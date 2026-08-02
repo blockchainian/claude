@@ -10,6 +10,6 @@
     "test": "npm run test:grok && npm run test:codex",
     "test:grok": "node --test tests/*.test.mjs",
     "test:codex": "plugins/codex/skills/execute/tests/test-execute.sh",
-    "validate": "claude plugin validate ."
+    "validate": "claude plugin validate --strict ."
   }
 }

@@ -29,9 +29,10 @@ plugins/grok/                     the grok plugin
 tests/                            grok's node suite
 ```
 
-`codex` carries no `version`, so every commit to this repository is a new
-version of it and users receive updates on push. `grok` pins a version in its
-`plugin.json` and ships only when that version changes.
+Both plugins pin a `version` in their `plugin.json`, which is what Claude Code
+compares to decide whether a user is out of date. Bump it in the same commit as
+the change you want to ship — a plugin whose version is unchanged stays cached
+on every machine that already has it, however much its code moved.
 
 ## Test
 
