@@ -27,6 +27,11 @@ assert_eq() { # assert_eq <desc> <expected> <actual>
   fi
 }
 
+# ---------- skill metadata ----------
+# Claude Code prefixes the plugin name itself, so the frontmatter name carries no namespace.
+SKILL_NAME="$(awk '/^name:/{sub(/^name: */, ""); gsub(/"/, ""); print; exit}' "$HERE/../SKILL.md")"
+assert_eq "SKILL.md name resolves to /codex:execute" "execute" "$SKILL_NAME"
+
 # ---------- fixture ----------
 export STUB_DIR="$SCRATCH/stub"
 mkdir -p "$STUB_DIR"

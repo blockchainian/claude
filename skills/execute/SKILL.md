@@ -1,5 +1,5 @@
 ---
-name: "codex:execute"
+name: execute
 description: Execute a planned feature as parallel codex workstreams off the Claude critical path — convert the session's plan into spec.md+workstreams.txt, launch execute.sh (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, codex review, push), then relay the result. Use when the user wants many-at-once implementation work delegated to codex.
 ---
 
