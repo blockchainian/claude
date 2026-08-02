@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Claude Code plugin marketplace for blockchainian's plugins: Grok and Codex review/delegation tooling.",
-    "version": "0.4.0"
+    "version": "0.4.1"
   },
   "plugins": [
     {
       "name": "codex",
       "description": "Execute a planned feature as parallel codex workstreams off Claude's critical path \u2014 delivered onto your session branch, codex-reviewed, pushed.",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "author": {
         "name": "blockchainian"
       },
