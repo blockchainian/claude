@@ -1,6 +1,9 @@
-# codex-plugin-cc
+# claude
 
-A community extension of the [official codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc)
+Home of the `blockchainian` plugin marketplace for Claude Code, and of the
+`codex` plugin it ships.
+
+`codex` is a community extension of the [official codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc)
 that delivers a planned feature as **parallel codex workstreams, off Claude's
 critical path** — from a plan to results on the branch you're working on, with
 codex reviewing the result. It ships under the same `codex` plugin name, so
@@ -27,14 +30,13 @@ measured workload. Full rationale and numbers: [docs/design.md](docs/design.md).
 ## Install
 
 ```
-/plugin marketplace add blockchainian/codex-plugin-cc
+/plugin marketplace add blockchainian/claude
 /plugin install codex@blockchainian
 ```
 
-(This registers the `blockchainian` marketplace — the same marketplace also
-served by [grok-plugin-cc](https://github.com/blockchainian/grok-plugin-cc);
-both repos define it identically and list both plugins, so adding either repo
-works and a later add simply switches which repo sources it.)
+This repository hosts the `blockchainian` marketplace, which also lists
+[grok](https://github.com/blockchainian/grok-plugin-cc). Claude Code registers
+one marketplace per name, so this is the only source to add.
 
 This plugin intentionally shares the `codex` plugin name with the official
 plugin. Installing both is supported — installed-plugin identity is

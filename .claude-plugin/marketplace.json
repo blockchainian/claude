@@ -4,8 +4,7 @@
     "name": "blockchainian"
   },
   "metadata": {
-    "description": "Claude Code plugin marketplace for blockchainian's plugins: Grok and Codex review/delegation tooling.",
-    "version": "0.4.1"
+    "description": "Claude Code plugin marketplace for blockchainian's plugins: Grok and Codex review/delegation tooling."
   },
   "plugins": [
     {
