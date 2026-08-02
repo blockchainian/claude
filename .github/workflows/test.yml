@@ -1,19 +1,27 @@
-# ABOUTME: CI for the execute engine — runs the stub-codex test suite on Linux and macOS.
+# ABOUTME: CI for both plugins — the codex execute engine on Linux and macOS, and the grok node suite.
 name: test
 on:
   push:
     branches: [main]
   pull_request:
 jobs:
-  linux:
+  codex-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: skills/execute/tests/test-execute.sh
-  macos:
+      - run: plugins/codex/skills/execute/tests/test-execute.sh
+  codex-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - run: brew install coreutils
       - run: sudo ln -sf "$(which gtimeout)" /usr/local/bin/timeout || ln -sf "$(which gtimeout)" "$(brew --prefix)/bin/timeout"
-      - run: skills/execute/tests/test-execute.sh
+      - run: plugins/codex/skills/execute/tests/test-execute.sh
+  grok:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run test:grok

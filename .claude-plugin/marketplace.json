@@ -13,21 +13,15 @@
       "author": {
         "name": "blockchainian"
       },
-      "source": "./"
+      "source": "./plugins/codex"
     },
     {
       "name": "grok",
       "description": "Use the local Grok CLI from Claude Code for code review and task delegation.",
-      "version": "0.1.0",
       "author": {
         "name": "blockchainian"
       },
-      "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/blockchainian/grok-plugin-cc.git",
-        "path": "plugins/grok",
-        "ref": "main"
-      }
+      "source": "./plugins/grok"
     }
   ]
 }
