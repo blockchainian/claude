@@ -6,6 +6,7 @@ set -u
 DIR=.
 PROMPT=""
 OFILE=""
+CFG=""
 MODE=exec
 args=("$@")
 i=0
@@ -14,7 +15,8 @@ while [ $i -lt ${#args[@]} ]; do
   case "$a" in
     -C) i=$((i+1)); DIR="${args[$i]}" ;;
     -o) i=$((i+1)); OFILE="${args[$i]}" ;;
-    -s|-m|-c|-p) i=$((i+1)) ;;
+    -c) i=$((i+1)); CFG="$CFG ${args[$i]}" ;;
+    -s|-m|-p) i=$((i+1)) ;;
     review) MODE=review ;;
     exec|--ephemeral|--skip-git-repo-check|--json|--uncommitted) ;;
     --base) i=$((i+1)) ;;
@@ -27,7 +29,7 @@ log() { echo "$1 dir=$DIR" >> "${STUB_DIR:?}/invocations.log"; }
 bump() { echo x >> "${STUB_DIR:?}/calls-$1"; }
 
 if [ "$MODE" = "review" ]; then
-  bump REVIEW; log REVIEW
+  bump REVIEW; log "REVIEW cfg=${CFG# }"
   [ -n "$OFILE" ] && echo "stub review: no findings" > "$OFILE"
   echo "stub review done"
   exit 0

@@ -173,6 +173,8 @@ assert "no stray files from failed workstreams" test ! -e "$FIX/hang.txt"
 
 # local review ran once and produced findings file
 assert_eq "local codex review ran once" 1 "$(count REVIEW)"
+assert "review runs at high reasoning effort" \
+  grep -q '^REVIEW cfg=model_reasoning_effort=high dir=' "$STUB_DIR/invocations.log"
 assert_eq "review findings captured" "stub review: no findings" "$(cat "$L/review.md" 2>/dev/null)"
 
 # ---------- scenario 2: all green, existing PR for the session branch ----------

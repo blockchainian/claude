@@ -328,7 +328,8 @@ done
 REVIEW="skip"
 if [ "$POST" = "pass" ]; then
   note "[review] merged workstreams vs pre-merge"
-  if timeout "$TIMEOUT_S" "$CODEX" exec -C "$REPO" -o "$RUN_DIR/logs/review.md" \
+  if timeout "$TIMEOUT_S" "$CODEX" exec -C "$REPO" -c model_reasoning_effort=high \
+       -o "$RUN_DIR/logs/review.md" \
        review --base "$PRE_MERGE" > "$RUN_DIR/logs/review.log" 2>&1; then
     REVIEW="done"; note "[review] result: $RUN_DIR/logs/review.md"
   else
