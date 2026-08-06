@@ -109,6 +109,17 @@ PR URL to the user. FAILED workstreams are listed in the PR body — offer to
 re-plan just those as a new small run (new run name) rather than re-entering
 the loop yourself.
 
+Route review findings by scope, not severity:
+
+- A finding whose fix stays in one file and touches no documented invariant
+  or API surface gets fixed in-session: TDD the fix, run the spec's `--check`
+  command yourself, commit, and push the session branch so the PR stays
+  current.
+- A finding whose fix spans files, touches an invariant, or whose correct fix
+  is uncertain gets a new small run with a fresh spec. The fresh codex review
+  on that run is the point of routing it this way — it re-reviews the fix
+  itself — so don't skip the pipeline for these to save time.
+
 ## Cleanup
 
 None on success — workstream worktrees and branches are already gone and the
