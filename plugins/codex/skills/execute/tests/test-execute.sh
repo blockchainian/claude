@@ -124,7 +124,7 @@ assert_eq "merge conflict resolved via codex exactly once" 1 "$(count MERGE-RESO
 # progress output
 assert_eq "first attempts omit attempt number" 0 "$(grep -c 'attempt 1' "$SCRATCH/run.log" || true)"
 assert "retry start appends attempt number" \
-  grep -Eq '\[workstream 2\] starting \(slot w[12]\) \(attempt 2\)' "$SCRATCH/run.log"
+  grep -q '\[workstream 2\] starting (attempt 2)' "$SCRATCH/run.log"
 assert "retry pass includes attempt number" grep -q '\[workstream 2\] PASS (attempt 2)' "$SCRATCH/run.log"
 assert "check failure uses concise FAIL output" grep -q '\[workstream 2\] FAIL (exit 1)' "$SCRATCH/run.log"
 assert "summary includes passed and failed workstreams" \

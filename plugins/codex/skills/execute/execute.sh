@@ -134,7 +134,7 @@ PREVIOUS ATTEMPT FAILED (attempt $((a-1)) of $((RETRIES+1))): $reason
 $failctx
 Fix it."
     fi
-    note "[workstream $idx] starting (slot w$SLOT)${start_attempt}"
+    note "[workstream $idx] starting${start_attempt}"
     timeout "$TIMEOUT_S" "$CODEX" exec -C "$WT" -s workspace-write --ephemeral \
       -o "$LOGD/workstream-$idx-a$a.last" "$PROMPT" > "$LOGD/workstream-$idx-a$a.codex.log" 2>&1
     rc=$?
