@@ -81,6 +81,9 @@ Semantics (all verified by tests/test-execute.sh):
   so concurrent runs merge one at a time, and waits (up to `--deliver-wait`,
   default 1800 s) for the tree to be clean and still on the base branch — a
   sibling session's uncommitted edits delay delivery instead of aborting it.
+  The lock is released right after the post-merge check; review runs unlocked,
+  and a push rejected because the remote moved is retried once after merging
+  `origin/<base>` in and re-running `check` on the combination.
   Conflicts resolved by codex in place; pre-merge HEAD is recorded as
   `refs/codex-execute/<feature>/pre-merge`.
 - Post-merge `check` runs on the session branch. RED restores the branch with

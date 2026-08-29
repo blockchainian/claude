@@ -84,7 +84,9 @@ post-merge check red (session branch restored to its pre-merge commit; green
 workstream branches kept), merge blocked (worktree stayed dirty past
 `--deliver-wait`, switched branch mid-run, or another run held the delivery
 lock too long), or push failed. Delivery waits for a clean tree and serializes
-across concurrent runs in the same repo instead of aborting.
+across concurrent runs in the same repo instead of aborting; the lock covers
+merge + post-merge check only, and a push rejected by a moved remote is retried
+once after merging the remote tip in and re-running the check.
 
 Run state lives under `.git/codex-execute/<feature>/` (per-workstream status
 JSON, logs, `review.md` findings, `summary.json`); worktrees under

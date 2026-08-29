@@ -339,6 +339,9 @@ Read ${SPEC:-spec.md at the repo root, if present,} for intent. Resolve every co
     fi
   fi
 fi
+# The branch is now gated (merged + checked, or restored); review is read-only against
+# the recorded pre-merge sha and push handles a moved remote, so other runs may deliver.
+release_delivery_lock
 
 # ---------- cleanup: workstream worktrees + merged/empty workstream branches ----------
 s=1
@@ -382,7 +385,21 @@ fi
 # ---------- deliver: push the session branch; the PR is FROM it ----------
 PUSHED=false; DELIVERED="none"
 if [ "$POST" = "pass" ] && [ "$PUSH" = "1" ]; then
-  if git -C "$REPO" push -q -u origin "$BASE" > "$RUN_DIR/logs/push.log" 2>&1; then
+  # push_base: push; on a non-fast-forward (another run or session pushed meanwhile)
+  # fetch, merge the remote tip in, re-run the gate on the combined branch, push once more.
+  # A conflicting or red combination fails the push and is left for a human.
+  push_base() {
+    git -C "$REPO" push -q -u origin "$BASE" > "$RUN_DIR/logs/push.log" 2>&1 && return 0
+    grep -qiE 'non-fast-forward|fetch first|rejected' "$RUN_DIR/logs/push.log" || return 1
+    note "push rejected (remote moved); merging origin/$BASE, re-running check, retrying"
+    git -C "$REPO" fetch -q origin "$BASE" >> "$RUN_DIR/logs/push.log" 2>&1 || return 1
+    if ! git -C "$REPO" merge -q --no-edit "origin/$BASE" >> "$RUN_DIR/logs/push.log" 2>&1; then
+      git -C "$REPO" merge --abort >> "$RUN_DIR/logs/push.log" 2>&1; return 1
+    fi
+    (cd "$REPO" && eval "$CHECK") > "$RUN_DIR/logs/push-recheck.log" 2>&1 || return 1
+    git -C "$REPO" push -q -u origin "$BASE" >> "$RUN_DIR/logs/push.log" 2>&1
+  }
+  if push_base; then
     PUSHED=true; DELIVERED="$BASE"; note "pushed to origin"
     if gh pr view "$BASE" > "$RUN_DIR/logs/pr.log" 2>&1; then
       if gh pr comment "$BASE" --body "@codex review" >> "$RUN_DIR/logs/pr.log" 2>&1; then

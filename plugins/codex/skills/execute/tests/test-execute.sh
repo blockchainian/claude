@@ -295,5 +295,31 @@ assert_eq "blocked run keeps the workstream branch" 1 \
   "$(git -C "$FIX" branch --list 'workstreams/feat-t/*' | wc -l | tr -d ' ')"
 git -C "$FIX" branch -q -D workstreams/feat-t/1
 
+# ---------- scenario 7: lock released after the post-merge check; push survives a remote that moved ----------
+printf 'WS-OK write a.txt per spec.md\n' > "$FIX/workstreams8.txt"
+echo "stale" > "$FIX/a.txt"
+git -C "$FIX" add workstreams8.txt a.txt && git -C "$FIX" commit -qm "workstreams8" && git -C "$FIX" push -q origin main
+CLONE="$SCRATCH/sibling-clone"
+git clone -q -b main "$ORIGIN" "$CLONE" && git -C "$CLONE" config user.email t@t && git -C "$CLONE" config user.name t
+: > "$STUB_DIR/invocations.log"
+set +e
+STUB_ADVANCE_ORIGIN_CLONE="$CLONE" "$ENGINE" --workstreams "$FIX/workstreams8.txt" --feature feat-s \
+  --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 \
+  --repo "$FIX" > "$SCRATCH/run8.log" 2>&1
+RC8=$?
+set -e 2>/dev/null || true
+echo "---- scenario 7 exit=$RC8 (log: $SCRATCH/run8.log) ----"
+
+assert_eq "run with a moved remote still delivers (exit 0)" 0 "$RC8"
+assert "delivery lock is released before review runs" \
+  grep -q '^REVIEW-LOCK-FREE' "$STUB_DIR/invocations.log"
+assert "push retry is reported" grep -q 'push rejected (remote moved)' "$SCRATCH/run8.log"
+assert "push eventually succeeded" grep -q '^codex:execute: pushed to origin$' "$SCRATCH/run8.log"
+assert_eq "origin main == local main after retry" \
+  "$(git -C "$FIX" rev-parse main)" "$(git -C "$ORIGIN" rev-parse main)"
+assert "sibling commit is on the delivered branch" test -f "$FIX/sibling.txt"
+assert_eq "workstream content is on the delivered branch" "ok-ws1" "$(cat "$FIX/a.txt")"
+assert "re-check ran on the combined branch" test -f "$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-execute/feat-s/logs/push-recheck.log"
+
 echo
 if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; exit 1; fi

@@ -30,6 +30,20 @@ bump() { echo x >> "${STUB_DIR:?}/calls-$1"; }
 
 if [ "$MODE" = "review" ]; then
   bump REVIEW; log "REVIEW cfg=${CFG# }"
+  # record whether the engine still holds the delivery lock while reviewing
+  if [ -e "$(git -C "$DIR" rev-parse --absolute-git-dir 2>/dev/null)/codex-execute/deliver.lock" ]; then
+    log "REVIEW-LOCK-HELD"
+  else
+    log "REVIEW-LOCK-FREE"
+  fi
+  # optionally push an unrelated commit to origin from a second clone, simulating a
+  # sibling landing on the branch while this run is still reviewing
+  if [ -n "${STUB_ADVANCE_ORIGIN_CLONE:-}" ]; then
+    echo "sibling" > "$STUB_ADVANCE_ORIGIN_CLONE/sibling.txt"
+    git -C "$STUB_ADVANCE_ORIGIN_CLONE" add sibling.txt
+    git -C "$STUB_ADVANCE_ORIGIN_CLONE" commit -qm "sibling commit during review"
+    git -C "$STUB_ADVANCE_ORIGIN_CLONE" push -q origin HEAD:main
+  fi
   [ -n "$OFILE" ] && echo "stub review: no findings" > "$OFILE"
   echo "stub review done"
   exit 0
