@@ -202,7 +202,7 @@ CUR="$(git -C "$REPO" symbolic-ref --short -q HEAD)" \
 [ -z "$BASE" ] && BASE="$CUR"
 [ "$BASE" = "$CUR" ] || fatal "repo has '$CUR' checked out but --base is '$BASE'; check out '$BASE' or drop --base"
 [ -z "$(git -C "$REPO" status --porcelain)" ] \
-  || fatal "session worktree is dirty; commit or stash before running"
+  || note "session worktree is dirty; workstreams branch from HEAD and delivery waits for a clean tree"
 [ -z "$(git -C "$REPO" branch --list "workstreams/$FEATURE/*")" ] \
   || fatal "leftover workstreams/$FEATURE/* branches exist; delete them or pick a new run name"
 BASE_SHA="$(git -C "$REPO" rev-parse HEAD)"

@@ -241,11 +241,13 @@ RC4=$?
 set -e 2>/dev/null || true
 rm -f "$FIX/dirty.txt"
 
-assert_eq "dirty session worktree is fatal" 1 "$RC4"
-assert "dirty guard names the problem" \
-  grep -q 'session worktree is dirty' "$SCRATCH/run4.log"
-assert_eq "dirty run created no workstream branches" 0 \
-  "$(git -C "$FIX" branch --list 'workstreams/feat-w/*' | wc -l | tr -d ' ')"
+assert "dirty session worktree at start is a warning, not fatal" \
+  sh -c "! grep -q 'FATAL' '$SCRATCH/run4.log'"
+assert "dirty warning names the situation" \
+  grep -q 'session worktree is dirty; workstreams branch from HEAD' "$SCRATCH/run4.log"
+assert "dirty-start run still executed its workstream" \
+  grep -q '\[workstream 1\] starting' "$SCRATCH/run4.log"
+git -C "$FIX" branch -q -D workstreams/feat-w/1 2>/dev/null || true
 
 set +e
 "$ENGINE" --workstreams "$FIX/workstreams2.txt" --base other --feature feat-v \
