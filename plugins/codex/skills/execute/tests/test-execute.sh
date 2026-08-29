@@ -257,5 +257,41 @@ assert_eq "base/checkout mismatch is fatal" 1 "$RC5"
 assert "mismatch guard names both branches" \
   sh -c "grep -q \"repo has 'main' checked out but --base is 'other'\" '$SCRATCH/run5.log'"
 
+# ---------- scenario 5: tree dirty at merge time, clean again later -> delivery waits, then merges ----------
+printf 'WS-DIRTY write f.txt while dirtying the session repo\n' > "$FIX/workstreams6.txt"
+git -C "$FIX" add workstreams6.txt && git -C "$FIX" commit -qm "workstreams6" && git -C "$FIX" push -q origin main
+set +e
+STUB_DIRTY_REPO="$FIX" "$ENGINE" --workstreams "$FIX/workstreams6.txt" --feature feat-u \
+  --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 --deliver-wait 20 \
+  --repo "$FIX" > "$SCRATCH/run6.log" 2>&1
+RC6=$?
+set -e 2>/dev/null || true
+echo "---- scenario 5 exit=$RC6 (log: $SCRATCH/run6.log) ----"
+
+assert_eq "delivery waits out transient dirt and exits 0" 0 "$RC6"
+assert "waiting is reported" grep -q '\[merge\] waiting for a clean session worktree' "$SCRATCH/run6.log"
+assert_eq "f.txt merged onto main after the wait" "ok-f" "$(cat "$FIX/f.txt" 2>/dev/null)"
+assert "no late.txt left behind" test ! -e "$FIX/late.txt"
+assert "delivery lock released" test ! -e "$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-execute/deliver.lock"
+
+# ---------- scenario 6: dirt outlives --deliver-wait -> merge blocked, branch kept ----------
+printf 'WS-DIRTY write f.txt while dirtying the session repo\n' > "$FIX/workstreams7.txt"
+git -C "$FIX" rm -q f.txt   # scenario 5 landed f.txt; remove it so this workstream has a diff
+git -C "$FIX" add workstreams7.txt && git -C "$FIX" commit -qm "workstreams7" && git -C "$FIX" push -q origin main
+set +e
+STUB_DIRTY_REPO="$FIX" STUB_DIRTY_SECS=12 "$ENGINE" --workstreams "$FIX/workstreams7.txt" --feature feat-t \
+  --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 --deliver-wait 1 \
+  --repo "$FIX" > "$SCRATCH/run7.log" 2>&1
+RC7=$?
+set -e 2>/dev/null || true
+rm -f "$FIX/late.txt"
+echo "---- scenario 6 exit=$RC7 (log: $SCRATCH/run7.log) ----"
+
+assert_eq "dirt outliving deliver-wait blocks the merge" 1 "$RC7"
+assert "blocked message names the wait" grep -q 'session worktree stayed dirty' "$SCRATCH/run7.log"
+assert_eq "blocked run keeps the workstream branch" 1 \
+  "$(git -C "$FIX" branch --list 'workstreams/feat-t/*' | wc -l | tr -d ' ')"
+git -C "$FIX" branch -q -D workstreams/feat-t/1
+
 echo
 if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; exit 1; fi

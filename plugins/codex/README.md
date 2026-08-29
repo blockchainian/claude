@@ -81,8 +81,10 @@ from the merge and reported in the summary and PR body; their branches are
 kept when they contain commits. Exit codes: `0` all green + delivered, `2`
 partial (some workstreams failed; session branch green and delivered), `1`
 post-merge check red (session branch restored to its pre-merge commit; green
-workstream branches kept), merge blocked (worktree went dirty or switched
-branch mid-run), or push failed.
+workstream branches kept), merge blocked (worktree stayed dirty past
+`--deliver-wait`, switched branch mid-run, or another run held the delivery
+lock too long), or push failed. Delivery waits for a clean tree and serializes
+across concurrent runs in the same repo instead of aborting.
 
 Run state lives under `.git/codex-execute/<feature>/` (per-workstream status
 JSON, logs, `review.md` findings, `summary.json`); worktrees under

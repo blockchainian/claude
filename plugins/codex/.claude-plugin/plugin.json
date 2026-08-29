@@ -1,6 +1,6 @@
 {
   "name": "codex",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Execute a planned feature as parallel codex workstreams off Claude's critical path \u2014 plan handover, worktree-pool execution with per-workstream checks and bounded retries, merge onto the session branch with restore-on-red, codex review, push.",
   "author": {
     "name": "blockchainian"

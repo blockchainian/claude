@@ -49,7 +49,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/execute/execute.sh \
   --workstreams <path>/workstreams.txt --feature <run-name> \
   --check "<verify cmd>" --spec <path>/spec.md \
   [--setup "<per-worktree deps cmd>"] \
-  [--concurrency N] [--retries 2] [--timeout 2400] [--no-push]
+  [--concurrency N] [--retries 2] [--timeout 2400] [--no-push] [--deliver-wait 1800]
 ```
 
 Results land on the **session branch, in the session worktree** — the branch
@@ -77,15 +77,19 @@ Semantics (all verified by tests/test-execute.sh):
   appended.
 - Failed workstreams: excluded from merge; branch kept only if it has commits.
 - Merge: green workstream branches merge DIRECTLY onto the session branch in
-  the session worktree (the tree must still be clean and on the same branch);
-  conflicts resolved by codex in place; pre-merge HEAD is recorded as
+  the session worktree. Delivery takes a per-repo lock (`.git/codex-execute/deliver.lock`)
+  so concurrent runs merge one at a time, and waits (up to `--deliver-wait`,
+  default 1800 s) for the tree to be clean and still on the base branch — a
+  sibling session's uncommitted edits delay delivery instead of aborting it.
+  Conflicts resolved by codex in place; pre-merge HEAD is recorded as
   `refs/codex-execute/<feature>/pre-merge`.
 - Post-merge `check` runs on the session branch. RED restores the branch with
   `git reset --keep` to the pre-merge commit and keeps every green workstream
   branch for autopsy — the session worktree ends exactly where it started.
 - Exit 0 = all green + delivered; 2 = partial (some workstreams failed,
   session branch green + delivered); 1 = post-merge check red (branch
-  restored), merge blocked (dirty/switched worktree), or push failed.
+  restored), merge blocked (tree stayed dirty past `--deliver-wait`, branch
+  switched, or lock held too long), or push failed.
 
 `--setup` example (codex's sandbox has no network, so provision deps when
 creating each worktree): `cp -R ../main-checkout/node_modules node_modules`

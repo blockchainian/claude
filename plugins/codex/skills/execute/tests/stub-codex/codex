@@ -67,6 +67,15 @@ case "$PROMPT" in
     bump WS-C2; log WS-C2
     echo "ok-ws6" > "$DIR/c.txt"
     ;;
+  *WS-DIRTY*)
+    # dirties the SESSION repo (not the worktree) and cleans it up a few seconds later,
+    # so the engine reaches its merge phase against a dirty tree that then becomes clean
+    bump WS-DIRTY; log WS-DIRTY
+    echo "ok-f" > "$DIR/f.txt"
+    echo dirt > "${STUB_DIRTY_REPO:?}/late.txt"
+    (sleep "${STUB_DIRTY_SECS:-3}"; rm -f "${STUB_DIRTY_REPO}/late.txt") >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+    ;;
   *WS-D*)
     bump WS-D; log WS-D
     echo "ok-d" > "$DIR/d.txt"

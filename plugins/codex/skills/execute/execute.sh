@@ -8,6 +8,7 @@ usage() {
 Usage: execute.sh --workstreams FILE --feature NAME --check CMD
                     [--base BRANCH] [--concurrency N] [--retries N] [--timeout SECS]
                     [--setup CMD] [--spec PATH] [--repo DIR] [--no-push]
+                    [--deliver-wait SECS]
 
   workstreams one workstream per line (blank lines and # comments skipped)
   feature     run name; namespaces workstream branches (workstreams/NAME/n) and run state
@@ -22,12 +23,16 @@ Usage: execute.sh --workstreams FILE --feature NAME --check CMD
               and merge prompts; e.g. specs/2026-07-22-foo/spec.md)
   repo        repository to operate on       (default: git toplevel of cwd)
   no-push     skip pushing / opening or updating a PR
+  deliver-wait max seconds to wait, at merge time, for the session worktree to
+              be clean and on the base branch (default: 1800); delivery also
+              takes a per-repo lock so concurrent runs merge one at a time
 
 Workstreams run in an isolated worktree pool branched from the session branch's
 run-start commit. Green workstream branches merge DIRECTLY onto the session
-branch in the session worktree; the post-merge check runs there, and a red
-check restores the branch to its pre-merge state (workstream branches kept for
-autopsy). Local codex review covers the merged workstream delta; the @codex PR
+branch in the session worktree once it is clean (uncommitted edits from a
+parallel session only delay delivery, up to --deliver-wait); the post-merge
+check runs there, and a red check restores the branch to its pre-merge state
+(workstream branches kept for autopsy). Local codex review covers the merged workstream delta; the @codex PR
 comment covers the whole PR.
 
 Env: EXECUTE_CODEX overrides the codex binary (default: codex).
@@ -40,7 +45,7 @@ note()  { echo "codex:execute: $*"; }
 
 # ---------- args ----------
 WORKSTREAMS="" BASE="" FEATURE="" CHECK="" SETUP="" SPEC="" REPO="" PUSH=1
-CONCURRENCY="" RETRIES=2 TIMEOUT_S=2400
+CONCURRENCY="" RETRIES=2 TIMEOUT_S=2400 DELIVER_WAIT_S=1800
 while [ $# -gt 0 ]; do
   case "$1" in
     --workstreams) WORKSTREAMS="$2"; shift 2 ;;
@@ -54,6 +59,7 @@ while [ $# -gt 0 ]; do
     --setup) SETUP="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --no-push) PUSH=0; shift ;;
+    --deliver-wait) DELIVER_WAIT_S="$2"; shift 2 ;;
     __workstream) WORKSTREAM_MODE="$2"; shift 2 ;;
     *) usage ;;
   esac
@@ -244,14 +250,50 @@ EXECUTION_SUMMARY="PASS [${PASSED# }]"
 [ -n "$FAILED" ] && EXECUTION_SUMMARY="$EXECUTION_SUMMARY FAIL [${FAILED# }]"
 note "$EXECUTION_SUMMARY"
 
+# ---------- delivery lock + clean-tree wait ----------
+# One delivery at a time per repo: the lock is a directory (atomic mkdir; macOS has no flock)
+# holding the owner pid, held from merge through push and released on exit.
+DELIVER_LOCK="$(git -C "$REPO" rev-parse --absolute-git-dir)/codex-execute/deliver.lock"
+LOCK_HELD=0
+release_delivery_lock() { [ "$LOCK_HELD" = "1" ] && rm -rf "$DELIVER_LOCK"; LOCK_HELD=0; }
+trap release_delivery_lock EXIT
+acquire_delivery_lock() { # acquire_delivery_lock <max-seconds>; returns 1 on timeout
+  local waited=0 owner
+  while ! mkdir "$DELIVER_LOCK" 2>/dev/null; do
+    owner="$(cat "$DELIVER_LOCK/pid" 2>/dev/null)"
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+      rm -rf "$DELIVER_LOCK"; continue   # stale lock from a dead run
+    fi
+    [ "$waited" -ge "$1" ] && return 1
+    [ "$waited" = 0 ] && note "[merge] waiting for delivery lock held by pid ${owner:-?}"
+    sleep 5; waited=$((waited+5))
+  done
+  echo $$ > "$DELIVER_LOCK/pid"; LOCK_HELD=1
+}
+tree_dirt() { git -C "$REPO" status --porcelain | head -5 | awk '{print $2}' | tr '\n' ' '; }
+wait_for_clean_tree() { # wait_for_clean_tree <max-seconds>; sets MERGE_BLOCKED on timeout
+  local waited=0 announced=0
+  while :; do
+    if [ "$(git -C "$REPO" symbolic-ref --short -q HEAD)" != "$BASE" ]; then
+      MERGE_BLOCKED="session worktree switched off '$BASE' during the run"; return
+    fi
+    [ -z "$(git -C "$REPO" status --porcelain)" ] && { [ "$announced" = 1 ] && note "[merge] session worktree clean; resuming"; return; }
+    if [ "$waited" -ge "$1" ]; then
+      MERGE_BLOCKED="session worktree stayed dirty for ${1}s ($(tree_dirt))"; return
+    fi
+    [ "$announced" = 0 ] && { note "[merge] waiting for a clean session worktree (dirty: $(tree_dirt))"; announced=1; }
+    sleep 5; waited=$((waited+5))
+  done
+}
+
 # ---------- phase: merge (directly onto the session branch) ----------
 MERGED=""; MERGE_FAILED=""; POST="skip"; RESTORED=false; MERGE_BLOCKED=""
 PRE_MERGE=""
 if [ -n "$PASSED" ]; then
-  if [ -n "$(git -C "$REPO" status --porcelain)" ]; then
-    MERGE_BLOCKED="session worktree became dirty during the run"
-  elif [ "$(git -C "$REPO" symbolic-ref --short -q HEAD)" != "$BASE" ]; then
-    MERGE_BLOCKED="session worktree switched off '$BASE' during the run"
+  if acquire_delivery_lock "$DELIVER_WAIT_S"; then
+    wait_for_clean_tree "$DELIVER_WAIT_S"
+  else
+    MERGE_BLOCKED="delivery lock held for ${DELIVER_WAIT_S}s by another run"
   fi
 fi
 
