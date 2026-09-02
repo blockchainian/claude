@@ -269,6 +269,36 @@ test("reassembles continuation frames", async () => {
   }
 });
 
+test("timeout during setup exits 124 without a turn to interrupt", { timeout: 10_000 }, async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "daemon-output-test-"));
+  const messages = [];
+  const daemon = await fakeDaemon((message) => { messages.push(message); });
+  try {
+    const result = await runRunner(daemon.socketPath, { output: path.join(directory, "last.txt"), timeout: "1" });
+    assert.equal(result.code, 124, result.stderr);
+    assert.deepEqual(messages.map((message) => message.method), ["initialize"]);
+  } finally {
+    await daemon.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("rejected setup request exits 1 promptly", { timeout: 10_000 }, async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "daemon-output-test-"));
+  const daemon = await fakeDaemon((message, socket) => {
+    if (message.method === "initialize") send(socket, { id: message.id, result: {} });
+    if (message.method === "thread/start") send(socket, { id: message.id, error: { code: -32000, message: "cwd is not a directory" } });
+  });
+  try {
+    const result = await runRunner(daemon.socketPath, { output: path.join(directory, "last.txt") });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /cwd is not a directory/);
+  } finally {
+    await daemon.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("missing socket exits 3 with a clear connection error", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "daemon-output-test-"));
   try {

@@ -52,7 +52,11 @@ if [ "$TEST_EXECUTE_RUNNER" = "exec" ]; then
   unset EXECUTE_DAEMON_RUNNER
 else
   unset EXECUTE_RUNNER
-  export EXECUTE_DAEMON_RUNNER="$HERE/stub-daemon-runner/daemon-run"
+  STUB_SPACED="$SCRATCH/stub dir"
+  mkdir -p "$STUB_SPACED/stub-daemon-runner"
+  cp "$HERE/stub-scenarios.sh" "$STUB_SPACED/"
+  cp "$HERE/stub-daemon-runner/daemon-run" "$STUB_SPACED/stub-daemon-runner/"
+  export EXECUTE_DAEMON_RUNNER="$STUB_SPACED/stub-daemon-runner/daemon-run"
 fi
 STUB_BIN="$SCRATCH/bin"
 mkdir -p "$STUB_BIN"

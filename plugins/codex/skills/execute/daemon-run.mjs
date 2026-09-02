@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // ABOUTME: Runs one codex task as a persistent app-server daemon thread.
 // ABOUTME: Implements the daemon's WebSocket transport without dependencies.
 
@@ -180,7 +181,9 @@ class WebSocketClient {
 
   close() {
     this.onFailure = undefined;
-    this.socket?.end(frame(8, Buffer.alloc(0)));
+    if (!this.socket) return;
+    if (this.socket.writable) this.socket.end(frame(8, Buffer.alloc(0)));
+    this.socket.unref();
   }
 }
 
@@ -204,27 +207,36 @@ function completionPromise(client, state) {
   });
 }
 
-async function run(options) {
-  const pluginPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.claude-plugin/plugin.json");
-  const plugin = JSON.parse(await readFile(pluginPath, "utf8"));
-  const socketPath = process.env.EXECUTE_DAEMON_SOCKET || path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "app-server-control/app-server-control.sock");
-  const client = new WebSocketClient(socketPath);
+async function session(client, options, state, version) {
   await client.connect();
-  await client.request("initialize", { clientInfo: { title: "codex:execute", name: "codex-execute", version: plugin.version }, capabilities: { experimentalApi: false, requestAttestation: false, optOutNotificationMethods: [] } });
+  await client.request("initialize", { clientInfo: { title: "codex:execute", name: "codex-execute", version }, capabilities: { experimentalApi: false, requestAttestation: false, optOutNotificationMethods: [] } });
   client.send({ method: "initialized", params: {} });
   const started = await client.request("thread/start", { cwd: options.cwd, approvalPolicy: "never", sandbox: options.sandbox, serviceName: "codex-execute", ephemeral: false });
-  const state = { threadId: started.thread.id, turnId: undefined, lastMessage: "" };
+  state.threadId = started.thread.id;
   console.log(`[thread ${state.threadId}] ${options.name}`);
   await client.request("thread/name/set", { threadId: state.threadId, name: options.name });
   const completed = completionPromise(client, state);
   const turn = await client.request("turn/start", { threadId: state.threadId, input: [{ type: "text", text: options.prompt, text_elements: [] }] });
   state.turnId = turn.turn.id;
+  return completed;
+}
+
+async function run(options) {
+  const pluginPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.claude-plugin/plugin.json");
+  const plugin = JSON.parse(await readFile(pluginPath, "utf8"));
+  const socketPath = process.env.EXECUTE_DAEMON_SOCKET || path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "app-server-control/app-server-control.sock");
+  const client = new WebSocketClient(socketPath);
+  const state = { threadId: undefined, turnId: undefined, lastMessage: "" };
   let forcedCode;
   let force;
   const forced = new Promise((resolve) => { force = resolve; });
   const stop = (code) => {
     if (forcedCode !== undefined) return;
     forcedCode = code;
+    if (state.turnId === undefined) {
+      force(undefined);
+      return;
+    }
     client.request("turn/interrupt", { threadId: state.threadId, turnId: state.turnId }).catch(() => {});
     setTimeout(() => force(undefined), 10_000).unref();
   };
@@ -236,12 +248,11 @@ async function run(options) {
   let result;
   try {
     try {
-      result = await Promise.race([completed, forced]);
+      result = await Promise.race([session(client, options, state, plugin.version), forced]);
     } catch (error) {
       if (forcedCode !== undefined) return forcedCode;
       throw error;
     }
-    if (forcedCode !== undefined && result === undefined) return forcedCode;
     if (forcedCode !== undefined) return forcedCode;
     if (result.status === "completed") {
       const finalItem = result.items?.filter((item) => item.type === "agentMessage").at(-1);

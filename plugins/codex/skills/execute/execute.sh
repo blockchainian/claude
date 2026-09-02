@@ -38,7 +38,7 @@ comment covers the whole PR.
 
 Env: EXECUTE_CODEX overrides the codex binary (default: codex).
      EXECUTE_RUNNER sets the task runner (default: daemon).
-     EXECUTE_DAEMON_RUNNER overrides the daemon runner command.
+     EXECUTE_DAEMON_RUNNER overrides the daemon runner executable.
 EOF
   exit 1
 }
@@ -52,7 +52,7 @@ DAEMON_RUNNER_OVERRIDDEN=0
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CODEX="${EXECUTE_CODEX:-codex}"
 EXECUTE_RUNNER="${EXECUTE_RUNNER:-daemon}"
-EXECUTE_DAEMON_RUNNER="${EXECUTE_DAEMON_RUNNER:-node $SCRIPT_DIR/daemon-run.mjs}"
+EXECUTE_DAEMON_RUNNER="${EXECUTE_DAEMON_RUNNER:-$SCRIPT_DIR/daemon-run.mjs}"
 
 WORKSTREAMS="" BASE="" FEATURE="" CHECK="" SETUP="" SPEC="" REPO="" PUSH=1
 CONCURRENCY="" RETRIES=2 TIMEOUT_S=2400 DELIVER_WAIT_S=1800
@@ -83,7 +83,7 @@ run_task() { # run_task <dir> <last-message-file> <thread-name> <prompt>
   if [ "$EXECUTE_RUNNER" = "exec" ]; then
     timeout "$TIMEOUT_S" "$CODEX" exec -C "$dir" -s workspace-write --ephemeral -o "$lastfile" "$prompt"
   else
-    $EXECUTE_DAEMON_RUNNER -C "$dir" -o "$lastfile" --name "$name" --timeout "$TIMEOUT_S" "$prompt"
+    "$EXECUTE_DAEMON_RUNNER" -C "$dir" -o "$lastfile" --name "$name" --timeout "$TIMEOUT_S" "$prompt"
   fi
 }
 
