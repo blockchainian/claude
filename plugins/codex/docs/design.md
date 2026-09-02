@@ -50,7 +50,7 @@ wall no matter how many workstreams run.
 ## Pipeline
 
 ```
-1. Plan            — Claude (one turn): write spec.md + workstreams.txt
+1. Plan            — Claude (one turn): write spec.md + workstreams.txt + handoff.md; a fresh session launches
 2. Execute         — Codex ×N in parallel worktrees: workstream → check → workstream branch (bounded retries)
 3. Merge           — workstream branches → the session branch, in the session worktree; conflicts resolved here
 4. Review & Push   — Codex reviews the merged workstream delta locally; push the session branch; @codex reviews the PR
@@ -176,9 +176,13 @@ Nothing project-specific is baked in. Per invocation:
   the PR as a bonus for the codex GitHub app. codex-cli rejects combining
   `--base` with custom review instructions — review focus lives in spec.md.
 - **Artifact locations**: Claude (not codex) authors `spec.md` +
-  `workstreams.txt`, stored at `specs/<date>-<feature>/` on the session
-  branch; codex reads them from each workstream worktree. Engine takes
-  `--spec` to reference them in prompts.
+  `workstreams.txt` + `handoff.md`, stored at `specs/<date>-<feature>/` on the
+  session branch; codex reads them from each workstream worktree. Engine takes
+  `--spec` to reference them in prompts and refuses to start without
+  `handoff.md` beside `workstreams.txt`: the launch is handed to a fresh
+  session (`/clear`, then resume from the handoff) because the ~150-turn
+  orchestration loop that follows is far cheaper from a small context, and an
+  effort switch without clearing re-writes the whole prompt cache.
 - **Session-branch delivery** (2026-07-23, replacing the earlier feature-branch
   and `--onto-base` modes): the run always delivers onto the branch the
   session has checked out. An open PR for that branch simply updates; a PR is

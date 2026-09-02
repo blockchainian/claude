@@ -8,7 +8,8 @@ the skill joins the official plugin's `/codex:` namespace as `/codex:execute`.
 
 **The DX:** research and plan a feature with Claude Code, then hand the plan
 to `/codex:execute`. Claude converts the plan into `spec.md` +
-`workstreams.txt` and launches the engine in the background. Codex executes
+`workstreams.txt` + `handoff.md`, and a fresh session (`/clear`, resume from
+the handoff) launches the engine in the background. Codex executes
 the workstreams in parallel worktrees, each gated by your test command with
 bounded retries; green workstream branches merge directly onto **the branch
 your session is on, in your worktree** (codex resolves conflicts); a
@@ -53,7 +54,8 @@ In Claude Code, plan a feature in conversation, then:
 /codex:execute
 ```
 
-The engine also works standalone, no Claude required:
+The engine also works standalone, no Claude required (it expects `handoff.md`
+beside `workstreams.txt`):
 
 ```
 plugins/codex/skills/execute/execute.sh \

@@ -47,13 +47,14 @@ them.
 The launch opens a long orchestration loop (measured median: ~150 main-loop
 turns from ~165k context), and the run's task notifications bind to the
 session that launches it — so this moment, not mid-run, is when to reset
-context. If context is above ~100k: write `<path>/handoff.md` (pointer to
+context. Every run: write `handoff.md` beside `workstreams.txt` (pointer to
 spec.md and the plan; "Next step" with the exact execute.sh command and check
 command; decisions since the plan; open items), commit it, and tell the user
 to `/clear`, set the implementation effort, and send `Resume from
-<path>/handoff.md`. The fresh session launches the run. Switching effort
-without clearing invalidates the whole prompt cache at full 1h-write price;
-after `/clear` it costs nothing.
+<path>/handoff.md`. The fresh session launches the run. The engine refuses to
+start when `handoff.md` is missing, so this step is not a judgment call.
+Switching effort without clearing invalidates the whole prompt cache at full
+1h-write price; after `/clear` it costs nothing.
 
 ## Phase 2+3 — Execute & Merge (script, NO Claude)
 
