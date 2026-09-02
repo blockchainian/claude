@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# ABOUTME: Test stand-in for daemon-run.mjs that accepts its task-runner CLI contract.
+# ABOUTME: Records named threads and delegates fixture behavior to the shared scenarios.
+set -u
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../stub-scenarios.sh"
+
+DIR=.
+OFILE=""
+NAME=""
+TIMEOUT_S=""
+PROMPT=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -C) DIR="$2"; shift 2 ;;
+    -o) OFILE="$2"; shift 2 ;;
+    --name) NAME="$2"; shift 2 ;;
+    --timeout) TIMEOUT_S="$2"; shift 2 ;;
+    -s) shift 2 ;;
+    *) PROMPT="$1"; shift ;;
+  esac
+done
+
+[ -n "$OFILE" ] && : > "$OFILE"
+STUB_DAEMON_MODE=1 run_stub_scenario
+rc=$?
+[ "$rc" -eq 0 ] && echo "stub daemon runner done"
+exit "$rc"

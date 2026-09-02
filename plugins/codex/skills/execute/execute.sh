@@ -8,7 +8,7 @@ usage() {
 Usage: execute.sh --workstreams FILE --feature NAME --check CMD
                     [--base BRANCH] [--concurrency N] [--retries N] [--timeout SECS]
                     [--setup CMD] [--spec PATH] [--repo DIR] [--no-push]
-                    [--deliver-wait SECS]
+                    [--deliver-wait SECS] [--runner exec|daemon]
 
   workstreams one workstream per line (blank lines and # comments skipped)
   feature     run name; namespaces workstream branches (workstreams/NAME/n) and run state
@@ -26,6 +26,7 @@ Usage: execute.sh --workstreams FILE --feature NAME --check CMD
   deliver-wait max seconds to wait, at merge time, for the session worktree to
               be clean and on the base branch (default: 1800); delivery also
               takes a per-repo lock so concurrent runs merge one at a time
+  runner      task runner: daemon or exec       (default: daemon)
 
 Workstreams run in an isolated worktree pool branched from the session branch's
 run-start commit. Green workstream branches merge DIRECTLY onto the session
@@ -36,6 +37,8 @@ check runs there, and a red check restores the branch to its pre-merge state
 comment covers the whole PR.
 
 Env: EXECUTE_CODEX overrides the codex binary (default: codex).
+     EXECUTE_RUNNER sets the task runner (default: daemon).
+     EXECUTE_DAEMON_RUNNER overrides the daemon runner command.
 EOF
   exit 1
 }
@@ -44,6 +47,13 @@ fatal() { echo "codex:execute: FATAL: $*" >&2; exit 1; }
 note()  { echo "codex:execute: $*"; }
 
 # ---------- args ----------
+DAEMON_RUNNER_OVERRIDDEN=0
+[ "${EXECUTE_DAEMON_RUNNER+x}" = x ] && DAEMON_RUNNER_OVERRIDDEN=1
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CODEX="${EXECUTE_CODEX:-codex}"
+EXECUTE_RUNNER="${EXECUTE_RUNNER:-daemon}"
+EXECUTE_DAEMON_RUNNER="${EXECUTE_DAEMON_RUNNER:-node $SCRIPT_DIR/daemon-run.mjs}"
+
 WORKSTREAMS="" BASE="" FEATURE="" CHECK="" SETUP="" SPEC="" REPO="" PUSH=1
 CONCURRENCY="" RETRIES=2 TIMEOUT_S=2400 DELIVER_WAIT_S=1800
 while [ $# -gt 0 ]; do
@@ -60,12 +70,22 @@ while [ $# -gt 0 ]; do
     --repo) REPO="$2"; shift 2 ;;
     --no-push) PUSH=0; shift ;;
     --deliver-wait) DELIVER_WAIT_S="$2"; shift 2 ;;
+    --runner) EXECUTE_RUNNER="$2"; shift 2 ;;
     __workstream) WORKSTREAM_MODE="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
 
-CODEX="${EXECUTE_CODEX:-codex}"
+case "$EXECUTE_RUNNER" in exec|daemon) ;; *) usage ;; esac
+
+run_task() { # run_task <dir> <last-message-file> <thread-name> <prompt>
+  local dir="$1" lastfile="$2" name="$3" prompt="$4"
+  if [ "$EXECUTE_RUNNER" = "exec" ]; then
+    timeout "$TIMEOUT_S" "$CODEX" exec -C "$dir" -s workspace-write --ephemeral -o "$lastfile" "$prompt"
+  else
+    $EXECUTE_DAEMON_RUNNER -C "$dir" -o "$lastfile" --name "$name" --timeout "$TIMEOUT_S" "$prompt"
+  fi
+}
 
 # ---------- worker mode ----------
 if [ "${WORKSTREAM_MODE:-}" != "" ]; then
@@ -141,8 +161,8 @@ $failctx
 Fix it."
     fi
     note "[workstream $idx] starting${start_attempt}"
-    timeout "$TIMEOUT_S" "$CODEX" exec -C "$WT" -s workspace-write --ephemeral \
-      -o "$LOGD/workstream-$idx-a$a.last" "$PROMPT" > "$LOGD/workstream-$idx-a$a.codex.log" 2>&1
+    run_task "$WT" "$LOGD/workstream-$idx-a$a.last" "$FEATURE/w$idx a$a" "$PROMPT" \
+      > "$LOGD/workstream-$idx-a$a.codex.log" 2>&1
     rc=$?
     if [ "$rc" -eq 124 ]; then
       reason="timeout"; failctx="codex hit the ${TIMEOUT_S}s per-invocation timeout"
@@ -195,6 +215,15 @@ command -v timeout >/dev/null || fatal "timeout(1) not found (brew install coreu
 command -v "$CODEX" >/dev/null || fatal "codex binary '$CODEX' not found"
 [ -f "$WORKSTREAMS" ] || fatal "workstreams file not found: $WORKSTREAMS"
 
+if [ "$EXECUTE_RUNNER" = "daemon" ] && [ "$DAEMON_RUNNER_OVERRIDDEN" = "0" ]; then
+  "$CODEX" app-server daemon start >/dev/null 2>&1 \
+    || fatal "codex app-server daemon failed to start; use --runner exec as a fallback"
+  DAEMON_VERSION="$("$CODEX" app-server daemon version 2>/dev/null)" \
+    || fatal "codex app-server daemon is unavailable; use --runner exec as a fallback"
+  echo "$DAEMON_VERSION" | grep -q '"status"[[:space:]]*:[[:space:]]*"running"' \
+    || fatal "codex app-server daemon is not running; use --runner exec as a fallback"
+fi
+
 if [ -z "$REPO" ]; then REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || fatal "not in a git repo and no --repo"; fi
 REPO="$(cd "$REPO" && pwd)"
 CUR="$(git -C "$REPO" symbolic-ref --short -q HEAD)" \
@@ -224,6 +253,7 @@ N="$(wc -l < "$RUN_DIR/workstreams.txt" | tr -d ' ')"
 [ "$CONCURRENCY" -gt "$N" ] && CONCURRENCY="$N"
 
 note "feature=$FEATURE base=$BASE workstreams=$N pool=$CONCURRENCY retries=$RETRIES timeout=${TIMEOUT_S}s"
+note "runner=$EXECUTE_RUNNER"
 note "delivering onto branch '$BASE' in $REPO"
 note "logs: $RUN_DIR/logs  status: $RUN_DIR/status"
 
@@ -231,7 +261,7 @@ SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 export EXECUTE_REPO="$REPO" EXECUTE_BASE_SHA="$BASE_SHA" EXECUTE_FEATURE="$FEATURE" EXECUTE_CHECK="$CHECK"
 export EXECUTE_SETUP="$SETUP" EXECUTE_SPEC="$SPEC" EXECUTE_RETRIES="$RETRIES" EXECUTE_TIMEOUT="$TIMEOUT_S"
 export EXECUTE_RUN_DIR="$RUN_DIR" EXECUTE_WT_ROOT="$WT_ROOT" EXECUTE_CONCURRENCY="$CONCURRENCY"
-export EXECUTE_CODEX="$CODEX"
+export EXECUTE_CODEX="$CODEX" EXECUTE_RUNNER EXECUTE_DAEMON_RUNNER
 
 # ---------- phase: execute ----------
 seq 1 "$N" | xargs -n1 -P "$CONCURRENCY" "$SELF" __workstream
@@ -315,8 +345,8 @@ elif [ -n "$PASSED" ]; then
     note "[merge] workstream $idx CONFLICT: $CONFLICTED-> resolving with codex"
     MPROMPT="You are resolving a git merge conflict in this repository. Branch 'workstreams/$FEATURE/$idx' is being merged into '$BASE'. Conflicted files: $CONFLICTED
 Read ${SPEC:-spec.md at the repo root, if present,} for intent. Resolve every conflict so BOTH sides' intent is preserved, then 'git add' each resolved file. Do not commit, do not push."
-    timeout "$TIMEOUT_S" "$CODEX" exec -C "$REPO" -s workspace-write --ephemeral \
-      -o "$RUN_DIR/logs/merge-$idx.last" "$MPROMPT" >> "$RUN_DIR/logs/merge-$idx.log" 2>&1
+    run_task "$REPO" "$RUN_DIR/logs/merge-$idx.last" "$FEATURE/merge-$idx" "$MPROMPT" \
+      >> "$RUN_DIR/logs/merge-$idx.log" 2>&1
     if [ -z "$(git -C "$REPO" diff --name-only --diff-filter=U)" ] \
        && git -C "$REPO" commit -q --no-edit >> "$RUN_DIR/logs/merge-$idx.log" 2>&1; then
       MERGED="$MERGED $idx"
