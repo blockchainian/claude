@@ -96,6 +96,16 @@ The engine's first half. Responsibilities:
   workstream FAILED (no commit), exclude it from the merge, and report it in
   the run summary and the PR body.
 
+#### Runner layer
+
+Task execution defaults to the shared Codex app-server daemon so workstreams
+and merge-conflict resolutions appear in `codex agents` with live status. The
+daemon runner guarantees a persistent named thread, workspace-write sandboxing,
+non-interactive approval policy, and bounded interruption on timeout. The
+`exec` runner remains available through `--runner exec` or
+`EXECUTE_RUNNER=exec` for compatibility and recovery. Local review deliberately
+continues to use `codex exec review` under either setting.
+
 ### 3. Merge (script + Codex, no Claude) — onto the session branch
 
 The engine's second half. **There is no intermediate feature branch or

@@ -5,6 +5,16 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ENGINE="$HERE/../execute.sh"
+
+if [ -z "${TEST_EXECUTE_RUNNER:-}" ]; then
+  batch_rc=0
+  for test_runner in exec daemon; do
+    echo "==== runner: $test_runner ===="
+    TEST_EXECUTE_RUNNER="$test_runner" "$0" || batch_rc=1
+  done
+  exit "$batch_rc"
+fi
+
 SCRATCH="$(mktemp -d /tmp/codex-execute-test.XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
@@ -37,6 +47,13 @@ export STUB_DIR="$SCRATCH/stub"
 mkdir -p "$STUB_DIR"
 # inject the stub via EXECUTE_CODEX: a single path, immune to PATH quirks (e.g. colons in dir names)
 export EXECUTE_CODEX="$HERE/stub-codex/codex"
+if [ "$TEST_EXECUTE_RUNNER" = "exec" ]; then
+  export EXECUTE_RUNNER=exec
+  unset EXECUTE_DAEMON_RUNNER
+else
+  unset EXECUTE_RUNNER
+  export EXECUTE_DAEMON_RUNNER="$HERE/stub-daemon-runner/daemon-run"
+fi
 STUB_BIN="$SCRATCH/bin"
 mkdir -p "$STUB_BIN"
 cat > "$STUB_BIN/gh" <<'EOF'
@@ -84,6 +101,14 @@ git -C "$FIX" push -q origin main
 
 BASE0="$(git -C "$FIX" rev-parse main)"
 
+# ---------- runner validation ----------
+set +e
+"$ENGINE" --runner bogus > "$SCRATCH/bogus.log" 2>&1
+BOGUS_RC=$?
+set -e 2>/dev/null || true
+assert_eq "bogus runner exits 1" 1 "$BOGUS_RC"
+assert "bogus runner prints usage" grep -q '^Usage:' "$SCRATCH/bogus.log"
+
 # ---------- scenario 1: partial run, delivery onto the session branch ----------
 set +e
 "$ENGINE" --workstreams "$FIX/workstreams.txt" --feature feat-x \
@@ -120,6 +145,20 @@ assert_eq "workstream 2 invoked twice (retry with failure context)" 2 "$(count W
 assert_eq "workstream 3 (hang) invoked retries+1 times" 2 "$(count WS-HANG)"
 assert_eq "workstream 4 (noop) invoked retries+1 times" 2 "$(count WS-NOOP)"
 assert_eq "merge conflict resolved via codex exactly once" 1 "$(count MERGE-RESOLVE)"
+
+if [ "$TEST_EXECUTE_RUNNER" = "daemon" ]; then
+  assert "default runner is daemon" grep -q '^codex:execute: runner=daemon$' "$SCRATCH/run.log"
+  assert "daemon runner handles workstream attempts" \
+    grep -q '^WS-OK .* name=feat-x/w1 a1$' "$STUB_DIR/invocations.log"
+  assert "daemon workstream retry has attempt name" \
+    grep -q '^WS-FAILONCE .* name=feat-x/w2 a2$' "$STUB_DIR/invocations.log"
+  assert "daemon runner handles merge conflicts" \
+    grep -q '^MERGE-RESOLVE .* name=feat-x/merge-6$' "$STUB_DIR/invocations.log"
+  assert_eq "codex stub handles no task attempts under daemon" 0 \
+    "$(grep -E '^(WS-|MERGE-RESOLVE)' "$STUB_DIR/invocations.log" | grep -vc ' name=' || true)"
+else
+  assert "explicit exec runner is reported" grep -q '^codex:execute: runner=exec$' "$SCRATCH/run.log"
+fi
 
 # progress output
 assert_eq "first attempts omit attempt number" 0 "$(grep -c 'attempt 1' "$SCRATCH/run.log" || true)"

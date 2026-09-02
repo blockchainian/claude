@@ -49,8 +49,15 @@ ${CLAUDE_PLUGIN_ROOT}/skills/execute/execute.sh \
   --workstreams <path>/workstreams.txt --feature <run-name> \
   --check "<verify cmd>" --spec <path>/spec.md \
   [--setup "<per-worktree deps cmd>"] \
-  [--concurrency N] [--retries 2] [--timeout 2400] [--no-push] [--deliver-wait 1800]
+  [--concurrency N] [--retries 2] [--timeout 2400] [--runner daemon|exec] \
+  [--no-push] [--deliver-wait 1800]
 ```
+
+The default `daemon` runner makes workstream and merge-conflict tasks visible
+as first-class rows in `codex agents`, including their live status. Use
+`--runner exec` to switch back to standalone `codex exec` processes. The
+`EXECUTE_RUNNER=exec` environment setting is also honoured (the command-line
+option takes precedence).
 
 Results land on the **session branch, in the session worktree** — the branch
 checked out when the run starts (`--base` may name it explicitly and must then

@@ -3,11 +3,15 @@
 # ABOUTME: simulates pass / fail-once / hang / no-op / conflicting workstreams plus merge resolution.
 set -u
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../stub-scenarios.sh"
+
 DIR=.
 PROMPT=""
 OFILE=""
 CFG=""
 MODE=exec
+NAME=""
 args=("$@")
 i=0
 while [ $i -lt ${#args[@]} ]; do
@@ -25,16 +29,13 @@ while [ $i -lt ${#args[@]} ]; do
   i=$((i+1))
 done
 
-log() { echo "$1 dir=$DIR" >> "${STUB_DIR:?}/invocations.log"; }
-bump() { echo x >> "${STUB_DIR:?}/calls-$1"; }
-
 if [ "$MODE" = "review" ]; then
-  bump REVIEW; log "REVIEW cfg=${CFG# }"
+  scenario_bump REVIEW; scenario_log "REVIEW cfg=${CFG# }"
   # record whether the engine still holds the delivery lock while reviewing
   if [ -e "$(git -C "$DIR" rev-parse --absolute-git-dir 2>/dev/null)/codex-execute/deliver.lock" ]; then
-    log "REVIEW-LOCK-HELD"
+    scenario_log "REVIEW-LOCK-HELD"
   else
-    log "REVIEW-LOCK-FREE"
+    scenario_log "REVIEW-LOCK-FREE"
   fi
   # optionally push an unrelated commit to origin from a second clone, simulating a
   # sibling landing on the branch while this run is still reviewing
@@ -49,59 +50,6 @@ if [ "$MODE" = "review" ]; then
   exit 0
 fi
 
-case "$PROMPT" in
-  *"merge conflict"*)
-    bump MERGE-RESOLVE; log MERGE-RESOLVE
-    echo "ok-merged" > "$DIR/c.txt"
-    git -C "$DIR" add c.txt
-    ;;
-  *WS-OK*)
-    bump WS-OK; log WS-OK
-    echo "ok-ws1" > "$DIR/a.txt"
-    ;;
-  *WS-FAILONCE*)
-    bump WS-FAILONCE; log WS-FAILONCE
-    case "$PROMPT" in
-      *"PREVIOUS ATTEMPT FAILED"*) echo "ok-ws2" > "$DIR/b.txt" ;;
-      *) echo "bad" > "$DIR/b.txt" ;;
-    esac
-    ;;
-  *WS-HANG*)
-    bump WS-HANG; log WS-HANG
-    sleep 30
-    ;;
-  *WS-NOOP*)
-    bump WS-NOOP; log WS-NOOP
-    ;;
-  *WS-C1*)
-    bump WS-C1; log WS-C1
-    echo "ok-ws5" > "$DIR/c.txt"
-    ;;
-  *WS-C2*)
-    bump WS-C2; log WS-C2
-    echo "ok-ws6" > "$DIR/c.txt"
-    ;;
-  *WS-DIRTY*)
-    # dirties the SESSION repo (not the worktree) and cleans it up a few seconds later,
-    # so the engine reaches its merge phase against a dirty tree that then becomes clean
-    bump WS-DIRTY; log WS-DIRTY
-    echo "ok-f" > "$DIR/f.txt"
-    echo dirt > "${STUB_DIRTY_REPO:?}/late.txt"
-    (sleep "${STUB_DIRTY_SECS:-3}"; rm -f "${STUB_DIRTY_REPO}/late.txt") >/dev/null 2>&1 &
-    disown 2>/dev/null || true
-    ;;
-  *WS-D*)
-    bump WS-D; log WS-D
-    echo "ok-d" > "$DIR/d.txt"
-    ;;
-  *WS-E*)
-    bump WS-E; log WS-E
-    echo "ok-e" > "$DIR/e.txt"
-    ;;
-  *)
-    bump UNKNOWN; log "UNKNOWN prompt=$PROMPT"
-    exit 1
-    ;;
-esac
+run_stub_scenario || exit $?
 echo "stub codex done"
 exit 0
