@@ -12,7 +12,11 @@ Produce exactly ONE image per requested screen. iOS has no full-page screenshot 
 Working slices go in a per-run temp directory and are always deleted:
 
 ```bash
-SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-screenshot.XXXXXX")"
+SKILL_DIR="<absolute path to this loaded skill folder>"
+if [ -z "${SLICE_DIR:-}" ]; then
+  SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codex-ios-screenshot.XXXXXX")"
+fi
+mkdir -p "$SLICE_DIR"
 ```
 
 The stitched PNG goes where the caller asks, via `--out`. Captured screens accumulate into a library that later tools read, so use one durable root and name each file for the screen it shows:
