@@ -17,12 +17,18 @@ and UI-driving steps.
 
 ## MCP server
 
-The plugin ships one server, `XcodeBuildMCP`, launched on demand:
+The plugin ships one server, `xcodebuildmcp`, declared in `.mcp.json` and
+launched on demand:
 
 ```
 npx -y xcodebuildmcp@latest mcp
-XCODEBUILDMCP_ENABLED_WORKFLOWS=simulator,ui-automation,debugging,logging
+XCODEBUILDMCP_ENABLED_WORKFLOWS=simulator,simulator-management,ui-automation,debugging,device
 ```
+
+That registers 59 tools. `session-management` is added by the server itself.
+`project-discovery`, `utilities`, and `coverage` are deliberately absent: the
+`simulator` workflow already re-lists their tools, so enabling them would add
+only `get_mac_bundle_id`.
 
 Tools are namespaced `mcp__plugin_build-ios-apps_xcodebuildmcp__*`.
 
@@ -60,5 +66,8 @@ Changes in this fork:
   `build_run_sim`/`launch_app_sim` provide. Upstream still documents
   `describe_ui` and `start_sim_log_cap`/`stop_sim_log_cap`, which no longer
   exist.
-- Dropped `logging` from `XCODEBUILDMCP_ENABLED_WORKFLOWS`; the server rejects it
-  as an unknown workflow.
+- Dropped `logging` from `XCODEBUILDMCP_ENABLED_WORKFLOWS`; xcodebuildmcp removed
+  that workflow in 2.5.0 and the server now rejects it as unknown.
+- Added the `simulator-management` and `device` workflows, which upstream does
+  not enable: simulator location, appearance, statusbar, keyboard and erase
+  control, plus build, install, launch, and test on physical devices.
