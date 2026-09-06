@@ -5,15 +5,25 @@ description: Capture one whole iOS app screen as a single stitched PNG, includin
 
 # iOS Take Screenshot
 
-Produce exactly ONE image per requested screen:
+Produce exactly ONE image per requested screen. iOS has no full-page screenshot API — `screenshot` returns only the visible viewport — so a whole screen must be captured as slices and stitched. This skill owns that end to end: open the app, reach the screen, capture slices, stitch, delete the slices.
+
+## Where Results Go
+
+Working slices go in a per-run temp directory and are always deleted:
+
+```bash
+SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-screenshot.XXXXXX")"
+```
+
+The stitched PNG goes where the caller asks, via `--out`. Captured screens accumulate into a library that later tools read, so use one durable root and name each file for the screen it shows:
 
 ```
-/tmp/ios-screenshots/<app-slug>/<screen-slug>.png
+$IOS_SCREENSHOT_DIR/<app-slug>/<screen-slug>.png
 ```
 
-iOS has no full-page screenshot API — `screenshot` returns only the visible viewport. A whole screen must be captured as a series of slices and stitched. This skill owns that end to end: open the app, reach the screen, capture slices, stitch, delete the slices.
+Resolve the root in this order: a path given in the request, then `$IOS_SCREENSHOT_DIR`, then ask. Never invent a root, and never put the library under `/tmp` — macOS clears it on reboot, and a research corpus that quietly empties is worse than one never collected.
 
-Override the output root with `IOS_SCREENSHOT_DIR`. The path is stable and predictable so later tools can consume it without being told where to look.
+Several agents can share that library safely. The phone is the real lock, not the directory: Appium holds one session per device, so two agents cannot capture at the same time — the second fails to get a session. The stitcher writes to a staging file and renames it into place, so a reader never sees a half-written PNG, and its verdict reports `replaced_existing` when a run overwrites an earlier capture of the same screen.
 
 ## Core Workflow
 
@@ -97,7 +107,7 @@ Save slices at full resolution — do not pass `maxWidth` when capturing for a s
 
 ```bash
 "$SKILL_DIR/scripts/stitch_screens.py" \
-  --out "/tmp/ios-screenshots/fomo/token-detail.png" \
+  --out "$IOS_SCREENSHOT_DIR/fomo/token-detail.png" \
   --slices "$SLICE_DIR"/slice-*.png
 ```
 
@@ -118,6 +128,13 @@ Verify the result by opening it and checking continuity across seams: ordered li
 ## 5. Clean Up
 
 Delete the slice directory. The stitched PNG is the only artifact that survives. Name it for what it shows — `token-detail.png`, `holders-tab.png`, `perps-list.png` — never `screenshot-1.png` or a timestamp.
+
+## Tests
+
+`scripts/test_stitch_screens.py` builds a synthetic page, cuts it into overlapping
+slices with fixed chrome on both edges — including a pinned header carrying a
+live-updating value — and asserts the stitch reconstructs the page row for row.
+Run it after any change to the stitcher.
 
 ## Reporting
 
