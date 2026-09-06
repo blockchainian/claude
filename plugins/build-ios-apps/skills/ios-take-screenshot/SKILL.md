@@ -1,0 +1,124 @@
+---
+name: ios-take-screenshot
+description: Capture one whole iOS app screen as a single stitched PNG, including everything below the fold. Use when asked to screenshot an app screen, capture a full page, or collect screens of another app for design research. Drives a real iPhone through appium-mcp, or the simulator through XcodeBuildMCP.
+---
+
+# iOS Take Screenshot
+
+Produce exactly ONE image per requested screen:
+
+```
+/tmp/ios-screenshots/<app-slug>/<screen-slug>.png
+```
+
+iOS has no full-page screenshot API — `screenshot` returns only the visible viewport. A whole screen must be captured as a series of slices and stitched. This skill owns that end to end: open the app, reach the screen, capture slices, stitch, delete the slices.
+
+Override the output root with `IOS_SCREENSHOT_DIR`. The path is stable and predictable so later tools can consume it without being told where to look.
+
+## Core Workflow
+
+1. Open the app (find it first — the default app listing hides App Store apps).
+2. Navigate to the requested screen and confirm you are on it by looking at a screenshot.
+3. Scroll to the top, then capture overlapping slices downward, capped.
+4. Stitch with `scripts/stitch_screens.py` and read its JSON verdict.
+5. Delete the slices. Keep only the stitched PNG.
+
+`SKILL_DIR` is the absolute path of this loaded skill folder. Do not derive it from the target app's `pwd` — installed plugins live outside the app being researched. Keep slices in a run-specific temp dir, never under `SKILL_DIR`.
+
+## Safety
+
+You are driving someone's real phone, often signed into a real account with real money.
+
+- Read-only. Never tap anything that transacts, sends, confirms, deletes, posts, or follows.
+- Never type into a credential, seed-phrase, or payment field.
+- Navigation, tab switching, and scrolling are fine. Anything that changes state is not.
+- If a screen can only be reached by a state-changing action, stop and ask.
+
+**Never tap a coordinate without a fresh screenshot showing what is under it.** An app
+resumes on whatever screen it was last left on, so coordinates memorised from an earlier
+run land somewhere else entirely. Tapping a remembered tab-bar position after reopening
+one app hit a "Deposit to buy" button and opened a payment sheet. Screenshot, look, then
+tap.
+
+To dismiss a modal sheet, tap the dimmed backdrop above it. A downward swipe on the sheet
+body often does nothing, and repeating it wastes turns.
+
+## 1. Open the App
+
+On a real device, resolve the bundle id first:
+
+```bash
+"$SKILL_DIR/scripts/find_ios_app.sh" --device <udid> --name fomo
+```
+
+`xcrun devicectl device info apps` lists **only developer-installed apps by default** — an App Store app looks absent. The script passes `--include-all-apps`, which is the whole reason it exists. Do not call `devicectl` directly for this.
+
+Then foreground it:
+
+- Real device: `appium_app_lifecycle` with `action=activate`, `id=<bundleId>`
+- Simulator: `mcp__plugin_build-ios-apps_xcodebuildmcp__launch_app_sim`
+
+Then screenshot. An app resumes where the user left it, not on its home screen, so confirm
+where you actually are before navigating.
+
+If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create`. Sessions idle out — just recreate on failure.
+
+## 2. Find the Requested Screen
+
+Navigate by tab bar, search, or an element found with `appium_find_element`. Prefer `accessibility id` over xpath.
+
+Then **look at a screenshot and confirm you are on the right screen** before capturing. Do not assume a tap landed. This is the single most common way a capture run wastes its slices.
+
+## 3. Capture Slices
+
+Read this section before your first scroll. These three facts cost an hour to learn:
+
+- **`direction` is the direction the CONTENT moves, not the finger.** `direction=up` scrolls you FURTHER DOWN the page. To move toward the top of a page, use `direction=down`. Getting this backwards produces slices that look random and overlap measurements that read as "nothing moved".
+- **Scoping matters.** On a nested scroll view, a bare `appium_gesture` may not move the page at all. Find the container once and reuse it:
+  `appium_find_element` with `strategy=-ios class chain`, `selector=**/XCUIElementTypeScrollView`, then pass its `elementUUID` to every scroll.
+- **One scoped scroll advances roughly a full viewport.** That is fine — the stitcher measures the real offset. Do not hand-tune drag coordinates; scoped `direction` scrolls are far more reliable than custom `x/y/endX/endY` drags, which frequently move nothing.
+
+A floating scroll-to-top button, where an app has one, returns to the top of the *list*, not the top of the *page*. Expect one more `direction=down` scroll to bring a header or chart back into view.
+
+Capture loop:
+
+1. Scroll toward the top (`direction=down`) until the top no longer changes.
+2. Screenshot → slice 1.
+3. Scroll `direction=up` once → screenshot → next slice.
+4. Repeat to a cap of **6 slices**.
+
+Stop early when a new slice is nearly identical to the previous one — that is the bottom of the page.
+
+**Infinite scroll:** if you reach the cap and the content is still advancing, take **one extra scroll and slice**, then stop. That extra slice is evidence the screen continues; report the capture as truncated rather than implying it is the whole page.
+
+Save slices at full resolution — do not pass `maxWidth` when capturing for a stitch, since downscaling loses the detail the overlap matcher needs.
+
+## 4. Stitch
+
+```bash
+"$SKILL_DIR/scripts/stitch_screens.py" \
+  --out "/tmp/ios-screenshots/fomo/token-detail.png" \
+  --slices "$SLICE_DIR"/slice-*.png
+```
+
+The script auto-detects the fixed chrome (status bar, sticky header, pinned bottom bar), finds where each slice overlaps the previous one by sliding a textured band and minimising pixel difference, and splices at the matched row so duplicated content appears once.
+
+It prints a JSON verdict. **Read it.** Every seam must say `"spliced": true`. A `"butt_joined"` seam means no overlap was found and content may be missing at that seam.
+
+If `sticky_detected` in the verdict looks wrong, override it and re-run. Both flags take the **number of pixels** of fixed chrome at each edge, not row indices:
+
+```bash
+--sticky-top 362 --sticky-bottom 357
+```
+
+Read those off a slice: how tall is the status bar plus any pinned header, and how tall is the pinned bottom bar. Detection handles a pinned header that shows a live-updating value, because it measures the share of pixels in a row that change rather than the size of the change.
+
+Verify the result by opening it and checking continuity across seams: ordered lists must stay ordered, and no row may repeat. On a dark UI a flat black band can match anywhere, so a low error score alone is not proof.
+
+## 5. Clean Up
+
+Delete the slice directory. The stitched PNG is the only artifact that survives. Name it for what it shows — `token-detail.png`, `holders-tab.png`, `perps-list.png` — never `screenshot-1.png` or a timestamp.
+
+## Reporting
+
+State the output path, the number of slices, whether the capture was truncated by infinite scroll, and every seam's status. If any seam was butt-joined, say so plainly instead of presenting the image as complete.
