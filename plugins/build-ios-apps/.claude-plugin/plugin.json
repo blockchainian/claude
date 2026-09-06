@@ -1,0 +1,29 @@
+{
+  "name": "build-ios-apps",
+  "version": "0.2.0",
+  "description": "Drive iOS apps on the simulator from Claude Code: build, run, and inspect via XcodeBuildMCP, capture symbolicated ETTrace flamegraphs, and root-cause memory leaks from memgraphs.",
+  "author": {
+    "name": "blockchainian"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/blockchainian/claude",
+  "repository": "https://github.com/blockchainian/claude",
+  "keywords": [
+    "ios",
+    "xcode",
+    "simulator",
+    "performance",
+    "profiling",
+    "memory-leaks",
+    "debugging"
+  ],
+  "mcpServers": {
+    "XcodeBuildMCP": {
+      "command": "npx",
+      "args": ["-y", "xcodebuildmcp@latest", "mcp"],
+      "env": {
+        "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,ui-automation,debugging,logging"
+      }
+    }
+  }
+}

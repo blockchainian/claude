@@ -4,12 +4,12 @@
     "name": "blockchainian"
   },
   "metadata": {
-    "description": "Claude Code plugin marketplace for blockchainian's plugins: Grok and Codex review/delegation tooling."
+    "description": "Claude Code plugin marketplace for blockchainian's plugins: Grok and Codex review/delegation tooling, and iOS simulator debugging and profiling."
   },
   "plugins": [
     {
       "name": "codex",
-      "description": "Execute a planned feature as parallel codex workstreams off Claude's critical path \u2014 delivered onto your session branch, codex-reviewed, pushed.",
+      "description": "Execute a planned feature as parallel codex workstreams off Claude's critical path — delivered onto your session branch, codex-reviewed, pushed.",
       "author": {
         "name": "blockchainian"
       },
@@ -22,6 +22,14 @@
         "name": "blockchainian"
       },
       "source": "./plugins/grok"
+    },
+    {
+      "name": "build-ios-apps",
+      "description": "Drive iOS apps on the simulator: build and run via XcodeBuildMCP, capture ETTrace flamegraphs, root-cause memory leaks.",
+      "author": {
+        "name": "blockchainian"
+      },
+      "source": "./plugins/build-ios-apps"
     }
   ]
 }
