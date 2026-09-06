@@ -24,7 +24,7 @@ npx -y xcodebuildmcp@latest mcp
 XCODEBUILDMCP_ENABLED_WORKFLOWS=simulator,ui-automation,debugging,logging
 ```
 
-Tools are namespaced `mcp__plugin_build-ios-apps_XcodeBuildMCP__*`.
+Tools are namespaced `mcp__plugin_build-ios-apps_xcodebuildmcp__*`.
 
 ## Install
 
@@ -52,4 +52,13 @@ Changes in this fork:
   display-name files dropped.
 - Dropped the five Swift-authoring skills (`ios-app-intents`,
   `swiftui-liquid-glass`, `swiftui-performance-audit`, `swiftui-ui-patterns`,
-  `swiftui-view-refactor`), keeping the three simulator-runtime skills.
+  `swiftui-view-refactor`) and the Codex-only `ios-simulator-browser` skill,
+  keeping the three simulator-runtime skills.
+- Corrected `ios-debugger-agent` against xcodebuildmcp 2.7.0: real tool names
+  (`snapshot_ui`, `session_set_defaults`, `elementRef`-based `tap`/`type_text`),
+  and log guidance matching the automatic runtime-log capture that
+  `build_run_sim`/`launch_app_sim` provide. Upstream still documents
+  `describe_ui` and `start_sim_log_cap`/`stop_sim_log_cap`, which no longer
+  exist.
+- Dropped `logging` from `XCODEBUILDMCP_ENABLED_WORKFLOWS`; the server rejects it
+  as an unknown workflow.
