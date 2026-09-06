@@ -31,6 +31,7 @@ DEFAULT_MAX_ERROR = 11.0
 DEFAULT_SEARCH = 2400   # how far back up the accumulated image to look for the overlap
 MIN_BAND_STD = 12.0     # a flatter band (empty dark background) matches anywhere
 MIN_ADVANCE_FRAC = 0.2  # each slice must extend the image by this share of a screen
+MIN_MATCH_ROWS = 60     # fewest overlapping rows that still make an alignment credible
 
 
 def load(paths: list[Path]) -> tuple[list[np.ndarray], list[np.ndarray]]:
@@ -123,13 +124,29 @@ def stitch(paths: list[Path], sticky_top: int | None, sticky_bottom: int | None,
         # splice near row zero, collapsing the whole stitch to a single screen.
         min_advance = int(content_g.shape[0] * MIN_ADVANCE_FRAC)
         lo = max(min_advance + band_start, acc_g.shape[0] - search)
-        hi = acc_g.shape[0] - band_h
-        best = (float("inf"), -1)
-        for p in range(lo, max(hi, lo + 1)):
-            err = float(np.abs(acc_g[p:p + band_h] - band).mean())
-            if err < best[0]:
-                best = (err, p)
-        err, p = best
+
+        def search_from(min_rows: int) -> tuple[float, int]:
+            best = (float("inf"), -1)
+            hi = acc_g.shape[0] - min_rows
+            for cand in range(lo, max(hi, lo + 1)):
+                avail = min(band_h, acc_g.shape[0] - cand)
+                if avail < min_rows:
+                    continue
+                e = float(np.abs(acc_g[cand:cand + avail] - band[:avail]).mean())
+                if e < best[0]:
+                    best = (e, cand)
+            return best
+
+        # Prefer a full-band match. Fewer rows compared means a noisier score, and
+        # a lucky 60-row match will beat the true 200-row one if both compete on
+        # raw error. Partial overlap is a fallback for when a scroll advanced
+        # nearly a full screen, not an equal candidate.
+        err, p = search_from(band_h)
+        partial = False
+        if err > max_error:
+            alt_err, alt_p = search_from(MIN_MATCH_ROWS)
+            if alt_err < err:
+                err, p, partial = alt_err, alt_p, True
         splice_at = p - band_start
 
         spliced = err <= max_error and 0 <= splice_at <= acc_g.shape[0]
@@ -147,6 +164,7 @@ def stitch(paths: list[Path], sticky_top: int | None, sticky_bottom: int | None,
             "splice_row": int(splice_at),
             "band_start": int(band_start),
             "band_std": round(band_std, 1),
+            "partial_overlap": partial,
         })
 
     verdict = {
@@ -181,9 +199,16 @@ def main() -> int:
     image, verdict = stitch(args.slices, args.sticky_top, args.sticky_bottom,
                             args.band, args.max_error, args.search)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(image).save(args.out)
+
+    # Write then rename, so a reader never sees a half-written PNG and a failed
+    # run never destroys the previous capture of the same screen.
+    replaced = args.out.exists()
+    staged = args.out.with_name(args.out.name + ".staging")
+    Image.fromarray(image).save(staged, format="PNG")  # extension is .staging, so be explicit
+    staged.replace(args.out)
 
     verdict["out"] = str(args.out)
+    verdict["replaced_existing"] = replaced
     verdict["width"] = int(image.shape[1])
     verdict["height"] = int(image.shape[0])
     print(json.dumps(verdict, indent=2))
