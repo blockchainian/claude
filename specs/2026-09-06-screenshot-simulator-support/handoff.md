@@ -1,140 +1,128 @@
-# Handoff: simulator support for `ios-take-screenshot`
+# Simulator support for `ios-take-screenshot`
 
 Date: 2026-09-06. Repo: `github.com/blockchainian/claude`, branch `main`.
-Plugin: `plugins/build-ios-apps`, version 0.5.3 at handoff.
+Plugin: `plugins/build-ios-apps`, 0.5.3 at the start of this work, 0.6.2 at the end.
 
-## Status: nothing on the simulator has been run
+## Status: shipped and exercised on a simulator
 
-The skill does not work on a simulator today, and this is stronger than "unverified". Both
-helper scripts read `devicectl`, which does not see simulators, so discovery and app lookup
-fail at the first step. Every capture technique in the skill is Appium-specific and targets
-a physical device.
+The skill captures a simulator screen end to end. It was run against a real app on a
+booted iPhone 16, through a genuine `claude plugin update` install rather than a symlink,
+across all four screen shapes that the device path had to handle.
 
-No simulator was booted, no app was installed on one, and no simulator screen was captured
-or stitched during the work that produced this handoff. The only simulator knowledge here
-comes from reading two XcodeBuildMCP tool schemas — see item 4 below. Treat every simulator
-statement in this document as a design note to be tested, not as a finding.
+The design decision from the first draft held: one skill, branching on target. The
+divergence really is one layer. What that draft got *wrong* was which layer — see below.
 
-The real-device path, by contrast, was cold-run end to end from a clean machine.
+## What the first draft predicted, and what is actually true
 
-## The decision, already made
+The original plan was written from reading two tool schemas. Two of its three load-bearing
+claims did not survive contact.
 
-Add simulator capture to the **existing** `ios-take-screenshot` skill, branching on target.
-Do not create a second skill.
+| Planned | Actual |
+|---|---|
+| Capture with the XcodeBuildMCP `screenshot` tool | It returns a **369x800 JPEG** for a 1179x2556 screen — downscaled and lossy whatever the file is named. Slices come from `xcrun simctl io ... screenshot --type=png` instead: native resolution, ~0.1s, writes straight into the slice directory with no copy step. |
+| Crop a sideways region to its element rect from `snapshot_ui` | **`snapshot_ui` reports no geometry at all** — no rect, no frame, no coordinates. Only `ref\|action\|role\|label\|identifier`. The plan was impossible as written. |
+| `swipe` takes `withinElementRef`, so element-scoped scrolling exists | True, and the only prediction that held. |
 
-Reason: the divergence is one layer. The stitcher, output convention, slice discipline,
-settle rule, endless-list rule, cleanup and reporting are all shared. Only app lookup,
-session setup, and the scroll/screenshot calls differ. Two skills would force the caller to
-pick correctly every time, and `ios-take-screenshot` is the generic name — it wins whenever
-the target is unstated, which is most of the time.
+The replacement for the rect: `--crop-band` on the stitcher finds the region in the pixels.
+A band that scrolls slides its whole content past the window, so its rows change; the rest
+of the screen does not. That is the same measurement chrome detection already made, used
+the other way round.
 
-If the branches later contradict rather than merely differ, the fallback shape is two thin
-skills over a shared `scripts/` directory. There is precedent: the profiling skills already
-build on `ios-debugger-agent`.
+## What shipped
 
-## What exists and is verified (real device only)
+- `find_ios_app.sh --simulator <udid|booted>` — `simctl listapps` piped through `plutil`,
+  same JSON shape as the device path. `devicectl` cannot see simulators at all.
+- `discover_ios_setup.py --target simulator` — booted simulators and a `sessionDefaults`
+  object. No WebDriverAgent, no provisioning profile, no session to create.
+- `stitch_screens.py --crop-band` — finds the moving band and crops to it.
+- `SKILL.md` — branches on target in three places: app lookup, setup, and the calls that
+  scroll and capture. Everything downstream of a slice is shared.
+- README target column, plugin and marketplace descriptions.
 
-Real-device capture works end to end and was cold-run from a clean machine (no preset, no
-`~/.appium`, no cached WebDriverAgent, none installed on the phone).
+## Bugs found while verifying, all pre-existing or introduced and fixed here
 
-- `SKILL.md` — the workflow, real devices only, states that explicitly
-- `scripts/discover_ios_setup.py` — reads UDID, team id, WDA bundle id and signed IPA off
-  the machine; prints `suggestedCapabilities`; exit 1 with `missing` when not ready
-- `scripts/find_ios_app.sh` — bundle id lookup; passes `--include-all-apps`, without which
-  `devicectl` hides App Store apps
-- `scripts/stitch_screens.py` — the stitcher; `--axis vertical|horizontal`
-- `scripts/test_stitch_screens.py` — synthetic regression, exact reconstruction, both axes
+Each has a regression test that fails without its fix.
 
-Captures produced and checked: a token page (4 slices, 5401px), a live feed, a search
-screen, a non-scrolling profile screen, a finite About tab, and a horizontal carousel
-(6 slices, 4499x354).
+1. **The first slice's expanded navigation title broke chrome detection.** iOS draws a large
+   title at scroll offset zero and collapses it once the page moves, so that band differs
+   between slice 1 and every later slice and was measured as content. Detection stopped at
+   the status bar and left a strip of title bar inside every content region, which the
+   matcher aligned against itself. A six-slice capture came out 4862px against a true
+   6131px. **This was not simulator-specific — it was the shared stitcher, so the shipped
+   device path had it too.** Fixed by measuring chrome on the slices the crop applies to.
+2. **A band was detected too tightly.** A row of text is mostly background, so few of its
+   pixels move; a real tab strip cropped to 35px with the glyphs cut in half. Fixed with
+   two thresholds — a strict one to find the band, a loose one to grow it to its edges.
+3. **The longest moving span is not the band.** On a live screen a token list whose prices
+   and sparklines redraw spans far more rows than a tab strip, and `--crop-band` locked onto
+   it. Fixed by ranking candidates on how completely each changes rather than how tall it
+   is, with a floor so a blinking detail cannot win.
+4. **A default-distance swipe advances roughly a whole viewport**, leaving nothing to match
+   on. On one capture it skipped a short holdings section entirely: two slices with no
+   overlap and a stitched page missing a row while looking perfectly plausible. The skill
+   now says to scroll about half a screen.
 
-## The work
+## Two traps worth keeping
 
-1. **App lookup** — `find_ios_app.sh` is `devicectl`-only. Add a simulator path via
-   `xcrun simctl listapps <udid>`, or a sibling script. Keep the JSON output shape.
-2. **Setup** — `discover_ios_setup.py` is device-only and its WebDriverAgent logic is
-   meaningless for a simulator. A simulator needs a booted device and an installed app,
-   nothing more. Decide whether to branch inside it or add `discover_ios_simulator.py`.
-3. **Drive layer** — replace Appium calls with XcodeBuildMCP for the simulator branch.
-4. **The one real asymmetry**, read from the tool schemas — not executed, so confirm it
-   before designing around it:
-   - `xcodebuildmcp swipe` takes `withinElementRef` → element-scoped scrolling exists
-   - `xcodebuildmcp screenshot` takes only `returnFormat` → **cannot capture one element**
+**`all_spliced: true` is not proof, and `--max-error` is never the fix.** Raising the
+threshold does not find a better alignment, it accepts a worse one. On the capture in bug 1
+it made every seam report success and produced an image a third shorter than the page, with
+the missing rows gone silently. Twice in this work a confident diagnosis of "it is just the
+threshold" was wrong, both times because the diagnosis was verified against the tool's own
+flag. Measure the true scroll offsets independently instead.
 
-   So a sideways region must be captured full screen and cropped to the element's rect from
-   `snapshot_ui` before stitching. Full-screen slices of a scrolling band splice in the
-   wrong place, because the static remainder matches at any offset. A crop helper is
-   probably the cleanest addition.
-5. **Description** — currently says "Not for the simulator". Update when it is true.
-6. **README** — the Skills table has a Target column; update that row.
+**A height check catches a bad splice but not a bad butt join.** A butt join pads in a whole
+untrimmed slice, so the output reads *longer* than the arithmetic predicts even while a
+section is missing. That is how bug 4 hid. For a butt-joined seam, read the bottom of the
+earlier slice against the top of the next one and ask what should sit between them.
 
-## Facts that cost time to learn
+## Verification
 
-Appium, real device:
+1. `scripts/test_stitch_screens.py` passes: a vertical page with a pinned header carrying a
+   live value, the same page transposed, a collapsing large title, and a carousel band with
+   sparse edges beside a taller live-updating decoy.
+2. Cold run through a real `claude plugin update` install, not a symlink. Both MCP servers
+   present in the installed `.mcp.json`; scripts and tests run from the installed copy.
+3. All four shapes captured against ChadWallet on the simulator: an endless list (truncated
+   at two screens, as the rule requires), a horizontally scrolling tab strip, a finite
+   scrolling page, and a non-scrolling screen passed through as a single slice.
+4. Every stitched output opened and checked for continuity.
 
-- `direction` is the direction the **content** moves. `direction=up` goes further **down**
-  the page. Getting this backwards makes every overlap measurement read as "nothing moved".
-- Scrolling must be scoped to a container's `elementUUID`; a bare gesture often moves
-  nothing, and custom `x/y/endX/endY` drags frequently move nothing at all.
-- `**/XCUIElementTypeScrollView` returns the **first** match, which may be the wrong one.
-  Find the right one by shape: read `rect` via `appium_get_element_attribute`. A horizontal
-  scroller is wide and short (e.g. 393x118); a page container is nearly screen height
-  (393x704). Walking indices and scrolling to see what moves wastes turns and produced two
-  wrong conclusions.
-- Element-scoped screenshots crop to the element and are what make horizontal capture sound.
-- An element's rect rounds between frames, so captures can differ by a pixel. The stitcher
-  trims to the common size; do not reintroduce a hard size check.
-- A live feed never settles. Bound the settle wait; a transition decays to near zero within
-  about a second, live content holds a steady difference indefinitely.
-- Two device switches cannot be set from the Mac, and one cannot even be read: Developer
-  Mode, and Settings → Developer → Enable UI Automation. Without the second, session
-  creation fails as a bare `xcodebuild failed with code 65`.
+## Known limits, documented in the skill
 
-Stitcher internals, in case it needs changing:
+- **Two slices cannot self-diagnose their chrome.** Detection compares slices, so with a
+  single pair the first slice's expanded title is half the evidence. An endless-list capture
+  is exactly two slices. The seam fails loudly rather than quietly; pass `--sticky-top`.
+- **A floating button over the middle of the page repeats once per slice.** Chrome is
+  detected at the edges only. It is a property of the screen, not a bad stitch.
+- **A live feed is a composite**, not a snapshot of one instant. Unchanged from the device
+  path, and it showed up again here: a token list's prices differ between slices.
 
-- Fixed chrome is found by the **share of pixels in a row that change**, not the average
-  change, so a pinned header showing a live value is still recognised as chrome.
-- Each slice must advance the image by a minimum fraction. Without that floor the matcher
-  aligns one slice's pinned header against the previous one's and collapses the stitch to a
-  single screen.
-- Full-band matches are preferred; partial overlap is a fallback only. Letting both compete
-  on raw error let a lucky 60-row match beat the true 200-row one and moved a seam by 700px.
-- Horizontal support is a transpose in and out; the matching code is unchanged.
+## Facts about driving a simulator
 
-Packaging, the trap that hid a day of work:
+- `elementRef`s go stale as soon as the screen moves; a stale one fails
+  `TARGET_NOT_ACTIONABLE`. Each `swipe` response carries a fresh snapshot — take the next
+  ref from there. A top-level container sometimes keeps its ref string and a nested one does
+  not, so never assume.
+- `direction=up` advances further down the page, same as Appium.
+- No settle delay is needed: by the time `swipe` returns the pixels have stopped.
+- Expect `SNAPSHOT_CAPTURE_FAILED` on most swipes. It is the accessibility tree timing out,
+  not the rendering.
+- Some rows are exposed as text rather than buttons and cannot be tapped by ref at all —
+  stock Settings below its first level, for one.
 
-- Claude Code loads the plugin from `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`,
-  **not** from the marketplace repo. Editing the repo changes nothing that runs.
-- `claude plugin install` says "already installed" and does nothing. Use
-  `claude plugin update <plugin>@<marketplace>`, which needs the version in `plugin.json`
-  to have moved. Then restart.
-- Symlinking the cache directory to the repo makes edits live instantly and is good for
-  iteration, but it hides packaging bugs — a missing MCP server was invisible until a real
-  install was tested. Do a genuine install before believing anything works.
-- The remote needs the `blockchainian` SSH alias (`git@blockchainian:...`); plain
-  `git@github.com:` authenticates as the wrong account and the push is denied.
+## Packaging
 
-## Verification bar
+Unchanged and still true: Claude Code loads the plugin from
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, not from the marketplace repo.
+`claude plugin install` says "already installed" and does nothing; use
+`claude plugin update <plugin>@<marketplace>` with a moved version in `plugin.json`, then
+restart. It reads the local marketplace clone, so an unpushed commit still installs. The
+remote needs the `blockchainian` SSH alias.
 
-Match what the device path went through, or the work is not done:
+## Open
 
-1. `scripts/test_stitch_screens.py` passes.
-2. A cold run from a clean state, through a **real install** rather than a symlink: the
-   skill loads from the installed copy, discovery reports what is missing, setup completes,
-   a screen is captured, stitched, and the slices are deleted.
-3. Exercise all four shapes, since each broke something: a finite scrolling screen, a
-   non-scrolling screen, an endless list, and a horizontally scrolling region.
-4. Open the stitched output and check continuity. On a dark UI a flat band matches anywhere,
-   so a low seam error is not proof — ordered content that stays ordered is.
-
-## Do not
-
-- Do not make the skill app-specific. It described one app's carousel once and had to be
-  rewritten.
-- Do not claim a capability before it is exercised. The simulator claim shipped for hours
-  before anything supported it.
-- Do not tap coordinates without a fresh screenshot of what is under them. A remembered
-  tab-bar position opened a payment sheet on a real account.
-- Do not present a truncated capture as complete. An endless list stops at two screens, and
-  the report must say so.
+- Nothing pushed. The branch is `main`, several commits ahead of origin.
+- The device path has not been re-run since the chrome-detection fix. The fix is covered by
+  a regression test and makes detection strictly better informed, but it changes shared code
+  and no phone capture has exercised it.
