@@ -384,6 +384,12 @@ Read those off a slice: how tall is the status bar plus any pinned header, and h
 
 Verify the result by opening it and checking continuity across seams: ordered lists must stay ordered, and no row may repeat. On a dark UI a flat black band can match anywhere, so a low error score alone is not proof.
 
+One thing the stitcher cannot remove: a button that floats over the middle of the page
+rather than sitting at an edge. Chrome is detected at the top and bottom edges only, so a
+floating action button is spliced in as content and appears once per slice — twice or more
+down the finished page. That is a property of the screen, not a bad stitch. Say so in the
+report rather than re-running.
+
 A stronger check when a stitch looks suspect: the output height should be about the first
 slice plus the sum of the scroll steps. If it is far short, content was dropped no matter
 what `all_spliced` says.
