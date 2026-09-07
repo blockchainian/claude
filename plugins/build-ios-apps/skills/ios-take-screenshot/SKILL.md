@@ -27,25 +27,36 @@ content rather than the device. If the request does not say and both are availab
 
 ## Where Results Go
 
-Working slices go in a per-run temp directory and are always deleted:
+### Every name in this document is a value to paste, not a variable
+
+Each command runs in its own shell. Nothing you assign in one command exists in the next,
+so a `$SLICE_DIR` written in a later command expands to an empty string and the command
+acts on the wrong path. Where this document writes `$SLICE_DIR`, `$OUT_ROOT`, `$UDID` or
+`$SKILL_DIR`, it means **the absolute value you were given, typed out in full**.
+
+Getting this wrong is quiet rather than loud. A guard like `if [ -z "${SLICE_DIR:-}" ]`
+reads as "reuse the directory if there is one", but in a fresh shell there never is one, so
+it mints a new directory on every command — one slice in each, and a glob at stitch time
+that matches a single file. The stitch then succeeds on one slice and reports nothing
+wrong. If you would rather not paste paths, put the whole capture loop in a single command
+instead; what you cannot do is split it across commands and expect a variable to survive.
+
+### Set the run up once
+
+Run this one command and read the two absolute paths out of its output:
 
 ```bash
-SKILL_DIR="<absolute path to this loaded skill folder>"
-if [ -z "${SLICE_DIR:-}" ]; then
-  SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-screenshot.XXXXXX")"
-fi
-mkdir -p "$SLICE_DIR"
+RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
+SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-screenshot.XXXXXX")"
+OUT_ROOT="${IOS_SCREENSHOT_DIR:-/tmp/build-ios-app}/$RUN_ID"
+mkdir -p "$SLICE_DIR" "$OUT_ROOT"
+printf 'SLICE_DIR=%s\nOUT_ROOT=%s\n' "$SLICE_DIR" "$OUT_ROOT"
 ```
 
 The stitched PNG goes where the caller asks, via `--out`. `IOS_SCREENSHOT_DIR` is an
 ordinary environment variable, so it is shared by every session that inherits the same
-shell. Give each run its own subdirectory, so two sessions capturing the same screen cannot
-overwrite each other:
-
-```bash
-RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-OUT_ROOT="${IOS_SCREENSHOT_DIR:-/tmp/build-ios-app}/$RUN_ID"
-```
+shell; `RUN_ID` gives each run its own subdirectory under it, so two sessions capturing the
+same screen cannot overwrite each other.
 
 Each screen is then named for what it shows:
 
@@ -76,7 +87,7 @@ an earlier capture of the same screen.
 4. Stitch with `scripts/stitch_screens.py` and read its JSON verdict.
 5. Delete the slices. Keep only the stitched PNG.
 
-`SKILL_DIR` is the absolute path of this loaded skill folder. Do not derive it from the target app's `pwd` — installed plugins live outside the app being researched. Keep slices in a run-specific temp dir, never under `SKILL_DIR`.
+`SKILL_DIR` is the absolute path of this loaded skill folder, which you already know. Do not derive it from the target app's `pwd` — installed plugins live outside the app being researched. Keep slices in a run-specific temp dir, never under `SKILL_DIR`.
 
 ## Tool Names
 
@@ -161,11 +172,8 @@ Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says 
 nothing is booted or that several are and it will not guess between them. Boot one with
 `boot_sim` if none is running, and `open_sim` if you want to watch.
 
-Keep the chosen UDID and use it everywhere:
-
-```bash
-UDID="<selectedSimulator.udid from the report above>"
-```
+Keep the chosen UDID — the `selectedSimulator.udid` from that report — and paste it into
+every command that needs it, as above.
 
 Pass it to `session_set_defaults` once, so every XcodeBuildMCP call targets that simulator,
 and pass the same value to every `simctl` command. **The two must agree.** XcodeBuildMCP
