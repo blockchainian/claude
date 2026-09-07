@@ -21,10 +21,13 @@ looks like an ordinary page fragment. Nothing in the tooling notices. The doc's
 
 ## Issues, most silent first
 
-1. **Session defaults are inherited across sessions and never read back.** The server
-   process is shared; this run started with defaults already pointing at A, set by another
-   session. Doc: after `session_set_defaults`, call `session_show_defaults` and compare with
-   the discovered UDID.
+1. **Session defaults are shared by every agent in a Claude Code session and never read
+   back.** Each session launches its own XcodeBuildMCP process (five were running at once
+   here) and nothing is persisted to disk, so sessions do not see each other's defaults —
+   but subagents of one session share its server, and this run started with defaults
+   already pointing at A, set by an earlier agent in the same session. Doc: after
+   `session_set_defaults`, call `session_show_defaults` and compare with the discovered
+   UDID; one simulator per session, never two agents capturing in the same session.
 2. **A mismatch is indistinguishable from a non-scrolling screen.** Every XcodeBuildMCP
    response echoes the simulator it hit (`artifacts.simulatorId`; snapshots add `udid`).
    Doc: compare that against the capture UDID before taking the "does not scroll" branch.
