@@ -56,6 +56,39 @@ def build_slices(tmp: Path) -> tuple[list[Path], np.ndarray]:
     return paths, page
 
 
+def build_horizontal_slices(tmp: Path) -> tuple[list[Path], np.ndarray]:
+    """The same page rotated: a wide screen scrolled sideways.
+
+    Fixed chrome sits on the left and right edges instead of top and bottom.
+    """
+    paths, page = build_slices(tmp / "v")
+    wide = []
+    for i, src in enumerate(paths):
+        arr = np.asarray(Image.open(src).convert("RGB")).transpose(1, 0, 2)
+        out = tmp / f"wide-{i:02d}.png"
+        Image.fromarray(arr).save(out)
+        wide.append(out)
+    return wide, page.transpose(1, 0, 2)
+
+
+def check_horizontal(mod, failures: list[str]) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td); (tmp / "v").mkdir()
+        paths, page = build_horizontal_slices(tmp)
+        image, verdict = mod.stitch(paths, None, None, mod.DEFAULT_BAND,
+                                    mod.DEFAULT_MAX_ERROR, mod.DEFAULT_SEARCH,
+                                    "horizontal")
+        if verdict["axis"] != "horizontal":
+            failures.append("axis not reported as horizontal")
+        if not verdict["all_spliced"]:
+            failures.append(f"horizontal: not every seam spliced: {verdict['seams']}")
+        expected_w = STICKY_TOP + VISIBLE + STEP * 3
+        if image.shape[1] != expected_w:
+            failures.append(f"horizontal width {image.shape[1]} != {expected_w}")
+        elif not np.array_equal(image[:, STICKY_TOP:], page[:, :VISIBLE + STEP * 3]):
+            failures.append("horizontal: content mismatch after transpose round-trip")
+
+
 def main() -> int:
     mod = load_module()
     failures = []
@@ -92,9 +125,11 @@ def main() -> int:
                 bad = int((got != page[:covered]).any(axis=(1, 2)).sum())
                 failures.append(f"content mismatch on {bad} rows")
 
+    check_horizontal(mod, failures)
+
     for f in failures:
         print("FAIL:", f)
-    print("PASS: stitch reconstructs the page exactly" if not failures
+    print("PASS: stitch reconstructs the page exactly on both axes" if not failures
           else f"{len(failures)} failure(s)")
     return 1 if failures else 0
 
