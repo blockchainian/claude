@@ -1,6 +1,6 @@
 {
   "name": "build-ios-apps",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "Drive iOS apps from Claude Code: build, run, and inspect on the simulator via XcodeBuildMCP, capture symbolicated ETTrace flamegraphs, root-cause memory leaks from memgraphs, and capture whole app screens, from a simulator or a connected iPhone.",
   "author": {
     "name": "blockchainian"

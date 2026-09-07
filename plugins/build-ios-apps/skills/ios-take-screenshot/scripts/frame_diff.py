@@ -15,6 +15,11 @@ later frame's content is actually found in the earlier one. A page that scrolled
 has a non-zero offset with a low error at that offset. A page that only flickered
 matches best at offset 0.
 
+Fixed chrome must be left out of that search: a pinned header sits at the same
+rows in both frames, so it matches at offset zero and outweighs the content
+below it. Unless its height is given, it is detected from the pair the same way
+the stitcher detects it.
+
 Prints JSON.
 """
 
@@ -28,12 +33,18 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from stitch_screens import detect_sticky
+
 BAND = 400          # rows of the later frame looked for in the earlier one
+MIN_OVERLAP = 100   # rows the band must still share with the earlier frame at the far end
 MOVED_DIFF = 2.0    # mean absolute difference that counts as "these differ"
 
 
-def gray(path: Path, top: int, bottom: int) -> np.ndarray:
-    a = np.asarray(Image.open(path).convert("L"), dtype=np.int16)
+def gray(path: Path) -> np.ndarray:
+    return np.asarray(Image.open(path).convert("L"), dtype=np.int16)
+
+
+def crop(a: np.ndarray, top: int, bottom: int) -> np.ndarray:
     return a[top:a.shape[0] - bottom] if bottom else a[top:]
 
 
@@ -41,29 +52,37 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("before", type=Path)
     ap.add_argument("after", type=Path)
-    ap.add_argument("--sticky-top", type=int, default=0,
-                    help="pixels of fixed chrome to ignore at the top")
-    ap.add_argument("--sticky-bottom", type=int, default=0,
-                    help="pixels of fixed chrome to ignore at the bottom")
+    ap.add_argument("--sticky-top", type=int, default=None,
+                    help="pixels of fixed chrome to ignore at the top (default: detected)")
+    ap.add_argument("--sticky-bottom", type=int, default=None,
+                    help="pixels of fixed chrome to ignore at the bottom (default: detected)")
     args = ap.parse_args()
 
     for p in (args.before, args.after):
         if not p.is_file():
             sys.exit(f"missing image: {p}")
 
-    a = gray(args.before, args.sticky_top, args.sticky_bottom)
-    b = gray(args.after, args.sticky_top, args.sticky_bottom)
+    a, b = gray(args.before), gray(args.after)
     h = min(a.shape[0], b.shape[0])
     w = min(a.shape[1], b.shape[1])
     a, b = a[:h, :w], b[:h, :w]
 
+    auto_top, auto_bottom = detect_sticky([a, b])
+    top = auto_top if args.sticky_top is None else args.sticky_top
+    bottom = auto_bottom if args.sticky_bottom is None else args.sticky_bottom
+    a, b = crop(a, top, bottom), crop(b, top, bottom)
+    h = a.shape[0]
+
     diff = float(np.abs(a - b).mean())
 
+    # A long scroll leaves only part of the band inside the earlier frame, so
+    # the band shrinks toward the far end rather than the search stopping short.
     band_h = min(BAND, h // 2)
     band = b[:band_h]
     best_off, best_err = 0, float("inf")
-    for off in range(h - band_h):
-        err = float(np.abs(a[off:off + band_h] - band).mean())
+    for off in range(max(1, h - MIN_OVERLAP)):
+        n = min(band_h, h - off)
+        err = float(np.abs(a[off:off + n] - band[:n]).mean())
         if err < best_err:
             best_off, best_err = off, err
 
@@ -74,6 +93,8 @@ def main() -> int:
         "match_error": round(best_err, 2),
         "scrolled": best_off > 0 and best_err < diff,
         "content_height": h,
+        "sticky_top": top,
+        "sticky_bottom": bottom,
         "scrolled_fraction": round(best_off / h, 3) if h else 0.0,
     }, indent=2))
     return 0
