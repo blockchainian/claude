@@ -1,6 +1,6 @@
 ---
 name: ios-take-screenshot
-description: Capture one whole iOS app screen as a single stitched PNG, including everything below the fold. Use when asked to screenshot an app screen, capture a full page, or collect screens of another app for design research. Drives a real iPhone through appium-mcp, or the simulator through XcodeBuildMCP.
+description: Capture one whole iOS app screen as a single stitched PNG, including everything below the fold. Use when asked to screenshot an app screen, capture a full page, or collect screens of another app for design research. Drives a real iPhone connected over USB, through appium-mcp. Not for the simulator.
 ---
 
 # iOS Take Screenshot
@@ -86,6 +86,12 @@ body often does nothing, and repeating it wastes turns.
 
 ## 0. Set Up the Device
 
+**Real devices only.** Every step below drives a physical iPhone through appium-mcp:
+`find_ios_app.sh` and `discover_ios_setup.py` both read `devicectl`, which does not see
+simulators, and the capture techniques rely on Appium's scroll semantics and element-scoped
+screenshots. Capturing a simulator screen would need `simctl` and XcodeBuildMCP equivalents
+that are not written yet, so do not reach for this skill there.
+
 Discover the session values rather than asking for them or remembering them:
 
 ```bash
@@ -131,10 +137,8 @@ On a real device, resolve the bundle id first:
 
 Then foreground it:
 
-- Real device: `appium_app_lifecycle` with `action=activate`, `id=<bundleId>`
-- Simulator: `mcp__plugin_build-ios-apps_xcodebuildmcp__launch_app_sim`
-
-Then screenshot. An app resumes where the user left it, not on its home screen, so confirm
+Foreground it with `appium_app_lifecycle` (`action=activate`, `id=<bundleId>`), then
+screenshot. An app resumes where the user left it, not on its home screen, so confirm
 where you actually are before navigating.
 
 If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create`. Sessions idle out — just recreate on failure.
