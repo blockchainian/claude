@@ -208,7 +208,14 @@ Read this section before your first scroll. These three facts cost an hour to le
 - **`direction` is the direction the CONTENT moves, not the finger.** `direction=up` scrolls you FURTHER DOWN the page. To move toward the top of a page, use `direction=down`. This holds on both targets. Getting it backwards produces slices that look random and overlap measurements that read as "nothing moved".
 - **Scoping matters, and a screen can hold several scroll views.** A bare gesture may not
   move the page at all, so every scroll must name a container.
-- **One scoped scroll advances roughly a full viewport** at the default distance. That is fine — the stitcher measures the real offset. Do not hand-tune drag coordinates; scoped `direction` scrolls are far more reliable than custom `x/y/endX/endY` drags, which frequently move nothing.
+- **One scoped scroll advances roughly a full viewport** at the default distance, which is
+  too far. The stitcher joins slices by finding where they overlap, so a scroll that
+  advances a whole screen leaves nothing to match on, and a short section between two
+  slices is never photographed at all. Ask for about half a screen — `distance` 0.5 on the
+  simulator — and let the stitcher measure the real offset. Measured on one screen:
+  `distance` 0.7 advanced 1819px of a 2220px body, over 80%, while 0.3 advanced 770px and
+  left a comfortable overlap. Do not hand-tune drag coordinates; scoped `direction` scrolls
+  are far more reliable than custom `x/y/endX/endY` drags, which frequently move nothing.
 
 A floating scroll-to-top button, where an app has one, returns to the top of the *list*, not the top of the *page*. Expect one more `direction=down` scroll to bring a header or chart back into view.
 
@@ -251,9 +258,9 @@ keeps the same ref string across several swipes and a nested one does not, so re
 the latest response every time rather than assuming.
 
 No delay is needed between the swipe and the capture: by the time `swipe` returns, the
-screen has stopped moving. If `swipe` warns `SNAPSHOT_CAPTURE_FAILED` — "the refreshed
-runtime snapshot did not settle" — that is its accessibility tree timing out, not the
-rendering. Take a fresh `snapshot_ui` for the next ref and carry on; the pixels are fine.
+screen has stopped moving. Expect `swipe` to warn `SNAPSHOT_CAPTURE_FAILED` — "the
+refreshed runtime snapshot did not settle" — on most calls; that is the norm on a busy
+screen, and it is its accessibility tree timing out, not the rendering. Take a fresh `snapshot_ui` for the next ref and carry on; the pixels are fine.
 
 `snapshot_ui` reports no geometry at all — no rect, no frame, no coordinates. Anything that
 needs to know where a region sits must read it from the pixels instead. That is what
@@ -366,7 +373,19 @@ The stitcher trusts the order it is given; passing slices out of order produces 
 
 The script auto-detects the fixed chrome (status bar, sticky header, pinned bottom bar), finds where each slice overlaps the previous one by sliding a textured band and minimising pixel difference, and splices at the matched row so duplicated content appears once.
 
-It prints a JSON verdict. **Read it.** Every seam must say `"spliced": true`. A `"butt_joined"` seam means no overlap was found and content may be missing at that seam.
+It prints a JSON verdict. **Read it.** Every seam must say `"spliced": true`. A
+`"butt_joined"` seam means no overlap was found and content may be missing at that seam.
+
+Where that seam sits tells you what went wrong:
+
+- **At the bottom of the page**, it usually means the last scroll hit the end and moved
+  almost nothing. Check `vs_previous_diff`: near zero means the slice was not content and
+  should have been discarded.
+- **Mid-page**, the scroll overshot. One swipe advanced further than a screen, so the two
+  slices do not overlap and whatever sat between them was never captured — the stitched
+  image looks plausible and is missing a section. Recapture that stretch with a smaller
+  `distance`, roughly half of what you used. This is the failure most likely to be
+  mistaken for a good capture, because nothing about the image looks wrong.
 
 **Do not chase a failing seam by raising `--max-error`.** Loosening the threshold does not
 find a better alignment; it accepts a worse one. On a six-slice capture that failed one
