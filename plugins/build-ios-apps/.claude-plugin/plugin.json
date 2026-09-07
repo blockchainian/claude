@@ -1,7 +1,7 @@
 {
   "name": "build-ios-apps",
-  "version": "0.4.0",
-  "description": "Drive iOS apps on the simulator from Claude Code: build, run, and inspect via XcodeBuildMCP, capture symbolicated ETTrace flamegraphs, and root-cause memory leaks from memgraphs.",
+  "version": "0.5.0",
+  "description": "Drive iOS apps from Claude Code: build, run, and inspect on the simulator via XcodeBuildMCP, capture symbolicated ETTrace flamegraphs, root-cause memory leaks from memgraphs, and capture whole app screens from a connected iPhone via Appium.",
   "author": {
     "name": "blockchainian"
   },
@@ -12,6 +12,9 @@
     "ios",
     "xcode",
     "simulator",
+    "device",
+    "appium",
+    "screenshots",
     "performance",
     "profiling",
     "memory-leaks",
