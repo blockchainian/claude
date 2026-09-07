@@ -114,7 +114,10 @@ def stitch(paths: list[Path], sticky_top: int | None, sticky_bottom: int | None,
     acc_g = gray[0][:keep]
     seams = []
 
-    for path, r, g in zip(paths[1:], rgb[1:], gray[1:]):
+    for idx, (path, r, g) in enumerate(zip(paths[1:], rgb[1:], gray[1:])):
+        # Distinguishes "the screen never moved" from "it moved but would not
+        # align" when a seam fails.
+        vs_previous = float(np.abs(gray[idx] - g).mean())
         content_rgb, content_g = r[top:keep], g[top:keep]
         band_start, band_std = pick_band(content_g, band_h)
         band = content_g[band_start:band_start + band_h]
@@ -165,6 +168,7 @@ def stitch(paths: list[Path], sticky_top: int | None, sticky_bottom: int | None,
             "band_start": int(band_start),
             "band_std": round(band_std, 1),
             "partial_overlap": partial,
+            "vs_previous_diff": round(vs_previous, 2),
         })
 
     verdict = {
