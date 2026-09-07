@@ -23,7 +23,9 @@ PROFILE_DIRS = [
     Path.home() / "Library/Developer/Xcode/UserData/Provisioning Profiles",  # Xcode 16+
     Path.home() / "Library/MobileDevice/Provisioning Profiles",              # legacy
 ]
+SIGNED_WDA_GLOB = ".cache/appium-mcp/wda-real/*/signed/*/Payload-resigned.ipa"
 PREBUILT_WDA = Path.home() / ".appium/wda-dd"
+DEFAULT_WDA_BUNDLE = "com.facebook.WebDriverAgentRunner"
 
 
 def devicectl(*args: str) -> dict:
@@ -99,6 +101,16 @@ def profiles(udid: str | None) -> list[dict]:
     return found
 
 
+def signed_wda_ipa() -> str | None:
+    """The newest WebDriverAgent that appium_prepare_ios_real_device signed.
+
+    Preferred over a hand-built one: the tool downloads the release matching the
+    driver, so there is no driver/WDA version skew to debug.
+    """
+    found = sorted(Path.home().glob(SIGNED_WDA_GLOB), key=lambda p: p.stat().st_mtime, reverse=True)
+    return str(found[0]) if found else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--device", help="UDID; defaults to the only connected device")
@@ -121,6 +133,7 @@ def main() -> int:
         "webDriverAgent": {
             "installed": bool(wda),
             "bundleId": wda,
+            "signedIpa": signed_wda_ipa(),
             "prebuiltDerivedData": str(PREBUILT_WDA) if PREBUILT_WDA.is_dir() else None,
         },
         "ready": bool(udid and team and wda),
@@ -131,10 +144,16 @@ def main() -> int:
             "appium:udid": udid,
             "appium:xcodeOrgId": team,
             "appium:xcodeSigningId": "Apple Development",
-            "appium:updatedWDABundleId": wda,
             "appium:noReset": True,
         }
-        if report["webDriverAgent"]["prebuiltDerivedData"]:
+        if wda != DEFAULT_WDA_BUNDLE:
+            caps["appium:updatedWDABundleId"] = wda
+        signed = report["webDriverAgent"]["signedIpa"]
+        if signed:
+            caps["appium:usePreinstalledWDA"] = True
+            caps["appium:prebuiltWDAPath"] = signed
+            caps["appium:wdaLaunchTimeout"] = 30000
+        elif report["webDriverAgent"]["prebuiltDerivedData"]:
             caps["appium:usePrebuiltWDA"] = True
             caps["appium:derivedDataPath"] = report["webDriverAgent"]["prebuiltDerivedData"]
         if device and device.get("osVersion"):
