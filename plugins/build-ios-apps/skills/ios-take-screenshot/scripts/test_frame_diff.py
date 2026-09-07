@@ -89,6 +89,15 @@ def main() -> int:
         if r["scrolled_px"] != 0 or r["scrolled"]:
             failures.append(f"without chrome flags a ticking value became a scroll: {r}")
 
+        # Slices from two different simulators differ in size. Cropping to the
+        # common size would compare unrelated screens; refuse instead.
+        f = tmp / "f.png"
+        Image.fromarray(frame(page, 0)[:, :WIDTH - 20]).save(f)
+        proc = subprocess.run([str(Path(__file__).with_name("frame_diff.py")), str(a), str(f)],
+                              capture_output=True, text=True, check=False)
+        if proc.returncode == 0 or "size" not in proc.stderr:
+            failures.append(f"frames of different sizes were compared: {proc.returncode} {proc.stderr!r}")
+
         e = tmp / "e.png"
         Image.fromarray(frame(page, 0)).save(e)
         r = run(a, e)
