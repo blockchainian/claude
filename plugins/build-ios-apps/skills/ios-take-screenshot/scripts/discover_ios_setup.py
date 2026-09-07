@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Report what a real iPhone needs for an Appium session, discovering what it can.
+"""Report what an iPhone or a simulator needs before capture, discovering what it can.
 
-Most session capabilities do not have to be asked for or remembered: the UDID
-comes from the device list, the team id from a provisioning profile, and the
-WebDriverAgent bundle id from the runner already installed on the device.
-Prints JSON, including a suggestedCapabilities object ready for
-appium_session_management (action=create).
+A real device drives through Appium, so most session capabilities can be found
+rather than asked for or remembered: the UDID comes from the device list, the
+team id from a provisioning profile, and the WebDriverAgent bundle id from the
+runner already installed on the device. Prints a suggestedCapabilities object
+ready for appium_session_management (action=create).
+
+A simulator drives through XcodeBuildMCP and needs none of that — only a booted
+simulator. Pass --target simulator for that report.
+
+Either way: exit 0 means ready, exit 1 lists what is missing.
 """
 
 from __future__ import annotations
@@ -58,6 +63,54 @@ def list_devices() -> list[dict]:
             "developerModeEnabled": props.get("developerModeStatus") == "enabled",
         })
     return devices
+
+
+def list_simulators() -> list[dict]:
+    """Booted simulators, newest runtime first.
+
+    A shut-down simulator is not an error worth reporting in detail: booting one
+    is a single command, and capture cannot use it until it is booted anyway.
+    """
+    proc = subprocess.run(["xcrun", "simctl", "list", "devices", "booted", "--json"],
+                          capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return []
+
+    sims = []
+    for runtime, devices in data.get("devices", {}).items():
+        version = runtime.rsplit(".", 1)[-1].removeprefix("iOS-").replace("-", ".")
+        for d in devices:
+            sims.append({
+                "udid": d.get("udid"),
+                "name": d.get("name"),
+                "osVersion": version,
+                "state": d.get("state"),
+            })
+    return sims
+
+
+def simulator_report(requested: str | None) -> dict:
+    sims = list_simulators()
+    sim = (next((s for s in sims if s["udid"] == requested), None) if requested
+           else (sims[0] if len(sims) == 1 else None))
+
+    report = {"target": "simulator", "simulators": sims, "selectedSimulator": sim,
+              "ready": sim is not None}
+    if sim:
+        # XcodeBuildMCP takes its simulator from the session defaults, so there
+        # are no per-call capabilities to pass — just this, once.
+        report["sessionDefaults"] = {"simulatorId": sim["udid"]}
+    else:
+        report["missing"] = [
+            "no simulator booted; boot one with `xcrun simctl boot <udid>`"
+            if not sims else
+            f"{len(sims)} simulators booted; pass --device with one of their UDIDs"
+        ]
+    return report
 
 
 def wda_bundle_id(udid: str) -> str | None:
@@ -113,8 +166,16 @@ def signed_wda_ipa() -> str | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--device", help="UDID; defaults to the only connected device")
+    ap.add_argument("--device", help="UDID; defaults to the only connected device "
+                                     "or the only booted simulator")
+    ap.add_argument("--target", choices=["device", "simulator"], default="device",
+                    help="what capture will drive (default: device)")
     args = ap.parse_args()
+
+    if args.target == "simulator":
+        report = simulator_report(args.device)
+        print(json.dumps(report, indent=2))
+        return 0 if report["ready"] else 1
 
     devices = list_devices()
     udid = args.device or (devices[0]["udid"] if len(devices) == 1 else None)
@@ -127,6 +188,7 @@ def main() -> int:
     wda = wda_bundle_id(udid) if udid else None
 
     report = {
+        "target": "device",
         "devices": devices,
         "selectedDevice": device,
         "profiles": profs,
