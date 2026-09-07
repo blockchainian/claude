@@ -10,6 +10,16 @@
       "env": {
         "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,simulator-management,ui-automation,debugging,device"
       }
+    },
+    "appium-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "appium-mcp@latest"
+      ],
+      "env": {
+        "NO_UI": "true"
+      }
     }
   }
 }
