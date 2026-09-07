@@ -69,7 +69,10 @@ def main() -> int:
                  f"are the same size; these came from different simulators or captures.")
     h = a.shape[0]
 
-    auto_top, auto_bottom = detect_sticky([a, b])
+    # Chrome is what holds still while content moves; when nothing moves at
+    # all there is none to find, and the detector would report its cap.
+    auto_top, auto_bottom = (0, 0) if float(np.abs(a - b).mean()) < MOVED_DIFF \
+        else detect_sticky([a, b])
     top = auto_top if args.sticky_top is None else args.sticky_top
     bottom = auto_bottom if args.sticky_bottom is None else args.sticky_bottom
     a, b = crop(a, top, bottom), crop(b, top, bottom)
