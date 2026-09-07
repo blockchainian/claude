@@ -26,6 +26,7 @@ PAGE_ROWS, STEP = 3000, 400
 VISIBLE = VIEWPORT - STICKY_TOP - STICKY_BOTTOM   # 580 rows of content per slice
 NAV = 80                                          # navigation bar below the status bar
 BAND_TOP, BAND_BOTTOM, BAND_STEP = 300, 500, 120  # a carousel inside a still screen
+BAND_EDGE = 20                                    # its sparse, text-like outer rows
 TITLED_VISIBLE = VISIBLE - NAV
 
 
@@ -138,6 +139,14 @@ def build_carousel_slices(tmp: Path) -> tuple[list[Path], np.ndarray]:
     strip = rng.integers(0, 255,
                          size=(BAND_BOTTOM - BAND_TOP, WIDTH + BAND_STEP * 3, 3),
                          dtype=np.uint8)
+
+    # A real carousel is a row of labels: its outer rows hold the tops and tails
+    # of glyphs and are mostly background, so only a few of their pixels move.
+    # Detecting the band on that share alone crops the glyphs in half.
+    sparse = np.zeros((BAND_EDGE, strip.shape[1], 1), dtype=bool)
+    sparse[:, ::20] = True
+    for rows in (slice(0, BAND_EDGE), slice(-BAND_EDGE, None)):
+        strip[rows] = np.where(sparse, strip[rows], 40)
 
     paths = []
     for i in range(4):
