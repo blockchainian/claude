@@ -63,9 +63,11 @@ def main() -> int:
             sys.exit(f"missing image: {p}")
 
     a, b = gray(args.before), gray(args.after)
-    h = min(a.shape[0], b.shape[0])
-    w = min(a.shape[1], b.shape[1])
-    a, b = a[:h, :w], b[:h, :w]
+    if a.shape != b.shape:
+        sys.exit(f"frames differ in size: {args.before.name} is {a.shape[1]}x{a.shape[0]}, "
+                 f"{args.after.name} is {b.shape[1]}x{b.shape[0]}. Slices of one screen "
+                 f"are the same size; these came from different simulators or captures.")
+    h = a.shape[0]
 
     auto_top, auto_bottom = detect_sticky([a, b])
     top = auto_top if args.sticky_top is None else args.sticky_top

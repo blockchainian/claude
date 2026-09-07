@@ -19,6 +19,16 @@ Session default set to A, `simctl` captures from B. The swipe scrolled A; B neve
 looks like an ordinary page fragment. Nothing in the tooling notices. The doc's
 "one slice is the whole screen" rule then relabels the bug as a finished capture.
 
+## Status
+
+Fixed in build-ios-apps 0.6.7, in this order: a per-simulator claim (`claim_simulator.py`,
+exit 3 names the holder so the later agent waits or aborts) with `capture_slice.sh`
+refusing unclaimed simulators and `booted`; the stitcher refuses identical slices; the doc
+reads defaults back, compares `artifacts.simulatorId`, says per-call targeting is
+impossible and how to pick with `--device`; discovery reports a shutdown UDID as such and
+emits the simulator name; `frame_diff.py` refuses a size mismatch; `IOS_SCREENSHOT_DIR`
+shown inline; dev-launcher guidance. Not fixable here: the tools' `nextSteps` hints (6).
+
 ## Issues, most silent first
 
 1. **Session defaults are shared by every agent in a Claude Code session and never read

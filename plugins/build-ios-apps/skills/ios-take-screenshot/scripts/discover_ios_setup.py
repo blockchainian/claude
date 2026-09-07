@@ -102,14 +102,17 @@ def simulator_report(requested: str | None) -> dict:
               "ready": sim is not None}
     if sim:
         # XcodeBuildMCP takes its simulator from the session defaults, so there
-        # are no per-call capabilities to pass — just this, once.
-        report["sessionDefaults"] = {"simulatorId": sim["udid"]}
+        # are no per-call capabilities to pass — just this, once. The name goes
+        # with the id, or a name left by an earlier default survives beside it.
+        report["sessionDefaults"] = {"simulatorId": sim["udid"], "simulatorName": sim["name"]}
+    elif requested:
+        report["missing"] = [f"simulator {requested} is not booted; boot it with "
+                             f"`xcrun simctl boot {requested}` or pick a booted one"]
+    elif not sims:
+        report["missing"] = ["no simulator booted; boot one with `xcrun simctl boot <udid>`"]
     else:
-        report["missing"] = [
-            "no simulator booted; boot one with `xcrun simctl boot <udid>`"
-            if not sims else
-            f"{len(sims)} simulators booted; pass --device with one of their UDIDs"
-        ]
+        report["missing"] = [f"{len(sims)} simulators booted; pass --device with one of "
+                             "their UDIDs"]
     return report
 
 

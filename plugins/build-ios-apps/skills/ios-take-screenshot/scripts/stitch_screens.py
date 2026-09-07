@@ -32,6 +32,7 @@ DEFAULT_SEARCH = 2400   # how far back up the accumulated image to look for the 
 MIN_BAND_STD = 12.0     # a flatter band (empty dark background) matches anywhere
 MIN_ADVANCE_FRAC = 0.2  # each slice must extend the image by this share of a screen
 MIN_MATCH_ROWS = 60     # fewest overlapping rows that still make an alignment credible
+IDENTICAL_DIFF = 1.0    # mean absolute difference below which two slices are the same frame
 MAX_BAND_GAP = 48       # flat rows inside a scrolling band that must not split it
 BAND_EDGE_FRAC = 0.02   # a row still belongs to the band if this share of it moved
 MIN_BAND_ROWS = 16      # shorter than this is a blinking detail, not a scrolling band
@@ -185,6 +186,19 @@ def stitch(paths: list[Path], sticky_top: int | None, sticky_bottom: int | None,
            axis: str = "vertical", crop_band: bool = False) -> tuple[np.ndarray, dict]:
     horizontal = axis == "horizontal"
     rgb, gray, cropped = load(paths, horizontal, crop_band)
+    # An identical pair is not two views of a page. Stitched anyway, most of each
+    # slice reads as chrome and the verdict passes on an image shorter than one
+    # screen that looks like an ordinary page fragment.
+    for prev, cur, a, b in zip(paths, paths[1:], gray, gray[1:]):
+        diff = float(np.abs(a - b).mean())
+        if diff < IDENTICAL_DIFF:
+            sys.exit(
+                f"{cur.name} is identical to {prev.name} (diff {diff:.2f}): the screen did "
+                f"not move between them. Either the swipe hit a different simulator than "
+                f"the capture — compare each response's artifacts.simulatorId with the "
+                f"capture UDID — or this slice marks the bottom of the page and must be "
+                f"dropped. A screen that does not scroll is one slice, passed alone."
+            )
     auto_top, auto_bottom = detect_sticky(gray)
     top = auto_top if sticky_top is None else sticky_top
     bottom = auto_bottom if sticky_bottom is None else sticky_bottom
