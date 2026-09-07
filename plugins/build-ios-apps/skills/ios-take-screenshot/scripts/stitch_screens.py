@@ -34,7 +34,13 @@ MIN_ADVANCE_FRAC = 0.2  # each slice must extend the image by this share of a sc
 MIN_MATCH_ROWS = 60     # fewest overlapping rows that still make an alignment credible
 
 
-def load(paths: list[Path]) -> tuple[list[np.ndarray], list[np.ndarray]]:
+def load(paths: list[Path], horizontal: bool = False) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Load slices, rotating them when the scroll axis is horizontal.
+
+    All the matching below works on rows. Transposing a horizontally scrolled
+    screen turns its columns into rows, so the same logic applies unchanged and
+    the result is transposed back on the way out.
+    """
     rgb, gray = [], []
     size = None
     for p in paths:
@@ -43,8 +49,12 @@ def load(paths: list[Path]) -> tuple[list[np.ndarray], list[np.ndarray]]:
             size = im.size
         elif im.size != size:
             sys.exit(f"slice size mismatch: {p} is {im.size}, expected {size}")
-        rgb.append(np.asarray(im.convert("RGB")))
-        gray.append(np.asarray(im.convert("L"), dtype=np.int16))
+        r = np.asarray(im.convert("RGB"))
+        g = np.asarray(im.convert("L"), dtype=np.int16)
+        if horizontal:
+            r, g = r.transpose(1, 0, 2), g.transpose(1, 0)
+        rgb.append(r)
+        gray.append(g)
     return rgb, gray
 
 
@@ -95,8 +105,10 @@ def pick_band(content: np.ndarray, band_h: int) -> tuple[int, float]:
 
 
 def stitch(paths: list[Path], sticky_top: int | None, sticky_bottom: int | None,
-           band_h: int, max_error: float, search: int) -> tuple[np.ndarray, dict]:
-    rgb, gray = load(paths)
+           band_h: int, max_error: float, search: int,
+           axis: str = "vertical") -> tuple[np.ndarray, dict]:
+    horizontal = axis == "horizontal"
+    rgb, gray = load(paths, horizontal)
     auto_top, auto_bottom = detect_sticky(gray)
     top = auto_top if sticky_top is None else sticky_top
     bottom = auto_bottom if sticky_bottom is None else sticky_bottom
@@ -171,7 +183,11 @@ def stitch(paths: list[Path], sticky_top: int | None, sticky_bottom: int | None,
             "vs_previous_diff": round(vs_previous, 2),
         })
 
+    if horizontal:
+        acc = acc.transpose(1, 0, 2)
+
     verdict = {
+        "axis": axis,
         "slices": len(paths),
         "sticky_top": int(top),
         "sticky_bottom": int(bottom),
@@ -194,6 +210,9 @@ def main() -> int:
     ap.add_argument("--band", type=int, default=DEFAULT_BAND)
     ap.add_argument("--max-error", type=float, default=DEFAULT_MAX_ERROR)
     ap.add_argument("--search", type=int, default=DEFAULT_SEARCH)
+    ap.add_argument("--axis", choices=["vertical", "horizontal"], default="vertical",
+                    help="scroll axis the slices were captured along (default: vertical). "
+                         "For horizontal, --sticky-top/--sticky-bottom mean left/right.")
     args = ap.parse_args()
 
     missing = [str(p) for p in args.slices if not p.is_file()]
@@ -201,7 +220,7 @@ def main() -> int:
         sys.exit("missing slices: " + ", ".join(missing))
 
     image, verdict = stitch(args.slices, args.sticky_top, args.sticky_bottom,
-                            args.band, args.max_error, args.search)
+                            args.band, args.max_error, args.search, args.axis)
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
     # Write then rename, so a reader never sees a half-written PNG and a failed
