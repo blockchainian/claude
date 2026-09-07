@@ -150,8 +150,16 @@ Then **look at a screenshot and confirm you are on the right screen** before cap
 Read this section before your first scroll. These three facts cost an hour to learn:
 
 - **`direction` is the direction the CONTENT moves, not the finger.** `direction=up` scrolls you FURTHER DOWN the page. To move toward the top of a page, use `direction=down`. Getting this backwards produces slices that look random and overlap measurements that read as "nothing moved".
-- **Scoping matters.** On a nested scroll view, a bare `appium_gesture` may not move the page at all. Find the container once and reuse it:
-  `appium_find_element` with `strategy=-ios class chain`, `selector=**/XCUIElementTypeScrollView`, then pass its `elementUUID` to every scroll.
+- **Scoping matters, and the first scroll view is often the wrong one.** On a nested scroll
+  view a bare `appium_gesture` may not move the page at all, so find the container and pass
+  its `elementUUID` to every scroll: `appium_find_element` with
+  `strategy=-ios class chain`, `selector=**/XCUIElementTypeScrollView`.
+  **Then check that it actually moved.** `**/XCUIElementTypeScrollView` returns the first
+  match, which is frequently a horizontal carousel — a row of recent items or suggestions —
+  and scrolling that vertically does nothing. If the screen does not move, try
+  `**/XCUIElementTypeScrollView[2]`, then `[3]`, until it does. A screen that looks like it
+  will not scroll is usually this, not a short page: check whether content is visibly cut
+  off at the bottom edge before concluding the screen is one viewport tall.
 - **One scoped scroll advances roughly a full viewport.** That is fine — the stitcher measures the real offset. Do not hand-tune drag coordinates; scoped `direction` scrolls are far more reliable than custom `x/y/endX/endY` drags, which frequently move nothing.
 
 A floating scroll-to-top button, where an app has one, returns to the top of the *list*, not the top of the *page*. Expect one more `direction=down` scroll to bring a header or chart back into view.
