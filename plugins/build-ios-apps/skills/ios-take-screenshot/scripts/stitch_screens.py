@@ -34,6 +34,7 @@ MIN_ADVANCE_FRAC = 0.2  # each slice must extend the image by this share of a sc
 MIN_MATCH_ROWS = 60     # fewest overlapping rows that still make an alignment credible
 MAX_BAND_GAP = 48       # flat rows inside a scrolling band that must not split it
 BAND_EDGE_FRAC = 0.02   # a row still belongs to the band if this share of it moved
+MIN_BAND_ROWS = 16      # shorter than this is a blinking detail, not a scrolling band
 
 
 def load(paths: list[Path], horizontal: bool = False,
@@ -91,9 +92,8 @@ def moving_band(images: list[np.ndarray]) -> tuple[int, int] | None:
     if rows.size == 0:
         return None
 
-    # A flat gap between cards does not change even while the band scrolls, and a
-    # live value elsewhere on the screen changes without being part of it. Close
-    # the small gaps, then keep the longest span.
+    # A flat gap between cards does not change even while the band scrolls, so
+    # close the small gaps before comparing candidates.
     spans, start, prev = [], int(rows[0]), int(rows[0])
     for r in rows[1:]:
         r = int(r)
@@ -102,7 +102,15 @@ def moving_band(images: list[np.ndarray]) -> tuple[int, int] | None:
             start = r
         prev = r
     spans.append((start, prev + 1))
-    top, bottom = max(spans, key=lambda s: s[1] - s[0])
+
+    # Pick by how completely each candidate changes, not by how tall it is. A
+    # band that scrolls slides its whole content past the window, so nearly
+    # every pixel in its rows differs. A live value elsewhere on the screen — a
+    # price, a sparkline — redraws a few digits in rows that are otherwise
+    # identical, and a list of them is far taller than the band. Length would
+    # pick the list; intensity picks the band.
+    ranked = [s for s in spans if s[1] - s[0] >= MIN_BAND_ROWS] or spans
+    top, bottom = max(ranked, key=lambda s: share[s[0]:s[1]].mean())
 
     # Grow to the band's real edges. A row of text is mostly background, so only
     # a small share of it moves even though the whole row belongs to the band;
