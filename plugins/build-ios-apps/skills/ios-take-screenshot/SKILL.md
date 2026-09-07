@@ -14,7 +14,7 @@ Working slices go in a per-run temp directory and are always deleted:
 ```bash
 SKILL_DIR="<absolute path to this loaded skill folder>"
 if [ -z "${SLICE_DIR:-}" ]; then
-  SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codex-ios-screenshot.XXXXXX")"
+  SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-screenshot.XXXXXX")"
 fi
 mkdir -p "$SLICE_DIR"
 ```
@@ -106,6 +106,14 @@ Stop early when a new slice is nearly identical to the previous one — that is 
 **Infinite scroll:** if you reach the cap and the content is still advancing, take **one extra scroll and slice**, then stop. That extra slice is evidence the screen continues; report the capture as truncated rather than implying it is the whole page.
 
 Save slices at full resolution — do not pass `maxWidth` when capturing for a stitch, since downscaling loses the detail the overlap matcher needs.
+
+`appium_screenshot` writes wherever the MCP server is configured to write (`SCREENSHOTS_DIR`, otherwise the working directory) and returns that path. It does not write into `SLICE_DIR`. Copy each returned file across as you go, named so a glob sorts in capture order:
+
+```bash
+cp "$RETURNED_PATH" "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
+```
+
+The stitcher trusts the order it is given; passing slices out of order produces a confidently wrong image.
 
 ## 4. Stitch
 
