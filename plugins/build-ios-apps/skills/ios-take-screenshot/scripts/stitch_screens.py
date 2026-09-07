@@ -33,6 +33,7 @@ MIN_BAND_STD = 12.0     # a flatter band (empty dark background) matches anywher
 MIN_ADVANCE_FRAC = 0.2  # each slice must extend the image by this share of a screen
 MIN_MATCH_ROWS = 60     # fewest overlapping rows that still make an alignment credible
 MAX_BAND_GAP = 48       # flat rows inside a scrolling band that must not split it
+BAND_EDGE_FRAC = 0.02   # a row still belongs to the band if this share of it moved
 
 
 def load(paths: list[Path], horizontal: bool = False,
@@ -81,12 +82,12 @@ def moving_band(images: list[np.ndarray]) -> tuple[int, int] | None:
     The simulator reports no element geometry, so the band is found the way fixed
     chrome is — by the share of pixels in a row that change — just inverted.
     """
-    moved = np.zeros(images[0].shape[0], dtype=bool)
+    share = np.zeros(images[0].shape[0])
     for a, b in zip(images, images[1:]):
         delta = np.abs(a.astype(np.int16) - b.astype(np.int16)).max(axis=2)
-        moved |= (delta > PIXEL_DELTA).mean(axis=1) > STATIC_ROW_FRAC
+        share = np.maximum(share, (delta > PIXEL_DELTA).mean(axis=1))
 
-    rows = np.flatnonzero(moved)
+    rows = np.flatnonzero(share > STATIC_ROW_FRAC)
     if rows.size == 0:
         return None
 
@@ -101,7 +102,17 @@ def moving_band(images: list[np.ndarray]) -> tuple[int, int] | None:
             start = r
         prev = r
     spans.append((start, prev + 1))
-    return max(spans, key=lambda s: s[1] - s[0])
+    top, bottom = max(spans, key=lambda s: s[1] - s[0])
+
+    # Grow to the band's real edges. A row of text is mostly background, so only
+    # a small share of it moves even though the whole row belongs to the band;
+    # detecting on that share alone clips the tops and bottoms of the glyphs. The
+    # strict threshold finds the band, a loose one finds where it ends.
+    while top > 0 and share[top - 1] > BAND_EDGE_FRAC:
+        top -= 1
+    while bottom < share.size and share[bottom] > BAND_EDGE_FRAC:
+        bottom += 1
+    return top, bottom
 
 
 def detect_sticky(gray: list[np.ndarray]) -> tuple[int, int]:
