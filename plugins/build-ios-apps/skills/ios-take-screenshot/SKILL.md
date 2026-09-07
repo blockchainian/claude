@@ -77,9 +77,9 @@ You are driving someone's real phone, often signed into a real account with real
 
 **Never tap a coordinate without a fresh screenshot showing what is under it.** An app
 resumes on whatever screen it was last left on, so coordinates memorised from an earlier
-run land somewhere else entirely. Tapping a remembered tab-bar position after reopening
-one app hit a "Deposit to buy" button and opened a payment sheet. Screenshot, look, then
-tap.
+run land somewhere else entirely. In one run, a remembered tab-bar position landed on a
+payment button after the app reopened elsewhere, opening a checkout sheet. Screenshot,
+look, then tap.
 
 To dismiss a modal sheet, tap the dimmed backdrop above it. A downward swipe on the sheet
 body often does nothing, and repeating it wastes turns.
@@ -124,7 +124,7 @@ every 7 days, after which capture stops working until it is signed again.
 On a real device, resolve the bundle id first:
 
 ```bash
-"$SKILL_DIR/scripts/find_ios_app.sh" --device <udid> --name fomo
+"$SKILL_DIR/scripts/find_ios_app.sh" --device <udid> --name <app name>
 ```
 
 `xcrun devicectl device info apps` lists **only developer-installed apps by default** — an App Store app looks absent. The script passes `--include-all-apps`, which is the whole reason it exists. Do not call `devicectl` directly for this.
@@ -150,16 +150,15 @@ Then **look at a screenshot and confirm you are on the right screen** before cap
 Read this section before your first scroll. These three facts cost an hour to learn:
 
 - **`direction` is the direction the CONTENT moves, not the finger.** `direction=up` scrolls you FURTHER DOWN the page. To move toward the top of a page, use `direction=down`. Getting this backwards produces slices that look random and overlap measurements that read as "nothing moved".
-- **Scoping matters, and the first scroll view is often the wrong one.** On a nested scroll
-  view a bare `appium_gesture` may not move the page at all, so find the container and pass
-  its `elementUUID` to every scroll: `appium_find_element` with
-  `strategy=-ios class chain`, `selector=**/XCUIElementTypeScrollView`.
-  **Then check that it actually moved.** `**/XCUIElementTypeScrollView` returns the first
-  match, which is frequently a horizontal carousel — a row of recent items or suggestions —
-  and scrolling that vertically does nothing. If the screen does not move, try
-  `**/XCUIElementTypeScrollView[2]`, then `[3]`, until it does. A screen that looks like it
-  will not scroll is usually this, not a short page: check whether content is visibly cut
-  off at the bottom edge before concluding the screen is one viewport tall.
+- **Scoping matters, and a screen can hold several scroll views.** A bare `appium_gesture`
+  may not move the page at all, so find a container and pass its `elementUUID` to every
+  scroll: `appium_find_element` with `strategy=-ios class chain`,
+  `selector=**/XCUIElementTypeScrollView`.
+  That selector returns the **first** match in hierarchy order, which is not necessarily the
+  one holding the content you want. It may scroll a different axis, or be nested, or be
+  inert. So after the first scroll, compare against the previous frame: if nothing moved,
+  try `**/XCUIElementTypeScrollView[2]`, then `[3]`, and so on. Only when no candidate moves
+  the screen have you established that it does not scroll.
 - **One scoped scroll advances roughly a full viewport.** That is fine — the stitcher measures the real offset. Do not hand-tune drag coordinates; scoped `direction` scrolls are far more reliable than custom `x/y/endX/endY` drags, which frequently move nothing.
 
 A floating scroll-to-top button, where an app has one, returns to the top of the *list*, not the top of the *page*. Expect one more `direction=down` scroll to bring a header or chart back into view.
@@ -202,13 +201,13 @@ the stitched image makes the endless section obvious. Stop there and report the 
 truncated.
 
 Judge which case you are in by what is advancing. Repeating rows of the same shape — a
-holders list, a feed, a leaderboard — are an endless list: stop at two screens. Distinct
+comment thread, a feed, a search-results list — are an endless list: stop at two screens. Distinct
 sections that each appear once — a description, a stats table, a footer — are finite page
 content: follow them to the bottom.
 
 **A live feed cannot be captured as one coherent page.** New rows arrive between slices, so
 the stitched image is a composite of two moments rather than a snapshot of one: row ages
-will not read in order, and a "new activity" pill may appear mid-image. Seam error also
+will not read in order, and a "new items" affordance may appear mid-image. Seam error also
 runs close to the accept threshold, because no two frames of a live screen match cleanly.
 Present such a capture as a composite, not as the state of the screen at one instant.
 
@@ -226,7 +225,7 @@ The stitcher trusts the order it is given; passing slices out of order produces 
 
 ```bash
 "$SKILL_DIR/scripts/stitch_screens.py" \
-  --out "$OUT_ROOT/fomo/token-detail.png" \
+  --out "$OUT_ROOT/<app-slug>/<screen-slug>.png" \
   --slices "$SLICE_DIR"/slice-*.png
 ```
 
@@ -246,7 +245,7 @@ Verify the result by opening it and checking continuity across seams: ordered li
 
 ## 5. Clean Up
 
-Delete the slice directory. The stitched PNG is the only artifact that survives. Name it for what it shows — `token-detail.png`, `holders-tab.png`, `perps-list.png` — never `screenshot-1.png` or a timestamp.
+Delete the slice directory. The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.
 
 ## Tests
 
