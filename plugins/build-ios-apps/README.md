@@ -6,14 +6,16 @@ connected iPhone.
 
 ## Skills
 
-- `build-ios-apps:ios-debugger-agent` — build/run/launch an app on a booted
-  simulator via XcodeBuildMCP, drive the UI, capture logs
-- `build-ios-apps:ios-ettrace-performance` — capture symbolicated ETTrace
-  flamegraphs for one focused flow and report the hot stacks
-- `build-ios-apps:ios-memgraph-leaks` — capture and compare `.memgraph` files to
-  root-cause leaks with before/after evidence
-- `build-ios-apps:ios-take-screenshot` — capture a whole app screen, including
-  everything below the fold, as one stitched PNG
+| Skill | Target | What it does |
+|---|---|---|
+| `ios-debugger-agent` | Simulator | Build, run and launch an app on a booted simulator via XcodeBuildMCP, drive the UI, capture logs |
+| `ios-ettrace-performance` | Simulator | Capture symbolicated ETTrace flamegraphs for one focused flow and report the hot stacks |
+| `ios-memgraph-leaks` | Simulator | Capture and compare `.memgraph` files to root-cause leaks with before/after evidence |
+| `ios-take-screenshot` | **Real device** | Capture a whole app screen, including everything below the fold, as one stitched PNG |
+
+Target matters when choosing a skill: the first three drive a booted simulator
+through XcodeBuildMCP, while `ios-take-screenshot` drives a physical iPhone
+through appium-mcp and does not work against a simulator.
 
 The two profiling skills build on `ios-debugger-agent` for the build, launch,
 and UI-driving steps.
