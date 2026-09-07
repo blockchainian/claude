@@ -196,6 +196,27 @@ def check_carousel_band(mod, failures: list[str]) -> None:
             failures.append("carousel: a band was cropped without the flag")
 
 
+def check_identical_slices(mod, failures: list[str]) -> None:
+    """Two identical slices are not a page: the swipe hit another simulator, or
+    the bottom marker was kept. Stitching them crops most of each as chrome and
+    passes green on an image shorter than one screen, so it must refuse."""
+    rng = np.random.default_rng(7)
+    frame = rng.integers(0, 255, size=(1200, WIDTH, 3), dtype=np.uint8)
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        paths = [tmp / "slice-00.png", tmp / "slice-01.png"]
+        for p in paths:
+            Image.fromarray(frame).save(p)
+        try:
+            mod.stitch(paths, None, None, mod.DEFAULT_BAND, mod.DEFAULT_MAX_ERROR,
+                       mod.DEFAULT_SEARCH)
+        except SystemExit as e:
+            if "identical" not in str(e) or "simulator" not in str(e):
+                failures.append(f"identical slices refused without saying why: {e}")
+        else:
+            failures.append("identical slices were stitched instead of refused")
+
+
 def check_horizontal(mod, failures: list[str]) -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td); (tmp / "v").mkdir()
@@ -253,6 +274,7 @@ def main() -> int:
     check_large_title(mod, failures)
     check_carousel_band(mod, failures)
     check_horizontal(mod, failures)
+    check_identical_slices(mod, failures)
 
     for f in failures:
         print("FAIL:", f)
