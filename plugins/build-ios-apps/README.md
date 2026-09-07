@@ -1,7 +1,8 @@
 # build-ios-apps
 
-Drive iOS apps on the simulator from Claude Code — build and run them, walk the
-UI, profile CPU, and prove memory leaks.
+Drive iOS apps from Claude Code — build and run them on the simulator, walk the
+UI, profile CPU, prove memory leaks, and capture whole app screens from a
+connected iPhone.
 
 ## Skills
 
@@ -11,14 +12,17 @@ UI, profile CPU, and prove memory leaks.
   flamegraphs for one focused flow and report the hot stacks
 - `build-ios-apps:ios-memgraph-leaks` — capture and compare `.memgraph` files to
   root-cause leaks with before/after evidence
+- `build-ios-apps:ios-take-screenshot` — capture a whole app screen, including
+  everything below the fold, as one stitched PNG
 
 The two profiling skills build on `ios-debugger-agent` for the build, launch,
 and UI-driving steps.
 
-## MCP server
+## MCP servers
 
-The plugin ships one server, `xcodebuildmcp`, declared in `.mcp.json` and
-launched on demand:
+The plugin ships two servers, declared in `.mcp.json` and launched on demand.
+
+`xcodebuildmcp`:
 
 ```
 npx -y xcodebuildmcp@latest mcp
@@ -32,6 +36,18 @@ only `get_mac_bundle_id`.
 
 Tools are namespaced `mcp__plugin_build-ios-apps_xcodebuildmcp__*`.
 
+`appium-mcp` drives a physical iPhone, which XcodeBuildMCP cannot do — its UI
+automation is simulator-only:
+
+```
+npx -y appium-mcp@latest
+NO_UI=true
+```
+
+Tools are namespaced `mcp__plugin_build-ios-apps_appium-mcp__*`. Device-specific
+capabilities are not in `.mcp.json`, since they differ per machine; pass them
+when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
+
 ## Install
 
 ```
@@ -44,6 +60,9 @@ Tools are namespaced `mcp__plugin_build-ios-apps_xcodebuildmcp__*`.
 - macOS with Xcode and the iOS Simulator installed
 - `npx` on PATH
 - `ettrace` for the profiling skill: `brew install emergetools/homebrew-tap/ettrace`
+- for `ios-take-screenshot` against a real iPhone: an Apple Developer account,
+  WebDriverAgent signed onto the device, and both Developer Mode and
+  Settings -> Developer -> Enable UI Automation turned on
 
 ## Attribution
 
