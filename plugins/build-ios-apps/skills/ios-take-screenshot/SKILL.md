@@ -349,13 +349,14 @@ stitched a duplicate.
 Compare two frames with:
 
 ```bash
-"$SKILL_DIR/scripts/frame_diff.py" <before.png> <after.png> \
-  --sticky-top <chrome px> --sticky-bottom <chrome px>
+"$SKILL_DIR/scripts/frame_diff.py" <before.png> <after.png>
 ```
 
 It prints `mean_abs_diff` on a 0-255 scale, and — more useful — `scrolled_px`, the offset
-at which the later frame's content is found in the earlier one. Do not reach for another
-tool: the system python has no imaging library, and this script carries its own.
+at which the later frame's content is found in the earlier one. It finds the fixed chrome
+from the pair itself and reports it as `sticky_top` and `sticky_bottom`; pass those flags
+only to override what it found. Do not reach for another tool: the system python has no
+imaging library, and this script carries its own.
 
 **Bound that wait to about three attempts.** A live feed never settles — its content keeps
 arriving — so an unbounded settle loop waits forever. Tell the two apart by whether the

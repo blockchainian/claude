@@ -21,15 +21,15 @@ import numpy as np
 from PIL import Image
 
 WIDTH, HEIGHT = 400, 1200
-CHROME_TOP, CHROME_BOTTOM = 100, 80
+CHROME_TOP, CHROME_BOTTOM = 250, 80  # header taller than half the matched band, as a real title bar is
 OFFSET = 500
 
 
-def run(before: Path, after: Path) -> dict:
+def run(before: Path, after: Path, chrome: bool = True) -> dict:
     script = Path(__file__).with_name("frame_diff.py")
+    flags = ["--sticky-top", str(CHROME_TOP), "--sticky-bottom", str(CHROME_BOTTOM)] if chrome else []
     proc = subprocess.run(
-        [str(script), str(before), str(after),
-         "--sticky-top", str(CHROME_TOP), "--sticky-bottom", str(CHROME_BOTTOM)],
+        [str(script), str(before), str(after), *flags],
         capture_output=True, text=True, check=False,
     )
     if proc.returncode != 0:
@@ -78,6 +78,16 @@ def main() -> int:
         if r["mean_abs_diff"] <= 2:
             failures.append("the tick was too small to be a meaningful test "
                             f"(diff {r['mean_abs_diff']}); it must exceed the stop threshold")
+
+        # The capture loop runs before the stitcher has reported the chrome, so
+        # the flags are usually absent. The fixed header must then be found
+        # from the pair itself, or its rows match at offset zero and win.
+        r = run(a, b, chrome=False)
+        if r["scrolled_px"] != OFFSET or not r["scrolled"]:
+            failures.append(f"without chrome flags a real scroll was missed: {r}")
+        r = run(c, d, chrome=False)
+        if r["scrolled_px"] != 0 or r["scrolled"]:
+            failures.append(f"without chrome flags a ticking value became a scroll: {r}")
 
         e = tmp / "e.png"
         Image.fromarray(frame(page, 0)).save(e)
