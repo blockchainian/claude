@@ -32,9 +32,11 @@ DEFAULT_SEARCH = 2400   # how far back up the accumulated image to look for the 
 MIN_BAND_STD = 12.0     # a flatter band (empty dark background) matches anywhere
 MIN_ADVANCE_FRAC = 0.2  # each slice must extend the image by this share of a screen
 MIN_MATCH_ROWS = 60     # fewest overlapping rows that still make an alignment credible
+MAX_BAND_GAP = 48       # flat rows inside a scrolling band that must not split it
 
 
-def load(paths: list[Path], horizontal: bool = False) -> tuple[list[np.ndarray], list[np.ndarray]]:
+def load(paths: list[Path], horizontal: bool = False,
+         crop_band: bool = False) -> tuple[list[np.ndarray], list[np.ndarray], tuple[int, int] | None]:
     """Load slices, rotating them when the scroll axis is horizontal.
 
     All the matching below works on rows. Transposing a horizontally scrolled
@@ -53,6 +55,10 @@ def load(paths: list[Path], horizontal: bool = False) -> tuple[list[np.ndarray],
             sys.exit(f"slice sizes differ by more than rounding: {sorted(sizes)}")
         images = [im.crop((0, 0, w, h)) for im in images]
 
+    band = moving_band([np.asarray(im.convert("RGB")) for im in images]) if crop_band else None
+    if band:
+        images = [im.crop((0, band[0], im.size[0], band[1])) for im in images]
+
     rgb, gray = [], []
     for im in images:
         r = np.asarray(im.convert("RGB"))
@@ -61,7 +67,41 @@ def load(paths: list[Path], horizontal: bool = False) -> tuple[list[np.ndarray],
             r, g = r.transpose(1, 0, 2), g.transpose(1, 0)
         rgb.append(r)
         gray.append(g)
-    return rgb, gray
+    return rgb, gray, band
+
+
+def moving_band(images: list[np.ndarray]) -> tuple[int, int] | None:
+    """The rows a scrolling region occupies, read from what moves between slices.
+
+    A carousel scrolls inside a screen that otherwise holds still. Cropping to it
+    matters because full-screen slices of a sideways-scrolling band are mostly
+    static, and static content matches at any offset, so the matcher splices
+    confidently in the wrong place.
+
+    The simulator reports no element geometry, so the band is found the way fixed
+    chrome is — by the share of pixels in a row that change — just inverted.
+    """
+    moved = np.zeros(images[0].shape[0], dtype=bool)
+    for a, b in zip(images, images[1:]):
+        delta = np.abs(a.astype(np.int16) - b.astype(np.int16)).max(axis=2)
+        moved |= (delta > PIXEL_DELTA).mean(axis=1) > STATIC_ROW_FRAC
+
+    rows = np.flatnonzero(moved)
+    if rows.size == 0:
+        return None
+
+    # A flat gap between cards does not change even while the band scrolls, and a
+    # live value elsewhere on the screen changes without being part of it. Close
+    # the small gaps, then keep the longest span.
+    spans, start, prev = [], int(rows[0]), int(rows[0])
+    for r in rows[1:]:
+        r = int(r)
+        if r - prev > MAX_BAND_GAP:
+            spans.append((start, prev + 1))
+            start = r
+        prev = r
+    spans.append((start, prev + 1))
+    return max(spans, key=lambda s: s[1] - s[0])
 
 
 def detect_sticky(gray: list[np.ndarray]) -> tuple[int, int]:
@@ -123,9 +163,9 @@ def pick_band(content: np.ndarray, band_h: int) -> tuple[int, float]:
 
 def stitch(paths: list[Path], sticky_top: int | None, sticky_bottom: int | None,
            band_h: int, max_error: float, search: int,
-           axis: str = "vertical") -> tuple[np.ndarray, dict]:
+           axis: str = "vertical", crop_band: bool = False) -> tuple[np.ndarray, dict]:
     horizontal = axis == "horizontal"
-    rgb, gray = load(paths, horizontal)
+    rgb, gray, cropped = load(paths, horizontal, crop_band)
     auto_top, auto_bottom = detect_sticky(gray)
     top = auto_top if sticky_top is None else sticky_top
     bottom = auto_bottom if sticky_bottom is None else sticky_bottom
@@ -209,6 +249,7 @@ def stitch(paths: list[Path], sticky_top: int | None, sticky_bottom: int | None,
         "sticky_top": int(top),
         "sticky_bottom": int(bottom),
         "sticky_detected": {"top": int(auto_top), "bottom": int(auto_bottom)},
+        "cropped_band": list(cropped) if cropped else None,
         "seams": seams,
         "all_spliced": all(s["spliced"] for s in seams),
     }
@@ -227,6 +268,11 @@ def main() -> int:
     ap.add_argument("--band", type=int, default=DEFAULT_BAND)
     ap.add_argument("--max-error", type=float, default=DEFAULT_MAX_ERROR)
     ap.add_argument("--search", type=int, default=DEFAULT_SEARCH)
+    ap.add_argument("--crop-band", action="store_true",
+                    help="crop every slice to the region that moves between them, before "
+                         "stitching. Use for a carousel captured full screen: the static "
+                         "remainder of the screen matches at any offset and would splice "
+                         "in the wrong place.")
     ap.add_argument("--axis", choices=["vertical", "horizontal"], default="vertical",
                     help="scroll axis the slices were captured along (default: vertical). "
                          "For horizontal, --sticky-top/--sticky-bottom mean left/right.")
@@ -237,7 +283,8 @@ def main() -> int:
         sys.exit("missing slices: " + ", ".join(missing))
 
     image, verdict = stitch(args.slices, args.sticky_top, args.sticky_bottom,
-                            args.band, args.max_error, args.search, args.axis)
+                            args.band, args.max_error, args.search, args.axis,
+                            args.crop_band)
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
     # Write then rename, so a reader never sees a half-written PNG and a failed
