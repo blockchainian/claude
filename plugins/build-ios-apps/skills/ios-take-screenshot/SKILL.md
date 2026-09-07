@@ -177,6 +177,22 @@ scroll on the same containers:
   for that region. Do not try to assemble a two-dimensional mosaic: the overlap matcher
   aligns along a single axis, and a grid of slices gives it no consistent seam to find.
 
+**Capture a sideways region by element, never full screen.** A carousel occupies a band; the
+rest of the screen holds still while it scrolls. Full-screen slices would be mostly static,
+and static content matches at any offset, so the matcher splices confidently in the wrong
+place. Pass the container's `elementUUID` to `appium_screenshot` and the capture is cropped
+to that band.
+
+Find the container by shape rather than by guessing an index. Walk
+`**/XCUIElementTypeScrollView[1]`, `[2]`, … and read each one's geometry with
+`appium_get_element_attribute` (`attribute=rect`). A horizontal scroller is wide and short —
+full screen width, a fraction of its height — while a page container is nearly as tall as
+the screen. On one app this immediately separated a 393x118 carousel from the 393x704 page
+container, with no trial-and-error scrolling.
+
+Element captures can differ by a pixel between frames as the rect rounds; the stitcher trims
+to the common size rather than rejecting the set.
+
 Either way, say in the report which axis was captured and whether content extends past it.
 A capture that silently drops the other axis reads as complete when it is not.
 
