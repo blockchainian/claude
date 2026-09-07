@@ -3,6 +3,20 @@
 Date: 2026-09-06. Repo: `github.com/blockchainian/claude`, branch `main`.
 Plugin: `plugins/build-ios-apps`, version 0.5.3 at handoff.
 
+## Status: nothing on the simulator has been run
+
+The skill does not work on a simulator today, and this is stronger than "unverified". Both
+helper scripts read `devicectl`, which does not see simulators, so discovery and app lookup
+fail at the first step. Every capture technique in the skill is Appium-specific and targets
+a physical device.
+
+No simulator was booted, no app was installed on one, and no simulator screen was captured
+or stitched during the work that produced this handoff. The only simulator knowledge here
+comes from reading two XcodeBuildMCP tool schemas — see item 4 below. Treat every simulator
+statement in this document as a design note to be tested, not as a finding.
+
+The real-device path, by contrast, was cold-run end to end from a clean machine.
+
 ## The decision, already made
 
 Add simulator capture to the **existing** `ios-take-screenshot` skill, branching on target.
@@ -18,7 +32,7 @@ If the branches later contradict rather than merely differ, the fallback shape i
 skills over a shared `scripts/` directory. There is precedent: the profiling skills already
 build on `ios-debugger-agent`.
 
-## What exists and is verified
+## What exists and is verified (real device only)
 
 Real-device capture works end to end and was cold-run from a clean machine (no preset, no
 `~/.appium`, no cached WebDriverAgent, none installed on the phone).
@@ -43,7 +57,8 @@ screen, a non-scrolling profile screen, a finite About tab, and a horizontal car
    meaningless for a simulator. A simulator needs a booted device and an installed app,
    nothing more. Decide whether to branch inside it or add `discover_ios_simulator.py`.
 3. **Drive layer** — replace Appium calls with XcodeBuildMCP for the simulator branch.
-4. **The one real asymmetry**, checked against the tool signatures, not assumed:
+4. **The one real asymmetry**, read from the tool schemas — not executed, so confirm it
+   before designing around it:
    - `xcodebuildmcp swipe` takes `withinElementRef` → element-scoped scrolling exists
    - `xcodebuildmcp screenshot` takes only `returnFormat` → **cannot capture one element**
 
