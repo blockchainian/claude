@@ -41,14 +41,20 @@ def load(paths: list[Path], horizontal: bool = False) -> tuple[list[np.ndarray],
     screen turns its columns into rows, so the same logic applies unchanged and
     the result is transposed back on the way out.
     """
+    images = [Image.open(p) for p in paths]
+    sizes = {im.size for im in images}
+    if len(sizes) > 1:
+        # Element-scoped captures can differ by a pixel as the element's rect
+        # rounds between frames. Trim to the common size rather than refusing
+        # a capture that is otherwise fine.
+        w = min(im.size[0] for im in images)
+        h = min(im.size[1] for im in images)
+        if max(im.size[0] for im in images) - w > 4 or max(im.size[1] for im in images) - h > 4:
+            sys.exit(f"slice sizes differ by more than rounding: {sorted(sizes)}")
+        images = [im.crop((0, 0, w, h)) for im in images]
+
     rgb, gray = [], []
-    size = None
-    for p in paths:
-        im = Image.open(p)
-        if size is None:
-            size = im.size
-        elif im.size != size:
-            sys.exit(f"slice size mismatch: {p} is {im.size}, expected {size}")
+    for im in images:
         r = np.asarray(im.convert("RGB"))
         g = np.asarray(im.convert("L"), dtype=np.int16)
         if horizontal:
