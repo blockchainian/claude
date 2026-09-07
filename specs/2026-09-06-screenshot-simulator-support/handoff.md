@@ -60,7 +60,9 @@ Each has a regression test that fails without its fix.
 4. **A default-distance swipe advances roughly a whole viewport**, leaving nothing to match
    on. On one capture it skipped a short holdings section entirely: two slices with no
    overlap and a stitched page missing a row while looking perfectly plausible. The skill
-   now says to scroll about half a screen.
+   now says to scroll about half a screen, and that number is measured, not guessed: at
+   `distance` 0.5 the same page advanced 1172, 1176 and 1175px of a 2020px content window —
+   58% a step, 42% overlap — and the row that had gone missing came back.
 
 ## Two traps worth keeping
 
@@ -86,6 +88,8 @@ earlier slice against the top of the next one and ask what should sit between th
 3. All four shapes captured against ChadWallet on the simulator: an endless list (truncated
    at two screens, as the rule requires), a horizontally scrolling tab strip, a finite
    scrolling page, and a non-scrolling screen passed through as a single slice.
+   The finite page was then recaptured at `distance` 0.5 to test the scroll guidance: five
+   slices, every seam spliced, 6145px, and 2307 + 1172 + 1176 + 1175 + 315 = 6145 exactly.
 4. Every stitched output opened and checked for continuity.
 
 ## Known limits, documented in the skill
