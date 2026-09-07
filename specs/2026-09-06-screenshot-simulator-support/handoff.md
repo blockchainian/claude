@@ -91,6 +91,20 @@ earlier slice against the top of the next one and ask what should sit between th
    The finite page was then recaptured at `distance` 0.5 to test the scroll guidance: five
    slices, every seam spliced, 6145px, and 2307 + 1172 + 1176 + 1175 + 315 = 6145 exactly.
 4. Every stitched output opened and checked for continuity.
+5. The document followed **unaided** — an agent given no UDID, no paths and no bundle id,
+   told to derive each from the skill's own steps and to stop rather than invent. It
+   produced a correct 6145px capture from one slice directory. Every run before that was
+   steered by paths supplied in the brief, which had been masking a real bug: the setup
+   block read as though it reused a slice directory, and in a fresh shell minted a new one
+   per command. Two orphaned directories holding a single slice each were still on disk
+   from earlier runs.
+
+That last run also found the document turning on a number — "a mean absolute pixel
+difference below about 2" — that it never said how to compute, on a machine whose system
+python has no imaging library. `frame_diff.py` now answers it, and the harder question
+underneath: a screen carrying a net worth or a claimable balance never reaches zero
+difference, so a raw difference reads as movement forever. It reports the offset at which
+the later frame's content sits in the earlier one — zero when only values redrew.
 
 ## Known limits, documented in the skill
 
