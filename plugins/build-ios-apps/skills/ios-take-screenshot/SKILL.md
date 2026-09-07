@@ -1,11 +1,29 @@
 ---
 name: ios-take-screenshot
-description: Capture one whole iOS app screen as a single stitched PNG, including everything below the fold. Use when asked to screenshot an app screen, capture a full page, or collect screens of another app for design research. Drives a real iPhone connected over USB, through appium-mcp. Not for the simulator.
+description: Capture one whole iOS app screen as a single stitched PNG, including everything below the fold. Use when asked to screenshot an app screen, capture a full page, or collect screens of another app for design research. Drives either a real iPhone connected over USB, through appium-mcp, or a booted simulator, through XcodeBuildMCP.
 ---
 
 # iOS Take Screenshot
 
 Produce exactly ONE image per requested screen. iOS has no full-page screenshot API — `screenshot` returns only the visible viewport — so a whole screen must be captured as slices and stitched. This skill owns that end to end: open the app, reach the screen, capture slices, stitch, delete the slices.
+
+## Pick the Target First
+
+Everything below has a real-device path and a simulator path. They differ in three places
+only — how the app is found, how a session is set up, and which calls scroll and capture.
+The stitcher, the output convention, the slice discipline, the settle rule, the
+endless-list rule, cleanup and reporting are identical.
+
+| | Real device | Simulator |
+|---|---|---|
+| App lookup | `devicectl` | `simctl` |
+| Drive layer | appium-mcp | XcodeBuildMCP |
+| Capture | `appium_screenshot` | `xcrun simctl io` |
+
+Use the device when the request names one, when the app is only installed on a phone, or
+when the point is how the app behaves on real hardware. Use the simulator when the app is
+already running there, when no phone is connected, or when the request is about layout and
+content rather than the device. If the request does not say and both are available, ask.
 
 ## Where Results Go
 
@@ -41,12 +59,18 @@ if they are told where it is. A path given in the request always wins over the d
 The default root lives under `/tmp`, which macOS clears on reboot. Point
 `IOS_SCREENSHOT_DIR` at a durable directory for screens worth keeping.
 
-Several agents can share that library safely. The phone is the real lock, not the directory: Appium holds one session per device, so two agents cannot capture at the same time — the second fails to get a session. The stitcher writes to a staging file and renames it into place, so a reader never sees a half-written PNG, and its verdict reports `replaced_existing` when a run overwrites an earlier capture of the same screen.
+Several agents can share that library safely. On a device the phone is the real lock, not
+the directory: Appium holds one session per device, so two agents cannot capture at the
+same time — the second fails to get a session. A simulator has no such lock, so two agents
+driving the same booted simulator will fight over what is on screen; capture one screen at
+a time. The stitcher writes to a staging file and renames it into place, so a reader never
+sees a half-written PNG, and its verdict reports `replaced_existing` when a run overwrites
+an earlier capture of the same screen.
 
 ## Core Workflow
 
-0. Discover the device and its session capabilities; set up WebDriverAgent if absent.
-1. Open the app (find it first — the default app listing hides App Store apps).
+0. Discover the target and set up the session.
+1. Open the app (find it first — the default device listing hides App Store apps).
 2. Navigate to the requested screen and confirm you are on it by looking at a screenshot.
 3. Scroll to the top, then capture overlapping slices downward, capped.
 4. Stitch with `scripts/stitch_screens.py` and read its JSON verdict.
@@ -56,9 +80,10 @@ Several agents can share that library safely. The phone is the real lock, not th
 
 ## Tool Names
 
-The plugin serves the Appium tools, so they carry its prefix:
-`appium_screenshot` is `mcp__plugin_build-ios-apps_appium-mcp__appium_screenshot`, and so
-on for every `appium_*` name below. They are written unprefixed here for readability.
+The plugin serves both MCP servers, so their tools carry its prefix. `appium_screenshot` is
+`mcp__plugin_build-ios-apps_appium-mcp__appium_screenshot`, and `swipe` is
+`mcp__plugin_build-ios-apps_xcodebuildmcp__swipe`. They are written unprefixed below for
+readability.
 
 Device-specific capabilities — UDID, team id, WebDriverAgent bundle id — are not in the
 plugin config, since they differ per machine. Pass them inline to
@@ -68,7 +93,9 @@ do not carry them between sessions — step 0 discovers them and prints them rea
 
 ## Safety
 
-You are driving someone's real phone, often signed into a real account with real money.
+On a real device you are driving someone's phone, often signed into a real account with
+real money. A simulator has no real account behind it, but the same discipline keeps a
+capture run honest and cheap, so follow it on both.
 
 - Read-only. Never tap anything that transacts, sends, confirms, deletes, posts, or follows.
 - Never type into a credential, seed-phrase, or payment field.
@@ -84,18 +111,9 @@ look, then tap.
 To dismiss a modal sheet, tap the dimmed backdrop above it. A downward swipe on the sheet
 body often does nothing, and repeating it wastes turns.
 
-## 0. Set Up the Device
+## 0. Set Up the Target
 
-**Real devices only.** Every step below drives a physical iPhone through appium-mcp:
-`find_ios_app.sh` and `discover_ios_setup.py` both read `devicectl`, which does not see
-simulators, and the capture techniques rely on Appium's scroll semantics and element-scoped
-screenshots. Capturing a simulator screen would need `simctl` in place of `devicectl`, and
-XcodeBuildMCP in place of Appium. Two differences shape that work, both checked against the
-tool signatures: `swipe` accepts `withinElementRef`, so element-scoped scrolling exists,
-but `screenshot` accepts only `returnFormat` and cannot capture a single element. A
-sideways region would therefore have to be captured full screen and cropped to the
-element's rect from `snapshot_ui` before stitching, since full-screen slices of a scrolling
-band splice in the wrong place.
+### Real device
 
 Discover the session values rather than asking for them or remembering them:
 
@@ -130,9 +148,23 @@ to leave the phone unlocked while a session runs.
 A paid Apple Developer account re-signs WebDriverAgent yearly; a free Apple ID expires it
 every 7 days, after which capture stops working until it is signed again.
 
+### Simulator
+
+There is no WebDriverAgent, no provisioning profile and no session to create. A booted
+simulator is the whole requirement:
+
+```bash
+"$SKILL_DIR/scripts/discover_ios_setup.py" --target simulator
+```
+
+Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says nothing is
+booted. Pass that UDID to `session_set_defaults` once, and every XcodeBuildMCP call after
+it targets that simulator. Boot one with `boot_sim` if none is running, and `open_sim` if
+you want to watch.
+
 ## 1. Open the App
 
-On a real device, resolve the bundle id first:
+### Real device
 
 ```bash
 "$SKILL_DIR/scripts/find_ios_app.sh" --device <udid> --name <app name>
@@ -140,42 +172,97 @@ On a real device, resolve the bundle id first:
 
 `xcrun devicectl device info apps` lists **only developer-installed apps by default** — an App Store app looks absent. The script passes `--include-all-apps`, which is the whole reason it exists. Do not call `devicectl` directly for this.
 
-Then foreground it:
-
 Foreground it with `appium_app_lifecycle` (`action=activate`, `id=<bundleId>`), then
 screenshot. An app resumes where the user left it, not on its home screen, so confirm
 where you actually are before navigating.
 
 If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create`. Sessions idle out — just recreate on failure.
 
+### Simulator
+
+```bash
+"$SKILL_DIR/scripts/find_ios_app.sh" --simulator booted --name <app name>
+```
+
+`devicectl` cannot see simulators at all, so this reads `simctl listapps` instead. `booted`
+works in place of a UDID when exactly one simulator is running.
+
+Then `launch_app_sim` with that bundle id, and screenshot to see where the app resumed.
+
 ## 2. Find the Requested Screen
 
-Navigate by tab bar, search, or an element found with `appium_find_element`. Prefer `accessibility id` over xpath.
+Navigate by tab bar, search, or an element found with `appium_find_element` on a device, or
+from a `snapshot_ui` target on a simulator. Prefer `accessibility id` over xpath.
 
 Then **look at a screenshot and confirm you are on the right screen** before capturing. Do not assume a tap landed. This is the single most common way a capture run wastes its slices.
+
+Not every visible row can be tapped by ref. On the simulator some list rows are exposed as
+text rather than buttons, and tapping their ref fails with `TARGET_NOT_ACTIONABLE`; stock
+Settings is like this below its first level. Reach such a screen another way, or pick a
+different screen, rather than retrying the same ref.
 
 ## 3. Capture Slices
 
 Read this section before your first scroll. These three facts cost an hour to learn:
 
-- **`direction` is the direction the CONTENT moves, not the finger.** `direction=up` scrolls you FURTHER DOWN the page. To move toward the top of a page, use `direction=down`. Getting this backwards produces slices that look random and overlap measurements that read as "nothing moved".
-- **Scoping matters, and a screen can hold several scroll views.** A bare `appium_gesture`
-  may not move the page at all, so find a container and pass its `elementUUID` to every
-  scroll: `appium_find_element` with `strategy=-ios class chain`,
-  `selector=**/XCUIElementTypeScrollView`.
-  That selector returns the **first** match in hierarchy order, which is not necessarily the
-  one holding the content you want. It may scroll a different axis, or be nested, or be
-  inert. So after the first scroll, compare against the previous frame: if nothing moved,
-  try `**/XCUIElementTypeScrollView[2]`, then `[3]`, and so on. Exhausting them establishes
-  only that nothing moves the screen **vertically** — see below before calling the screen
-  one viewport tall.
-- **One scoped scroll advances roughly a full viewport.** That is fine — the stitcher measures the real offset. Do not hand-tune drag coordinates; scoped `direction` scrolls are far more reliable than custom `x/y/endX/endY` drags, which frequently move nothing.
+- **`direction` is the direction the CONTENT moves, not the finger.** `direction=up` scrolls you FURTHER DOWN the page. To move toward the top of a page, use `direction=down`. This holds on both targets. Getting it backwards produces slices that look random and overlap measurements that read as "nothing moved".
+- **Scoping matters, and a screen can hold several scroll views.** A bare gesture may not
+  move the page at all, so every scroll must name a container.
+- **One scoped scroll advances roughly a full viewport** at the default distance. That is fine — the stitcher measures the real offset. Do not hand-tune drag coordinates; scoped `direction` scrolls are far more reliable than custom `x/y/endX/endY` drags, which frequently move nothing.
 
 A floating scroll-to-top button, where an app has one, returns to the top of the *list*, not the top of the *page*. Expect one more `direction=down` scroll to bring a header or chart back into view.
 
-**One capture covers one axis.** The loop below scrolls vertically, and the stitcher joins
-slices along that axis. Before concluding a screen does not scroll at all, try a horizontal
-scroll on the same containers:
+### Scrolling and capturing on a real device
+
+Find a container with `appium_find_element` (`strategy=-ios class chain`,
+`selector=**/XCUIElementTypeScrollView`) and pass its `elementUUID` to every scroll.
+That selector returns the **first** match in hierarchy order, which is not necessarily the
+one holding the content you want. It may scroll a different axis, or be nested, or be
+inert. So after the first scroll, compare against the previous frame: if nothing moved,
+try `**/XCUIElementTypeScrollView[2]`, then `[3]`, and so on. Exhausting them establishes
+only that nothing moves the screen **vertically** — see below before calling the screen
+one viewport tall.
+
+`appium_screenshot` writes wherever the MCP server is configured to write (`SCREENSHOTS_DIR`, otherwise the working directory) and returns that path. It does not write into `SLICE_DIR`. Copy each returned file across as you go, named so a glob sorts in capture order:
+
+```bash
+cp "$RETURNED_PATH" "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
+```
+
+Save slices at full resolution — do not pass `maxWidth` when capturing for a stitch, since downscaling loses the detail the overlap matcher needs.
+
+### Scrolling and capturing on a simulator
+
+**Do not capture slices with the XcodeBuildMCP `screenshot` tool.** It returns a downscaled,
+lossy JPEG — 369x800 for a screen that is really 1179x2556 — whatever the file is named. It
+is fine for looking at a screen; it destroys the detail the overlap matcher needs. Capture
+with `simctl` instead, which writes a full-resolution PNG straight into `SLICE_DIR`, so
+there is no copy step:
+
+```bash
+xcrun simctl io <udid> screenshot --type=png "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
+```
+
+Scroll with `swipe`, which requires `withinElementRef`. Get the first ref from `snapshot_ui`
+— it lists scrollable targets — and then **take each next ref out of the previous `swipe`
+response**, which carries a fresh snapshot of its own. Refs go stale as soon as the screen
+moves, and a stale one fails with `TARGET_NOT_ACTIONABLE`. A top-level container sometimes
+keeps the same ref string across several swipes and a nested one does not, so read it from
+the latest response every time rather than assuming.
+
+No delay is needed between the swipe and the capture: by the time `swipe` returns, the
+screen has stopped moving. If `swipe` warns `SNAPSHOT_CAPTURE_FAILED` — "the refreshed
+runtime snapshot did not settle" — that is its accessibility tree timing out, not the
+rendering. Take a fresh `snapshot_ui` for the next ref and carry on; the pixels are fine.
+
+`snapshot_ui` reports no geometry at all — no rect, no frame, no coordinates. Anything that
+needs to know where a region sits must read it from the pixels instead. That is what
+`--crop-band` on the stitcher is for; see the sideways capture below.
+
+### One capture covers one axis
+
+The loop below scrolls vertically, and the stitcher joins slices along that axis. Before
+concluding a screen does not scroll at all, try a horizontal scroll on the same containers:
 
 - **A screen that only scrolls sideways** — a wide table, a paged gallery — moves on the
   horizontal attempt. Capture it the same way, scrolling `direction=left` to advance, and
@@ -186,24 +273,31 @@ scroll on the same containers:
   for that region. Do not try to assemble a two-dimensional mosaic: the overlap matcher
   aligns along a single axis, and a grid of slices gives it no consistent seam to find.
 
-**Capture a sideways region by element, never full screen.** A carousel occupies a band; the
-rest of the screen holds still while it scrolls. Full-screen slices would be mostly static,
-and static content matches at any offset, so the matcher splices confidently in the wrong
-place. Pass the container's `elementUUID` to `appium_screenshot` and the capture is cropped
-to that band.
+**A sideways region must be reduced to its own band before stitching.** A carousel occupies
+a band; the rest of the screen holds still while it scrolls. Full-screen slices would be
+mostly static, and static content matches at any offset, so the matcher splices confidently
+in the wrong place. There are two ways to get the band, one per target:
 
-Find the container by shape rather than by guessing an index. Walk
-`**/XCUIElementTypeScrollView[1]`, `[2]`, … and read each one's geometry with
-`appium_get_element_attribute` (`attribute=rect`). A horizontal scroller is wide and short —
-full screen width, a fraction of its height — while a page container is nearly as tall as
-the screen. On one app this immediately separated a 393x118 carousel from the 393x704 page
-container, with no trial-and-error scrolling.
+- **Real device:** pass the container's `elementUUID` to `appium_screenshot` and the capture
+  is cropped to that band. Find the container by shape rather than by guessing an index.
+  Walk `**/XCUIElementTypeScrollView[1]`, `[2]`, … and read each one's geometry with
+  `appium_get_element_attribute` (`attribute=rect`). A horizontal scroller is wide and
+  short — full screen width, a fraction of its height — while a page container is nearly as
+  tall as the screen. On one app this immediately separated a 393x118 carousel from the
+  393x704 page container, with no trial-and-error scrolling.
+- **Simulator:** there is no element-scoped capture and no geometry to crop to, so capture
+  full screen and let the stitcher find the band: `--axis horizontal --crop-band`. It keeps
+  the rows that change between slices, which is exactly the region that scrolled, and
+  reports them as `cropped_band` in the verdict. Check that against the carousel you meant
+  to capture.
 
 Element captures can differ by a pixel between frames as the rect rounds; the stitcher trims
 to the common size rather than rejecting the set.
 
 Either way, say in the report which axis was captured and whether content extends past it.
 A capture that silently drops the other axis reads as complete when it is not.
+
+### Settle, then capture
 
 **Let the screen settle before the first slice.** A screen captured mid-transition differs
 from the same screen a moment later, and that difference is easily mistaken for scrolling.
@@ -253,14 +347,6 @@ will not read in order, and a "new items" affordance may appear mid-image. Seam 
 runs close to the accept threshold, because no two frames of a live screen match cleanly.
 Present such a capture as a composite, not as the state of the screen at one instant.
 
-Save slices at full resolution — do not pass `maxWidth` when capturing for a stitch, since downscaling loses the detail the overlap matcher needs.
-
-`appium_screenshot` writes wherever the MCP server is configured to write (`SCREENSHOTS_DIR`, otherwise the working directory) and returns that path. It does not write into `SLICE_DIR`. Copy each returned file across as you go, named so a glob sorts in capture order:
-
-```bash
-cp "$RETURNED_PATH" "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
-```
-
 The stitcher trusts the order it is given; passing slices out of order produces a confidently wrong image.
 
 ## 4. Stitch
@@ -275,15 +361,25 @@ The script auto-detects the fixed chrome (status bar, sticky header, pinned bott
 
 It prints a JSON verdict. **Read it.** Every seam must say `"spliced": true`. A `"butt_joined"` seam means no overlap was found and content may be missing at that seam.
 
+**Do not chase a failing seam by raising `--max-error`.** Loosening the threshold does not
+find a better alignment; it accepts a worse one. On a six-slice capture that failed one
+seam, raising it made every seam report `"spliced": true` and produced an image a third
+shorter than the page it came from, with the missing rows gone silently. When a seam fails,
+the cause is almost always the chrome bounds, so check those first.
+
 If `sticky_detected` in the verdict looks wrong, override it and re-run. Both flags take the **number of pixels** of fixed chrome at each edge, not row indices:
 
 ```bash
 --sticky-top 362 --sticky-bottom 357
 ```
 
-Read those off a slice: how tall is the status bar plus any pinned header, and how tall is the pinned bottom bar. Detection handles a pinned header that shows a live-updating value, because it measures the share of pixels in a row that change rather than the size of the change.
+Read those off a slice: how tall is the status bar plus any pinned header, and how tall is the pinned bottom bar. Detection handles a pinned header that shows a live-updating value, because it measures the share of pixels in a row that change rather than the size of the change. It also ignores the first slice when three or more were captured, because iOS expands a large navigation title at the top of a page and collapses it as soon as the page moves — measuring that band against later slices reads it as content and crops short of it.
 
 Verify the result by opening it and checking continuity across seams: ordered lists must stay ordered, and no row may repeat. On a dark UI a flat black band can match anywhere, so a low error score alone is not proof.
+
+A stronger check when a stitch looks suspect: the output height should be about the first
+slice plus the sum of the scroll steps. If it is far short, content was dropped no matter
+what `all_spliced` says.
 
 ## 5. Clean Up
 
@@ -291,11 +387,13 @@ Delete the slice directory. The stitched PNG is the only artifact that survives.
 
 ## Tests
 
-`scripts/test_stitch_screens.py` builds a synthetic page, cuts it into overlapping
-slices with fixed chrome on both edges — including a pinned header carrying a
-live-updating value — and asserts the stitch reconstructs the page row for row.
-Run it after any change to the stitcher.
+`scripts/test_stitch_screens.py` builds synthetic pages and asserts the stitch reconstructs
+them row for row: a vertical page with fixed chrome on both edges, including a pinned header
+carrying a live-updating value; the same page rotated, for the horizontal axis; a page whose
+large navigation title collapses after the first slice; and a still screen holding one
+sideways-scrolling carousel, which must be found and cropped to. Run it after any change to
+the stitcher.
 
 ## Reporting
 
-State the output path, the number of slices, whether the capture was truncated by infinite scroll, and every seam's status. If any seam was butt-joined, say so plainly instead of presenting the image as complete.
+State the target, the output path, the number of slices, whether the capture was truncated by infinite scroll, and every seam's status. If any seam was butt-joined, say so plainly instead of presenting the image as complete.

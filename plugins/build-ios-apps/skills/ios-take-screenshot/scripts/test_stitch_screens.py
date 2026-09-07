@@ -25,6 +25,7 @@ STICKY_TOP, STICKY_BOTTOM = 100, 120
 PAGE_ROWS, STEP = 3000, 400
 VISIBLE = VIEWPORT - STICKY_TOP - STICKY_BOTTOM   # 580 rows of content per slice
 NAV = 80                                          # navigation bar below the status bar
+BAND_TOP, BAND_BOTTOM, BAND_STEP = 300, 500, 120  # a carousel inside a still screen
 TITLED_VISIBLE = VISIBLE - NAV
 
 
@@ -126,6 +127,60 @@ def check_large_title(mod, failures: list[str]) -> None:
                 failures.append(f"large title: content mismatch on {bad} rows")
 
 
+def build_carousel_slices(tmp: Path) -> tuple[list[Path], np.ndarray]:
+    """Full-screen slices of a screen whose only moving part scrolls sideways.
+
+    Everything outside the band holds still, which is what makes a full-screen
+    match meaningless: the static remainder aligns at any offset.
+    """
+    rng = np.random.default_rng(2024)
+    page = rng.integers(0, 90, size=(VIEWPORT, WIDTH, 3), dtype=np.uint8)
+    strip = rng.integers(0, 255,
+                         size=(BAND_BOTTOM - BAND_TOP, WIDTH + BAND_STEP * 3, 3),
+                         dtype=np.uint8)
+
+    paths = []
+    for i in range(4):
+        frame = page.copy()
+        frame[BAND_TOP:BAND_BOTTOM] = strip[:, BAND_STEP * i:BAND_STEP * i + WIDTH]
+        q = tmp / f"carousel-{i:02d}.png"
+        Image.fromarray(frame).save(q)
+        paths.append(q)
+    return paths, strip
+
+
+def check_carousel_band(mod, failures: list[str]) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        paths, strip = build_carousel_slices(Path(td))
+        image, verdict = mod.stitch(paths, None, None, mod.DEFAULT_BAND,
+                                    mod.DEFAULT_MAX_ERROR, mod.DEFAULT_SEARCH,
+                                    "horizontal", True)
+
+        if verdict["cropped_band"] != [BAND_TOP, BAND_BOTTOM]:
+            failures.append(f"carousel: band {verdict['cropped_band']} != "
+                            f"[{BAND_TOP}, {BAND_BOTTOM}]")
+        if not verdict["all_spliced"]:
+            failures.append(f"carousel: not every seam spliced: {verdict['seams']}")
+
+        expected_w = WIDTH + BAND_STEP * 3
+        if image.shape[1] != expected_w:
+            failures.append(f"carousel: width {image.shape[1]} != {expected_w}")
+        elif image.shape[0] != BAND_BOTTOM - BAND_TOP:
+            failures.append(f"carousel: height {image.shape[0]} != "
+                            f"{BAND_BOTTOM - BAND_TOP} (cropped to the wrong rows)")
+        elif not np.array_equal(image, strip):
+            failures.append("carousel: the reconstructed strip does not match")
+
+        # Without the crop the same slices must NOT stitch cleanly: the still
+        # screen around the band aligns anywhere. This is the failure the flag
+        # exists to prevent, so it is worth pinning down.
+        _, plain = mod.stitch(paths, None, None, mod.DEFAULT_BAND,
+                              mod.DEFAULT_MAX_ERROR, mod.DEFAULT_SEARCH,
+                              "horizontal", False)
+        if plain["cropped_band"] is not None:
+            failures.append("carousel: a band was cropped without the flag")
+
+
 def check_horizontal(mod, failures: list[str]) -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td); (tmp / "v").mkdir()
@@ -181,11 +236,13 @@ def main() -> int:
                 failures.append(f"content mismatch on {bad} rows")
 
     check_large_title(mod, failures)
+    check_carousel_band(mod, failures)
     check_horizontal(mod, failures)
 
     for f in failures:
         print("FAIL:", f)
-    print("PASS: stitch reconstructs the page exactly, both axes and a collapsing title" if not failures
+    print("PASS: stitch reconstructs the page exactly, both axes, a collapsing "
+          "title and a carousel band" if not failures
           else f"{len(failures)} failure(s)")
     return 1 if failures else 0
 
