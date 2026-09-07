@@ -39,6 +39,17 @@ Several agents can share that library safely. The phone is the real lock, not th
 
 `SKILL_DIR` is the absolute path of this loaded skill folder. Do not derive it from the target app's `pwd` — installed plugins live outside the app being researched. Keep slices in a run-specific temp dir, never under `SKILL_DIR`.
 
+## Tool Names
+
+The plugin serves the Appium tools, so they carry its prefix:
+`appium_screenshot` is `mcp__plugin_build-ios-apps_appium-mcp__appium_screenshot`, and so
+on for every `appium_*` name below. They are written unprefixed here for readability.
+
+Device-specific capabilities — UDID, team id, WebDriverAgent bundle id — are not in the
+plugin config, since they differ per machine. Pass them inline to
+`appium_session_management` (`action=create`), or point the server at a local
+`capabilities.json` with `CAPABILITIES_CONFIG`.
+
 ## Safety
 
 You are driving someone's real phone, often signed into a real account with real money.
