@@ -19,13 +19,27 @@ fi
 mkdir -p "$SLICE_DIR"
 ```
 
-The stitched PNG goes where the caller asks, via `--out`. Captured screens accumulate into a library that later tools read, so use one durable root and name each file for the screen it shows:
+The stitched PNG goes where the caller asks, via `--out`. `IOS_SCREENSHOT_DIR` is an
+ordinary environment variable, so it is shared by every session that inherits the same
+shell. Give each run its own subdirectory, so two sessions capturing the same screen cannot
+overwrite each other:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
+OUT_ROOT="${IOS_SCREENSHOT_DIR:-/tmp/build-ios-app}/$RUN_ID"
+```
+
+Each screen is then named for what it shows:
 
 ```
-$IOS_SCREENSHOT_DIR/<app-slug>/<screen-slug>.png
+$OUT_ROOT/<app-slug>/<screen-slug>.png
 ```
 
-Resolve the root in this order: a path given in the request, then `$IOS_SCREENSHOT_DIR`, then ask. Never invent a root, and never put the library under `/tmp` — macOS clears it on reboot, and a research corpus that quietly empties is worse than one never collected.
+Report the full path when you finish — a run-scoped directory is only useful to later tools
+if they are told where it is. A path given in the request always wins over the default.
+
+The default root lives under `/tmp`, which macOS clears on reboot. Point
+`IOS_SCREENSHOT_DIR` at a durable directory for screens worth keeping.
 
 Several agents can share that library safely. The phone is the real lock, not the directory: Appium holds one session per device, so two agents cannot capture at the same time — the second fails to get a session. The stitcher writes to a staging file and renames it into place, so a reader never sees a half-written PNG, and its verdict reports `replaced_existing` when a run overwrites an earlier capture of the same screen.
 
@@ -48,7 +62,22 @@ on for every `appium_*` name below. They are written unprefixed here for readabi
 Device-specific capabilities — UDID, team id, WebDriverAgent bundle id — are not in the
 plugin config, since they differ per machine. Pass them inline to
 `appium_session_management` (`action=create`), or point the server at a local
-`capabilities.json` with `CAPABILITIES_CONFIG`.
+`capabilities.json` with `CAPABILITIES_CONFIG`. The inline form:
+
+```json
+{
+  "appium:udid": "<device udid>",
+  "appium:xcodeOrgId": "<team id>",
+  "appium:xcodeSigningId": "Apple Development",
+  "appium:updatedWDABundleId": "<your.wda.bundle.id>",
+  "appium:usePrebuiltWDA": true,
+  "appium:derivedDataPath": "<path to the signed WDA build>",
+  "appium:noReset": true
+}
+```
+
+`usePrebuiltWDA` with `derivedDataPath` reuses a WebDriverAgent you already signed and
+installed, instead of rebuilding it on every session.
 
 ## Safety
 
@@ -116,7 +145,7 @@ Capture loop:
 1. Scroll toward the top (`direction=down`) until the top no longer changes.
 2. Screenshot → slice 1.
 3. Scroll `direction=up` once → screenshot → next slice.
-4. Repeat to a cap of **6 slices**.
+4. Repeat until the page stops moving, with a hard stop at **6 slices**.
 
 "Nearly identical" means a mean absolute pixel difference below about 2 on settled frames.
 Compare each new slice against the previous one:
@@ -130,7 +159,16 @@ Compare each new slice against the previous one:
 The stitcher reports `vs_previous_diff` per seam, which separates "never moved" from "moved
 but would not align" when a seam fails.
 
-**Infinite scroll:** if you reach the cap and the content is still advancing, take **one extra scroll and slice**, then stop. That extra slice is evidence the screen continues; report the capture as truncated rather than implying it is the whole page.
+**Infinite scroll: two screens is enough — one scroll.** An endless list has no bottom to
+reach, and capturing more of it adds rows, not information. Such a list is usually already
+partly visible on the first screen, so a single scroll reveals the next page of rows, and
+the stitched image makes the endless section obvious. Stop there and report the capture as
+truncated.
+
+Judge which case you are in by what is advancing. Repeating rows of the same shape — a
+holders list, a feed, a leaderboard — are an endless list: stop at two screens. Distinct
+sections that each appear once — a description, a stats table, a footer — are finite page
+content: follow them to the bottom.
 
 Save slices at full resolution — do not pass `maxWidth` when capturing for a stitch, since downscaling loses the detail the overlap matcher needs.
 
@@ -146,7 +184,7 @@ The stitcher trusts the order it is given; passing slices out of order produces 
 
 ```bash
 "$SKILL_DIR/scripts/stitch_screens.py" \
-  --out "$IOS_SCREENSHOT_DIR/fomo/token-detail.png" \
+  --out "$OUT_ROOT/fomo/token-detail.png" \
   --slices "$SLICE_DIR"/slice-*.png
 ```
 
