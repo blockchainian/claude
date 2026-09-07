@@ -275,12 +275,21 @@ there is no copy step:
 xcrun simctl io "$UDID" screenshot --type=png "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
-Scroll with `swipe`, which requires `withinElementRef`. Get the first ref from `snapshot_ui`
-— it lists scrollable targets — and then **take each next ref out of the previous `swipe`
-response**, which carries a fresh snapshot of its own. Refs go stale as soon as the screen
-moves, and a stale one fails with `TARGET_NOT_ACTIONABLE`. A top-level container sometimes
-keeps the same ref string across several swipes and a nested one does not, so read it from
-the latest response every time rather than assuming.
+Scroll with `swipe`, which requires `withinElementRef`. Get the first ref from
+`snapshot_ui` — it lists scrollable targets. After that, where the next ref comes from
+depends on what the swipe returned:
+
+- **The response carries a fresh snapshot** — take the next ref from it, no extra call.
+- **The response is only a settle warning** (see below), and carries no targets at all.
+  Then call `snapshot_ui` again for the next ref. On a busy screen this is the common case,
+  so expect to call it after most swipes.
+
+Either way, never reuse a ref across a swipe on the strength of it having worked before.
+Refs go stale as soon as the screen moves, and a stale one fails with
+`TARGET_NOT_ACTIONABLE` or `SNAPSHOT_MISSING`. A top-level container sometimes keeps the
+same ref string for a swipe or two and then stops, with nothing to warn you which time is
+the last — so read it fresh every time, and on either error take a new snapshot rather than
+retrying the same ref.
 
 No delay is needed between the swipe and the capture: by the time `swipe` returns, the
 screen has stopped moving. Expect `swipe` to warn `SNAPSHOT_CAPTURE_FAILED` — "the
@@ -337,6 +346,17 @@ Screenshot twice and compare; only start capturing once two consecutive frames a
 identical. Skipping this produced a run that captured one non-scrolling screen twice and
 stitched a duplicate.
 
+Compare two frames with:
+
+```bash
+"$SKILL_DIR/scripts/frame_diff.py" <before.png> <after.png> \
+  --sticky-top <chrome px> --sticky-bottom <chrome px>
+```
+
+It prints `mean_abs_diff` on a 0-255 scale, and — more useful — `scrolled_px`, the offset
+at which the later frame's content is found in the earlier one. Do not reach for another
+tool: the system python has no imaging library, and this script carries its own.
+
 **Bound that wait to about three attempts.** A live feed never settles — its content keeps
 arriving — so an unbounded settle loop waits forever. Tell the two apart by whether the
 change decays: a transition drops to near zero within a second or two, while live content
@@ -350,7 +370,7 @@ Capture loop:
 3. Scroll `direction=up` once → screenshot → next slice.
 4. Repeat until the page stops moving, with a hard stop at **6 slices**.
 
-"Nearly identical" means a mean absolute pixel difference below about 2 on settled frames.
+"Nearly identical" means a `mean_abs_diff` below about 2 on settled frames.
 Compare each new slice against the previous one:
 
 - **Below 2 → stop.** The page did not move. Discard that slice; it marks the bottom, it is
@@ -361,6 +381,14 @@ Compare each new slice against the previous one:
 
 The stitcher reports `vs_previous_diff` per seam, which separates "never moved" from "moved
 but would not align" when a seam fails.
+
+**A difference is not the same as movement.** A screen can be static and still differ
+between frames: a net worth, a PnL, a claimable balance all tick on their own, so the raw
+difference never reaches zero and the rule above reads as "it moved" forever. That is what
+`scrolled_px` is for — it is 0 when nothing scrolled, whatever the values did, and a real
+scroll reports the offset it found with a low `match_error`. Judge by that, not by the
+difference alone. This is the same hazard as a live feed, in a milder form: there, whole
+rows arrive; here, a few digits change in place.
 
 **Infinite scroll: two screens is enough — one scroll.** An endless list has no bottom to
 reach, and capturing more of it adds rows, not information. Such a list is usually already
@@ -448,7 +476,15 @@ anything should sit between them.
 
 Delete the slice directory. The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.
 
+Where a screen's own header and the tab that reaches it disagree — a tab bar reading
+"Account" above a page headed "Portfolio" — name it for the header, which is what the image
+shows. The app slug is the app's display name from `find_ios_app.sh`, lowercased, spaces to
+hyphens: `ChadWallet` becomes `chadwallet`.
+
 ## Tests
+
+`scripts/test_frame_diff.py` covers the frame comparison: a known scroll offset must be
+reported as scrolled, and a static frame carrying a changed value must not.
 
 `scripts/test_stitch_screens.py` builds synthetic pages and asserts the stitch reconstructs
 them row for row: a vertical page with fixed chrome on both edges, including a pinned header
