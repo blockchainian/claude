@@ -72,9 +72,20 @@ def detect_sticky(gray: list[np.ndarray]) -> tuple[int, int]:
     changes a few digits while the rest of the row holds still, so its average
     difference is large but its changed-pixel share stays small. Content rows
     scroll wholesale and change nearly every pixel.
+
+    The first slice is left out of the measurement whenever enough slices remain
+    without it. iOS draws an expanded navigation title at scroll offset zero and
+    swaps it for a compact title bar as soon as the page moves, so that band
+    differs between the first slice and every later one and reads as content.
+    Cropping short of it then leaves a strip of title bar at the top of every
+    content region, which the overlap matcher aligns against itself and splices
+    into a collapsed image. The crop only ever applies to the slices measured
+    here, so measuring the ones it applies to is also the correct scope.
     """
     if len(gray) < 2:
         return 0, 0
+    if len(gray) > 2:
+        gray = gray[1:]
     height = gray[0].shape[0]
     static = np.ones(height, dtype=bool)
     for a, b in zip(gray, gray[1:]):
