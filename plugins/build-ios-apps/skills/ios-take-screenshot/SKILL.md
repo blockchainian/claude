@@ -43,20 +43,21 @@ instead; what you cannot do is split it across commands and expect a variable to
 
 ### Set the run up once
 
-Run this one command and read the two absolute paths out of its output:
+Run this one command and read the three values out of its output:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-screenshot.XXXXXX")"
 OUT_ROOT="${IOS_SCREENSHOT_DIR:-/tmp/build-ios-app}/$RUN_ID"
 mkdir -p "$SLICE_DIR" "$OUT_ROOT"
-printf 'SLICE_DIR=%s\nOUT_ROOT=%s\n' "$SLICE_DIR" "$OUT_ROOT"
+printf 'RUN_ID=%s\nSLICE_DIR=%s\nOUT_ROOT=%s\n' "$RUN_ID" "$SLICE_DIR" "$OUT_ROOT"
 ```
 
-The stitched PNG goes where the caller asks, via `--out`. `IOS_SCREENSHOT_DIR` is an
-ordinary environment variable, so it is shared by every session that inherits the same
-shell; `RUN_ID` gives each run its own subdirectory under it, so two sessions capturing the
-same screen cannot overwrite each other.
+The stitched PNG goes where the caller asks, via `--out`. `IOS_SCREENSHOT_DIR` only
+takes effect if it is set in the shell that runs this command, so to use it, put it on the
+command line: `IOS_SCREENSHOT_DIR=/some/dir RUN_ID=...`. `RUN_ID` gives each run its own
+subdirectory under it, so two sessions capturing the same screen cannot overwrite each
+other, and it is also the name under which this run claims its simulator.
 
 Each screen is then named for what it shows:
 
@@ -72,11 +73,14 @@ The default root lives under `/tmp`, which macOS clears on reboot. Point
 
 Several agents can share that library safely. On a device the phone is the real lock, not
 the directory: Appium holds one session per device, so two agents cannot capture at the
-same time — the second fails to get a session. A simulator has no such lock, so two agents
-driving the same booted simulator will fight over what is on screen; capture one screen at
-a time. The stitcher writes to a staging file and renames it into place, so a reader never
-sees a half-written PNG, and its verdict reports `replaced_existing` when a run overwrites
-an earlier capture of the same screen.
+same time — the second fails to get a session. A simulator has no such lock of its own, so
+this skill provides one: `claim_simulator.py` holds a simulator for one `RUN_ID`, and
+`capture_slice.sh` refuses a simulator nobody has claimed. Two agents on the same simulator
+is not supported — the second claim fails, and that agent chooses to wait or abort. Several
+sessions on several simulators is fine: each session has its own XcodeBuildMCP server and
+its own defaults. The stitcher writes to a staging file and renames it into place, so a
+reader never sees a half-written PNG, and its verdict reports `replaced_existing` when a
+run overwrites an earlier capture of the same screen.
 
 ## Core Workflow
 
@@ -170,21 +174,42 @@ simulator is the whole requirement:
 
 Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says either that
 nothing is booted or that several are and it will not guess between them. Boot one with
-`boot_sim` if none is running, and `open_sim` if you want to watch.
+`boot_sim` if none is running, and `open_sim` if you want to watch. With several booted,
+choose one and run it again with `--device <udid>`; it then reports that one as selected.
 
 Keep the chosen UDID — the `selectedSimulator.udid` from that report — and paste it into
 every command that needs it, as above.
 
-Pass it to `session_set_defaults` once, so every XcodeBuildMCP call targets that simulator,
-and pass the same value to every `simctl` command. **The two must agree.** XcodeBuildMCP
-scrolls whatever its session default points at, while `simctl` captures whatever UDID you
-hand it; if they differ you will swipe one simulator and photograph another, and the slices
-will look like a screen that never moves.
+Then claim it for this run, so no other agent drives it while you capture:
+
+```bash
+"$SKILL_DIR/scripts/claim_simulator.py" "$UDID" --run "$RUN_ID"
+```
+
+Exit 0 means it is yours. Exit 3 means another run holds it, and the message says which
+run and for how long. Decide: wait and claim again, or abort and pick another simulator.
+Never `--steal` unless you know that run is dead. The claim is a file under `TMPDIR`, so
+it is visible to every session of the same user; releasing it is part of cleanup.
+
+Pass the `sessionDefaults` object to `session_set_defaults`, so every XcodeBuildMCP call
+targets that simulator, then call `session_show_defaults` and check that `simulatorId` is
+the UDID you claimed. The defaults belong to the XcodeBuildMCP server, which every agent in
+this session shares, so they can already hold a different simulator set by an earlier
+agent, and nothing warns you. None of `launch_app_sim`, `snapshot_ui`, `tap`, `swipe` or
+`screenshot` takes a simulator of its own, whatever their `nextSteps` hints claim about a
+`simulatorId` parameter; there is no per-call targeting. What each response does carry is
+the simulator it hit, as `artifacts.simulatorId` (`udid` in a snapshot). Compare that with
+the capture UDID whenever a screen seems not to move.
+
+**The default and the capture UDID must agree.** XcodeBuildMCP scrolls whatever its
+session default points at, while `simctl` captures whatever UDID you hand it; if they
+differ you will swipe one simulator and photograph another, and the slices will look like a
+screen that never moves. The stitcher refuses an identical pair for exactly this reason.
 
 For the same reason, do not use `booted` as a stand-in for the UDID. `simctl` resolves it to
 one running simulator without saying which, and simulators routinely hold different builds
 of the same app — on one machine the same app was version 62 on one booted simulator and 64
-on another.
+on another. `claim_simulator.py` and `capture_slice.sh` refuse it outright.
 
 ## 1. Open the App
 
@@ -212,7 +237,10 @@ If no Appium session exists yet, create one: `select_device` (`platform=ios`, `i
 script also accepts `booted`, but only when exactly one simulator is running — with several
 up it refuses rather than answering about an arbitrary one.
 
-Then `launch_app_sim` with that bundle id, and screenshot to see where the app resumed.
+Then `launch_app_sim` with that bundle id, and screenshot to see where the app resumed. A
+development build may resume on its dev launcher — a list of servers, not the app. Pick the
+running server from that list and dismiss any developer menu, then confirm the app itself
+is on screen before going further.
 
 ## 2. Find the Requested Screen
 
@@ -268,11 +296,12 @@ Save slices at full resolution — do not pass `maxWidth` when capturing for a s
 **Do not capture slices with the XcodeBuildMCP `screenshot` tool.** It returns a downscaled,
 lossy JPEG — 369x800 for a screen that is really 1179x2556 — whatever the file is named. It
 is fine for looking at a screen; it destroys the detail the overlap matcher needs. Capture
-with `simctl` instead, which writes a full-resolution PNG straight into `SLICE_DIR`, so
-there is no copy step:
+with the wrapper instead, which writes a full-resolution PNG straight into `SLICE_DIR`, so
+there is no copy step, and refuses a simulator this run has not claimed:
 
 ```bash
-xcrun simctl io "$UDID" screenshot --type=png "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
+"$SKILL_DIR/scripts/capture_slice.sh" --simulator "$UDID" \
+  --out "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
 Scroll with `swipe`, which requires `withinElementRef`. Get the first ref from
@@ -429,6 +458,9 @@ The script auto-detects the fixed chrome (status bar, sticky header, pinned bott
 
 It prints a JSON verdict. **Read it.** Every seam must say `"spliced": true`. A
 `"butt_joined"` seam means no overlap was found and content may be missing at that seam.
+It refuses outright, writing nothing, when two consecutive slices are identical: that is a
+bottom marker that should have been dropped, or a swipe that hit a different simulator
+than the capture. Fix the slices; do not pass the pair some other way.
 
 Where that seam sits tells you what went wrong:
 
@@ -475,7 +507,13 @@ anything should sit between them.
 
 ## 5. Clean Up
 
-Delete the slice directory. The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.
+Delete the slice directory, and on a simulator release the claim:
+
+```bash
+"$SKILL_DIR/scripts/claim_simulator.py" "$UDID" --run "$RUN_ID" --release
+```
+
+The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.
 
 Where a screen's own header and the tab that reaches it disagree — a tab bar reading
 "Account" above a page headed "Portfolio" — name it for the header, which is what the image
@@ -484,15 +522,22 @@ hyphens: `ChadWallet` becomes `chadwallet`.
 
 ## Tests
 
+`scripts/test_claim_simulator.py` covers the simulator claim: one run holds a simulator, a
+second claim is refused with the holder named, only the holder releases, and capture
+refuses both `booted` and an unclaimed simulator. `scripts/test_discover_ios_setup.py`
+covers the simulator report: the pick is named in full, a shutdown UDID is reported as
+such, and two booted simulators ask for `--device`.
+
 `scripts/test_frame_diff.py` covers the frame comparison: a known scroll offset must be
-reported as scrolled, and a static frame carrying a changed value must not.
+reported as scrolled, with and without the chrome flags, a static frame carrying a changed
+value must not, and frames of different sizes are refused.
 
 `scripts/test_stitch_screens.py` builds synthetic pages and asserts the stitch reconstructs
 them row for row: a vertical page with fixed chrome on both edges, including a pinned header
 carrying a live-updating value; the same page rotated, for the horizontal axis; a page whose
 large navigation title collapses after the first slice; and a still screen holding one
-sideways-scrolling carousel, which must be found and cropped to. Run it after any change to
-the stitcher.
+sideways-scrolling carousel, which must be found and cropped to; two identical slices must
+be refused. Run it after any change to the stitcher.
 
 ## Reporting
 
