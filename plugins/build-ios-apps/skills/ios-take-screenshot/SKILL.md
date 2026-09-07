@@ -157,10 +157,26 @@ simulator is the whole requirement:
 "$SKILL_DIR/scripts/discover_ios_setup.py" --target simulator
 ```
 
-Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says nothing is
-booted. Pass that UDID to `session_set_defaults` once, and every XcodeBuildMCP call after
-it targets that simulator. Boot one with `boot_sim` if none is running, and `open_sim` if
-you want to watch.
+Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says either that
+nothing is booted or that several are and it will not guess between them. Boot one with
+`boot_sim` if none is running, and `open_sim` if you want to watch.
+
+Keep the chosen UDID and use it everywhere:
+
+```bash
+UDID="<selectedSimulator.udid from the report above>"
+```
+
+Pass it to `session_set_defaults` once, so every XcodeBuildMCP call targets that simulator,
+and pass the same value to every `simctl` command. **The two must agree.** XcodeBuildMCP
+scrolls whatever its session default points at, while `simctl` captures whatever UDID you
+hand it; if they differ you will swipe one simulator and photograph another, and the slices
+will look like a screen that never moves.
+
+For the same reason, do not use `booted` as a stand-in for the UDID. `simctl` resolves it to
+one running simulator without saying which, and simulators routinely hold different builds
+of the same app — on one machine the same app was version 62 on one booted simulator and 64
+on another.
 
 ## 1. Open the App
 
@@ -181,11 +197,12 @@ If no Appium session exists yet, create one: `select_device` (`platform=ios`, `i
 ### Simulator
 
 ```bash
-"$SKILL_DIR/scripts/find_ios_app.sh" --simulator booted --name <app name>
+"$SKILL_DIR/scripts/find_ios_app.sh" --simulator "$UDID" --name <app name>
 ```
 
-`devicectl` cannot see simulators at all, so this reads `simctl listapps` instead. `booted`
-works in place of a UDID when exactly one simulator is running.
+`devicectl` cannot see simulators at all, so this reads `simctl listapps` instead. The
+script also accepts `booted`, but only when exactly one simulator is running — with several
+up it refuses rather than answering about an arbitrary one.
 
 Then `launch_app_sim` with that bundle id, and screenshot to see where the app resumed.
 
@@ -247,7 +264,7 @@ with `simctl` instead, which writes a full-resolution PNG straight into `SLICE_D
 there is no copy step:
 
 ```bash
-xcrun simctl io <udid> screenshot --type=png "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
+xcrun simctl io "$UDID" screenshot --type=png "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
 Scroll with `swipe`, which requires `withinElementRef`. Get the first ref from `snapshot_ui`

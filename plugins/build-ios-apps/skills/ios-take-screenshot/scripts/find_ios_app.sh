@@ -37,6 +37,17 @@ OUT="$(mktemp "${TMPDIR:-/tmp}/ios-apps.XXXXXX.json")"
 trap 'rm -f "$OUT"' EXIT
 
 if [ -n "$SIMULATOR" ]; then
+  if [ "$SIMULATOR" = "booted" ]; then
+    # simctl resolves "booted" to one running simulator without saying which, so
+    # with several up it answers about an arbitrary one. Different simulators
+    # routinely hold different builds of the same app.
+    COUNT="$(xcrun simctl list devices booted | grep -c '(Booted)' || true)"
+    if [ "$COUNT" -ne 1 ]; then
+      echo "$COUNT simulators are booted; pass a UDID instead of \"booted\"" >&2
+      xcrun simctl list devices booted >&2
+      exit 2
+    fi
+  fi
   # simctl prints an old-style plist, so convert it rather than parsing it.
   xcrun simctl listapps "$SIMULATOR" | plutil -convert json -o "$OUT" -- -
 else
