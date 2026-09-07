@@ -24,6 +24,8 @@ WIDTH, VIEWPORT = 400, 800
 STICKY_TOP, STICKY_BOTTOM = 100, 120
 PAGE_ROWS, STEP = 3000, 400
 VISIBLE = VIEWPORT - STICKY_TOP - STICKY_BOTTOM   # 580 rows of content per slice
+NAV = 80                                          # navigation bar below the status bar
+TITLED_VISIBLE = VISIBLE - NAV
 
 
 def load_module():
@@ -69,6 +71,59 @@ def build_horizontal_slices(tmp: Path) -> tuple[list[Path], np.ndarray]:
         Image.fromarray(arr).save(out)
         wide.append(out)
     return wide, page.transpose(1, 0, 2)
+
+
+def build_large_title_slices(tmp: Path) -> tuple[list[Path], np.ndarray]:
+    """Slices of a screen whose large navigation title collapses after the first.
+
+    iOS draws an expanded title at scroll offset zero and swaps it for a compact
+    title bar as soon as the page moves. The bar occupies the same rows either
+    way, so it is chrome, but its pixels differ between the first slice and every
+    later one.
+    """
+    rng = np.random.default_rng(99)
+    page = rng.integers(0, 255, size=(PAGE_ROWS, WIDTH, 3), dtype=np.uint8)
+
+    status = np.full((STICKY_TOP, WIDTH, 3), 30, dtype=np.uint8)
+    status[20:40, 10:200] = 200
+    expanded = rng.integers(0, 255, size=(NAV, WIDTH, 3), dtype=np.uint8)
+    collapsed = rng.integers(0, 255, size=(NAV, WIDTH, 3), dtype=np.uint8)
+    footer = np.full((STICKY_BOTTOM, WIDTH, 3), 60, dtype=np.uint8)
+
+    paths = []
+    for i, offset in enumerate(range(0, STEP * 4, STEP)):
+        nav = expanded if i == 0 else collapsed
+        body = page[offset:offset + TITLED_VISIBLE]
+        p = tmp / f"titled-{i:02d}.png"
+        Image.fromarray(np.vstack([status, nav, body, footer])).save(p)
+        paths.append(p)
+    return paths, page
+
+
+def check_large_title(mod, failures: list[str]) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        paths, page = build_large_title_slices(Path(td))
+        image, verdict = mod.stitch(paths, None, None, mod.DEFAULT_BAND,
+                                    mod.DEFAULT_MAX_ERROR, mod.DEFAULT_SEARCH)
+
+        chrome = STICKY_TOP + NAV
+        if verdict["sticky_top"] != chrome:
+            failures.append(
+                f"large title: sticky_top {verdict['sticky_top']} != {chrome} "
+                "(the first slice's expanded title hid the bar below it)")
+        if not verdict["all_spliced"]:
+            failures.append(f"large title: not every seam spliced: {verdict['seams']}")
+
+        expected_h = chrome + TITLED_VISIBLE + STEP * 3
+        if image.shape[0] != expected_h:
+            failures.append(f"large title: height {image.shape[0]} != {expected_h} "
+                            "(content was dropped at a seam)")
+        else:
+            covered = TITLED_VISIBLE + STEP * 3
+            got = image[chrome:]
+            if not np.array_equal(got, page[:covered]):
+                bad = int((got != page[:covered]).any(axis=(1, 2)).sum())
+                failures.append(f"large title: content mismatch on {bad} rows")
 
 
 def check_horizontal(mod, failures: list[str]) -> None:
@@ -125,11 +180,12 @@ def main() -> int:
                 bad = int((got != page[:covered]).any(axis=(1, 2)).sum())
                 failures.append(f"content mismatch on {bad} rows")
 
+    check_large_title(mod, failures)
     check_horizontal(mod, failures)
 
     for f in failures:
         print("FAIL:", f)
-    print("PASS: stitch reconstructs the page exactly on both axes" if not failures
+    print("PASS: stitch reconstructs the page exactly, both axes and a collapsing title" if not failures
           else f"{len(failures)} failure(s)")
     return 1 if failures else 0
 
