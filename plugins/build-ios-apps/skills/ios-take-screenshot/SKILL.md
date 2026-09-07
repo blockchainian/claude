@@ -89,8 +89,13 @@ body often does nothing, and repeating it wastes turns.
 **Real devices only.** Every step below drives a physical iPhone through appium-mcp:
 `find_ios_app.sh` and `discover_ios_setup.py` both read `devicectl`, which does not see
 simulators, and the capture techniques rely on Appium's scroll semantics and element-scoped
-screenshots. Capturing a simulator screen would need `simctl` and XcodeBuildMCP equivalents
-that are not written yet, so do not reach for this skill there.
+screenshots. Capturing a simulator screen would need `simctl` in place of `devicectl`, and
+XcodeBuildMCP in place of Appium. Two differences shape that work, both checked against the
+tool signatures: `swipe` accepts `withinElementRef`, so element-scoped scrolling exists,
+but `screenshot` accepts only `returnFormat` and cannot capture a single element. A
+sideways region would therefore have to be captured full screen and cropped to the
+element's rect from `snapshot_ui` before stitching, since full-screen slices of a scrolling
+band splice in the wrong place.
 
 Discover the session values rather than asking for them or remembering them:
 
