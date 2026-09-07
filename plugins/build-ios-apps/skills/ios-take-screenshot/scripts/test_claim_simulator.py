@@ -50,9 +50,16 @@ def main() -> int:
         if r.returncode != 2:
             failures.append(f'"booted" was accepted as a UDID: {r.returncode}')
 
-        r = run("capture_slice.sh", "--simulator", "booted", "--out", f"{tmp}/x.png", tmp=tmp)
+        r = run("capture_slice.sh", "--simulator", "booted", "--run", "run-a",
+                "--out", f"{tmp}/x.png", tmp=tmp)
         if r.returncode != 2:
             failures.append(f'capture accepted "booted": {r.returncode} {r.stderr}')
+
+        r = run("capture_slice.sh", "--simulator", UDID, "--run", "run-b",
+                "--out", f"{tmp}/x.png", tmp=tmp)
+        if r.returncode != 3 or "run-a" not in r.stderr:
+            failures.append(f"capture by a run that does not hold the claim was not refused: "
+                            f"{r.returncode} {r.stderr!r}")
 
         r = run("claim_simulator.py", UDID, "--run", "run-b", "--steal", tmp=tmp)
         if r.returncode != 0 or json.loads(r.stdout)["heldBy"] != "run-b":
@@ -62,7 +69,8 @@ def main() -> int:
         if r.returncode != 0:
             failures.append(f"holder could not release: {r.returncode} {r.stderr}")
 
-        r = run("capture_slice.sh", "--simulator", UDID, "--out", f"{tmp}/x.png", tmp=tmp)
+        r = run("capture_slice.sh", "--simulator", UDID, "--run", "run-b",
+                "--out", f"{tmp}/x.png", tmp=tmp)
         if r.returncode != 3 or "claim" not in r.stderr:
             failures.append(f"capture ran against an unclaimed simulator: {r.returncode} {r.stderr!r}")
 
