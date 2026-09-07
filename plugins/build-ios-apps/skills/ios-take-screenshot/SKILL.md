@@ -45,6 +45,7 @@ Several agents can share that library safely. The phone is the real lock, not th
 
 ## Core Workflow
 
+0. Discover the device and its session capabilities; set up WebDriverAgent if absent.
 1. Open the app (find it first — the default app listing hides App Store apps).
 2. Navigate to the requested screen and confirm you are on it by looking at a screenshot.
 3. Scroll to the top, then capture overlapping slices downward, capped.
@@ -62,22 +63,8 @@ on for every `appium_*` name below. They are written unprefixed here for readabi
 Device-specific capabilities — UDID, team id, WebDriverAgent bundle id — are not in the
 plugin config, since they differ per machine. Pass them inline to
 `appium_session_management` (`action=create`), or point the server at a local
-`capabilities.json` with `CAPABILITIES_CONFIG`. The inline form:
-
-```json
-{
-  "appium:udid": "<device udid>",
-  "appium:xcodeOrgId": "<team id>",
-  "appium:xcodeSigningId": "Apple Development",
-  "appium:updatedWDABundleId": "<your.wda.bundle.id>",
-  "appium:usePrebuiltWDA": true,
-  "appium:derivedDataPath": "<path to the signed WDA build>",
-  "appium:noReset": true
-}
-```
-
-`usePrebuiltWDA` with `derivedDataPath` reuses a WebDriverAgent you already signed and
-installed, instead of rebuilding it on every session.
+`capabilities.json` with `CAPABILITIES_CONFIG`. Do not ask the user for these values and
+do not carry them between sessions — step 0 discovers them and prints them ready to use.
 
 ## Safety
 
@@ -96,6 +83,41 @@ tap.
 
 To dismiss a modal sheet, tap the dimmed backdrop above it. A downward swipe on the sheet
 body often does nothing, and repeating it wastes turns.
+
+## 0. Set Up the Device
+
+Discover the session values rather than asking for them or remembering them:
+
+```bash
+"$SKILL_DIR/scripts/discover_ios_setup.py"
+```
+
+It reports the connected devices, which provisioning profiles cover them, whether
+WebDriverAgent is installed, and — when everything is in place — a `suggestedCapabilities`
+object to pass straight to `appium_session_management` (`action=create`). Exit 0 means
+ready; exit 1 lists what is missing. The UDID comes from the device list, the team id from
+a profile that covers the device, and the WebDriverAgent bundle id from the runner already
+installed on it.
+
+**If WebDriverAgent is not installed, do not build it by hand.** Use
+`appium_prepare_ios_real_device`:
+
+1. Call it with no `provisioningProfileUuid` to list available profiles.
+2. Call it again with the chosen UUID and `isFreeAccount` — false for a paid Apple
+   Developer account, true otherwise. It downloads the matching WebDriverAgent release,
+   packages it as an IPA, resigns it with that profile, and returns a `capabilitiesHint`.
+3. Pass that hint to `appium_session_management` (`action=create`), serialising the whole
+   object — do not drop its boolean or numeric values.
+
+Two switches live on the phone and cannot be set from the Mac. Developer Mode, which
+`devicectl` does report, and **Settings -> Developer -> UI TESTING -> Enable UI
+Automation**, which it does not report at all. Without the second, session creation fails
+with a bare `xcodebuild failed with code 65`, and the real reason — "Timed out while
+enabling automation mode" — appears only in the test log. Ask the user to turn both on, and
+to leave the phone unlocked while a session runs.
+
+A paid Apple Developer account re-signs WebDriverAgent yearly; a free Apple ID expires it
+every 7 days, after which capture stops working until it is signed again.
 
 ## 1. Open the App
 
