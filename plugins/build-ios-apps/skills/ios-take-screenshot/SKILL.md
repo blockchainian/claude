@@ -336,6 +336,13 @@ partly visible on the first screen, so a single scroll reveals the next page of 
 the stitched image makes the endless section obvious. Stop there and report the capture as
 truncated.
 
+Two slices is also the one case where chrome detection cannot help itself. It works by
+comparing slices, and with a single pair the first slice's expanded navigation title is
+half the evidence, so it reads as content and the crop stops short of the title bar. The
+seam then fails loudly rather than silently — `all_spliced` is false and the slices are
+butt-joined. If that happens on a two-slice capture, read the chrome height off a slice and
+pass `--sticky-top` explicitly; do not reach for `--max-error`.
+
 Judge which case you are in by what is advancing. Repeating rows of the same shape — a
 comment thread, a feed, a search-results list — are an endless list: stop at two screens. Distinct
 sections that each appear once — a description, a stats table, a footer — are finite page
@@ -373,7 +380,7 @@ If `sticky_detected` in the verdict looks wrong, override it and re-run. Both fl
 --sticky-top 362 --sticky-bottom 357
 ```
 
-Read those off a slice: how tall is the status bar plus any pinned header, and how tall is the pinned bottom bar. Detection handles a pinned header that shows a live-updating value, because it measures the share of pixels in a row that change rather than the size of the change. It also ignores the first slice when three or more were captured, because iOS expands a large navigation title at the top of a page and collapses it as soon as the page moves — measuring that band against later slices reads it as content and crops short of it.
+Read those off a slice: how tall is the status bar plus any pinned header, and how tall is the pinned bottom bar. Detection handles a pinned header that shows a live-updating value, because it measures the share of pixels in a row that change rather than the size of the change. It also ignores the first slice when three or more were captured, because iOS expands a large navigation title at the top of a page and collapses it as soon as the page moves — measuring that band against later slices reads it as content and crops short of it. With exactly two slices there is nothing left to measure once the first is set aside, so that screen needs `--sticky-top` passed by hand.
 
 Verify the result by opening it and checking continuity across seams: ordered lists must stay ordered, and no row may repeat. On a dark UI a flat black band can match anywhere, so a low error score alone is not proof.
 
