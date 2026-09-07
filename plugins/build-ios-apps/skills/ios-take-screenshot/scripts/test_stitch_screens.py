@@ -27,6 +27,7 @@ VISIBLE = VIEWPORT - STICKY_TOP - STICKY_BOTTOM   # 580 rows of content per slic
 NAV = 80                                          # navigation bar below the status bar
 BAND_TOP, BAND_BOTTOM, BAND_STEP = 300, 500, 120  # a carousel inside a still screen
 BAND_EDGE = 20                                    # its sparse, text-like outer rows
+LIVE_TOP, LIVE_BOTTOM = 560, 800                  # a taller region of live values
 TITLED_VISIBLE = VISIBLE - NAV
 
 
@@ -152,6 +153,11 @@ def build_carousel_slices(tmp: Path) -> tuple[list[Path], np.ndarray]:
     for i in range(4):
         frame = page.copy()
         frame[BAND_TOP:BAND_BOTTOM] = strip[:, BAND_STEP * i:BAND_STEP * i + WIDTH]
+        # A taller region of live values: prices and sparklines that redraw
+        # between frames without scrolling. It changes enough rows to form a
+        # longer span than the carousel, so picking the longest span picks this.
+        live = frame[LIVE_TOP:LIVE_BOTTOM]
+        live[:, ::5] = rng.integers(0, 255, size=live[:, ::5].shape, dtype=np.uint8)
         q = tmp / f"carousel-{i:02d}.png"
         Image.fromarray(frame).save(q)
         paths.append(q)

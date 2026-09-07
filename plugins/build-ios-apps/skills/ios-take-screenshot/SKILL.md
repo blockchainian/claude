@@ -413,6 +413,12 @@ A stronger check when a stitch looks suspect: the output height should be about 
 slice plus the sum of the scroll steps. If it is far short, content was dropped no matter
 what `all_spliced` says.
 
+That check only catches a bad splice, though. It cannot catch a bad butt join, which pads
+in a whole untrimmed slice and so comes out *longer* than the arithmetic predicts even
+while a section is missing. For a butt-joined seam there is no substitute for looking at
+it: read the bottom of the earlier slice and the top of the next one, and ask whether
+anything should sit between them.
+
 ## 5. Clean Up
 
 Delete the slice directory. The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.
