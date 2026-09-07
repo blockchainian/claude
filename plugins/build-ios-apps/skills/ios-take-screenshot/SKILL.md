@@ -94,6 +94,12 @@ Read this section before your first scroll. These three facts cost an hour to le
 
 A floating scroll-to-top button, where an app has one, returns to the top of the *list*, not the top of the *page*. Expect one more `direction=down` scroll to bring a header or chart back into view.
 
+**Let the screen settle before the first slice.** A screen captured mid-transition differs
+from the same screen a moment later, and that difference is easily mistaken for scrolling.
+Screenshot twice and compare; only start capturing once two consecutive frames are nearly
+identical. Skipping this produced a run that captured one non-scrolling screen twice and
+stitched a duplicate.
+
 Capture loop:
 
 1. Scroll toward the top (`direction=down`) until the top no longer changes.
@@ -101,7 +107,17 @@ Capture loop:
 3. Scroll `direction=up` once → screenshot → next slice.
 4. Repeat to a cap of **6 slices**.
 
-Stop early when a new slice is nearly identical to the previous one — that is the bottom of the page.
+"Nearly identical" means a mean absolute pixel difference below about 2 on settled frames.
+Compare each new slice against the previous one:
+
+- **Below 2 → stop.** The page did not move. Discard that slice; it marks the bottom, it is
+  not content.
+- **If that happens on the very first scroll, the screen does not scroll at all.** One slice
+  is the whole screen. Pass it alone to the stitcher, which copies a single slice through
+  unchanged. Do not stitch a screen to itself.
+
+The stitcher reports `vs_previous_diff` per seam, which separates "never moved" from "moved
+but would not align" when a seam fails.
 
 **Infinite scroll:** if you reach the cap and the content is still advancing, take **one extra scroll and slice**, then stop. That extra slice is evidence the screen continues; report the capture as truncated rather than implying it is the whole page.
 
