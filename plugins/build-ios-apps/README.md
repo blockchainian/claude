@@ -11,11 +11,11 @@ connected iPhone.
 | `ios-debugger-agent` | Simulator | Build, run and launch an app on a booted simulator via XcodeBuildMCP, drive the UI, capture logs |
 | `ios-ettrace-performance` | Simulator | Capture symbolicated ETTrace flamegraphs for one focused flow and report the hot stacks |
 | `ios-memgraph-leaks` | Simulator | Capture and compare `.memgraph` files to root-cause leaks with before/after evidence |
-| `ios-take-screenshot` | **Real device** | Capture a whole app screen, including everything below the fold, as one stitched PNG |
+| `ios-take-screenshot` | Simulator or real device | Capture a whole app screen, including everything below the fold, as one stitched PNG |
 
 Target matters when choosing a skill: the first three drive a booted simulator
-through XcodeBuildMCP, while `ios-take-screenshot` drives a physical iPhone
-through appium-mcp and does not work against a simulator.
+through XcodeBuildMCP. `ios-take-screenshot` drives either, XcodeBuildMCP for a
+simulator and appium-mcp for a phone, and picks by what the request asks for.
 
 The two profiling skills build on `ios-debugger-agent` for the build, launch,
 and UI-driving steps.
@@ -62,6 +62,7 @@ when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 - macOS with Xcode and the iOS Simulator installed
 - `npx` on PATH
 - `ettrace` for the profiling skill: `brew install emergetools/homebrew-tap/ettrace`
+- for `ios-take-screenshot` against a simulator: nothing beyond a booted simulator
 - for `ios-take-screenshot` against a real iPhone: an Apple Developer account,
   WebDriverAgent signed onto the device, and both Developer Mode and
   Settings -> Developer -> Enable UI Automation turned on
