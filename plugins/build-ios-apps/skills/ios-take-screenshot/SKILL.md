@@ -140,6 +140,12 @@ Screenshot twice and compare; only start capturing once two consecutive frames a
 identical. Skipping this produced a run that captured one non-scrolling screen twice and
 stitched a duplicate.
 
+**Bound that wait to about three attempts.** A live feed never settles — its content keeps
+arriving — so an unbounded settle loop waits forever. Tell the two apart by whether the
+change decays: a transition drops to near zero within a second or two, while live content
+holds a steady difference indefinitely. Once you have established it is live, capture
+anyway and say so in the report.
+
 Capture loop:
 
 1. Scroll toward the top (`direction=down`) until the top no longer changes.
@@ -169,6 +175,12 @@ Judge which case you are in by what is advancing. Repeating rows of the same sha
 holders list, a feed, a leaderboard — are an endless list: stop at two screens. Distinct
 sections that each appear once — a description, a stats table, a footer — are finite page
 content: follow them to the bottom.
+
+**A live feed cannot be captured as one coherent page.** New rows arrive between slices, so
+the stitched image is a composite of two moments rather than a snapshot of one: row ages
+will not read in order, and a "new activity" pill may appear mid-image. Seam error also
+runs close to the accept threshold, because no two frames of a live screen match cleanly.
+Present such a capture as a composite, not as the state of the screen at one instant.
 
 Save slices at full resolution — do not pass `maxWidth` when capturing for a stitch, since downscaling loses the detail the overlap matcher needs.
 
