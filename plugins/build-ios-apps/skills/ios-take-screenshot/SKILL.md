@@ -157,11 +157,28 @@ Read this section before your first scroll. These three facts cost an hour to le
   That selector returns the **first** match in hierarchy order, which is not necessarily the
   one holding the content you want. It may scroll a different axis, or be nested, or be
   inert. So after the first scroll, compare against the previous frame: if nothing moved,
-  try `**/XCUIElementTypeScrollView[2]`, then `[3]`, and so on. Only when no candidate moves
-  the screen have you established that it does not scroll.
+  try `**/XCUIElementTypeScrollView[2]`, then `[3]`, and so on. Exhausting them establishes
+  only that nothing moves the screen **vertically** — see below before calling the screen
+  one viewport tall.
 - **One scoped scroll advances roughly a full viewport.** That is fine — the stitcher measures the real offset. Do not hand-tune drag coordinates; scoped `direction` scrolls are far more reliable than custom `x/y/endX/endY` drags, which frequently move nothing.
 
 A floating scroll-to-top button, where an app has one, returns to the top of the *list*, not the top of the *page*. Expect one more `direction=down` scroll to bring a header or chart back into view.
+
+**One capture covers one axis.** The loop below scrolls vertically, and the stitcher joins
+slices along that axis. Before concluding a screen does not scroll at all, try a horizontal
+scroll on the same containers:
+
+- **A screen that only scrolls sideways** — a wide table, a paged gallery — moves on the
+  horizontal attempt. Capture it the same way, scrolling `direction=left` to advance, and
+  stitch with `--axis horizontal`. Fixed chrome is then read off the left and right edges,
+  so `--sticky-top` and `--sticky-bottom` mean left and right if you need to override them.
+- **A screen that scrolls both ways** cannot become one image. Capture the vertical page as
+  the main artifact, then capture any horizontally scrollable region as its own image named
+  for that region. Do not try to assemble a two-dimensional mosaic: the overlap matcher
+  aligns along a single axis, and a grid of slices gives it no consistent seam to find.
+
+Either way, say in the report which axis was captured and whether content extends past it.
+A capture that silently drops the other axis reads as complete when it is not.
 
 **Let the screen settle before the first slice.** A screen captured mid-transition differs
 from the same screen a moment later, and that difference is easily mistaken for scrolling.
