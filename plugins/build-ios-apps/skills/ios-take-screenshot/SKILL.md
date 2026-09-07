@@ -54,8 +54,8 @@ printf 'RUN_ID=%s\nSLICE_DIR=%s\nOUT_ROOT=%s\n' "$RUN_ID" "$SLICE_DIR" "$OUT_ROO
 ```
 
 The stitched PNG goes where the caller asks, via `--out`. `IOS_SCREENSHOT_DIR` only
-takes effect if it is set in the shell that runs this command, so to use it, put it on the
-command line: `IOS_SCREENSHOT_DIR=/some/dir RUN_ID=...`. `RUN_ID` gives each run its own
+takes effect if it is set in the shell that runs this command, so to use it, make
+`IOS_SCREENSHOT_DIR=/some/dir` the first line of that same command. `RUN_ID` gives each run its own
 subdirectory under it, so two sessions capturing the same screen cannot overwrite each
 other, and it is also the name under which this run claims its simulator.
 
@@ -297,10 +297,10 @@ Save slices at full resolution — do not pass `maxWidth` when capturing for a s
 lossy JPEG — 369x800 for a screen that is really 1179x2556 — whatever the file is named. It
 is fine for looking at a screen; it destroys the detail the overlap matcher needs. Capture
 with the wrapper instead, which writes a full-resolution PNG straight into `SLICE_DIR`, so
-there is no copy step, and refuses a simulator this run has not claimed:
+there is no copy step, and refuses a simulator this run does not hold:
 
 ```bash
-"$SKILL_DIR/scripts/capture_slice.sh" --simulator "$UDID" \
+"$SKILL_DIR/scripts/capture_slice.sh" --simulator "$UDID" --run "$RUN_ID" \
   --out "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
@@ -496,8 +496,9 @@ down the finished page. That is a property of the screen, not a bad stitch. Say 
 report rather than re-running.
 
 A stronger check when a stitch looks suspect: the output height should be about the first
-slice plus the sum of the scroll steps. If it is far short, content was dropped no matter
-what `all_spliced` says.
+slice plus the sum of the scroll steps, minus the bottom chrome, which the first slice
+carries and the stitch drops. If it is far short, content was dropped no matter what
+`all_spliced` says.
 
 That check only catches a bad splice, though. It cannot catch a bad butt join, which pads
 in a whole untrimmed slice and so comes out *longer* than the arithmetic predicts even
@@ -524,7 +525,7 @@ hyphens: `ChadWallet` becomes `chadwallet`.
 
 `scripts/test_claim_simulator.py` covers the simulator claim: one run holds a simulator, a
 second claim is refused with the holder named, only the holder releases, and capture
-refuses both `booted` and an unclaimed simulator. `scripts/test_discover_ios_setup.py`
+refuses `booted`, an unclaimed simulator, and one held by another run. `scripts/test_discover_ios_setup.py`
 covers the simulator report: the pick is named in full, a shutdown UDID is reported as
 such, and two booted simulators ask for `--device`.
 

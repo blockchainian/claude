@@ -103,6 +103,9 @@ def main() -> int:
         r = run(a, e)
         if r["differs"] or r["scrolled"]:
             failures.append(f"identical frames reported as changed: {r}")
+        r = run(a, e, chrome=False)
+        if r["sticky_top"] or r["sticky_bottom"]:
+            failures.append(f"identical frames have no chrome to detect, yet: {r}")
 
     for f in failures:
         print("FAIL:", f)
