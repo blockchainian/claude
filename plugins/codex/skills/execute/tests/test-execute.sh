@@ -126,6 +126,21 @@ assert_eq "missing handoff.md exits 1" 1 "$GATE_RC"
 assert "missing handoff.md names the file" grep -q 'handoff.md' "$SCRATCH/nohandoff.log"
 assert_eq "gated run creates no run state" 0 "$(ls -d "$FIX/.git/codex-execute/feat-gate" 2>/dev/null | wc -l | tr -d ' ')"
 
+# ---------- daemon start cwd ----------
+# The shared app-server daemon inherits the cwd of whoever starts it, and every later codex TUI
+# attaches to it. Starting it from a worktree that is later deleted breaks thread/start for all
+# clients, so the engine must start it from $HOME.
+if [ "$TEST_EXECUTE_RUNNER" = "daemon" ]; then
+  mkdir -p "$SCRATCH/not-a-repo"
+  set +e
+  (cd "$SCRATCH/not-a-repo" && env -u EXECUTE_DAEMON_RUNNER "$ENGINE" --workstreams "$FIX/workstreams.txt" \
+    --feature feat-cwd --check "sh ./check.sh") > "$SCRATCH/daemon-cwd.log" 2>&1
+  set -e 2>/dev/null || true
+  assert "engine started the daemon" test -f "$STUB_DIR/daemon-start-cwd"
+  assert_eq "daemon is started from \$HOME, not the launching directory" "$HOME" "$(cat "$STUB_DIR/daemon-start-cwd" 2>/dev/null)"
+  assert "engine stopped at the repo check after the daemon block" grep -q 'not in a git repo' "$SCRATCH/daemon-cwd.log"
+fi
+
 # ---------- scenario 1: partial run, delivery onto the session branch ----------
 set +e
 "$ENGINE" --workstreams "$FIX/workstreams.txt" --feature feat-x \
