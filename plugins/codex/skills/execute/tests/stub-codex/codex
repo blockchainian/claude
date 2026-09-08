@@ -29,6 +29,14 @@ while [ $i -lt ${#args[@]} ]; do
   i=$((i+1))
 done
 
+if [ "${args[0]:-}" = "app-server" ] && [ "${args[1]:-}" = "daemon" ]; then
+  case "${args[2]:-}" in
+    start) pwd > "${STUB_DIR:?}/daemon-start-cwd"; exit 0 ;;
+    version) echo '{"status":"running"}'; exit 0 ;;
+    *) exit 1 ;;
+  esac
+fi
+
 if [ "$MODE" = "review" ]; then
   scenario_bump REVIEW; scenario_log "REVIEW cfg=${CFG# }"
   # record whether the engine still holds the delivery lock while reviewing

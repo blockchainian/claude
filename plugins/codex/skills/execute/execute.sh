@@ -219,7 +219,9 @@ HANDOFF="$(dirname "$WORKSTREAMS")/handoff.md"
 [ -f "$HANDOFF" ] || fatal "handoff.md not found beside workstreams: $HANDOFF (write it, then launch from a fresh session)"
 
 if [ "$EXECUTE_RUNNER" = "daemon" ] && [ "$DAEMON_RUNNER_OVERRIDDEN" = "0" ]; then
-  "$CODEX" app-server daemon start >/dev/null 2>&1 \
+  # The daemon keeps the cwd it was started from for its whole life and every later codex TUI
+  # attaches to it; a worktree cwd that is later deleted breaks thread/start for all of them.
+  (cd "$HOME" && "$CODEX" app-server daemon start) >/dev/null 2>&1 \
     || fatal "codex app-server daemon failed to start; use --runner exec as a fallback"
   DAEMON_VERSION="$("$CODEX" app-server daemon version 2>/dev/null)" \
     || fatal "codex app-server daemon is unavailable; use --runner exec as a fallback"
