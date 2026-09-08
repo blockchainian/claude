@@ -195,8 +195,9 @@ it is visible to every session of the same user; releasing it is part of cleanup
 Pass the `sessionDefaults` object to `session_set_defaults`, so every XcodeBuildMCP call
 targets that simulator, then call `session_show_defaults` and check that `simulatorId` is
 the UDID you claimed. The defaults belong to the XcodeBuildMCP server, which every agent in
-this session shares, so they can already hold a different simulator set by an earlier
-agent, and nothing warns you. None of `launch_app_sim`, `snapshot_ui`, `tap`, `swipe` or
+this session shares, so they can already hold a different simulator, or a different
+app's bundle id, set by an earlier agent, and nothing warns you. Set both and read both
+back. None of `launch_app_sim`, `snapshot_ui`, `tap`, `swipe` or
 `screenshot` takes a simulator of its own, whatever their `nextSteps` hints claim about a
 `simulatorId` parameter; there is no per-call targeting. What each response does carry is
 the simulator it hit, as `artifacts.simulatorId` (`udid` in a snapshot). Compare that with
@@ -238,8 +239,10 @@ If no Appium session exists yet, create one: `select_device` (`platform=ios`, `i
 script also accepts `booted`, but only when exactly one simulator is running — with several
 up it refuses rather than answering about an arbitrary one.
 
-Then `launch_app_sim` with that bundle id, and screenshot to see where the app resumed. A
-development build may resume on its dev launcher — a list of servers, not the app. Pick the
+Then `launch_app_sim` with that bundle id. The screen can stay blank for several seconds
+after launch, so wait with `wait_for_ui` (`predicate: settled`) before the first screenshot,
+then screenshot to see where the app resumed. A development build may resume on its dev
+launcher — a list of servers, not the app. Pick the
 running server from that list and dismiss any developer menu, then confirm the app itself
 is on screen before going further.
 
@@ -378,6 +381,12 @@ Screenshot twice and compare; only start capturing once two consecutive frames a
 identical. Skipping this produced a run that captured one non-scrolling screen twice and
 stitched a duplicate.
 
+Name every throwaway frame — settle probes, the at-the-top check, the bottom marker —
+outside the slice pattern, `probe-*.png` in `SLICE_DIR`, so the `slice-*.png` glob at
+stitch time cannot pick one up. A probe that slips into the stitch is not always caught:
+the stitcher refuses an identical pair, but a probe taken mid-transition is not identical
+to anything.
+
 Compare two frames with:
 
 ```bash
@@ -409,8 +418,9 @@ Capture loop:
 "Nearly identical" means a `mean_abs_diff` below about 2 on settled frames.
 Compare each new slice against the previous one:
 
-- **Below 2 → stop.** The page did not move. Discard that slice; it marks the bottom, it is
-  not content.
+- **Below 2 → stop.** The page did not move. That frame marks the bottom, it is not
+  content: capture it as a probe, never as a slice, so nothing has to be deleted before the
+  stitch.
 - **If that happens on the very first scroll, the screen does not scroll at all.** One slice
   is the whole screen. Pass it alone to the stitcher, which copies a single slice through
   unchanged. Do not stitch a screen to itself.
@@ -432,12 +442,14 @@ partly visible on the first screen, so a single scroll reveals the next page of 
 the stitched image makes the endless section obvious. Stop there and report the capture as
 truncated.
 
-Two slices is also the one case where chrome detection cannot help itself. It works by
-comparing slices, and with a single pair the first slice's expanded navigation title is
-half the evidence, so it reads as content and the crop stops short of the title bar. The
-seam then fails loudly rather than silently — `all_spliced` is false and the slices are
-butt-joined. If that happens on a two-slice capture, read the chrome height off a slice and
-pass `--sticky-top` explicitly; do not reach for `--max-error`.
+Two slices is also the one case where chrome detection has the least to work with. It
+works by comparing slices, and with a single pair the first slice is half the evidence, so
+where the app expands a large navigation title at the top of a page and collapses it once
+the page moves, that band reads as content and the crop stops short of the title bar. A
+compact title bar that does not change detects fine. When it does go wrong, the seam fails
+loudly rather than silently — `all_spliced` is false and the slices are butt-joined. If
+that happens on a two-slice capture, read the chrome height off a slice and pass
+`--sticky-top` explicitly; do not reach for `--max-error`.
 
 Judge which case you are in by what is advancing. Repeating rows of the same shape — a
 comment thread, a feed, a search-results list — are an endless list: stop at two screens. Distinct
@@ -491,7 +503,7 @@ If `sticky_detected` in the verdict looks wrong, override it and re-run. Both fl
 --sticky-top 362 --sticky-bottom 357
 ```
 
-Read those off a slice: how tall is the status bar plus any pinned header, and how tall is the pinned bottom bar. Detection handles a pinned header that shows a live-updating value, because it measures the share of pixels in a row that change rather than the size of the change. It also ignores the first slice when three or more were captured, because iOS expands a large navigation title at the top of a page and collapses it as soon as the page moves — measuring that band against later slices reads it as content and crops short of it. With exactly two slices there is nothing left to measure once the first is set aside, so that screen needs `--sticky-top` passed by hand.
+Read those off a slice: how tall is the status bar plus any pinned header, and how tall is the pinned bottom bar. Detection handles a pinned header that shows a live-updating value, because it measures the share of pixels in a row that change rather than the size of the change. It also ignores the first slice when three or more were captured, because iOS expands a large navigation title at the top of a page and collapses it as soon as the page moves — measuring that band against later slices reads it as content and crops short of it. With exactly two slices there is nothing left to measure once the first is set aside, so it is measured, and a screen whose title collapses after the first slice then needs `--sticky-top` passed by hand.
 
 Verify the result by opening it and checking continuity across seams: ordered lists must stay ordered, and no row may repeat. On a dark UI a flat black band can match anywhere, so a low error score alone is not proof.
 
