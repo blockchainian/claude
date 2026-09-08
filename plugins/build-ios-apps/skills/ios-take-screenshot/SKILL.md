@@ -47,7 +47,8 @@ Run this one command and read the three values out of its output:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-SLICE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-screenshot.XXXXXX")"
+TMP="${TMPDIR:-/tmp}"
+SLICE_DIR="$(mktemp -d "${TMP%/}/ios-screenshot.XXXXXX")"
 OUT_ROOT="${IOS_SCREENSHOT_DIR:-/tmp/build-ios-app}/$RUN_ID"
 mkdir -p "$SLICE_DIR" "$OUT_ROOT"
 printf 'RUN_ID=%s\nSLICE_DIR=%s\nOUT_ROOT=%s\n' "$RUN_ID" "$SLICE_DIR" "$OUT_ROOT"
@@ -304,21 +305,23 @@ there is no copy step, and refuses a simulator this run does not hold:
   --out "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
+Exit 0 prints the path it wrote. Exit 2 is a bad argument, `booted` included. Exit 3 is a
+simulator this run does not hold — unclaimed, or held by another run, which the message
+names; that is not a retry, it is the one-agent-per-simulator rule.
+
 Scroll with `swipe`, which requires `withinElementRef`. Get the first ref from
-`snapshot_ui` — it lists scrollable targets. After that, where the next ref comes from
-depends on what the swipe returned:
+`snapshot_ui` — it lists scrollable targets. After every swipe, call `snapshot_ui` again
+for the next ref. The swipe response carries a fresh snapshot only when the accessibility
+tree settled in time, and on a live screen it rarely does: the usual response is the settle
+warning described below, with no targets in it. If a swipe does return targets, use them
+and skip the call.
 
-- **The response carries a fresh snapshot** — take the next ref from it, no extra call.
-- **The response is only a settle warning** (see below), and carries no targets at all.
-  Then call `snapshot_ui` again for the next ref. On a busy screen this is the common case,
-  so expect to call it after most swipes.
-
-Either way, never reuse a ref across a swipe on the strength of it having worked before.
-Refs go stale as soon as the screen moves, and a stale one fails with
-`TARGET_NOT_ACTIONABLE` or `SNAPSHOT_MISSING`. A top-level container sometimes keeps the
-same ref string for a swipe or two and then stops, with nothing to warn you which time is
-the last — so read it fresh every time, and on either error take a new snapshot rather than
-retrying the same ref.
+Never reuse a ref across a swipe on the strength of it having worked before. A ref can go
+stale once the screen moves, and a stale one fails with `TARGET_NOT_ACTIONABLE` or
+`SNAPSHOT_MISSING`. A top-level container often keeps the same ref string for a whole
+capture, and sometimes for a swipe or two before it changes, with nothing to say which
+time is the last. Reading it fresh costs one call; a stale ref costs a failed swipe and a
+snapshot anyway. On either error take a new snapshot rather than retrying the same ref.
 
 No delay is needed between the swipe and the capture: by the time `swipe` returns, the
 screen has stopped moving. Expect `swipe` to warn `SNAPSHOT_CAPTURE_FAILED` — "the
@@ -395,7 +398,10 @@ anyway and say so in the report.
 
 Capture loop:
 
-1. Scroll toward the top (`direction=down`) until the top no longer changes.
+1. Scroll toward the top (`direction=down`) until the top no longer changes: capture a
+   frame, swipe once more, capture again, and compare with `frame_diff.py`. `scrolled_px`
+   0 on that pair means you are at the top; that frame is slice 1. An app usually resumes
+   near the top of a tab, so this is often a single swipe.
 2. Screenshot → slice 1.
 3. Scroll `direction=up` once → screenshot → next slice.
 4. Repeat until the page stops moving, with a hard stop at **6 slices**.
@@ -489,11 +495,13 @@ Read those off a slice: how tall is the status bar plus any pinned header, and h
 
 Verify the result by opening it and checking continuity across seams: ordered lists must stay ordered, and no row may repeat. On a dark UI a flat black band can match anywhere, so a low error score alone is not proof.
 
-One thing the stitcher cannot remove: a button that floats over the middle of the page
-rather than sitting at an edge. Chrome is detected at the top and bottom edges only, so a
-floating action button is spliced in as content and appears once per slice — twice or more
-down the finished page. That is a property of the screen, not a bad stitch. Say so in the
-report rather than re-running.
+One thing the stitcher cannot remove: a button that floats over the page rather than
+sitting flush with an edge. Chrome is detected at the top and bottom edges only, so a
+floating action button is spliced in as content wherever it sits inside the part of a
+slice the stitch keeps. Whether it repeats depends on where it floats and how far each
+scroll advanced: one pinned near the bottom edge usually lands in the tail every splice
+discards and shows once, while one over the middle can show once per slice. A repeat is a
+property of the screen, not a bad stitch. Say so in the report rather than re-running.
 
 A stronger check when a stitch looks suspect: the output height should be about the first
 slice plus the sum of the scroll steps, minus the bottom chrome, which the first slice
