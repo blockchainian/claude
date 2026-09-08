@@ -308,7 +308,9 @@ there is no copy step, and refuses a simulator this run does not hold:
   --out "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
-Exit 0 prints the path it wrote. Exit 2 is a bad argument, `booted` included. Exit 3 is a
+Every script here prints its result as JSON on stdout; the one-line package note `uv`
+prints on a first run goes to stderr, so parse stdout alone. Exit 0 prints the path it
+wrote. Exit 2 is a bad argument, `booted` included. Exit 3 is a
 simulator this run does not hold — unclaimed, or held by another run, which the message
 names; that is not a retry, it is the one-agent-per-simulator rule.
 
@@ -408,10 +410,10 @@ anyway and say so in the report.
 Capture loop:
 
 1. Scroll toward the top (`direction=down`) until the top no longer changes: capture a
-   frame, swipe once more, capture again, and compare with `frame_diff.py`. `scrolled_px`
-   0 on that pair means you are at the top; that frame is slice 1. An app usually resumes
-   near the top of a tab, so this is often a single swipe.
-2. Screenshot → slice 1.
+   probe, swipe once more, capture another probe, and compare with `frame_diff.py`.
+   `scrolled_px` 0 on that pair means you are at the top. An app usually resumes near the
+   top of a tab, so this is often a single swipe.
+2. Capture slice 1 — a fresh capture named as a slice, not one of the probes.
 3. Scroll `direction=up` once → screenshot → next slice.
 4. Repeat until the page stops moving, with a hard stop at **6 slices**.
 
@@ -528,7 +530,9 @@ anything should sit between them.
 
 ## 5. Clean Up
 
-Delete the slice directory, and on a simulator release the claim:
+Delete the slice directory, and on a simulator release the claim. A run that captures
+several screens keeps its claim until the last one; releasing between screens only invites
+another agent in mid-run:
 
 ```bash
 "$SKILL_DIR/scripts/claim_simulator.py" "$UDID" --run "$RUN_ID" --release
