@@ -1,0 +1,21 @@
+{
+  "name": "render",
+  "description": "Deploy, debug, and monitor applications on Render: the Render MCP server over OAuth, the render-assistant agent, the render.yaml validation hook, and the nine Render skills for CLI, Blueprints, debugging, monitoring, env vars, Postgres, Key Value, disks, and MCP setup.",
+  "version": "0.2.2",
+  "author": {
+    "name": "Render",
+    "email": "support@render.com",
+    "url": "https://render.com"
+  },
+  "homepage": "https://github.com/render-oss/render-plugin-claude-code",
+  "repository": "https://github.com/blockchainian/claude",
+  "license": "MIT",
+  "keywords": [
+    "render",
+    "deploy",
+    "cloud",
+    "blueprint",
+    "monitoring",
+    "debugging"
+  ]
+}
