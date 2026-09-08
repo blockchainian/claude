@@ -1,0 +1,11 @@
+{
+  "name": "cloudflare",
+  "description": "Skills for the Cloudflare developer platform: Workers, Durable Objects, Agents SDK, Wrangler CLI, and web performance, with the five Cloudflare MCP servers.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Cloudflare"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/cloudflare/skills",
+  "repository": "https://github.com/blockchainian/claude"
+}
