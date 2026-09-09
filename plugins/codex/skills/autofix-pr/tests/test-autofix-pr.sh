@@ -99,7 +99,8 @@ write_threads "$STUB_DIR/threads.json" "$(thread T1 false proxy/src/api.ts 'null
 write_threads "$STUB_DIR/threads.after.json" "$(thread T1 true proxy/src/api.ts 'null deref on the error path')"
 cat > "$STUB_DIR/last-message.txt" <<'EOF'
 Fixed the null deref and pushed.
-Deployed staging at bbbbbbb2 and verified the routed hostname.
+Deployed staging: {"target": "staging", "sha": "bbbbbbb2", "ok": true, "steps": []}
+wrangler said: Current Version ID: 30e88bb3-9cc7-463b-863e-c6ef33b51657 for staging.
 EOF
 cat > "$STUB_DIR/round-action.sh" <<'EOF'
 cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
@@ -110,7 +111,7 @@ run_driver --max-rounds 2
 echo "---- scenario 1 exit=$RC ----"
 echo "$OUT"
 assert_eq "clean round exits 0" 0 "$RC"
-assert "output is one flat JSON object" jq -e 'type == "object" and (map(type == "array" or type == "number") | all)' "$SCRATCH/out.json"
+assert "output is one flat JSON object" jq -e 'type == "object" and (map(type == "array" or type == "number" or type == "boolean") | all)' "$SCRATCH/out.json"
 assert_eq "one round ran" 1 "$(field .rounds)"
 assert_eq "the pushed head sha is reported" '["bbbbbbb2"]' "$(field .pushed)"
 assert_eq "the staging deploy sha is reported" '["bbbbbbb2"]' "$(field .staging_deploys)"
@@ -122,8 +123,8 @@ assert "the daemon thread carries the round name" \
   grep -q '^name=7/fix-pr r1 ' "$STUB_DIR/invocations.log"
 assert "the prompt names the Codex fix-pr skill and the PR" \
   grep -q 'fix-pr skill' "$STUB_DIR/prompts.log"
-assert "the prompt does not ask for staging-only" \
-  sh -c "! grep -q 'staging-only' '$STUB_DIR/prompts.log'"
+assert "the prompt asks for staging-only by default" grep -q 'staging-only' "$STUB_DIR/prompts.log"
+assert_eq "the run is not awaiting a review" false "$(field .awaiting_review)"
 assert "gh read the review threads over graphql" grep -q 'graphql' "$STUB_DIR/gh.log"
 
 # ---------- scenario 2: rounds exhausted ----------
@@ -156,7 +157,7 @@ cat > "$STUB_DIR/round-action.sh" <<'EOF'
 cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
 EOF
 
-run_driver --max-rounds 2 --staging-only
+run_driver --max-rounds 2
 echo "---- scenario 3 exit=$RC ----"
 echo "$OUT"
 assert_eq "a UX thread alone does not block completion" 0 "$RC"
@@ -164,6 +165,23 @@ assert_eq "one round ran" 1 "$(field .rounds)"
 assert_eq "the UX thread is routed to Claude Code" '["T_UX"]' "$(field .ux_threads)"
 assert_eq "the UX thread is not counted as remaining" '[]' "$(field .remaining)"
 assert "staging-only is passed to the Codex skill" grep -q 'staging-only' "$STUB_DIR/prompts.log"
+
+# ---------- scenario 3c: --ship-production hands the production flip to the Codex skill ----------
+new_stub_dir ship
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T_S false proxy/src/api.ts 'off by one')"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T_S true proxy/src/api.ts 'off by one')"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+EOF
+
+run_driver --max-rounds 1 --ship-production
+echo "---- scenario 3c exit=$RC ----"
+assert "with --ship-production the prompt asks for production" grep -q 'deploy production' "$STUB_DIR/prompts.log"
+assert "with --ship-production the prompt does not say staging-only" \
+  sh -c "! grep -q 'staging-only' '$STUB_DIR/prompts.log'"
 
 # ---------- scenario 3b: the same thread without the PR label stays remaining ----------
 new_stub_dir ux-nolabel
@@ -210,6 +228,66 @@ echo "$OUT"
 assert_eq "no round runs without a review newer than the head" 0 "$(field .rounds)"
 assert_eq "the driver reports the pre-existing thread" '["T4"]' "$(field .remaining)"
 assert "codex was never invoked" test ! -f "$STUB_DIR/invocations.log"
+
+# ---------- scenario 6: the reviewer reacts to the push with a review, no inline comment ----------
+new_stub_dir rereview
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T5 false proxy/src/api.ts 'first finding')"
+write_threads "$STUB_DIR/threads.r1.json" "$(thread T5 true proxy/src/api.ts 'first finding')" "$(thread T6 false proxy/src/db.ts 'finding on the fix')"
+write_threads "$STUB_DIR/threads.r2.json" "$(thread T5 true proxy/src/api.ts 'first finding')" "$(thread T6 true proxy/src/db.ts 'finding on the fix')"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+if [ "$STUB_ROUND" = 1 ]; then
+  cp "$STUB_DIR/threads.r1.json" "$STUB_DIR/threads.json"
+  sed 's/aaaaaaa1/bbbbbbb2/' "$STUB_DIR/pr.json" > "$STUB_DIR/pr.json.tmp" && mv "$STUB_DIR/pr.json.tmp" "$STUB_DIR/pr.json"
+  printf '{"commit": {"committer": {"date": "2026-09-08T12:00:00Z"}}}\n' > "$STUB_DIR/commit.json"
+  printf '[{"id": 9, "submitted_at": "2026-09-08T12:30:00Z", "state": "COMMENTED", "body": "review"}]\n' > "$STUB_DIR/reviews.json"
+else
+  cp "$STUB_DIR/threads.r2.json" "$STUB_DIR/threads.json"
+fi
+EOF
+
+run_driver --max-rounds 2
+echo "---- scenario 6 exit=$RC ----"
+echo "$OUT"
+assert_eq "the thread the reviewer opened on the push is fixed in round 2" 2 "$(field .rounds)"
+assert_eq "nothing remains after the re-review" '[]' "$(field .remaining)"
+assert_eq "the push is reported once" '["bbbbbbb2"]' "$(field .pushed)"
+assert "the driver read the submitted reviews" grep -q '/reviews' "$STUB_DIR/gh.log"
+
+# ---------- scenario 7: no review reaches the pushed head within the wait ----------
+new_stub_dir unreviewed
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T7 false proxy/src/api.ts 'finding')"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T7 true proxy/src/api.ts 'finding')"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+sed 's/aaaaaaa1/bbbbbbb2/' "$STUB_DIR/pr.json" > "$STUB_DIR/pr.json.tmp" && mv "$STUB_DIR/pr.json.tmp" "$STUB_DIR/pr.json"
+printf '{"commit": {"committer": {"date": "2026-09-08T12:00:00Z"}}}\n' > "$STUB_DIR/commit.json"
+EOF
+
+run_driver --max-rounds 2
+echo "---- scenario 7 exit=$RC ----"
+echo "$OUT"
+assert_eq "one round ran" 1 "$(field .rounds)"
+assert_eq "an unreviewed push is reported as awaiting review" true "$(field .awaiting_review)"
+assert_eq "nothing is known to remain" '[]' "$(field .remaining)"
+
+# ---------- scenario 8: a PR pushed after its last review is not read as clean ----------
+new_stub_dir fresh-push
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T12:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json"
+
+run_driver --max-rounds 2
+echo "---- scenario 8 exit=$RC ----"
+echo "$OUT"
+assert_eq "no round runs" 0 "$(field .rounds)"
+assert_eq "the unreviewed head is reported as awaiting review" true "$(field .awaiting_review)"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; exit 1; fi
