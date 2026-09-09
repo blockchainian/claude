@@ -8,6 +8,7 @@ echo "$*" >> "${STUB_DIR:?}/gh.log"
 case "$*" in
   "api user") echo '{"login": "me"}' ;;
   *graphql*) cat "$STUB_DIR/threads.json" ;;
+  *"/reactions"*) if [ -f "$STUB_DIR/reactions.json" ]; then cat "$STUB_DIR/reactions.json"; else echo "[]"; fi ;;
   *"/reviews"*) if [ -f "$STUB_DIR/reviews.json" ]; then cat "$STUB_DIR/reviews.json"; else echo "[]"; fi ;;
   *"/comments"*) cat "$STUB_DIR/comments.json" ;;
   *"/commits/"*) cat "$STUB_DIR/commit.json" ;;
