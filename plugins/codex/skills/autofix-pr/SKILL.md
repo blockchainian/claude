@@ -27,7 +27,9 @@ ${CLAUDE_PLUGIN_ROOT}/skills/autofix-pr/autofix-pr.sh --pr <number> \
 Launch it in the background and END YOUR TURN. Each round:
 
 1. Waits for a review submitted on the current head commit, or a review comment or reaction
-   on the PR newer than that commit's time, from anyone but the account running the engine
+   on the PR newer than that commit's time, from anyone but the account running the engine.
+   The head is the branch ref's commit, not the pull request's head, which GitHub can leave
+   lagging a push by minutes
    — one GraphQL query per poll, at most `--wait / --poll` checks. GraphQL has its own rate budget,
    so several engines polling at once leave the REST budget to the Codex skill. A clean Codex re-review leaves
    no review: the bot reacts with a thumbs-up on the PR, so thumbs-up reactions count. Its

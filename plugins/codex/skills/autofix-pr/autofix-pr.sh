@@ -20,7 +20,7 @@ Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--production]
   timeout      per-Codex-invocation seconds    (default: 3600)
 
 Each round waits for a submitted review, review comment, or PR reaction newer than the
-current PR head, runs the Codex fix-pr skill as a daemon thread named '<pr>/fix-pr r<n>', then
+current branch head (the branch ref, since the PR head can lag a push), runs the Codex fix-pr skill as a daemon thread named '<pr>/fix-pr r<n>', then
 re-reads the PR. After a push the next round waits for the reviewer to react to the new
 head before reading the threads. The run ends when a reviewed head has no unresolved
 must-fix thread, the rounds are exhausted, or no review arrives in time, and prints one
@@ -93,10 +93,15 @@ ME="$(gh_api user | jq -r '.login // ""' 2>/dev/null)"
 UX_LABEL="claude-code-ux"
 UX_MARKER="[UX — Claude Code]"
 
-HEAD_SHA="" HEAD_TIME="" HAS_UX_LABEL=0
+# The head is read from the branch ref, not from the PR: GitHub's pull-request head can lag a
+# push by minutes, and a review matched against the lagging head would pass for a branch head
+# the reviewer has not seen.
+HEAD_SHA="" HEAD_TIME="" HEAD_REF="" HAS_UX_LABEL=0
 refresh_pr() {
   gh_api "repos/{owner}/{repo}/pulls/$PR" > "$WORK/pr.json" || fatal "cannot read PR #$PR"
-  HEAD_SHA="$(jq -r '.head.sha' "$WORK/pr.json")"
+  HEAD_REF="$(jq -r '.head.ref' "$WORK/pr.json")"
+  HEAD_SHA="$(gh_api "repos/{owner}/{repo}/git/ref/heads/$HEAD_REF" | jq -r '.object.sha' 2>/dev/null)"
+  [ -n "$HEAD_SHA" ] && [ "$HEAD_SHA" != "null" ] || HEAD_SHA="$(jq -r '.head.sha' "$WORK/pr.json")"
   OWNER="$(jq -r '.base.repo.owner.login' "$WORK/pr.json")"
   NAME="$(jq -r '.base.repo.name' "$WORK/pr.json")"
   HAS_UX_LABEL="$(jq -r --arg l "$UX_LABEL" '[.labels[]?.name] | index($l) | if . == null then 0 else 1 end' "$WORK/pr.json")"
