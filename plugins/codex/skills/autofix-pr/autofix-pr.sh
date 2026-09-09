@@ -137,16 +137,18 @@ classify() {
 WAIT_QUERY='query($owner: String!, $name: String!, $pr: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $pr) {
-      reviews(last: 50) { nodes { submittedAt author { login } } }
+      reviews(last: 50) { nodes { submittedAt author { login } commit { oid } } }
       reviewThreads(last: 100) { nodes { comments(last: 10) { nodes { createdAt author { login } } } } }
       reactions(last: 50) { nodes { createdAt content user { login } } }
     }
   }
 }'
 
-# Bounded poll: at most WAIT_S/POLL_S checks for a submitted review, a review comment, or a
-# thumbs-up on the PR newer than the PR head from anyone but this account. A clean Codex
-# re-review leaves no review at all: the bot reacts with a thumbs-up on the PR; its "eyes"
+# Bounded poll: at most WAIT_S/POLL_S checks for a review submitted on the head commit, or a
+# review comment or thumbs-up on the PR newer than the head's commit time, from anyone but this
+# account. A review records the commit it was made on, so it is matched by SHA; a comment's
+# commit follows the moving head and a reaction has none, so those two stay time-based. A clean
+# Codex re-review leaves no review at all: the bot reacts with a thumbs-up on the PR; its "eyes"
 # reaction only means the review is in progress.
 wait_for_review() {
   local checks=$((WAIT_S / POLL_S)) i=0 fresh
@@ -154,9 +156,9 @@ wait_for_review() {
   while [ "$i" -lt "$checks" ]; do
     i=$((i+1))
     fresh="$(gh_api graphql -F owner="$OWNER" -F name="$NAME" -F pr="$PR" -f query="$WAIT_QUERY" \
-      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '
+      | jq -r --arg t "$HEAD_TIME" --arg head "$HEAD_SHA" --arg me "$ME" '
           .data.repository.pullRequest as $p
-          | ([$p.reviews.nodes[] | select(.submittedAt > $t and (.author.login // "") != $me)]
+          | ([$p.reviews.nodes[] | select(.submittedAt != null and .commit.oid == $head and (.author.login // "") != $me)]
              + [$p.reviewThreads.nodes[].comments.nodes[] | select(.createdAt > $t and (.author.login // "") != $me)]
              + [$p.reactions.nodes[] | select(.content == "THUMBS_UP" and .createdAt > $t and (.user.login // "") != $me)])
           | length' 2>/dev/null)"
