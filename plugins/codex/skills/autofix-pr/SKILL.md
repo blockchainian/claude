@@ -41,8 +41,10 @@ Launch it in the background and END YOUR TURN. Each round:
    `codex agents` with its live status, then re-reads the PR head. With `--ux-file`, the
    threads are re-read every poll while the skill works, and each thread it routes to
    Claude Code is appended to that file the moment it is marked, so the UX lane can start
-   in parallel instead of after the round. The skill is told that marked threads belong to
-   Claude Code and to rebase onto the remote PR branch before every push.
+   in parallel instead of after the round. The skill is told that findings under `website/src/components/**`,
+   `website/src/app/**`, `mobile/app/**` and `mobile/src/components/**` are Claude Code's to fix
+   (label and mark, do not fix), that marked threads belong to Claude Code, and to rebase onto
+   the remote PR branch before every push.
 
 After a push, the next iteration waits for the reviewer to react to the new head before
 reading its threads, so a head the reviewer has not seen is never reported as clean. The
