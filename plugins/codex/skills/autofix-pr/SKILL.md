@@ -55,7 +55,9 @@ reading its threads, so a head the reviewer has not seen is never reported as cl
 run ends when a reviewed head has no unresolved must-fix thread, after `--max-rounds`, or
 when no review arrives in time.
 
-By default the Codex skill stops after staging verification and reports the staging SHA;
+A PR whose files all live under `website/` or `mobile/` is told up front that no backend
+service is affected, so the Codex skill skips deployment and staging verification instead of
+spending minutes establishing that. By default the Codex skill stops after staging verification and reports the staging SHA;
 the production flip stays with the caller. `--production` lets it deploy production
 itself on the first clean round.
 
