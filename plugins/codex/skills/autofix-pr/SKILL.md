@@ -20,7 +20,7 @@ NOT for UI work: UI-changing findings come back for Claude Code to implement.
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/autofix-pr/autofix-pr.sh --pr <number> \
-  [--repo DIR] [--max-rounds 2] [--ship-production] \
+  [--repo DIR] [--max-rounds 2] [--production] \
   [--wait 1800] [--poll 30] [--timeout 3600]
 ```
 
@@ -40,7 +40,7 @@ run ends when a reviewed head has no unresolved must-fix thread, after `--max-ro
 when no review arrives in time.
 
 By default the Codex skill stops after staging verification and reports the staging SHA;
-the production flip stays with the caller. `--ship-production` lets it deploy production
+the production flip stays with the caller. `--production` lets it deploy production
 itself on the first clean round.
 
 ## Output

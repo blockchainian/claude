@@ -5,13 +5,13 @@ set -u
 
 usage() {
   cat <<'EOF'
-Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--ship-production]
+Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--production]
                  [--wait SECS] [--poll SECS] [--timeout SECS]
 
   pr           pull request number in the repo's origin
   repo         repository to operate on        (default: git toplevel of cwd)
   max-rounds   review/fix rounds to run        (default: 2)
-  ship-production let the Codex skill deploy production after staging passes; without it
+  production   let the Codex skill deploy production after staging passes; without it
                the skill stops after staging verification and production stays with the caller
   wait         max seconds to wait for a review newer than the PR head (default: 1800)
   poll         seconds between those checks    (default: 30)
@@ -43,13 +43,13 @@ DAEMON_RUNNER_OVERRIDDEN=0
 [ "${FIXPR_DAEMON_RUNNER+x}" = x ] && DAEMON_RUNNER_OVERRIDDEN=1
 DAEMON_RUNNER="${FIXPR_DAEMON_RUNNER:-$SCRIPT_DIR/../execute/daemon-run.mjs}"
 
-PR="" REPO="" MAX_ROUNDS=2 SHIP_PRODUCTION=0 WAIT_S=1800 POLL_S=30 TIMEOUT_S=3600
+PR="" REPO="" MAX_ROUNDS=2 PRODUCTION=0 WAIT_S=1800 POLL_S=30 TIMEOUT_S=3600
 while [ $# -gt 0 ]; do
   case "$1" in
     --pr) PR="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --max-rounds) MAX_ROUNDS="$2"; shift 2 ;;
-    --ship-production) SHIP_PRODUCTION=1; shift ;;
+    --production) PRODUCTION=1; shift ;;
     --wait) WAIT_S="$2"; shift 2 ;;
     --poll) POLL_S="$2"; shift 2 ;;
     --timeout) TIMEOUT_S="$2"; shift 2 ;;
@@ -146,7 +146,7 @@ wait_for_review() {
 }
 
 STAGING_CLAUSE="This invocation is staging-only: deploy staging, verify it, and stop before production, reporting the staging SHA."
-[ "$SHIP_PRODUCTION" = "1" ] && STAGING_CLAUSE="Deploy staging, verify it, then deploy production as the skill prescribes."
+[ "$PRODUCTION" = "1" ] && STAGING_CLAUSE="Deploy staging, verify it, then deploy production as the skill prescribes."
 REPORT_CLAUSE="Quote every deploy-staging.sh JSON result line verbatim in your final message."
 
 run_round() { # run_round <round>

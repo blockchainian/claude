@@ -166,7 +166,7 @@ assert_eq "the UX thread is routed to Claude Code" '["T_UX"]' "$(field .ux_threa
 assert_eq "the UX thread is not counted as remaining" '[]' "$(field .remaining)"
 assert "staging-only is passed to the Codex skill" grep -q 'staging-only' "$STUB_DIR/prompts.log"
 
-# ---------- scenario 3c: --ship-production hands the production flip to the Codex skill ----------
+# ---------- scenario 3c: --production hands the production flip to the Codex skill ----------
 new_stub_dir ship
 write_pr aaaaaaa1
 write_commit_time "2026-09-08T10:00:00Z"
@@ -177,10 +177,10 @@ cat > "$STUB_DIR/round-action.sh" <<'EOF'
 cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
 EOF
 
-run_driver --max-rounds 1 --ship-production
+run_driver --max-rounds 1 --production
 echo "---- scenario 3c exit=$RC ----"
-assert "with --ship-production the prompt asks for production" grep -q 'deploy production' "$STUB_DIR/prompts.log"
-assert "with --ship-production the prompt does not say staging-only" \
+assert "with --production the prompt asks for production" grep -q 'deploy production' "$STUB_DIR/prompts.log"
+assert "with --production the prompt does not say staging-only" \
   sh -c "! grep -q 'staging-only' '$STUB_DIR/prompts.log'"
 
 # ---------- scenario 3b: the same thread without the PR label stays remaining ----------
