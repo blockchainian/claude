@@ -11,7 +11,6 @@ Usage: execute.sh --workstreams FILE --feature NAME --check CMD
                     [--deliver-wait SECS] [--runner exec|daemon]
 
   workstreams one workstream per line (blank lines and # comments skipped)
-              handoff.md must sit beside it (the launch is handed to a fresh session)
   feature     run name; namespaces workstream branches (workstreams/NAME/n) and run state
   check       verify command, run from a worktree root
   base        session branch to deliver onto (default: the branch the repo has
@@ -215,8 +214,6 @@ fi
 command -v timeout >/dev/null || fatal "timeout(1) not found (brew install coreutils)"
 command -v "$CODEX" >/dev/null || fatal "codex binary '$CODEX' not found"
 [ -f "$WORKSTREAMS" ] || fatal "workstreams file not found: $WORKSTREAMS"
-HANDOFF="$(dirname "$WORKSTREAMS")/handoff.md"
-[ -f "$HANDOFF" ] || fatal "handoff.md not found beside workstreams: $HANDOFF (write it, then launch from a fresh session)"
 
 if [ "$EXECUTE_RUNNER" = "daemon" ] && [ "$DAEMON_RUNNER_OVERRIDDEN" = "0" ]; then
   # The daemon keeps the cwd it was started from for its whole life and every later codex TUI
