@@ -242,7 +242,7 @@ if [ "$STUB_ROUND" = 1 ]; then
   cp "$STUB_DIR/threads.r1.json" "$STUB_DIR/threads.json"
   sed 's/aaaaaaa1/bbbbbbb2/' "$STUB_DIR/pr.json" > "$STUB_DIR/pr.json.tmp" && mv "$STUB_DIR/pr.json.tmp" "$STUB_DIR/pr.json"
   printf '{"commit": {"committer": {"date": "2026-09-08T12:00:00Z"}}}\n' > "$STUB_DIR/commit.json"
-  printf '[{"id": 9, "submitted_at": "2026-09-08T12:30:00Z", "state": "COMMENTED", "user": {"login": "reviewer-bot"}, "body": "review"}]\n' > "$STUB_DIR/reviews.json"
+  printf '[{"id": 9, "submitted_at": "2026-09-08T12:30:00Z", "state": "COMMENTED", "user": {"login": "reviewer-bot"}, "commit_id": "bbbbbbb2", "body": "review"}]\n' > "$STUB_DIR/reviews.json"
 else
   cp "$STUB_DIR/threads.r2.json" "$STUB_DIR/threads.json"
 fi
@@ -332,6 +332,31 @@ run_driver --max-rounds 1
 echo "---- scenario 7d exit=$RC ----"
 echo "$OUT"
 assert_eq "an eyes reaction does not end the wait" true "$(field .awaiting_review)"
+
+# ---------- scenario 7e: a review of the previous head, submitted after a late push, does not count ----------
+new_stub_dir late-push
+write_pr bbbbbbb2
+write_commit_time "2026-09-08T12:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json"
+printf '[{"id": 9, "submitted_at": "2026-09-08T12:10:00Z", "state": "COMMENTED", "user": {"login": "reviewer-bot"}, "commit_id": "aaaaaaa1", "body": "review of the old head"}]\n' > "$STUB_DIR/reviews.json"
+
+run_driver --max-rounds 1
+echo "---- scenario 7e exit=$RC ----"
+echo "$OUT"
+assert_eq "a review made on another commit is not a review of this head" true "$(field .awaiting_review)"
+
+# ---------- scenario 7f: a review made on the head counts even when its time is older than the commit time ----------
+new_stub_dir head-review
+write_pr bbbbbbb2
+write_commit_time "2026-09-08T12:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json"
+printf '[{"id": 9, "submitted_at": "2026-09-08T12:00:30Z", "state": "COMMENTED", "user": {"login": "reviewer-bot"}, "commit_id": "bbbbbbb2", "body": "review of this head"}]\n' > "$STUB_DIR/reviews.json"
+
+run_driver --max-rounds 1
+echo "---- scenario 7f exit=$RC ----"
+assert_eq "a review made on the head counts" false "$(field .awaiting_review)"
 
 # ---------- scenario 8: a PR pushed after its last review is not read as clean ----------
 new_stub_dir fresh-push
