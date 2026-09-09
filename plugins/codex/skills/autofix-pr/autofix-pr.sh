@@ -83,6 +83,10 @@ trap 'rm -rf "$WORK"' EXIT
 
 gh_api() { (cd "$REPO" && "$GH" api "$@"); }
 
+# The Codex skill replies and resolves as this account, and GitHub wraps each reply in a review;
+# those must not pass for the reviewer reacting to a push.
+ME="$(gh_api user | jq -r '.login // ""' 2>/dev/null)"
+
 UX_LABEL="claude-code-ux"
 UX_MARKER="[UX — Claude Code]"
 
@@ -129,16 +133,17 @@ classify() {
 }
 
 # Bounded poll: at most WAIT_S/POLL_S checks for a submitted review or a review comment newer
-# than the PR head. A clean re-review submits a review with no comments, so both count.
+# than the PR head from anyone but this account. A clean re-review submits a review with no
+# comments, so both count.
 wait_for_review() {
   local checks=$((WAIT_S / POLL_S)) i=0 fresh_comments fresh_reviews
   [ "$checks" -lt 1 ] && checks=1
   while [ "$i" -lt "$checks" ]; do
     i=$((i+1))
     fresh_comments="$(gh_api "repos/{owner}/{repo}/pulls/$PR/comments" --paginate \
-      | jq -r --arg t "$HEAD_TIME" '[.[] | select(.created_at > $t)] | length' 2>/dev/null)"
+      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.created_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
     fresh_reviews="$(gh_api "repos/{owner}/{repo}/pulls/$PR/reviews" --paginate \
-      | jq -r --arg t "$HEAD_TIME" '[.[] | select(.submitted_at > $t)] | length' 2>/dev/null)"
+      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.submitted_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
     if [ "$(( ${fresh_comments:-0} + ${fresh_reviews:-0} ))" -gt 0 ] 2>/dev/null; then return 0; fi
     [ "$i" -lt "$checks" ] && sleep "$POLL_S"
   done
