@@ -5,21 +5,24 @@ set -u
 
 usage() {
   cat <<'EOF'
-Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--staging-only]
+Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--ship-production]
                  [--wait SECS] [--poll SECS] [--timeout SECS]
 
   pr           pull request number in the repo's origin
   repo         repository to operate on        (default: git toplevel of cwd)
   max-rounds   review/fix rounds to run        (default: 2)
-  staging-only stop the Codex skill after staging; production stays with the caller
-  wait         max seconds to wait for a review comment newer than the PR head (default: 1800)
+  ship-production let the Codex skill deploy production after staging passes; without it
+               the skill stops after staging verification and production stays with the caller
+  wait         max seconds to wait for a review newer than the PR head (default: 1800)
   poll         seconds between those checks    (default: 30)
   timeout      per-Codex-invocation seconds    (default: 3600)
 
-Each round waits for review feedback newer than the current PR head, runs the Codex
-fix-pr skill as a daemon thread named '<pr>/fix-pr r<n>', then re-reads the PR. The run
-ends when no unresolved must-fix thread remains or the rounds are exhausted, and prints
-one flat JSON object.
+Each round waits for a submitted review or review comment newer than the current PR
+head, runs the Codex fix-pr skill as a daemon thread named '<pr>/fix-pr r<n>', then
+re-reads the PR. After a push the next round waits for the reviewer to react to the new
+head before reading the threads. The run ends when a reviewed head has no unresolved
+must-fix thread, the rounds are exhausted, or no review arrives in time, and prints one
+flat JSON object.
 
 Exit: 0 = no unresolved must-fix threads; 2 = threads remain; 1 = fatal.
 
@@ -40,13 +43,13 @@ DAEMON_RUNNER_OVERRIDDEN=0
 [ "${FIXPR_DAEMON_RUNNER+x}" = x ] && DAEMON_RUNNER_OVERRIDDEN=1
 DAEMON_RUNNER="${FIXPR_DAEMON_RUNNER:-$SCRIPT_DIR/../execute/daemon-run.mjs}"
 
-PR="" REPO="" MAX_ROUNDS=2 STAGING_ONLY=0 WAIT_S=1800 POLL_S=30 TIMEOUT_S=3600
+PR="" REPO="" MAX_ROUNDS=2 SHIP_PRODUCTION=0 WAIT_S=1800 POLL_S=30 TIMEOUT_S=3600
 while [ $# -gt 0 ]; do
   case "$1" in
     --pr) PR="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --max-rounds) MAX_ROUNDS="$2"; shift 2 ;;
-    --staging-only) STAGING_ONLY=1; shift ;;
+    --ship-production) SHIP_PRODUCTION=1; shift ;;
     --wait) WAIT_S="$2"; shift 2 ;;
     --poll) POLL_S="$2"; shift 2 ;;
     --timeout) TIMEOUT_S="$2"; shift 2 ;;
@@ -125,66 +128,75 @@ classify() {
   awk -F'\t' '$1 == "remaining" {print $2}' "$WORK/classified" > "$WORK/remaining"
 }
 
-# Bounded poll: at most WAIT_S/POLL_S checks for a review comment newer than the PR head.
+# Bounded poll: at most WAIT_S/POLL_S checks for a submitted review or a review comment newer
+# than the PR head. A clean re-review submits a review with no comments, so both count.
 wait_for_review() {
-  local checks=$((WAIT_S / POLL_S)) i=0 fresh
+  local checks=$((WAIT_S / POLL_S)) i=0 fresh_comments fresh_reviews
   [ "$checks" -lt 1 ] && checks=1
   while [ "$i" -lt "$checks" ]; do
     i=$((i+1))
-    fresh="$(gh_api "repos/{owner}/{repo}/pulls/$PR/comments" --paginate \
+    fresh_comments="$(gh_api "repos/{owner}/{repo}/pulls/$PR/comments" --paginate \
       | jq -r --arg t "$HEAD_TIME" '[.[] | select(.created_at > $t)] | length' 2>/dev/null)"
-    if [ "${fresh:-0}" -gt 0 ] 2>/dev/null; then return 0; fi
+    fresh_reviews="$(gh_api "repos/{owner}/{repo}/pulls/$PR/reviews" --paginate \
+      | jq -r --arg t "$HEAD_TIME" '[.[] | select(.submitted_at > $t)] | length' 2>/dev/null)"
+    if [ "$(( ${fresh_comments:-0} + ${fresh_reviews:-0} ))" -gt 0 ] 2>/dev/null; then return 0; fi
     [ "$i" -lt "$checks" ] && sleep "$POLL_S"
   done
   return 1
 }
 
-STAGING_CLAUSE="Deploy staging, verify it, then deploy production as the skill prescribes."
-[ "$STAGING_ONLY" = "1" ] && STAGING_CLAUSE="This invocation is staging-only: deploy staging, verify it, and stop before production, reporting the staging SHA."
+STAGING_CLAUSE="This invocation is staging-only: deploy staging, verify it, and stop before production, reporting the staging SHA."
+[ "$SHIP_PRODUCTION" = "1" ] && STAGING_CLAUSE="Deploy staging, verify it, then deploy production as the skill prescribes."
+REPORT_CLAUSE="Quote every deploy-staging.sh JSON result line verbatim in your final message."
 
 run_round() { # run_round <round>
   local round="$1" prompt
-  prompt="Use your fix-pr skill on pull request #$PR of $OWNER/$NAME, checked out at $REPO. $STAGING_CLAUSE"
+  prompt="Use your fix-pr skill on pull request #$PR of $OWNER/$NAME, checked out at $REPO. $STAGING_CLAUSE $REPORT_CLAUSE"
   note "[round $round] invoking the Codex fix-pr skill"
   "$DAEMON_RUNNER" -C "$REPO" -o "$WORK/last-$round.txt" --name "$PR/fix-pr r$round" \
     --timeout "$TIMEOUT_S" "$prompt" > "$WORK/round-$round.log" 2>&1
 }
 
-# The Codex skill reports its deployments in prose; take the commit-shaped token from each
-# line mentioning staging.
+# The Codex skill quotes each deploy-staging.sh result line; the staging SHA is its "sha" field.
 collect_staging() { # collect_staging <last-message-file>
   [ -f "$1" ] || return 0
-  grep -i staging "$1" | grep -Eio '\b[0-9a-f]{7,40}\b' >> "$WORK/staging"
+  grep -o '{.*}' "$1" | while IFS= read -r line; do
+    printf '%s\n' "$line" | jq -r 'select(type == "object" and .target == "staging") | .sha // empty' 2>/dev/null
+  done >> "$WORK/staging"
 }
 
 : > "$WORK/pushed"
 : > "$WORK/staging"
 refresh_pr
-classify
 
-ROUNDS=0
-while [ -s "$WORK/remaining" ] && [ "$ROUNDS" -lt "$MAX_ROUNDS" ]; do
+# Threads are read only from a head the reviewer has reacted to; a head pushed after the last
+# review is awaiting review, not clean.
+ROUNDS=0 AWAITING_REVIEW=false
+while :; do
   if ! wait_for_review; then
-    note "no review comment newer than $HEAD_SHA within ${WAIT_S}s; stopping"
-    break
+    note "no review newer than $HEAD_SHA within ${WAIT_S}s; stopping"
+    AWAITING_REVIEW=true
   fi
+  classify
+  [ "$AWAITING_REVIEW" = false ] || break
+  [ -s "$WORK/remaining" ] || break
+  [ "$ROUNDS" -lt "$MAX_ROUNDS" ] || break
   ROUNDS=$((ROUNDS+1))
   PREV_SHA="$HEAD_SHA"
   run_round "$ROUNDS"
   collect_staging "$WORK/last-$ROUNDS.txt"
   refresh_pr
-  classify
   [ "$HEAD_SHA" != "$PREV_SHA" ] && echo "$HEAD_SHA" >> "$WORK/pushed"
 done
 
-jq -n --argjson rounds "$ROUNDS" \
+jq -n --argjson rounds "$ROUNDS" --argjson awaiting "$AWAITING_REVIEW" \
   --rawfile pushed "$WORK/pushed" --rawfile staging "$WORK/staging" \
   --rawfile ux "$WORK/ux" --rawfile config "$WORK/config" --rawfile remaining "$WORK/remaining" \
   'def lines: split("\n") | map(select(length > 0))
      | reduce .[] as $item ([]; if index($item) then . else . + [$item] end);
-   {rounds: $rounds, pushed: ($pushed | lines), staging_deploys: ($staging | lines),
-    ux_threads: ($ux | lines), config_threads: ($config | lines),
-    remaining: ($remaining | lines)}' -c
+   {rounds: $rounds, awaiting_review: $awaiting, pushed: ($pushed | lines),
+    staging_deploys: ($staging | lines), ux_threads: ($ux | lines),
+    config_threads: ($config | lines), remaining: ($remaining | lines)}' -c
 
 [ -s "$WORK/remaining" ] && exit 2
 exit 0

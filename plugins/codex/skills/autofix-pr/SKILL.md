@@ -20,37 +20,43 @@ NOT for UI work: UI-changing findings come back for Claude Code to implement.
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/autofix-pr/autofix-pr.sh --pr <number> \
-  [--repo DIR] [--max-rounds 2] [--staging-only] \
+  [--repo DIR] [--max-rounds 2] [--ship-production] \
   [--wait 1800] [--poll 30] [--timeout 3600]
 ```
 
 Launch it in the background and END YOUR TURN. Each round:
 
-1. Waits for a review comment created after the current PR head's commit time — a bounded
-   `gh api` poll, at most `--wait / --poll` checks. No new review means no round: the run
-   stops and reports the state it read.
-2. Runs the Codex fix-pr skill as a daemon thread named `<pr>/fix-pr r<n>`, visible in
-   `codex agents` with its live status.
-3. Re-reads the PR: head SHA, labels, and every review thread over GraphQL.
+1. Waits for a submitted review or a review comment newer than the current PR head's
+   commit time — a bounded `gh api` poll, at most `--wait / --poll` checks. A clean
+   re-review submits a review with no comments, so both count. No review means no round:
+   the run stops, reports the state it read, and sets `awaiting_review`.
+2. Reads every review thread over GraphQL and classifies the unresolved ones.
+3. Runs the Codex fix-pr skill as a daemon thread named `<pr>/fix-pr r<n>`, visible in
+   `codex agents` with its live status, then re-reads the PR head.
 
-The run ends when no unresolved must-fix thread remains, or after `--max-rounds`.
+After a push, the next iteration waits for the reviewer to react to the new head before
+reading its threads, so a head the reviewer has not seen is never reported as clean. The
+run ends when a reviewed head has no unresolved must-fix thread, after `--max-rounds`, or
+when no review arrives in time.
 
-`--staging-only` tells the Codex skill to stop after staging verification and report the
-staging SHA, leaving the production flip to the caller. Without it the Codex skill ships
-production itself on the first clean round.
+By default the Codex skill stops after staging verification and reports the staging SHA;
+the production flip stays with the caller. `--ship-production` lets it deploy production
+itself on the first clean round.
 
 ## Output
 
 One flat JSON object on stdout (progress goes to stderr):
 
 ```
-{"rounds": 1, "pushed": ["<sha>"], "staging_deploys": ["<sha>"],
+{"rounds": 1, "awaiting_review": false, "pushed": ["<sha>"], "staging_deploys": ["<sha>"],
  "ux_threads": ["<thread id>"], "config_threads": ["<thread id>"], "remaining": []}
 ```
 
+- `awaiting_review` — true when the run stopped because no review newer than the PR head
+  arrived within `--wait`; the thread lists then describe an unreviewed head.
 - `pushed` — PR head SHAs observed after a round, in order.
-- `staging_deploys` — commit-shaped tokens the Codex skill reported on a line mentioning
-  staging.
+- `staging_deploys` — the `sha` of every `deploy-staging.sh` JSON result the Codex skill
+  quoted in its report.
 - `ux_threads` — unresolved threads the Codex skill routed to Claude Code: the PR carries
   the `claude-code-ux` label and the thread carries its `[UX — Claude Code]` reply. Hand
   these to the `ux-pr-fixer` agent.
