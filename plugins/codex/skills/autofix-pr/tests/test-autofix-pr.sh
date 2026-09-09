@@ -242,7 +242,7 @@ if [ "$STUB_ROUND" = 1 ]; then
   cp "$STUB_DIR/threads.r1.json" "$STUB_DIR/threads.json"
   sed 's/aaaaaaa1/bbbbbbb2/' "$STUB_DIR/pr.json" > "$STUB_DIR/pr.json.tmp" && mv "$STUB_DIR/pr.json.tmp" "$STUB_DIR/pr.json"
   printf '{"commit": {"committer": {"date": "2026-09-08T12:00:00Z"}}}\n' > "$STUB_DIR/commit.json"
-  printf '[{"id": 9, "submitted_at": "2026-09-08T12:30:00Z", "state": "COMMENTED", "body": "review"}]\n' > "$STUB_DIR/reviews.json"
+  printf '[{"id": 9, "submitted_at": "2026-09-08T12:30:00Z", "state": "COMMENTED", "user": {"login": "reviewer-bot"}, "body": "review"}]\n' > "$STUB_DIR/reviews.json"
 else
   cp "$STUB_DIR/threads.r2.json" "$STUB_DIR/threads.json"
 fi
@@ -275,6 +275,27 @@ echo "$OUT"
 assert_eq "one round ran" 1 "$(field .rounds)"
 assert_eq "an unreviewed push is reported as awaiting review" true "$(field .awaiting_review)"
 assert_eq "nothing is known to remain" '[]' "$(field .remaining)"
+
+# ---------- scenario 7b: the engine's own thread replies are not the reviewer reacting ----------
+new_stub_dir own-replies
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T8 false proxy/src/api.ts 'finding')"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T8 true proxy/src/api.ts 'finding')"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+sed 's/aaaaaaa1/bbbbbbb2/' "$STUB_DIR/pr.json" > "$STUB_DIR/pr.json.tmp" && mv "$STUB_DIR/pr.json.tmp" "$STUB_DIR/pr.json"
+printf '{"commit": {"committer": {"date": "2026-09-08T12:00:00Z"}}}\n' > "$STUB_DIR/commit.json"
+printf '[{"id": 9, "submitted_at": "2026-09-08T12:01:00Z", "state": "COMMENTED", "user": {"login": "me"}, "body": ""}]\n' > "$STUB_DIR/reviews.json"
+printf '[{"id": 2, "created_at": "2026-09-08T12:01:00Z", "user": {"login": "me"}, "body": "Fixed in bbbbbbb2."}]\n' > "$STUB_DIR/comments.json"
+EOF
+
+run_driver --max-rounds 2
+echo "---- scenario 7b exit=$RC ----"
+echo "$OUT"
+assert_eq "one round ran" 1 "$(field .rounds)"
+assert_eq "the engine's own replies do not count as a review of the push" true "$(field .awaiting_review)"
 
 # ---------- scenario 8: a PR pushed after its last review is not read as clean ----------
 new_stub_dir fresh-push
