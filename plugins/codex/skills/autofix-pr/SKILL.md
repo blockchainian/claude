@@ -21,7 +21,7 @@ NOT for UI work: UI-changing findings come back for Claude Code to implement.
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/autofix-pr/autofix-pr.sh --pr <number> \
   [--repo DIR] [--max-rounds 2] [--production] \
-  [--wait 1800] [--poll 30] [--timeout 3600]
+  [--wait 300] [--poll 30] [--timeout 3600]
 ```
 
 Launch it in the background and END YOUR TURN. Each round:
