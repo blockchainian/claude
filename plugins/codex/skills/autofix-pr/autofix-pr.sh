@@ -133,8 +133,9 @@ classify() {
 }
 
 # Bounded poll: at most WAIT_S/POLL_S checks for a submitted review, a review comment, or a
-# reaction on the PR newer than the PR head from anyone but this account. A clean Codex
-# re-review leaves no review at all: the bot reacts with a thumbs-up on the PR.
+# thumbs-up on the PR newer than the PR head from anyone but this account. A clean Codex
+# re-review leaves no review at all: the bot reacts with a thumbs-up on the PR; its "eyes"
+# reaction only means the review is in progress.
 wait_for_review() {
   local checks=$((WAIT_S / POLL_S)) i=0 fresh_comments fresh_reviews fresh_reactions
   [ "$checks" -lt 1 ] && checks=1
@@ -145,7 +146,7 @@ wait_for_review() {
     fresh_reviews="$(gh_api "repos/{owner}/{repo}/pulls/$PR/reviews" --paginate \
       | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.submitted_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
     fresh_reactions="$(gh_api "repos/{owner}/{repo}/issues/$PR/reactions" --paginate \
-      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.created_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
+      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.content == "+1" and .created_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
     if [ "$(( ${fresh_comments:-0} + ${fresh_reviews:-0} + ${fresh_reactions:-0} ))" -gt 0 ] 2>/dev/null; then return 0; fi
     [ "$i" -lt "$checks" ] && sleep "$POLL_S"
   done

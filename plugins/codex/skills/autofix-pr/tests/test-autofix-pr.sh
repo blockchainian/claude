@@ -319,6 +319,19 @@ assert_eq "a thumbs-up on the PR after the push counts as the reviewer reacting"
 assert_eq "the reviewed head is clean" '[]' "$(field .remaining)"
 assert "the driver read the PR reactions" grep -q '/reactions' "$STUB_DIR/gh.log"
 
+# ---------- scenario 7d: the bot's "eyes" reaction means it is still reviewing ----------
+new_stub_dir eyes-reaction
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T12:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json"
+printf '[{"id": 4, "content": "eyes", "created_at": "2026-09-08T12:01:00Z", "user": {"login": "reviewer-bot"}}]\n' > "$STUB_DIR/reactions.json"
+
+run_driver --max-rounds 1
+echo "---- scenario 7d exit=$RC ----"
+echo "$OUT"
+assert_eq "an eyes reaction does not end the wait" true "$(field .awaiting_review)"
+
 # ---------- scenario 8: a PR pushed after its last review is not read as clean ----------
 new_stub_dir fresh-push
 write_pr aaaaaaa1
