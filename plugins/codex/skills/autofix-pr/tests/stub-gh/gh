@@ -6,6 +6,15 @@ set -u
 echo "$*" >> "${STUB_DIR:?}/gh.log"
 
 case "$*" in
+  *"reactions("*)
+    # The review-wait query: compose the GraphQL shape from the REST-shaped fixtures.
+    for f in reviews comments reactions; do [ -f "$STUB_DIR/$f.json" ] || echo "[]" > "$STUB_DIR/$f.json"; done
+    jq -n --slurpfile r "$STUB_DIR/reviews.json" --slurpfile c "$STUB_DIR/comments.json" --slurpfile x "$STUB_DIR/reactions.json" '
+      {data: {repository: {pullRequest: {
+        reviews: {nodes: ($r[0] | map({submittedAt: .submitted_at, author: {login: (.user.login // null)}}))},
+        reviewThreads: {nodes: [{comments: {nodes: ($c[0] | map({createdAt: .created_at, author: {login: (.user.login // null)}}))}}]},
+        reactions: {nodes: ($x[0] | map({createdAt: .created_at, content: (if .content == "+1" then "THUMBS_UP" else (.content | ascii_upcase) end), user: {login: (.user.login // null)}}))}
+      }}}}' ;;
   "api user") echo '{"login": "me"}' ;;
   *graphql*) cat "$STUB_DIR/threads.json" ;;
   *"/reactions"*) if [ -f "$STUB_DIR/reactions.json" ]; then cat "$STUB_DIR/reactions.json"; else echo "[]"; fi ;;
