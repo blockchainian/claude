@@ -10,6 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: plugins/codex/skills/execute/tests/test-execute.sh
+      - run: plugins/codex/skills/fix-pr/tests/test-fix-pr.sh
   codex-macos:
     runs-on: macos-latest
     steps:
@@ -17,6 +18,7 @@ jobs:
       - run: brew install coreutils
       - run: sudo ln -sf "$(which gtimeout)" /usr/local/bin/timeout || ln -sf "$(which gtimeout)" "$(brew --prefix)/bin/timeout"
       - run: plugins/codex/skills/execute/tests/test-execute.sh
+      - run: plugins/codex/skills/fix-pr/tests/test-fix-pr.sh
   grok:
     runs-on: ubuntu-latest
     steps:
