@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# ABOUTME: End-to-end test for fix-pr.sh using stubbed gh and daemon-runner CLIs.
+# ABOUTME: Covers a clean round, exhausted rounds, UX routing by label and config-thread detection.
+set -u
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+DRIVER="$HERE/../fix-pr.sh"
+
+SCRATCH="$(mktemp -d /tmp/codex-fix-pr-test.XXXXXX)"
+trap 'rm -rf "$SCRATCH"' EXIT
+
+FAILS=0
+assert() { # assert <desc> <cmd...>
+  local desc="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    echo "PASS: $desc"
+  else
+    echo "FAIL: $desc  [cmd: $*]"
+    FAILS=$((FAILS+1))
+  fi
+}
+assert_eq() { # assert_eq <desc> <expected> <actual>
+  if [ "$2" = "$3" ]; then
+    echo "PASS: $1"
+  else
+    echo "FAIL: $1  [expected '$2' got '$3']"
+    FAILS=$((FAILS+1))
+  fi
+}
+
+# ---------- skill metadata ----------
+# Claude Code prefixes the plugin name itself, so the frontmatter name carries no namespace.
+SKILL_NAME="$(awk '/^name:/{sub(/^name: */, ""); gsub(/"/, ""); print; exit}' "$HERE/../SKILL.md")"
+assert_eq "SKILL.md name resolves to /codex:fix-pr" "fix-pr" "$SKILL_NAME"
+
+# ---------- fixture helpers ----------
+STUB_BIN="$SCRATCH/bin"
+mkdir -p "$STUB_BIN"
+cp "$HERE/stub-gh/gh" "$STUB_BIN/gh"
+export PATH="$STUB_BIN:$PATH"
+export FIXPR_DAEMON_RUNNER="$HERE/stub-daemon-runner/daemon-run"
+
+REPO="$SCRATCH/repo"
+git init -q -b main "$REPO"
+git -C "$REPO" config user.email test@test && git -C "$REPO" config user.name test
+echo base > "$REPO/base.txt"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm base
+
+new_stub_dir() { # new_stub_dir <name>
+  STUB_DIR="$SCRATCH/stub-$1"
+  mkdir -p "$STUB_DIR"
+  export STUB_DIR
+}
+
+write_pr() { # write_pr <sha> <label-or-empty>
+  local labels="[]"
+  [ -n "${2:-}" ] && labels="[{\"name\": \"$2\"}]"
+  cat > "$STUB_DIR/pr.json" <<EOF
+{"number": 7, "head": {"sha": "$1"},
+ "base": {"repo": {"owner": {"login": "acme"}, "name": "app"}},
+ "labels": $labels}
+EOF
+}
+
+write_commit_time() { printf '{"commit": {"committer": {"date": "%s"}}}\n' "$1" > "$STUB_DIR/commit.json"; }
+write_comment_time() { printf '[{"id": 1, "created_at": "%s", "body": "review"}]\n' "$1" > "$STUB_DIR/comments.json"; }
+
+thread() { # thread <id> <resolved true|false> <path> <body>
+  printf '{"id": "%s", "isResolved": %s, "isOutdated": false, "path": "%s", "comments": {"nodes": [{"body": "%s"}]}}' \
+    "$1" "$2" "$3" "$4"
+}
+write_threads() { # write_threads <file> <thread-json>...
+  local file="$1"; shift
+  local joined=""
+  while [ "$#" -gt 0 ]; do
+    [ -n "$joined" ] && joined="$joined,"
+    joined="$joined$1"
+    shift
+  done
+  printf '{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [%s]}}}}}\n' "$joined" > "$file"
+}
+
+run_driver() { # run_driver <args...>; captures stdout in $OUT and exit code in $RC
+  set +e
+  OUT="$("$DRIVER" --pr 7 --repo "$REPO" --wait 2 --poll 1 "$@" 2>"$SCRATCH/err.log")"
+  RC=$?
+  set -e 2>/dev/null || true
+  printf '%s' "$OUT" > "$SCRATCH/out.json"
+}
+
+field() { printf '%s' "$OUT" | jq -c "$1"; }
+
+# ---------- scenario 1: one clean round ----------
+new_stub_dir clean
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T1 false proxy/src/api.ts 'null deref on the error path')"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T1 true proxy/src/api.ts 'null deref on the error path')"
+cat > "$STUB_DIR/last-message.txt" <<'EOF'
+Fixed the null deref and pushed.
+Deployed staging at bbbbbbb2 and verified the routed hostname.
+EOF
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+sed 's/aaaaaaa1/bbbbbbb2/' "$STUB_DIR/pr.json" > "$STUB_DIR/pr.json.tmp" && mv "$STUB_DIR/pr.json.tmp" "$STUB_DIR/pr.json"
+EOF
+
+run_driver --max-rounds 2
+echo "---- scenario 1 exit=$RC ----"
+echo "$OUT"
+assert_eq "clean round exits 0" 0 "$RC"
+assert "output is one flat JSON object" jq -e 'type == "object" and (map(type == "array" or type == "number") | all)' "$SCRATCH/out.json"
+assert_eq "one round ran" 1 "$(field .rounds)"
+assert_eq "the pushed head sha is reported" '["bbbbbbb2"]' "$(field .pushed)"
+assert_eq "the staging deploy sha is reported" '["bbbbbbb2"]' "$(field .staging_deploys)"
+assert_eq "no ux threads" '[]' "$(field .ux_threads)"
+assert_eq "no config threads" '[]' "$(field .config_threads)"
+assert_eq "nothing remains" '[]' "$(field .remaining)"
+assert_eq "codex ran once" 1 "$(wc -l < "$STUB_DIR/invocations.log" | tr -d ' ')"
+assert "the daemon thread carries the round name" \
+  grep -q '^name=7/fix-pr r1 ' "$STUB_DIR/invocations.log"
+assert "the prompt names the Codex fix-pr skill and the PR" \
+  grep -q 'fix-pr skill' "$STUB_DIR/prompts.log"
+assert "the prompt does not ask for staging-only" \
+  sh -c "! grep -q 'staging-only' '$STUB_DIR/prompts.log'"
+assert "gh read the review threads over graphql" grep -q 'graphql' "$STUB_DIR/gh.log"
+
+# ---------- scenario 2: rounds exhausted ----------
+new_stub_dir exhausted
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T9 false proxy/src/api.ts 'still broken')"
+
+run_driver --max-rounds 2
+echo "---- scenario 2 exit=$RC ----"
+echo "$OUT"
+assert_eq "unresolved threads after the last round exit 2" 2 "$RC"
+assert_eq "both rounds ran" 2 "$(field .rounds)"
+assert_eq "the unresolved thread is reported as remaining" '["T9"]' "$(field .remaining)"
+assert_eq "nothing was pushed" '[]' "$(field .pushed)"
+assert_eq "codex ran twice" 2 "$(wc -l < "$STUB_DIR/invocations.log" | tr -d ' ')"
+assert "the second thread name carries round 2" \
+  grep -q '^name=7/fix-pr r2 ' "$STUB_DIR/invocations.log"
+
+# ---------- scenario 3: UX thread routed by label ----------
+new_stub_dir ux
+write_pr aaaaaaa1 claude-code-ux
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+UX_THREAD="$(thread T_UX false website/app/page.tsx '[UX — Claude Code] **The warning row needs a new column.**')"
+write_threads "$STUB_DIR/threads.json" "$(thread T2 false proxy/src/api.ts 'unchecked index')" "$UX_THREAD"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T2 true proxy/src/api.ts 'unchecked index')" "$UX_THREAD"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+EOF
+
+run_driver --max-rounds 2 --staging-only
+echo "---- scenario 3 exit=$RC ----"
+echo "$OUT"
+assert_eq "a UX thread alone does not block completion" 0 "$RC"
+assert_eq "one round ran" 1 "$(field .rounds)"
+assert_eq "the UX thread is routed to Claude Code" '["T_UX"]' "$(field .ux_threads)"
+assert_eq "the UX thread is not counted as remaining" '[]' "$(field .remaining)"
+assert "staging-only is passed to the Codex skill" grep -q 'staging-only' "$STUB_DIR/prompts.log"
+
+# ---------- scenario 3b: the same thread without the PR label stays remaining ----------
+new_stub_dir ux-nolabel
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$UX_THREAD"
+
+run_driver --max-rounds 1
+echo "---- scenario 3b exit=$RC ----"
+echo "$OUT"
+assert_eq "without the label the UX marker is not routed" '[]' "$(field .ux_threads)"
+assert_eq "without the label the thread remains" '["T_UX"]' "$(field .remaining)"
+
+# ---------- scenario 4: config thread left for the user ----------
+new_stub_dir config
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+CFG_THREAD="$(thread T_CFG false .claude/settings.json 'this hook entry denies the deploy command')"
+write_threads "$STUB_DIR/threads.json" "$(thread T3 false proxy/src/api.ts 'swallowed error')" "$CFG_THREAD"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T3 true proxy/src/api.ts 'swallowed error')" "$CFG_THREAD"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+EOF
+
+run_driver --max-rounds 2
+echo "---- scenario 4 exit=$RC ----"
+echo "$OUT"
+assert_eq "a config thread alone does not block completion" 0 "$RC"
+assert_eq "the config thread is left for the user" '["T_CFG"]' "$(field .config_threads)"
+assert_eq "the config thread is not counted as remaining" '[]' "$(field .remaining)"
+
+# ---------- scenario 5: no review comment newer than the PR head ----------
+new_stub_dir nocomment
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T12:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T4 false proxy/src/api.ts 'stale finding')"
+
+run_driver --max-rounds 2
+echo "---- scenario 5 exit=$RC ----"
+echo "$OUT"
+assert_eq "no round runs without a review newer than the head" 0 "$(field .rounds)"
+assert_eq "the driver reports the pre-existing thread" '["T4"]' "$(field .remaining)"
+assert "codex was never invoked" test ! -f "$STUB_DIR/invocations.log"
+
+echo
+if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; exit 1; fi
