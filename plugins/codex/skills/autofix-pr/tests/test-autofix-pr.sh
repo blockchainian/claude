@@ -297,6 +297,28 @@ echo "$OUT"
 assert_eq "one round ran" 1 "$(field .rounds)"
 assert_eq "the engine's own replies do not count as a review of the push" true "$(field .awaiting_review)"
 
+# ---------- scenario 7c: a clean re-review is a thumbs-up reaction on the PR, not a review ----------
+new_stub_dir clean-reaction
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T9 false proxy/src/api.ts 'finding')"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T9 true proxy/src/api.ts 'finding')"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+sed 's/aaaaaaa1/bbbbbbb2/' "$STUB_DIR/pr.json" > "$STUB_DIR/pr.json.tmp" && mv "$STUB_DIR/pr.json.tmp" "$STUB_DIR/pr.json"
+printf '{"commit": {"committer": {"date": "2026-09-08T12:00:00Z"}}}\n' > "$STUB_DIR/commit.json"
+printf '[{"id": 3, "content": "+1", "created_at": "2026-09-08T12:09:00Z", "user": {"login": "reviewer-bot"}}]\n' > "$STUB_DIR/reactions.json"
+EOF
+
+run_driver --max-rounds 2
+echo "---- scenario 7c exit=$RC ----"
+echo "$OUT"
+assert_eq "one round ran" 1 "$(field .rounds)"
+assert_eq "a thumbs-up on the PR after the push counts as the reviewer reacting" false "$(field .awaiting_review)"
+assert_eq "the reviewed head is clean" '[]' "$(field .remaining)"
+assert "the driver read the PR reactions" grep -q '/reactions' "$STUB_DIR/gh.log"
+
 # ---------- scenario 8: a PR pushed after its last review is not read as clean ----------
 new_stub_dir fresh-push
 write_pr aaaaaaa1

@@ -26,10 +26,11 @@ ${CLAUDE_PLUGIN_ROOT}/skills/autofix-pr/autofix-pr.sh --pr <number> \
 
 Launch it in the background and END YOUR TURN. Each round:
 
-1. Waits for a submitted review or a review comment newer than the current PR head's
-   commit time from anyone but the account running the engine — a bounded `gh api` poll,
-   at most `--wait / --poll` checks. A clean re-review submits a review with no comments,
-   so both count; the Codex skill's own thread replies, which GitHub wraps in reviews, do not. No review means no round:
+1. Waits for a submitted review, a review comment, or a reaction on the PR newer than the
+   current PR head's commit time from anyone but the account running the engine — a
+   bounded `gh api` poll, at most `--wait / --poll` checks. A clean Codex re-review leaves
+   no review: the bot reacts with a thumbs-up on the PR, so reactions count. The Codex
+   skill's own thread replies, which GitHub wraps in reviews, do not. No review means no round:
    the run stops, reports the state it read, and sets `awaiting_review`.
 2. Reads every review thread over GraphQL and classifies the unresolved ones.
 3. Runs the Codex fix-pr skill as a daemon thread named `<pr>/fix-pr r<n>`, visible in

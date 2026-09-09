@@ -17,8 +17,8 @@ Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--production]
   poll         seconds between those checks    (default: 30)
   timeout      per-Codex-invocation seconds    (default: 3600)
 
-Each round waits for a submitted review or review comment newer than the current PR
-head, runs the Codex fix-pr skill as a daemon thread named '<pr>/fix-pr r<n>', then
+Each round waits for a submitted review, review comment, or PR reaction newer than the
+current PR head, runs the Codex fix-pr skill as a daemon thread named '<pr>/fix-pr r<n>', then
 re-reads the PR. After a push the next round waits for the reviewer to react to the new
 head before reading the threads. The run ends when a reviewed head has no unresolved
 must-fix thread, the rounds are exhausted, or no review arrives in time, and prints one
@@ -132,11 +132,11 @@ classify() {
   awk -F'\t' '$1 == "remaining" {print $2}' "$WORK/classified" > "$WORK/remaining"
 }
 
-# Bounded poll: at most WAIT_S/POLL_S checks for a submitted review or a review comment newer
-# than the PR head from anyone but this account. A clean re-review submits a review with no
-# comments, so both count.
+# Bounded poll: at most WAIT_S/POLL_S checks for a submitted review, a review comment, or a
+# reaction on the PR newer than the PR head from anyone but this account. A clean Codex
+# re-review leaves no review at all: the bot reacts with a thumbs-up on the PR.
 wait_for_review() {
-  local checks=$((WAIT_S / POLL_S)) i=0 fresh_comments fresh_reviews
+  local checks=$((WAIT_S / POLL_S)) i=0 fresh_comments fresh_reviews fresh_reactions
   [ "$checks" -lt 1 ] && checks=1
   while [ "$i" -lt "$checks" ]; do
     i=$((i+1))
@@ -144,7 +144,9 @@ wait_for_review() {
       | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.created_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
     fresh_reviews="$(gh_api "repos/{owner}/{repo}/pulls/$PR/reviews" --paginate \
       | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.submitted_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
-    if [ "$(( ${fresh_comments:-0} + ${fresh_reviews:-0} ))" -gt 0 ] 2>/dev/null; then return 0; fi
+    fresh_reactions="$(gh_api "repos/{owner}/{repo}/issues/$PR/reactions" --paginate \
+      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.created_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
+    if [ "$(( ${fresh_comments:-0} + ${fresh_reviews:-0} + ${fresh_reactions:-0} ))" -gt 0 ] 2>/dev/null; then return 0; fi
     [ "$i" -lt "$checks" ] && sleep "$POLL_S"
   done
   return 1
