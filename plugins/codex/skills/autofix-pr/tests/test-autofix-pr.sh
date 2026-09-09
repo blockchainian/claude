@@ -254,7 +254,8 @@ echo "$OUT"
 assert_eq "the thread the reviewer opened on the push is fixed in round 2" 2 "$(field .rounds)"
 assert_eq "nothing remains after the re-review" '[]' "$(field .remaining)"
 assert_eq "the push is reported once" '["bbbbbbb2"]' "$(field .pushed)"
-assert "the driver read the submitted reviews" grep -q '/reviews' "$STUB_DIR/gh.log"
+assert "the wait reads reviews, comments and reactions in one graphql query" \
+  sh -c "grep -q 'reactions(' '$STUB_DIR/gh.log' && ! grep -qE 'pulls/7/(reviews|comments)|issues/7/reactions' '$STUB_DIR/gh.log'"
 
 # ---------- scenario 7: no review reaches the pushed head within the wait ----------
 new_stub_dir unreviewed
@@ -317,7 +318,7 @@ echo "$OUT"
 assert_eq "one round ran" 1 "$(field .rounds)"
 assert_eq "a thumbs-up on the PR after the push counts as the reviewer reacting" false "$(field .awaiting_review)"
 assert_eq "the reviewed head is clean" '[]' "$(field .remaining)"
-assert "the driver read the PR reactions" grep -q '/reactions' "$STUB_DIR/gh.log"
+assert "the reaction came through the graphql wait query" grep -q 'reactions(' "$STUB_DIR/gh.log"
 
 # ---------- scenario 7d: the bot's "eyes" reaction means it is still reviewing ----------
 new_stub_dir eyes-reaction

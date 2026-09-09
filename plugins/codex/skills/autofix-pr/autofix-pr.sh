@@ -14,7 +14,7 @@ Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--production]
   production   let the Codex skill deploy production after staging passes; without it
                the skill stops after staging verification and production stays with the caller
   wait         max seconds to wait for a review newer than the PR head (default: 900)
-  poll         seconds between those checks    (default: 30)
+  poll         seconds between those checks    (default: 10)
   timeout      per-Codex-invocation seconds    (default: 3600)
 
 Each round waits for a submitted review, review comment, or PR reaction newer than the
@@ -43,7 +43,7 @@ DAEMON_RUNNER_OVERRIDDEN=0
 [ "${FIXPR_DAEMON_RUNNER+x}" = x ] && DAEMON_RUNNER_OVERRIDDEN=1
 DAEMON_RUNNER="${FIXPR_DAEMON_RUNNER:-$SCRIPT_DIR/../execute/daemon-run.mjs}"
 
-PR="" REPO="" MAX_ROUNDS=2 PRODUCTION=0 WAIT_S=900 POLL_S=30 TIMEOUT_S=3600
+PR="" REPO="" MAX_ROUNDS=2 PRODUCTION=0 WAIT_S=900 POLL_S=10 TIMEOUT_S=3600
 while [ $# -gt 0 ]; do
   case "$1" in
     --pr) PR="$2"; shift 2 ;;
@@ -132,22 +132,35 @@ classify() {
   awk -F'\t' '$1 == "remaining" {print $2}' "$WORK/classified" > "$WORK/remaining"
 }
 
+# The reviewer's reaction to the head, in one GraphQL query per poll: GraphQL has its own
+# rate budget, so several engines polling at once do not eat the REST budget Codex uses.
+WAIT_QUERY='query($owner: String!, $name: String!, $pr: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      reviews(last: 50) { nodes { submittedAt author { login } } }
+      reviewThreads(last: 100) { nodes { comments(last: 10) { nodes { createdAt author { login } } } } }
+      reactions(last: 50) { nodes { createdAt content user { login } } }
+    }
+  }
+}'
+
 # Bounded poll: at most WAIT_S/POLL_S checks for a submitted review, a review comment, or a
 # thumbs-up on the PR newer than the PR head from anyone but this account. A clean Codex
 # re-review leaves no review at all: the bot reacts with a thumbs-up on the PR; its "eyes"
 # reaction only means the review is in progress.
 wait_for_review() {
-  local checks=$((WAIT_S / POLL_S)) i=0 fresh_comments fresh_reviews fresh_reactions
+  local checks=$((WAIT_S / POLL_S)) i=0 fresh
   [ "$checks" -lt 1 ] && checks=1
   while [ "$i" -lt "$checks" ]; do
     i=$((i+1))
-    fresh_comments="$(gh_api "repos/{owner}/{repo}/pulls/$PR/comments" --paginate \
-      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.created_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
-    fresh_reviews="$(gh_api "repos/{owner}/{repo}/pulls/$PR/reviews" --paginate \
-      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.submitted_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
-    fresh_reactions="$(gh_api "repos/{owner}/{repo}/issues/$PR/reactions" --paginate \
-      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '[.[] | select(.content == "+1" and .created_at > $t and (.user.login // "") != $me)] | length' 2>/dev/null)"
-    if [ "$(( ${fresh_comments:-0} + ${fresh_reviews:-0} + ${fresh_reactions:-0} ))" -gt 0 ] 2>/dev/null; then return 0; fi
+    fresh="$(gh_api graphql -F owner="$OWNER" -F name="$NAME" -F pr="$PR" -f query="$WAIT_QUERY" \
+      | jq -r --arg t "$HEAD_TIME" --arg me "$ME" '
+          .data.repository.pullRequest as $p
+          | ([$p.reviews.nodes[] | select(.submittedAt > $t and (.author.login // "") != $me)]
+             + [$p.reviewThreads.nodes[].comments.nodes[] | select(.createdAt > $t and (.author.login // "") != $me)]
+             + [$p.reactions.nodes[] | select(.content == "THUMBS_UP" and .createdAt > $t and (.user.login // "") != $me)])
+          | length' 2>/dev/null)"
+    if [ "${fresh:-0}" -gt 0 ] 2>/dev/null; then return 0; fi
     [ "$i" -lt "$checks" ] && sleep "$POLL_S"
   done
   return 1
