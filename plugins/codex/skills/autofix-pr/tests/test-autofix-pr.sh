@@ -150,7 +150,7 @@ new_stub_dir ux
 write_pr aaaaaaa1 claude-code-ux
 write_commit_time "2026-09-08T10:00:00Z"
 write_comment_time "2026-09-08T11:00:00Z"
-UX_THREAD="$(thread T_UX false website/app/page.tsx '[UX — Claude Code] **The warning row needs a new column.**')"
+UX_THREAD="$(thread T_UX false website/src/components/page.tsx '[UX — Claude Code] **The warning row needs a new column.**')"
 write_threads "$STUB_DIR/threads.json" "$(thread T2 false proxy/src/api.ts 'unchecked index')" "$UX_THREAD"
 write_threads "$STUB_DIR/threads.after.json" "$(thread T2 true proxy/src/api.ts 'unchecked index')" "$UX_THREAD"
 cat > "$STUB_DIR/round-action.sh" <<'EOF'
@@ -188,8 +188,8 @@ new_stub_dir ux-stream
 write_pr aaaaaaa1
 write_commit_time "2026-09-08T10:00:00Z"
 write_comment_time "2026-09-08T11:00:00Z"
-write_threads "$STUB_DIR/threads.json" "$(thread T2 false proxy/src/api.ts 'unchecked index')" "$(thread T_UX2 false website/app/page.tsx 'needs a column')"
-write_threads "$STUB_DIR/threads.after.json" "$(thread T2 true proxy/src/api.ts 'unchecked index')" "$(thread T_UX2 false website/app/page.tsx '[UX — Claude Code] **needs a column**')"
+write_threads "$STUB_DIR/threads.json" "$(thread T2 false proxy/src/api.ts 'unchecked index')" "$(thread T_UX2 false website/src/components/page.tsx 'needs a column')"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T2 true proxy/src/api.ts 'unchecked index')" "$(thread T_UX2 false website/src/components/page.tsx '[UX — Claude Code] **needs a column**')"
 cat > "$STUB_DIR/round-action.sh" <<'EOF'
 cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
 sed 's/"labels": \[\]/"labels": [{"name": "claude-code-ux"}]/' "$STUB_DIR/pr.json" > "$STUB_DIR/pr.json.tmp" && mv "$STUB_DIR/pr.json.tmp" "$STUB_DIR/pr.json"
@@ -203,6 +203,28 @@ assert_eq "the marked thread is also in the final JSON" '["T_UX2"]' "$(field .ux
 assert "the prompt tells Codex to leave marked threads to Claude Code" grep -q 'belong to Claude Code' "$STUB_DIR/prompts.log"
 assert "the prompt tells Codex to rebase before pushing" grep -q 'rebase' "$STUB_DIR/prompts.log"
 assert "the prompt names the UI paths Claude Code owns" grep -q 'website/src/components' "$STUB_DIR/prompts.log"
+
+# ---------- scenario 3d: a mark on a non-UI path is ignored and the thread goes back to Codex by id ----------
+new_stub_dir misrouted
+write_pr aaaaaaa1 claude-code-ux
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+ROUTE_THREAD="$(thread T_API false website/src/app/api/images/route.ts '[UX — Claude Code] **cache header**')"
+UI_THREAD="$(thread T_UI false website/src/components/Card.tsx 'copy the full address')"
+write_threads "$STUB_DIR/threads.json" "$ROUTE_THREAD" "$UI_THREAD"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T_API true website/src/app/api/images/route.ts '[UX — Claude Code] **cache header**')" "$UI_THREAD"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+EOF
+UX_FILE="$SCRATCH/ux-misrouted.txt"
+run_driver --max-rounds 1 --ux-file "$UX_FILE"
+echo "---- scenario 3d exit=$RC ----"
+echo "$OUT"
+assert_eq "a marked thread on an api path is not a UX thread" '[]' "$(field .ux_threads)"
+assert "the misrouted thread is never streamed" sh -c "! grep -q T_API '$UX_FILE' 2>/dev/null"
+assert "the prompt names the misrouted thread as Codex's to fix" grep -q 'T_API' "$STUB_DIR/prompts.log"
+assert "the prompt names the UI-path thread as a UX candidate" grep -q 'T_UI' "$STUB_DIR/prompts.log"
+assert_eq "one round ran on it" 1 "$(field .rounds)"
 
 # ---------- scenario 3b: the same thread without the PR label stays remaining ----------
 new_stub_dir ux-nolabel
