@@ -202,9 +202,21 @@ lanes_clause() {
   printf ' %s' "Threads that already carry the [UX — Claude Code] reply on UI paths belong to Claude Code: do not modify, reply to, or resolve them. Before every push, rebase onto the remote PR branch, since the other lane may have pushed."
 }
 
+# A PR whose files all live under website/ or mobile/ touches no backend service; say so, so
+# the Codex skill does not spend minutes proving there is nothing to deploy.
+deploy_clause() {
+  local files
+  files="$(gh_api "repos/{owner}/{repo}/pulls/$PR/files" --paginate | jq -r '.[].filename' 2>/dev/null)"
+  if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^(website|mobile)/'; then
+    printf '%s' "This PR changes only website/ and mobile/ files: no backend service is affected, so skip deployment and staging verification entirely; once the relevant tests pass, push, reply and resolve."
+  else
+    printf '%s' "$STAGING_CLAUSE"
+  fi
+}
+
 run_round() { # run_round <round>
   local round="$1" prompt
-  prompt="Use your fix-pr skill on pull request #$PR of $OWNER/$NAME, checked out at $REPO. $STAGING_CLAUSE $REPORT_CLAUSE $(lanes_clause)"
+  prompt="Use your fix-pr skill on pull request #$PR of $OWNER/$NAME, checked out at $REPO. $(deploy_clause) $REPORT_CLAUSE $(lanes_clause)"
   note "[round $round] invoking the Codex fix-pr skill"
   "$DAEMON_RUNNER" -C "$REPO" -o "$WORK/last-$round.txt" --name "$PR/fix-pr r$round" \
     --timeout "$TIMEOUT_S" "$prompt" > "$WORK/round-$round.log" 2>&1 &
