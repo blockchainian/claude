@@ -7,6 +7,7 @@ echo "$*" >> "${STUB_DIR:?}/gh.log"
 
 case "$*" in
   *graphql*) cat "$STUB_DIR/threads.json" ;;
+  *"/reviews"*) if [ -f "$STUB_DIR/reviews.json" ]; then cat "$STUB_DIR/reviews.json"; else echo "[]"; fi ;;
   *"/comments"*) cat "$STUB_DIR/comments.json" ;;
   *"/commits/"*) cat "$STUB_DIR/commit.json" ;;
   *"/pulls/"*) cat "$STUB_DIR/pr.json" ;;
