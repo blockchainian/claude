@@ -13,7 +13,7 @@ Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--production]
   max-rounds   review/fix rounds to run        (default: 2)
   production   let the Codex skill deploy production after staging passes; without it
                the skill stops after staging verification and production stays with the caller
-  wait         max seconds to wait for a review newer than the PR head (default: 1800)
+  wait         max seconds to wait for a review newer than the PR head (default: 300)
   poll         seconds between those checks    (default: 30)
   timeout      per-Codex-invocation seconds    (default: 3600)
 
@@ -43,7 +43,7 @@ DAEMON_RUNNER_OVERRIDDEN=0
 [ "${FIXPR_DAEMON_RUNNER+x}" = x ] && DAEMON_RUNNER_OVERRIDDEN=1
 DAEMON_RUNNER="${FIXPR_DAEMON_RUNNER:-$SCRIPT_DIR/../execute/daemon-run.mjs}"
 
-PR="" REPO="" MAX_ROUNDS=2 PRODUCTION=0 WAIT_S=1800 POLL_S=30 TIMEOUT_S=3600
+PR="" REPO="" MAX_ROUNDS=2 PRODUCTION=0 WAIT_S=300 POLL_S=30 TIMEOUT_S=3600
 while [ $# -gt 0 ]; do
   case "$1" in
     --pr) PR="$2"; shift 2 ;;
