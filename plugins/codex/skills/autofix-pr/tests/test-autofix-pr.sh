@@ -226,6 +226,22 @@ assert "the prompt names the misrouted thread as Codex's to fix" grep -q 'T_API'
 assert "the prompt names the UI-path thread as a UX candidate" grep -q 'T_UI' "$STUB_DIR/prompts.log"
 assert_eq "one round ran on it" 1 "$(field .rounds)"
 
+# ---------- scenario 3e: a website-only PR tells Codex there is nothing to deploy ----------
+new_stub_dir frontend-only
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T_FE false website/src/app/api/images/route.ts 'cache header')"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T_FE true website/src/app/api/images/route.ts 'cache header')"
+printf '[{"filename": "website/src/app/api/images/route.ts"}, {"filename": "website/src/components/Card.tsx"}]\n' > "$STUB_DIR/files.json"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+EOF
+run_driver --max-rounds 1
+echo "---- scenario 3e exit=$RC ----"
+assert "a website-only diff tells Codex no backend service is affected" grep -q 'no backend service is affected' "$STUB_DIR/prompts.log"
+assert "a PR touching the proxy is not told that" sh -c "! grep -q 'no backend service is affected' '$SCRATCH/stub-clean/prompts.log'"
+
 # ---------- scenario 3b: the same thread without the PR label stays remaining ----------
 new_stub_dir ux-nolabel
 write_pr aaaaaaa1
