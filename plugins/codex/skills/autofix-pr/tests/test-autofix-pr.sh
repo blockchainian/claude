@@ -202,6 +202,7 @@ assert_eq "the marked thread is streamed to the ux file" "T_UX2" "$(cat "$UX_FIL
 assert_eq "the marked thread is also in the final JSON" '["T_UX2"]' "$(field .ux_threads)"
 assert "the prompt tells Codex to leave marked threads to Claude Code" grep -q 'belong to Claude Code' "$STUB_DIR/prompts.log"
 assert "the prompt tells Codex to rebase before pushing" grep -q 'rebase' "$STUB_DIR/prompts.log"
+assert "the prompt names the UI paths Claude Code owns" grep -q 'website/src/components' "$STUB_DIR/prompts.log"
 
 # ---------- scenario 3b: the same thread without the PR label stays remaining ----------
 new_stub_dir ux-nolabel
