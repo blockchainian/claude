@@ -90,7 +90,6 @@ if [ -f d.txt ] && [ -f e.txt ]; then echo "d.txt and e.txt conflict"; exit 1; f
 exit 0
 EOF
 echo "shared spec for workstreams" > "$FIX/spec.md"
-echo "handoff: next step is this run" > "$FIX/handoff.md"
 cat > "$FIX/workstreams.txt" <<'EOF'
 WS-OK write a.txt per spec.md
 WS-FAILONCE write b.txt per spec.md
@@ -113,18 +112,6 @@ BOGUS_RC=$?
 set -e 2>/dev/null || true
 assert_eq "bogus runner exits 1" 1 "$BOGUS_RC"
 assert "bogus runner prints usage" grep -q '^Usage:' "$SCRATCH/bogus.log"
-
-# ---------- handoff gate ----------
-mkdir -p "$SCRATCH/nohandoff"
-cp "$FIX/workstreams.txt" "$SCRATCH/nohandoff/workstreams.txt"
-set +e
-"$ENGINE" --workstreams "$SCRATCH/nohandoff/workstreams.txt" --feature feat-gate \
-  --check "sh ./check.sh" --repo "$FIX" > "$SCRATCH/nohandoff.log" 2>&1
-GATE_RC=$?
-set -e 2>/dev/null || true
-assert_eq "missing handoff.md exits 1" 1 "$GATE_RC"
-assert "missing handoff.md names the file" grep -q 'handoff.md' "$SCRATCH/nohandoff.log"
-assert_eq "gated run creates no run state" 0 "$(ls -d "$FIX/.git/codex-execute/feat-gate" 2>/dev/null | wc -l | tr -d ' ')"
 
 # ---------- daemon start cwd ----------
 # The shared app-server daemon inherits the cwd of whoever starts it, and every later codex TUI

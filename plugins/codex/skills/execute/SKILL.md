@@ -42,19 +42,14 @@ them.
    Commit both to the session branch. The session worktree must be CLEAN when
    the engine starts — the run delivers onto this branch.
 
-### Reset context before launching
+### Launch from this session
 
-The launch opens a long orchestration loop (measured median: ~150 main-loop
-turns from ~165k context), and the run's task notifications bind to the
-session that launches it — so this moment, not mid-run, is when to reset
-context. Every run: write `handoff.md` beside `workstreams.txt` (pointer to
-spec.md and the plan; "Next step" with the exact execute.sh command and check
-command; decisions since the plan; open items), commit it, and tell the user
-to `/clear`, set the implementation effort, and send `Resume from
-<path>/handoff.md`. The fresh session launches the run. The engine refuses to
-start when `handoff.md` is missing, so this step is not a judgment call.
-Switching effort without clearing invalidates the whole prompt cache at full
-1h-write price; after `/clear` it costs nothing.
+Convert and launch in the same turn. Never write a handoff here: plan.md,
+spec.md and workstreams.txt are the record, and a fresh session resumes from
+plan.md. The run's task notifications bind to the session that launches it,
+so never `/clear` mid-run either. Switching effort without clearing
+invalidates the whole prompt cache at full 1h-write price, so set the
+implementation effort before the session that launches starts.
 
 ## Phase 2+3 — Execute & Merge (script, NO Claude)
 
