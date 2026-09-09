@@ -20,6 +20,9 @@ case "$*" in
   *"/reactions"*) if [ -f "$STUB_DIR/reactions.json" ]; then cat "$STUB_DIR/reactions.json"; else echo "[]"; fi ;;
   *"/reviews"*) if [ -f "$STUB_DIR/reviews.json" ]; then cat "$STUB_DIR/reviews.json"; else echo "[]"; fi ;;
   *"/comments"*) cat "$STUB_DIR/comments.json" ;;
+  *"git/ref/heads/"*)
+    # The branch ref: the PR fixture's head unless the scenario pins a newer branch head.
+    if [ -f "$STUB_DIR/branch-head" ]; then printf '{"object": {"sha": "%s"}}\n' "$(cat "$STUB_DIR/branch-head")"; else jq '{object: {sha: .head.sha}}' "$STUB_DIR/pr.json"; fi ;;
   *"/commits/"*) cat "$STUB_DIR/commit.json" ;;
   *"/pulls/"*) cat "$STUB_DIR/pr.json" ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 1 ;;
