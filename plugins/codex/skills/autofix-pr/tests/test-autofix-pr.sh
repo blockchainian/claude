@@ -56,7 +56,7 @@ write_pr() { # write_pr <sha> <label-or-empty>
   local labels="[]"
   [ -n "${2:-}" ] && labels="[{\"name\": \"$2\"}]"
   cat > "$STUB_DIR/pr.json" <<EOF
-{"number": 7, "head": {"sha": "$1"},
+{"number": 7, "head": {"sha": "$1", "ref": "feature"},
  "base": {"repo": {"owner": {"login": "acme"}, "name": "app"}},
  "labels": $labels}
 EOF
@@ -377,6 +377,26 @@ printf '[{"id": 9, "submitted_at": "2026-09-08T12:00:30Z", "state": "COMMENTED",
 run_driver --max-rounds 1
 echo "---- scenario 7f exit=$RC ----"
 assert_eq "a review made on the head counts" false "$(field .awaiting_review)"
+
+# ---------- scenario 7g: the PR head lags the branch ref after a push ----------
+new_stub_dir stale-pr-head
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T10 false proxy/src/api.ts 'finding')"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T10 true proxy/src/api.ts 'finding')"
+printf '[{"id": 9, "submitted_at": "2026-09-08T11:00:00Z", "state": "COMMENTED", "user": {"login": "reviewer-bot"}, "commit_id": "aaaaaaa1", "body": "review"}]\n' > "$STUB_DIR/reviews.json"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+printf 'bbbbbbb2' > "$STUB_DIR/branch-head"
+printf '{"commit": {"committer": {"date": "2026-09-08T12:00:00Z"}}}\n' > "$STUB_DIR/commit.json"
+EOF
+
+run_driver --max-rounds 2
+echo "---- scenario 7g exit=$RC ----"
+echo "$OUT"
+assert_eq "the push is seen on the branch ref even though the PR head lags" '["bbbbbbb2"]' "$(field .pushed)"
+assert_eq "a branch head the reviewer has not seen is awaiting review, not clean" true "$(field .awaiting_review)"
 
 # ---------- scenario 8: a PR pushed after its last review is not read as clean ----------
 new_stub_dir fresh-push
