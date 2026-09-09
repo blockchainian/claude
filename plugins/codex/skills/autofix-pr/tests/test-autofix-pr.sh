@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# ABOUTME: End-to-end test for fix-pr.sh using stubbed gh and daemon-runner CLIs.
+# ABOUTME: End-to-end test for autofix-pr.sh using stubbed gh and daemon-runner CLIs.
 # ABOUTME: Covers a clean round, exhausted rounds, UX routing by label and config-thread detection.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-DRIVER="$HERE/../fix-pr.sh"
+DRIVER="$HERE/../autofix-pr.sh"
 
-SCRATCH="$(mktemp -d /tmp/codex-fix-pr-test.XXXXXX)"
+SCRATCH="$(mktemp -d /tmp/codex-autofix-pr-test.XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
 FAILS=0
@@ -31,7 +31,7 @@ assert_eq() { # assert_eq <desc> <expected> <actual>
 # ---------- skill metadata ----------
 # Claude Code prefixes the plugin name itself, so the frontmatter name carries no namespace.
 SKILL_NAME="$(awk '/^name:/{sub(/^name: */, ""); gsub(/"/, ""); print; exit}' "$HERE/../SKILL.md")"
-assert_eq "SKILL.md name resolves to /codex:fix-pr" "fix-pr" "$SKILL_NAME"
+assert_eq "SKILL.md name resolves to /codex:autofix-pr" "autofix-pr" "$SKILL_NAME"
 
 # ---------- fixture helpers ----------
 STUB_BIN="$SCRATCH/bin"
