@@ -179,7 +179,7 @@ wait_for_review() {
 STAGING_CLAUSE="This invocation is staging-only: deploy staging, verify it, and stop before production, reporting the staging SHA."
 [ "$PRODUCTION" = "1" ] && STAGING_CLAUSE="Deploy staging, verify it, then deploy production as the skill prescribes."
 REPORT_CLAUSE="Quote every deploy-staging.sh JSON result line verbatim in your final message."
-LANES_CLAUSE="Ownership of findings is by path: a finding whose fix would touch website/src/components/**, website/src/app/**, mobile/app/** or mobile/src/components/** is UI work for Claude Code — do not fix it; add the claude-code-ux label and reply [UX — Claude Code] as the skill prescribes. Threads that already carry the [UX — Claude Code] reply belong to Claude Code, which fixes them in parallel on this PR: do not modify, reply to, or resolve them. Before every push, rebase onto the remote PR branch, since the other lane may have pushed."
+LANES_CLAUSE="A finding is UX work for Claude Code only when both hold: its fix lands under website/src/components/**, website/src/app/**, mobile/app/** or mobile/src/components/**, AND the fix changes what the user sees or does (layout, copy, visual state, interaction). For those, do not fix: add the claude-code-ux label and reply [UX — Claude Code] as the skill prescribes. Everything else — backend, scripts, tests, and logic fixes inside those paths that leave the rendered result unchanged — you fix yourself. Threads that already carry the [UX — Claude Code] reply belong to Claude Code, which fixes them in parallel on this PR: do not modify, reply to, or resolve them. Before every push, rebase onto the remote PR branch, since the other lane may have pushed."
 
 run_round() { # run_round <round>
   local round="$1" prompt
