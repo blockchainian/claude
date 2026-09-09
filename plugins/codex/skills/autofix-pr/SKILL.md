@@ -20,7 +20,7 @@ NOT for UI work: UI-changing findings come back for Claude Code to implement.
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/autofix-pr/autofix-pr.sh --pr <number> \
-  [--repo DIR] [--max-rounds 2] [--production] \
+  [--repo DIR] [--max-rounds 2] [--production] [--ux-file PATH] \
   [--wait 900] [--poll 10] [--timeout 3600]
 ```
 
@@ -36,7 +36,11 @@ Launch it in the background and END YOUR TURN. Each round:
    the run stops, reports the state it read, and sets `awaiting_review`.
 2. Reads every review thread over GraphQL and classifies the unresolved ones.
 3. Runs the Codex fix-pr skill as a daemon thread named `<pr>/fix-pr r<n>`, visible in
-   `codex agents` with its live status, then re-reads the PR head.
+   `codex agents` with its live status, then re-reads the PR head. With `--ux-file`, the
+   threads are re-read every poll while the skill works, and each thread it routes to
+   Claude Code is appended to that file the moment it is marked, so the UX lane can start
+   in parallel instead of after the round. The skill is told that marked threads belong to
+   Claude Code and to rebase onto the remote PR branch before every push.
 
 After a push, the next iteration waits for the reviewer to react to the new head before
 reading its threads, so a head the reviewer has not seen is never reported as clean. The

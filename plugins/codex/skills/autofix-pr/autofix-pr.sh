@@ -6,13 +6,15 @@ set -u
 usage() {
   cat <<'EOF'
 Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--production]
-                 [--wait SECS] [--poll SECS] [--timeout SECS]
+                 [--ux-file PATH] [--wait SECS] [--poll SECS] [--timeout SECS]
 
   pr           pull request number in the repo's origin
   repo         repository to operate on        (default: git toplevel of cwd)
   max-rounds   review/fix rounds to run        (default: 2)
   production   let the Codex skill deploy production after staging passes; without it
                the skill stops after staging verification and production stays with the caller
+  ux-file      append each thread id the Codex skill routes to Claude Code, one per line,
+               as soon as it is marked — while the round is still running
   wait         max seconds to wait for a review newer than the PR head (default: 900)
   poll         seconds between those checks    (default: 10)
   timeout      per-Codex-invocation seconds    (default: 3600)
@@ -43,13 +45,14 @@ DAEMON_RUNNER_OVERRIDDEN=0
 [ "${FIXPR_DAEMON_RUNNER+x}" = x ] && DAEMON_RUNNER_OVERRIDDEN=1
 DAEMON_RUNNER="${FIXPR_DAEMON_RUNNER:-$SCRIPT_DIR/../execute/daemon-run.mjs}"
 
-PR="" REPO="" MAX_ROUNDS=2 PRODUCTION=0 WAIT_S=900 POLL_S=10 TIMEOUT_S=3600
+PR="" REPO="" MAX_ROUNDS=2 PRODUCTION=0 UX_FILE="" WAIT_S=900 POLL_S=10 TIMEOUT_S=3600
 while [ $# -gt 0 ]; do
   case "$1" in
     --pr) PR="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --max-rounds) MAX_ROUNDS="$2"; shift 2 ;;
     --production) PRODUCTION=1; shift ;;
+    --ux-file) UX_FILE="$2"; shift 2 ;;
     --wait) WAIT_S="$2"; shift 2 ;;
     --poll) POLL_S="$2"; shift 2 ;;
     --timeout) TIMEOUT_S="$2"; shift 2 ;;
@@ -171,13 +174,38 @@ wait_for_review() {
 STAGING_CLAUSE="This invocation is staging-only: deploy staging, verify it, and stop before production, reporting the staging SHA."
 [ "$PRODUCTION" = "1" ] && STAGING_CLAUSE="Deploy staging, verify it, then deploy production as the skill prescribes."
 REPORT_CLAUSE="Quote every deploy-staging.sh JSON result line verbatim in your final message."
+LANES_CLAUSE="Threads that already carry the [UX — Claude Code] reply belong to Claude Code, which fixes them in parallel on this PR: do not modify, reply to, or resolve them. Before every push, rebase onto the remote PR branch, since the other lane may have pushed."
 
 run_round() { # run_round <round>
   local round="$1" prompt
-  prompt="Use your fix-pr skill on pull request #$PR of $OWNER/$NAME, checked out at $REPO. $STAGING_CLAUSE $REPORT_CLAUSE"
+  prompt="Use your fix-pr skill on pull request #$PR of $OWNER/$NAME, checked out at $REPO. $STAGING_CLAUSE $REPORT_CLAUSE $LANES_CLAUSE"
   note "[round $round] invoking the Codex fix-pr skill"
   "$DAEMON_RUNNER" -C "$REPO" -o "$WORK/last-$round.txt" --name "$PR/fix-pr r$round" \
-    --timeout "$TIMEOUT_S" "$prompt" > "$WORK/round-$round.log" 2>&1
+    --timeout "$TIMEOUT_S" "$prompt" > "$WORK/round-$round.log" 2>&1 &
+  local daemon=$!
+  # While the Codex skill works, re-read the threads so a thread it routes to Claude Code
+  # reaches the UX lane now, not when the round ends.
+  while kill -0 "$daemon" 2>/dev/null; do
+    stream_ux
+    sleep "$POLL_S"
+  done
+  wait "$daemon"
+  stream_ux
+}
+
+# Append every newly marked UX thread id to UX_FILE and say so on stderr.
+stream_ux() {
+  [ -n "$UX_FILE" ] || return 0
+  refresh_pr
+  classify
+  touch "$WORK/ux-seen"
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    grep -qx "$id" "$WORK/ux-seen" && continue
+    echo "$id" >> "$WORK/ux-seen"
+    echo "$id" >> "$UX_FILE"
+    note "ux thread routed to Claude Code: $id"
+  done < "$WORK/ux"
 }
 
 # The Codex skill quotes each deploy-staging.sh result line; the staging SHA is its "sha" field.
