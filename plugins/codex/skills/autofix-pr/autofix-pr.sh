@@ -92,6 +92,11 @@ ME="$(gh_api user | jq -r '.login // ""' 2>/dev/null)"
 
 UX_LABEL="claude-code-ux"
 UX_MARKER="[UX — Claude Code]"
+# Paths where a finding can be UX work. Ownership is decided here, mechanically: a mark on any
+# other path is ignored and the thread goes back to the Codex skill by id. API routes and tests
+# under the app tree are never UX. Override with FIXPR_UX_PATHS (an ERE).
+UX_PATHS="${FIXPR_UX_PATHS:-^(website/src/(components|app)/|mobile/(app|src/components)/)}"
+UX_PATHS_EXCLUDE="${FIXPR_UX_PATHS_EXCLUDE:-(^website/src/app/api/|\\.test\\.)}"
 
 # The head is read from the branch ref, not from the PR: GitHub's pull-request head can lag a
 # push by minutes, and a review matched against the lagging head would pass for a branch head
@@ -119,25 +124,31 @@ THREADS_QUERY='query($owner: String!, $name: String!, $pr: Int!) {
   }
 }'
 
-# An unresolved thread is a UX thread when the PR carries the claude-code-ux label and the
-# Codex skill's reply marker is on it; a config thread when it touches Claude Code config,
-# which the Codex skill never edits. Everything else unresolved is must-fix work.
+# An unresolved thread is a UX thread when the PR carries the claude-code-ux label, the Codex
+# skill's reply marker is on it, AND its path is UX-eligible; a config thread when it touches
+# Claude Code config, which the Codex skill never edits. Everything else unresolved — including
+# a marked thread on a non-UX path — is must-fix work for the Codex skill.
 classify() {
   gh_api graphql -F owner="$OWNER" -F name="$NAME" -F pr="$PR" -f query="$THREADS_QUERY" \
     > "$WORK/threads.json" || fatal "cannot read the review threads of PR #$PR"
-  jq -r --arg marker "$UX_MARKER" --argjson label "$HAS_UX_LABEL" '
+  jq -r --arg marker "$UX_MARKER" --argjson label "$HAS_UX_LABEL" \
+        --arg uxpaths "$UX_PATHS" --arg uxexclude "$UX_PATHS_EXCLUDE" '
     [.data.repository.pullRequest.reviewThreads.nodes[]
      | select(.isResolved | not)
      | {id, path: (.path // ""), body: ([.comments.nodes[].body] | join("\n"))}]
+    | map(. + {eligible: ((.path | test($uxpaths)) and ((.path | test($uxexclude)) | not))})
     | map(. + {kind:
-        (if $label == 1 and (.body | contains($marker)) then "ux"
+        (if $label == 1 and (.body | contains($marker)) and .eligible then "ux"
          elif (.path + "\n" + .body) | test("\\.claude/|CLAUDE\\.md") then "config"
          else "remaining" end)})
-    | .[] | "\(.kind)\t\(.id)"' "$WORK/threads.json" > "$WORK/classified" \
+    | .[] | "\(.kind)\t\(.id)\t\(.eligible)\t\(.path)"' "$WORK/threads.json" > "$WORK/classified" \
     || fatal "cannot classify the review threads of PR #$PR"
   awk -F'\t' '$1 == "ux" {print $2}' "$WORK/classified" > "$WORK/ux"
   awk -F'\t' '$1 == "config" {print $2}' "$WORK/classified" > "$WORK/config"
   awk -F'\t' '$1 == "remaining" {print $2}' "$WORK/classified" > "$WORK/remaining"
+  # For the Codex prompt: unresolved must-fix threads split by path eligibility.
+  awk -F'\t' '$1 == "remaining" && $3 == "true" {print $2 " (" $4 ")"}' "$WORK/classified" | paste -sd, - > "$WORK/candidates"
+  awk -F'\t' '$1 == "remaining" && $3 != "true" {print $2 " (" $4 ")"}' "$WORK/classified" | paste -sd, - > "$WORK/must-fix"
 }
 
 # The reviewer's reaction to the head, in one GraphQL query per poll: GraphQL has its own
@@ -179,11 +190,21 @@ wait_for_review() {
 STAGING_CLAUSE="This invocation is staging-only: deploy staging, verify it, and stop before production, reporting the staging SHA."
 [ "$PRODUCTION" = "1" ] && STAGING_CLAUSE="Deploy staging, verify it, then deploy production as the skill prescribes."
 REPORT_CLAUSE="Quote every deploy-staging.sh JSON result line verbatim in your final message."
-LANES_CLAUSE="A finding is UX work for Claude Code only when both hold: its fix lands under website/src/components/**, website/src/app/**, mobile/app/** or mobile/src/components/**, AND the fix changes what the user sees or does (layout, copy, visual state, interaction). For those, do not fix: add the claude-code-ux label and reply [UX — Claude Code] as the skill prescribes. Everything else — backend, scripts, tests, and logic fixes inside those paths that leave the rendered result unchanged — you fix yourself. Threads that already carry the [UX — Claude Code] reply belong to Claude Code, which fixes them in parallel on this PR: do not modify, reply to, or resolve them. Before every push, rebase onto the remote PR branch, since the other lane may have pushed."
+# Ownership is decided by the engine, by path; the Codex skill judges "UI-changing" only inside
+# the eligible set and gets its must-fix threads by id.
+lanes_clause() {
+  local must candidates
+  must="$(cat "$WORK/must-fix" 2>/dev/null)"
+  candidates="$(cat "$WORK/candidates" 2>/dev/null)"
+  printf '%s' "Claude Code fixes UX threads on this PR in parallel; ownership is decided by path."
+  [ -n "$must" ] && printf ' %s' "Threads you must fix yourself, by id, even if one carries a [UX — Claude Code] reply by mistake: $must."
+  [ -n "$candidates" ] && printf ' %s' "Threads on UI paths: $candidates — for each, if the fix changes what the user sees or does (layout, copy, visual state, interaction), do not fix it: add the claude-code-ux label and reply [UX — Claude Code] as the skill prescribes; if the fix leaves the rendered result unchanged, fix it yourself."
+  printf ' %s' "Threads that already carry the [UX — Claude Code] reply on UI paths belong to Claude Code: do not modify, reply to, or resolve them. Before every push, rebase onto the remote PR branch, since the other lane may have pushed."
+}
 
 run_round() { # run_round <round>
   local round="$1" prompt
-  prompt="Use your fix-pr skill on pull request #$PR of $OWNER/$NAME, checked out at $REPO. $STAGING_CLAUSE $REPORT_CLAUSE $LANES_CLAUSE"
+  prompt="Use your fix-pr skill on pull request #$PR of $OWNER/$NAME, checked out at $REPO. $STAGING_CLAUSE $REPORT_CLAUSE $(lanes_clause)"
   note "[round $round] invoking the Codex fix-pr skill"
   "$DAEMON_RUNNER" -C "$REPO" -o "$WORK/last-$round.txt" --name "$PR/fix-pr r$round" \
     --timeout "$TIMEOUT_S" "$prompt" > "$WORK/round-$round.log" 2>&1 &
