@@ -5,7 +5,7 @@ set -u
 
 usage() {
   cat <<'EOF'
-Usage: fix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--staging-only]
+Usage: autofix-pr.sh --pr NUMBER [--repo DIR] [--max-rounds N] [--staging-only]
                  [--wait SECS] [--poll SECS] [--timeout SECS]
 
   pr           pull request number in the repo's origin
@@ -30,8 +30,8 @@ EOF
   exit 1
 }
 
-fatal() { echo "codex:fix-pr: FATAL: $*" >&2; exit 1; }
-note()  { echo "codex:fix-pr: $*" >&2; }
+fatal() { echo "codex:autofix-pr: FATAL: $*" >&2; exit 1; }
+note()  { echo "codex:autofix-pr: $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GH="${FIXPR_GH:-gh}"
@@ -75,7 +75,7 @@ if [ "$DAEMON_RUNNER_OVERRIDDEN" = "0" ]; then
     || fatal "codex app-server daemon is not running"
 fi
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/codex-fix-pr.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/codex-autofix-pr.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 gh_api() { (cd "$REPO" && "$GH" api "$@"); }

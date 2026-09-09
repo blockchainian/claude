@@ -1,12 +1,12 @@
 ---
-name: fix-pr
+name: autofix-pr
 description: Work a pull request's review threads to done through bounded rounds of the Codex fix-pr skill — wait for review feedback newer than the PR head, run codex as a daemon thread, re-read the PR, and report the pushes, staging deploys, UI threads routed back to Claude Code and threads left for the user. Use when a PR is under review and its backend findings should be fixed off the Claude critical path.
 ---
 
-# codex:fix-pr — work a PR's review threads off the Claude critical path
+# codex:autofix-pr — work a PR's review threads off the Claude critical path
 
 Codex owns the fixing; Claude owns the routing. Engine:
-`${CLAUDE_PLUGIN_ROOT}/skills/fix-pr/fix-pr.sh`. The Codex-side skill it invokes lives at
+`${CLAUDE_PLUGIN_ROOT}/skills/autofix-pr/autofix-pr.sh`. The Codex-side skill it invokes lives at
 `~/.codex/skills/fix-pr` and already triages findings, fixes must-fix bugs, replies and
 resolves threads, and deploys the affected backend services.
 
@@ -19,7 +19,7 @@ NOT for UI work: UI-changing findings come back for Claude Code to implement.
 ## Run it
 
 ```
-${CLAUDE_PLUGIN_ROOT}/skills/fix-pr/fix-pr.sh --pr <number> \
+${CLAUDE_PLUGIN_ROOT}/skills/autofix-pr/autofix-pr.sh --pr <number> \
   [--repo DIR] [--max-rounds 2] [--staging-only] \
   [--wait 1800] [--poll 30] [--timeout 3600]
 ```
@@ -53,7 +53,7 @@ One flat JSON object on stdout (progress goes to stderr):
   staging.
 - `ux_threads` — unresolved threads the Codex skill routed to Claude Code: the PR carries
   the `claude-code-ux` label and the thread carries its `[UX — Claude Code]` reply. Hand
-  these to the `ux-fix-pr` agent.
+  these to the `ux-pr-fixer` agent.
 - `config_threads` — unresolved threads whose path or text names `.claude/**` or
   `CLAUDE.md`. The Codex skill never edits Claude Code configuration, so these are the
   user's call.
@@ -65,5 +65,5 @@ Neither UX nor config threads block completion — they are routed, not failed.
 
 ## Tests
 
-`skills/fix-pr/tests/test-fix-pr.sh` stubs `gh` and the daemon runner through `PATH` and
+`skills/autofix-pr/tests/test-autofix-pr.sh` stubs `gh` and the daemon runner through `PATH` and
 `FIXPR_DAEMON_RUNNER`; it never touches a real PR or a real Codex.

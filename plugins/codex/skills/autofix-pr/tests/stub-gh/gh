@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Test stand-in for the gh CLI serving the pull request, commit, comment and
-# ABOUTME: review-thread fixtures the fix-pr driver reads, and recording every invocation.
+# ABOUTME: review-thread fixtures the autofix-pr driver reads, and recording every invocation.
 set -u
 
 echo "$*" >> "${STUB_DIR:?}/gh.log"
