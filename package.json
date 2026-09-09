@@ -7,9 +7,10 @@
     "node": ">=18.18"
   },
   "scripts": {
-    "test": "npm run test:grok && npm run test:codex",
+    "test": "npm run test:grok && npm run test:codex && npm run test:codex-fix-pr",
     "test:grok": "node --test tests/*.test.mjs",
     "test:codex": "plugins/codex/skills/execute/tests/test-execute.sh",
+    "test:codex-fix-pr": "plugins/codex/skills/fix-pr/tests/test-fix-pr.sh",
     "validate": "claude plugin validate --strict ."
   }
 }
