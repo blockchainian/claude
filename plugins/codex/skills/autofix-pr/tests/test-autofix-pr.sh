@@ -183,6 +183,26 @@ assert "with --production the prompt asks for production" grep -q 'deploy produc
 assert "with --production the prompt does not say staging-only" \
   sh -c "! grep -q 'staging-only' '$STUB_DIR/prompts.log'"
 
+# ---------- scenario 3a: UX marks are streamed to --ux-file while the round runs ----------
+new_stub_dir ux-stream
+write_pr aaaaaaa1
+write_commit_time "2026-09-08T10:00:00Z"
+write_comment_time "2026-09-08T11:00:00Z"
+write_threads "$STUB_DIR/threads.json" "$(thread T2 false proxy/src/api.ts 'unchecked index')" "$(thread T_UX2 false website/app/page.tsx 'needs a column')"
+write_threads "$STUB_DIR/threads.after.json" "$(thread T2 true proxy/src/api.ts 'unchecked index')" "$(thread T_UX2 false website/app/page.tsx '[UX — Claude Code] **needs a column**')"
+cat > "$STUB_DIR/round-action.sh" <<'EOF'
+cp "$STUB_DIR/threads.after.json" "$STUB_DIR/threads.json"
+sed 's/"labels": \[\]/"labels": [{"name": "claude-code-ux"}]/' "$STUB_DIR/pr.json" > "$STUB_DIR/pr.json.tmp" && mv "$STUB_DIR/pr.json.tmp" "$STUB_DIR/pr.json"
+EOF
+UX_FILE="$SCRATCH/ux-stream.txt"
+run_driver --max-rounds 1 --ux-file "$UX_FILE"
+echo "---- scenario 3a exit=$RC ----"
+echo "$OUT"
+assert_eq "the marked thread is streamed to the ux file" "T_UX2" "$(cat "$UX_FILE" 2>/dev/null)"
+assert_eq "the marked thread is also in the final JSON" '["T_UX2"]' "$(field .ux_threads)"
+assert "the prompt tells Codex to leave marked threads to Claude Code" grep -q 'belong to Claude Code' "$STUB_DIR/prompts.log"
+assert "the prompt tells Codex to rebase before pushing" grep -q 'rebase' "$STUB_DIR/prompts.log"
+
 # ---------- scenario 3b: the same thread without the PR label stays remaining ----------
 new_stub_dir ux-nolabel
 write_pr aaaaaaa1
