@@ -47,7 +47,9 @@ Files: `path/a.ts`, `path/b.ts`.
 ## UX workstream (Fable)
 
 <!-- The single workstream the Fable UX agent implements on the session branch: files it owns,
-surfaces it changes, whether each surface depends on the backend lane. Write `No UX lane.` and
+surfaces it changes, whether each surface depends on the backend lane. When any frontend change
+is UX-changing, every frontend change in the plan belongs here, not in a codex workstream: the
+lanes never share the frontend. Write `No UX lane.` and
 drop the wire-contract item, the empty JSON block and the UX checklist section when nothing a user
 sees changes. -->
 

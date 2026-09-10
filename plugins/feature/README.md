@@ -4,9 +4,11 @@ Ship a feature from a written plan, with Claude orchestrating and never
 implementing. `/feature:orchestrate` reads `plan.md`, launches the backend lane
 through [codex](../codex/README.md)'s `/codex:execute`, launches the UX lane as
 the `ux-implementer` agent in parallel, writes the UI probes while both run,
-deploys and verifies staging, works the PR's review threads through
-`/codex:autofix-pr` and the `ux-pr-fixer` agent, and decides production only
-when the backend threads are closed and the UX probes are green. The
+deploys and verifies staging, triages the execute run's local review once
+into `findings.json`, fixes in two lanes (`codex-rescue` and the
+`ux-pr-fixer` agent) with no re-review, re-probes the touched surfaces, and
+decides production only when every finding is closed and the probes are
+green. The
 `planner` agent writes `plan.md` from a grounded `problem.md` following
 `skills/orchestrate/plan-template.md`; `/feature:handoff` records a mid-phase
 stop in under 40 lines.
@@ -55,8 +57,12 @@ them there:
   and exits non-zero on failure, and **a staging verify command** that prints a
   verdict JSON and exits non-zero on failure. The orchestrator gates on exit
   codes, never on output text.
-- **A production deploy command** owned by the codex lane; the orchestrator
-  triggers it only through that lane.
+- **Backend paths**: the modules, API-route directories and test-file
+  patterns whose findings always belong to the codex lane, so the orchestrator
+  judges UX ownership only for the rest.
+- **Which services deploy from the default branch on merge**, and **a
+  production deploy command** owned by the codex lane for the rest; the
+  orchestrator triggers it only through that lane.
 - **Per-module test scripts** callable with a path filter (the plan's single
   `Checks` command chains them with `&&`), and **a dev-server command** that
   takes a port flag plus the default dev port to keep clear of, for the UX lane's
@@ -64,8 +70,11 @@ them there:
 
 For chadwallet these are `website/scripts/ui-probes/`,
 `mobile/scripts/ui-probes/` and `scripts/ui-probes/lib.sh`;
-`scripts/deploy-staging.sh` and `scripts/verify-staging.sh`; `yarn -s test` per
-module; `yarn dev -p <port>` with port 3004 reserved.
+`scripts/deploy-staging.sh` and `scripts/verify-staging.sh`; backend paths
+`proxy/`, `streamer/`, `scraper/`, `website/src/app/api/` and any test file;
+Render services and Vercel deploy from `main` on merge while the Cloudflare
+Workers (proxy, streamer) still go through the codex lane's deploy command;
+`yarn -s test` per module; `yarn dev -p <port>` with port 3004 reserved.
 
 ## Install
 
