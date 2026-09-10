@@ -1,5 +1,5 @@
 ---
-name: ui-verifier
+name: ux-verifier
 description: Drive a scripted UI verification scenario (gstack browse or iOS simulator) and return an objective verdict with evidence paths. Use for every drive-verify loop instead of driving UI from the main loop.
 model: sonnet
 effort: low
@@ -29,5 +29,5 @@ Your final message is EXACTLY this flat JSON, no XML tags, no surrounding prose:
 
 - Web: `B=$(PATH=$HOME/.local/bin:$PATH command -v browse)` (symlink to `~/Code/garrytan/gstack/browse/dist/browse`); if the browse daemon cannot launch Chromium, `export PLAYWRIGHT_BROWSERS_PATH=$HOME/.gstack-pw-browsers`. ONE shared browse daemon exists across sessions — do not restart it.
 - iOS simulator: load XcodeBuildMCP tools (screenshot, snapshot_ui, tap, swipe, wait_for_ui) via ToolSearch when the scenario targets the sim.
-- iOS builds: `~/.claude/ui-verifier/<project>-sim-build` holds the commit of the last sim build (writing it is exempt from read-only). If it equals the commit under test and the app is installed on the booted sim, skip the build and `launch_app_sim`; otherwise rebuild — never walk a stale build, the verdict would be about the wrong code. Build only from the main working tree (DerivedData is path-keyed; any new path = full cold build), never `clean`, reuse the same scheme/simulator via session defaults, write the marker after a successful build, and leave the sim booted with the app installed.
+- iOS builds: `~/.claude/ux-verifier/<project>-sim-build` holds the commit of the last sim build (writing it is exempt from read-only). If it equals the commit under test and the app is installed on the booted sim, skip the build and `launch_app_sim`; otherwise rebuild — never walk a stale build, the verdict would be about the wrong code. Build only from the main working tree (DerivedData is path-keyed; any new path = full cold build), never `clean`, reuse the same scheme/simulator via session defaults, write the marker after a successful build, and leave the sim booted with the app installed.
 - Computed styles and console assertions: browse `js` with getComputedStyle / console capture.
