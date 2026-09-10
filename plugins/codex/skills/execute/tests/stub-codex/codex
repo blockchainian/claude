@@ -12,6 +12,8 @@ OFILE=""
 CFG=""
 MODE=exec
 NAME=""
+SANDBOX=""
+SCHEMA=""
 args=("$@")
 i=0
 while [ $i -lt ${#args[@]} ]; do
@@ -20,7 +22,9 @@ while [ $i -lt ${#args[@]} ]; do
     -C) i=$((i+1)); DIR="${args[$i]}" ;;
     -o) i=$((i+1)); OFILE="${args[$i]}" ;;
     -c) i=$((i+1)); CFG="$CFG ${args[$i]}" ;;
-    -s|-m|-p) i=$((i+1)) ;;
+    -s) i=$((i+1)); SANDBOX="${args[$i]}" ;;
+    -m|-p) i=$((i+1)) ;;
+    --output-schema) i=$((i+1)); SCHEMA="$(basename "${args[$i]}")" ;;
     review) MODE=review ;;
     exec|--ephemeral|--skip-git-repo-check|--json|--uncommitted) ;;
     --base) i=$((i+1)) ;;
@@ -37,23 +41,19 @@ if [ "${args[0]:-}" = "app-server" ] && [ "${args[1]:-}" = "daemon" ]; then
   esac
 fi
 
+case "$PROMPT" in Review*) MODE=review ;; esac
 if [ "$MODE" = "review" ]; then
   scenario_bump REVIEW; scenario_log "REVIEW cfg=${CFG# }"
+  scenario_log "REVIEW sandbox=$SANDBOX schema=$SCHEMA"
+  scenario_log "REVIEW prompt=$(printf '%s' "$PROMPT" | tr '\n' ' ')"
+  sleep "${STUB_REVIEW_SLEEP:-0}"
   # record whether the engine still holds the delivery lock while reviewing
   if [ -e "$(git -C "$DIR" rev-parse --absolute-git-dir 2>/dev/null)/codex-execute/deliver.lock" ]; then
     scenario_log "REVIEW-LOCK-HELD"
   else
     scenario_log "REVIEW-LOCK-FREE"
   fi
-  # optionally push an unrelated commit to origin from a second clone, simulating a
-  # sibling landing on the branch while this run is still reviewing
-  if [ -n "${STUB_ADVANCE_ORIGIN_CLONE:-}" ]; then
-    echo "sibling" > "$STUB_ADVANCE_ORIGIN_CLONE/sibling.txt"
-    git -C "$STUB_ADVANCE_ORIGIN_CLONE" add sibling.txt
-    git -C "$STUB_ADVANCE_ORIGIN_CLONE" commit -qm "sibling commit during review"
-    git -C "$STUB_ADVANCE_ORIGIN_CLONE" push -q origin HEAD:main
-  fi
-  [ -n "$OFILE" ] && echo "stub review: no findings" > "$OFILE"
+  [ -n "$OFILE" ] && printf '{"findings":[]}' > "$OFILE"
   echo "stub review done"
   exit 0
 fi
