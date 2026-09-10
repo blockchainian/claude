@@ -40,6 +40,9 @@ Scope is exactly the ask in `problem.md`. Do not add steps that were not request
   `(new)` on their own line.
 - Then grep every function, route, table, column and env var the plan names; a miss there reads
   fluently, which is why reading alone does not find it.
+- Frontend is one lane. When any frontend change is UX-changing, every frontend change goes into
+  the UX workstream for Fable; codex workstreams get frontend files only when the plan has no UX
+  lane. Never split frontend between the lanes.
 - Do not modify any file in the repo. Do not spawn agents.
 
 Your final message is: the plan path, its word count, the checker's exit code, and every
