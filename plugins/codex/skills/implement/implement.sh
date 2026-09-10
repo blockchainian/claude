@@ -20,7 +20,7 @@ Usage: implement.sh --workstreams FILE --feature NAME --check CMD
   timeout     per-codex-invocation seconds   (default: 2400)
   setup       run once per created workstream worktree (e.g. deps provisioning)
   spec        repo-relative path to the shared spec (referenced in workstream
-              and merge prompts; e.g. specs/2026-07-22-foo/spec.md)
+              and merge prompts; e.g. specs/2026-07-22-foo/plan.md)
   repo        repository to operate on       (default: git toplevel of cwd)
   no-push     skip pushing / opening or updating a PR
   deliver-wait max seconds to wait, at merge time, for the session worktree to
@@ -425,7 +425,7 @@ if [ "$POST" = "pass" ] && [ "$PUSH" = "1" ]; then
       note "existing PR updates"
     else
       BODY="codex:implement run '$FEATURE': $N workstreams, passed:[${PASSED# }] failed:[${FAILED# }] merge-failed:[${MERGE_FAILED# }]. Post-merge check: $POST."
-      if gh pr create --head "$BASE" --title "execute: $FEATURE" --body "$BODY" >> "$RUN_DIR/logs/pr.log" 2>&1; then
+      if gh pr create --head "$BASE" --title "implement: $FEATURE" --body "$BODY" >> "$RUN_DIR/logs/pr.log" 2>&1; then
         note "PR is $(tail -1 "$RUN_DIR/logs/pr.log")"
       else
         note "no PR created (gh failed, or '$BASE' is the default branch); see $RUN_DIR/logs/pr.log"

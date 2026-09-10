@@ -5,7 +5,7 @@ ships.
 
 | Plugin | What it does |
 |---|---|
-| [codex](plugins/codex/README.md) | Delivers a planned feature as parallel codex workstreams, off Claude's critical path — merged onto your session branch, codex-reviewed, pushed. |
+| [codex](plugins/codex/README.md) | Delivers a planned feature as parallel codex workstreams, off Claude's critical path — merged onto your session branch and pushed — and reviews the delta into a findings file. |
 | [grok](plugins/grok/README.md) | Runs the local Grok CLI from Claude Code for read-only reviews and delegated coding tasks. |
 | [build-ios-apps](plugins/build-ios-apps/README.md) | Builds, runs, profiles, and screenshots iOS apps on a simulator or a connected iPhone. |
 | [render](plugins/render/README.md) | The Render plugin with only the nine skills this desk uses, plus its MCP server, agent, and hook. |
@@ -47,7 +47,7 @@ on every machine that already has it, however much its code moved.
 
 ```
 npm test              # both suites
-npm run test:codex    # the execute engine against a stub codex CLI
+npm run test:codex    # the implement engine and review script against a stub codex CLI
 npm run test:grok     # the grok command and runtime suite
 npm run validate      # the marketplace and plugin manifests
 ```

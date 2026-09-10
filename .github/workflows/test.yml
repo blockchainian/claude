@@ -1,4 +1,4 @@
-# ABOUTME: CI for the plugins — the codex execute engine on Linux and macOS, the grok node suite, and the feature hooks.
+# ABOUTME: CI for the plugins — the codex implement engine and review script on Linux and macOS, the grok node suite, and the feature hooks.
 name: test
 on:
   push:

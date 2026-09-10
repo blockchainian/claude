@@ -4,8 +4,8 @@ Ship a feature from a written plan, with Claude orchestrating and never
 implementing. `/feature:orchestrate` reads `plan.md`, launches the backend lane
 through [codex](../codex/README.md)'s `/codex:implement`, launches the UX lane as
 the `ux-implementer` agent in parallel, writes the UI probes while both run,
-deploys and verifies staging, runs the local schema review (`review.sh` from the
-codex plugin) once per plan and triages it into `findings.json`, fixes in two lanes (`codex-rescue` and the
+deploys and verifies staging, runs the local schema review (`/codex:review`)
+once per plan and triages it into `findings.json`, fixes in two lanes (`codex-rescue` and the
 `ux-autofixer` agent) with no re-review, re-probes the touched surfaces, and
 decides production only when every finding is closed and the probes are
 green. The
