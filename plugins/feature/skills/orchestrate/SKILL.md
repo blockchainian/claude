@@ -26,9 +26,8 @@ then drop back.
 
 The plan follows `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/plan-template.md`: Scope, Facts, Constraints,
 Workstreams, UX workstream, Dependencies, Invariants, UX checklist per surface, New files, Checks,
-Live checks, Outcome. Each workstream block is the implementer's whole brief, so `codex:implement`'s
-spec.md is assembled from the plan's Constraints, Dependencies, Invariants and workstream blocks
-without adding facts. The `planner` agent (`${CLAUDE_PLUGIN_ROOT}/agents/planner.md`, Fable high) writes it;
+Live checks, Outcome. Each workstream block is the implementer's whole brief: `codex:implement` passes
+the plan itself as the spec and writes one pointer line per workstream, adding no facts. The `planner` agent (`${CLAUDE_PLUGIN_ROOT}/agents/planner.md`, Fable high) writes it;
 its brief carries these two lines verbatim:
 
 > Repo facts come from `<path>/problem.md` only. If you need a fact that is not in it, stop and
@@ -66,7 +65,7 @@ why reading alone does not find it.
 
 5. **Review and deploy staging, both on the push.** Watch the engine's output with `Monitor` for
    the line `pushed to origin` and act on it, not on the run's exit. First start the review in the
-   background: `${CLAUDE_PLUGIN_ROOT}/../codex/skills/implement/review.sh <repo> <base> HEAD
+   background: `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/review.sh <repo> <base> HEAD
    specs/<date>-<topic>/review.json <plan.md>`, where `<base>` is the engine's
    `.git/codex-implement/<feature>/pre-merge.sha`. A plan with no codex workstream has no engine
    run: start the same command when the UX lane reports `done`, with `<base>` the plan's base

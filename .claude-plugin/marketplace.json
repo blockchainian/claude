@@ -17,7 +17,7 @@
     },
     {
       "name": "codex",
-      "description": "Execute a planned feature as parallel codex workstreams off Claude's critical path — delivered onto your session branch, codex-reviewed, pushed.",
+      "description": "Deliver a planned feature as parallel codex workstreams off Claude's critical path — merged onto your session branch and pushed — then review the delta into a findings file.",
       "author": {
         "name": "blockchainian"
       },

@@ -1,7 +1,7 @@
 {
   "name": "codex",
-  "version": "0.8.0",
-  "description": "Execute a planned feature as parallel codex workstreams off Claude's critical path — plan handover, worktree-pool execution with per-workstream checks and bounded retries, merge onto the session branch with restore-on-red, push; review.sh for a schema-structured local review.",
+  "version": "0.9.0",
+  "description": "Deliver a planned feature as parallel codex workstreams off Claude's critical path — implement: workstreams.txt from plan.md, worktree-pool execution with per-workstream checks and bounded retries, merge onto the session branch with restore-on-red, push, PR; review: a schema-structured local codex review of the delta into review.json.",
   "author": {
     "name": "blockchainian"
   },
@@ -13,6 +13,7 @@
     "parallel",
     "worktrees",
     "delegation",
-    "code-generation"
+    "code-generation",
+    "review"
   ]
 }
