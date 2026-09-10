@@ -4,9 +4,17 @@
     "name": "blockchainian"
   },
   "metadata": {
-    "description": "Claude Code plugin marketplace for blockchainian's plugins: Grok and Codex review/delegation tooling, iOS debugging, profiling, and whole-screen capture on simulator or device, and the Render and Cloudflare plugins carrying only the skills this desk uses."
+    "description": "Claude Code plugin marketplace for blockchainian's plugins: the feature pipeline (plan, orchestrate, verify, handoff), Grok and Codex review/delegation tooling, iOS debugging, profiling, and whole-screen capture on simulator or device, and the Render and Cloudflare plugins carrying only the skills this desk uses."
   },
   "plugins": [
+    {
+      "name": "feature",
+      "description": "Ship a feature from a written plan: orchestrate the codex and UX lanes to a merged, verified, deployed PR, with the planner, UX and verifier agents, the handoff skill, and the no-blocking hooks.",
+      "author": {
+        "name": "blockchainian"
+      },
+      "source": "./plugins/feature"
+    },
     {
       "name": "codex",
       "description": "Execute a planned feature as parallel codex workstreams off Claude's critical path \u2014 delivered onto your session branch, codex-reviewed, pushed.",

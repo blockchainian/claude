@@ -1,4 +1,4 @@
-# ABOUTME: CI for both plugins — the codex execute engine on Linux and macOS, and the grok node suite.
+# ABOUTME: CI for the plugins — the codex execute engine on Linux and macOS, the grok node suite, and the feature hooks.
 name: test
 on:
   push:
@@ -27,3 +27,8 @@ jobs:
         with:
           node-version: 22
       - run: npm run test:grok
+  feature:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: plugins/feature/hooks/tests/run.sh
