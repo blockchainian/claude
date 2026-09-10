@@ -12,8 +12,8 @@ when the backend threads are closed and the UX probes are green. The
 stop in under 40 lines.
 
 The pipeline is `/feature:ground` → `planner` → `/feature:orchestrate` →
-review-fix → deploy. The `ground` skill is not in this plugin yet; see
-[skills/ground/README.md](skills/ground/README.md).
+review-fix → deploy. Grounding takes its ask in the shape of the project's
+`docs/user-template.md` (Ask, Example, Accept when, Constraints, Premises, Keep unchanged).
 
 ## Skills
 
@@ -21,7 +21,7 @@ review-fix → deploy. The `ground` skill is not in this plugin yet; see
 |---|---|
 | `/feature:orchestrate` | Run a `plan.md` through the codex and UX lanes to a shipped feature |
 | `/feature:handoff` | Write a mid-phase handoff: stopped at, done, next, unverified, do not redo |
-| `/feature:ground` | Pending — placeholder only |
+| `/feature:ground` | Pin repo facts into `problem.md` before planning; checks every path and anchor against the base commit |
 
 ## Agents
 
