@@ -51,8 +51,8 @@ why reading alone does not find it.
 2. **Launch the backend lane.** Invoke the `codex:implement` skill with the plan's codex workstreams
    (backend; frontend only when the plan has no UX lane). It runs in the background, verifies
    itself per workstream and post-merge on raw exit codes, merges onto the session branch and
-   pushes a PR. It does not review; that is step 5. Do not spawn a
-   verifier for its workstreams; confirm instead that its check command covers the touched surfaces.
+   pushes a PR. It does not review; that is step 5. Do not re-verify its
+   workstreams; confirm instead that its check command covers the touched surfaces.
 
 3. **Launch the UX lane, in parallel.** Spawn the `ux-implementer` agent with the Agent tool, giving
    it the plan's UX workstream, the wire contract quoted as a real response body, and the UX

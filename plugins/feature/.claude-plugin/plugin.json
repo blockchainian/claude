@@ -1,7 +1,7 @@
 {
   "name": "feature",
-  "version": "0.2.0",
-  "description": "Ship a feature from a written plan: the orchestrate skill runs the codex and UX lanes to a merged, verified, deployed PR; the planner, ux-implementer, ux-autofixer, workstream-verifier and ui-verifier agents staff the lanes; the handoff skill records a mid-phase stop; hooks keep subagents and the main loop from blocking on each other.",
+  "version": "0.2.1",
+  "description": "Ship a feature from a written plan: the orchestrate skill runs the codex and UX lanes to a merged, verified, deployed PR; the planner, ux-implementer, ux-autofixer and ui-verifier agents staff the lanes; the handoff skill records a mid-phase stop; hooks keep subagents and the main loop from blocking on each other.",
   "author": {
     "name": "blockchainian"
   },
