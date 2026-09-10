@@ -4,7 +4,7 @@ description: >
   Pin repo facts BEFORE a planning turn, so the planner transcribes checked
   facts instead of inferring them. Use when about to plan or design any
   change against an existing codebase — "plan X", "design Y", "write a spec
-  for Z" — and especially before handing a spec to /codex:execute, whose
+  for Z" — and especially before handing a spec to /codex:implement, whose
   gates test whether code passes, never whether a premise was true.
   Produces a grounding doc and stops before design. NOT for planning itself,
   and not for changes small enough to hold in one turn.
@@ -100,5 +100,5 @@ sweep, no file dumps, no restated code that a `path:line` already points to.
 
 This costs a real extra turn. Spend it when a wrong premise is expensive:
 cross-module contracts, migrations, money/fee/PnL paths, auth, anything
-going to `/codex:execute`. Skip it for a change small enough that the
+going to `/codex:implement`. Skip it for a change small enough that the
 planner reads every relevant file in the same turn anyway.

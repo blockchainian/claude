@@ -49,7 +49,7 @@ if [ "$MODE" = "review" ]; then
   sleep "${STUB_REVIEW_SLEEP:-0}"
   [ -n "${STUB_REVIEW_FAIL:-}" ] && { echo "stub review failed"; exit 1; }
   # record whether the engine still holds the delivery lock while reviewing
-  if [ -e "$(git -C "$DIR" rev-parse --absolute-git-dir 2>/dev/null)/codex-execute/deliver.lock" ]; then
+  if [ -e "$(git -C "$DIR" rev-parse --absolute-git-dir 2>/dev/null)/codex-implement/deliver.lock" ]; then
     scenario_log "REVIEW-LOCK-HELD"
   else
     scenario_log "REVIEW-LOCK-FREE"

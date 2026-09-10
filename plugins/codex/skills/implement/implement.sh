@@ -5,7 +5,7 @@ set -u
 
 usage() {
   cat <<'EOF'
-Usage: execute.sh --workstreams FILE --feature NAME --check CMD
+Usage: implement.sh --workstreams FILE --feature NAME --check CMD
                     [--base BRANCH] [--concurrency N] [--retries N] [--timeout SECS]
                     [--setup CMD] [--spec PATH] [--repo DIR] [--no-push]
                     [--deliver-wait SECS] [--runner exec|daemon]
@@ -34,26 +34,26 @@ branch in the session worktree once it is clean (uncommitted edits from a
 parallel session only delay delivery, up to --deliver-wait); the post-merge
 check runs there, and a red check restores the branch to its pre-merge state
 (workstream branches kept for autopsy). The engine does not review: the
-pre-merge SHA it records (refs/codex-execute/<feature>/pre-merge, run-dir
+pre-merge SHA it records (refs/codex-implement/<feature>/pre-merge, run-dir
 pre-merge.sha) is the base for review.sh, which the caller runs after the push.
 
-Env: EXECUTE_CODEX overrides the codex binary (default: codex).
-     EXECUTE_RUNNER sets the task runner (default: daemon).
-     EXECUTE_DAEMON_RUNNER overrides the daemon runner executable.
+Env: IMPLEMENT_CODEX overrides the codex binary (default: codex).
+     IMPLEMENT_RUNNER sets the task runner (default: daemon).
+     IMPLEMENT_DAEMON_RUNNER overrides the daemon runner executable.
 EOF
   exit 1
 }
 
-fatal() { echo "codex:execute: FATAL: $*" >&2; exit 1; }
-note()  { echo "codex:execute: $*"; }
+fatal() { echo "codex:implement: FATAL: $*" >&2; exit 1; }
+note()  { echo "codex:implement: $*"; }
 
 # ---------- args ----------
 DAEMON_RUNNER_OVERRIDDEN=0
-[ "${EXECUTE_DAEMON_RUNNER+x}" = x ] && DAEMON_RUNNER_OVERRIDDEN=1
+[ "${IMPLEMENT_DAEMON_RUNNER+x}" = x ] && DAEMON_RUNNER_OVERRIDDEN=1
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CODEX="${EXECUTE_CODEX:-codex}"
-EXECUTE_RUNNER="${EXECUTE_RUNNER:-daemon}"
-EXECUTE_DAEMON_RUNNER="${EXECUTE_DAEMON_RUNNER:-$SCRIPT_DIR/daemon-run.mjs}"
+CODEX="${IMPLEMENT_CODEX:-codex}"
+IMPLEMENT_RUNNER="${IMPLEMENT_RUNNER:-daemon}"
+IMPLEMENT_DAEMON_RUNNER="${IMPLEMENT_DAEMON_RUNNER:-$SCRIPT_DIR/daemon-run.mjs}"
 
 WORKSTREAMS="" BASE="" FEATURE="" CHECK="" SETUP="" SPEC="" REPO="" PUSH=1
 CONCURRENCY="" RETRIES=2 TIMEOUT_S=2400 DELIVER_WAIT_S=1800
@@ -71,20 +71,20 @@ while [ $# -gt 0 ]; do
     --repo) REPO="$2"; shift 2 ;;
     --no-push) PUSH=0; shift ;;
     --deliver-wait) DELIVER_WAIT_S="$2"; shift 2 ;;
-    --runner) EXECUTE_RUNNER="$2"; shift 2 ;;
+    --runner) IMPLEMENT_RUNNER="$2"; shift 2 ;;
     __workstream) WORKSTREAM_MODE="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
 
-case "$EXECUTE_RUNNER" in exec|daemon) ;; *) usage ;; esac
+case "$IMPLEMENT_RUNNER" in exec|daemon) ;; *) usage ;; esac
 
 run_task() { # run_task <dir> <last-message-file> <thread-name> <prompt>
   local dir="$1" lastfile="$2" name="$3" prompt="$4"
-  if [ "$EXECUTE_RUNNER" = "exec" ]; then
+  if [ "$IMPLEMENT_RUNNER" = "exec" ]; then
     timeout "$TIMEOUT_S" "$CODEX" exec -C "$dir" -s workspace-write --ephemeral -o "$lastfile" "$prompt"
   else
-    "$EXECUTE_DAEMON_RUNNER" -C "$dir" -o "$lastfile" --name "$name" --timeout "$TIMEOUT_S" "$prompt"
+    "$IMPLEMENT_DAEMON_RUNNER" -C "$dir" -o "$lastfile" --name "$name" --timeout "$TIMEOUT_S" "$prompt"
   fi
 }
 
@@ -216,7 +216,7 @@ command -v timeout >/dev/null || fatal "timeout(1) not found (brew install coreu
 command -v "$CODEX" >/dev/null || fatal "codex binary '$CODEX' not found"
 [ -f "$WORKSTREAMS" ] || fatal "workstreams file not found: $WORKSTREAMS"
 
-if [ "$EXECUTE_RUNNER" = "daemon" ] && [ "$DAEMON_RUNNER_OVERRIDDEN" = "0" ]; then
+if [ "$IMPLEMENT_RUNNER" = "daemon" ] && [ "$DAEMON_RUNNER_OVERRIDDEN" = "0" ]; then
   # The daemon keeps the cwd it was started from for its whole life and every later codex TUI
   # attaches to it; a worktree cwd that is later deleted breaks thread/start for all of them.
   (cd "$HOME" && "$CODEX" app-server daemon start) >/dev/null 2>&1 \
@@ -245,8 +245,8 @@ if [ -z "$CONCURRENCY" ]; then
 fi
 
 GITDIR="$(git -C "$REPO" rev-parse --absolute-git-dir)"
-RUN_DIR="$GITDIR/codex-execute/$FEATURE"
-WT_ROOT="$(dirname "$REPO")/.codex-execute-$FEATURE"
+RUN_DIR="$GITDIR/codex-implement/$FEATURE"
+WT_ROOT="$(dirname "$REPO")/.codex-implement-$FEATURE"
 rm -rf "$RUN_DIR"
 mkdir -p "$RUN_DIR/logs" "$RUN_DIR/status" "$RUN_DIR/locks" "$WT_ROOT"
 
@@ -256,7 +256,7 @@ N="$(wc -l < "$RUN_DIR/workstreams.txt" | tr -d ' ')"
 [ "$CONCURRENCY" -gt "$N" ] && CONCURRENCY="$N"
 
 note "feature=$FEATURE base=$BASE workstreams=$N pool=$CONCURRENCY retries=$RETRIES timeout=${TIMEOUT_S}s"
-note "runner=$EXECUTE_RUNNER"
+note "runner=$IMPLEMENT_RUNNER"
 note "delivering onto branch '$BASE' in $REPO"
 note "logs: $RUN_DIR/logs  status: $RUN_DIR/status"
 
@@ -264,7 +264,7 @@ SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 export EXECUTE_REPO="$REPO" EXECUTE_BASE_SHA="$BASE_SHA" EXECUTE_FEATURE="$FEATURE" EXECUTE_CHECK="$CHECK"
 export EXECUTE_SETUP="$SETUP" EXECUTE_SPEC="$SPEC" EXECUTE_RETRIES="$RETRIES" EXECUTE_TIMEOUT="$TIMEOUT_S"
 export EXECUTE_RUN_DIR="$RUN_DIR" EXECUTE_WT_ROOT="$WT_ROOT" EXECUTE_CONCURRENCY="$CONCURRENCY"
-export EXECUTE_CODEX="$CODEX" EXECUTE_RUNNER EXECUTE_DAEMON_RUNNER
+export IMPLEMENT_CODEX="$CODEX" IMPLEMENT_RUNNER IMPLEMENT_DAEMON_RUNNER
 
 # ---------- phase: execute ----------
 seq 1 "$N" | xargs -n1 -P "$CONCURRENCY" "$SELF" __workstream
@@ -286,7 +286,7 @@ note "$EXECUTION_SUMMARY"
 # ---------- delivery lock + clean-tree wait ----------
 # One delivery at a time per repo: the lock is a directory (atomic mkdir; macOS has no flock)
 # holding the owner pid, held from merge through push and released on exit.
-DELIVER_LOCK="$(git -C "$REPO" rev-parse --absolute-git-dir)/codex-execute/deliver.lock"
+DELIVER_LOCK="$(git -C "$REPO" rev-parse --absolute-git-dir)/codex-implement/deliver.lock"
 LOCK_HELD=0
 release_delivery_lock() { [ "$LOCK_HELD" = "1" ] && rm -rf "$DELIVER_LOCK"; LOCK_HELD=0; }
 trap release_delivery_lock EXIT
@@ -334,7 +334,7 @@ if [ -n "$MERGE_BLOCKED" ]; then
   note "[merge] BLOCKED: $MERGE_BLOCKED; workstream branches kept"
 elif [ -n "$PASSED" ]; then
   PRE_MERGE="$(git -C "$REPO" rev-parse HEAD)"
-  git -C "$REPO" update-ref "refs/codex-execute/$FEATURE/pre-merge" "$PRE_MERGE"
+  git -C "$REPO" update-ref "refs/codex-implement/$FEATURE/pre-merge" "$PRE_MERGE"
   echo "$PRE_MERGE" > "$RUN_DIR/pre-merge.sha"
 
   for idx in $PASSED; do
@@ -424,7 +424,7 @@ if [ "$POST" = "pass" ] && [ "$PUSH" = "1" ]; then
     if gh pr view "$BASE" > "$RUN_DIR/logs/pr.log" 2>&1; then
       note "existing PR updates"
     else
-      BODY="codex:execute run '$FEATURE': $N workstreams, passed:[${PASSED# }] failed:[${FAILED# }] merge-failed:[${MERGE_FAILED# }]. Post-merge check: $POST."
+      BODY="codex:implement run '$FEATURE': $N workstreams, passed:[${PASSED# }] failed:[${FAILED# }] merge-failed:[${MERGE_FAILED# }]. Post-merge check: $POST."
       if gh pr create --head "$BASE" --title "execute: $FEATURE" --body "$BODY" >> "$RUN_DIR/logs/pr.log" 2>&1; then
         note "PR is $(tail -1 "$RUN_DIR/logs/pr.log")"
       else
