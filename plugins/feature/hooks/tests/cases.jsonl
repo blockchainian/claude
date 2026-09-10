@@ -1,0 +1,12 @@
+{"hook":"deny-foreground-poll","name":"subagent sleep is left in the foreground","input":{"agent_id":"ax-1","agent_type":"ux-pr-fixer","tool_name":"Bash","tool_input":{"command":"until grep -q '^exit=' build.log; do sleep 5; done"}},"expect":"pass"}
+{"hook":"subagent-no-spawn","name":"subagent is told background commands never wake it","input":{"agent_id":"ax-1","agent_type":"ux-pr-fixer","hook_event_name":"SubagentStart"},"expect":"context:never re-invoke"}
+{"hook":"deny-foreground-poll","name":"main-loop until loop is rewritten to run_in_background","input":{"tool_name":"Bash","tool_input":{"command":"until grep -q '^exit=' build.log; do sleep 5; done"}},"expect":"input:\"run_in_background\":true"}
+{"hook":"deny-foreground-poll","name":"tail -f is rewritten to run_in_background","input":{"tool_name":"Bash","tool_input":{"command":"tail -f run.log"}},"expect":"input:\"run_in_background\":true"}
+{"hook":"deny-foreground-poll","name":"long sleep is rewritten to run_in_background","input":{"tool_name":"Bash","tool_input":{"command":"sleep 30 && cat verdict.json"}},"expect":"input:\"run_in_background\":true"}
+{"hook":"deny-foreground-poll","name":"short sleep passes","input":{"tool_name":"Bash","tool_input":{"command":"sleep 5 && cat verdict.json"}},"expect":"pass"}
+{"hook":"deny-foreground-poll","name":"while-read iteration passes","input":{"tool_name":"Bash","tool_input":{"command":"while IFS= read -r l; do echo \"$l\"; done < list.txt"}},"expect":"pass"}
+{"hook":"deny-foreground-poll","name":"heredoc body with a while loop passes","input":{"tool_name":"Bash","tool_input":{"command":"python3 - <<'PY'\nwhile True:\n    break\nPY"}},"expect":"pass"}
+{"hook":"deny-foreground-poll","name":"already backgrounded command passes","input":{"tool_name":"Bash","tool_input":{"command":"until test -f done; do sleep 5; done","run_in_background":true}},"expect":"pass"}
+{"hook":"deny-blocking-taskoutput","name":"blocking TaskOutput is denied","input":{"tool_name":"TaskOutput","tool_input":{"task_id":"t1","block":true}},"expect":"deny:Blocking TaskOutput freezes the session"}
+{"hook":"deny-blocking-taskoutput","name":"TaskOutput without block defaults to blocking and is denied","input":{"tool_name":"TaskOutput","tool_input":{"task_id":"t1"}},"expect":"deny:Blocking TaskOutput freezes the session"}
+{"hook":"deny-blocking-taskoutput","name":"non-blocking TaskOutput passes","input":{"tool_name":"TaskOutput","tool_input":{"task_id":"t1","block":false}},"expect":"pass"}
