@@ -4,10 +4,10 @@ A community extension of the [official codex plugin for Claude Code](https://git
 that delivers a planned feature as **parallel codex workstreams, off Claude's
 critical path** — from a plan to results on the branch you're working on, with
 codex reviewing the result. It ships under the same `codex` plugin name, so
-the skill joins the official plugin's `/codex:` namespace as `/codex:execute`.
+the skill joins the official plugin's `/codex:` namespace as `/codex:implement`.
 
 **The DX:** research and plan a feature with Claude Code, then hand the plan
-to `/codex:execute`. Claude converts the plan into `spec.md` +
+to `/codex:implement`. Claude converts the plan into `spec.md` +
 `workstreams.txt` + `handoff.md`, and a fresh session (`/clear`, resume from
 the handoff) launches the engine in the background. Codex executes
 the workstreams in parallel worktrees, each gated by your test command with
@@ -52,14 +52,14 @@ optionally `gh` (authenticated) for automatic PR creation.
 In Claude Code, plan a feature in conversation, then:
 
 ```
-/codex:execute
+/codex:implement
 ```
 
 The engine also works standalone, no Claude required (it expects `handoff.md`
 beside `workstreams.txt`):
 
 ```
-plugins/codex/skills/execute/execute.sh \
+plugins/codex/skills/implement/implement.sh \
   --workstreams specs/my-feature/workstreams.txt --feature my-feature \
   --check "yarn test" --spec specs/my-feature/spec.md
 ```
@@ -91,9 +91,9 @@ across concurrent runs in the same repo instead of aborting; the lock covers
 merge + post-merge check only, and a push rejected by a moved remote is retried
 once after merging the remote tip in and re-running the check.
 
-Run state lives under `.git/codex-execute/<feature>/` (per-workstream status
+Run state lives under `.git/codex-implement/<feature>/` (per-workstream status
 JSON, logs, `pre-merge.sha`, `summary.json`); worktrees under
-`../.codex-execute-<feature>/` exist only for the duration of the run.
+`../.codex-implement-<feature>/` exist only for the duration of the run.
 
 ## Test
 

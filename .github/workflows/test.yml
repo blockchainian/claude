@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: plugins/codex/skills/execute/tests/test-execute.sh
+      - run: plugins/codex/skills/implement/tests/test-implement.sh
       - run: plugins/codex/skills/autofix-pr/tests/test-autofix-pr.sh
   codex-macos:
     runs-on: macos-latest
@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: brew install coreutils
       - run: sudo ln -sf "$(which gtimeout)" /usr/local/bin/timeout || ln -sf "$(which gtimeout)" "$(brew --prefix)/bin/timeout"
-      - run: plugins/codex/skills/execute/tests/test-execute.sh
+      - run: plugins/codex/skills/implement/tests/test-implement.sh
       - run: plugins/codex/skills/autofix-pr/tests/test-autofix-pr.sh
   grok:
     runs-on: ubuntu-latest

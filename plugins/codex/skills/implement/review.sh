@@ -15,7 +15,7 @@ Usage: review.sh REPO BASE HEAD OUT_JSON [SPEC]
 
 Runs a plain `codex exec` in a read-only sandbox with review instructions and review-schema.json,
 not `codex exec review --base`, which refuses custom instructions. Severity is must-fix or nit.
-Env: EXECUTE_CODEX overrides the codex binary (default: codex); REVIEW_TIMEOUT seconds (default 2400).
+Env: IMPLEMENT_CODEX overrides the codex binary (default: codex); REVIEW_TIMEOUT seconds (default 2400).
 EOT
   exit 1
 }
@@ -23,7 +23,7 @@ EOT
 [ $# -ge 4 ] || usage
 REPO="$1" BASE="$2" HEAD_SHA="$3" OUT="$4" SPEC="${5:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CODEX="${EXECUTE_CODEX:-codex}"
+CODEX="${IMPLEMENT_CODEX:-codex}"
 TIMEOUT_S="${REVIEW_TIMEOUT:-2400}"
 LOG="${OUT%.json}.log"
 note() { echo "codex:review: $*" >&2; }

@@ -1,6 +1,6 @@
 {
   "name": "codex",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Execute a planned feature as parallel codex workstreams off Claude's critical path — plan handover, worktree-pool execution with per-workstream checks and bounded retries, merge onto the session branch with restore-on-red, push; review.sh for a schema-structured local review.",
   "author": {
     "name": "blockchainian"

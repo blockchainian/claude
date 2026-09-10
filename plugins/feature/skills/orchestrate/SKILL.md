@@ -26,7 +26,7 @@ then drop back.
 
 The plan follows `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/plan-template.md`: Scope, Facts, Constraints,
 Workstreams, UX workstream, Dependencies, Invariants, UX checklist per surface, New files, Checks,
-Live checks, Outcome. Each workstream block is the implementer's whole brief, so `codex:execute`'s
+Live checks, Outcome. Each workstream block is the implementer's whole brief, so `codex:implement`'s
 spec.md is assembled from the plan's Constraints, Dependencies, Invariants and workstream blocks
 without adding facts. The `planner` agent (`${CLAUDE_PLUGIN_ROOT}/agents/planner.md`, Fable high) writes it;
 its brief carries these two lines verbatim:
@@ -48,7 +48,7 @@ why reading alone does not find it.
    records. If they differ, rebase onto the plan's base or re-check the plan's paths before
    launching — a plan is valid only at its SHA. Confirm the tree is clean.
 
-2. **Launch the backend lane.** Invoke the `codex:execute` skill with the plan's codex workstreams
+2. **Launch the backend lane.** Invoke the `codex:implement` skill with the plan's codex workstreams
    (backend; frontend only when the plan has no UX lane). It runs in the background, verifies
    itself per workstream and post-merge on raw exit codes, merges onto the session branch and
    pushes a PR. It does not review; that is step 5. Do not spawn a
@@ -66,9 +66,9 @@ why reading alone does not find it.
 
 5. **Review and deploy staging, both on the push.** Watch the engine's output with `Monitor` for
    the line `pushed to origin` and act on it, not on the run's exit. First start the review in the
-   background: `${CLAUDE_PLUGIN_ROOT}/../codex/skills/execute/review.sh <repo> <base> HEAD
+   background: `${CLAUDE_PLUGIN_ROOT}/../codex/skills/implement/review.sh <repo> <base> HEAD
    specs/<date>-<topic>/review.json <plan.md>`, where `<base>` is the engine's
-   `.git/codex-execute/<feature>/pre-merge.sha`. A plan with no codex workstream has no engine
+   `.git/codex-implement/<feature>/pre-merge.sha`. A plan with no codex workstream has no engine
    run: start the same command when the UX lane reports `done`, with `<base>` the plan's base
    SHA. One review per plan, one round. Then run the project's staging deploy command, read the `sha` from its JSON, and record it as `STAGING_SHA`. Then run the project's
    staging verify command and read its verdict JSON. Both exit non-zero on failure; gate the next
@@ -97,7 +97,7 @@ why reading alone does not find it.
    findings touch (about 40 s; clone, never symlink — the codex sandbox writes through symlinks;
    add another module's the same way only for a finding there). Spawn `codex:codex-rescue` with
    the `codex` findings, told to work in the session checkout, commit, rebase onto the remote
-   branch and push; spawn `ux-pr-fixer` with the `ux` findings, the worktree path, the side
+   branch and push; spawn `ux-autofixer` with the `ux` findings, the worktree path, the side
    branch `ux/<branch>`, the PR branch and the UX checklist. A finding touching `.claude/**` or
    `CLAUDE.md` comes back for the user. There is no re-review: when both lanes are done, redeploy
    staging if the codex lane pushed, re-run only the probes for surfaces the fixes touched, then
