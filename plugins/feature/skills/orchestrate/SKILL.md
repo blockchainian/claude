@@ -2,8 +2,8 @@
 name: orchestrate
 description: >
   Run a written plan through the codex and UX lanes to a shipped feature —
-  launch the workstreams, write and run the probes, verify staging, work the
-  PR threads, decide production. Use when a `plan.md` exists and has passed
+  launch the workstreams, write and run the probes, verify staging, triage the
+  local review, run the fix lanes, decide production. Use when a `plan.md` exists and has passed
   the path checker: "/feature:orchestrate <plan.md>", "run this plan", "ship this
   plan". NOT for planning, and not for a change small enough to do in one
   turn — there the launch overhead is the whole cost.
@@ -49,8 +49,9 @@ why reading alone does not find it.
    launching — a plan is valid only at its SHA. Confirm the tree is clean.
 
 2. **Launch the backend lane.** Invoke the `codex:execute` skill with the plan's codex workstreams
-   (backend and non-UX frontend). It runs in the background, verifies itself per workstream and
-   post-merge on raw exit codes, merges onto the session branch and pushes a PR. Do not spawn a
+   (backend; frontend only when the plan has no UX lane). It runs in the background, verifies
+   itself per workstream and post-merge on raw exit codes, merges onto the session branch, pushes
+   a PR, and reviews the merged delta locally in the background into `review.json`. Do not spawn a
    verifier for its workstreams; confirm instead that its check command covers the touched surfaces.
 
 3. **Launch the UX lane, in parallel.** Spawn the `ux-implementer` agent with the Agent tool, giving
@@ -63,8 +64,9 @@ why reading alone does not find it.
    README says where both live). This is the overlap the pipeline is built for. If no probe is
    needed, ground the next feature or poll the previous PR. NEVER edit the branch codex merges onto.
 
-5. **Deploy and verify staging.** When codex reports done: run the project's staging deploy
-   command, read the `sha` from its JSON, and record it as `STAGING_SHA`. Then run the project's
+5. **Deploy and verify staging.** The engine pushes before its review finishes, so watch its
+   output with `Monitor` for the line `pushed to origin` and act on that line, not on the run's
+   exit. Run the project's staging deploy command, read the `sha` from its JSON, and record it as `STAGING_SHA`. Then run the project's
    staging verify command and read its verdict JSON. Both exit non-zero on failure; gate the next
    step on the exit code, not on the text. Then run the plan's Live checks against staging, a
    minute after the deploy returns — the first request after a deploy can still hit the old build. Only staging runs from
@@ -75,31 +77,35 @@ why reading alone does not find it.
    dead, and keeps its context. At most two rounds; a finding that survives two rounds goes to the
    user.
 
-7. **Work the PR, both lanes at once.** First give the UX lane its own tree so neither lane can
-   dirty the other's: `git worktree add ../.ux-<pr> -b ux/<pr> origin/<branch>` then
-   `cp -Rc <module>/node_modules ../.ux-<pr>/<module>/node_modules` for the module the UX
-   threads touch (about 40 s; clone, never symlink — the codex sandbox writes through symlinks;
-   add another module's the same way only if a thread there appears). Then launch `codex:autofix-pr` with `--ux-file <scratchpad>/ux-<pr>.txt`
-   and never with `--production`: its default stops the Codex skill after staging, and
-   production is step 9's decision. It fixes verified must-fix backend threads, redeploys
-   staging, and labels UX threads `claude-code-ux` — and with `--ux-file` it appends each such
-   thread id to the file the moment Codex marks it. Watch the file with `Monitor`; on the first id
-   spawn `ux-pr-fixer` with the PR number, the worktree path, the side branch `ux/<pr>`, the PR
-   branch, the ids and the UX checklist; send later ids to the same agent by message. On every
-   SHA in the engine's `staging_deploys`, update `STAGING_SHA` and re-run the UX probes. An
-   `awaiting_review: true` result means the reviewer has not reacted to the pushed head yet:
-   relaunch it later instead of reading `remaining: []` as clean.
+7. **Triage, once.** When the execute run exits, read `review_file` from its `summary.json`.
+   Drop every `nit`. Verify each `must-fix` against the code — severity is the reviewer's claim,
+   not a fact — and add the probe failures from step 6 as findings of their own. Then decide the
+   owner of each finding, exactly once: a finding in a backend module, an API route or a test
+   file is `codex` without further thought (the project contract in the plugin README names the
+   paths); for the rest ask one question, does the fix change what the user sees or does — `ux`
+   if yes, `codex` if no. Findings in the same file get the same owner. Write them to
+   `specs/<date>-<topic>/findings.json` as `[{file, line, claim, owner}]`. No findings means no
+   fix round: go to step 9.
 
-8. **Close the UX lane.** `ux-pr-fixer` fixes each marked thread in its worktree, rebases onto the
-   PR branch, pushes, replies and resolves; a thread touching `.claude/**` or `CLAUDE.md` comes
-   back as a finding for the user. Its pushes get their own bot review, which the engine matches
-   by head SHA, so the lanes never misread each other's heads. Codex is told marked threads belong
-   to Claude Code and to rebase before every push. When both lanes are done: `git worktree remove
-   --force ../.ux-<pr>` and `git branch -D ux/<pr>`, in the background (about 15 s).
+8. **Fix, both lanes at once, one round.** Give the UX lane its own tree so neither lane can
+   dirty the other's: `git worktree add ../.ux-<branch> -b ux/<branch> origin/<branch>` then
+   `cp -Rc <module>/node_modules ../.ux-<branch>/<module>/node_modules` for the module the UX
+   findings touch (about 40 s; clone, never symlink — the codex sandbox writes through symlinks;
+   add another module's the same way only for a finding there). Spawn `codex:codex-rescue` with
+   the `codex` findings, told to work in the session checkout, commit, rebase onto the remote
+   branch and push; spawn `ux-pr-fixer` with the `ux` findings, the worktree path, the side
+   branch `ux/<branch>`, the PR branch and the UX checklist. A finding touching `.claude/**` or
+   `CLAUDE.md` comes back for the user. There is no re-review: when both lanes are done, redeploy
+   staging if the codex lane pushed, re-run only the probes for surfaces the fixes touched, then
+   `git worktree remove --force ../.ux-<branch>` and `git branch -D ux/<branch>`, in the
+   background (about 15 s). Post one PR comment summarising the findings and their dispositions;
+   that comment is the review's record.
 
-9. **Decide production, then record the outcome.** Production ships only when the backend threads
-   are closed AND the UX probes are green — never a half-shipped mixed feature. Trigger it through
-   the codex lane's deploy command, then run the plan's Live checks against production. The
+9. **Decide production, then record the outcome.** Production ships only when every finding is
+   closed AND the re-run probes are green — never a half-shipped mixed feature. Merge the PR into
+   the default branch; services that deploy from it on merge need nothing more, and the rest go
+   through the codex lane's deploy command (the project contract in the plugin README says
+   which). Then run the plan's Live checks against production. The
    phase's record is the PR, the deploy SHAs, the probe verdicts and the live-check results; write
    them into `plan.md` under its Outcome heading, write the memory files, and end. Write a separate
    `specs/<date>-<topic>/handoff.md` only if you must stop mid-phase (context past ~300k, quota
@@ -124,7 +130,7 @@ why reading alone does not find it.
 - **Agents are idle, not dead.** Send findings back by message and keep their context. Drop one only
   when its work is done or it has idled past the one-hour cache TTL, then spawn fresh with a short
   brief.
-- **Loops are capped.** One fix round, one re-review as a check on the fixes, a second fix only on
-  verified must-fix findings, never a third. Review severity labels are unranked input; verify a
-  finding before acting on it.
+- **Loops are capped.** One fix round and no re-review; the re-run of the probes on the surfaces
+  the fixes touched is the second gate. A finding that survives the round goes to the user.
+  Review severity labels are unranked input; verify a finding before acting on it.
 - **Memory at the phase end only** — written in step 9, not mid-turn; no handoff unless stopping mid-phase.
