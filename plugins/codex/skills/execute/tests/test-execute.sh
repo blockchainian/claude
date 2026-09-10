@@ -194,11 +194,7 @@ assert "merge uses concise PASS output" \
 assert "PR output is concise" \
   grep -q '^codex:execute: PR is https://github.com/example/app/pull/42$' "$SCRATCH/run.log"
 assert "console summary uses compact fields" \
-  grep -q '^codex:execute: summary: feature=feat-x base=main workstreams=6 pass=4 fail=2 merged=4 post-merge=pass reviewed pushed$' "$SCRATCH/run.log"
-assert "review progress uses concise wording" \
-  grep -q '^codex:execute: \[review\] merged workstreams vs pre-merge$' "$SCRATCH/run.log"
-assert "review result identifies the findings file" \
-  grep -q '^codex:execute: \[review\] result: .*/logs/review.json$' "$SCRATCH/run.log"
+  grep -q '^codex:execute: summary: feature=feat-x base=main workstreams=6 pass=4 fail=2 merged=4 post-merge=pass pushed$' "$SCRATCH/run.log"
 assert "push output omits the branch name" \
   grep -q '^codex:execute: pushed to origin$' "$SCRATCH/run.log"
 assert "delivery target announced" \
@@ -227,16 +223,9 @@ assert "summary records no restore" grep -q '"restored": false' "$ST/summary.jso
 # failed workstreams not on the session branch
 assert "no stray files from failed workstreams" test ! -e "$FIX/hang.txt"
 
-# local review ran once: read-only, against the findings schema, into review.json
-assert_eq "local codex review ran once" 1 "$(count REVIEW)"
-assert "review runs at high reasoning effort" \
-  grep -q '^REVIEW cfg=model_reasoning_effort=high dir=' "$STUB_DIR/invocations.log"
-assert "review runs read-only against the findings schema" \
-  grep -q '^REVIEW sandbox=read-only schema=review-schema.json dir=' "$STUB_DIR/invocations.log"
-assert "review prompt names the pre-merge sha and asks for must-fix findings" \
-  grep -q "^REVIEW prompt=.*$BASE0.*must-fix" "$STUB_DIR/invocations.log"
-assert_eq "review findings captured as JSON" '{"findings":[]}' "$(cat "$L/review.json" 2>/dev/null)"
-assert "summary records the review file" grep -q "\"review_file\": \"$L/review.json\"" "$ST/summary.json"
+# the engine never reviews; review.sh is the caller's step after the push
+assert "engine does not invoke the review" test ! -e "$STUB_DIR/calls-REVIEW"
+assert "summary carries no review field" test "$(grep -c '"review' "$ST/summary.json")" = 0
 assert_eq "no GitHub review is requested" 0 "$(grep -c 'GitHub review' "$SCRATCH/run.log" || true)"
 assert "no PR comment is posted" test ! -e "$STUB_DIR/gh-comment"
 
@@ -245,7 +234,7 @@ assert "no PR comment is posted" test ! -e "$STUB_DIR/gh-comment"
 printf 'WS-C1 write c.txt (variant 1)\n' > "$FIX/workstreams2.txt"
 git -C "$FIX" add workstreams2.txt && git -C "$FIX" commit -qm "workstreams2" && git -C "$FIX" push -q origin main
 set +e
-GH_VIEW_OK=1 STUB_REVIEW_SLEEP=2 "$ENGINE" --workstreams "$FIX/workstreams2.txt" --base main --feature feat-y \
+GH_VIEW_OK=1 "$ENGINE" --workstreams "$FIX/workstreams2.txt" --base main --feature feat-y \
   --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 \
   --repo "$FIX" > "$SCRATCH/run2.log" 2>&1
 RC2=$?
@@ -259,14 +248,11 @@ assert_eq "origin main == local main after delivery" \
   "$(git -C "$FIX" rev-parse main)" "$(git -C "$ORIGIN" rev-parse main)"
 assert "existing PR path updates instead of creating" \
   grep -q '^codex:execute: existing PR updates$' "$SCRATCH/run2.log"
-assert "push does not wait for the review" \
-  sh -c "grep -n 'pushed to origin\|\[review\] result' '$SCRATCH/run2.log' | head -1 | grep -q 'pushed to origin'"
 assert "feat-y worktree root fully removed" test ! -e "$(dirname "$FIX")/.codex-execute-feat-y"
-assert_eq "review also ran for scenario 2" 2 "$(count REVIEW)"
 assert "all-green summary only includes passed workstreams" \
   grep -q '^codex:execute: PASS \[1\]$' "$SCRATCH/run2.log"
 assert "all-green console summary omits zero values" \
-  grep -q '^codex:execute: summary: feature=feat-y base=main workstreams=1 pass=1 merged=1 post-merge=pass reviewed pushed$' "$SCRATCH/run2.log"
+  grep -q '^codex:execute: summary: feature=feat-y base=main workstreams=1 pass=1 merged=1 post-merge=pass pushed$' "$SCRATCH/run2.log"
 
 # ---------- scenario 3: red post-merge check restores the session branch ----------
 printf 'WS-D write d.txt\nWS-E write e.txt\n' > "$FIX/workstreams3.txt"
@@ -294,7 +280,6 @@ assert "restored summary token present" \
 assert_eq "origin main untouched by red run" "$ORIGIN3" "$(git -C "$ORIGIN" rev-parse main)"
 ST3="$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-execute/feat-z/status"
 assert "summary records the restore" grep -q '"restored": true' "$ST3/summary.json"
-assert_eq "no review on red post-merge" 2 "$(count REVIEW)"
 git -C "$FIX" branch -q -D workstreams/feat-z/1 workstreams/feat-z/2
 
 # ---------- scenario 4: guard rails ----------
@@ -388,8 +373,6 @@ set -e 2>/dev/null || true
 echo "---- scenario 7 exit=$RC8 (log: $SCRATCH/run8.log) ----"
 
 assert_eq "run with a moved remote still delivers (exit 0)" 0 "$RC8"
-assert "delivery lock is released before review runs" \
-  grep -q '^REVIEW-LOCK-FREE' "$STUB_DIR/invocations.log"
 assert "push retry is reported" grep -q 'push rejected (remote moved)' "$SCRATCH/run8.log"
 assert "push eventually succeeded" grep -q '^codex:execute: pushed to origin$' "$SCRATCH/run8.log"
 assert_eq "origin main == local main after retry" \
