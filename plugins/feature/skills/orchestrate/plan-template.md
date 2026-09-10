@@ -90,7 +90,7 @@ skips it. Name test files too. -->
 
 ## Checks
 
-<!-- Exactly one command line; the engine runs the same command in every worktree and after
+<!-- Exactly one command line; implement.sh runs the same command in every worktree and after
 merge. Call each module's test script with a path filter; never name the runner (modules may
 run different runners). Chain modules with && when more than one is touched. -->
 

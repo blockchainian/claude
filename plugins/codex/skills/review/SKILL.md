@@ -12,13 +12,13 @@ Script: `${CLAUDE_PLUGIN_ROOT}/skills/review/review.sh`. Output schema:
 
 Once per plan, one round, after the push that lands the implementation:
 
-- after `codex:implement` prints `pushed to origin`, with the base the engine
+- after `codex:implement` prints `pushed to origin`, with the base `implement.sh`
   recorded in `.git/codex-implement/<feature>/pre-merge.sha`;
 - for a plan with no codex workstream, when the UX lane reports done, with
   the base the plan's recorded SHA.
 
 Under `/feature:orchestrate` the orchestrator runs it and triages; standalone,
-run it yourself. The `codex:implement` engine never calls it.
+run it yourself. `implement.sh` never calls it.
 
 ## Run
 
