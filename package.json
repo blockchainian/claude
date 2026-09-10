@@ -9,7 +9,7 @@
   "scripts": {
     "test": "npm run test:grok && npm run test:codex && npm run test:feature",
     "test:grok": "node --test tests/*.test.mjs",
-    "test:codex": "plugins/codex/skills/implement/tests/test-implement.sh && plugins/codex/skills/implement/tests/test-review.sh",
+    "test:codex": "plugins/codex/skills/implement/tests/test-implement.sh && plugins/codex/skills/review/tests/test-review.sh",
     "validate": "claude plugin validate --strict .",
     "test:feature": "plugins/feature/hooks/tests/run.sh"
   }

@@ -1,163 +1,134 @@
 ---
 name: implement
-description: Execute a planned feature as parallel codex workstreams off the Claude critical path — convert the session's plan into spec.md+workstreams.txt, launch implement.sh (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, push; review.sh reviews the delta on request), then relay the result. Use when the user wants many-at-once implementation work delegated to codex.
+description: Deliver a planned feature as parallel codex workstreams off the Claude critical path — write workstreams.txt from the session's plan.md, launch implement.sh in the background (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, push, PR), then relay summary.json. Use when a plan.md exists and its codex workstreams should be implemented many-at-once by codex.
 ---
 
-# codex:implement — parallel codex execution off the Claude critical path
+# codex:implement — parallel codex implementation off the Claude critical path
 
-Claude plans once and never re-enters; git + the filesystem are the
+Claude hands over once and never re-enters: git and the filesystem are the
 coordination bus. Engine: `${CLAUDE_PLUGIN_ROOT}/skills/implement/implement.sh`.
-Design rationale and measured numbers: `${CLAUDE_PLUGIN_ROOT}/docs/design.md`.
+Rationale and measured numbers: `${CLAUDE_PLUGIN_ROOT}/README.md`.
 
 ## When to use
 
-The handover point of the standard DX: the user researches and plans a feature
-with you in Claude Code, then invokes this skill — from there codex delivers
-the feature onto the branch the session is on. Use for **independent,
-self-contained** backend workstreams codex can execute in parallel. NOT for
-interactive research/spec work (keep steering that live), NOT for UI/UX work.
+A `plan.md` exists — written to the feature plugin's plan template, with one
+block per codex workstream and a single Checks command — and the user wants
+its backend workstreams implemented. Use for **independent, self-contained**
+workstreams codex can run in parallel. NOT for research or planning (keep
+steering that live), NOT for UX work (the feature plugin's UX lane owns it),
+and NOT for review — that is `codex:review`.
 
-## Phase 1 — Plan handover (you, ONE turn)
+## 1. Handover (you, ONE turn)
 
-The input is the plan already developed in THIS conversation — do not re-plan
-or re-ask; convert it. (If invoked with no prior plan, do the research first,
-then come back here.)
+The input is `plan.md`, already written and committed on the session branch.
+Do not re-plan and do not re-ask; the plan is the spec codex reads.
 
-**You (Claude Code) create spec.md and workstreams.txt — codex only reads them.**
-Put them where the repo keeps design docs (e.g. `specs/<date>-<feature>/`, or
-`docs/`), committed to the session branch so every workstream worktree carries
-them.
+1. Check the plan is usable as a spec: each workstream block ends with the
+   files it owns, no two workstreams own the same file, and Dependencies names
+   any overlap the merge must expect. Conflict avoidance is the planner's job;
+   the engine has no runtime check. A plan that fails this goes back to the
+   planner, not into the engine.
+2. Write `workstreams.txt` beside the plan: one line per codex workstream,
+   each line a **pointer** into the plan, never the brief itself, for example
+   `implement workstream "auth-token" per specs/<date>-<topic>/plan.md, following its Constraints and Invariants`.
+   Skip the UX workstream; it is not codex's.
+3. Take the check command from the plan's Checks section verbatim; the
+   engine runs it in every worktree and after merge, so the plan's Invariants
+   must be covered by it — the gates replace a live review.
+4. Commit `workstreams.txt`. The session worktree must be CLEAN when the
+   engine starts, because the run delivers onto this branch.
 
-1. Decompose the plan into N independent workstreams. **Partition along file
-   boundaries so no two workstreams edit the same file** — conflict avoidance
-   is the planner's job; there is no runtime check. If overlap is unavoidable,
-   record it in spec.md (which workstreams, which files) so the merge phase
-   expects it. A `plan.md` written to the orchestrate plan template
-   (`~/.claude/skills/orchestrate/plan-template.md`) is already partitioned:
-   each workstream block ends with the files it owns, and Dependencies names
-   the overlaps.
-2. Write `spec.md` (architecture, constraints, patterns, out-of-scope, known
-   overlaps, cross-workstream invariants). From a template plan, assemble it
-   without adding facts: Scope's out-of-scope list, Constraints, Dependencies
-   and Invariants become the shared sections, and each workstream block is
-   copied whole as its own §. Put invariants into the check command where
-   possible: the deterministic gates replace your live review.
-3. Write `workstreams.txt`: one workstream per line, each line a **pointer**
-   into the spec, not the whole brief
-   (`implement workstream 3 per specs/<date>-<feature>/spec.md §3; run auth tests`).
-   Commit both to the session branch. The session worktree must be CLEAN when
-   the engine starts — the run delivers onto this branch.
-
-### Launch from this session
-
-Convert and launch in the same turn. Never write a handoff here: plan.md,
-spec.md and workstreams.txt are the record, and a fresh session resumes from
-plan.md. The run's task notifications bind to the session that launches it,
-so never `/clear` mid-run either. Switching effort without clearing
-invalidates the whole prompt cache at full 1h-write price, so set the
-implementation effort before the session that launches starts.
-
-## Phase 2+3 — Execute & Merge (script, NO Claude)
+Launch in the same turn. Never write a handoff: plan.md and workstreams.txt
+are the record, and a fresh session resumes from plan.md. The run's task
+notifications bind to the session that launches it, so never `/clear`
+mid-run. Set effort before the launching session starts; switching effort
+mid-session invalidates the prompt cache.
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/implement/implement.sh \
-  --workstreams <path>/workstreams.txt --feature <run-name> \
-  --check "<verify cmd>" --spec <path>/spec.md \
+  --workstreams specs/<date>-<topic>/workstreams.txt --feature <run-name> \
+  --check "<the plan's Checks command>" --spec specs/<date>-<topic>/plan.md \
   [--setup "<per-worktree deps cmd>"] \
   [--concurrency N] [--retries 2] [--timeout 2400] [--runner daemon|exec] \
   [--no-push] [--deliver-wait 1800]
 ```
 
-The default `daemon` runner makes workstream and merge-conflict tasks visible
-as first-class rows in `codex agents`, including their live status. Use
-`--runner exec` to switch back to standalone `codex exec` processes. The
-`IMPLEMENT_RUNNER=exec` environment setting is also honoured (the command-line
-option takes precedence).
-
-Results land on the **session branch, in the session worktree** — the branch
-checked out when the run starts (`--base` may name it explicitly and must then
-match). `--feature` is just the run name; no branch or worktree is created
-for it.
-
-Launch it in the background and END YOUR TURN — do not poll, do not ingest
+Run it in the background and END YOUR TURN — do not poll and do not read
 workstream logs. Progress lives in files:
-- statuses: `<repo>/.git/codex-implement/<feature>/status/workstream-*.json` + `summary.json`
+- statuses: `<repo>/.git/codex-implement/<feature>/status/workstream-*.json` and `summary.json`
 - logs: `<repo>/.git/codex-implement/<feature>/logs/`
 
-These workstreams are **self-verifying**: the engine runs `--check` per
-workstream and again post-merge, gating on raw exit codes. Do not re-run or
-re-verify them from your own context. After the run, your job is only
-confirming the check command covered the touched surfaces.
+`--feature` is only the run name; no branch or worktree is created for it.
+`--spec` is repo-relative and is quoted in every workstream and merge prompt.
+`--setup` provisions dependencies once per worktree, because codex's sandbox
+has no network: `cp -R ../main-checkout/node_modules node_modules` (`cp -Rc`
+on APFS for a copy-on-write clone). The default `daemon` runner shows
+workstreams and merge resolutions as rows in `codex agents`; `--runner exec`
+(or `IMPLEMENT_RUNNER=exec`) uses standalone `codex exec` processes.
 
-Semantics (all verified by tests/test-implement.sh):
-- Worktree pool sized to concurrency at `../.codex-implement-<feature>/w*`,
-  branched from the session branch's run-start commit; created on demand,
-  fully removed after merge. Workstream branches `workstreams/<feature>/<n>`.
-- Red = check failed OR codex timeout OR codex nonzero exit OR no diff.
-  Bounded retry re-invokes codex in the same worktree with the failure tail
-  appended.
-- Failed workstreams: excluded from merge; branch kept only if it has commits.
-- Merge: green workstream branches merge DIRECTLY onto the session branch in
-  the session worktree. Delivery takes a per-repo lock (`.git/codex-implement/deliver.lock`)
-  so concurrent runs merge one at a time, and waits (up to `--deliver-wait`,
-  default 1800 s) for the tree to be clean and still on the base branch — a
-  sibling session's uncommitted edits delay delivery instead of aborting it.
-  The lock is released right after the post-merge check; review runs unlocked,
-  and a push rejected because the remote moved is retried once after merging
-  `origin/<base>` in and re-running `check` on the combination.
-  Conflicts resolved by codex in place; pre-merge HEAD is recorded as
-  `refs/codex-implement/<feature>/pre-merge`.
-- Post-merge `check` runs on the session branch. RED restores the branch with
+## 2. Execute (engine, no Claude)
+
+- A worktree pool sized to concurrency at `../.codex-implement-<feature>/w*`,
+  branched from the session branch's run-start commit, created on demand and
+  removed after merge. Workstream branches are `workstreams/<feature>/<n>`.
+- Per workstream: codex works in a free worktree, the engine runs `--check`,
+  and commits the branch on green.
+- Red = check failed, codex timeout, codex nonzero exit, or no diff. A bounded
+  retry re-invokes codex in the same worktree with the failure tail appended.
+- A workstream that exhausts its retries is FAILED: excluded from the merge,
+  its branch kept only if it has commits, and listed in the summary and PR body.
+
+## 3. Merge (engine, no Claude)
+
+- Delivery takes a per-repo lock (`.git/codex-implement/deliver.lock`) so
+  concurrent runs merge one at a time, and waits up to `--deliver-wait` for
+  the session worktree to be clean and still on the base branch — a sibling
+  session's uncommitted edits delay delivery instead of aborting it.
+- Pre-merge HEAD is recorded as `refs/codex-implement/<feature>/pre-merge`
+  and `.git/codex-implement/<feature>/pre-merge.sha`; `codex:review` uses it
+  as the review base.
+- Green workstream branches merge directly onto the session branch, in the
+  session worktree. Conflicts are resolved in place by codex with the spec as
+  context.
+- The post-merge `--check` runs on the session branch. RED restores it with
   `git reset --keep` to the pre-merge commit and keeps every green workstream
-  branch for autopsy — the session worktree ends exactly where it started.
-- Exit 0 = all green + delivered; 2 = partial (some workstreams failed,
-  session branch green + delivered); 1 = post-merge check red (branch
+  branch for autopsy — the worktree ends exactly where it started. The lock
+  is released after this check.
+
+## 4. Deliver (engine, no Claude)
+
+- The session branch is pushed; the engine prints `pushed to origin`. A push
+  rejected because the remote moved is retried once after merging
+  `origin/<base>` in and re-running `--check` on the combination.
+- If the branch has an open PR it updates; otherwise a PR is opened FROM the
+  session branch to the default branch (needs `gh`; skipped on the default
+  branch). `--no-push` stops after merge.
+- Exit 0 = all green and delivered; 2 = partial (some workstreams failed,
+  session branch green and delivered); 1 = post-merge check red (branch
   restored), merge blocked (tree stayed dirty past `--deliver-wait`, branch
   switched, or lock held too long), or push failed.
 
-`--setup` example (codex's sandbox has no network, so provision deps when
-creating each worktree): `cp -R ../main-checkout/node_modules node_modules`
-(on APFS use `cp -Rc` for a copy-on-write clone).
+All of this is verified by `tests/test-implement.sh`.
 
-## Phase 4 — Review & deliver (codex, automatic)
+## 5. Relay (you)
 
-Once the post-merge check passes the engine pushes the session branch. If the
-branch has an open PR it updates; otherwise a PR is opened FROM the session
-branch to the repo's default branch. No `@codex review` comment is posted and
-the engine itself does not review.
+The workstreams are self-verifying: the engine gated each one and the merge
+on raw exit codes. Do not re-run or re-verify them; confirm only that the
+check command covered the touched surfaces.
 
-The review is a separate step the caller runs once the push has landed:
+When the run finishes, relay `summary.json` and the PR URL. FAILED
+workstreams are listed in the PR body — offer to re-plan just those as a new
+small run (new run name) rather than re-entering the loop yourself.
 
-```
-${CLAUDE_PLUGIN_ROOT}/skills/implement/review.sh <repo> $(cat .git/codex-implement/<feature>/pre-merge.sha) HEAD <out>/review.json <spec>
-```
-
-It is a read-only `codex exec` with review instructions and
-`review-schema.json`, one round, writing `{"findings": [{file, line,
-severity, claim}]}` with severity `must-fix` or `nit`. Run it in the
-background. Under `/feature:orchestrate` the orchestrator runs it and triages
-the result; standalone, run it yourself when the engine reports `pushed`.
-
-When the run finishes, relay `summary.json`, the `must-fix` findings from
-`review.json` (nits are dropped, not relayed), and the PR URL to the user. FAILED workstreams are listed in the PR body — offer to
-re-plan just those as a new small run (new run name) rather than re-entering
-the loop yourself.
-
-Route review findings by scope, not severity:
-
-- A finding whose fix stays in one file and touches no documented invariant
-  or API surface gets fixed in-session: TDD the fix, run the spec's `--check`
-  command yourself, commit, and push the session branch so the PR stays
-  current.
-- A finding whose fix spans files, touches an invariant, or whose correct fix
-  is uncertain gets a new small run with a fresh spec, followed by `review.sh`
-  over that run's delta. Re-reviewing the fix itself is the point of routing
-  it this way, so don't skip the pipeline for these to save time.
+Review is not part of this skill. Under `/feature:orchestrate` the
+orchestrator runs `codex:review` on the push and triages the findings;
+standalone, run `codex:review` yourself when the engine reports `pushed to
+origin`.
 
 ## Cleanup
 
 None on success — workstream worktrees and branches are already gone and the
 work is on the session branch. After a red post-merge check, the kept
 `workstreams/<feature>/<n>` branches and `refs/codex-implement/<feature>/pre-merge`
-can be deleted once the autopsy is done; `.git/codex-implement/<feature>/` can
-be deleted whenever.
+can be deleted once the autopsy is done; `.git/codex-implement/<feature>/`
+can be deleted whenever.
