@@ -47,7 +47,7 @@ on every machine that already has it, however much its code moved.
 
 ```
 npm test              # both suites
-npm run test:codex    # the implement engine and review script against a stub codex CLI
+npm run test:codex    # implement.sh and review.sh against a stub codex CLI
 npm run test:grok     # the grok command and runtime suite
 npm run validate      # the marketplace and plugin manifests
 ```

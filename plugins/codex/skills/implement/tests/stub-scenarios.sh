@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Shared scenario implementations for the execute engine's fake task runners.
+# ABOUTME: Shared scenario implementations for implement.sh's fake task runners.
 # ABOUTME: Simulates workstream edits, retries, timeouts, and merge-conflict resolution.
 
 scenario_log() { echo "$1 dir=$DIR${NAME:+ name=$NAME}" >> "${STUB_DIR:?}/invocations.log"; }

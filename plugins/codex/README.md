@@ -9,7 +9,7 @@ the same `codex` plugin name, so its two skills join the official plugin's
 **The DX:** plan a feature with Claude Code (the [feature](../feature/README.md)
 plugin's planner writes `plan.md`), then hand the plan to `/codex:implement`.
 Claude writes `workstreams.txt`, one pointer line per workstream, and launches
-the engine in the background. Codex implements the workstreams in parallel
+`implement.sh` in the background. Codex implements the workstreams in parallel
 worktrees, each gated by the plan's check command with bounded retries; green
 workstream branches merge directly onto **the branch your session is on, in
 your worktree** (codex resolves conflicts); a post-merge check gates delivery
@@ -47,9 +47,9 @@ optionally `gh` (authenticated) for automatic PR creation.
 | `/codex:implement` | Turn `plan.md` into `workstreams.txt`, launch `implement.sh` in the background, relay `summary.json` and the PR when it exits. |
 | `/codex:review` | Run `review.sh` over a commit range and write `review.json` (`{findings: [{file, line, severity, claim}]}`, severity `must-fix` or `nit`) for the caller to triage. |
 
-The engine never reviews; the caller (the feature plugin's orchestrator, or
-you when running standalone) runs `/codex:review` once per plan after the
-engine reports `pushed to origin`.
+`implement.sh` never reviews; the caller (the feature plugin's orchestrator, or
+you when running standalone) runs `/codex:review` once per plan after
+`implement.sh` reports `pushed to origin`.
 
 ## Use
 
@@ -59,7 +59,7 @@ In Claude Code, with a committed `plan.md` on the session branch:
 /codex:implement
 ```
 
-then, once the engine has pushed:
+then, once `implement.sh` has pushed:
 
 ```
 /codex:review
@@ -194,7 +194,7 @@ branch with `git reset --keep` and keeps the green branches for autopsy.
 
 **Deliver** pushes the session branch and updates its PR, or opens one to the
 default branch. **Review** is a separate script the caller triggers, because
-a plan with no codex workstream has no engine run and still needs the review.
+a plan with no codex workstream has no `implement.sh` run and still needs the review.
 Correctness rests on deterministic gates — each workstream's check, the
 post-merge check — plus one structured codex review whose severities are
 labelled at the source, not on a single model's judgment used as a gate.
@@ -226,13 +226,13 @@ labelled at the source, not on a single model's judgment used as a gate.
 npm run test:codex
 ```
 
-`skills/implement/tests/test-implement.sh` runs the engine against a fixture
+`skills/implement/tests/test-implement.sh` runs `implement.sh` against a fixture
 repo with a stubbed codex CLI (pass, retry-with-failure-context, hang/timeout,
 no-diff, merge-conflict resolution, session-branch delivery, restore-on-red,
 delivery lock and wait, existing-PR update, pool bounds, cleanup, guard rails);
 `skills/review/tests/test-review.sh` covers the review script's arguments,
 sandbox and schema flags, prompt, output and failure exit against the same
-stub. The engine is additionally verified against the real codex CLI.
+stub. `implement.sh` is additionally verified against the real codex CLI.
 
 ## License
 

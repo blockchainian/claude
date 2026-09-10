@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Parallel codex workstream engine: runs workstreams.txt through codex exec in a worktree
+# ABOUTME: Parallel codex workstream runner: runs workstreams.txt through codex exec in a worktree
 # ABOUTME: pool with per-workstream checks and bounded retries, then merges workstream branches onto the session branch.
 set -u
 
@@ -33,7 +33,7 @@ run-start commit. Green workstream branches merge DIRECTLY onto the session
 branch in the session worktree once it is clean (uncommitted edits from a
 parallel session only delay delivery, up to --deliver-wait); the post-merge
 check runs there, and a red check restores the branch to its pre-merge state
-(workstream branches kept for autopsy). The engine does not review: the
+(workstream branches kept for autopsy). This script does not review: the
 pre-merge SHA it records (refs/codex-implement/<feature>/pre-merge, run-dir
 pre-merge.sha) is the base for review.sh, which the caller runs after the push.
 
