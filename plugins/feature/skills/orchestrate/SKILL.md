@@ -121,7 +121,7 @@ why reading alone does not find it.
   notifications re-invoke you when a lane finishes. NEVER idle-wait, and NEVER call `TaskOutput`.
 - **No `sleep` in the foreground.** Anything that waits runs with `run_in_background`.
 - **No UI driving from the main loop.** Probes only, run with `run_in_background`, verdict JSON
-  read back. Delegate to `ui-verifier` only what a probe cannot express: a freeform walk, or a step
+  read back. Delegate to `ux-verifier` only what a probe cannot express: a freeform walk, or a step
   needing judgment in flight. Judge screenshots yourself; taste calls go to the user.
 - **Inconclusive is not a pass.** Fix the probe or the environment and re-run. "Probe may be stale"
   means the screen model no longer matches the app: update the probe with the deliberate change, or

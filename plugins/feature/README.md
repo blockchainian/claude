@@ -32,7 +32,7 @@ review-fix → deploy. Grounding takes its ask in the shape of the project's
 | `planner` | Fable high | Write `plan.md` from `problem.md` using the plan template; repo facts from `problem.md` only |
 | `ux-implementer` | Fable medium | Implement one UX workstream on the session branch, commit after every step, return flat JSON |
 | `ux-autofixer` | Fable medium | Fix the PR threads labelled `claude-code-ux` in the UX lane's worktree, push, reply, resolve |
-| `ui-verifier` | Sonnet low | Drive a scripted UI scenario (browse or iOS simulator) and return a verdict with evidence paths |
+| `ux-verifier` | Sonnet low | Drive a scripted UI scenario (browse or iOS simulator) and return a verdict with evidence paths |
 
 ## Hooks
 
