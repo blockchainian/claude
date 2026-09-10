@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "feature",
-      "description": "Ship a feature from a written plan: orchestrate the codex and UX lanes to a merged, verified, deployed PR, with the planner, UX and UI-verifier agents, the handoff skill, and the no-blocking hooks.",
+      "description": "Ship a feature from a written plan: orchestrate the codex and UX lanes to a merged, verified, deployed PR, with the planner, UX and UX-verifier agents, the handoff skill, and the no-blocking hooks.",
       "author": {
         "name": "blockchainian"
       },
