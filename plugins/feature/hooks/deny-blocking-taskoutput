@@ -1,0 +1,12 @@
+#!/bin/bash
+# ABOUTME: PreToolUse hook that denies blocking TaskOutput calls; task-notifications
+# ABOUTME: re-invoke the session on completion, so blocking polls only freeze the main loop.
+input=$(cat)
+# note: jq's // operator swallows false, so compare the raw value
+blk=$(jq -r '.tool_input.block' <<<"$input")
+if [ "$blk" != "false" ]; then
+  cat <<'JSON'
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocking TaskOutput freezes the session; the task-notification re-invokes you when the task completes. To peek at interim output, Read the task's output file, or pass block: false for a non-blocking status check."}}
+JSON
+fi
+exit 0
