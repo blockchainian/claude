@@ -1,12 +1,12 @@
 ---
-name: execute
-description: Execute a planned feature as parallel codex workstreams off the Claude critical path — convert the session's plan into spec.md+workstreams.txt, launch execute.sh (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, push; review.sh reviews the delta on request), then relay the result. Use when the user wants many-at-once implementation work delegated to codex.
+name: implement
+description: Execute a planned feature as parallel codex workstreams off the Claude critical path — convert the session's plan into spec.md+workstreams.txt, launch implement.sh (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, push; review.sh reviews the delta on request), then relay the result. Use when the user wants many-at-once implementation work delegated to codex.
 ---
 
-# codex:execute — parallel codex execution off the Claude critical path
+# codex:implement — parallel codex execution off the Claude critical path
 
 Claude plans once and never re-enters; git + the filesystem are the
-coordination bus. Engine: `${CLAUDE_PLUGIN_ROOT}/skills/execute/execute.sh`.
+coordination bus. Engine: `${CLAUDE_PLUGIN_ROOT}/skills/implement/implement.sh`.
 Design rationale and measured numbers: `${CLAUDE_PLUGIN_ROOT}/docs/design.md`.
 
 ## When to use
@@ -60,7 +60,7 @@ implementation effort before the session that launches starts.
 ## Phase 2+3 — Execute & Merge (script, NO Claude)
 
 ```
-${CLAUDE_PLUGIN_ROOT}/skills/execute/execute.sh \
+${CLAUDE_PLUGIN_ROOT}/skills/implement/implement.sh \
   --workstreams <path>/workstreams.txt --feature <run-name> \
   --check "<verify cmd>" --spec <path>/spec.md \
   [--setup "<per-worktree deps cmd>"] \
@@ -71,7 +71,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/execute/execute.sh \
 The default `daemon` runner makes workstream and merge-conflict tasks visible
 as first-class rows in `codex agents`, including their live status. Use
 `--runner exec` to switch back to standalone `codex exec` processes. The
-`EXECUTE_RUNNER=exec` environment setting is also honoured (the command-line
+`IMPLEMENT_RUNNER=exec` environment setting is also honoured (the command-line
 option takes precedence).
 
 Results land on the **session branch, in the session worktree** — the branch
@@ -81,17 +81,17 @@ for it.
 
 Launch it in the background and END YOUR TURN — do not poll, do not ingest
 workstream logs. Progress lives in files:
-- statuses: `<repo>/.git/codex-execute/<feature>/status/workstream-*.json` + `summary.json`
-- logs: `<repo>/.git/codex-execute/<feature>/logs/`
+- statuses: `<repo>/.git/codex-implement/<feature>/status/workstream-*.json` + `summary.json`
+- logs: `<repo>/.git/codex-implement/<feature>/logs/`
 
 These workstreams are **self-verifying**: the engine runs `--check` per
 workstream and again post-merge, gating on raw exit codes. Never spawn the
-`workstream-verifier` agent for a `/codex:execute` run — that agent is for
+`workstream-verifier` agent for a `/codex:implement` run — that agent is for
 Claude-subagent workstreams. After the run, your job is only confirming the
 check command covered the touched surfaces.
 
-Semantics (all verified by tests/test-execute.sh):
-- Worktree pool sized to concurrency at `../.codex-execute-<feature>/w*`,
+Semantics (all verified by tests/test-implement.sh):
+- Worktree pool sized to concurrency at `../.codex-implement-<feature>/w*`,
   branched from the session branch's run-start commit; created on demand,
   fully removed after merge. Workstream branches `workstreams/<feature>/<n>`.
 - Red = check failed OR codex timeout OR codex nonzero exit OR no diff.
@@ -99,7 +99,7 @@ Semantics (all verified by tests/test-execute.sh):
   appended.
 - Failed workstreams: excluded from merge; branch kept only if it has commits.
 - Merge: green workstream branches merge DIRECTLY onto the session branch in
-  the session worktree. Delivery takes a per-repo lock (`.git/codex-execute/deliver.lock`)
+  the session worktree. Delivery takes a per-repo lock (`.git/codex-implement/deliver.lock`)
   so concurrent runs merge one at a time, and waits (up to `--deliver-wait`,
   default 1800 s) for the tree to be clean and still on the base branch — a
   sibling session's uncommitted edits delay delivery instead of aborting it.
@@ -107,7 +107,7 @@ Semantics (all verified by tests/test-execute.sh):
   and a push rejected because the remote moved is retried once after merging
   `origin/<base>` in and re-running `check` on the combination.
   Conflicts resolved by codex in place; pre-merge HEAD is recorded as
-  `refs/codex-execute/<feature>/pre-merge`.
+  `refs/codex-implement/<feature>/pre-merge`.
 - Post-merge `check` runs on the session branch. RED restores the branch with
   `git reset --keep` to the pre-merge commit and keeps every green workstream
   branch for autopsy — the session worktree ends exactly where it started.
@@ -130,7 +130,7 @@ the engine itself does not review.
 The review is a separate step the caller runs once the push has landed:
 
 ```
-${CLAUDE_PLUGIN_ROOT}/skills/execute/review.sh <repo> $(cat .git/codex-execute/<feature>/pre-merge.sha) HEAD <out>/review.json <spec>
+${CLAUDE_PLUGIN_ROOT}/skills/implement/review.sh <repo> $(cat .git/codex-implement/<feature>/pre-merge.sha) HEAD <out>/review.json <spec>
 ```
 
 It is a read-only `codex exec` with review instructions and
@@ -159,6 +159,6 @@ Route review findings by scope, not severity:
 
 None on success — workstream worktrees and branches are already gone and the
 work is on the session branch. After a red post-merge check, the kept
-`workstreams/<feature>/<n>` branches and `refs/codex-execute/<feature>/pre-merge`
-can be deleted once the autopsy is done; `.git/codex-execute/<feature>/` can
+`workstreams/<feature>/<n>` branches and `refs/codex-implement/<feature>/pre-merge`
+can be deleted once the autopsy is done; `.git/codex-implement/<feature>/` can
 be deleted whenever.

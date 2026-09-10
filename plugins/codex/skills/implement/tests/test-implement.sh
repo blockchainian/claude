@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# ABOUTME: End-to-end test for execute.sh using a fixture git repo and the stub codex CLI.
+# ABOUTME: End-to-end test for implement.sh using a fixture git repo and the stub codex CLI.
 # ABOUTME: Covers pass, retry, hang, no-diff, conflicts, session-branch delivery, restore, guards.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ENGINE="$HERE/../execute.sh"
+ENGINE="$HERE/../implement.sh"
 
-if [ -z "${TEST_EXECUTE_RUNNER:-}" ]; then
+if [ -z "${TEST_IMPLEMENT_RUNNER:-}" ]; then
   batch_rc=0
   for test_runner in exec daemon; do
     echo "==== runner: $test_runner ===="
-    TEST_EXECUTE_RUNNER="$test_runner" "$0" || batch_rc=1
+    TEST_IMPLEMENT_RUNNER="$test_runner" "$0" || batch_rc=1
   done
   exit "$batch_rc"
 fi
 
-SCRATCH="$(mktemp -d /tmp/codex-execute-test.XXXXXX)"
+SCRATCH="$(mktemp -d /tmp/codex-implement-test.XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
 FAILS=0
@@ -40,23 +40,23 @@ assert_eq() { # assert_eq <desc> <expected> <actual>
 # ---------- skill metadata ----------
 # Claude Code prefixes the plugin name itself, so the frontmatter name carries no namespace.
 SKILL_NAME="$(awk '/^name:/{sub(/^name: */, ""); gsub(/"/, ""); print; exit}' "$HERE/../SKILL.md")"
-assert_eq "SKILL.md name resolves to /codex:execute" "execute" "$SKILL_NAME"
+assert_eq "SKILL.md name resolves to /codex:implement" "implement" "$SKILL_NAME"
 
 # ---------- fixture ----------
 export STUB_DIR="$SCRATCH/stub"
 mkdir -p "$STUB_DIR"
-# inject the stub via EXECUTE_CODEX: a single path, immune to PATH quirks (e.g. colons in dir names)
-export EXECUTE_CODEX="$HERE/stub-codex/codex"
-if [ "$TEST_EXECUTE_RUNNER" = "exec" ]; then
-  export EXECUTE_RUNNER=exec
-  unset EXECUTE_DAEMON_RUNNER
+# inject the stub via IMPLEMENT_CODEX: a single path, immune to PATH quirks (e.g. colons in dir names)
+export IMPLEMENT_CODEX="$HERE/stub-codex/codex"
+if [ "$TEST_IMPLEMENT_RUNNER" = "exec" ]; then
+  export IMPLEMENT_RUNNER=exec
+  unset IMPLEMENT_DAEMON_RUNNER
 else
-  unset EXECUTE_RUNNER
+  unset IMPLEMENT_RUNNER
   STUB_SPACED="$SCRATCH/stub dir"
   mkdir -p "$STUB_SPACED/stub-daemon-runner"
   cp "$HERE/stub-scenarios.sh" "$STUB_SPACED/"
   cp "$HERE/stub-daemon-runner/daemon-run" "$STUB_SPACED/stub-daemon-runner/"
-  export EXECUTE_DAEMON_RUNNER="$STUB_SPACED/stub-daemon-runner/daemon-run"
+  export IMPLEMENT_DAEMON_RUNNER="$STUB_SPACED/stub-daemon-runner/daemon-run"
 fi
 STUB_BIN="$SCRATCH/bin"
 mkdir -p "$STUB_BIN"
@@ -117,10 +117,10 @@ assert "bogus runner prints usage" grep -q '^Usage:' "$SCRATCH/bogus.log"
 # The shared app-server daemon inherits the cwd of whoever starts it, and every later codex TUI
 # attaches to it. Starting it from a worktree that is later deleted breaks thread/start for all
 # clients, so the engine must start it from $HOME.
-if [ "$TEST_EXECUTE_RUNNER" = "daemon" ]; then
+if [ "$TEST_IMPLEMENT_RUNNER" = "daemon" ]; then
   mkdir -p "$SCRATCH/not-a-repo"
   set +e
-  (cd "$SCRATCH/not-a-repo" && env -u EXECUTE_DAEMON_RUNNER "$ENGINE" --workstreams "$FIX/workstreams.txt" \
+  (cd "$SCRATCH/not-a-repo" && env -u IMPLEMENT_DAEMON_RUNNER "$ENGINE" --workstreams "$FIX/workstreams.txt" \
     --feature feat-cwd --check "sh ./check.sh") > "$SCRATCH/daemon-cwd.log" 2>&1
   set -e 2>/dev/null || true
   assert "engine started the daemon" test -f "$STUB_DIR/daemon-start-cwd"
@@ -141,7 +141,7 @@ echo "---- engine exit=$RC (log: $SCRATCH/run.log) ----"
 # ---------- assertions ----------
 assert_eq "exit code 2 (partial: failed workstreams, session branch green)" 2 "$RC"
 
-WT_ROOT="$(dirname "$FIX")/.codex-execute-feat-x"
+WT_ROOT="$(dirname "$FIX")/.codex-implement-feat-x"
 
 # merged content landed on the session branch, in the session worktree
 assert_eq "still on main" "main" "$(git -C "$FIX" symbolic-ref --short HEAD)"
@@ -151,7 +151,7 @@ assert_eq "c.txt conflict resolved by codex" "ok-merged" "$(cat "$FIX/c.txt" 2>/
 assert "merge commits are on main" \
   sh -c "git -C '$FIX' log --oneline main | grep -q 'merge workstream 1'"
 assert_eq "pre-merge ref recorded at run-start commit" "$BASE0" \
-  "$(git -C "$FIX" rev-parse refs/codex-execute/feat-x/pre-merge 2>/dev/null)"
+  "$(git -C "$FIX" rev-parse refs/codex-implement/feat-x/pre-merge 2>/dev/null)"
 
 # push happened: session branch delivered
 assert_eq "origin main == local main" \
@@ -165,8 +165,8 @@ assert_eq "workstream 3 (hang) invoked retries+1 times" 2 "$(count WS-HANG)"
 assert_eq "workstream 4 (noop) invoked retries+1 times" 2 "$(count WS-NOOP)"
 assert_eq "merge conflict resolved via codex exactly once" 1 "$(count MERGE-RESOLVE)"
 
-if [ "$TEST_EXECUTE_RUNNER" = "daemon" ]; then
-  assert "default runner is daemon" grep -q '^codex:execute: runner=daemon$' "$SCRATCH/run.log"
+if [ "$TEST_IMPLEMENT_RUNNER" = "daemon" ]; then
+  assert "default runner is daemon" grep -q '^codex:implement: runner=daemon$' "$SCRATCH/run.log"
   assert "daemon runner handles workstream attempts" \
     grep -q '^WS-OK .* name=feat-x/w1 a1$' "$STUB_DIR/invocations.log"
   assert "daemon workstream retry has attempt name" \
@@ -176,7 +176,7 @@ if [ "$TEST_EXECUTE_RUNNER" = "daemon" ]; then
   assert_eq "codex stub handles no task attempts under daemon" 0 \
     "$(grep -E '^(WS-|MERGE-RESOLVE)' "$STUB_DIR/invocations.log" | grep -vc ' name=' || true)"
 else
-  assert "explicit exec runner is reported" grep -q '^codex:execute: runner=exec$' "$SCRATCH/run.log"
+  assert "explicit exec runner is reported" grep -q '^codex:implement: runner=exec$' "$SCRATCH/run.log"
 fi
 
 # progress output
@@ -186,34 +186,34 @@ assert "retry start appends attempt number" \
 assert "retry pass includes attempt number" grep -q '\[workstream 2\] PASS (attempt 2)' "$SCRATCH/run.log"
 assert "check failure uses concise FAIL output" grep -q '\[workstream 2\] FAIL (exit 1)' "$SCRATCH/run.log"
 assert "summary includes passed and failed workstreams" \
-  grep -q '^codex:execute: PASS \[1 2 5 6\] FAIL \[3 4\]$' "$SCRATCH/run.log"
+  grep -q '^codex:implement: PASS \[1 2 5 6\] FAIL \[3 4\]$' "$SCRATCH/run.log"
 assert "successful merge uses uppercase status" \
-  grep -q '^codex:execute: \[merge\] workstream 1 MERGED$' "$SCRATCH/run.log"
+  grep -q '^codex:implement: \[merge\] workstream 1 MERGED$' "$SCRATCH/run.log"
 assert "merge uses concise PASS output" \
-  grep -q '^codex:execute: \[merge\] PASS$' "$SCRATCH/run.log"
+  grep -q '^codex:implement: \[merge\] PASS$' "$SCRATCH/run.log"
 assert "PR output is concise" \
-  grep -q '^codex:execute: PR is https://github.com/example/app/pull/42$' "$SCRATCH/run.log"
+  grep -q '^codex:implement: PR is https://github.com/example/app/pull/42$' "$SCRATCH/run.log"
 assert "console summary uses compact fields" \
-  grep -q '^codex:execute: summary: feature=feat-x base=main workstreams=6 pass=4 fail=2 merged=4 post-merge=pass pushed$' "$SCRATCH/run.log"
+  grep -q '^codex:implement: summary: feature=feat-x base=main workstreams=6 pass=4 fail=2 merged=4 post-merge=pass pushed$' "$SCRATCH/run.log"
 assert "push output omits the branch name" \
-  grep -q '^codex:execute: pushed to origin$' "$SCRATCH/run.log"
+  grep -q '^codex:implement: pushed to origin$' "$SCRATCH/run.log"
 assert "delivery target announced" \
-  grep -q "^codex:execute: delivering onto branch 'main' in $FIX$" "$SCRATCH/run.log"
+  grep -q "^codex:implement: delivering onto branch 'main' in $FIX$" "$SCRATCH/run.log"
 assert "delivery target precedes logs" \
-  awk '/^codex:execute: delivering onto/{d=NR} /^codex:execute: logs:/{l=NR} END {exit !(d && l && d < l)}' "$SCRATCH/run.log"
+  awk '/^codex:implement: delivering onto/{d=NR} /^codex:implement: logs:/{l=NR} END {exit !(d && l && d < l)}' "$SCRATCH/run.log"
 
 # worktree pool cleaned up entirely (no feature worktree exists at all)
 assert "worktree root fully removed" test ! -e "$WT_ROOT"
 assert_eq "git worktree list has no workstream worktrees" 0 \
   "$(git -C "$FIX" worktree list | grep -c "$WT_ROOT" || true)"
-L="$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-execute/feat-x/logs"
+L="$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-implement/feat-x/logs"
 assert "pool respected concurrency=2 (no w3 created)" test ! -e "$L/w3.create.log"
 
 # merged + clean-failed workstream branches deleted (failed workstreams had no commits)
 assert_eq "no workstream branches left" 0 "$(git -C "$FIX" branch --list 'workstreams/feat-x/*' | wc -l | tr -d ' ')"
 
 # status files
-ST="$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-execute/feat-x/status"
+ST="$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-implement/feat-x/status"
 assert "summary.json exists" test -f "$ST/summary.json"
 assert_eq "4 workstreams passed" 4 "$(grep -c '"result": "pass"' "$ST"/workstream-*.json | awk -F: '{s+=$2} END {print s}')"
 assert_eq "2 workstreams failed" 2 "$(grep -c '"result": "fail"' "$ST"/workstream-*.json | awk -F: '{s+=$2} END {print s}')"
@@ -247,12 +247,12 @@ assert "origin main advanced with the new merge" \
 assert_eq "origin main == local main after delivery" \
   "$(git -C "$FIX" rev-parse main)" "$(git -C "$ORIGIN" rev-parse main)"
 assert "existing PR path updates instead of creating" \
-  grep -q '^codex:execute: existing PR updates$' "$SCRATCH/run2.log"
-assert "feat-y worktree root fully removed" test ! -e "$(dirname "$FIX")/.codex-execute-feat-y"
+  grep -q '^codex:implement: existing PR updates$' "$SCRATCH/run2.log"
+assert "feat-y worktree root fully removed" test ! -e "$(dirname "$FIX")/.codex-implement-feat-y"
 assert "all-green summary only includes passed workstreams" \
-  grep -q '^codex:execute: PASS \[1\]$' "$SCRATCH/run2.log"
+  grep -q '^codex:implement: PASS \[1\]$' "$SCRATCH/run2.log"
 assert "all-green console summary omits zero values" \
-  grep -q '^codex:execute: summary: feature=feat-y base=main workstreams=1 pass=1 merged=1 post-merge=pass pushed$' "$SCRATCH/run2.log"
+  grep -q '^codex:implement: summary: feature=feat-y base=main workstreams=1 pass=1 merged=1 post-merge=pass pushed$' "$SCRATCH/run2.log"
 
 # ---------- scenario 3: red post-merge check restores the session branch ----------
 printf 'WS-D write d.txt\nWS-E write e.txt\n' > "$FIX/workstreams3.txt"
@@ -278,7 +278,7 @@ assert "restore is reported" \
 assert "restored summary token present" \
   sh -c "grep -q 'post-merge=fail restored' '$SCRATCH/run3.log'"
 assert_eq "origin main untouched by red run" "$ORIGIN3" "$(git -C "$ORIGIN" rev-parse main)"
-ST3="$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-execute/feat-z/status"
+ST3="$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-implement/feat-z/status"
 assert "summary records the restore" grep -q '"restored": true' "$ST3/summary.json"
 git -C "$FIX" branch -q -D workstreams/feat-z/1 workstreams/feat-z/2
 
@@ -324,7 +324,7 @@ assert_eq "delivery waits out transient dirt and exits 0" 0 "$RC6"
 assert "waiting is reported" grep -q '\[merge\] waiting for a clean session worktree' "$SCRATCH/run6.log"
 assert_eq "f.txt merged onto main after the wait" "ok-f" "$(cat "$FIX/f.txt" 2>/dev/null)"
 assert "no late.txt left behind" test ! -e "$FIX/late.txt"
-assert "delivery lock released" test ! -e "$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-execute/deliver.lock"
+assert "delivery lock released" test ! -e "$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-implement/deliver.lock"
 
 # ---------- scenario 6: dirt outlives --deliver-wait -> merge blocked, branch kept ----------
 printf 'WS-DIRTY write f.txt while dirtying the session repo\n' > "$FIX/workstreams7.txt"
@@ -374,12 +374,12 @@ echo "---- scenario 7 exit=$RC8 (log: $SCRATCH/run8.log) ----"
 
 assert_eq "run with a moved remote still delivers (exit 0)" 0 "$RC8"
 assert "push retry is reported" grep -q 'push rejected (remote moved)' "$SCRATCH/run8.log"
-assert "push eventually succeeded" grep -q '^codex:execute: pushed to origin$' "$SCRATCH/run8.log"
+assert "push eventually succeeded" grep -q '^codex:implement: pushed to origin$' "$SCRATCH/run8.log"
 assert_eq "origin main == local main after retry" \
   "$(git -C "$FIX" rev-parse main)" "$(git -C "$ORIGIN" rev-parse main)"
 assert "sibling commit is on the delivered branch" test -f "$FIX/sibling.txt"
 assert_eq "workstream content is on the delivered branch" "ok-ws1" "$(cat "$FIX/a.txt")"
-assert "re-check ran on the combined branch" test -f "$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-execute/feat-s/logs/push-recheck.log"
+assert "re-check ran on the combined branch" test -f "$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-implement/feat-s/logs/push-recheck.log"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; exit 1; fi

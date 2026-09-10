@@ -1,6 +1,6 @@
 ---
 name: workstream-verifier
-description: Verify one delegated implementation workstream (a worktree changed by a Claude subagent or a codex rescue) by rerunning its touched suites unpiped and inspecting its diff, returning an objective flat-JSON verdict with evidence. Use for every such workstream instead of re-verifying from the orchestrator context. NOT for /codex:execute workstreams — those are self-verifying (the engine gates on --check and post-merge exit codes).
+description: Verify one delegated implementation workstream (a worktree changed by a Claude subagent or a codex rescue) by rerunning its touched suites unpiped and inspecting its diff, returning an objective flat-JSON verdict with evidence. Use for every such workstream instead of re-verifying from the orchestrator context. NOT for /codex:implement workstreams — those are self-verifying (the engine gates on --check and post-merge exit codes).
 model: sonnet
 effort: low
 tools: Bash, Read, Glob, Grep, ToolSearch

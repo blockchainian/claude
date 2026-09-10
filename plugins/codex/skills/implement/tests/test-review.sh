@@ -11,7 +11,7 @@ assert() { local d="$1"; shift; if "$@" >/dev/null 2>&1; then echo "PASS: $d"; e
 assert_eq() { if [ "$2" = "$3" ]; then echo "PASS: $1"; else echo "FAIL: $1  [expected '$2' got '$3']"; FAILS=$((FAILS+1)); fi; }
 
 export STUB_DIR="$SCRATCH/stub"; mkdir -p "$STUB_DIR"
-export EXECUTE_CODEX="$HERE/stub-codex/codex"
+export IMPLEMENT_CODEX="$HERE/stub-codex/codex"
 FIX="$SCRATCH/repo"
 git init -q -b main "$FIX"
 git -C "$FIX" config user.email test@test && git -C "$FIX" config user.name test
