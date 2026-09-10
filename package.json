@@ -1,16 +1,17 @@
 {
   "name": "blockchainian-claude",
   "private": true,
-  "description": "The blockchainian plugin marketplace for Claude Code: the codex, grok, build-ios-apps, render, and cloudflare plugins.",
+  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, grok, build-ios-apps, render, and cloudflare plugins.",
   "type": "module",
   "engines": {
     "node": ">=18.18"
   },
   "scripts": {
-    "test": "npm run test:grok && npm run test:codex && npm run test:codex-autofix-pr",
+    "test": "npm run test:grok && npm run test:codex && npm run test:codex-autofix-pr && npm run test:feature",
     "test:grok": "node --test tests/*.test.mjs",
     "test:codex": "plugins/codex/skills/execute/tests/test-execute.sh",
     "test:codex-autofix-pr": "plugins/codex/skills/autofix-pr/tests/test-autofix-pr.sh",
-    "validate": "claude plugin validate --strict ."
+    "validate": "claude plugin validate --strict .",
+    "test:feature": "plugins/feature/hooks/tests/run.sh"
   }
 }

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# ABOUTME: SubagentStart hook that tells every spawned subagent it cannot spawn agents itself,
+# ABOUTME: and that background commands never wake it, so it works directly and waits in the foreground.
+cat <<'JSON'
+{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":"You are a subagent. You cannot spawn agents: Agent tool calls from you fail with 'cannot spawn other teammates'. Do the work yourself with the tools you have and return a final report. Background commands never re-invoke you: nothing wakes you when a run_in_background job or a backgrounded poll exits, so wait in the foreground with a bounded command, or return blocked with what you were waiting on."}}
+JSON

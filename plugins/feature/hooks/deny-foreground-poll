@@ -1,0 +1,18 @@
+#!/bin/bash
+# ABOUTME: PreToolUse hook that rewrites foreground poll-wait Bash commands (until/while
+# ABOUTME: loops, tail -f, sleep >=10s) to run_in_background so they never block the main loop; subagents are exempt.
+input=$(cat)
+bg=$(jq -r '.tool_input.run_in_background // false' <<<"$input")
+[ "$bg" = "true" ] && exit 0
+# A subagent is never re-invoked when a background command exits, so its waits stay in the foreground.
+[ "$(jq -r '.agent_id // ""' <<<"$input")" != "" ] && exit 0
+cmd=$(jq -r '.tool_input.command // ""' <<<"$input")
+# ignore heredoc/here-string bodies (embedded scripts legitimately contain while/until)
+cmd=${cmd%%<<*}
+# while-read over input is iteration, not waiting
+cmd=${cmd//while IFS= read/READLOOP}
+cmd=${cmd//while read/READLOOP}
+if grep -qE '(^|[;&|][[:space:]]*)(until|while)[[:space:]]|tail[[:space:]]+-[a-zA-Z]*f\b|\bsleep[[:space:]]+([1-9][0-9]|[0-9]{3,})\b' <<<"$cmd"; then
+  jq -c '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",permissionDecisionReason:"Foreground wait (until/while loop, tail -f, or sleep >=10s) rewritten to run_in_background: true; the harness re-invokes you when the command exits.",updatedInput:(.tool_input + {run_in_background:true})}}' <<<"$input"
+fi
+exit 0
