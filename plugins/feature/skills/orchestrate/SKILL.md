@@ -50,8 +50,8 @@ why reading alone does not find it.
 
 2. **Launch the backend lane.** Invoke the `codex:execute` skill with the plan's codex workstreams
    (backend; frontend only when the plan has no UX lane). It runs in the background, verifies
-   itself per workstream and post-merge on raw exit codes, merges onto the session branch, pushes
-   a PR, and reviews the merged delta locally in the background into `review.json`. Do not spawn a
+   itself per workstream and post-merge on raw exit codes, merges onto the session branch and
+   pushes a PR. It does not review; that is step 5. Do not spawn a
    verifier for its workstreams; confirm instead that its check command covers the touched surfaces.
 
 3. **Launch the UX lane, in parallel.** Spawn the `ux-implementer` agent with the Agent tool, giving
@@ -64,9 +64,13 @@ why reading alone does not find it.
    README says where both live). This is the overlap the pipeline is built for. If no probe is
    needed, ground the next feature or poll the previous PR. NEVER edit the branch codex merges onto.
 
-5. **Deploy and verify staging.** The engine pushes before its review finishes, so watch its
-   output with `Monitor` for the line `pushed to origin` and act on that line, not on the run's
-   exit. Run the project's staging deploy command, read the `sha` from its JSON, and record it as `STAGING_SHA`. Then run the project's
+5. **Review and deploy staging, both on the push.** Watch the engine's output with `Monitor` for
+   the line `pushed to origin` and act on it, not on the run's exit. First start the review in the
+   background: `${CLAUDE_PLUGIN_ROOT}/../codex/skills/execute/review.sh <repo> <base> HEAD
+   specs/<date>-<topic>/review.json <plan.md>`, where `<base>` is the engine's
+   `.git/codex-execute/<feature>/pre-merge.sha`. A plan with no codex workstream has no engine
+   run: start the same command when the UX lane reports `done`, with `<base>` the plan's base
+   SHA. One review per plan, one round. Then run the project's staging deploy command, read the `sha` from its JSON, and record it as `STAGING_SHA`. Then run the project's
    staging verify command and read its verdict JSON. Both exit non-zero on failure; gate the next
    step on the exit code, not on the text. Then run the plan's Live checks against staging, a
    minute after the deploy returns — the first request after a deploy can still hit the old build. Only staging runs from
@@ -77,8 +81,8 @@ why reading alone does not find it.
    dead, and keeps its context. At most two rounds; a finding that survives two rounds goes to the
    user.
 
-7. **Triage, once.** When the execute run exits, read `review_file` from its `summary.json`.
-   Drop every `nit`. Verify each `must-fix` against the code — severity is the reviewer's claim,
+7. **Triage, once.** When the review has written `review.json` (its process exits; a fail exit
+   means no review, which is a finding for the user), drop every `nit`. Verify each `must-fix` against the code — severity is the reviewer's claim,
    not a fact — and add the probe failures from step 6 as findings of their own. Then decide the
    owner of each finding, exactly once: a finding in a backend module, an API route or a test
    file is `codex` without further thought (the project contract in the plugin README names the
