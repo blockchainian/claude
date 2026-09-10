@@ -1,6 +1,6 @@
 ---
 name: execute
-description: Execute a planned feature as parallel codex workstreams off the Claude critical path — convert the session's plan into spec.md+workstreams.txt, launch execute.sh (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, codex review, push), then relay the result. Use when the user wants many-at-once implementation work delegated to codex.
+description: Execute a planned feature as parallel codex workstreams off the Claude critical path — convert the session's plan into spec.md+workstreams.txt, launch execute.sh (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, background codex review into findings JSON, push), then relay the result. Use when the user wants many-at-once implementation work delegated to codex.
 ---
 
 # codex:execute — parallel codex execution off the Claude critical path
@@ -122,19 +122,19 @@ creating each worktree): `cp -R ../main-checkout/node_modules node_modules`
 
 ## Phase 4 — Review & deliver (codex, automatic)
 
-The engine reviews locally — `codex exec review --base <pre-merge>` covers
-exactly the merged workstream delta, findings written to
-`.git/codex-execute/<feature>/logs/review.md` — then pushes the session
-branch. If the branch has an open PR it updates and gets an `@codex review`
-comment (the GitHub app reviews the whole PR when installed); otherwise a PR
-is opened FROM the session branch to the repo's default branch. There is no
-Claude review step (by design) and nothing for you to run.
+Once the post-merge check passes the engine starts a local codex review of
+exactly the merged workstream delta in the background — a read-only
+`codex exec` with review instructions and a findings schema, one round —
+and pushes the session branch without waiting for it. If the branch has an
+open PR it updates; otherwise a PR is opened FROM the session branch to the
+repo's default branch. No `@codex review` comment is posted. The engine exits
+when the review has written `.git/codex-execute/<feature>/logs/review.json`
+(`{"findings": [{file, line, severity, claim}]}`, severity `must-fix` or
+`nit`; `summary.json` names the file as `review_file`). There is no Claude
+review step and nothing for you to run.
 
-(codex-cli gotcha: `review --base` cannot take custom instructions — review
-focus belongs in spec.md, which the reviewer reads from the tree.)
-
-When the run finishes, relay `summary.json`, the review.md findings, and the
-PR URL to the user. FAILED workstreams are listed in the PR body — offer to
+When the run finishes, relay `summary.json`, the `must-fix` findings from
+`review.json` (nits are dropped, not relayed), and the PR URL to the user. FAILED workstreams are listed in the PR body — offer to
 re-plan just those as a new small run (new run name) rather than re-entering
 the loop yourself.
 

@@ -133,12 +133,15 @@ too many).
 
 ### 4. Review & deliver (Codex, no Claude)
 
-- Local `codex exec review --base <pre-merge>` covers exactly the merged
-  workstream delta (not older commits already on the branch); findings land in
-  the run logs.
-- Push the session branch. If it has an open PR, the PR updates and gets an
-  `@codex review` comment — the GitHub app reviews the whole PR. Otherwise a
-  PR is opened FROM the session branch to the repo's default branch.
+- A local codex review of exactly the merged workstream delta (not older
+  commits already on the branch) starts in the background as soon as the
+  post-merge check passes. It is a plain `codex exec` in a read-only sandbox
+  with review instructions and a findings JSON schema (`review-schema.json`:
+  file, line, severity `must-fix`|`nit`, claim), writing `logs/review.json`;
+  the engine waits for it only at the very end.
+- Push the session branch without waiting for the review. If it has an open
+  PR, the PR updates. Otherwise a PR is opened FROM the session branch to the
+  repo's default branch, its body naming the review file.
 - **No Claude review step.** Correctness rests on three deterministic-ish
   gates: each workstream's own check, the post-merge check on the integrated
   branch, and Codex's reviews — not a single model's judgment used as a gate.
@@ -170,11 +173,13 @@ Nothing project-specific is baked in. Per invocation:
 - **Skill** = `skills/execute/SKILL.md`: the Claude bookend —
   write spec+workstreams, launch the script in the background, request the
   review.
-- **Review mechanism** (decided 2026-07-22): the engine runs local
-  `codex exec review --base <base>` on the integrated diff itself (fast,
-  CLI-native; findings land in the run logs), then comments `@codex review` on
-  the PR as a bonus for the codex GitHub app. codex-cli rejects combining
-  `--base` with custom review instructions — review focus lives in spec.md.
+- **Review mechanism** (decided 2026-09-09): the engine reviews the integrated
+  diff locally in the background with `codex exec` plus review instructions
+  and an output schema, so findings are structured and nits are labelled at
+  the source. `codex exec review --base` is not used because codex-cli rejects
+  combining `--base` with custom instructions, and no `@codex review` comment
+  is posted: the GitHub review is slow, unobservable, and its threads need
+  polling.
 - **Artifact locations**: Claude (not codex) authors `spec.md` +
   `workstreams.txt`, stored at `specs/<date>-<feature>/` on the session
   branch; codex reads them from each workstream worktree. Engine takes
