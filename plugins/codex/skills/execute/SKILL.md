@@ -32,10 +32,16 @@ them.
    boundaries so no two workstreams edit the same file** — conflict avoidance
    is the planner's job; there is no runtime check. If overlap is unavoidable,
    record it in spec.md (which workstreams, which files) so the merge phase
-   expects it.
+   expects it. A `plan.md` written to the orchestrate plan template
+   (`~/.claude/skills/orchestrate/plan-template.md`) is already partitioned:
+   each workstream block ends with the files it owns, and Dependencies names
+   the overlaps.
 2. Write `spec.md` (architecture, constraints, patterns, out-of-scope, known
-   overlaps, cross-workstream invariants). Put invariants into the check
-   command where possible: the deterministic gates replace your live review.
+   overlaps, cross-workstream invariants). From a template plan, assemble it
+   without adding facts: Scope's out-of-scope list, Constraints, Dependencies
+   and Invariants become the shared sections, and each workstream block is
+   copied whole as its own §. Put invariants into the check command where
+   possible: the deterministic gates replace your live review.
 3. Write `workstreams.txt`: one workstream per line, each line a **pointer**
    into the spec, not the whole brief
    (`implement workstream 3 per specs/<date>-<feature>/spec.md §3; run auth tests`).
