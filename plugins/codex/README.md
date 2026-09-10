@@ -14,8 +14,9 @@ the workstreams in parallel worktrees, each gated by your test command with
 bounded retries; green workstream branches merge directly onto **the branch
 your session is on, in your worktree** (codex resolves conflicts); a
 post-merge check gates delivery — red restores your branch exactly to its
-pre-merge state; codex reviews the merged delta; your branch is pushed and its
-PR updated (or one opened if none exists). Claude never polls, never ingests
+pre-merge state; your branch is pushed and its PR updated (or one opened if
+none exists) while codex reviews the merged delta in the background into a
+findings JSON file. Claude never polls, never ingests
 worker transcripts, and never re-enters the loop — and when the run is done,
 the work is simply on your branch.
 
@@ -74,7 +75,7 @@ plugins/codex/skills/execute/execute.sh \
 | `--retries` | per-workstream retry budget on red | 2 |
 | `--timeout` | per-codex-invocation seconds (past it = red) | 2400 |
 | `--setup` | run once per created worktree (deps provisioning) | – |
-| `--no-push` | stop after merge + review | off |
+| `--no-push` | stop after merge; the review still runs | off |
 
 The session worktree must be clean when the run starts; results are delivered
 by merging onto its branch at the end of the run. Red = check failed, codex
@@ -91,7 +92,7 @@ merge + post-merge check only, and a push rejected by a moved remote is retried
 once after merging the remote tip in and re-running the check.
 
 Run state lives under `.git/codex-execute/<feature>/` (per-workstream status
-JSON, logs, `review.md` findings, `summary.json`); worktrees under
+JSON, logs, `review.json` findings, `summary.json`); worktrees under
 `../.codex-execute-<feature>/` exist only for the duration of the run.
 
 ## Test

@@ -65,7 +65,7 @@ cat > "$STUB_BIN/gh" <<'EOF'
 case "$1 $2" in
   "pr view") [ "${GH_VIEW_OK:-0}" = "1" ] || exit 1 ;;
   "pr create") echo "https://github.com/example/app/pull/42" ;;
-  "pr comment") ;;
+  "pr comment") touch "${STUB_DIR:?}/gh-comment" ;;
   *) exit 1 ;;
 esac
 EOF
@@ -193,14 +193,12 @@ assert "merge uses concise PASS output" \
   grep -q '^codex:execute: \[merge\] PASS$' "$SCRATCH/run.log"
 assert "PR output is concise" \
   grep -q '^codex:execute: PR is https://github.com/example/app/pull/42$' "$SCRATCH/run.log"
-assert "GitHub review output is concise" \
-  grep -q '^codex:execute: GitHub review requested$' "$SCRATCH/run.log"
 assert "console summary uses compact fields" \
   grep -q '^codex:execute: summary: feature=feat-x base=main workstreams=6 pass=4 fail=2 merged=4 post-merge=pass reviewed pushed$' "$SCRATCH/run.log"
 assert "review progress uses concise wording" \
   grep -q '^codex:execute: \[review\] merged workstreams vs pre-merge$' "$SCRATCH/run.log"
-assert "review result identifies the result file" \
-  grep -q '^codex:execute: \[review\] result: .*/logs/review.md$' "$SCRATCH/run.log"
+assert "review result identifies the findings file" \
+  grep -q '^codex:execute: \[review\] result: .*/logs/review.json$' "$SCRATCH/run.log"
 assert "push output omits the branch name" \
   grep -q '^codex:execute: pushed to origin$' "$SCRATCH/run.log"
 assert "delivery target announced" \
@@ -229,18 +227,25 @@ assert "summary records no restore" grep -q '"restored": false' "$ST/summary.jso
 # failed workstreams not on the session branch
 assert "no stray files from failed workstreams" test ! -e "$FIX/hang.txt"
 
-# local review ran once and produced findings file
+# local review ran once: read-only, against the findings schema, into review.json
 assert_eq "local codex review ran once" 1 "$(count REVIEW)"
 assert "review runs at high reasoning effort" \
   grep -q '^REVIEW cfg=model_reasoning_effort=high dir=' "$STUB_DIR/invocations.log"
-assert_eq "review findings captured" "stub review: no findings" "$(cat "$L/review.md" 2>/dev/null)"
+assert "review runs read-only against the findings schema" \
+  grep -q '^REVIEW sandbox=read-only schema=review-schema.json dir=' "$STUB_DIR/invocations.log"
+assert "review prompt names the pre-merge sha and asks for must-fix findings" \
+  grep -q "^REVIEW prompt=.*$BASE0.*must-fix" "$STUB_DIR/invocations.log"
+assert_eq "review findings captured as JSON" '{"findings":[]}' "$(cat "$L/review.json" 2>/dev/null)"
+assert "summary records the review file" grep -q "\"review_file\": \"$L/review.json\"" "$ST/summary.json"
+assert_eq "no GitHub review is requested" 0 "$(grep -c 'GitHub review' "$SCRATCH/run.log" || true)"
+assert "no PR comment is posted" test ! -e "$STUB_DIR/gh-comment"
 
 # ---------- scenario 2: all green, existing PR for the session branch ----------
 # WS-C1 rewrites c.txt (scenario 1 left "ok-merged"), so the workstream has a real diff
 printf 'WS-C1 write c.txt (variant 1)\n' > "$FIX/workstreams2.txt"
 git -C "$FIX" add workstreams2.txt && git -C "$FIX" commit -qm "workstreams2" && git -C "$FIX" push -q origin main
 set +e
-GH_VIEW_OK=1 "$ENGINE" --workstreams "$FIX/workstreams2.txt" --base main --feature feat-y \
+GH_VIEW_OK=1 STUB_REVIEW_SLEEP=2 "$ENGINE" --workstreams "$FIX/workstreams2.txt" --base main --feature feat-y \
   --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 \
   --repo "$FIX" > "$SCRATCH/run2.log" 2>&1
 RC2=$?
@@ -252,8 +257,10 @@ assert "origin main advanced with the new merge" \
   sh -c "git -C '$ORIGIN' log --oneline main | grep -q 'merge workstream 1'"
 assert_eq "origin main == local main after delivery" \
   "$(git -C "$FIX" rev-parse main)" "$(git -C "$ORIGIN" rev-parse main)"
-assert "existing PR path comments instead of creating" \
-  grep -q '^codex:execute: existing PR updates; GitHub review requested$' "$SCRATCH/run2.log"
+assert "existing PR path updates instead of creating" \
+  grep -q '^codex:execute: existing PR updates$' "$SCRATCH/run2.log"
+assert "push does not wait for the review" \
+  sh -c "grep -n 'pushed to origin\|\[review\] result' '$SCRATCH/run2.log' | head -1 | grep -q 'pushed to origin'"
 assert "feat-y worktree root fully removed" test ! -e "$(dirname "$FIX")/.codex-execute-feat-y"
 assert_eq "review also ran for scenario 2" 2 "$(count REVIEW)"
 assert "all-green summary only includes passed workstreams" \
@@ -356,13 +363,25 @@ git -C "$FIX" branch -q -D workstreams/feat-t/1
 # ---------- scenario 7: lock released after the post-merge check; push survives a remote that moved ----------
 printf 'WS-OK write a.txt per spec.md\n' > "$FIX/workstreams8.txt"
 echo "stale" > "$FIX/a.txt"
-git -C "$FIX" add workstreams8.txt a.txt && git -C "$FIX" commit -qm "workstreams8" && git -C "$FIX" push -q origin main
+# During the post-merge check (the one check that runs in the session repo, after the merge and
+# before the push) a second clone lands an unrelated commit on origin, once.
+cat > "$FIX/sibling.sh" <<'EOF'
+#!/bin/sh
+[ "$(pwd -P)" = "$(cd "$SIBLING_REPO" && pwd -P)" ] || exit 0
+[ -e "$SIBLING_CLONE/.landed" ] && exit 0
+echo "sibling" > "$SIBLING_CLONE/sibling.txt"
+git -C "$SIBLING_CLONE" add sibling.txt
+git -C "$SIBLING_CLONE" commit -qm "sibling commit during the post-merge check"
+git -C "$SIBLING_CLONE" push -q origin HEAD:main
+touch "$SIBLING_CLONE/.landed"
+EOF
+git -C "$FIX" add workstreams8.txt a.txt sibling.sh && git -C "$FIX" commit -qm "workstreams8" && git -C "$FIX" push -q origin main
 CLONE="$SCRATCH/sibling-clone"
 git clone -q -b main "$ORIGIN" "$CLONE" && git -C "$CLONE" config user.email t@t && git -C "$CLONE" config user.name t
 : > "$STUB_DIR/invocations.log"
 set +e
-STUB_ADVANCE_ORIGIN_CLONE="$CLONE" "$ENGINE" --workstreams "$FIX/workstreams8.txt" --feature feat-s \
-  --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 \
+SIBLING_CLONE="$CLONE" SIBLING_REPO="$FIX" "$ENGINE" --workstreams "$FIX/workstreams8.txt" --feature feat-s \
+  --check "sh ./check.sh && sh ./sibling.sh" --concurrency 1 --retries 0 --timeout 3 \
   --repo "$FIX" > "$SCRATCH/run8.log" 2>&1
 RC8=$?
 set -e 2>/dev/null || true
