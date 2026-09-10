@@ -63,12 +63,12 @@ why reading alone does not find it.
    README says where both live). This is the overlap the pipeline is built for. If no probe is
    needed, ground the next feature or poll the previous PR. NEVER edit the branch codex merges onto.
 
-5. **Review and deploy staging, both on the push.** Watch the engine's output with `Monitor` for
+5. **Review and deploy staging, both on the push.** Watch `implement.sh`'s output with `Monitor` for
    the line `pushed to origin` and act on it, not on the run's exit. First start the review in the
    background: `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/review.sh <repo> <base> HEAD
-   specs/<date>-<topic>/review.json <plan.md>`, where `<base>` is the engine's
-   `.git/codex-implement/<feature>/pre-merge.sha`. A plan with no codex workstream has no engine
-   run: start the same command when the UX lane reports `done`, with `<base>` the plan's base
+   specs/<date>-<topic>/review.json <plan.md>`, where `<base>` is the
+   `.git/codex-implement/<feature>/pre-merge.sha` the script recorded. A plan with no codex workstream has no
+   `implement.sh` run: start the same command when the UX lane reports `done`, with `<base>` the plan's base
    SHA. One review per plan, one round. Then run the project's staging deploy command, read the `sha` from its JSON, and record it as `STAGING_SHA`. Then run the project's
    staging verify command and read its verdict JSON. Both exit non-zero on failure; gate the next
    step on the exit code, not on the text. Then run the plan's Live checks against staging, a

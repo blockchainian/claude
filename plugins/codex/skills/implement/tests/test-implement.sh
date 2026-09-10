@@ -4,7 +4,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ENGINE="$HERE/../implement.sh"
+IMPLEMENT="$HERE/../implement.sh"
 
 if [ -z "${TEST_IMPLEMENT_RUNNER:-}" ]; then
   batch_rc=0
@@ -107,7 +107,7 @@ BASE0="$(git -C "$FIX" rev-parse main)"
 
 # ---------- runner validation ----------
 set +e
-"$ENGINE" --runner bogus > "$SCRATCH/bogus.log" 2>&1
+"$IMPLEMENT" --runner bogus > "$SCRATCH/bogus.log" 2>&1
 BOGUS_RC=$?
 set -e 2>/dev/null || true
 assert_eq "bogus runner exits 1" 1 "$BOGUS_RC"
@@ -116,27 +116,27 @@ assert "bogus runner prints usage" grep -q '^Usage:' "$SCRATCH/bogus.log"
 # ---------- daemon start cwd ----------
 # The shared app-server daemon inherits the cwd of whoever starts it, and every later codex TUI
 # attaches to it. Starting it from a worktree that is later deleted breaks thread/start for all
-# clients, so the engine must start it from $HOME.
+# clients, so implement.sh must start it from $HOME.
 if [ "$TEST_IMPLEMENT_RUNNER" = "daemon" ]; then
   mkdir -p "$SCRATCH/not-a-repo"
   set +e
-  (cd "$SCRATCH/not-a-repo" && env -u IMPLEMENT_DAEMON_RUNNER "$ENGINE" --workstreams "$FIX/workstreams.txt" \
+  (cd "$SCRATCH/not-a-repo" && env -u IMPLEMENT_DAEMON_RUNNER "$IMPLEMENT" --workstreams "$FIX/workstreams.txt" \
     --feature feat-cwd --check "sh ./check.sh") > "$SCRATCH/daemon-cwd.log" 2>&1
   set -e 2>/dev/null || true
-  assert "engine started the daemon" test -f "$STUB_DIR/daemon-start-cwd"
+  assert "implement.sh started the daemon" test -f "$STUB_DIR/daemon-start-cwd"
   assert_eq "daemon is started from \$HOME, not the launching directory" "$HOME" "$(cat "$STUB_DIR/daemon-start-cwd" 2>/dev/null)"
-  assert "engine stopped at the repo check after the daemon block" grep -q 'not in a git repo' "$SCRATCH/daemon-cwd.log"
+  assert "implement.sh stopped at the repo check after the daemon block" grep -q 'not in a git repo' "$SCRATCH/daemon-cwd.log"
 fi
 
 # ---------- scenario 1: partial run, delivery onto the session branch ----------
 set +e
-"$ENGINE" --workstreams "$FIX/workstreams.txt" --feature feat-x \
+"$IMPLEMENT" --workstreams "$FIX/workstreams.txt" --feature feat-x \
   --check "sh ./check.sh" --concurrency 2 --retries 1 --timeout 3 \
   --repo "$FIX" > "$SCRATCH/run.log" 2>&1
 RC=$?
 set -e 2>/dev/null || true
 
-echo "---- engine exit=$RC (log: $SCRATCH/run.log) ----"
+echo "---- implement.sh exit=$RC (log: $SCRATCH/run.log) ----"
 
 # ---------- assertions ----------
 assert_eq "exit code 2 (partial: failed workstreams, session branch green)" 2 "$RC"
@@ -223,8 +223,8 @@ assert "summary records no restore" grep -q '"restored": false' "$ST/summary.jso
 # failed workstreams not on the session branch
 assert "no stray files from failed workstreams" test ! -e "$FIX/hang.txt"
 
-# the engine never reviews; review.sh is the caller's step after the push
-assert "engine does not invoke the review" test ! -e "$STUB_DIR/calls-REVIEW"
+# implement.sh never reviews; review.sh is the caller's step after the push
+assert "implement.sh does not invoke the review" test ! -e "$STUB_DIR/calls-REVIEW"
 assert "summary carries no review field" test "$(grep -c '"review' "$ST/summary.json")" = 0
 assert_eq "no GitHub review is requested" 0 "$(grep -c 'GitHub review' "$SCRATCH/run.log" || true)"
 assert "no PR comment is posted" test ! -e "$STUB_DIR/gh-comment"
@@ -234,7 +234,7 @@ assert "no PR comment is posted" test ! -e "$STUB_DIR/gh-comment"
 printf 'WS-C1 write c.txt (variant 1)\n' > "$FIX/workstreams2.txt"
 git -C "$FIX" add workstreams2.txt && git -C "$FIX" commit -qm "workstreams2" && git -C "$FIX" push -q origin main
 set +e
-GH_VIEW_OK=1 "$ENGINE" --workstreams "$FIX/workstreams2.txt" --base main --feature feat-y \
+GH_VIEW_OK=1 "$IMPLEMENT" --workstreams "$FIX/workstreams2.txt" --base main --feature feat-y \
   --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 \
   --repo "$FIX" > "$SCRATCH/run2.log" 2>&1
 RC2=$?
@@ -260,7 +260,7 @@ git -C "$FIX" add workstreams3.txt && git -C "$FIX" commit -qm "workstreams3" &&
 PRE3="$(git -C "$FIX" rev-parse main)"
 ORIGIN3="$(git -C "$ORIGIN" rev-parse main)"
 set +e
-"$ENGINE" --workstreams "$FIX/workstreams3.txt" --feature feat-z \
+"$IMPLEMENT" --workstreams "$FIX/workstreams3.txt" --feature feat-z \
   --check "sh ./check.sh" --concurrency 2 --retries 0 --timeout 3 \
   --repo "$FIX" > "$SCRATCH/run3.log" 2>&1
 RC3=$?
@@ -285,7 +285,7 @@ git -C "$FIX" branch -q -D workstreams/feat-z/1 workstreams/feat-z/2
 # ---------- scenario 4: guard rails ----------
 echo dirt > "$FIX/dirty.txt"
 set +e
-"$ENGINE" --workstreams "$FIX/workstreams2.txt" --feature feat-w \
+"$IMPLEMENT" --workstreams "$FIX/workstreams2.txt" --feature feat-w \
   --check "sh ./check.sh" --repo "$FIX" > "$SCRATCH/run4.log" 2>&1
 RC4=$?
 set -e 2>/dev/null || true
@@ -300,7 +300,7 @@ assert "dirty-start run still executed its workstream" \
 git -C "$FIX" branch -q -D workstreams/feat-w/1 2>/dev/null || true
 
 set +e
-"$ENGINE" --workstreams "$FIX/workstreams2.txt" --base other --feature feat-v \
+"$IMPLEMENT" --workstreams "$FIX/workstreams2.txt" --base other --feature feat-v \
   --check "sh ./check.sh" --repo "$FIX" > "$SCRATCH/run5.log" 2>&1
 RC5=$?
 set -e 2>/dev/null || true
@@ -313,7 +313,7 @@ assert "mismatch guard names both branches" \
 printf 'WS-DIRTY write f.txt while dirtying the session repo\n' > "$FIX/workstreams6.txt"
 git -C "$FIX" add workstreams6.txt && git -C "$FIX" commit -qm "workstreams6" && git -C "$FIX" push -q origin main
 set +e
-STUB_DIRTY_REPO="$FIX" "$ENGINE" --workstreams "$FIX/workstreams6.txt" --feature feat-u \
+STUB_DIRTY_REPO="$FIX" "$IMPLEMENT" --workstreams "$FIX/workstreams6.txt" --feature feat-u \
   --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 --deliver-wait 20 \
   --repo "$FIX" > "$SCRATCH/run6.log" 2>&1
 RC6=$?
@@ -331,7 +331,7 @@ printf 'WS-DIRTY write f.txt while dirtying the session repo\n' > "$FIX/workstre
 git -C "$FIX" rm -q f.txt   # scenario 5 landed f.txt; remove it so this workstream has a diff
 git -C "$FIX" add workstreams7.txt && git -C "$FIX" commit -qm "workstreams7" && git -C "$FIX" push -q origin main
 set +e
-STUB_DIRTY_REPO="$FIX" STUB_DIRTY_SECS=12 "$ENGINE" --workstreams "$FIX/workstreams7.txt" --feature feat-t \
+STUB_DIRTY_REPO="$FIX" STUB_DIRTY_SECS=12 "$IMPLEMENT" --workstreams "$FIX/workstreams7.txt" --feature feat-t \
   --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 --deliver-wait 1 \
   --repo "$FIX" > "$SCRATCH/run7.log" 2>&1
 RC7=$?
@@ -365,7 +365,7 @@ CLONE="$SCRATCH/sibling-clone"
 git clone -q -b main "$ORIGIN" "$CLONE" && git -C "$CLONE" config user.email t@t && git -C "$CLONE" config user.name t
 : > "$STUB_DIR/invocations.log"
 set +e
-SIBLING_CLONE="$CLONE" SIBLING_REPO="$FIX" "$ENGINE" --workstreams "$FIX/workstreams8.txt" --feature feat-s \
+SIBLING_CLONE="$CLONE" SIBLING_REPO="$FIX" "$IMPLEMENT" --workstreams "$FIX/workstreams8.txt" --feature feat-s \
   --check "sh ./check.sh && sh ./sibling.sh" --concurrency 1 --retries 0 --timeout 3 \
   --repo "$FIX" > "$SCRATCH/run8.log" 2>&1
 RC8=$?
