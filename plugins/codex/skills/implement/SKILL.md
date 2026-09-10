@@ -85,10 +85,9 @@ workstream logs. Progress lives in files:
 - logs: `<repo>/.git/codex-implement/<feature>/logs/`
 
 These workstreams are **self-verifying**: the engine runs `--check` per
-workstream and again post-merge, gating on raw exit codes. Never spawn the
-`workstream-verifier` agent for a `/codex:implement` run — that agent is for
-Claude-subagent workstreams. After the run, your job is only confirming the
-check command covered the touched surfaces.
+workstream and again post-merge, gating on raw exit codes. Do not re-run or
+re-verify them from your own context. After the run, your job is only
+confirming the check command covered the touched surfaces.
 
 Semantics (all verified by tests/test-implement.sh):
 - Worktree pool sized to concurrency at `../.codex-implement-<feature>/w*`,
