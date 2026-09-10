@@ -1,6 +1,6 @@
 ---
 name: execute
-description: Execute a planned feature as parallel codex workstreams off the Claude critical path — convert the session's plan into spec.md+workstreams.txt, launch execute.sh (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, background codex review into findings JSON, push), then relay the result. Use when the user wants many-at-once implementation work delegated to codex.
+description: Execute a planned feature as parallel codex workstreams off the Claude critical path — convert the session's plan into spec.md+workstreams.txt, launch execute.sh (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, push; review.sh reviews the delta on request), then relay the result. Use when the user wants many-at-once implementation work delegated to codex.
 ---
 
 # codex:execute — parallel codex execution off the Claude critical path
@@ -122,16 +122,22 @@ creating each worktree): `cp -R ../main-checkout/node_modules node_modules`
 
 ## Phase 4 — Review & deliver (codex, automatic)
 
-Once the post-merge check passes the engine starts a local codex review of
-exactly the merged workstream delta in the background — a read-only
-`codex exec` with review instructions and a findings schema, one round —
-and pushes the session branch without waiting for it. If the branch has an
-open PR it updates; otherwise a PR is opened FROM the session branch to the
-repo's default branch. No `@codex review` comment is posted. The engine exits
-when the review has written `.git/codex-execute/<feature>/logs/review.json`
-(`{"findings": [{file, line, severity, claim}]}`, severity `must-fix` or
-`nit`; `summary.json` names the file as `review_file`). There is no Claude
-review step and nothing for you to run.
+Once the post-merge check passes the engine pushes the session branch. If the
+branch has an open PR it updates; otherwise a PR is opened FROM the session
+branch to the repo's default branch. No `@codex review` comment is posted and
+the engine itself does not review.
+
+The review is a separate step the caller runs once the push has landed:
+
+```
+${CLAUDE_PLUGIN_ROOT}/skills/execute/review.sh <repo> $(cat .git/codex-execute/<feature>/pre-merge.sha) HEAD <out>/review.json <spec>
+```
+
+It is a read-only `codex exec` with review instructions and
+`review-schema.json`, one round, writing `{"findings": [{file, line,
+severity, claim}]}` with severity `must-fix` or `nit`. Run it in the
+background. Under `/feature:orchestrate` the orchestrator runs it and triages
+the result; standalone, run it yourself when the engine reports `pushed`.
 
 When the run finishes, relay `summary.json`, the `must-fix` findings from
 `review.json` (nits are dropped, not relayed), and the PR URL to the user. FAILED workstreams are listed in the PR body — offer to
@@ -145,9 +151,9 @@ Route review findings by scope, not severity:
   command yourself, commit, and push the session branch so the PR stays
   current.
 - A finding whose fix spans files, touches an invariant, or whose correct fix
-  is uncertain gets a new small run with a fresh spec. The fresh codex review
-  on that run is the point of routing it this way — it re-reviews the fix
-  itself — so don't skip the pipeline for these to save time.
+  is uncertain gets a new small run with a fresh spec, followed by `review.sh`
+  over that run's delta. Re-reviewing the fix itself is the point of routing
+  it this way, so don't skip the pipeline for these to save time.
 
 ## Cleanup
 

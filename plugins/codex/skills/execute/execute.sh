@@ -33,9 +33,9 @@ run-start commit. Green workstream branches merge DIRECTLY onto the session
 branch in the session worktree once it is clean (uncommitted edits from a
 parallel session only delay delivery, up to --deliver-wait); the post-merge
 check runs there, and a red check restores the branch to its pre-merge state
-(workstream branches kept for autopsy). A local codex review of the merged
-workstream delta runs in the background from the post-merge check and writes
-findings JSON to logs/review.json; the push does not wait for it.
+(workstream branches kept for autopsy). The engine does not review: the
+pre-merge SHA it records (refs/codex-execute/<feature>/pre-merge, run-dir
+pre-merge.sha) is the base for review.sh, which the caller runs after the push.
 
 Env: EXECUTE_CODEX overrides the codex binary (default: codex).
      EXECUTE_RUNNER sets the task runner (default: daemon).
@@ -372,8 +372,8 @@ Read ${SPEC:-spec.md at the repo root, if present,} for intent. Resolve every co
     fi
   fi
 fi
-# The branch is now gated (merged + checked, or restored); review is read-only against
-# the recorded pre-merge sha and push handles a moved remote, so other runs may deliver.
+# The branch is now gated (merged + checked, or restored); push handles a moved remote,
+# so other runs may deliver.
 release_delivery_lock
 
 # ---------- cleanup: workstream worktrees + merged/empty workstream branches ----------
@@ -402,21 +402,6 @@ while [ "$i" -le "$N" ]; do
   i=$((i+1))
 done
 
-# ---------- review (local codex review of the merged workstream delta, in the background) ----------
-# A plain `codex exec` rather than `codex exec review --base`: codex-cli refuses custom
-# instructions alongside --base, and the instructions are what keep nits out of the findings.
-REVIEW="skip"; REVIEW_PID=""; REVIEW_FILE=""
-if [ "$POST" = "pass" ]; then
-  REVIEW_FILE="$RUN_DIR/logs/review.json"
-  MERGED_SHA="$(git -C "$REPO" rev-parse HEAD)"
-  note "[review] merged workstreams vs pre-merge"
-  REVIEW_PROMPT="Review the changes this repository gained between commit $PRE_MERGE and commit $MERGED_SHA (git diff $PRE_MERGE $MERGED_SHA)${SPEC:+, against the intent in $SPEC}. Report a finding only when the change breaks behaviour, violates a stated invariant, or leaves an input or error path unhandled; label it must-fix. Anything else you would still mention is a nit. Do not report style, naming, or refactoring preferences. Cite the file and line of every finding."
-  timeout "$TIMEOUT_S" "$CODEX" exec -C "$REPO" -s read-only -c model_reasoning_effort=high \
-       --output-schema "$SCRIPT_DIR/review-schema.json" -o "$REVIEW_FILE" "$REVIEW_PROMPT" \
-       > "$RUN_DIR/logs/review.log" 2>&1 &
-  REVIEW_PID=$!
-fi
-
 # ---------- deliver: push the session branch; the PR is FROM it ----------
 PUSHED=false; DELIVERED="none"
 if [ "$POST" = "pass" ] && [ "$PUSH" = "1" ]; then
@@ -439,7 +424,7 @@ if [ "$POST" = "pass" ] && [ "$PUSH" = "1" ]; then
     if gh pr view "$BASE" > "$RUN_DIR/logs/pr.log" 2>&1; then
       note "existing PR updates"
     else
-      BODY="codex:execute run '$FEATURE': $N workstreams, passed:[${PASSED# }] failed:[${FAILED# }] merge-failed:[${MERGE_FAILED# }]. Post-merge check: $POST. Local codex review findings: $REVIEW_FILE."
+      BODY="codex:execute run '$FEATURE': $N workstreams, passed:[${PASSED# }] failed:[${FAILED# }] merge-failed:[${MERGE_FAILED# }]. Post-merge check: $POST."
       if gh pr create --head "$BASE" --title "execute: $FEATURE" --body "$BODY" >> "$RUN_DIR/logs/pr.log" 2>&1; then
         note "PR is $(tail -1 "$RUN_DIR/logs/pr.log")"
       else
@@ -451,23 +436,14 @@ if [ "$POST" = "pass" ] && [ "$PUSH" = "1" ]; then
   fi
 fi
 
-# ---------- review result ----------
-if [ -n "$REVIEW_PID" ]; then
-  if wait "$REVIEW_PID"; then
-    REVIEW="done"; note "[review] result: $REVIEW_FILE"
-  else
-    REVIEW="failed"; note "[review] codex review failed (see $RUN_DIR/logs/review.log)"
-  fi
-fi
-
 # ---------- summary ----------
 NP=0; NF=0; NM=0; NMF=0
 for x in $PASSED; do NP=$((NP+1)); done
 for x in $FAILED; do NF=$((NF+1)); done
 for x in $MERGED; do NM=$((NM+1)); done
 for x in $MERGE_FAILED; do NMF=$((NMF+1)); done
-printf '{"feature": "%s", "base": "%s", "workstreams": %s, "passed": %s, "failed": %s, "merged": %s, "merge_failed": %s, "post_merge_check": "%s", "review": "%s", "review_file": "%s", "pushed": %s, "delivered_to": "%s", "restored": %s, "merge_blocked": "%s"}\n' \
-  "$FEATURE" "$BASE" "$N" "$NP" "$NF" "$NM" "$NMF" "$POST" "$REVIEW" "$REVIEW_FILE" "$PUSHED" "$DELIVERED" "$RESTORED" "$MERGE_BLOCKED" \
+printf '{"feature": "%s", "base": "%s", "workstreams": %s, "passed": %s, "failed": %s, "merged": %s, "merge_failed": %s, "post_merge_check": "%s", "pushed": %s, "delivered_to": "%s", "restored": %s, "merge_blocked": "%s"}\n' \
+  "$FEATURE" "$BASE" "$N" "$NP" "$NF" "$NM" "$NMF" "$POST" "$PUSHED" "$DELIVERED" "$RESTORED" "$MERGE_BLOCKED" \
   > "$RUN_DIR/status/summary.json"
 SUMMARY="feature=$FEATURE base=$BASE workstreams=$N"
 [ "$NP" -gt 0 ] && SUMMARY="$SUMMARY pass=$NP"
@@ -480,10 +456,6 @@ case "$POST" in
   fail) SUMMARY="$SUMMARY post-merge=fail" ;;
 esac
 [ "$RESTORED" = "true" ] && SUMMARY="$SUMMARY restored"
-case "$REVIEW" in
-  done) SUMMARY="$SUMMARY reviewed" ;;
-  failed) SUMMARY="$SUMMARY review=failed" ;;
-esac
 [ "$PUSHED" = "true" ] && SUMMARY="$SUMMARY pushed"
 note "summary: $SUMMARY"
 
