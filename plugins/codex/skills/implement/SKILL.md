@@ -6,7 +6,7 @@ description: Deliver a planned feature as parallel codex workstreams off the Cla
 # codex:implement — parallel codex implementation off the Claude critical path
 
 Claude hands over once and never re-enters: git and the filesystem are the
-coordination bus. Engine: `${CLAUDE_PLUGIN_ROOT}/skills/implement/implement.sh`.
+coordination bus. Script: `${CLAUDE_PLUGIN_ROOT}/skills/implement/implement.sh`.
 Rationale and measured numbers: `${CLAUDE_PLUGIN_ROOT}/README.md`.
 
 ## When to use
@@ -26,17 +26,17 @@ Do not re-plan and do not re-ask; the plan is the spec codex reads.
 1. Check the plan is usable as a spec: each workstream block ends with the
    files it owns, no two workstreams own the same file, and Dependencies names
    any overlap the merge must expect. Conflict avoidance is the planner's job;
-   the engine has no runtime check. A plan that fails this goes back to the
-   planner, not into the engine.
+   `implement.sh` has no runtime check. A plan that fails this goes back to
+   the planner, not into the script.
 2. Write `workstreams.txt` beside the plan: one line per codex workstream,
    each line a **pointer** into the plan, never the brief itself, for example
    `implement workstream "auth-token" per specs/<date>-<topic>/plan.md, following its Constraints and Invariants`.
    Skip the UX workstream; it is not codex's.
-3. Take the check command from the plan's Checks section verbatim; the
-   engine runs it in every worktree and after merge, so the plan's Invariants
+3. Take the check command from the plan's Checks section verbatim;
+   `implement.sh` runs it in every worktree and after merge, so the plan's Invariants
    must be covered by it — the gates replace a live review.
 4. Commit `workstreams.txt`. The session worktree must be CLEAN when the
-   engine starts, because the run delivers onto this branch.
+   script starts, because the run delivers onto this branch.
 
 Launch in the same turn. Never write a handoff: plan.md and workstreams.txt
 are the record, and a fresh session resumes from plan.md. The run's task
@@ -66,19 +66,19 @@ on APFS for a copy-on-write clone). The default `daemon` runner shows
 workstreams and merge resolutions as rows in `codex agents`; `--runner exec`
 (or `IMPLEMENT_RUNNER=exec`) uses standalone `codex exec` processes.
 
-## 2. Execute (engine, no Claude)
+## 2. Execute (implement.sh, no Claude)
 
 - A worktree pool sized to concurrency at `../.codex-implement-<feature>/w*`,
   branched from the session branch's run-start commit, created on demand and
   removed after merge. Workstream branches are `workstreams/<feature>/<n>`.
-- Per workstream: codex works in a free worktree, the engine runs `--check`,
+- Per workstream: codex works in a free worktree, the script runs `--check`,
   and commits the branch on green.
 - Red = check failed, codex timeout, codex nonzero exit, or no diff. A bounded
   retry re-invokes codex in the same worktree with the failure tail appended.
 - A workstream that exhausts its retries is FAILED: excluded from the merge,
   its branch kept only if it has commits, and listed in the summary and PR body.
 
-## 3. Merge (engine, no Claude)
+## 3. Merge (implement.sh, no Claude)
 
 - Delivery takes a per-repo lock (`.git/codex-implement/deliver.lock`) so
   concurrent runs merge one at a time, and waits up to `--deliver-wait` for
@@ -95,9 +95,9 @@ workstreams and merge resolutions as rows in `codex agents`; `--runner exec`
   branch for autopsy — the worktree ends exactly where it started. The lock
   is released after this check.
 
-## 4. Deliver (engine, no Claude)
+## 4. Deliver (implement.sh, no Claude)
 
-- The session branch is pushed; the engine prints `pushed to origin`. A push
+- The session branch is pushed; the script prints `pushed to origin`. A push
   rejected because the remote moved is retried once after merging
   `origin/<base>` in and re-running `--check` on the combination.
 - If the branch has an open PR it updates; otherwise a PR is opened FROM the
@@ -112,7 +112,7 @@ All of this is verified by `tests/test-implement.sh`.
 
 ## 5. Relay (you)
 
-The workstreams are self-verifying: the engine gated each one and the merge
+The workstreams are self-verifying: `implement.sh` gated each one and the merge
 on raw exit codes. Do not re-run or re-verify them; confirm only that the
 check command covered the touched surfaces.
 
@@ -122,7 +122,7 @@ small run (new run name) rather than re-entering the loop yourself.
 
 Review is not part of this skill. Under `/feature:orchestrate` the
 orchestrator runs `codex:review` on the push and triages the findings;
-standalone, run `codex:review` yourself when the engine reports `pushed to
+standalone, run `codex:review` yourself when `implement.sh` reports `pushed to
 origin`.
 
 ## Cleanup
