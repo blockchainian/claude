@@ -10,7 +10,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 
-const runner = path.resolve("plugins/codex/skills/execute/daemon-run.mjs");
+const runner = path.resolve("plugins/codex/skills/implement/daemon-run.mjs");
 const websocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 function serverFrame(payload, { opcode = 1, finished = true } = {}) {
@@ -125,7 +125,7 @@ async function runRunner(socketPath, { timeout = "5", output, cwd = ".", name = 
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
       cwd: process.cwd(),
-      env: { ...process.env, EXECUTE_DAEMON_SOCKET: socketPath },
+      env: { ...process.env, IMPLEMENT_DAEMON_SOCKET: socketPath },
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -152,7 +152,7 @@ test("happy path uses the exact RPC sequence and writes the final agent message"
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(script.messages.map((message) => message.method), ["initialize", "initialized", "thread/start", "thread/name/set", "turn/start"]);
     const start = script.messages[2].params;
-    assert.deepEqual(start, { cwd: path.resolve("plugins"), approvalPolicy: "never", sandbox: "read-only", serviceName: "codex-execute", ephemeral: false });
+    assert.deepEqual(start, { cwd: path.resolve("plugins"), approvalPolicy: "never", sandbox: "read-only", serviceName: "codex-implement", ephemeral: false });
     assert.deepEqual(script.messages[3].params, { threadId: "thread-123", name: "feature/w1 a1" });
     assert.equal(await readFile(output, "utf8"), "Finished cleanly");
     assert.match(result.stdout, /^\[thread thread-123\] feature\/w1 a1/m);

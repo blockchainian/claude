@@ -2,11 +2,11 @@
 
 Ship a feature from a written plan, with Claude orchestrating and never
 implementing. `/feature:orchestrate` reads `plan.md`, launches the backend lane
-through [codex](../codex/README.md)'s `/codex:execute`, launches the UX lane as
+through [codex](../codex/README.md)'s `/codex:implement`, launches the UX lane as
 the `ux-implementer` agent in parallel, writes the UI probes while both run,
 deploys and verifies staging, runs the local schema review (`review.sh` from the
 codex plugin) once per plan and triages it into `findings.json`, fixes in two lanes (`codex-rescue` and the
-`ux-pr-fixer` agent) with no re-review, re-probes the touched surfaces, and
+`ux-autofixer` agent) with no re-review, re-probes the touched surfaces, and
 decides production only when every finding is closed and the probes are
 green. The
 `planner` agent writes `plan.md` from a grounded `problem.md` following
@@ -31,7 +31,7 @@ review-fix → deploy. Grounding takes its ask in the shape of the project's
 |---|---|---|
 | `planner` | Fable high | Write `plan.md` from `problem.md` using the plan template; repo facts from `problem.md` only |
 | `ux-implementer` | Fable medium | Implement one UX workstream on the session branch, commit after every step, return flat JSON |
-| `ux-pr-fixer` | Fable medium | Fix the PR threads labelled `claude-code-ux` in the UX lane's worktree, push, reply, resolve |
+| `ux-autofixer` | Fable medium | Fix the PR threads labelled `claude-code-ux` in the UX lane's worktree, push, reply, resolve |
 | `workstream-verifier` | Sonnet low | Rerun a delegated workstream's touched suites unpiped and return an objective verdict |
 | `ui-verifier` | Sonnet low | Drive a scripted UI scenario (browse or iOS simulator) and return a verdict with evidence paths |
 

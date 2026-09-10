@@ -75,7 +75,7 @@ pipeline assumes — is produced here, not checked at runtime.
   `implement workstream 3 per spec.md §3; run auth tests, must be green`
 - Codex reads `spec.md` itself; we do not duplicate the spec across N lines.
 
-### 2. Execute (Codex ×N, parallel, no Claude) — `execute.sh`
+### 2. Execute (Codex ×N, parallel, no Claude) — `implement.sh`
 
 The engine's first half. Responsibilities:
 - Read `workstreams.txt`.
@@ -103,7 +103,7 @@ and merge-conflict resolutions appear in `codex agents` with live status. The
 daemon runner guarantees a persistent named thread, workspace-write sandboxing,
 non-interactive approval policy, and bounded interruption on timeout. The
 `exec` runner remains available through `--runner exec` or
-`EXECUTE_RUNNER=exec` for compatibility and recovery. Local review deliberately
+`IMPLEMENT_RUNNER=exec` for compatibility and recovery. Local review deliberately
 continues to use `codex exec review` under either setting.
 
 ### 3. Merge (script + Codex, no Claude) — onto the session branch
@@ -117,7 +117,7 @@ too many).
 - Preconditions, checked before the first merge: the session worktree is still
   on the session branch and still clean; otherwise the merge phase is BLOCKED
   and every green workstream branch is kept.
-- Record pre-merge HEAD as `refs/codex-execute/<run>/pre-merge`.
+- Record pre-merge HEAD as `refs/codex-implement/<run>/pre-merge`.
 - Merge green workstream branches onto the session branch one at a time, in
   the session worktree. Clean merges are the expected case — the planner made
   workstreams file-disjoint.
@@ -163,13 +163,13 @@ Nothing project-specific is baked in. Per invocation:
 
 ## Packaging (implemented 2026-07-22)
 - **Generic script** = the repo-agnostic engine
-  `skills/execute/execute.sh (this repo)`: Execute plus Merge & Push —
+  `skills/implement/implement.sh (this repo)`: Execute plus Merge & Push —
   parallel Codex + worktree pool + per-workstream check + workstream merge —
   driven entirely by the params above. Verified by
-  `skills/execute/tests/test-execute.sh` (stubbed codex; covers
+  `skills/implement/tests/test-implement.sh` (stubbed codex; covers
   pass/retry/hang/no-diff/conflict/cleanup/push) plus a live `codex exec`
   smoke run.
-- **Skill** = `skills/execute/SKILL.md`: the Claude bookend —
+- **Skill** = `skills/implement/SKILL.md`: the Claude bookend —
   write spec+workstreams, launch the script in the background, request the
   review.
 - **Review mechanism** (decided 2026-09-09, moved out of the engine

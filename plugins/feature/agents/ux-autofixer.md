@@ -1,5 +1,5 @@
 ---
-name: ux-pr-fixer
+name: ux-autofixer
 description: Fix the review and probe findings the orchestrator routed to the UX lane — each in the UX lane's worktree, pushed to the PR branch — and return a flat-JSON status. Use for the UX half of the fix round while codex fixes the backend findings in parallel.
 model: fable
 effort: medium

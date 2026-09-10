@@ -209,9 +209,9 @@ function completionPromise(client, state) {
 
 async function session(client, options, state, version) {
   await client.connect();
-  await client.request("initialize", { clientInfo: { title: "codex:execute", name: "codex-execute", version }, capabilities: { experimentalApi: false, requestAttestation: false, optOutNotificationMethods: [] } });
+  await client.request("initialize", { clientInfo: { title: "codex:implement", name: "codex-implement", version }, capabilities: { experimentalApi: false, requestAttestation: false, optOutNotificationMethods: [] } });
   client.send({ method: "initialized", params: {} });
-  const started = await client.request("thread/start", { cwd: options.cwd, approvalPolicy: "never", sandbox: options.sandbox, serviceName: "codex-execute", ephemeral: false });
+  const started = await client.request("thread/start", { cwd: options.cwd, approvalPolicy: "never", sandbox: options.sandbox, serviceName: "codex-implement", ephemeral: false });
   state.threadId = started.thread.id;
   console.log(`[thread ${state.threadId}] ${options.name}`);
   await client.request("thread/name/set", { threadId: state.threadId, name: options.name });
@@ -224,7 +224,7 @@ async function session(client, options, state, version) {
 async function run(options) {
   const pluginPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.claude-plugin/plugin.json");
   const plugin = JSON.parse(await readFile(pluginPath, "utf8"));
-  const socketPath = process.env.EXECUTE_DAEMON_SOCKET || path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "app-server-control/app-server-control.sock");
+  const socketPath = process.env.IMPLEMENT_DAEMON_SOCKET || path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "app-server-control/app-server-control.sock");
   const client = new WebSocketClient(socketPath);
   const state = { threadId: undefined, turnId: undefined, lastMessage: "" };
   let forcedCode;
