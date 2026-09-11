@@ -62,18 +62,22 @@ them there:
 - **Which services deploy from the default branch on merge**, and **a
   production deploy command** owned by the codex lane for the rest; the
   orchestrator triggers it only through that lane.
-- **Per-module test scripts** callable with a path filter (the plan's single
-  `Checks` command chains them with `&&`), and **a dev-server command** that
-  takes a port flag plus the default dev port to keep clear of, for the UX lane's
-  probes.
+- **A per-module gate** — the type/compile check, linter, and test command (the
+  last callable with a path filter) — declared in the project's AGENTS.md
+  "Checks (the gate)" section, which `/feature:ground` pins into `problem.md` and
+  the plan's single `Checks` command chains with `&&`; and **a dev-server command**
+  that takes a port flag plus the default dev port to keep clear of, for the UX
+  lane's probes.
 
 For chadwallet these are `website/scripts/ui-probes/`,
 `mobile/scripts/ui-probes/` and `scripts/ui-probes/lib.sh`;
 `scripts/deploy-staging.sh` and `scripts/verify-staging.sh`; backend paths
 `proxy/`, `streamer/`, `scraper/`, `website/src/app/api/` and any test file;
 Render services and Vercel deploy from `main` on merge while the Cloudflare
-Workers (proxy, streamer) still go through the codex lane's deploy command;
-`yarn -s test` per module; `yarn dev -p <port>` with port 3004 reserved.
+Workers (proxy, streamer) still go through the codex lane's deploy command; the
+per-module gate is `yarn --cwd <module> tsc --noEmit && yarn --cwd <module> lint
+&& yarn --cwd <module> test <path>` (see chadwallet's AGENTS.md "Checks (the
+gate)"); `yarn dev -p <port>` with port 3004 reserved.
 
 ## Install
 
