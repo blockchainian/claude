@@ -12,7 +12,8 @@ description: >
 
 A resumer reads the handoff plus the phase's document (or, for research, the materialized
 findings). Everything else must be pointed to, not restated. Target under 40 lines for the
-handoff itself. File: `specs/<date>-<topic>/handoff.md`.
+handoff itself. File: `specs/<date>-<topic>/handoff.md`, rewritten in place on every later
+handoff for the same topic.
 
 ## Five sections, in this order
 
@@ -55,8 +56,10 @@ tool result, and a resumer can pull one specific result from it by grep without 
 
 ## Trigger
 
-The idle wake-up: when a turn ends waiting — on a background job or on the user — schedule
-one one-shot `CronCreate` 55 minutes out (recurring false) whose prompt is: "If still idle,
-write the handoff per the feature:handoff skill and end. Do not reschedule." Measured 2026-09-09: 49
-away gaps over an hour per week cost $118 in prefix rewrites; one wake-up catches a third of
-them for about ten cents each and renews the cache once.
+The idle wake-up: a Stop hook in the dotfiles schedules a one-shot 55 minutes after every turn
+end; if the session is still idle it fires "[idle-wakeup <session>] If still idle, write the
+handoff per the feature:handoff skill and end." The hook owns scheduling: never create, delete or
+reschedule the wake-up yourself. A later handoff for the same topic replaces the earlier file in
+place; never date a second file or append. Measured 2026-09-09: 49 away gaps over an hour per week
+cost $118 in prefix rewrites; one wake-up catches a third of them for about ten cents each and
+renews the cache once.
