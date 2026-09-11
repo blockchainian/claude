@@ -346,6 +346,14 @@ elif [ -n "$PASSED" ]; then
 
   for idx in $PASSED; do
     BR="workstreams/$FEATURE/$idx"
+    # ahead-of-base guard: a branch with no commits ahead of base merges as a no-op
+    # ("already up to date", exit 0) and would be miscounted MERGED while its work
+    # silently vanished — the daemon-collision / commit-loss symptom. Surface it instead.
+    if [ "$(git -C "$REPO" rev-list --count "$BASE_SHA".."$BR" 2>/dev/null || echo 0)" = "0" ]; then
+      MERGE_FAILED="$MERGE_FAILED $idx"
+      note "[merge] workstream $idx EMPTY: passed but 0 commits ahead of base — not merged (branch kept)"
+      continue
+    fi
     if git -C "$REPO" merge -q --no-ff -m "merge workstream $idx" "$BR" > "$RUN_DIR/logs/merge-$idx.log" 2>&1; then
       MERGED="$MERGED $idx"
       note "[merge] workstream $idx MERGED"
