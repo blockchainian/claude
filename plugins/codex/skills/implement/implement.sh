@@ -182,7 +182,14 @@ Fix it."
     if [ "$crc" -eq 0 ]; then
       if [ -n "$(git -C "$WT" status --porcelain)" ]; then
         git -C "$WT" add -A
-        git -C "$WT" commit -q -m "workstream $idx: $(echo "$LINE" | cut -c1-60)"
+        git -C "$WT" commit -q -m "workstream $idx: $(echo "$LINE" | cut -c1-60)" \
+          > "$LOGD/workstream-$idx-a$a.commit.log" 2>&1
+      fi
+      if [ "$(git -C "$WT" rev-list --count "$BASE_SHA"..HEAD 2>/dev/null || echo 0)" = "0" ]; then
+        reason="commit rejected"
+        failctx="the check passed but the commit produced no revision (a pre-commit hook likely rejected it):
+$(tail -c 2000 "$LOGD/workstream-$idx-a$a.commit.log" 2>/dev/null)"
+        note "[workstream $idx] ${attempt_prefix}FAIL: commit rejected"; continue
       fi
       result="pass"; reason="check-green"
       note "[workstream $idx] PASS${attempt_suffix}"
