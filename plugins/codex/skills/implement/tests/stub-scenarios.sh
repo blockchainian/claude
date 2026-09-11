@@ -50,6 +50,14 @@ run_stub_scenario() {
       scenario_bump WS-HOOKREJECT; scenario_log WS-HOOKREJECT
       echo "ok-hook" > "$DIR/hookbad.txt"
       ;;
+    *WS-STRAY*)
+      scenario_bump WS-STRAY; scenario_log WS-STRAY
+      # Simulate a daemon-runner collision: the edit is real and passes the check, but the
+      # commit lands OFF the workstream branch (here: a detached HEAD), so the branch reaches
+      # the merge with zero commits ahead of base.
+      echo "ok-stray" > "$DIR/stray.txt"
+      git -C "$DIR" checkout -q --detach 2>/dev/null || true
+      ;;
     *WS-D*)
       scenario_bump WS-D; scenario_log WS-D
       echo "ok-d" > "$DIR/d.txt"
