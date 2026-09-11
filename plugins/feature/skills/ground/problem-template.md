@@ -27,6 +27,15 @@ the command and its dated output; wire shapes as a real response body.
   { }
   ```
 
+## Checks (the gate)
+
+The project's per-module gate, transcribed from its AGENTS.md "Checks (the gate)" section — the
+plan's `Checks` command composes these (type/compile check + lint + tests, path-filtered per
+touched module; full and unfiltered post-merge). Transcribe the real commands, do not invent them.
+"none declared" if the project's AGENTS.md has no such section.
+
+- <module>: type-check `<cmd>`, lint `<cmd>`, tests `<cmd> <path>`
+
 ## Open questions
 
 Candidate mechanisms as questions, each with what would settle it. No proposals.
