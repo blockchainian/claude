@@ -91,8 +91,11 @@ skips it. Name test files too. -->
 ## Checks
 
 <!-- Exactly one command line; implement.sh runs the same command in every worktree and after
-merge. Call each module's test script with a path filter; never name the runner (modules may
-run different runners). Chain modules with && when more than one is touched. -->
+merge. For each touched module compose its gate from problem.md's "Checks (the gate)" — its
+type/compile check, its linter, and its tests with a path filter; never name the runner (modules
+may run different runners). A green test+lint is not proof the module compiles: the type/compile
+check is required whenever problem.md declares one. Chain modules with && when more than one is
+touched. -->
 
 - `<command>`
 
