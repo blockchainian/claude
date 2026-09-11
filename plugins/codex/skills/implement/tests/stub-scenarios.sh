@@ -46,6 +46,10 @@ run_stub_scenario() {
       (sleep "${STUB_DIRTY_SECS:-3}"; rm -f "${STUB_DIRTY_REPO}/late.txt") >/dev/null 2>&1 &
       disown 2>/dev/null || true
       ;;
+    *WS-HOOKREJECT*)
+      scenario_bump WS-HOOKREJECT; scenario_log WS-HOOKREJECT
+      echo "ok-hook" > "$DIR/hookbad.txt"
+      ;;
     *WS-D*)
       scenario_bump WS-D; scenario_log WS-D
       echo "ok-d" > "$DIR/d.txt"

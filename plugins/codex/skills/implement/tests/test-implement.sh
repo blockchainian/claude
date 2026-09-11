@@ -381,5 +381,42 @@ assert "sibling commit is on the delivered branch" test -f "$FIX/sibling.txt"
 assert_eq "workstream content is on the delivered branch" "ok-ws1" "$(cat "$FIX/a.txt")"
 assert "re-check ran on the combined branch" test -f "$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-implement/feat-s/logs/push-recheck.log"
 
+# ---------- scenario 8: a commit rejected by the pre-commit hook is a failure, not a silent pass ----------
+# Regression: the workstream commit ran without checking its exit code. A repo pre-commit hook that
+# rejects the commit (e.g. a failing format:check) left the branch with zero commits, so the merge
+# was a no-op — yet the run reported the workstream PASS and merged, and the edits silently vanished.
+printf 'WS-HOOKREJECT write hookbad.txt that the pre-commit hook rejects\n' > "$FIX/workstreams9.txt"
+git -C "$FIX" add workstreams9.txt && git -C "$FIX" commit -qm "workstreams9" && git -C "$FIX" push -q origin main
+HOOK="$(git -C "$FIX" rev-parse --absolute-git-dir)/hooks/pre-commit"
+cat > "$HOOK" <<'EOF'
+#!/bin/sh
+# Reject any commit that stages hookbad.txt (stand-in for a failing format:check).
+if git diff --cached --name-only | grep -q '^hookbad.txt$'; then
+  echo "pre-commit: hookbad.txt is not allowed" >&2
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "$HOOK"
+PRE9="$(git -C "$ORIGIN" rev-parse main)"
+set +e
+"$IMPLEMENT" --workstreams "$FIX/workstreams9.txt" --feature feat-r \
+  --check "sh ./check.sh" --concurrency 1 --retries 1 --timeout 3 \
+  --repo "$FIX" > "$SCRATCH/run9.log" 2>&1
+RC9=$?
+set -e 2>/dev/null || true
+rm -f "$HOOK"
+echo "---- scenario 8 exit=$RC9 (log: $SCRATCH/run9.log) ----"
+
+assert "hook-rejected commit is reported, not swallowed" \
+  grep -q '\[workstream 1\].*commit rejected' "$SCRATCH/run9.log"
+assert "hook-rejected workstream is never reported PASS" \
+  sh -c "! grep -q '\[workstream 1\] PASS' '$SCRATCH/run9.log'"
+ST9="$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-implement/feat-r/status"
+assert "hook-rejected workstream recorded as fail" grep -q '"result": "fail"' "$ST9/workstream-1.json"
+assert "hookbad.txt never landed on the session branch" test ! -e "$FIX/hookbad.txt"
+assert_eq "origin main untouched by the hook-rejected run" "$PRE9" "$(git -C "$ORIGIN" rev-parse main)"
+git -C "$FIX" branch -q -D workstreams/feat-r/1 2>/dev/null || true
+
 echo
-if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; exit 1; fi
+if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; echo "-- run9 --"; tail -30 "$SCRATCH/run9.log"; exit 1; fi
