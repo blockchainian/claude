@@ -418,5 +418,34 @@ assert "hookbad.txt never landed on the session branch" test ! -e "$FIX/hookbad.
 assert_eq "origin main untouched by the hook-rejected run" "$PRE9" "$(git -C "$ORIGIN" rev-parse main)"
 git -C "$FIX" branch -q -D workstreams/feat-r/1 2>/dev/null || true
 
+# ---------- scenario 9: a passed workstream whose branch is empty at merge is surfaced, not silently "merged" ----------
+# Regression: a daemon-runner collision could land a workstream's commit off its own branch, so the branch
+# reached the merge at tip==base. `git merge --no-ff` then reports "already up to date" (exit 0) and the run
+# counted it MERGED while the edits silently vanished. The ahead-of-base guard must catch this.
+printf 'WS-STRAY writes stray.txt but its commit lands off the workstream branch\n' > "$FIX/workstreams10.txt"
+git -C "$FIX" add workstreams10.txt && git -C "$FIX" commit -qm "workstreams10" && git -C "$FIX" push -q origin main
+PRE10="$(git -C "$ORIGIN" rev-parse main)"
+set +e
+"$IMPLEMENT" --workstreams "$FIX/workstreams10.txt" --feature feat-q \
+  --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 \
+  --repo "$FIX" > "$SCRATCH/run10.log" 2>&1
+RC10=$?
+set -e 2>/dev/null || true
+echo "---- scenario 9 exit=$RC10 (log: $SCRATCH/run10.log) ----"
+
+assert_eq "empty passed-branch makes the run partial (exit 2)" 2 "$RC10"
+assert "empty branch is never reported MERGED" \
+  sh -c "! grep -q '\[merge\] workstream 1 MERGED' '$SCRATCH/run10.log'"
+assert "empty branch is surfaced as EMPTY" \
+  grep -q '\[merge\] workstream 1 EMPTY' "$SCRATCH/run10.log"
+assert "stray.txt never landed on the session branch" test ! -e "$FIX/stray.txt"
+ST10="$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-implement/feat-q/status"
+assert "summary records zero merged" grep -q '"merged": 0' "$ST10/summary.json"
+assert "summary records one merge_failed" grep -q '"merge_failed": 1' "$ST10/summary.json"
+assert_eq "empty-branch workstream branch kept for inspection" 1 \
+  "$(git -C "$FIX" branch --list 'workstreams/feat-q/*' | wc -l | tr -d ' ')"
+assert_eq "origin main untouched by the empty-branch run" "$PRE10" "$(git -C "$ORIGIN" rev-parse main)"
+git -C "$FIX" branch -q -D workstreams/feat-q/1 2>/dev/null || true
+
 echo
 if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; echo "-- run9 --"; tail -30 "$SCRATCH/run9.log"; exit 1; fi

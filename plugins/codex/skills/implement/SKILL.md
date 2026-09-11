@@ -112,13 +112,17 @@ All of this is verified by `tests/test-implement.sh`.
 
 ## 5. Relay (you)
 
-The workstreams are self-verifying: `implement.sh` gated each one and the merge
-on raw exit codes. Do not re-run or re-verify them; confirm only that the
+`implement.sh` gates each workstream and the merge on raw exit codes, so you need
+not re-run their checks. But a green gate is not proof the work landed — confirm
+each merged workstream actually changed the tree before trusting the run: read
+`summary.json` for `merge_failed`/empty workstreams, and spot-check that the merge
+commits carry real diffs (`git show --stat`). A workstream reported passed but
+merged empty landed nothing; re-plan it as a new small run. Also confirm the
 check command covered the touched surfaces.
 
-When the run finishes, relay `summary.json` and the PR URL. FAILED
-workstreams are listed in the PR body — offer to re-plan just those as a new
-small run (new run name) rather than re-entering the loop yourself.
+When the run finishes, relay `summary.json` and the PR URL. FAILED and
+merge-failed workstreams are listed in the PR body — offer to re-plan just those
+as a new small run (new run name) rather than re-entering the loop yourself.
 
 Review is not part of this skill. Under `/feature:orchestrate` the
 orchestrator runs `codex:review` on the push and triages the findings;
