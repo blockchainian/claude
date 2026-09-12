@@ -263,7 +263,7 @@ mkdir -p "$RUN_DIR/logs" "$RUN_DIR/status" "$RUN_DIR/locks" "$WT_ROOT"
 grep -v '^[[:space:]]*$' "$WORKSTREAMS" | grep -v '^[[:space:]]*#' > "$RUN_DIR/workstreams.txt"
 N="$(wc -l < "$RUN_DIR/workstreams.txt" | tr -d ' ')"
 [ "$N" -gt 0 ] || fatal "no workstreams in $WORKSTREAMS"
-LIST_LINE="$(grep -nE '^[[:space:]]*([0-9]+[.)]|[-*])[[:space:]]' "$RUN_DIR/workstreams.txt" | head -1)"
+LIST_LINE="$(grep -nE '^[[:space:]]*([0-9]+[.)]|[-*])[[:space:]]' "$WORKSTREAMS" | head -1)"
 [ -z "$LIST_LINE" ] || fatal "$WORKSTREAMS line ${LIST_LINE%%:*} is a list item; every line is one workstream, so a multi-line brief belongs in a .md the line points to"
 [ "$CONCURRENCY" -gt "$N" ] && CONCURRENCY="$N"
 
@@ -362,6 +362,13 @@ elif [ -n "$PASSED" ]; then
     if git -C "$REPO" merge -q --no-ff -m "merge workstream $idx" "$BR" > "$RUN_DIR/logs/merge-$idx.log" 2>&1; then
       MERGED="$MERGED $idx"
       note "[merge] workstream $idx MERGED"
+      continue
+    fi
+    # git refuses to overwrite untracked files; there is no conflict for codex to resolve
+    UNTRACKED_HIT="$(sed -n '/untracked working tree files would be overwritten/,/^Please move or remove/{/^\t/p;}' "$RUN_DIR/logs/merge-$idx.log" | tr -d '\t' | tr '\n' ' ')"
+    if [ -n "$UNTRACKED_HIT" ]; then
+      MERGE_FAILED="$MERGE_FAILED $idx"
+      note "[merge] workstream $idx BLOCKED by untracked file(s): ${UNTRACKED_HIT% }in the session worktree; excluded (branch kept)"
       continue
     fi
     CONFLICTED="$(git -C "$REPO" diff --name-only --diff-filter=U | tr '\n' ' ')"
