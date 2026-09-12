@@ -1,5 +1,5 @@
 #!/bin/sh
-# ABOUTME: Checks check-paths.sh and check-anchors.py output and exit codes against small fixture docs.
+# ABOUTME: Checks check-paths.sh, check-overlap.sh and check-anchors.py output and exit codes against small fixture docs.
 # ABOUTME: Usage: run from a git repo root (chadwallet): <plugin>/skills/ground/tests/run.sh
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 check="$here/../check-paths.sh"
@@ -38,6 +38,15 @@ expect "paths with line ranges are checked" "MISSING: website/src/no-such-ranged
 
 out=$("$check" "$here/fixture-brackets.md"); rc=$?
 expect "bracketed route paths are checked" "MISSING: mobile/app/token/[nope].tsx" 1 "$out" $rc
+
+overlap="$here/../check-overlap.sh"
+
+out=$("$overlap" "$here/fixture-overlap.md"); rc=$?
+expect "a file on two workstreams' Files: lines is flagged" \
+  "OVERLAP: mobile/shared/data/api/core/client.ts (home-lanes, token-tabs)" 1 "$out" $rc
+
+out=$("$overlap" "$here/fixture-overlap-clean.md"); rc=$?
+expect "disjoint workstreams pass; Files: outside a workstream section is ignored" "" 0 "$out" $rc
 
 anchors="$here/../check-anchors.py"
 flags() { printf '%s\n' "$1" | grep -v '^    ' ; }
