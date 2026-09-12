@@ -72,12 +72,14 @@ if they are told where it is. A path given in the request always wins over the d
 The default root lives under `/tmp`, which macOS clears on reboot. Point
 `IOS_SCREENSHOT_DIR` at a durable directory for screens worth keeping.
 
-Several agents can share that library safely. On a device the phone is the real lock, not
-the directory: Appium holds one session per device, so two agents cannot capture at the
-same time — the second fails to get a session. A simulator has no such lock of its own, so
-this skill provides one: `claim_simulator.py` holds a simulator for one `RUN_ID`, and
-`capture_slice.sh` refuses a simulator nobody has claimed. Two agents on the same simulator
-is not supported — the second claim fails, and that agent chooses to wait or abort. Several
+Several agents can share that library safely; a phone or a simulator they cannot, so this
+skill provides a lock: `claim_simulator.py` holds one UDID for one `RUN_ID`, and
+`capture_slice.sh` refuses a simulator nobody has claimed. Neither target refuses a second
+agent on its own. On a phone, WebDriverAgent serves one session, and a second Appium
+session does not fail — it wins, and the first agent's next call fails with "Session does
+not exist" mid-run. On a simulator, XcodeBuildMCP retargets its session default to whoever
+set it last. So the second claim fails, and that agent chooses to wait or abort; with
+several agents queued on one phone, waiting and claiming again is the normal path. Several
 sessions on several simulators is fine: each session has its own XcodeBuildMCP server and
 its own defaults. The stitcher writes to a staging file and renames it into place, so a
 reader never sees a half-written PNG, and its verdict reports `replaced_existing` when a
@@ -153,6 +155,17 @@ installed on it.
    packages it as an IPA, resigns it with that profile, and returns a `capabilitiesHint`.
 3. Pass that hint to `appium_session_management` (`action=create`), serialising the whole
    object — do not drop its boolean or numeric values.
+
+Before creating the session, claim the phone for this run, so no other agent opens a
+session that ends yours:
+
+```bash
+"$SKILL_DIR/scripts/claim_simulator.py" "$UDID" --run "$RUN_ID"
+```
+
+Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim again, since
+there is no other phone to pick. Hold the claim across every screen of the flow and
+release it at cleanup, after deleting the Appium session.
 
 Two switches live on the phone and cannot be set from the Mac. Developer Mode, which
 `devicectl` does report, and **Settings -> Developer -> UI TESTING -> Enable UI
@@ -530,9 +543,9 @@ anything should sit between them.
 
 ## 5. Clean Up
 
-Delete the slice directory, and on a simulator release the claim. A run that captures
-several screens keeps its claim until the last one; releasing between screens only invites
-another agent in mid-run:
+Delete the slice directory, on a phone delete the Appium session, and release the claim.
+A run that captures several screens keeps its claim until the last one; releasing between
+screens only invites another agent in mid-run:
 
 ```bash
 "$SKILL_DIR/scripts/claim_simulator.py" "$UDID" --run "$RUN_ID" --release
