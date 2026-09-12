@@ -24,14 +24,16 @@ Usage: implement.sh --workstreams FILE --feature NAME --check CMD
   repo        repository to operate on       (default: git toplevel of cwd)
   no-push     skip pushing / opening or updating a PR
   deliver-wait max seconds to wait, at merge time, for the session worktree to
-              be clean and on the base branch (default: 1800); delivery also
+              have no uncommitted changes to tracked files and be on the base
+              branch (default: 1800; untracked files never delay it); delivery also
               takes a per-repo lock so concurrent runs merge one at a time
   runner      task runner: daemon or exec       (default: daemon)
 
 Workstreams run in an isolated worktree pool branched from the session branch's
 run-start commit. Green workstream branches merge DIRECTLY onto the session
-branch in the session worktree once it is clean (uncommitted edits from a
-parallel session only delay delivery, up to --deliver-wait); the post-merge
+branch in the session worktree once it has no uncommitted changes to tracked
+files (edits from a parallel session only delay delivery, up to --deliver-wait;
+untracked files never do); the post-merge
 check runs there, and a red check restores the branch to its pre-merge state
 (workstream branches kept for autopsy). This script does not review: the
 pre-merge SHA it records (refs/codex-implement/<feature>/pre-merge, run-dir
@@ -240,7 +242,8 @@ CUR="$(git -C "$REPO" symbolic-ref --short -q HEAD)" \
   || fatal "repo is on a detached HEAD; check out the branch to deliver onto"
 [ -z "$BASE" ] && BASE="$CUR"
 [ "$BASE" = "$CUR" ] || fatal "repo has '$CUR' checked out but --base is '$BASE'; check out '$BASE' or drop --base"
-[ -z "$(git -C "$REPO" status --porcelain)" ] \
+tree_dirty() { git -C "$REPO" status --porcelain --untracked-files=no; }
+[ -z "$(tree_dirty)" ] \
   || note "session worktree is dirty; workstreams branch from HEAD and delivery waits for a clean tree"
 [ -z "$(git -C "$REPO" branch --list "workstreams/$FEATURE/*")" ] \
   || fatal "leftover workstreams/$FEATURE/* branches exist; delete them or pick a new run name"
@@ -260,6 +263,8 @@ mkdir -p "$RUN_DIR/logs" "$RUN_DIR/status" "$RUN_DIR/locks" "$WT_ROOT"
 grep -v '^[[:space:]]*$' "$WORKSTREAMS" | grep -v '^[[:space:]]*#' > "$RUN_DIR/workstreams.txt"
 N="$(wc -l < "$RUN_DIR/workstreams.txt" | tr -d ' ')"
 [ "$N" -gt 0 ] || fatal "no workstreams in $WORKSTREAMS"
+LIST_LINE="$(grep -nE '^[[:space:]]*([0-9]+[.)]|[-*])[[:space:]]' "$RUN_DIR/workstreams.txt" | head -1)"
+[ -z "$LIST_LINE" ] || fatal "$WORKSTREAMS line ${LIST_LINE%%:*} is a list item; every line is one workstream, so a multi-line brief belongs in a .md the line points to"
 [ "$CONCURRENCY" -gt "$N" ] && CONCURRENCY="$N"
 
 note "feature=$FEATURE base=$BASE workstreams=$N pool=$CONCURRENCY retries=$RETRIES timeout=${TIMEOUT_S}s"
@@ -310,14 +315,14 @@ acquire_delivery_lock() { # acquire_delivery_lock <max-seconds>; returns 1 on ti
   done
   echo $$ > "$DELIVER_LOCK/pid"; LOCK_HELD=1
 }
-tree_dirt() { git -C "$REPO" status --porcelain | head -5 | awk '{print $2}' | tr '\n' ' '; }
+tree_dirt() { tree_dirty | head -5 | awk '{print $2}' | tr '\n' ' '; }
 wait_for_clean_tree() { # wait_for_clean_tree <max-seconds>; sets MERGE_BLOCKED on timeout
   local waited=0 announced=0
   while :; do
     if [ "$(git -C "$REPO" symbolic-ref --short -q HEAD)" != "$BASE" ]; then
       MERGE_BLOCKED="session worktree switched off '$BASE' during the run"; return
     fi
-    [ -z "$(git -C "$REPO" status --porcelain)" ] && { [ "$announced" = 1 ] && note "[merge] session worktree clean; resuming"; return; }
+    [ -z "$(tree_dirty)" ] && { [ "$announced" = 1 ] && note "[merge] session worktree clean; resuming"; return; }
     if [ "$waited" -ge "$1" ]; then
       MERGE_BLOCKED="session worktree stayed dirty for ${1}s ($(tree_dirt))"; return
     fi

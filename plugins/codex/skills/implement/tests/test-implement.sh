@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: End-to-end test for implement.sh using a fixture git repo and the stub codex CLI.
-# ABOUTME: Covers pass, retry, hang, no-diff, conflicts, session-branch delivery, restore, guards.
+# ABOUTME: Covers pass, retry, hang, no-diff, conflicts, session-branch delivery, restore, guards, brief-format checks.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -283,15 +283,15 @@ assert "summary records the restore" grep -q '"restored": true' "$ST3/summary.js
 git -C "$FIX" branch -q -D workstreams/feat-z/1 workstreams/feat-z/2
 
 # ---------- scenario 4: guard rails ----------
-echo dirt > "$FIX/dirty.txt"
+echo dirt >> "$FIX/spec.md"
 set +e
 "$IMPLEMENT" --workstreams "$FIX/workstreams2.txt" --feature feat-w \
   --check "sh ./check.sh" --repo "$FIX" > "$SCRATCH/run4.log" 2>&1
 RC4=$?
 set -e 2>/dev/null || true
-rm -f "$FIX/dirty.txt"
+git -C "$FIX" checkout -q -- spec.md
 
-assert "dirty session worktree at start is a warning, not fatal" \
+assert "modified tracked file at start is a warning, not fatal" \
   sh -c "! grep -q 'FATAL' '$SCRATCH/run4.log'"
 assert "dirty warning names the situation" \
   grep -q 'session worktree is dirty; workstreams branch from HEAD' "$SCRATCH/run4.log"
@@ -323,7 +323,7 @@ echo "---- scenario 5 exit=$RC6 (log: $SCRATCH/run6.log) ----"
 assert_eq "delivery waits out transient dirt and exits 0" 0 "$RC6"
 assert "waiting is reported" grep -q '\[merge\] waiting for a clean session worktree' "$SCRATCH/run6.log"
 assert_eq "f.txt merged onto main after the wait" "ok-f" "$(cat "$FIX/f.txt" 2>/dev/null)"
-assert "no late.txt left behind" test ! -e "$FIX/late.txt"
+assert "spec.md restored by the time delivery ran" git -C "$FIX" diff --quiet -- spec.md
 assert "delivery lock released" test ! -e "$(git -C "$FIX" rev-parse --absolute-git-dir)/codex-implement/deliver.lock"
 
 # ---------- scenario 6: dirt outlives --deliver-wait -> merge blocked, branch kept ----------
@@ -336,7 +336,7 @@ STUB_DIRTY_REPO="$FIX" STUB_DIRTY_SECS=12 "$IMPLEMENT" --workstreams "$FIX/works
   --repo "$FIX" > "$SCRATCH/run7.log" 2>&1
 RC7=$?
 set -e 2>/dev/null || true
-rm -f "$FIX/late.txt"
+git -C "$FIX" checkout -q -- spec.md
 echo "---- scenario 6 exit=$RC7 (log: $SCRATCH/run7.log) ----"
 
 assert_eq "dirt outliving deliver-wait blocks the merge" 1 "$RC7"
@@ -446,6 +446,45 @@ assert_eq "empty-branch workstream branch kept for inspection" 1 \
   "$(git -C "$FIX" branch --list 'workstreams/feat-q/*' | wc -l | tr -d ' ')"
 assert_eq "origin main untouched by the empty-branch run" "$PRE10" "$(git -C "$ORIGIN" rev-parse main)"
 git -C "$FIX" branch -q -D workstreams/feat-q/1 2>/dev/null || true
+
+# ---------- scenario 11: an untracked file in the session worktree never delays delivery ----------
+printf 'WS-UNTRACKED write f.txt and drop an untracked file in the session repo\n' > "$FIX/workstreams11.txt"
+git -C "$FIX" add workstreams11.txt && git -C "$FIX" commit -qm "workstreams11" && git -C "$FIX" push -q origin main
+echo "launch notes" > "$FIX/untracked-notes.txt"
+set +e
+STUB_DIRTY_REPO="$FIX" "$IMPLEMENT" --workstreams "$FIX/workstreams11.txt" --feature feat-p \
+  --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 --deliver-wait 1 \
+  --repo "$FIX" > "$SCRATCH/run11.log" 2>&1
+RC11=$?
+set -e 2>/dev/null || true
+rm -f "$FIX/late.txt" "$FIX/untracked-notes.txt"
+echo "---- scenario 11 exit=$RC11 (log: $SCRATCH/run11.log) ----"
+
+assert_eq "untracked files do not block delivery" 0 "$RC11"
+assert "no clean-tree wait for untracked files" \
+  sh -c "! grep -q 'waiting for a clean session worktree' '$SCRATCH/run11.log'"
+assert "untracked files do not trigger the dirty-start warning" \
+  sh -c "! grep -q 'session worktree is dirty' '$SCRATCH/run11.log'"
+assert_eq "f.txt merged despite the untracked file" "ok-f" "$(cat "$FIX/f.txt" 2>/dev/null)"
+
+# ---------- scenario 12: a multi-line brief in the workstreams file is rejected before any run ----------
+cat > "$FIX/workstreams12.txt" <<'EOF2'
+implement workstream "review-fix" per spec.md, applying these fixes:
+1. first fix
+2. second fix
+- a bullet
+EOF2
+set +e
+"$IMPLEMENT" --workstreams "$FIX/workstreams12.txt" --feature feat-o \
+  --check "sh ./check.sh" --repo "$FIX" > "$SCRATCH/run12.log" 2>&1
+RC12=$?
+set -e 2>/dev/null || true
+rm -f "$FIX/workstreams12.txt"
+
+assert_eq "list lines in the workstreams file are fatal" 1 "$RC12"
+assert "fatal names the offending line" grep -q 'FATAL.*line 2.*brief' "$SCRATCH/run12.log"
+assert "no workstream launched from a fragmented brief" \
+  sh -c "! grep -q '\[workstream 1\] starting' '$SCRATCH/run12.log'"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; echo "-- run9 --"; tail -30 "$SCRATCH/run9.log"; exit 1; fi
