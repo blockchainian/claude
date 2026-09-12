@@ -69,7 +69,13 @@ why reading alone does not find it.
    specs/<date>-<topic>/review.json <plan.md>`, where `<base>` is the
    `.git/codex-implement/<feature>/pre-merge.sha` the script recorded. A plan with no codex workstream has no
    `implement.sh` run: start the same command when the UX lane reports `done`, with `<base>` the plan's base
-   SHA. One review per plan, one round. Then run the project's staging deploy command, read the `sha` from its JSON, and record it as `STAGING_SHA`. Then run the project's
+   SHA. One review per plan, one round. Alongside it, start the cloud round's poller in the
+   background: `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/review-state.sh <pr> HEAD
+   specs/<date>-<topic>/cloud-review.json`, where `<pr>` is `gh pr view --json number -q .number`
+   on the pushed branch. The local review pre-filters; the GitHub cloud review
+   (`chatgpt-codex-connector`) is the authoritative merge gate for step 9 — one round, so the
+   poller waits only for the first post or clean reaction on this exact head, never for a review
+   of whatever step 8 later pushes. Then run the project's staging deploy command, read the `sha` from its JSON, and record it as `STAGING_SHA`. Then run the project's
    staging verify command and read its verdict JSON. Both exit non-zero on failure; gate the next
    step on the exit code, not on the text. Then run the plan's Live checks against staging, a
    minute after the deploy returns — the first request after a deploy can still hit the old build. Only staging runs from
@@ -81,7 +87,10 @@ why reading alone does not find it.
    user.
 
 7. **Triage, once.** When the review has written `review.json` (its process exits; a fail exit
-   means no review, which is a finding for the user), drop every `nit`. Verify each `must-fix` against the code — severity is the reviewer's claim,
+   means no review, which is a finding for the user) and the cloud poller has written
+   `cloud-review.json`, drop every `nit` from both. A cloud `state` of `timeout` is a finding for
+   the user — step 9's merge gate needs a real verdict, not a guess; `clean` contributes no
+   findings. Verify each `must-fix` (local and cloud) against the code — severity is the reviewer's claim,
    not a fact — and add the probe failures from step 6 as findings of their own. Then decide the
    owner of each finding, exactly once: a finding in a backend module, an API route or a test
    file is `codex` without further thought (the project contract in the plugin README names the
@@ -105,10 +114,14 @@ why reading alone does not find it.
    that comment is the review's record.
 
 9. **Decide production, then record the outcome.** Production ships only when every finding is
-   closed AND the re-run probes are green — never a half-shipped mixed feature. Merge the PR into
-   the default branch; services that deploy from it on merge need nothing more, and the rest go
-   through the codex lane's deploy command (the project contract in the plugin README says
-   which). Then run the plan's Live checks against production. The
+   closed AND the re-run probes are green — never a half-shipped mixed feature. Then run the
+   project's CI-watch command against the fixed head (the branch tip after step 8's pushes, or the
+   original push when step 7 found nothing) and read its verdict JSON; gate on the `conclusion`
+   field, never on prose. Merge only on `conclusion: success`: a plain `gh pr merge`, never
+   `--admin` — a merge that would need `--admin`, or any prod, secret or infra mutation, is out of
+   scope for this gate and goes to the user instead. Services that deploy from the default branch
+   on merge need nothing more, and the rest go through the codex lane's deploy command (the
+   project contract in the plugin README says which). Then run the plan's Live checks against production. The
    phase's record is the PR, the deploy SHAs, the probe verdicts and the live-check results; write
    them into `plan.md` under its Outcome heading, write the memory files, and end. Write a separate
    `specs/<date>-<topic>/handoff.md` only if you must stop mid-phase (context past ~300k, quota
@@ -135,5 +148,10 @@ why reading alone does not find it.
   brief.
 - **Loops are capped.** One fix round and no re-review; the re-run of the probes on the surfaces
   the fixes touched is the second gate. A finding that survives the round goes to the user.
-  Review severity labels are unranked input; verify a finding before acting on it.
+  Review severity labels are unranked input; verify a finding before acting on it. The cloud
+  review gets the same one round: a must-fix its own fix introduces ships unreviewed.
+- **The merge gate is CI, not prose.** `gh pr merge` runs only after the project's CI-watch
+  command reports `conclusion: success` on the fixed head. Never `--admin`. Auto-push and
+  auto-merge are PR-scoped only — never a prod, secret or infra mutation from this skill; a
+  finding that needs one goes to the user, not into the fix round.
 - **Memory at the phase end only** — written in step 9, not mid-turn; no handoff unless stopping mid-phase.
