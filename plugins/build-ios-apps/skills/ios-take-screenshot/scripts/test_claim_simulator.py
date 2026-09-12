@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Regression tests for claim_simulator.py and capture_slice.sh.
 
-One agent per simulator: a second claim on a held simulator must fail with a
-clear, distinct exit code and say who holds it, and a capture must refuse to
-run against a simulator nobody has claimed or against "booted".
+One agent per simulator or phone: a second claim on a held UDID must fail with a
+clear, distinct exit code and say who holds it without calling a phone a
+simulator, and a capture must refuse to run against a simulator nobody has
+claimed or against "booted".
 Run: ./test_claim_simulator.py
 """
 
@@ -17,6 +18,7 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 UDID = "00000000-0000-0000-0000-00000000TEST"
+PHONE = "00008030-001A2B3C4D5E6F7A"
 
 
 def run(*args: str, tmp: str) -> subprocess.CompletedProcess:
@@ -61,6 +63,16 @@ def main() -> int:
             failures.append(f"capture by a run that does not hold the claim was not refused: "
                             f"{r.returncode} {r.stderr!r}")
 
+        run("claim_simulator.py", PHONE, "--run", "run-a", tmp=tmp)
+        r = run("claim_simulator.py", PHONE, "--run", "run-b", tmp=tmp)
+        if r.returncode != 3 or "simulator" in r.stderr.lower() or "run-a" not in r.stderr:
+            failures.append(f"a held phone is described as a simulator or without its holder: "
+                            f"{r.returncode} {r.stderr!r}")
+        r = run("claim_simulator.py", PHONE, "--run", "run-b", "--release", tmp=tmp)
+        if r.returncode != 3 or "simulator" in r.stderr.lower():
+            failures.append(f"phone release refusal is wrong or calls it a simulator: "
+                            f"{r.returncode} {r.stderr!r}")
+
         r = run("claim_simulator.py", UDID, "--run", "run-b", "--steal", tmp=tmp)
         if r.returncode != 0 or json.loads(r.stdout)["heldBy"] != "run-b":
             failures.append(f"steal did not take the lock: {r.returncode} {r.stdout}")
@@ -80,7 +92,7 @@ def main() -> int:
 
     for f in failures:
         print("FAIL:", f)
-    print("PASS: one run holds a simulator at a time, and capture needs the claim"
+    print("PASS: one run holds a simulator or phone at a time, and capture needs the claim"
           if not failures else f"{len(failures)} failure(s)")
     return 1 if failures else 0
 
