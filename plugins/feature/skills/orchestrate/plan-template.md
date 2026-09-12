@@ -41,6 +41,11 @@ else. -->
 1. <change> — `symbol` `path.ts:NN`. <Values, ordering, edge cases.>
 2. <change> — …
 
+<!-- If this workstream reproduces an external producer's wire contract (a pinned
+`fixtures/<domain>.json` exists), its tests MUST round-trip that fixture — feed the fixture's own
+returned id/cursor/timestamp/date back through the code and assert the output matches the
+fixture; a literal invented in the test is a defect. If no fixture is pinned, this does not
+apply. -->
 Tests: <named cases, one per behaviour: the drop, the keep, each boundary, each missing input>.
 Files: `path/a.ts`, `path/b.ts`.
 

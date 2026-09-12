@@ -23,7 +23,7 @@ review-fix → deploy. Grounding takes its ask in the shape of the project's
 |---|---|
 | `/feature:orchestrate` | Run a `plan.md` through the codex and UX lanes to a shipped feature |
 | `/feature:handoff` | Write a mid-phase handoff: stopped at, done, next, unverified, do not redo |
-| `/feature:ground` | Pin repo facts into `problem.md` before planning; checks every path and anchor against the base commit |
+| `/feature:ground` | Pin repo facts into `problem.md` before planning; checks every path and anchor against the base commit; pins a reproduced wire contract as a `fixtures/<domain>.json` file |
 
 ## Agents
 
