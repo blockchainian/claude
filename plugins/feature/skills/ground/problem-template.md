@@ -12,7 +12,12 @@ Decision in one sentence: <what is being changed and why now>.
 ## Facts
 
 One bullet per fact, evidence inline. Code as `path.ts:120`; measurements as
-the command and its dated output; wire shapes as a real response body.
+the command and its dated output; wire shapes as a real response body. When
+the feature reproduces a wire shape rather than merely reading a field from
+it — a pagination cursor, timestamp, date, or any value the code must match
+verbatim — also save the body as `fixtures/<domain>.json` beside this doc and
+cite that path in the bullet. No external producer contract to reproduce:
+skip this, nothing to add.
 
 - <fact> — `path/file.ts:NN`
 - <measurement> — `<command>`, <date>:
@@ -21,7 +26,8 @@ the command and its dated output; wire shapes as a real response body.
   <real output, trimmed>
   ```
 
-- <wire field> — real body from `<producer endpoint>`, <date>:
+- <wire field> — real body from `<producer endpoint>`, <date> (pinned as
+  `fixtures/<domain>.json` when the feature reproduces this shape):
 
   ```json
   { }
