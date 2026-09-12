@@ -114,9 +114,10 @@ why reading alone does not find it.
    that comment is the review's record.
 
 9. **Decide production, then record the outcome.** Production ships only when every finding is
-   closed AND the re-run probes are green — never a half-shipped mixed feature. Then run the
-   project's CI-watch command against the fixed head (the branch tip after step 8's pushes, or the
-   original push when step 7 found nothing) and read its verdict JSON; gate on the `conclusion`
+   closed AND the re-run probes are green — never a half-shipped mixed feature. Then run
+   `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/watch-ci.sh <ref> [out-file]` against the fixed head
+   (the branch tip after step 8's pushes, or the original push when step 7 found nothing) and read
+   its verdict JSON; gate on the `conclusion`
    field, never on prose. Merge only on `conclusion: success`: a plain `gh pr merge`, never
    `--admin` — a merge that would need `--admin`, or any prod, secret or infra mutation, is out of
    scope for this gate and goes to the user instead. Services that deploy from the default branch
@@ -150,8 +151,8 @@ why reading alone does not find it.
   the fixes touched is the second gate. A finding that survives the round goes to the user.
   Review severity labels are unranked input; verify a finding before acting on it. The cloud
   review gets the same one round: a must-fix its own fix introduces ships unreviewed.
-- **The merge gate is CI, not prose.** `gh pr merge` runs only after the project's CI-watch
-  command reports `conclusion: success` on the fixed head. Never `--admin`. Auto-push and
+- **The merge gate is CI, not prose.** `gh pr merge` runs only after `watch-ci.sh` reports
+  `conclusion: success` on the fixed head. Never `--admin`. Auto-push and
   auto-merge are PR-scoped only — never a prod, secret or infra mutation from this skill; a
   finding that needs one goes to the user, not into the fix round.
 - **Memory at the phase end only** — written in step 9, not mid-turn; no handoff unless stopping mid-phase.

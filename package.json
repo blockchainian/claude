@@ -11,6 +11,6 @@
     "test:grok": "node --test tests/*.test.mjs",
     "test:codex": "plugins/codex/skills/implement/tests/test-implement.sh && plugins/codex/skills/review/tests/test-review.sh && plugins/codex/skills/review/tests/test-review-state.sh && plugins/codex/skills/review/tests/test-classify-severity.sh",
     "validate": "claude plugin validate --strict .",
-    "test:feature": "plugins/feature/hooks/tests/run.sh"
+    "test:feature": "plugins/feature/hooks/tests/run.sh && plugins/feature/skills/orchestrate/watch-ci.test.sh"
   }
 }
