@@ -41,9 +41,14 @@ Scope is exactly the ask in `problem.md`. Do not add steps that were not request
 - Then grep every function, route, table, column and env var the plan names; a miss there reads
   fluently, which is why reading alone does not find it.
 - Frontend is one lane. When any frontend change is UX-changing, every frontend change goes into
-  the UX workstream for Fable; codex workstreams get frontend files only when the plan has no UX
+  the UX workstreams for Fable; codex workstreams get frontend files only when the plan has no UX
   lane. Never split frontend between the lanes.
+- Slice the UX lane by surface. Screens with disjoint file sets are separate UX workstreams in
+  this one plan, each with its own `Files:` line; the orchestrator launches them all at once. A
+  program that touches many screens gets one plan, never one plan per screen. Run
+  `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-overlap.sh <plan.md>` with the path checker and fix
+  every `OVERLAP:` by giving the file to one workstream.
 - Do not modify any file in the repo. Do not spawn agents.
 
-Your final message is: the plan path, its word count, the checker's exit code, and every
+Your final message is: the plan path, its word count, both checkers' exit codes, and every
 `QUESTION:` line verbatim. Nothing else.
