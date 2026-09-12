@@ -46,7 +46,10 @@ npx -y appium-mcp@latest
 NO_UI=true
 ```
 
-Tools are namespaced `mcp__plugin_build-ios-apps_appium-mcp__*`. Device-specific
+Tools are namespaced `mcp__plugin_build-ios-apps_appium-mcp__*`. The plugin's
+`phone-session-gate` hook denies `appium_session_management` `create` unless the phone is
+claimed through `ios-take-screenshot`'s claim script and no session is open on it, since
+WebDriverAgent serves one session and a second create ends the first. Device-specific
 capabilities are not in `.mcp.json`, since they differ per machine; pass them
 when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 
