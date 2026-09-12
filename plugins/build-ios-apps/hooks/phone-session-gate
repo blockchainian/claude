@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+# ABOUTME: Pre/PostToolUse hook that allows one Appium session per phone, and only after the
+# ABOUTME: capture claim; it records the open session in the claim and clears it on delete.
+"""WebDriverAgent serves one session per phone, and a second create does not fail:
+it wins, and the first agent's next call dies with "Session does not exist". The
+claim file that claim_simulator.py writes per UDID under TMPDIR is the only thing
+agents in one Claude Code session share, so this gate keys on it.
+
+PreToolUse, action=create: deny unless the capabilities name an appium:udid, a
+claim exists for it, and no session is recorded there. PostToolUse: a successful
+create records its session id in the claim; a successful delete clears it, so
+the holder can recreate after an idle-out by deleting first.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+CREATED = re.compile(r"created successfully with ID: (\S+)")
+DELETED = re.compile(r"Session (\S+) deleted successfully")
+
+
+def lock_dir() -> Path:
+    return Path(os.environ.get("TMPDIR") or "/tmp")
+
+
+def lock_path(udid: str) -> Path:
+    return lock_dir() / f"ios-screenshot-lock.{udid}.json"
+
+
+def read(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def deny(reason: str) -> None:
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason,
+    }}))
+
+
+def udid_of(tool_input: dict) -> str | None:
+    caps = tool_input.get("capabilities")
+    if isinstance(caps, str):
+        try:
+            caps = json.loads(caps)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(caps, dict):
+        return None
+    udid = caps.get("appium:udid") or caps.get("udid")
+    return udid if isinstance(udid, str) and udid else None
+
+
+def response_text(response) -> tuple[str, bool]:
+    """The tool's text parts joined, and whether it reported an error."""
+    if isinstance(response, str):
+        return response, False
+    if isinstance(response, list):
+        return "\n".join(response_text(part)[0] for part in response), False
+    if isinstance(response, dict):
+        if "content" in response:
+            text = response_text(response["content"])[0]
+        elif "text" in response:
+            text = str(response["text"])
+        else:
+            text = json.dumps(response)
+        return text, bool(response.get("isError"))
+    return json.dumps(response), False
+
+
+def before_create(tool_input: dict) -> None:
+    udid = udid_of(tool_input)
+    if not udid:
+        deny("Pass the phone's UDID as appium:udid in capabilities, so the claim can be "
+             "checked; discover_ios_setup.py prints it in suggestedCapabilities.")
+        return
+    held = read(lock_path(udid))
+    if held is None:
+        deny(f"{udid} is not claimed. Run claim_simulator.py {udid} --run <RUN_ID> first, "
+             f"and hold the claim until the capture run is done.")
+        return
+    session = held.get("session")
+    if session:
+        deny(f"{udid} already has Appium session {session} open under run {held.get('run')}. "
+             f"A second session would end that one mid-run. If you are that run and the "
+             f"session idled out, delete it first (action=delete), then create again; "
+             f"otherwise wait for the claim to be released.")
+
+
+def after_create(tool_input: dict, response) -> None:
+    text, is_error = response_text(response)
+    if is_error:
+        return
+    m = CREATED.search(text)
+    udid = udid_of(tool_input)
+    if not m or not udid:
+        return
+    path = lock_path(udid)
+    held = read(path)
+    if held is None:
+        return
+    held["session"] = m.group(1)
+    path.write_text(json.dumps(held))
+
+
+def after_delete(tool_input: dict, response) -> None:
+    text, is_error = response_text(response)
+    if is_error:
+        return
+    m = DELETED.search(text)
+    target = tool_input.get("sessionId") or (m.group(1).rstrip(".") if m else None)
+    for path in lock_dir().glob("ios-screenshot-lock.*.json"):
+        held = read(path)
+        if not held or "session" not in held:
+            continue
+        if target and held["session"] != target:
+            continue
+        del held["session"]
+        path.write_text(json.dumps(held))
+
+
+def main() -> int:
+    try:
+        payload = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return 0
+    event = payload.get("hook_event_name")
+    tool_input = payload.get("tool_input") or {}
+    action = tool_input.get("action")
+    if event == "PreToolUse" and action == "create":
+        before_create(tool_input)
+    elif event == "PostToolUse" and action == "create":
+        after_create(tool_input, payload.get("tool_response"))
+    elif event == "PostToolUse" and action == "delete":
+        after_delete(tool_input, payload.get("tool_response"))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
