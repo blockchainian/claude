@@ -42,9 +42,14 @@ run_stub_scenario() {
     *WS-DIRTY*)
       scenario_bump WS-DIRTY; scenario_log WS-DIRTY
       echo "ok-f" > "$DIR/f.txt"
-      echo dirt > "${STUB_DIRTY_REPO:?}/late.txt"
-      (sleep "${STUB_DIRTY_SECS:-3}"; rm -f "${STUB_DIRTY_REPO}/late.txt") >/dev/null 2>&1 &
+      echo dirt >> "${STUB_DIRTY_REPO:?}/spec.md"
+      (sleep "${STUB_DIRTY_SECS:-3}"; git -C "${STUB_DIRTY_REPO}" checkout -q -- spec.md) >/dev/null 2>&1 &
       disown 2>/dev/null || true
+      ;;
+    *WS-UNTRACKED*)
+      scenario_bump WS-UNTRACKED; scenario_log WS-UNTRACKED
+      echo "ok-f" > "$DIR/f.txt"
+      echo dirt > "${STUB_DIRTY_REPO:?}/late.txt"
       ;;
     *WS-HOOKREJECT*)
       scenario_bump WS-HOOKREJECT; scenario_log WS-HOOKREJECT
