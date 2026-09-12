@@ -79,7 +79,11 @@ agent on its own. On a phone, WebDriverAgent serves one session, and a second Ap
 session does not fail — it wins, and the first agent's next call fails with "Session does
 not exist" mid-run. On a simulator, XcodeBuildMCP retargets its session default to whoever
 set it last. So the second claim fails, and that agent chooses to wait or abort; with
-several agents queued on one phone, waiting and claiming again is the normal path. Several
+several agents queued on one phone, waiting and claiming again is the normal path. On a
+phone the plugin's `phone-session-gate` hook enforces the claim: `appium_session_management`
+`create` is denied unless its capabilities carry `appium:udid`, that UDID is claimed, and no
+session is recorded open on it. The hook cannot tell agents apart, so it stops a second
+session, not a second driver on the holder's session. Several
 sessions on several simulators is fine: each session has its own XcodeBuildMCP server and
 its own defaults. The stitcher writes to a staging file and renames it into place, so a
 reader never sees a half-written PNG, and its verdict reports `replaced_existing` when a
@@ -165,7 +169,8 @@ session that ends yours:
 
 Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim again, since
 there is no other phone to pick. Hold the claim across every screen of the flow and
-release it at cleanup, after deleting the Appium session.
+release it at cleanup, after deleting the Appium session. The hook records the session id
+in the claim when `create` succeeds, and clears it when `delete` succeeds.
 
 Two switches live on the phone and cannot be set from the Mac. Developer Mode, which
 `devicectl` does report, and **Settings -> Developer -> UI TESTING -> Enable UI
@@ -240,7 +245,7 @@ Foreground it with `appium_app_lifecycle` (`action=activate`, `id=<bundleId>`), 
 screenshot. An app resumes where the user left it, not on its home screen, so confirm
 where you actually are before navigating.
 
-If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create`. Sessions idle out — just recreate on failure.
+If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create` and the discovered capabilities, which carry `appium:udid`. Sessions idle out. When a call fails with "Session does not exist", delete the session first (`action=delete`), then create again; the gate denies a create while the claim still records the old session.
 
 ### Simulator
 
