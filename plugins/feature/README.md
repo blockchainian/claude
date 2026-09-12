@@ -56,10 +56,6 @@ them there:
   and exits non-zero on failure, and **a staging verify command** that prints a
   verdict JSON and exits non-zero on failure. The orchestrator gates on exit
   codes, never on output text.
-- **A CI-watch command** that polls one ref's checks to a single verdict JSON
-  with a `conclusion` field, exiting 0 only on a completed success. The
-  orchestrator's production merge gate (step 9) runs it against the fixed
-  head and never merges on prose.
 - **Backend paths**: the modules, API-route directories and test-file
   patterns whose findings always belong to the codex lane, so the orchestrator
   judges UX ownership only for the rest.
@@ -78,11 +74,14 @@ For chadwallet these are `website/scripts/ui-probes/`,
 `scripts/deploy-staging.sh` and `scripts/verify-staging.sh`; backend paths
 `proxy/`, `streamer/`, `scraper/`, `website/src/app/api/` and any test file;
 Render services and Vercel deploy from `main` on merge while the Cloudflare
-Workers (proxy, streamer) still go through the codex lane's deploy command; the
-per-module gate is `yarn --cwd <module> tsc --noEmit && yarn --cwd <module> lint
+Workers (proxy, streamer) still go through the codex lane's deploy command; and
+the per-module gate is `yarn --cwd <module> tsc --noEmit && yarn --cwd <module> lint
 && yarn --cwd <module> test <path>` (see chadwallet's AGENTS.md "Checks (the
-gate)"); `yarn dev -p <port>` with port 3004 reserved; and `scripts/watch-ci.sh
-<ref> [out-file]` for the CI-watch command.
+gate)"); `yarn dev -p <port>` with port 3004 reserved.
+
+CI-watching needs no project contract: the plugin ships its own GitHub/`gh`-based
+poller, `skills/orchestrate/watch-ci.sh <ref> [out-file]`, used by the
+production merge gate (step 9) against every project.
 
 ## Install
 
@@ -101,8 +100,9 @@ remove them there; otherwise each fires twice.
 npm run test:feature
 ```
 
-Runs `hooks/tests/run.sh`: every case in `hooks/tests/cases.jsonl` through the
-three hook scripts.
+Runs `hooks/tests/run.sh` (every case in `hooks/tests/cases.jsonl` through the
+three hook scripts) and `skills/orchestrate/watch-ci.test.sh` (the CI-watch
+poller against a stubbed `gh`).
 
 ## License
 
