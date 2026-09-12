@@ -3,7 +3,8 @@
 Ship a feature from a written plan, with Claude orchestrating and never
 implementing. `/feature:orchestrate` reads `plan.md`, launches the backend lane
 through [codex](../codex/README.md)'s `/codex:implement`, launches the UX lane as
-the `ux-implementer` agent in parallel, writes the UI probes while both run,
+one `ux-implementer` agent per UX workstream, all at once and in parallel with
+codex, writes the UI probes while they run,
 deploys and verifies staging, runs the local schema review (`/codex:review`)
 once per plan and triages it into `findings.json`, fixes in two lanes (`codex-rescue` and the
 `ux-autofixer` agent) with no re-review, re-probes the touched surfaces, and
@@ -24,13 +25,14 @@ review-fix → deploy. Grounding takes its ask in the shape of the project's
 | `/feature:orchestrate` | Run a `plan.md` through the codex and UX lanes to a shipped feature |
 | `/feature:handoff` | Write a mid-phase handoff: stopped at, done, next, unverified, do not redo |
 | `/feature:ground` | Pin repo facts into `problem.md` before planning; checks every path and anchor against the base commit; pins a reproduced wire contract as a `fixtures/<domain>.json` file |
+| `check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the planner and the orchestrator run it beside the path checker |
 
 ## Agents
 
 | Agent | Model | What it does |
 |---|---|---|
 | `planner` | Fable high | Write `plan.md` from `problem.md` using the plan template; repo facts from `problem.md` only |
-| `ux-implementer` | Fable medium | Implement one UX workstream on the session branch, commit after every step, return flat JSON |
+| `ux-implementer` | Fable medium | Implement one UX workstream in the checkout its brief names (the session tree or its own worktree), commit after every step, return flat JSON |
 | `ux-autofixer` | Fable medium | Fix the PR threads labelled `claude-code-ux` in the UX lane's worktree, push, reply, resolve |
 | `ux-verifier` | Sonnet low | Drive a scripted UI scenario (browse or iOS simulator) and return a verdict with evidence paths |
 
@@ -51,7 +53,9 @@ them there:
 - **A UI probe library and its shared helpers.** Scripted probes, one per
   surface, that print a verdict JSON and exit non-zero on failure; the
   orchestrator writes new probes with the shared helpers and runs them with
-  `run_in_background`. Name the probe directories and the helper file.
+  `run_in_background`. Name the probe directories and the helper file. For a
+  native app, also a build-once dev-client script and a reload helper, so a
+  JavaScript change is verified by reload and only a native change rebuilds.
 - **A staging deploy command** that prints JSON containing the deployed `sha`
   and exits non-zero on failure, and **a staging verify command** that prints a
   verdict JSON and exits non-zero on failure. The orchestrator gates on exit
@@ -70,7 +74,8 @@ them there:
   lane's probes.
 
 For chadwallet these are `website/scripts/ui-probes/`,
-`mobile/scripts/ui-probes/` and `scripts/ui-probes/lib.sh`;
+`mobile/scripts/ui-probes/` and `scripts/ui-probes/lib.sh` (`yarn ios:dev-client`
+and `sim_reload` for the mobile app);
 `scripts/deploy-staging.sh` and `scripts/verify-staging.sh`; backend paths
 `proxy/`, `streamer/`, `scraper/`, `website/src/app/api/` and any test file;
 Render services and Vercel deploy from `main` on merge while the Cloudflare

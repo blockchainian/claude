@@ -49,20 +49,33 @@ apply. -->
 Tests: <named cases, one per behaviour: the drop, the keep, each boundary, each missing input>.
 Files: `path/a.ts`, `path/b.ts`.
 
-## UX workstream (Fable)
+<!-- Every workstream, codex or UX, ends with a `Files:` line; check-overlap.sh reads them. -->
 
-<!-- The single workstream the Fable UX agent implements on the session branch: files it owns,
-surfaces it changes, whether each surface depends on the backend lane. When any frontend change
-is UX-changing, every frontend change in the plan belongs here, not in a codex workstream: the
-lanes never share the frontend. Write `No UX lane.` and
-drop the wire-contract item, the empty JSON block and the UX checklist section when nothing a user
-sees changes. -->
+## UX workstreams (Fable)
+
+<!-- One block per UX workstream, each implemented by its own Fable UX agent, all launched at once.
+The block is the whole brief: files it owns, surfaces it changes, whether each surface depends on
+the backend lane. Split by surface whenever the file sets are disjoint — a program that touches
+many screens is many workstreams in ONE plan, never one plan per screen. A file belongs to exactly
+one workstream (check-overlap.sh enforces it); a shared file goes to the workstream that changes
+it most, and the others code against its committed interface. When any frontend change is
+UX-changing, every frontend change in the plan belongs here, not in a codex workstream: the lanes
+never share the frontend. Write `No UX lane.` and drop the wire-contract item, the empty JSON
+block and the UX checklist section when nothing a user sees changes. -->
+
+### `<id>` — <one sentence: what changes and where>
+
+1. <change> — `symbol` `path.tsx:NN`. <Values, ordering, edge cases.>
+2. <change> — …
+
+Surfaces: <screen or route>, backend dependency: <none | workstream id>.
+Files: `path/a.tsx`, `path/b.tsx`.
 
 ## Dependencies
 
 - Between workstreams: shared files and the disjoint functions each owns; which side of a merge
   conflict to keep; order, if any.
-- Backend → UX: the wire contract the UX workstream codes against, quoted from `problem.md` as a
+- Backend → UX: the wire contract the UX workstreams code against, quoted from `problem.md` as a
   real response body:
 
 ```json
@@ -78,7 +91,7 @@ green unedited, a call site that keeps its signature). -->
 
 ## UX checklist per surface
 
-<!-- Delete this whole section, heading included, when the UX workstream reads `No UX lane.`
+<!-- Delete this whole section, heading included, when the UX workstreams read `No UX lane.`
 Otherwise one surface per heading, one objective assertion per line (element exists, computed
 style, console clean, navigation happened). These become the probe. -->
 
