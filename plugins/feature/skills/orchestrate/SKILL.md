@@ -25,8 +25,9 @@ then drop back.
 ## What plan.md must contain
 
 The plan follows `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/plan-template.md`: Scope, Facts, Constraints,
-Workstreams, UX workstream, Dependencies, Invariants, UX checklist per surface, New files, Checks,
-Live checks, Outcome. Each workstream block is the implementer's whole brief: `codex:implement` passes
+Workstreams, UX workstreams, Dependencies, Invariants, UX checklist per surface, New files, Checks,
+Live checks, Outcome. A program that touches many screens is one plan with many UX workstreams,
+not one plan per screen: grounding and planning run once, the implementers run at once. Each workstream block is the implementer's whole brief: `codex:implement` passes
 the plan itself as the spec and writes one pointer line per workstream, adding no facts. The `planner` agent (`${CLAUDE_PLUGIN_ROOT}/agents/planner.md`, Fable high) writes it;
 its brief carries these two lines verbatim:
 
@@ -37,7 +38,9 @@ its brief carries these two lines verbatim:
 
 Before the plan ships, and after every revision, run `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-paths.sh
 <plan> [skip-regex]` from inside the repo. It exits 1 on any `MISSING:` or `AMBIGUOUS:` path;
-mark files the plan creates `(new)` on their own line so they are skipped. Then grep each
+mark files the plan creates `(new)` on their own line so they are skipped. Run
+`${CLAUDE_PLUGIN_ROOT}/skills/ground/check-overlap.sh <plan>` beside it; it exits 1 when two
+workstreams list the same file, which is a merge conflict scheduled in advance. Then grep each
 function, route, table, column and env var the plan names — a miss there reads fluently, which is
 why reading alone does not find it.
 
@@ -53,10 +56,24 @@ why reading alone does not find it.
    pushes a PR. It does not review; that is step 5. Do not re-verify its
    workstreams; confirm instead that its check command covers the touched surfaces.
 
-3. **Launch the UX lane, in parallel.** Spawn the `ux-implementer` agent with the Agent tool, giving
-   it the plan's UX workstream, the wire contract quoted as a real response body, and the UX
-   checklist. It starts now, not after codex. It commits after every coherent step and returns flat
-   JSON: `status` is `done`, `blocked` or `needs-backend`.
+3. **Launch the UX lane, in parallel — one implementer per UX workstream.** Spawn a
+   `ux-implementer` agent with the Agent tool for EVERY UX workstream in the plan, all in the same
+   message, giving each its workstream block, the wire contract quoted as a real response body,
+   and the UX checklist for its surfaces. They start now, not after codex and not after each
+   other. One workstream works on the session branch. Each further workstream gets its own tree
+   first (the worktree recipe below, `../.ux-<id>` on branch `ux/<id>` from HEAD), and its brief
+   names that path; when its agent reports `done`, merge `ux/<id>` onto the session branch
+   (`git merge --no-ff ux/<id>`; the plan's disjoint `Files:` lines make it clean) and remove the
+   tree. Merging a lane branch is integration, not editing. Each agent commits after every
+   coherent step and returns flat JSON: `status` is `done`, `blocked` or `needs-backend`.
+
+   **Worktree recipe.** `git worktree add ../.ux-<name> -b ux/<name> <base>` then
+   `cp -Rc <module>/node_modules ../.ux-<name>/<module>/node_modules` for the module the lane
+   touches (about 40 s; clone, never symlink — the codex sandbox writes through symlinks; copy any
+   untracked env file the module needs the same way). Remove with
+   `git worktree remove --force ../.ux-<name>` and `git branch -D ux/<name>` once merged, in the
+   background (about 15 s). Never `Agent isolation: "worktree"` — it branches from the default
+   branch, not from HEAD.
 
 4. **While both run, write the probes.** Turn each line of the plan's UX checklist into a probe
    in the project's probe library, using its shared helpers (the project contract in the plugin
@@ -82,7 +99,7 @@ why reading alone does not find it.
    here — production is the codex lane's command.
 
 6. **Run the UX probes against staging.** Run them with `run_in_background` and read the verdict
-   JSON. Failures go back to the UX agent by SendMessage to `ux-implementer` — it is idle, not
+   JSON. Failures go back to the UX agent that owns the surface by SendMessage — it is idle, not
    dead, and keeps its context. At most two rounds; a finding that survives two rounds goes to the
    user.
 
@@ -100,17 +117,15 @@ why reading alone does not find it.
    fix round: go to step 9.
 
 8. **Fix, both lanes at once, one round.** Give the UX lane its own tree so neither lane can
-   dirty the other's: `git worktree add ../.ux-<branch> -b ux/<branch> origin/<branch>` then
-   `cp -Rc <module>/node_modules ../.ux-<branch>/<module>/node_modules` for the module the UX
-   findings touch (about 40 s; clone, never symlink — the codex sandbox writes through symlinks;
-   add another module's the same way only for a finding there). Spawn `codex:codex-rescue` with
+   dirty the other's: the worktree recipe from step 3 with `../.ux-<branch>`, branch
+   `ux/<branch>`, base `origin/<branch>`, for the module the UX findings touch (another module's
+   only for a finding there). Spawn `codex:codex-rescue` with
    the `codex` findings, told to work in the session checkout, commit, rebase onto the remote
    branch and push; spawn `ux-autofixer` with the `ux` findings, the worktree path, the side
    branch `ux/<branch>`, the PR branch and the UX checklist. A finding touching `.claude/**` or
    `CLAUDE.md` comes back for the user. There is no re-review: when both lanes are done, redeploy
    staging if the codex lane pushed, re-run only the probes for surfaces the fixes touched, then
-   `git worktree remove --force ../.ux-<branch>` and `git branch -D ux/<branch>`, in the
-   background (about 15 s). Post one PR comment summarising the findings and their dispositions;
+   remove the tree. Post one PR comment summarising the findings and their dispositions;
    that comment is the review's record.
 
 9. **Decide production, then record the outcome.** Production ships only when every finding is
@@ -140,8 +155,11 @@ why reading alone does not find it.
   means the screen model no longer matches the app: update the probe with the deliberate change, or
   treat the mismatch itself as the finding.
 - **You do not edit the branch.** Not a typo fix, not a lint fix. Findings go to the agent that owns
-  the file. The one exception is the probe scripts, which no lane owns. Creating and removing the
-  UX lane's worktree is setup, not an edit.
+  the file. The one exception is the probe scripts, which no lane owns. Creating and removing a
+  lane's worktree, and merging its branch when it reports done, is integration, not an edit.
+- **Disjoint work runs at once.** Workstreams with disjoint `Files:` lines are launched in the same
+  message, never one after another. Serial slices were the whole cost of the 2026-09-11 mobile
+  session: 66 minutes of implementation took 4 h 40 min of wall clock.
 - **Effort is not toggled**, and ad-hoc Agent spawns cannot set effort — that is why the UX lanes
   are defined agents. Do not spawn agents from a high-effort turn.
 - **Agents are idle, not dead.** Send findings back by message and keep their context. Drop one only
