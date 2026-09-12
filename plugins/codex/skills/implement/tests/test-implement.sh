@@ -469,6 +469,8 @@ assert_eq "f.txt merged despite the untracked file" "ok-f" "$(cat "$FIX/f.txt" 2
 
 # ---------- scenario 12: a multi-line brief in the workstreams file is rejected before any run ----------
 cat > "$FIX/workstreams12.txt" <<'EOF2'
+# review-fix brief
+
 implement workstream "review-fix" per spec.md, applying these fixes:
 1. first fix
 2. second fix
@@ -482,9 +484,33 @@ set -e 2>/dev/null || true
 rm -f "$FIX/workstreams12.txt"
 
 assert_eq "list lines in the workstreams file are fatal" 1 "$RC12"
-assert "fatal names the offending line" grep -q 'FATAL.*line 2.*brief' "$SCRATCH/run12.log"
+assert "fatal names the offending line as numbered in the file" grep -q 'FATAL.*line 4.*brief' "$SCRATCH/run12.log"
 assert "no workstream launched from a fragmented brief" \
   sh -c "! grep -q '\[workstream 1\] starting' '$SCRATCH/run12.log'"
+
+# ---------- scenario 13: a workstream file colliding with an untracked file fails the merge without a resolver ----------
+printf 'WS-OK write a.txt per spec.md\n' > "$FIX/workstreams13.txt"
+git -C "$FIX" rm -q a.txt && git -C "$FIX" add workstreams13.txt \
+  && git -C "$FIX" commit -qm "workstreams13; a.txt no longer tracked" && git -C "$FIX" push -q origin main
+echo "my scratch" > "$FIX/a.txt"
+rm -f "$STUB_DIR/calls-MERGE-RESOLVE"
+set +e
+"$IMPLEMENT" --workstreams "$FIX/workstreams13.txt" --feature feat-n \
+  --check "sh ./check.sh" --concurrency 1 --retries 0 --timeout 3 --deliver-wait 1 \
+  --repo "$FIX" > "$SCRATCH/run13.log" 2>&1
+RC13=$?
+set -e 2>/dev/null || true
+echo "---- scenario 13 exit=$RC13 (log: $SCRATCH/run13.log) ----"
+
+assert_eq "untracked collision fails the merge" 2 "$RC13"
+assert "untracked collision is named, not called a conflict" \
+  grep -q '\[merge\] workstream 1 BLOCKED by untracked file(s): a.txt' "$SCRATCH/run13.log"
+assert "no codex resolver launched for an untracked collision" test ! -e "$STUB_DIR/calls-MERGE-RESOLVE"
+assert_eq "untracked file left untouched" "my scratch" "$(cat "$FIX/a.txt")"
+assert_eq "collision workstream branch kept" 1 \
+  "$(git -C "$FIX" branch --list 'workstreams/feat-n/1' | wc -l | tr -d ' ')"
+rm -f "$FIX/a.txt"
+git -C "$FIX" branch -q -D workstreams/feat-n/1 2>/dev/null || true
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; echo "-- run9 --"; tail -30 "$SCRATCH/run9.log"; exit 1; fi

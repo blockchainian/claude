@@ -85,7 +85,9 @@ workstreams and merge resolutions as rows in `codex agents`; `--runner exec`
   concurrent runs merge one at a time, and waits up to `--deliver-wait` for
   the session worktree to have no uncommitted changes to tracked files
   (untracked files never delay it) and still be on the base branch — a sibling
-  session's uncommitted edits delay delivery instead of aborting it.
+  session's uncommitted edits delay delivery instead of aborting it. A
+  workstream whose files collide with an untracked file is excluded, branch
+  kept, without a codex resolution round.
 - Pre-merge HEAD is recorded as `refs/codex-implement/<feature>/pre-merge`
   and `.git/codex-implement/<feature>/pre-merge.sha`; `codex:review` uses it
   as the review base.
