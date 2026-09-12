@@ -35,8 +35,9 @@ Do not re-plan and do not re-ask; the plan is the spec codex reads.
 3. Take the check command from the plan's Checks section verbatim;
    `implement.sh` runs it in every worktree and after merge, so the plan's Invariants
    must be covered by it — the gates replace a live review.
-4. Commit `workstreams.txt`. The session worktree must be CLEAN when the
-   script starts, because the run delivers onto this branch.
+4. Commit `workstreams.txt`. The session worktree must have no uncommitted
+   changes to tracked files when the script starts, because the run delivers
+   onto this branch.
 
 Launch in the same turn. Never write a handoff: plan.md and workstreams.txt
 are the record, and a fresh session resumes from plan.md. The run's task
@@ -82,7 +83,8 @@ workstreams and merge resolutions as rows in `codex agents`; `--runner exec`
 
 - Delivery takes a per-repo lock (`.git/codex-implement/deliver.lock`) so
   concurrent runs merge one at a time, and waits up to `--deliver-wait` for
-  the session worktree to be clean and still on the base branch — a sibling
+  the session worktree to have no uncommitted changes to tracked files
+  (untracked files never delay it) and still be on the base branch — a sibling
   session's uncommitted edits delay delivery instead of aborting it.
 - Pre-merge HEAD is recorded as `refs/codex-implement/<feature>/pre-merge`
   and `.git/codex-implement/<feature>/pre-merge.sha`; `codex:review` uses it
