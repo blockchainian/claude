@@ -7,7 +7,7 @@ ships.
 |---|---|
 | [codex](plugins/codex/README.md) | Delivers a planned feature as parallel codex workstreams, off Claude's critical path — merged onto your session branch and pushed — and reviews the delta into a findings file. |
 | [grok](plugins/grok/README.md) | Runs the local Grok CLI from Claude Code for read-only reviews and delegated coding tasks. |
-| [build-ios-apps](plugins/build-ios-apps/README.md) | Builds, runs, profiles, and screenshots iOS apps on a simulator or a connected iPhone. |
+| [mobile](plugins/mobile/README.md) | Builds, runs, profiles, and screenshots iOS apps on a simulator or a connected iPhone. |
 | [render](plugins/render/README.md) | The Render plugin with only the nine skills this desk uses, plus its MCP server, agent, and hook. |
 | [cloudflare](plugins/cloudflare/README.md) | The Cloudflare plugin with only the six skills this desk uses, plus its five MCP servers. |
 | [proxyman](plugins/proxyman/README.md) | Captures and decodes the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy, scoped to that app's hosts. |
@@ -19,7 +19,7 @@ ships.
 /plugin marketplace add blockchainian/claude
 /plugin install codex@blockchainian
 /plugin install grok@blockchainian
-/plugin install build-ios-apps@blockchainian
+/plugin install mobile@blockchainian
 /plugin install render@blockchainian
 /plugin install cloudflare@blockchainian
 /plugin install proxyman@blockchainian
@@ -36,7 +36,7 @@ README covers its requirements and usage.
 .claude-plugin/marketplace.json   the catalog, listing every plugin
 plugins/codex/                    the codex plugin
 plugins/grok/                     the grok plugin
-plugins/build-ios-apps/           the iOS plugin
+plugins/mobile/                   the iOS plugin
 plugins/render/                   the Render plugin, trimmed to nine skills
 plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
 plugins/proxyman/                 the mitmproxy traffic-capture plugin

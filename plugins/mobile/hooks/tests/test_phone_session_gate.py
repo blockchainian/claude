@@ -18,7 +18,7 @@ from pathlib import Path
 HERE = Path(__file__).parent
 HOOK = HERE.parent / "phone-session-gate"
 CLAIM = HERE.parent.parent / "skills/ios-take-screenshot/scripts/claim_simulator.py"
-TOOL = "mcp__plugin_build-ios-apps_appium-mcp__appium_session_management"
+TOOL = "mcp__plugin_mobile_appium-mcp__appium_session_management"
 PHONE = "00008030-001A2B3C4D5E6F7A"
 SESSION = "3f1c0a52-7d4e-4b0e-9d7a-6c1b2e3d4f50"
 

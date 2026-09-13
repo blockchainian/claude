@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__plugin_build-ios-apps_appium-mcp__appium_session_management",
+        "matcher": "mcp__plugin_mobile_appium-mcp__appium_session_management",
         "hooks": [
           {
             "type": "command",
@@ -14,7 +14,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__plugin_build-ios-apps_appium-mcp__appium_session_management",
+        "matcher": "mcp__plugin_mobile_appium-mcp__appium_session_management",
         "hooks": [
           {
             "type": "command",
