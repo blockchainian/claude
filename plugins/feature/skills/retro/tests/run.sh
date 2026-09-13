@@ -23,4 +23,13 @@ expect "codex TOTAL: 1,600"
 expect "mean joined rollout: 1,600 tok"   # proxy multiplier for un-joinable failed workstreams
 reject "other-thread"                     # different cwd + not a recorded thread id → excluded
 
-if [ "$fail" -eq 0 ]; then echo "retro/extract.py: all assertions passed"; else echo "$out"; exit 1; fi
+# ---- efficacy.py: recurrence analysis over retro.json x fixes.jsonl ----
+eout="$(python3 efficacy.py --root tests/fixture-efficacy)"
+eexpect() { if ! grep -qF "$1" <<<"$eout"; then echo "FAIL (efficacy): expected: $1"; fail=1; fi; }
+eexpect "retros: 3  fixes: 2"
+eexpect "NO RECURRENCE — strong"                 # mechanical gate: waste structurally blocked
+eexpect "NOT EFFECTIVE — recurs at 20.0% → 20.0%"   # judgment fix: waste came back
+eexpect "mechanical-gate: 1/1"
+eexpect "judgment: 0/1"
+
+if [ "$fail" -eq 0 ]; then echo "retro/extract.py + efficacy.py: all assertions passed"; else echo "$out"; echo "$eout"; exit 1; fi

@@ -1,0 +1,1 @@
+{"session_id":"c","name":"sweep-c","date":"2026-09-15","shape":"ship","grand_total":10000,"lanes":{"orchestrator":4000,"subagents":3000,"codex":3000},"findings":[{"waste_class":"W2","axis":"A","cost":2500,"cost_kind":"measured","fix_destination":"memory","fix_id":"f2-memory"}]}
