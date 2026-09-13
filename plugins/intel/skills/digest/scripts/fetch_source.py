@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ABOUTME: Fetches the readable text of a source URL and writes it as plain text.
-# ABOUTME: Handles articles, podcast transcript pages, YouTube subtitles, and audio.
+# ABOUTME: Handles articles, transcript pages, YouTube subtitles, PDFs, and audio.
 
 import html
 import json
@@ -35,7 +35,7 @@ def slugify(url):
     p = urlparse(url)
     if p.query and "v=" in p.query:
         return clean(re.sub(r".*v=([\w-]+).*", r"\1", p.query))
-    parts = [re.sub(r"\.(html?|php)$", "", s) for s in p.path.split("/") if s]
+    parts = [re.sub(r"\.(html?|php|pdf)$", "", s) for s in p.path.split("/") if s]
     picked = []
     for segment in reversed(parts):
         picked.insert(0, segment)
@@ -60,6 +60,31 @@ AUDIO_EXT = r"\.(?:mp3|m4a|aac|ogg|oga|wav|flac)"
 
 def is_audio_url(url):
     return re.search(AUDIO_EXT + r"$", urlparse(url).path, re.I) is not None
+
+
+def is_pdf_url(url):
+    return urlparse(url).path.lower().endswith(".pdf")
+
+
+def pdf_to_text(pdf_path):
+    """The text of a PDF via pdfminer.six, imported in-process or run through
+    uv's ephemeral env. A near-empty result means the PDF is image-only
+    (scanned) — there is no OCR here."""
+    try:
+        from pdfminer.high_level import extract_text
+        return extract_text(str(pdf_path)) or ""
+    except ImportError:
+        pass
+    if shutil.which("uv"):
+        res = subprocess.run(
+            ["uv", "run", "--with", "pdfminer.six", "python3", "-c",
+             "import sys;from pdfminer.high_level import extract_text;"
+             "sys.stdout.write(extract_text(sys.argv[1]) or '')", str(pdf_path)],
+            capture_output=True, text=True)
+        if res.returncode == 0:
+            return res.stdout
+        raise SystemExit("pdfminer failed: " + res.stderr.strip()[-300:])
+    raise SystemExit("cannot read PDF: install `uv` (it runs pdfminer.six) or pdfminer.six")
 
 
 def find_audio_url(raw, base):
@@ -177,6 +202,18 @@ def fetch_page(url):
     return body
 
 
+def fetch_bytes(url, dest):
+    res = subprocess.run(["curl", "-sL", "--max-time", "60", "-A", UA,
+                          "-o", str(dest), "-w", "%{http_code}", url],
+                         capture_output=True, text=True)
+    if res.returncode != 0:
+        raise SystemExit(f"curl failed for {url}: {res.stderr.strip()[-300:]}")
+    status = res.stdout.strip()
+    if status.isdigit() and int(status) >= 400:
+        raise SystemExit(f"HTTP {status} from {url} — nothing was fetched")
+    return dest
+
+
 def main():
     if len(sys.argv) < 2:
         raise SystemExit("usage: fetch_transcript.py <url>")
@@ -188,6 +225,10 @@ def main():
     audio_url = None
     if is_youtube(url):
         text, subtitles = fetch_youtube(url, workdir)
+    elif is_pdf_url(url):
+        src = Path(url)
+        pdf = src if src.is_file() else fetch_bytes(url, workdir / "source.pdf")
+        text, subtitles = pdf_to_text(pdf), None
     elif is_audio_url(url):
         text, subtitles, audio_url = "", None, url
     else:

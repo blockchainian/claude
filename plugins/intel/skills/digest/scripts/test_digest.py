@@ -4,12 +4,39 @@
 
 import importlib.util
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).parent
 fails = []
+
+
+def make_pdf(text):
+    """A minimal, valid single-page PDF carrying `text`, offsets computed so
+    pdfminer can read it — no external library needed to build the fixture."""
+    stream = b"BT /F1 24 Tf 72 700 Td (" + text.encode() + b") Tj ET\n"
+    objs = [
+        b"<</Type /Catalog /Pages 2 0 R>>",
+        b"<</Type /Pages /Kids [3 0 R] /Count 1>>",
+        b"<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources <</Font <</F1 5 0 R>>>>>>",
+        b"<</Length " + str(len(stream)).encode() + b">>\nstream\n" + stream + b"endstream",
+        b"<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>",
+    ]
+    pdf = b"%PDF-1.4\n"
+    offsets = []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(pdf))
+        pdf += str(i).encode() + b" 0 obj\n" + body + b"\nendobj\n"
+    xref_pos = len(pdf)
+    pdf += b"xref\n0 " + str(len(objs) + 1).encode() + b"\n0000000000 65535 f \n"
+    for off in offsets:
+        pdf += ("%010d 00000 n \n" % off).encode()
+    pdf += b"trailer\n<</Size " + str(len(objs) + 1).encode() + b" /Root 1 0 R>>\n"
+    pdf += b"startxref\n" + str(xref_pos).encode() + b"\n%%EOF\n"
+    return pdf
 
 ARTICLE = """<html><head><title>Ignore</title></head><body>
 <nav>Home About Subscribe Newsletter</nav>
@@ -65,6 +92,21 @@ def main():
     # slug for an article URL
     check("article slug is distinctive", fs.slugify("https://site.com/posts/why-x-wins") == "why-x-wins",
           fs.slugify("https://site.com/posts/why-x-wins"))
+
+    # --- PDF detection + extraction ---
+    check("pdf url detected", fs.is_pdf_url("https://a.com/whitepaper.pdf"))
+    check("pdf url with query detected", fs.is_pdf_url("https://a.com/doc.pdf?v=1"))
+    check("html url is not pdf", not fs.is_pdf_url("https://a.com/posts/hello"))
+    check("pdf slug drops .pdf", fs.slugify("https://a.com/docs/whitepaper.pdf") == "whitepaper",
+          fs.slugify("https://a.com/docs/whitepaper.pdf"))
+
+    if shutil.which("uv") or importlib.util.find_spec("pdfminer"):
+        pdf = Path(tempfile.mkdtemp()) / "t.pdf"
+        pdf.write_bytes(make_pdf("Hello intel digest PDF"))
+        txt = fs.pdf_to_text(pdf)
+        check("pdf text extracted", "Hello intel digest PDF" in txt, txt[:80])
+    else:
+        print("SKIP: pdf extraction (no uv/pdfminer available)")
 
     # --- store: an article draft (no 'show') saves ---
     root = Path(tempfile.mkdtemp())
