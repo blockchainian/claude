@@ -101,10 +101,21 @@ if [ "${WORKSTREAM_MODE:-}" != "" ]; then
   LINE="$(sed -n "${idx}p" "$RUN_DIR/workstreams.txt")"
   BR="workstreams/$FEATURE/$idx"
 
-  status() { # status <result> <attempts> <reason>
-    printf '{"workstream": %s, "result": "%s", "attempts": %s, "branch": "%s", "reason": "%s", "line": "%s"}\n' \
-      "$idx" "$1" "$2" "$BR" "$3" "$(echo "$LINE" | cut -c1-120 | sed 's/"/\\"/g')" \
+  status() { # status <result> <attempts> <reason> [threads-json-array]
+    printf '{"workstream": %s, "result": "%s", "attempts": %s, "branch": "%s", "reason": "%s", "threads": %s, "line": "%s"}\n' \
+      "$idx" "$1" "$2" "$BR" "$3" "${4:-[]}" "$(echo "$LINE" | cut -c1-120 | sed 's/"/\\"/g')" \
       > "$RUN_DIR/status/workstream-$idx.json"
+  }
+
+  # The codex thread id(s) this workstream ran, parsed from the daemon runner's
+  # "[thread <id>] <name>" log line — the join key into ~/.codex/sessions for
+  # cost attribution. (The exec runner is --ephemeral and logs none; threads is [].)
+  codex_threads() {
+    local ids
+    ids="$(grep -h '^\[thread ' "$LOGD/workstream-$idx-a"*.codex.log 2>/dev/null \
+      | sed -E 's/^\[thread ([^]]+)\].*/\1/' | sed 's/[[:space:]]*$//' \
+      | awk 'NF' | sort -u | sed 's/.*/"&"/' | paste -sd, -)"
+    printf '[%s]' "$ids"
   }
 
   # acquire a pool slot
@@ -209,7 +220,7 @@ $(tail -c 2000 "$LOGD/workstream-$idx-a$a.commit.log" 2>/dev/null)"
     fi
     note "[workstream $idx] FAILED after $a attempt(s): $reason"
   fi
-  status "$result" "$a" "$reason"
+  status "$result" "$a" "$reason" "$(codex_threads)"
 
   # release the slot with a clean tree
   git -C "$WT" checkout -q --detach
