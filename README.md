@@ -10,6 +10,7 @@ ships.
 | [build-ios-apps](plugins/build-ios-apps/README.md) | Builds, runs, profiles, and screenshots iOS apps on a simulator or a connected iPhone. |
 | [render](plugins/render/README.md) | The Render plugin with only the nine skills this desk uses, plus its MCP server, agent, and hook. |
 | [cloudflare](plugins/cloudflare/README.md) | The Cloudflare plugin with only the six skills this desk uses, plus its five MCP servers. |
+| [proxyman](plugins/proxyman/README.md) | Captures and decodes the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy, scoped to that app's hosts. |
 
 ## Install
 
@@ -20,6 +21,7 @@ ships.
 /plugin install build-ios-apps@blockchainian
 /plugin install render@blockchainian
 /plugin install cloudflare@blockchainian
+/plugin install proxyman@blockchainian
 ```
 
 Claude Code registers one marketplace per name, so adding this repository is
@@ -35,6 +37,7 @@ plugins/grok/                     the grok plugin
 plugins/build-ios-apps/           the iOS plugin
 plugins/render/                   the Render plugin, trimmed to nine skills
 plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
+plugins/proxyman/                 the mitmproxy traffic-capture plugin
 tests/                            grok's node suite
 ```
 
