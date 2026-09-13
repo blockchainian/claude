@@ -58,40 +58,78 @@ tunnel — install the iOS profile, then **Settings > General > About > Certific
 Settings** and toggle the mitmproxy CA on. Without that toggle, TLS interception fails on the
 phone.
 
-## 1. Know the target's hosts
+## 1. Who does the scoping — Zero Omega or `--hosts`
 
-Scoping needs the app's domains. For a website you usually know them — but check the network
-tab or a discovery pass for the API and WebSocket hosts, which often sit on a different
-domain than the page (`axiom.trade` served its API from `api2.axiom.trade` and its socket
-from a `cluster*.axiom.trade`). For a mobile app you rarely know them up front.
+An app talks to many domains: its own API (often a different subdomain), a WebSocket host,
+third-party auth (Privy), analytics, RPC providers, CDNs. Capturing "the app" means capturing
+all of those, so something has to decide which traffic belongs to the app. **Where that
+decision is made differs by transport, and it determines whether you pass `--hosts`.**
 
-**Discovery pass** (only when you don't know the hosts): start a capture with **no**
-`--hosts`, drive only the target app for a minute, stop, and list what it talked to:
+- **Mac website — Zero Omega scopes, so capture unfiltered.** Zero Omega enables the
+  mitmproxy profile for the web app and routes *all* of that app's traffic to the proxy,
+  across every domain it calls. The scope is already applied at the routing layer, so run the
+  capture with **no `--hosts`** and keep everything that arrives — that is how you get the
+  app's cross-domain calls. Adding `--hosts` here is a mistake: `allow_hosts` would tunnel and
+  **drop** every call to a domain you did not list, which is exactly the cross-domain traffic
+  you want. This holds for one app at a time; when several apps are captured at once and share
+  a domain, see the caveat below.
+- **iPhone WireGuard — `--hosts` scopes.** The tunnel routes the whole phone, so mitmproxy
+  sees everything and `--hosts` is what narrows the file to the target app (section 2).
+
+**Seeing which domains an app used** (for the report, or to build a WireGuard `--hosts` list):
+`hosts.py` tallies them from a capture, most-frequent first.
 
 ```bash
-"$SKILL_DIR/scripts/capture.py" start --mode proxy --label discover
-# ... connect the client, use the app briefly, then stop (section 4) ...
 mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/hosts.py"
 ```
 
-`hosts.py` prints each host and its flow count, most-frequent first. Pick the app's own API
-and socket hosts from that list — ignore analytics, crash reporters and CDNs unless they are
-the point. An unscoped capture holds unrelated traffic, so treat its file as throwaway and
-re-capture scoped to the hosts you found.
+On a Zero-Omega web capture that list is already just the app's domains. For WireGuard, do one
+short unscoped pass, read the list, then re-capture with `--hosts` set to the app's own API
+and socket hosts (ignore analytics and CDNs unless they are the point).
+
+### Concurrent captures and shared domains
+
+Separate captures never collide at the proxyman level: each run has its own port, output
+directory and process, held with lock files (WireGuard is the one single-slot resource). A
+mitmdump instance only records what is routed to its own port, so two runs never double-write
+or corrupt each other.
+
+The limit is above proxyman, in Zero Omega's routing: **a domain maps to exactly one profile,
+so one port** (confirmed behaviour — auto-switch matches the request's own URL). So when two
+apps are captured at once and share a domain — `privy.io` for auth, a common RPC or analytics
+host — that domain's traffic from *both* apps lands in whichever single capture the rule
+points at, and the other app's capture misses it. `--hosts` cannot fix this: the two apps use
+the *same* host, so no host filter separates them, and it is not a bug in either capture — it
+is where the routing sent the packets.
+
+Split a shared domain by **who called it**, not by host, with `origins.py`:
+
+```bash
+# List the distinct callers (Origin / Referer / *-app-id) of each host in a capture.
+mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
+
+# Pull just one app's calls out of a shared capture (match on its origin or app id).
+SOURCE=app-a.example mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
+```
+
+Each web app sends a distinct `Origin`/`Referer`, and Privy carries a per-app id header, so a
+shared `privy.io` capture separates cleanly at read time. If you would rather avoid the
+co-mingling entirely, capture the apps sequentially instead of at once.
 
 ## 2. Start a scoped capture
 
 ### Mac website (Zero Omega)
 
 ```bash
-"$SKILL_DIR/scripts/capture.py" start --mode proxy --hosts "axiom.trade,api2.axiom.trade" --label axiom
+"$SKILL_DIR/scripts/capture.py" start --mode proxy --label axiom
 ```
 
-Read `proxyLocal` (e.g. `127.0.0.1:9080`) from the JSON. In the Zero Omega extension, create
-a proxy profile pointing at that host and port and switch it on **for the target site only**
-— an auto-switch rule for the app's domains, not a global proxy, so the rest of your browsing
-is untouched. The capture's host filter is a second line of defence: even a global proxy
-setting would only ever save the target hosts.
+No `--hosts` — Zero Omega already scopes to the app (section 1). Read `proxyLocal` (e.g.
+`127.0.0.1:9080`) from the JSON. In the Zero Omega extension, point the mitmproxy profile at
+that host and port and enable it for the web app; it routes all of the app's traffic, across
+every domain, to the proxy, and the capture keeps whatever arrives. If you must run Zero Omega
+as a *global* proxy instead of per-app, then pass `--hosts` to keep the file to the app —
+but list every domain the app uses, or its cross-domain calls are dropped.
 
 **Use the user's own logged-in Chrome, not a throwaway profile.** The sites worth capturing
 are login-gated (often Google OAuth), and the Claude Chrome extension drives that main
@@ -173,6 +211,10 @@ WSHOST=pump.fun mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/s
 
 # Host tally, to confirm the scope held or to pick hosts after a discovery pass.
 mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/hosts.py"
+
+# Callers of each host (Origin/Referer/app-id); SOURCE=<origin> pulls one app's calls.
+# Use when a domain is shared by several apps — see "Concurrent captures and shared domains".
+mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
 ```
 
 For a specific request or response body, filter with mitmproxy's flow language and dump it —
