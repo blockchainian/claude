@@ -178,6 +178,24 @@ class HubCaptures(unittest.TestCase):
         self.assertEqual(out["clientsConnected"], 1)
         self.assertEqual(out["requests"], 1)
 
+    def test_check_flags_tls_failure(self):
+        self._fake_hub()
+        t0 = 1_000_000.0
+        cap = "20260101-000000-2-y"
+        capture.captures_dir().mkdir(parents=True, exist_ok=True)
+        (capture.captures_dir() / f"{cap}.json").write_text(json.dumps(
+            {"id": cap, "label": "y", "started_at": t0, "hosts": ["api.foo.com"],
+             "hostRegex": capture.host_regex(["api.foo.com"])}))
+        (capture.hub_dir() / "mitmdump.log").write_text(
+            f"PROXY_CLIENT_CONNECTED {t0 + 1:.3f}\n"
+            f"PROXY_TLS_FAILED {t0 + 1:.3f} api.foo.com\n"      # CA not trusted / pinned
+            f"PROXY_TLS_FAILED {t0 + 2:.3f} api.foo.com\n")
+        out = self._run(argparse.Namespace(func=capture.cmd_check, capture=cap))
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["requests"], 0)
+        self.assertEqual(out["tlsFailed"], 2)
+        self.assertIn("TLS", out["verdict"])
+
     def test_down_clears_a_dead_hub(self):
         self._fake_hub(alive=False)
         out = self._run(argparse.Namespace(func=capture.cmd_down, wipe=False))

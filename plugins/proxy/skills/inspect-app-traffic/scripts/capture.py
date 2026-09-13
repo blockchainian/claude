@@ -237,8 +237,8 @@ def _reader_output(record: dict, addon: str, extra: list[str]) -> str:
     return subprocess.run(cmd, capture_output=True, text=True).stdout
 
 
-def _log_counts(record: dict) -> tuple[int, int]:
-    """Count this capture's client connections and requests from the hub log.
+def _log_counts(record: dict) -> tuple[int, int, int]:
+    """Count this capture's client connections, requests, and TLS failures from the hub log.
 
     connlog.py writes a timestamped line per client connection and per request host, so a
     capture's window (start time) and hosts are counted straight from the log — no re-parse of
@@ -249,8 +249,8 @@ def _log_counts(record: dict) -> tuple[int, int]:
     try:
         text = (hub_dir() / "mitmdump.log").read_text(errors="replace")
     except FileNotFoundError:
-        return 0, 0
-    clients = requests = 0
+        return 0, 0, 0
+    clients = requests = tls_failed = 0
     for line in text.splitlines():
         parts = line.split(maxsplit=2)
         if len(parts) >= 2 and parts[0] == "PROXY_CLIENT_CONNECTED":
@@ -259,14 +259,17 @@ def _log_counts(record: dict) -> tuple[int, int]:
                     clients += 1
             except ValueError:
                 pass
-        elif len(parts) == 3 and parts[0] == "PROXY_REQUEST":
+        elif len(parts) == 3 and parts[0] in ("PROXY_REQUEST", "PROXY_TLS_FAILED"):
             try:
                 fresh = float(parts[1]) >= since
             except ValueError:
                 continue
             if fresh and (not rx or re.search(rx, parts[2])):
-                requests += 1
-    return clients, requests
+                if parts[0] == "PROXY_REQUEST":
+                    requests += 1
+                else:
+                    tls_failed += 1
+    return clients, requests, tls_failed
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -280,19 +283,24 @@ def cmd_check(args: argparse.Namespace) -> int:
                           "verdict": "the hub is not running — start a capture first"}))
         return 0
 
-    clients, requests = _log_counts(record)
+    clients, requests, tls_failed = _log_counts(record)
 
     if clients == 0:
         verdict = ("nothing has connected to the hub — enable Zero Omega for the site (proxy "
                    "8080) or turn on the phone tunnel, then use the app")
+    elif requests == 0 and tls_failed > 0:
+        verdict = (f"connections are arriving but TLS is failing on {tls_failed} — the client "
+                   "does not trust the mitmproxy CA (on the phone: install via mitm.it, then "
+                   "Settings > General > About > Certificate Trust Settings), or the app pins "
+                   "its certificate")
     elif requests == 0:
         verdict = ("the hub has traffic but none for this capture's hosts since it started — "
                    "widen --hosts, or the Zero Omega rule does not cover the app's hosts")
     else:
         verdict = f"capturing: {requests} request(s) to this capture's hosts"
     print(json.dumps({"ok": requests > 0, "capture": args.capture, "hubRunning": True,
-                      "clientsConnected": clients, "requests": requests, "verdict": verdict},
-                     indent=2))
+                      "clientsConnected": clients, "requests": requests,
+                      "tlsFailed": tls_failed, "verdict": verdict}, indent=2))
     return 0
 
 
@@ -319,7 +327,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
     if not record:
         print(json.dumps({"stopped": False, "reason": "capture not found", "capture": args.capture}))
         return 2
-    _, n = _log_counts(record)
+    _, n, _ = _log_counts(record)
     path.unlink(missing_ok=True)
     wiped = False
     if args.wipe:
