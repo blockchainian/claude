@@ -2,10 +2,11 @@
 name: digest
 description: >
   Turn a long-form source — an article, a podcast transcript, a YouTube video,
-  a page that only offers audio — into durable, searchable highlights. Use for
-  "/digest <url>", "highlights of <url>", "what did <source>
-  say about X", "summarize this article/episode", "search my notes".
-  Handles ordinary article and transcript pages, YouTube (via subtitles), and
+  a PDF (whitepaper, filing, deck), a page that only offers audio — into
+  durable, searchable highlights. Use for "/digest <url-or-file>", "highlights
+  of <url>", "what did <source> say about X", "summarize this
+  article/episode/paper", "search my notes". Handles ordinary article and
+  transcript pages, YouTube (via subtitles), PDFs (URL or local file), and
   audio pages (via the transcribe skill).
 
   NOT for: general web research across many pages (use agent-reach), or
@@ -41,8 +42,8 @@ everything is present, so it is safe to run every time.
 bash "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
 ```
 
-It ensures `uv` (runs the trafilatura article extractor in an ephemeral env)
-and `yt-dlp` (YouTube subtitles).
+It ensures `uv` (runs the trafilatura article extractor and the pdfminer PDF
+extractor in an ephemeral env) and `yt-dlp` (YouTube subtitles).
 
 ## Digest a URL (the default)
 
@@ -62,6 +63,11 @@ and `yt-dlp` (YouTube subtitles).
    `subtitles`. With `auto` there are no speaker labels, so attribute quotes to
    the source, not a named speaker; with `manual` the labels may be present, so
    use them only where the text actually carries them.
+
+   A **PDF** (a `.pdf` URL, downloaded first, or a local file path passed
+   straight in) is extracted with pdfminer. A PDF that comes back with almost
+   no words is image-only (scanned) — there is no OCR here, so say it is scanned
+   and stop rather than writing highlights from nothing.
 
 1b. **Decide what the page gave you.**
    - If `audio_url` is **non-null** (the page links audio, or the URL itself was

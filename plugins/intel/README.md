@@ -13,11 +13,12 @@ goes in; durable, attributable notes come out.
   `streamlink`/`yt-dlp` — segmented and transcribed as it plays. Idempotent
   `setup.sh` auto-installs what's missing. A reusable audio-to-text step: any
   skill that has audio and needs its words calls this one.
-- **`digest`** — turn a source URL into durable highlights, stored and
-  searchable. Extracts an article's main body (trafilatura) or a podcast
-  transcript, reads YouTube via subtitles, and for a page that only offers
-  audio falls back to `transcribe`. A bare URL digests; `save` / `search`
-  manage the store, with per-item take-aways.
+- **`digest`** — turn a source into durable highlights, stored and searchable.
+  Extracts an article's main body (trafilatura) or a podcast transcript, reads
+  YouTube via subtitles, pulls text from a PDF (URL or local file, via
+  pdfminer), and for a page that only offers audio falls back to `transcribe`.
+  A bare URL or file digests; `save` / `search` manage the store, with per-item
+  take-aways.
 
 ## Why they live together
 
