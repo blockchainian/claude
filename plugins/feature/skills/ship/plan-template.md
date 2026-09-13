@@ -34,7 +34,10 @@ conventions the implementer would otherwise guess (TDD, ABOUTME headers, no comp
 ## Workstreams
 
 <!-- One block per codex workstream. The block is the whole brief: the implementer reads nothing
-else. -->
+else. Every acceptance criterion `AC<n>` from problem.md's "Accepted when" becomes at least one
+named test here or in the UX checklist, tagged `[AC<n>]` on the case that settles it — a ui
+criterion belongs in the UX checklist, the rest in a workstream's Tests line, a benchmark in Tests
+or Live checks. check-acceptance.py flags any criterion no test references. -->
 
 ### `<id>` — <one sentence: what changes and where>
 
@@ -46,7 +49,7 @@ else. -->
 returned id/cursor/timestamp/date back through the code and assert the output matches the
 fixture; a literal invented in the test is a defect. If no fixture is pinned, this does not
 apply. -->
-Tests: <named cases, one per behaviour: the drop, the keep, each boundary, each missing input>.
+Tests: <named cases, one per behaviour: the drop, the keep, each boundary, each missing input; tag each case that settles an acceptance criterion `[AC<n>]`>.
 Files: `path/a.ts`, `path/b.ts`.
 
 <!-- Every workstream, codex or UX, ends with a `Files:` line; check-overlap.sh reads them. -->
@@ -93,11 +96,12 @@ green unedited, a call site that keeps its signature). -->
 
 <!-- Delete this whole section, heading included, when the UX workstreams read `No UX lane.`
 Otherwise one surface per heading, one objective assertion per line (element exists, computed
-style, console clean, navigation happened). These become the probe. -->
+style, console clean, navigation happened). These become the probe. Tag each assertion that
+settles a ui acceptance criterion `[AC<n>]`. -->
 
 ### <surface>
 
-- <assertion>
+- <assertion> `[AC<n>]`
 
 ## New files
 
