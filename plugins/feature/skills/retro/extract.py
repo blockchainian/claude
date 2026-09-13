@@ -204,6 +204,8 @@ def report(name, root, basis, codex_root):
             ctot += tk
         if rows:
             print(f"  codex TOTAL: {ctot:,}  (NOT in the Claude transcripts; joined from ~/.codex/sessions)")
+            print(f"  mean joined rollout: {ctot // len(rows):,} tok — the proxy multiplier: an un-joinable "
+                  "failed workstream ≈ this × (discarded-workstream count read from the transcript).")
             print("  ** rank this against the Claude buckets above — a failed/nothing-merged codex run "
                   "belongs in the ranking, never dropped because its cost lived off-transcript. **")
         else:
