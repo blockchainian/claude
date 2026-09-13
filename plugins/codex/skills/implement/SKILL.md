@@ -29,8 +29,12 @@ Do not re-plan and do not re-ask; the plan is the spec codex reads.
    `implement.sh` has no runtime check. A plan that fails this goes back to
    the planner, not into the script.
 2. Write `workstreams.txt` beside the plan: one line per codex workstream,
-   each line a **pointer** into the plan, never the brief itself, for example
-   `implement workstream "auth-token" per specs/<date>-<topic>/plan.md, following its Constraints and Invariants`.
+   each line a **pointer** into the plan, never the brief itself, that scopes
+   the agent to the shared core plus its own block — necessary and sufficient
+   to build correctly — for example `implement workstream "auth-token" per
+   specs/<date>-<topic>/plan.md: read only its Scope, Facts, Constraints,
+   Dependencies and Invariants and the "auth-token" workstream block; ignore
+   the other workstreams and any other section`.
    Skip the UX workstream; it is not codex's.
 3. Take the check command from the plan's Checks section verbatim;
    `implement.sh` runs it in every worktree and after merge, so the plan's Invariants

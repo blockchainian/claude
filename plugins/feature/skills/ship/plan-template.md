@@ -3,6 +3,11 @@
 <!-- Lines in these comments are guidance for the planner; delete them, do not copy them. -->
 <!-- Refuse a problem.md whose Status line is not "no design decided", or that records the work as
 shipped: there is nothing to plan. -->
+<!-- This file is the agent-facing spec: nothing in it is for the user, and no decision rationale,
+alternative rejected, risk or shipped outcome belongs here. Those go in decisions.md (pre-launch,
+decisions-template.md) and outcome.md (post-ship, outcome-template.md). A codex workstream reads
+only the shared core — Scope, Facts, Constraints, Dependencies, Invariants — plus its own block, so
+that set must be necessary and sufficient to build the block correctly without any other section. -->
 
 Base: `<short sha>` on branch `<branch>`, <date>. Every code anchor below is `symbol` plus
 `path.ts:NN` at that SHA; when they disagree, the symbol wins.
@@ -130,7 +135,5 @@ must show; feature-specific, not the generic deploy scripts. -->
 
 - `<command>` — expect <value>
 
-## Outcome
-
-<!-- Filled in by the orchestrator at phase end: staging SHA, production SHA, PR, thread
-dispositions, live-check results. -->
+<!-- No Outcome section: the orchestrator writes the shipped record to outcome.md
+(outcome-template.md) at phase end, keeping this file input-only. -->
