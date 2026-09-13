@@ -12,12 +12,14 @@ REST and WebSocket protocol.
 **One shared hub.** A single long-lived mitmdump — the hub — serves the HTTP proxy and,
 when asked, WireGuard, on the fixed port **8080**. Every session and agent shares it: the
 browser needs only **one** Zero Omega profile, pointed at 8080, and the phone needs only one
-tunnel. The hub records everything routed to it into one flow file.
+tunnel.
 
-**A capture is a view, not a process.** `start` notes the moment and the target hosts; the
-readers then show only that capture's window, scoped to its hosts (and, for a shared host,
-its caller). Two agents capturing two apps at once are two records over one hub, separated at
-read time — no second proxy, no second port, no second Zero Omega profile.
+**A capture is a record, not a process.** `start` opens a capture with a start time and its
+target hosts; the hub then fans every flow into the file of each active capture whose hosts
+and window it matches. So each capture has its own file — a read touches only that app's data,
+not the whole hub — and two agents capturing two apps at once run over one proxy, one port,
+one Zero Omega profile, with a file per app. No second proxy, no read that pays for another
+capture's traffic.
 
 ## Every name here is a value to paste, not a variable
 
@@ -26,7 +28,7 @@ Where this document writes `$CAP`, `$SKILL_DIR` or `$PROXY_DIR`, it means the ac
 read it out of the JSON a previous command printed and type it in full. `$SKILL_DIR` is the
 absolute path of this loaded skill folder, which you already know; do not derive it from the
 target app's working directory. All scripts print JSON on stdout — parse stdout, act on it.
-The hub and its flow file live under `$PROXY_DIR` (default `/tmp/proxy`); point it at a
+The hub and the per-capture flow files live under `$PROXY_DIR` (default `/tmp/proxy`); point it at a
 durable directory to keep captures across a reboot.
 
 ## 0. Setup (skip if already set up)
@@ -112,8 +114,9 @@ Claude Chrome extension driving it. Either way, enable Zero Omega first.
 
 ## 3. Read the capture
 
-Every reader is scoped to `$CAP` — its time window and its `--hosts` — so it shows only that
-app's traffic out of the shared hub:
+Each capture has its **own** file — the hub fans every flow into the file of each active
+capture whose hosts and window it matches — so a read touches only that app's data, however
+much other traffic the hub is handling at the same time:
 
 ```bash
 "$SKILL_DIR/scripts/capture.py" read "$CAP" --kind flows     # one line per request
@@ -123,21 +126,25 @@ app's traffic out of the shared hub:
 ```
 
 `--kind ws` takes `--wsmax <chars>` to widen frame bodies. For a request or response body,
-read the hub file directly with mitmproxy's flow language:
+read the capture's own file directly with mitmproxy's flow language:
 
 ```bash
-mitmdump -q -nr "$PROXY_DIR/hub/flows.mitm" '~u /api/trade & ~s' --set flow_detail=3 2>/dev/null
+mitmdump -q -nr "$PROXY_DIR/cap/$CAP.mitm" '~u /api/trade & ~s' --set flow_detail=3 2>/dev/null
 ```
+
+A WebSocket flow is written to the capture's file when it closes, so read its frames after
+the socket ends or after `down` — a socket still open mid-capture is not in the file yet.
 
 ## 4. Concurrent captures and shared domains
 
-Two agents can capture two apps at once: each `start` opens its own record over the one hub,
-and each `read` shows only that record's window and hosts. Nothing collides — one proxy, one
-port, one Zero Omega profile.
+Two agents can capture two apps at once: each `start` opens its own capture, the hub writes
+each app's flows into its own file, and each `read` touches only that file. Nothing collides
+and no read pays for another capture's traffic — one proxy, one port, one Zero Omega profile,
+one file per app.
 
 When two apps share a host — `privy.io` for auth, a common RPC or analytics host — that host's
-traffic is in the one hub for both. `--hosts` cannot separate apps on the *same* host. Split
-by **caller** with origins:
+flows are written to **both** captures' files (both match it). `--hosts` cannot separate apps
+on the *same* host. Split by **caller** with origins:
 
 ```bash
 "$SKILL_DIR/scripts/capture.py" read "$CAP" --kind origins                       # list callers
@@ -152,7 +159,7 @@ shared host separates cleanly at read time.
 ```bash
 "$SKILL_DIR/scripts/capture.py" status               # the hub and the open captures
 "$SKILL_DIR/scripts/capture.py" stop "$CAP"          # close one capture; the hub keeps running
-"$SKILL_DIR/scripts/capture.py" down --wipe          # stop the hub and delete its flow file
+"$SKILL_DIR/scripts/capture.py" down --wipe          # stop the hub and delete all capture files
 ```
 
 Close each capture when its investigation is done. Leave the hub running while any capture is
@@ -163,8 +170,8 @@ terminal). Leave the CA installed otherwise; re-trusting it is the slow part.
 
 ## Safety and privacy
 
-- The hub file holds **everything routed to it**, unredacted — auth tokens, cookies, JWTs.
-  Treat it as a secret; `down --wipe` deletes it. Never paste tokens into a report or send a
+- A capture's file holds that app's traffic, unredacted — auth tokens, cookies, JWTs.
+  Treat it as a secret; `down --wipe` deletes them all. Never paste tokens into a report or send a
   raw flow file to an external service; quote request shapes, not credentials.
 - The hub captures only what Zero Omega (or the tunnel) routes to it, so what lands in the
   file is what the user chose to route. Never leave a WireGuard tunnel on after capturing — it
@@ -189,5 +196,5 @@ mitmdump: the host regex matches an app's domains and subdomains but not lookali
 check detects a wildcard listener and allows a TIME_WAIT port; and `start`/`stop`/`status`/
 `down`/`check` act on capture records over a faked hub. Run it with
 `python3 scripts/test_capture.py`. `scripts/test_wg_config.py` pins the pure-Python X25519
-derivation against a known mitmproxy key pair and the RFC 7748 vector. The hub lifecycle and
-the reader scoping (since + host + caller) are verified in a live capture.
+derivation against a known mitmproxy key pair and the RFC 7748 vector. The hub lifecycle, the
+fan-out into per-capture files, and the caller scoping are verified in a live capture.
