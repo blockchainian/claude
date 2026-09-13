@@ -220,6 +220,13 @@ assert_eq "2 workstreams failed" 2 "$(grep -c '"result": "fail"' "$ST"/workstrea
 assert "summary records delivery to main" grep -q '"delivered_to": "main"' "$ST/summary.json"
 assert "summary records no restore" grep -q '"restored": false' "$ST/summary.json"
 
+# codex thread id recorded as the join key for cost attribution (daemon runner only;
+# the exec runner is --ephemeral and persists no rollout to join against)
+if [ "$TEST_IMPLEMENT_RUNNER" = "daemon" ]; then
+  assert "status json records codex thread id(s)" \
+    grep -q '"threads": \["stub-' "$ST"/workstream-*.json
+fi
+
 # failed workstreams not on the session branch
 assert "no stray files from failed workstreams" test ! -e "$FIX/hang.txt"
 
