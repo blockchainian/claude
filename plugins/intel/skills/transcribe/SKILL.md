@@ -1,5 +1,5 @@
 ---
-name: transcribe-audio
+name: transcribe
 description: >
   Turn audio into plain-text words, transcribed locally with whisper — a
   finite file or URL, or a live stream captured as it plays. Use when you have
@@ -26,7 +26,7 @@ Run setup once at the start; it installs only what is missing and is a near-inst
 no-op when everything is present, so it is safe to run every time.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/transcribe-audio/scripts/setup.sh"
+bash "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/setup.sh"
 ```
 
 It ensures `ffmpeg` (pulls and segments audio), `streamlink` and `yt-dlp`
@@ -39,7 +39,7 @@ what is present or missing without installing anything.
 ## Batch — a finite file or URL
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe-audio/scripts/transcribe_audio.py" \
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe_audio.py" \
   "<audio-url-or-file>" "<out.txt>"
 ```
 
@@ -52,7 +52,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe-audio/scripts/transcribe_audio.
 ## Live — an ongoing stream
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe-audio/scripts/transcribe_live.py" \
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe_live.py" \
   "<stream>" "<out.txt>" [--segment-seconds 30] [--max-minutes N]
 ```
 
@@ -93,5 +93,5 @@ and a whisper runner are present it also runs a real end-to-end batch and live
 transcription of a generated clip:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe-audio/scripts/test_transcribe.py"
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/test_transcribe.py"
 ```

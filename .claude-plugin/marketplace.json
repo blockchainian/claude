@@ -65,7 +65,7 @@
     },
     {
       "name": "intel",
-      "description": "Gather and distill knowledge from long-form sources: transcribe audio locally with whisper (the reusable transcribe-audio skill), and turn an article, podcast transcript, or video into durable, searchable highlights (the digest skill).",
+      "description": "Gather and distill knowledge from long-form sources: transcribe audio locally with whisper (the reusable transcribe skill), and turn an article, podcast transcript, or video into durable, searchable highlights (the digest skill).",
       "author": {
         "name": "blockchainian"
       },
