@@ -89,18 +89,44 @@ touching anything.
    discarded-workstream count × mean joined per-workstream cost, plus the
    orchestrator's own (measured) reaction tokens. Never present a proxy as measured.
 
-5. **Write `retro.md` to `~/.claude/retros/<date>-<session>/` and stop at the
-   gate.** Ranked wastes with evidence (token cost, the `path:line` or memory that
-   held the answer, the axis). Then the proposed fixes, grouped by destination
-   (ground / planner / ship / memory). Confirm the diagnosis before applying anything.
+5. **Write `retro.md` and `retro.json` to `~/.claude/retros/<date>-<session>/`, then
+   stop at the gate.** `retro.md` is the human record: ranked wastes with evidence
+   (token cost, the `path:line` or memory that held the answer, the axis), then the
+   proposed fixes grouped by destination (ground / planner / ship / memory).
+   `retro.json` is the machine record that makes efficacy analyzable later — one
+   object:
 
-6. **Apply, on approval, smallest first.** Memory writes (sharpened so the next
-   session front-loads the check) apply on approval. Edits to `ground`, the
-   `planner` agent, `ship` or the plan template are **proposals** — they change
-   how every future run behaves, so never apply one without explicit sign-off.
-   The cheapest ship guardrail, recurring across runs: validate each workstream's
-   check command on the clean baseline before fan-out, and reject any gate
-   already red.
+   ```
+   {session_id, name, date, shape: "goal"|"ship", grand_total,
+    lanes: {orchestrator, subagents, codex},
+    findings: [{waste_class, axis, cost, cost_kind: "measured"|"proxy",
+                fix_destination, fix_id}]}
+   ```
+
+   Take the numbers verbatim from `extract.py` (never re-estimate them). `waste_class`
+   is a **stable kebab-case slug** (e.g. `ungroundable-gate`, `monolithic-self-verify`,
+   `probe-recipe-trial-error`) — reuse the same slug across sessions so a recurrence
+   can be tracked. Give each proposed fix a stable `fix_id`. Confirm the diagnosis
+   before applying anything.
+
+6. **Apply, on approval, smallest first — and log it.** Memory writes (sharpened so
+   the next session front-loads the check) apply on approval. Edits to `ground`, the
+   `planner` agent, `ship` or the plan template are **proposals** — they change how
+   every future run behaves, so never apply one without explicit sign-off. The
+   cheapest ship guardrail, recurring across runs: validate each workstream's check
+   command on the clean baseline before fan-out, and reject any gate already red.
+
+   For **every fix you actually apply**, append one line to `~/.claude/retros/fixes.jsonl`:
+
+   ```
+   {fix_id, waste_class, type: "mechanical-gate"|"judgment"|"memory", applied_at: <commit SHA or memory path>, ref}
+   ```
+
+   This is the treatment timeline. `efficacy.py --root ~/.claude/retros` then joins it
+   to the `retro.json` records and reports whether each fix's `waste_class` recurs in
+   later comparable sessions — near-deductive for a mechanical gate (the waste becomes
+   structurally impossible), only suggestive for judgment/memory fixes. It presents
+   recurrence evidence; a human marks the verdict.
 
 ## Scaling
 
