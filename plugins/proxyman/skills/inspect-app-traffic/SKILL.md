@@ -106,6 +106,12 @@ If the browser shows `NET::ERR_CERT_AUTHORITY_INVALID` or an HSTS block with no 
 CA is not trusted yet — go back to setup. HSTS sites (axiom among them) forbid clicking
 through, so the CA must be trusted; there is no skip.
 
+**Capturing is passive.** This skill only records what crosses the proxy; the traffic can
+come from you clicking through the app or from the Claude Chrome extension driving it. To
+capture what the extension generates, enable Zero Omega for the site first — the extension
+cannot toggle it (its UI is a `chrome-extension://` page the browser tools cannot reach), so
+that switch is a manual step. Everything the driving then produces is captured normally.
+
 ### iPhone app — WireGuard
 
 WireGuard is the iPhone path: it captures the whole phone, including background and
