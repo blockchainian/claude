@@ -88,7 +88,7 @@ class HubCaptures(unittest.TestCase):
         pid = os.getpid() if alive else 2**31 - 1
         capture.hub_meta_path().write_text(json.dumps(
             {"pid": pid, "since": 0, "port": 8080, "modes": ["regular"],
-             "flowFile": str(capture.hub_flow_file()), "log": str(capture.hub_dir() / "x.log")}))
+             "log": str(capture.hub_dir() / "mitmdump.log")}))
 
     def _run(self, ns) -> dict:
         buf = io.StringIO()
