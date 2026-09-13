@@ -47,9 +47,12 @@ concern.
    break — confirm or correct," and wait for the answer. This surfaces the
    falsification target instead of demanding the user pre-sort into it, and
    catches the dangerous case early: an assumption the user filed as a settled
-   decision, flagged before the sweep builds on it. If the input is already
-   clean and the split is obvious, echo it in one line and move on — do not
-   turn this into an interview.
+   decision, flagged before the sweep builds on it. The one-line shortcut is
+   only for an ask that carries no assumption about existing behavior to pull
+   — one stated purely as goal and imposed decisions. Tidy phrasing is not
+   that case: a well-organized design is exactly where a confident but
+   unverified premise hides, so extract it anyway. Don't turn a genuinely
+   assumption-free ask into an interview.
 
 2. **Name the decision and pin the base commit.** One sentence on what is
    being changed and why now. Record `git rev-parse --short HEAD`; every line
