@@ -109,7 +109,7 @@ Split a shared domain by **who called it**, not by host, with `origins.py`:
 mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
 
 # Pull just one app's calls out of a shared capture (match on its origin or app id).
-SOURCE=app-a.example mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
+mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py" --set source=app-a.example
 ```
 
 Each web app sends a distinct `Origin`/`Referer`, and Privy carries a per-app id header, so a
@@ -212,7 +212,7 @@ WSHOST=pump.fun mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/s
 # Host tally, to confirm the scope held or to pick hosts after a discovery pass.
 mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/hosts.py"
 
-# Callers of each host (Origin/Referer/app-id); SOURCE=<origin> pulls one app's calls.
+# Callers of each host (Origin/Referer/app-id); --set source=<origin> pulls one app's calls.
 # Use when a domain is shared by several apps — see "Concurrent captures and shared domains".
 mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
 ```

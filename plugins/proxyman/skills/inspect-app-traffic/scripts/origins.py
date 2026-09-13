@@ -1,14 +1,18 @@
 # ABOUTME: mitmproxy addon to attribute a shared-domain capture to the app that made each
 # ABOUTME: request, by Origin/Referer/app-id header — since one host can serve several apps.
-import os
+from mitmproxy import ctx, http
 
-from mitmproxy import http
 
-# Substring to match against a request's Origin, Referer, or *-app-id headers. When set, only
-# matching flows are printed (one line each) — pull one app's calls out of a shared capture.
-# When empty, on `done` print a table of (host, source) -> count, so the distinct callers of
-# each shared host are visible and you can see what to filter on.
-SOURCE = os.environ.get("SOURCE", "")
+def load(loader) -> None:
+    # Controlled with `--set source=<substring>`. When set, only flows whose caller
+    # (Origin / Referer / *-app-id header) contains it are printed, one line each — pull one
+    # app's calls out of a shared capture. When empty, on `done` a table of (host, caller) ->
+    # count is printed instead, so the distinct callers of each shared host are visible.
+    loader.add_option(
+        "source", str, "",
+        "Substring matched against a request's Origin/Referer/*-app-id header. "
+        "Empty lists callers per host; set pulls one caller's flows.")
+
 
 _seen: dict[tuple[str, str], int] = {}
 
@@ -26,8 +30,9 @@ def _source_of(flow: http.HTTPFlow) -> str:
 
 def response(flow: http.HTTPFlow) -> None:
     src = _source_of(flow)
-    if SOURCE:
-        if SOURCE in src:
+    source = ctx.options.source
+    if source:
+        if source in src:
             r = flow.response
             status = str(r.status_code) if r else "-"
             print(f"{flow.request.method:6} {status:>3}  "
@@ -37,7 +42,7 @@ def response(flow: http.HTTPFlow) -> None:
 
 
 def done() -> None:
-    if SOURCE or not _seen:
+    if ctx.options.source or not _seen:
         return
     hw = max(len(h) for h, _ in _seen)
     for (host, src), n in sorted(_seen.items(), key=lambda kv: -kv[1]):
