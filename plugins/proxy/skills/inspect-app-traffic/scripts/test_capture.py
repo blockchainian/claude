@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -127,6 +128,28 @@ class CheckCommand(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual(out["targetRequests"], 2)
         self.assertIn("capturing", out["verdict"])
+
+
+class PortInUse(unittest.TestCase):
+    def test_detects_wildcard_listener(self):
+        # A listener on all interfaces (0.0.0.0) must read as in-use — the case a
+        # SO_REUSEADDR bind to 127.0.0.1 missed, letting a capture claim an occupied port.
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("", 0))
+        srv.listen()
+        port = srv.getsockname()[1]
+        try:
+            self.assertTrue(capture._port_in_use(port))
+        finally:
+            srv.close()
+
+    def test_unbound_port_reads_free(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("", 0))
+        port = s.getsockname()[1]
+        s.close()
+        self.assertFalse(capture._port_in_use(port))
 
 
 class Human(unittest.TestCase):
