@@ -19,7 +19,7 @@ for a short, deliberate discovery pass (below), and say so when you do.
 ## Every name here is a value to paste, not a variable
 
 Each Bash call runs in its own shell; nothing assigned in one command survives to the next.
-Where this document writes `$RUN`, `$PORT`, `$SKILL_DIR` or `$PROXYMAN_DIR`, it means the
+Where this document writes `$RUN`, `$PORT`, `$SKILL_DIR` or `$PROXY_DIR`, it means the
 actual value — read it out of the JSON a previous command printed and type it in full.
 `$SKILL_DIR` is the absolute path of this loaded skill folder, which you already know; do not
 derive it from the target app's working directory, since an installed plugin lives elsewhere.
@@ -28,12 +28,12 @@ All scripts print JSON on stdout — parse stdout, act on the values.
 ## Running many at once
 
 Two sessions or agents can capture two different apps at the same time. Each capture is a
-**run** with its own listen port, its own output directory under `$PROXYMAN_DIR` (default
-`/tmp/proxyman`), and its own mitmdump process; ports are held with lock files so a second
+**run** with its own listen port, its own output directory under `$PROXY_DIR` (default
+`/tmp/proxy`), and its own mitmdump process; ports are held with lock files so a second
 run never lands on a taken one. The one shared resource is the mitmproxy CA in `~/.mitmproxy`
 — installed once, reused by every run. WireGuard mode is the exception: it needs UDP 51820
 and the shared server key, so only one WireGuard capture runs at a time (proxy captures are
-unlimited and can run alongside it). Point `$PROXYMAN_DIR` at a durable directory to keep
+unlimited and can run alongside it). Point `$PROXY_DIR` at a durable directory to keep
 captures across a reboot — the default under `/tmp` is cleared then.
 
 ## 0. Setup (skip if already set up)
@@ -80,7 +80,7 @@ decision is made differs by transport, and it determines whether you pass `--hos
 `hosts.py` tallies them from a capture, most-frequent first.
 
 ```bash
-mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/hosts.py"
+mitmdump -q -nr "$PROXY_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/hosts.py"
 ```
 
 On a Zero-Omega web capture that list is already just the app's domains. For WireGuard, do one
@@ -89,13 +89,13 @@ and socket hosts (ignore analytics and CDNs unless they are the point).
 
 ### Concurrent captures and shared domains
 
-Separate captures never collide at the proxyman level: each run has its own port, output
+Separate captures never collide at the proxy level: each run has its own port, output
 directory and process, held with lock files (WireGuard is the one single-slot resource). A
 mitmdump instance only records what is routed to its own port, so two runs never double-write
 or corrupt each other.
 
-The limit is above proxyman, in Zero Omega's routing: **a domain maps to exactly one profile,
-so one port** (confirmed behaviour — auto-switch matches the request's own URL). So when two
+The limit is not in the capture but in Zero Omega's routing: **a domain maps to exactly one
+profile, so one port** (confirmed behaviour — auto-switch matches the request's own URL). So when two
 apps are captured at once and share a domain — `privy.io` for auth, a common RPC or analytics
 host — that domain's traffic from *both* apps lands in whichever single capture the rule
 points at, and the other app's capture misses it. `--hosts` cannot fix this: the two apps use
@@ -106,10 +106,10 @@ Split a shared domain by **who called it**, not by host, with `origins.py`:
 
 ```bash
 # List the distinct callers (Origin / Referer / *-app-id) of each host in a capture.
-mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
+mitmdump -q -nr "$PROXY_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
 
 # Pull just one app's calls out of a shared capture (match on its origin or app id).
-mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py" --set source=app-a.example
+mitmdump -q -nr "$PROXY_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py" --set source=app-a.example
 ```
 
 Each web app sends a distinct `Origin`/`Referer`, and Privy carries a per-app id header, so a
@@ -150,7 +150,7 @@ capture what the extension generates, enable Zero Omega for the site first — t
 cannot toggle it (its UI is a `chrome-extension://` page the browser tools cannot reach), so
 that switch is a manual step. Everything the driving then produces is captured normally.
 
-**Confirm the routing before you drive.** proxyman cannot read Zero Omega's on/off state, but
+**Confirm the routing before you drive.** proxy cannot read Zero Omega's on/off state, but
 it sees what reaches it — so after the user enables the proxy and loads the app once, check
 that its traffic is actually arriving before investing in a drive:
 
@@ -170,7 +170,7 @@ non-proxy-aware traffic, and the host filter is what keeps the capture to the ta
 
 ```bash
 "$SKILL_DIR/scripts/capture.py" start --mode wireguard --hosts "pump.fun,api.pump.fun" --label pump
-"$SKILL_DIR/scripts/wg_config.py" --qr "$PROXYMAN_DIR/$RUN/wg-qr.png"
+"$SKILL_DIR/scripts/wg_config.py" --qr "$PROXY_DIR/$RUN/wg-qr.png"
 ```
 
 `wg_config.py` prints the client config and writes a QR. Send the QR to the user (see
@@ -204,24 +204,24 @@ format, re-readable only by mitmproxy tools, which is why these go through `mitm
 
 ```bash
 # One line per request: method, status, host+path, content-type.
-mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/flowlog.py"
+mitmdump -q -nr "$PROXY_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/flowlog.py"
 
 # WebSocket frames; --set wshost= filters to one host, --set wsmax= sets the truncation width.
-mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/wslog.py" --set wshost=pump.fun
+mitmdump -q -nr "$PROXY_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/wslog.py" --set wshost=pump.fun
 
 # Host tally, to confirm the scope held or to pick hosts after a discovery pass.
-mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/hosts.py"
+mitmdump -q -nr "$PROXY_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/hosts.py"
 
 # Callers of each host (Origin/Referer/app-id); --set source=<origin> pulls one app's calls.
 # Use when a domain is shared by several apps — see "Concurrent captures and shared domains".
-mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
+mitmdump -q -nr "$PROXY_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/origins.py"
 ```
 
 For a specific request or response body, filter with mitmproxy's flow language and dump it —
 e.g. one endpoint's response:
 
 ```bash
-mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" '~u /api/trade & ~s' \
+mitmdump -q -nr "$PROXY_DIR/$RUN/flows.mitm" '~u /api/trade & ~s' \
   --set flow_detail=3 2>/dev/null
 ```
 

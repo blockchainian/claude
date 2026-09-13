@@ -10,7 +10,7 @@ ships.
 | [mobile](plugins/mobile/README.md) | Builds, runs, profiles, and screenshots iOS apps on a simulator or a connected iPhone. |
 | [render](plugins/render/README.md) | The Render plugin with only the nine skills this desk uses, plus its MCP server, agent, and hook. |
 | [cloudflare](plugins/cloudflare/README.md) | The Cloudflare plugin with only the six skills this desk uses, plus its five MCP servers. |
-| [proxyman](plugins/proxyman/README.md) | Captures and decodes the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy, scoped to that app's hosts. |
+| [proxy](plugins/proxy/README.md) | Captures and decodes the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy, scoped to that app's hosts. |
 | [intel](plugins/intel/README.md) | Transcribes audio locally with whisper and turns any long-form source (article, podcast, video) into durable, searchable highlights. |
 
 ## Install
@@ -22,7 +22,7 @@ ships.
 /plugin install mobile@blockchainian
 /plugin install render@blockchainian
 /plugin install cloudflare@blockchainian
-/plugin install proxyman@blockchainian
+/plugin install proxy@blockchainian
 /plugin install intel@blockchainian
 ```
 
@@ -39,7 +39,7 @@ plugins/grok/                     the grok plugin
 plugins/mobile/                   the iOS plugin
 plugins/render/                   the Render plugin, trimmed to nine skills
 plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
-plugins/proxyman/                 the mitmproxy traffic-capture plugin
+plugins/proxy/                    the mitmproxy traffic-capture plugin
 plugins/intel/                    the audio-transcription and highlights plugin
 tests/                            grok's node suite
 ```
