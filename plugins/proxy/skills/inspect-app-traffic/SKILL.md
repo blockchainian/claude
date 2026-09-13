@@ -158,12 +158,14 @@ shared host separates cleanly at read time.
 
 ```bash
 "$SKILL_DIR/scripts/capture.py" status               # the hub and the open captures
-"$SKILL_DIR/scripts/capture.py" stop "$CAP"          # close one capture; the hub keeps running
+"$SKILL_DIR/scripts/capture.py" stop "$CAP" --wipe   # close a capture AND delete its file
 "$SKILL_DIR/scripts/capture.py" down --wipe          # stop the hub and delete all capture files
 ```
 
-Close each capture when its investigation is done. Leave the hub running while any capture is
-active; `down` when the whole session is over — and for a WireGuard capture tell the user to
+Capture files hold unredacted tokens and are **not** cleaned automatically. Leave nothing
+behind: `stop "$CAP" --wipe` once you have read what you need (plain `stop` keeps the file for
+a later read), and end the session with `down --wipe`. Leave the hub running while any capture
+is active; `down` when the whole session is over — and for a WireGuard capture tell the user to
 turn the tunnel off. If the user asks to undo setup entirely, the CA is removed with
 `sudo security delete-certificate -c mitmproxy /Library/Keychains/System.keychain` (their
 terminal). Leave the CA installed otherwise; re-trusting it is the slow part.
