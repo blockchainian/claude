@@ -146,7 +146,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     domains = [d for d in (args.hosts or "").split(",") if d.strip()]
     regex = args.host_regex or (host_regex(domains) if domains else None)
 
-    cmd = ["mitmdump", "-q", "--set", f"save_stream_file={flow_file}"]
+    connlog = Path(__file__).with_name("connlog.py")
+    cmd = ["mitmdump", "-q", "-s", str(connlog), "--set", f"save_stream_file={flow_file}"]
     if regex:
         # allow_hosts is a plain regex; save_stream_filter is mitmproxy's filter language,
         # where | and () are operators — the regex must be quoted so they stay literal.
@@ -275,6 +276,49 @@ def cmd_status(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check(args: argparse.Namespace) -> int:
+    """Report whether the app's traffic is actually reaching the proxy.
+
+    proxyman cannot read Zero Omega's on/off state, but it sees what connects to it. The
+    capture logs a line when a client connects and when a target-host request is intercepted
+    (connlog.py); counting those in the run log tells the three cases apart: nothing
+    connected (proxy not enabled), connected but no target requests (rule misses the host),
+    or target requests flowing (working).
+    """
+    meta_path = _find_meta(args.run)
+    if not meta_path:
+        print(json.dumps({"ok": False, "reason": "run not found", "run": args.run}))
+        return 2
+    meta = _read(meta_path) or {}
+    log = Path(meta.get("log", ""))
+    text = log.read_text(errors="replace") if log.exists() else ""
+    clients = text.count("PROXY_CLIENT_CONNECTED")
+    requests = text.count("PROXY_REQUEST ")
+    flow = Path(meta.get("flowFile", ""))
+    size = flow.stat().st_size if flow.exists() else 0
+    running = pid_alive(meta.get("pid", -1))
+
+    if not running:
+        verdict = "capture is not running — start it first"
+    elif clients == 0:
+        verdict = ("no client has connected to the proxy — the proxy is not enabled "
+                   "(enable Zero Omega for the site, or connect the phone), or the app has "
+                   "not been used yet")
+    elif requests == 0:
+        verdict = ("proxy is connected but no target-host requests seen — check the Zero "
+                   "Omega rule covers the app's hosts, then use the app")
+    else:
+        verdict = f"capturing: {requests} request(s) to the target hosts"
+
+    print(json.dumps({
+        "ok": requests > 0, "run": meta.get("run"), "running": running,
+        "hosts": meta.get("hosts"), "clientsConnected": clients,
+        "targetRequests": requests, "flowBytes": size, "flowHuman": _human(size),
+        "verdict": verdict,
+    }, indent=2))
+    return 0
+
+
 def _human(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024:
@@ -305,6 +349,10 @@ def main() -> int:
 
     st = sub.add_parser("status", help="list captures")
     st.set_defaults(func=cmd_status)
+
+    c = sub.add_parser("check", help="is the app's traffic reaching the proxy?")
+    c.add_argument("run", help="run id (or its label suffix as printed by status)")
+    c.set_defaults(func=cmd_check)
 
     args = ap.parse_args()
     return args.func(args)

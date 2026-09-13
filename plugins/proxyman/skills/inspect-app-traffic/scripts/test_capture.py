@@ -6,7 +6,10 @@ and subdomains but not lookalikes, and port claiming hands two concurrent runs d
 ports while reusing a port whose holder has died.
 """
 
+import argparse
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -68,6 +71,62 @@ class PortClaim(unittest.TestCase):
         reused = capture.claim_port(first, "runB")
         self.assertEqual(reused, first)
         self.assertEqual(json.loads(capture.port_lock(first).read_text())["run"], "runB")
+
+
+class CheckCommand(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("PROXYMAN_DIR")
+        os.environ["PROXYMAN_DIR"] = self._tmp.name
+
+    def tearDown(self):
+        if self._old is None:
+            os.environ.pop("PROXYMAN_DIR", None)
+        else:
+            os.environ["PROXYMAN_DIR"] = self._old
+        self._tmp.cleanup()
+
+    def _run(self, log_body: str, alive: bool = True) -> dict:
+        run = "20260101-000000-1-t"
+        rundir = Path(self._tmp.name) / run
+        rundir.mkdir(parents=True)
+        log = rundir / "mitmdump.log"
+        log.write_text(log_body)
+        flow = rundir / "flows.mitm"
+        flow.write_text("")
+        pid = os.getpid() if alive else 2**31 - 1
+        (rundir / "meta.json").write_text(json.dumps(
+            {"run": run, "pid": pid, "log": str(log), "flowFile": str(flow),
+             "hosts": ["example.com"]}))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            capture.cmd_check(argparse.Namespace(run=run))
+        return json.loads(buf.getvalue())
+
+    def test_not_running(self):
+        out = self._run("", alive=False)
+        self.assertFalse(out["ok"])
+        self.assertIn("not running", out["verdict"])
+
+    def test_no_client_connected(self):
+        out = self._run("")
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["clientsConnected"], 0)
+        self.assertIn("not enabled", out["verdict"])
+
+    def test_connected_but_host_missed(self):
+        out = self._run("PROXY_CLIENT_CONNECTED\n")
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["clientsConnected"], 1)
+        self.assertEqual(out["targetRequests"], 0)
+        self.assertIn("no target-host requests", out["verdict"])
+
+    def test_capturing(self):
+        out = self._run("PROXY_CLIENT_CONNECTED\nPROXY_REQUEST example.com\n"
+                        "PROXY_REQUEST example.com\n")
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["targetRequests"], 2)
+        self.assertIn("capturing", out["verdict"])
 
 
 class Human(unittest.TestCase):

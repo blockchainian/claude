@@ -112,6 +112,19 @@ capture what the extension generates, enable Zero Omega for the site first — t
 cannot toggle it (its UI is a `chrome-extension://` page the browser tools cannot reach), so
 that switch is a manual step. Everything the driving then produces is captured normally.
 
+**Confirm the routing before you drive.** proxyman cannot read Zero Omega's on/off state, but
+it sees what reaches it — so after the user enables the proxy and loads the app once, check
+that its traffic is actually arriving before investing in a drive:
+
+```bash
+"$SKILL_DIR/scripts/capture.py" check "$RUN"
+```
+
+It reports `clientsConnected` and `targetRequests` and a verdict: nothing connected means the
+proxy is not enabled; connected with zero target requests means the Zero Omega rule does not
+cover the app's hosts (widen it, or add the missing host to `--hosts` and restart); target
+requests flowing means it is working. Run it whenever a capture looks empty.
+
 ### iPhone app — WireGuard
 
 WireGuard is the iPhone path: it captures the whole phone, including background and
@@ -206,7 +219,9 @@ the endpoint shapes and WebSocket message formats — never the tokens.
 
 `scripts/test_capture.py` covers target scoping and isolation: the host filter matches an
 app's domains and subdomains but not lookalikes and treats dots literally, two concurrent
-runs receive different ports, and a port whose holder has died is reused. `scripts/test_wg_config.py`
+runs receive different ports, a port whose holder has died is reused, and `check` reports the
+right verdict for each state (not running, no client connected, connected but host missed,
+capturing). `scripts/test_wg_config.py`
 pins the pure-Python X25519 derivation against a known mitmproxy key pair and the RFC 7748
 vector. Run both with `python3 scripts/test_capture.py` and `python3 scripts/test_wg_config.py`
 after changing either script.
