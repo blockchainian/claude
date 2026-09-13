@@ -63,7 +63,10 @@ concern.
    mood-clear material into the six fields and echo the mapping back in one
    short block before sweeping. The one classification that carries weight:
    separate a **decision the user is imposing** (a Constraint — respected, not
-   tested) from a **claim about how the code works** (a Premise — verified).
+   tested) from a **claim about how the code works** (a Premise — verified). A
+   Constraint is respected, but the facts it rests on are not exempt: "keep the
+   verdict JSON shape" presupposes that JSON exists with a known shape — pull
+   that presupposition out as a Premise and verify it with the rest.
    List the Premises back under "here is what I will try to break — confirm or
    correct." The one-line shortcut is only for an ask that carries no claim
    about existing behavior to pull — one stated purely as goal and imposed
