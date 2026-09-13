@@ -22,9 +22,9 @@ only what was observed.
 The input is the user's ask, in whatever shape they think in — a goal, a list
 of requirements, a design, or all three at once. The sweep works from six
 fields (Ask, Example, Accept when, Constraints, Premises, Keep unchanged);
-step 1 sorts the input into them so the user never has to pre-sort into a
-schema shaped for this skill. Every factual claim in it, wherever it sat in
-the input, is unverified until checked; a refuted one becomes an open
+steps 1–2 read and sort the input into them so the user never has to pre-sort
+into a schema shaped for this skill. Every factual claim in it, wherever it sat
+in the input, is unverified until checked; a refuted one becomes an open
 question, never a silent fix.
 
 The output is one file, `specs/<date>-<topic>/problem.md`, in the shape of
@@ -35,30 +35,38 @@ concern.
 
 ## Procedure
 
-1. **Classify the ask, and confirm what will be tested.** The user writes in
-   whatever shape they think in; sort that material into the six fields and
-   echo the mapping back in one short block before sweeping. The one
-   classification that carries weight: separate a **decision the user is
-   imposing** (a Constraint — respected, not tested) from an **assumption
-   about how the code works** (a Premise — verified). A design states both in
-   the same breath, so pull every load-bearing assumption out of it: whatever
-   a plan would rest on and could be false is a Premise, wherever it sat in
-   the input. List those Premises back under "here is what I will try to
-   break — confirm or correct," and wait for the answer. This surfaces the
-   falsification target instead of demanding the user pre-sort into it, and
-   catches the dangerous case early: an assumption the user filed as a settled
-   decision, flagged before the sweep builds on it. The one-line shortcut is
-   only for an ask that carries no assumption about existing behavior to pull
-   — one stated purely as goal and imposed decisions. Tidy phrasing is not
-   that case: a well-organized design is exactly where a confident but
-   unverified premise hides, so extract it anyway. Don't turn a genuinely
-   assumption-free ask into an interview.
+1. **Read each statement's mood; reject what is ambiguous.** Every line in the
+   ask is one of three things — a claim about the current state, a description
+   of the desired state, or a claim that is simply wrong. The first and third
+   are the same grammatical kind, an indicative claim about what *is*, and the
+   sweep tells them apart by checking; the desired state is optative, what
+   *should be*. What the repo can never disambiguate is a line whose mood is
+   unclear: "the flag defaults to on" reads as fact and as wish, contradicts
+   the code the same way on either reading, and no sweep says which the user
+   meant. So before anything else, reject every mood-ambiguous line and hand it
+   back with the fix — a current fact goes in the present indicative ("X
+   currently does Y"), a want goes as an imperative ("change Y to Z"). Do not
+   guess the mood, and do not sweep around it. On a non-interactive run with no
+   user to answer, fail with the flagged lines rather than proceeding. The user
+   learns the discipline from the rejections; a clean ask draws none.
 
-2. **Name the decision and pin the base commit.** One sentence on what is
+2. **Classify the survivors, and confirm what will be tested.** Sort the
+   mood-clear material into the six fields and echo the mapping back in one
+   short block before sweeping. The one classification that carries weight:
+   separate a **decision the user is imposing** (a Constraint — respected, not
+   tested) from a **claim about how the code works** (a Premise — verified).
+   List the Premises back under "here is what I will try to break — confirm or
+   correct." The one-line shortcut is only for an ask that carries no claim
+   about existing behavior to pull — one stated purely as goal and imposed
+   decisions; tidy phrasing is not that case, since a well-organized design is
+   exactly where a confident but unverified premise hides, so extract the
+   claims anyway. Don't turn a genuinely claim-free ask into an interview.
+
+3. **Name the decision and pin the base commit.** One sentence on what is
    being changed and why now. Record `git rev-parse --short HEAD`; every line
    number in the doc is valid only at that SHA.
 
-3. **Sweep, read-only, delegated.** Spawn Explore agents (`model: "sonnet"`)
+4. **Sweep, read-only, delegated.** Spawn Explore agents (`model: "sonnet"`)
    for the file-finding fan-out; they return locations and conclusions, not
    file dumps. Run the measuring commands yourself: probes, D1 queries, a
    real request against the producer. Nothing enters the doc from recall.
@@ -67,7 +75,7 @@ concern.
    (the plugin's `subagent-no-spawn` hook) blocks nested spawning, so a
    subagent invoking `/ground` must sweep by hand.
 
-4. **Write the doc** from the template, then check its paths and anchors
+5. **Write the doc** from the template, then check its paths and anchors
    from inside the repo and fix every flag before stopping:
 
    ```
@@ -87,7 +95,7 @@ concern.
    own bullet (`UNANCHORED`). Fix the doc, not the symbol: a flag means the
    line, the file or the claim is wrong, and the printed lines show which.
 
-5. **Stop.** Do not propose a design in this turn, not even a sketch.
+6. **Stop.** Do not propose a design in this turn, not even a sketch.
 
 ## What counts as a fact
 
