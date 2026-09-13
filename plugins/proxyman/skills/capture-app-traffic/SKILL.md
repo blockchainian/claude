@@ -49,12 +49,14 @@ steps, each a command to run in order. Two of them the user must run, not you:
 cannot read a password through this harness — ask the user to paste it into a real terminal,
 or to type it here prefixed with `!`). The CA-generation step (`setup.sh --generate-ca`) you
 can run yourself. Re-run `setup.sh` after the user reports done, and confirm exit 0 before
-capturing.
+capturing. A missing `qrencode` is reported but does not block readiness — it only makes the
+WireGuard QR; without it `wg_config.py` prints the config as text to import by hand.
 
 **iPhone, one extra time:** after the Mac trusts the CA, the phone must trust it too. With
-the phone pointed at the proxy (see below), open `http://mitm.it` in Safari, install the
-iOS profile, then **Settings > General > About > Certificate Trust Settings** and toggle the
-mitmproxy CA on. Without that toggle, TLS interception fails on the phone.
+the WireGuard tunnel on (see below), open `http://mitm.it` in Safari — it is served over the
+tunnel — install the iOS profile, then **Settings > General > About > Certificate Trust
+Settings** and toggle the mitmproxy CA on. Without that toggle, TLS interception fails on the
+phone.
 
 ## 1. Know the target's hosts
 
@@ -97,29 +99,27 @@ through, so the CA must be trusted; there is no skip. As a throwaway alternative
 site, launch Chrome with `--ignore-certificate-errors --user-data-dir=/tmp/chrome-proxy
 --proxy-server=127.0.0.1:$PORT`, which sidesteps the keychain entirely.
 
-### iPhone app — two ways
+### iPhone app — WireGuard
 
-- **Wi-Fi proxy** (that app's foreground traffic, simplest): keep `--mode proxy`. On the
-  phone, Settings > Wi-Fi > (i) > Configure Proxy > Manual, server = the Mac's LAN IP
-  (`proxy` field in the JSON), port = `$PORT`. Good for a single app in the foreground.
-- **WireGuard** (the whole phone, catches background and non-proxy-aware traffic):
+WireGuard is the iPhone path: it captures the whole phone, including background and
+non-proxy-aware traffic, and the host filter is what keeps the capture to the target app.
 
-  ```bash
-  "$SKILL_DIR/scripts/capture.py" start --mode wireguard --hosts "pump.fun,api.pump.fun" --label pump
-  "$SKILL_DIR/scripts/wg_config.py" --qr "$PROXYMAN_DIR/$RUN/wg-qr.png"
-  ```
+```bash
+"$SKILL_DIR/scripts/capture.py" start --mode wireguard --hosts "pump.fun,api.pump.fun" --label pump
+"$SKILL_DIR/scripts/wg_config.py" --qr "$PROXYMAN_DIR/$RUN/wg-qr.png"
+```
 
-  `wg_config.py` prints the client config and writes a QR. Send the QR to the user (see
-  Reporting), have them import it into the WireGuard app and toggle the tunnel on. **Only one
-  WireGuard capture at a time**; a second `start` exits 3 naming the holder. AllowedIPs is
-  `0.0.0.0/0`, so while the tunnel is on the whole phone routes through the Mac — the host
-  filter is what stops unrelated traffic being saved, and the tunnel must be turned off when
-  done. If the phone says "unable to create tunnel", the user declined the VPN permission;
-  it is not a config problem.
+`wg_config.py` prints the client config and writes a QR. Send the QR to the user (see
+Reporting), have them import it into the WireGuard app and toggle the tunnel on. **Only one
+WireGuard capture at a time**; a second `start` exits 3 naming the holder. AllowedIPs is
+`0.0.0.0/0`, so while the tunnel is on the whole phone routes through the Mac — the host
+filter is what stops unrelated traffic being saved, and the tunnel must be turned off when
+done. If the phone says "unable to create tunnel", the user declined the VPN permission; it
+is not a config problem.
 
-Both phone modes need the phone on the same LAN as the Mac, and the router's AP/client
-isolation turned **off** — with it on the phone cannot reach the Mac at all, and `mitm.it`
-will not load. That was the first thing to check when nothing connected.
+The phone must be on the same LAN as the Mac, with the router's AP/client isolation turned
+**off** — with it on the phone cannot reach the Mac at all, and `mitm.it` will not load. That
+was the first thing to check when nothing connected.
 
 ## 3. Watch it live (optional)
 
