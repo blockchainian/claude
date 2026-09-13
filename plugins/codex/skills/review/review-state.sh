@@ -103,6 +103,20 @@ OWNER=$(sed -n '1p' <<<"$REPO_INFO")
 NAME=$(sed -n '2p' <<<"$REPO_INFO")
 [ -n "$OWNER" ] && [ -n "$NAME" ] || { log "cannot resolve owner/repo for PR $PR"; exit 1; }
 
+# The caller commonly passes the symbolic ref "HEAD" (or a short SHA), but the cloud reviewer
+# records a full 40-char commit oid and `gh api .../commits/HEAD` resolves to the default branch,
+# not the PR head — so a literal "HEAD"/short ref both mis-times and never matches. Resolve any
+# non-full-SHA ref to the PR's head oid via the API (no local git dependency).
+if ! printf '%s' "$HEAD" | grep -Eq '^[0-9a-f]{40}$'; then
+  RESOLVED=$("$GH" pr view "$PR" --json headRefOid -q .headRefOid 2>/dev/null)
+  if printf '%s' "$RESOLVED" | grep -Eq '^[0-9a-f]{40}$'; then
+    log "resolved head ref '$HEAD' to PR $PR head $RESOLVED"
+    HEAD=$RESOLVED
+  else
+    log "warning: could not resolve head ref '$HEAD' to a full SHA (got '${RESOLVED:-}'); matching may miss"
+  fi
+fi
+
 HEAD_TIME=$(head_commit_time "$OWNER" "$NAME" "$HEAD") || { log "cannot resolve commit $HEAD"; exit 1; }
 [ -n "$HEAD_TIME" ] || { log "cannot resolve commit $HEAD"; exit 1; }
 
