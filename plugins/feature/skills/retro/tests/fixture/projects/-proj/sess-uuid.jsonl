@@ -1,0 +1,3 @@
+{"type":"custom-title","customTitle":"fixture-sess","sessionId":"sess-uuid"}
+{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":100,"output_tokens":20,"cache_read_input_tokens":5000}}}
+{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"tool_use","id":"t1","name":"Task","input":{"subagent_type":"general-purpose","description":"WS-A parity fixes","prompt":"do A"}},{"type":"tool_use","id":"t2","name":"Task","input":{"subagent_type":"feature:ux-verifier","description":"Verify A","prompt":"check A"}}]}}
