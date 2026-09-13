@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# ABOUTME: Central store for podcast highlights - save, list and search.
-# ABOUTME: One markdown file per episode under episodes/, rebuilt index.md.
+# ABOUTME: Central store for source highlights - save, list and search.
+# ABOUTME: One markdown file per item under episodes/, rebuilt index.md.
 
 import os
 import re
@@ -32,10 +32,10 @@ def rebuild_index():
     rows = []
     for f in sorted(EPISODES.glob("*.md")):
         meta, _ = parse_frontmatter(f.read_text(encoding="utf-8"))
-        rows.append((meta.get("saved", ""), meta.get("show", "?"),
+        rows.append((meta.get("saved", ""), meta.get("source") or meta.get("show") or "?",
                      meta.get("title", f.stem), f.name, meta.get("url", "")))
     rows.sort(reverse=True)
-    lines = ["# Podcast highlights", ""]
+    lines = ["# Highlights", ""]
     lines += [f"- {saved} — **{show}** — [{title}](episodes/{name}) — {url}"
               for saved, show, title, name, url in rows]
     INDEX.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -61,7 +61,7 @@ def cmd_save(draft):
         raise SystemExit(f"no such draft: {src}")
     text = src.read_text(encoding="utf-8")
     meta, _ = parse_frontmatter(text)
-    missing = [k for k in ("title", "show", "url") if not meta.get(k)]
+    missing = [k for k in ("title", "url") if not meta.get(k)]
     if missing:
         raise SystemExit("draft frontmatter is missing: " + ", ".join(missing))
     if not meta.get("saved"):
@@ -69,7 +69,7 @@ def cmd_save(draft):
         meta["saved"] = str(date.today())
     slug = meta.get("slug") or (src.stem if src.parent == EPISODES
                                 else src.parent.name)
-    slug = re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-") or "episode"
+    slug = re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-") or "item"
     EPISODES.mkdir(parents=True, exist_ok=True)
     dest, existed = free_slot(slug, meta["url"])
     if existed:
@@ -79,7 +79,7 @@ def cmd_save(draft):
     dest.write_text(text, encoding="utf-8")
     total = rebuild_index()
     print(f"saved: {dest}")
-    print(f"index: {INDEX} ({total} episodes)")
+    print(f"index: {INDEX} ({total} items)")
 
 
 TAKEAWAYS_HEADING = "## Take-aways"
@@ -143,8 +143,8 @@ def cmd_takeaway(target, action, index, text):
     dest = Path(target)
     if dest.parent != EPISODES or not dest.is_file():
         raise SystemExit(
-            f"not a stored episode: {dest}\n"
-            "save the episode first; take-aways attach to the stored file.")
+            f"not a stored item: {dest}\n"
+            "save the item first; take-aways attach to the stored file.")
     items = current_takeaways(dest)
     if action == "list":
         print_takeaways(items)
@@ -177,7 +177,7 @@ def cmd_search(query):
         if not matches:
             continue
         hits += 1
-        print(f"\n=== {meta.get('show', '?')} — {meta.get('title', f.stem)}")
+        print(f"\n=== {meta.get('source') or meta.get('show') or '?'} — {meta.get('title', f.stem)}")
         print(f"    {f}")
         if meta.get("url"):
             print(f"    {meta['url']}")
@@ -185,7 +185,7 @@ def cmd_search(query):
             print(f"    {n}: {line[:220]}")
         if len(matches) > 12:
             print(f"    ... {len(matches) - 12} more matches")
-    print(f"\n{hits} episode(s) matched {query!r}")
+    print(f"\n{hits} item(s) matched {query!r}")
 
 
 def cmd_list():
