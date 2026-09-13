@@ -107,10 +107,20 @@ def claim_port(preferred: int | None, run_id: str) -> int:
 
 
 def _port_in_use(port: int) -> bool:
+    """True if anything already holds this port.
+
+    Two checks: a connect (catches a listener on any address), and a wildcard bind with no
+    SO_REUSEADDR. mitmdump binds all interfaces, so a wildcard listener such as a running
+    mitmweb must count as in-use — a SO_REUSEADDR bind to 127.0.0.1 wrongly succeeds against
+    a 0.0.0.0 listener and would let a capture silently claim an occupied port.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as c:
+        c.settimeout(0.3)
+        if c.connect_ex(("127.0.0.1", port)) == 0:
+            return True
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            s.bind(("127.0.0.1", port))
+            s.bind(("", port))
         except OSError:
             return True
     return False
@@ -196,6 +206,15 @@ def cmd_start(args: argparse.Namespace) -> int:
     if not pid_alive(proc.pid):
         tail = log_file.read_text()[-500:] if log_file.exists() else ""
         print(json.dumps({"started": False, "reason": "mitmdump exited", "log": tail}))
+        _release(port, wg_held, run_id)
+        return 1
+
+    # Confirm the port is actually being served — a capture that lost a bind race can stay
+    # alive without listening, and would otherwise be reported as started.
+    if args.mode == "proxy" and not _port_in_use(port):
+        proc.terminate()
+        print(json.dumps({"started": False, "reason": f"nothing listening on {port} "
+                          "after launch — the port may be held by another process"}))
         _release(port, wg_held, run_id)
         return 1
 
