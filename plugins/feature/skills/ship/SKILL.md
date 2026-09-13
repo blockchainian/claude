@@ -129,8 +129,14 @@ the plan names — a miss there reads fluently, which is why reading alone does 
    file is `codex` without further thought (the project contract in the plugin README names the
    paths); for the rest ask one question, does the fix change what the user sees or does — `ux`
    if yes, `codex` if no. Findings in the same file get the same owner. Write them to
-   `specs/<date>-<topic>/findings.json` as `[{file, line, claim, owner}]`. No findings means no
-   fix round: go to step 9.
+   `specs/<date>-<topic>/findings.json` as `[{file, line, claim, owner, thread_id, comment_id,
+   disposition}]`, carrying `thread_id` and `comment_id` verbatim from the `cloud-review.json`
+   must-fix (both `null` for a local finding or a probe failure, which have no GitHub thread).
+   `disposition` starts `fixed` for a finding you keep and `rejected` — with a one-line `reason` —
+   for a cloud must-fix you verify as a false positive (it asks to revert an intended change, or
+   the code already handles it): record the rejected ones here even though they skip the fix round,
+   so step 8 still closes their threads. No kept findings means no fix round, but a rejected cloud
+   finding still needs its thread closed: go to step 8's close step, then step 9.
 
 8. **Fix, both lanes at once, one round.** Give the UX lane its own tree so neither lane can
    dirty the other's: the worktree recipe from step 3 with `../.ux-<branch>`, branch
@@ -142,7 +148,11 @@ the plan names — a miss there reads fluently, which is why reading alone does 
    `CLAUDE.md` comes back for the user. There is no re-review: when both lanes are done, redeploy
    staging if the codex lane pushed, re-run only the probes for surfaces the fixes touched, then
    remove the tree. Post one PR comment summarising the findings and their dispositions;
-   that comment is the review's record.
+   that comment is the review's record. Then close the loop on the cloud-review threads: pipe the
+   `findings.json` entries to `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/resolve-threads.sh` —
+   it reacts (👍 fixed, 👎 rejected), replies with the `reason` on a rejection, and resolves each
+   thread, skipping the entries with a `null` `thread_id`. The summary comment stays the record for
+   local findings and for a reaction-only cloud review that left no threads.
 
 9. **Decide production, then record the outcome.** Production ships only when every finding is
    closed AND the re-run probes are green AND every acceptance criterion is met — the gate's
