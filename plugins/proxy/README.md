@@ -1,25 +1,28 @@
 # proxy
 
-Capture and decode the HTTP and WebSocket traffic of **one target web or mobile app** with
-[mitmproxy](https://mitmproxy.org), scoped to that app's hosts so unrelated traffic is passed
-through untouched and never saved.
+Capture and decode the HTTP and WebSocket traffic of a target web or mobile app with
+[mitmproxy](https://mitmproxy.org), through one shared proxy that every session reuses.
 
-One skill, `inspect-app-traffic`, owns the run end to end: check setup, start a
-target-scoped capture, connect the client (a Mac browser via the Zero Omega extension, or an
-iPhone via a WireGuard tunnel), read the flows, tear it down.
+One skill, `inspect-app-traffic`, owns the run end to end: check setup, start a capture,
+connect the client (a Mac browser via the Zero Omega extension, or an iPhone via a WireGuard
+tunnel), read the flows, tear it down.
 
 ## What it gives you
 
-- **Target scoping.** A capture is aimed at an app by its domains: only those hosts are
-  decrypted (`--allow-hosts`) and saved (`save_stream_filter`); everything else — a bank,
-  iMessage, other apps — passes through as an opaque tunnel and is never written.
-- **Parallel-safe.** Each capture is a run with its own port, output directory under
-  `PROXY_DIR` (default `/tmp/proxy`), and mitmdump process, held with lock files. Two
-  agents can capture two apps at once. WireGuard mode is the one single-holder resource.
+- **One shared hub.** A single long-lived mitmdump serves the HTTP proxy and, when asked,
+  WireGuard, on the fixed port 8080. The browser needs only one Zero Omega profile; the phone
+  one tunnel. The hub records everything routed to it into one flow file under `PROXY_DIR`
+  (default `/tmp/proxy`).
+- **Captures are views, not processes.** `start` notes the moment and the target hosts; the
+  readers show only that capture's window, scoped to its hosts. Two agents capturing two apps
+  at once are two records over one hub, separated at read time — no second proxy, no second
+  Zero Omega profile.
+- **Shared-domain attribution.** When two apps share a host (e.g. `privy.io`), `origins.py`
+  splits the capture by caller (`Origin`/`Referer`/app-id).
 - **Setup that skips itself.** `setup.sh` detects an existing user (mitmdump installed, CA
   generated and trusted) and exits 0; otherwise it prints the exact remaining steps.
-- **Offline readers.** `flowlog.py` (one line per request), `wslog.py` (WebSocket frames),
-  and `hosts.py` (host tally, for discovering an app's hosts) read a saved `.mitm` file.
+- **Readers over the hub file.** `flowlog.py` (one line per request), `wslog.py` (WebSocket
+  frames), `hosts.py` (host tally), `origins.py` (callers), each scoped by `since`/`host`.
 - **WireGuard config, no dependencies.** `wg_config.py` derives the client config and a QR
   from mitmproxy's keys with a pure-Python X25519, needing neither the `cryptography` module
   nor the `wg` tool.

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Tests for capture.py's target scoping and per-run isolation.
+"""Tests for capture.py: host scoping, the port check, and the hub/capture orchestration.
 
-Covers the two properties the skill leans on: the host filter matches an app's own domains
-and subdomains but not lookalikes, and port claiming hands two concurrent runs different
-ports while reusing a port whose holder has died.
+The hub lifecycle and the reader scoping (since + host) are exercised live in a real capture;
+here we cover the pure logic and the orchestration that does not need a running mitmdump —
+by faking a hub whose pid is this test process, so `start`/`stop`/`status` act on capture
+records without launching anything.
 """
 
 import argparse
@@ -12,7 +13,6 @@ import importlib.util
 import io
 import json
 import os
-import re
 import socket
 import tempfile
 import unittest
@@ -27,6 +27,7 @@ _spec.loader.exec_module(capture)
 
 class HostRegex(unittest.TestCase):
     def setUp(self):
+        import re
         self.rx = re.compile(capture.host_regex(["pump.fun", "api.pump.fun"]))
 
     def test_matches_domain_and_subdomains(self):
@@ -38,96 +39,9 @@ class HostRegex(unittest.TestCase):
             self.assertNotRegex(host, self.rx, host)
 
     def test_escapes_dots(self):
-        # A dot in a domain must be a literal, not "any char": "pumpXfun" must not match.
+        import re
         rx = re.compile(capture.host_regex(["pump.fun"]))
         self.assertNotRegex("pumpxfun", rx)
-
-
-class PortClaim(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self._old = os.environ.get("TMPDIR")
-        os.environ["TMPDIR"] = self._tmp.name
-
-    def tearDown(self):
-        if self._old is None:
-            os.environ.pop("TMPDIR", None)
-        else:
-            os.environ["TMPDIR"] = self._old
-        self._tmp.cleanup()
-
-    def test_two_runs_get_different_ports(self):
-        a = capture.claim_port(None, "runA")
-        b = capture.claim_port(None, "runB")
-        self.assertNotEqual(a, b)
-        # Each claim left a lock naming its run.
-        self.assertEqual(json.loads(capture.port_lock(a).read_text())["run"], "runA")
-        self.assertEqual(json.loads(capture.port_lock(b).read_text())["run"], "runB")
-
-    def test_dead_holder_port_is_reused(self):
-        first = capture.claim_port(None, "runA")
-        # Rewrite the lock as held by a pid that cannot be alive.
-        capture.port_lock(first).write_text(json.dumps(
-            {"run": "ghost", "port": first, "pid": 2**31 - 1, "since": 0}))
-        reused = capture.claim_port(first, "runB")
-        self.assertEqual(reused, first)
-        self.assertEqual(json.loads(capture.port_lock(first).read_text())["run"], "runB")
-
-
-class CheckCommand(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self._old = os.environ.get("PROXY_DIR")
-        os.environ["PROXY_DIR"] = self._tmp.name
-
-    def tearDown(self):
-        if self._old is None:
-            os.environ.pop("PROXY_DIR", None)
-        else:
-            os.environ["PROXY_DIR"] = self._old
-        self._tmp.cleanup()
-
-    def _run(self, log_body: str, alive: bool = True) -> dict:
-        run = "20260101-000000-1-t"
-        rundir = Path(self._tmp.name) / run
-        rundir.mkdir(parents=True)
-        log = rundir / "mitmdump.log"
-        log.write_text(log_body)
-        flow = rundir / "flows.mitm"
-        flow.write_text("")
-        pid = os.getpid() if alive else 2**31 - 1
-        (rundir / "meta.json").write_text(json.dumps(
-            {"run": run, "pid": pid, "log": str(log), "flowFile": str(flow),
-             "hosts": ["example.com"]}))
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            capture.cmd_check(argparse.Namespace(run=run))
-        return json.loads(buf.getvalue())
-
-    def test_not_running(self):
-        out = self._run("", alive=False)
-        self.assertFalse(out["ok"])
-        self.assertIn("not running", out["verdict"])
-
-    def test_no_client_connected(self):
-        out = self._run("")
-        self.assertFalse(out["ok"])
-        self.assertEqual(out["clientsConnected"], 0)
-        self.assertIn("not enabled", out["verdict"])
-
-    def test_connected_but_host_missed(self):
-        out = self._run("PROXY_CLIENT_CONNECTED\n")
-        self.assertFalse(out["ok"])
-        self.assertEqual(out["clientsConnected"], 1)
-        self.assertEqual(out["targetRequests"], 0)
-        self.assertIn("no target-host requests", out["verdict"])
-
-    def test_capturing(self):
-        out = self._run("PROXY_CLIENT_CONNECTED\nPROXY_REQUEST example.com\n"
-                        "PROXY_REQUEST example.com\n")
-        self.assertTrue(out["ok"])
-        self.assertEqual(out["targetRequests"], 2)
-        self.assertIn("capturing", out["verdict"])
 
 
 class PortInUse(unittest.TestCase):
@@ -152,12 +66,92 @@ class PortInUse(unittest.TestCase):
         self.assertFalse(capture._port_in_use(port))
 
 
-class Human(unittest.TestCase):
-    def test_sizes(self):
-        self.assertEqual(capture._human(0), "0B")
-        self.assertEqual(capture._human(512), "512B")
-        self.assertEqual(capture._human(1536), "1.5KB")
-        self.assertEqual(capture._human(44 * 1024 * 1024), "44.0MB")
+class HubCaptures(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = {}
+        for k, v in {"PROXY_DIR": self._tmp.name, "TMPDIR": self._tmp.name}.items():
+            self._env[k] = os.environ.get(k)
+            os.environ[k] = v
+
+    def tearDown(self):
+        for k, v in self._env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self._tmp.cleanup()
+
+    def _fake_hub(self, alive: bool = True):
+        # A hub whose pid is this process (alive) makes ensure_hub reuse it without spawning.
+        capture.hub_dir().mkdir(parents=True, exist_ok=True)
+        pid = os.getpid() if alive else 2**31 - 1
+        capture.hub_meta_path().write_text(json.dumps(
+            {"pid": pid, "since": 0, "port": 8080, "modes": ["regular"],
+             "flowFile": str(capture.hub_flow_file()), "log": str(capture.hub_dir() / "x.log")}))
+
+    def _run(self, ns) -> dict:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ns.func(ns)
+        return json.loads(buf.getvalue())
+
+    def test_start_creates_capture_record(self):
+        self._fake_hub()
+        out = self._run(argparse.Namespace(func=capture.cmd_start, label="appA",
+                                           hosts="pump.fun,api.pump.fun", host_regex=None,
+                                           wireguard=False))
+        self.assertTrue(out["started"])
+        self.assertIn("appA", out["capture"])
+        self.assertEqual(out["proxyLocal"], "127.0.0.1:8080")
+        rec = json.loads((capture.captures_dir() / f"{out['capture']}.json").read_text())
+        self.assertEqual(rec["hosts"], ["pump.fun", "api.pump.fun"])
+        self.assertIn("pump", rec["hostRegex"])
+        self.assertGreater(rec["started_at"], 0)
+
+    def test_start_without_hub_and_port_busy_fails(self):
+        # No hub meta, and 8080 held by a real listener -> start reports failure, no record.
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            srv.bind(("", 8080))
+            srv.listen()
+        except OSError:
+            self.skipTest("port 8080 not bindable in this environment")
+        try:
+            out = self._run(argparse.Namespace(func=capture.cmd_start, label="x", hosts=None,
+                                               host_regex=None, wireguard=False))
+            self.assertFalse(out["started"])
+            self.assertEqual(list(capture.captures_dir().glob("*.json")), [])
+        finally:
+            srv.close()
+
+    def test_stop_removes_record(self):
+        self._fake_hub()
+        started = self._run(argparse.Namespace(func=capture.cmd_start, label="b", hosts=None,
+                                               host_regex=None, wireguard=False))
+        cap = started["capture"]
+        out = self._run(argparse.Namespace(func=capture.cmd_stop, capture=cap))
+        self.assertTrue(out["stopped"])
+        self.assertFalse((capture.captures_dir() / f"{cap}.json").exists())
+
+    def test_status_lists_open_captures(self):
+        self._fake_hub()
+        self._run(argparse.Namespace(func=capture.cmd_start, label="c", hosts="x.com",
+                                     host_regex=None, wireguard=False))
+        out = self._run(argparse.Namespace(func=capture.cmd_status))
+        self.assertTrue(out["hubRunning"])
+        self.assertEqual(len(out["captures"]), 1)
+
+    def test_check_missing_capture(self):
+        out = self._run(argparse.Namespace(func=capture.cmd_check, capture="nope"))
+        self.assertFalse(out["ok"])
+
+    def test_down_clears_a_dead_hub(self):
+        self._fake_hub(alive=False)
+        out = self._run(argparse.Namespace(func=capture.cmd_down, wipe=False))
+        self.assertTrue(out["down"])
+        self.assertFalse(capture.hub_meta_path().exists())
 
 
 if __name__ == "__main__":
