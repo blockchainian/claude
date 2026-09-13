@@ -1,20 +1,21 @@
-# ABOUTME: mitmproxy addon printing WebSocket frames, optionally filtered to one host.
-# ABOUTME: Control with `--set wshost=<substring>` and `--set wsmax=<chars>`.
+# ABOUTME: mitmproxy addon printing WebSocket frames, scoped to a capture window and host.
+# ABOUTME: Control with `--set since=`, `--set host=<regex>`, and `--set wsmax=<chars>`.
+import re
+
 from mitmproxy import ctx, http
 
 
 def load(loader) -> None:
-    loader.add_option(
-        "wshost", str, "",
-        "Substring; only WebSocket frames whose host matches are printed. Empty = all hosts.")
-    loader.add_option(
-        "wsmax", int, 220,
-        "Max characters of each frame body to print.")
+    loader.add_option("since", str, "", "only sockets opened at or after this epoch time")
+    loader.add_option("host", str, "", "regex; only frames whose host matches are printed")
+    loader.add_option("wsmax", int, 220, "max characters of each frame body to print")
 
 
 def websocket_message(flow: http.HTTPFlow) -> None:
-    host = ctx.options.wshost
-    if host and host not in flow.request.pretty_host:
+    if (flow.request.timestamp_start or 0) < float(ctx.options.since or 0):
+        return
+    h = ctx.options.host
+    if h and not re.search(h, flow.request.pretty_host):
         return
     if not flow.websocket:
         return
