@@ -62,6 +62,14 @@
         "name": "blockchainian"
       },
       "source": "./plugins/proxyman"
+    },
+    {
+      "name": "intel",
+      "description": "Gather and distill knowledge from spoken and broadcast media: transcribe audio locally with whisper (the reusable transcribe-audio skill), and turn podcast transcripts into durable, searchable highlights.",
+      "author": {
+        "name": "blockchainian"
+      },
+      "source": "./plugins/intel"
     }
   ]
 }

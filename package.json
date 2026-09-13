@@ -1,17 +1,18 @@
 {
   "name": "blockchainian-claude",
   "private": true,
-  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, grok, build-ios-apps, render, cloudflare, and proxyman plugins.",
+  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, grok, build-ios-apps, render, cloudflare, proxyman, and intel plugins.",
   "type": "module",
   "engines": {
     "node": ">=18.18"
   },
   "scripts": {
-    "test": "npm run test:grok && npm run test:codex && npm run test:feature && npm run test:proxyman",
+    "test": "npm run test:grok && npm run test:codex && npm run test:feature && npm run test:proxyman && npm run test:intel",
     "test:grok": "node --test tests/*.test.mjs",
     "test:codex": "plugins/codex/skills/implement/tests/test-implement.sh && plugins/codex/skills/review/tests/test-review.sh && plugins/codex/skills/review/tests/test-review-state.sh && plugins/codex/skills/review/tests/test-classify-severity.sh",
     "validate": "claude plugin validate --strict .",
     "test:feature": "plugins/feature/hooks/tests/run.sh && plugins/feature/skills/orchestrate/watch-ci.test.sh",
-    "test:proxyman": "python3 plugins/proxyman/skills/inspect-app-traffic/scripts/test_capture.py && python3 plugins/proxyman/skills/inspect-app-traffic/scripts/test_wg_config.py"
+    "test:proxyman": "python3 plugins/proxyman/skills/inspect-app-traffic/scripts/test_capture.py && python3 plugins/proxyman/skills/inspect-app-traffic/scripts/test_wg_config.py",
+    "test:intel": "python3 plugins/intel/skills/transcribe-audio/scripts/test_transcribe.py"
   }
 }

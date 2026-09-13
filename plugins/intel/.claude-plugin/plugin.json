@@ -1,0 +1,20 @@
+{
+  "name": "intel",
+  "version": "0.1.0",
+  "description": "Gather and distill knowledge from spoken and broadcast media: transcribe audio locally with whisper, and turn podcast transcripts into durable, searchable highlights.",
+  "author": {
+    "name": "blockchainian"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/blockchainian/claude",
+  "repository": "https://github.com/blockchainian/claude",
+  "keywords": [
+    "transcription",
+    "whisper",
+    "podcast",
+    "audio",
+    "highlights",
+    "research",
+    "media"
+  ]
+}
