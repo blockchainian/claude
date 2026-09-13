@@ -56,14 +56,17 @@ Store location: `~/.claude/podcast-highlights/` (override with
      realtime), so run it in the **background** and wait for it:
 
      ```bash
+     bash   "${CLAUDE_PLUGIN_ROOT}/skills/transcribe-audio/scripts/setup.sh"
      python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe-audio/scripts/transcribe_audio.py" \
        "<audio_url>" "<transcript path>"
      ```
 
-     It writes plain text to the same `transcript` path and prints JSON with
-     the new `words`/`thin`. See the `transcribe-audio` skill for its
-     requirements and caveats — in short: needs `uv` or `mlx_whisper` (Apple
-     Silicon); the transcript has **no speaker labels**, so attribute quotes to
+     `setup.sh` first installs any missing tools (idempotent, a no-op when they
+     are present). The transcribe script writes plain text to the same
+     `transcript` path and prints JSON with the new `words`/`thin`. See the
+     `transcribe-audio` skill for its requirements and caveats — in short: needs
+     `uv` or `mlx_whisper` (Apple Silicon); the transcript has **no speaker
+     labels**, so attribute quotes to
      the show, not a named host; and the audio often carries
      **dynamically-inserted modern ads** with whisper occasionally looping on a
      garbled stretch — note both and exclude/repair them when reading.
