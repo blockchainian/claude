@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# ABOUTME: Fetches a podcast transcript from a URL and writes it as plain text.
-# ABOUTME: Handles YouTube subtitles and ordinary transcript web pages.
+# ABOUTME: Fetches the readable text of a source URL and writes it as plain text.
+# ABOUTME: Handles articles, podcast transcript pages, YouTube subtitles, and audio.
 
 import html
 import json
@@ -87,6 +87,37 @@ def html_to_text(raw):
     return "\n".join(l for l in lines if l)
 
 
+MIN_MAIN_WORDS = 50
+
+
+def trafilatura_text(raw, url):
+    """The page's main article text via trafilatura, run in-process or through
+    uv's ephemeral env, or None when neither is available or it finds nothing."""
+    try:
+        import trafilatura
+        return trafilatura.extract(raw, url=url)
+    except Exception:
+        pass
+    if shutil.which("uv"):
+        res = subprocess.run(
+            ["uv", "run", "--with", "trafilatura", "python3", "-c",
+             "import sys,trafilatura;print(trafilatura.extract(sys.stdin.read()) or '')"],
+            input=raw, capture_output=True, text=True)
+        if res.returncode == 0:
+            return res.stdout
+    return None
+
+
+def extract_main_text(raw, url):
+    """The readable body of a page: trafilatura's main-content extraction when it
+    yields real prose (strips nav, sidebars, footers), else a plain tag-strip
+    that keeps every block of text — the safe floor for oddly-built pages."""
+    main = trafilatura_text(raw, url)
+    if main and len(main.split()) >= MIN_MAIN_WORDS:
+        return main.strip()
+    return html_to_text(raw)
+
+
 def vtt_to_text(vtt):
     out, seen_last = [], None
     for line in vtt.splitlines():
@@ -161,7 +192,7 @@ def main():
         text, subtitles, audio_url = "", None, url
     else:
         raw = fetch_page(url)
-        text, subtitles = html_to_text(raw), None
+        text, subtitles = extract_main_text(raw, url), None
         audio_url = find_audio_url(raw, url)
 
     path = workdir / "transcript.txt"

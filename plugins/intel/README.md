@@ -1,8 +1,8 @@
 # intel
 
-Gather and distill knowledge from **spoken and broadcast media** — podcasts,
-interviews, streams — into text you can read and search. Recorded talk goes in;
-durable, attributable notes come out.
+Gather and distill knowledge from **long-form sources** — articles, podcasts,
+talks, videos, live streams — into text you can read and search. The source
+goes in; durable, attributable notes come out.
 
 ## Skills
 
@@ -13,27 +13,32 @@ durable, attributable notes come out.
   `streamlink`/`yt-dlp` — segmented and transcribed as it plays. Idempotent
   `setup.sh` auto-installs what's missing. A reusable audio-to-text step: any
   skill that has audio and needs its words calls this one.
-- **`podcast`** — turn a podcast transcript URL into durable highlights, stored
-  and searchable. Reads ordinary transcript pages and YouTube subtitles; for a
-  thin page that only offers audio, it falls back to `transcribe-audio`.
+- **`digest`** — turn a source URL into durable highlights, stored and
+  searchable. Extracts an article's main body (trafilatura) or a podcast
+  transcript, reads YouTube via subtitles, and for a page that only offers
+  audio falls back to `transcribe-audio`. `read` / `save` / `search`, with
+  per-item take-aways.
 
 ## Why they live together
 
-Both skills answer the same question — *what was actually said, and what of it
-is worth keeping* — from different source shapes. `transcribe-audio` is the
-floor: it gets words out of sound. `podcast` builds highlighting and a
-searchable store on top. New source kinds (Twitch VODs, X Spaces, conference
-talks) slot in beside `podcast`, reusing `transcribe-audio` for the audio leg.
+Both skills answer the same question — *what was actually said or written, and
+what of it is worth keeping* — from different source shapes. `transcribe-audio`
+is the floor: it gets words out of sound. `digest` builds highlighting and a
+searchable store on top, over whatever produced the words. New source kinds
+(Twitch VODs, conference talks) slot in by reusing `transcribe-audio` for the
+audio leg and `digest` for the notes.
 
 ## Requirements
 
 - `transcribe-audio`: Apple Silicon; `setup.sh` installs `ffmpeg`,
   `streamlink`, `yt-dlp`, and a whisper runner (`mlx_whisper`/`uv`) via
   Homebrew. `curl` for URL downloads.
-- `podcast`: `curl`; `yt-dlp` for YouTube sources.
+- `digest`: `curl`; `setup.sh` installs `uv` (runs the trafilatura article
+  extractor) and `yt-dlp` (YouTube subtitles).
 
 ## Tests
 
 ```
 python3 skills/transcribe-audio/scripts/test_transcribe.py
+python3 skills/digest/scripts/test_digest.py
 ```
