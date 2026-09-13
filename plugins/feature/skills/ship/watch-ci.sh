@@ -32,9 +32,12 @@ PY
   fi
 
   # No PR for this ref (a bare branch or commit SHA): fall back to its latest workflow run.
-  local run_id
-  if printf '%s' "$ref" | grep -Eq '^[0-9a-f]{7,40}$'; then
-    run_id=$("$GH" run list -c "$ref" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
+  local run_id full_sha
+  if printf '%s' "$ref" | grep -Eq '^[0-9a-f]{7,40}$' || [ "$ref" = HEAD ]; then
+    # `gh run list -c` matches only the full 40-char head SHA, so a short SHA or "HEAD" never
+    # matches — resolve to the full SHA first (falling back to the raw ref if git can't).
+    full_sha=$(git rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null || true)
+    run_id=$("$GH" run list -c "${full_sha:-$ref}" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
   else
     run_id=$("$GH" run list -b "$ref" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
   fi

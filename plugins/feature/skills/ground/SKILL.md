@@ -86,6 +86,12 @@ Every claim carries its evidence inline, or it does not go in:
 - **Constraints already decided** — link the memory or prior handoff rather
   than restating it.
 
+**Facts a plan's gate or fix will rest on.** Pin these before they detonate downstream, where no exit code catches them:
+
+- **The `--check` command, run on the clean baseline.** If the plan will gate on a build/check command, run it at the base SHA and record pass/fail and which errors are pre-existing. A gate already red on baseline is not a code signal — the plan must then gate on a differential (new errors in touched files only) or on a command that actually passes. A whole codex run can write correct code and be discarded against a check that never passed on that module.
+- **The existing client for any third-party API the plan will call or probe.** When a repo module exists to talk to a service, read it before improvising auth or transport — it holds the real recipe (token exchange, required headers, anti-bot client). Improvising instead burns probe after probe rediscovering what the module already encodes.
+- **The real cap behind any numeric bound a fix pins.** A limit or clamp value the plan cites must match the existing validation or schema cap it flows into; a value that contradicts it (a clamp to 150 into a `max(100)` schema) passes mocked tests and fails only live.
+
 **Diagnosis is not design.** A candidate mechanism named as a question with
 what would settle it belongs in Open questions: "Does GMGN drop a
 subscription on a duplicate subscribe? Settled by <probe>." Choosing among
