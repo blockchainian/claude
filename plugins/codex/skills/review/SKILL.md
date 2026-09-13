@@ -86,10 +86,20 @@ scripts turn it into the same shape as a local review:
   findings), or `timeout` (no review arrived in time — a finding for the
   caller, not a pass); exits non-zero only for `timeout`.
 - **`classify-severity.sh [threads.json]`** takes the bot's open review
-  threads (`{path, line, isResolved, body}`, stdin or a file argument) and
-  splits them into `must_fix`/`nits` by its native badge: `P0`/`P1` is
-  must-fix, `P2` and higher or no badge at all is a nit, and a resolved thread
-  is dropped. `review-state.sh` calls it once a review has posted.
+  threads (`{thread_id, comment_id, path, line, isResolved, body}`, stdin or a
+  file argument) and splits them into `must_fix`/`nits` by its native badge:
+  `P0`/`P1` is must-fix, `P2` and higher or no badge at all is a nit, and a
+  resolved thread is dropped. Each finding carries `thread_id`/`comment_id`
+  through so the caller can close its thread. `review-state.sh` calls it once a
+  review has posted.
+- **`resolve-threads.sh [dispositions.json]`** closes the loop on the
+  cloud-review threads by disposition: `[{thread_id, comment_id, disposition,
+  reason}]` in, and for each entry with a `thread_id` it reacts (👍 `fixed`, 👎
+  `rejected`), replies with `reason` on a rejection, then resolves the thread.
+  Entries with a `null` `thread_id` (local findings) are skipped; an empty
+  array is a no-op. `--dry-run` prints the operation plan instead of calling
+  GitHub. `/feature:ship` step 8 pipes `findings.json` to it after posting the
+  summary comment.
 
 Under `/feature:orchestrate`: step 5 starts `review-state.sh` in the
 background alongside the local review, against the head `implement.sh` (or
@@ -98,6 +108,7 @@ the UX lane) just pushed; step 7 folds its `must_fix` into the same
 merge on CI, after round 1's fixes are pushed — there is no round 2, so a
 must-fix a fix itself introduces ships unreviewed by design.
 
-Verified by `tests/test-review-state.sh` and `tests/test-classify-severity.sh`
+Verified by `tests/test-review-state.sh`, `tests/test-classify-severity.sh`
+and `tests/test-resolve-threads.sh` (the last via `--dry-run`, so no live PR)
 against a stub `gh`, using the cloud bot's real comment format (from PR 623,
 `0xbabedead/chadwallet`) as fixtures.

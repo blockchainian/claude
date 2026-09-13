@@ -8,9 +8,10 @@ usage() {
   cat >&2 <<'EOF'
 Usage: classify-severity.sh [threads.json]
 
-Reads a JSON array of {path, line, isResolved, body} (default: stdin) — one entry per PR review
-thread, body the concatenated comment text — and prints {must_fix: [...], nits: [...]} where each
-entry is {file, line, severity, claim}.
+Reads a JSON array of {thread_id, comment_id, path, line, isResolved, body} (default: stdin) — one
+entry per PR review thread, body the concatenated comment text — and prints {must_fix: [...],
+nits: [...]} where each entry is {file, line, severity, claim, thread_id, comment_id}. The thread_id
+and comment_id let a caller resolve or react on the thread the finding came from.
 
 Severity: a "![P0 Badge]" or "![P1 Badge]" marks must-fix; P2 and higher, or no badge at all, is
 a nit. A resolved thread is dropped.
@@ -56,7 +57,14 @@ def classify(thread):
     else:
         first_line = body.strip().splitlines()[0] if body.strip() else ""
         claim = first_line[:200]
-    return {"file": thread.get("path", ""), "line": thread.get("line") or 0, "severity": severity, "claim": claim}
+    return {
+        "file": thread.get("path", ""),
+        "line": thread.get("line") or 0,
+        "severity": severity,
+        "claim": claim,
+        "thread_id": thread.get("thread_id"),
+        "comment_id": thread.get("comment_id"),
+    }
 
 findings = [classify(t) for t in threads if not t.get("isResolved")]
 must_fix = [f for f in findings if f["severity"] == "must-fix"]

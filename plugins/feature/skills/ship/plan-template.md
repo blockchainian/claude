@@ -97,6 +97,15 @@ green unedited, a call site that keeps its signature). -->
 
 - <invariant> — `path/test.ts`
 
+## Intended changes
+
+<!-- Behavior this plan deliberately changes from before, so the reviewer reads the diff as intent
+and does not file it as a regression (a stub or null replaced with a real value, a signature that
+moves on purpose). The opposite of an Invariant; never mix the two. One line each, with the test
+that proves the new behavior. Delete the section if nothing changes behavior. -->
+
+- <behavior> now <new> (was <old>) — intended, not a regression — `path/test.ts`
+
 ## UX checklist per surface
 
 <!-- Delete this whole section, heading included, when the UX workstreams read `No UX lane.`

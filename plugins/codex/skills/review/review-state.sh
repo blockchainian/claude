@@ -28,7 +28,7 @@ QUERY='query($owner: String!, $name: String!, $pr: Int!) {
     pullRequest(number: $pr) {
       reviews(last: 50) { nodes { submittedAt author { login } commit { oid } } }
       reactions(last: 50) { nodes { createdAt content user { login } } }
-      reviewThreads(first: 100) { nodes { isResolved path line comments(first: 10) { nodes { body } } } }
+      reviewThreads(first: 100) { nodes { id isResolved path line comments(first: 10) { nodes { id body } } } }
     }
   }
 }'
@@ -76,6 +76,8 @@ d = json.loads(sys.argv[1])
 nodes = d["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
 out = [
     {
+        "thread_id": n["id"],
+        "comment_id": (n["comments"]["nodes"][0]["id"] if n["comments"]["nodes"] else None),
         "path": n["path"],
         "line": n.get("line"),
         "isResolved": n["isResolved"],
