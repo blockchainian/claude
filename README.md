@@ -12,6 +12,7 @@ ships.
 | [cloudflare](plugins/cloudflare/README.md) | The Cloudflare plugin with only the six skills this desk uses, plus its five MCP servers. |
 | [proxy](plugins/proxy/README.md) | Captures and decodes the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy, scoped to that app's hosts. |
 | [intel](plugins/intel/README.md) | Transcribes audio locally with whisper and turns any long-form source (article, podcast, video) into durable, searchable highlights. |
+| [web](plugins/web/README.md) | Finds web memory leaks by diffing V8 heap snapshots captured from a running Chrome over the DevTools protocol. |
 
 ## Install
 
@@ -24,6 +25,7 @@ ships.
 /plugin install cloudflare@blockchainian
 /plugin install proxy@blockchainian
 /plugin install intel@blockchainian
+/plugin install web@blockchainian
 ```
 
 Claude Code registers one marketplace per name, so adding this repository is
@@ -41,6 +43,7 @@ plugins/render/                   the Render plugin, trimmed to nine skills
 plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
 plugins/proxy/                    the mitmproxy traffic-capture plugin
 plugins/intel/                    the audio-transcription and highlights plugin
+plugins/web/                      the web heap-snapshot leak-finder plugin
 tests/                            grok's node suite
 ```
 

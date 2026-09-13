@@ -1,18 +1,19 @@
 {
   "name": "blockchainian-claude",
   "private": true,
-  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, grok, mobile, render, cloudflare, proxy, and intel plugins.",
+  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, grok, mobile, render, cloudflare, proxy, intel, and web plugins.",
   "type": "module",
   "engines": {
     "node": ">=18.18"
   },
   "scripts": {
-    "test": "npm run test:grok && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel",
+    "test": "npm run test:grok && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web",
     "test:grok": "node --test tests/*.test.mjs",
     "test:codex": "plugins/codex/skills/implement/tests/test-implement.sh && plugins/codex/skills/review/tests/test-review.sh && plugins/codex/skills/review/tests/test-review-state.sh && plugins/codex/skills/review/tests/test-classify-severity.sh",
     "validate": "claude plugin validate --strict .",
     "test:feature": "plugins/feature/hooks/tests/run.sh && plugins/feature/skills/ship/watch-ci.test.sh && plugins/feature/skills/retro/tests/run.sh",
     "test:proxy": "python3 plugins/proxy/skills/inspect-app-traffic/scripts/test_capture.py && python3 plugins/proxy/skills/inspect-app-traffic/scripts/test_wg_config.py",
-    "test:intel": "python3 plugins/intel/skills/transcribe/scripts/test_transcribe.py && python3 plugins/intel/skills/digest/scripts/test_digest.py"
+    "test:intel": "python3 plugins/intel/skills/transcribe/scripts/test_transcribe.py && python3 plugins/intel/skills/digest/scripts/test_digest.py",
+    "test:web": "uv run plugins/web/skills/find-leaks/scripts/test_diff_heap_snapshots.py"
   }
 }
