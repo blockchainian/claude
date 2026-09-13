@@ -47,5 +47,45 @@ assert "null thread_id (local finding) contributes no op" check \
 OUT_EMPTY=$(printf '[]' | "$RESOLVE" --dry-run)
 assert_eq "empty dispositions yield empty plan" '[]' "$OUT_EMPTY"
 
+# ---------- executor loop against a stub gh (no live PR) ----------
+# The stub records each `gh api graphql` invocation's variables so we can assert the executor
+# issues the right mutation with the right ids — not just that the plan is correct.
+FAKE_GH="$SCRATCH/fake-gh.sh"
+CALLS="$SCRATCH/calls.log"
+cat > "$FAKE_GH" <<SH
+#!/usr/bin/env bash
+# Record only the -F variable pairs of each call, one call per line.
+line=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    -F) line="\$line \$2"; shift 2 ;;
+    -f) shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "\$line" >> "$CALLS"
+SH
+chmod +x "$FAKE_GH"
+
+: > "$CALLS"
+GH="$FAKE_GH" "$RESOLVE" "$SCRATCH/dispositions.json"
+RC=$?
+assert_eq "executor exits 0 when all gh calls succeed" 0 "$RC"
+
+CALLS_TEXT=$(cat "$CALLS")
+grep_call() { printf '%s\n' "$CALLS_TEXT" | grep -Fq "$1"; }
+assert "fixed thread reacted THUMBS_UP on its comment" grep_call "subjectId=PRRC_fixed content=THUMBS_UP"
+assert "rejected thread reacted THUMBS_DOWN on its comment" grep_call "subjectId=PRRC_rej content=THUMBS_DOWN"
+assert "rejected thread got the reason as a reply" grep_call "threadId=PRRT_rej body=reverts intended drop-in parity"
+assert "fixed thread was resolved" grep_call "threadId=PRRT_fixed"
+assert "null-comment thread resolved without a reaction" grep_call "threadId=PRRT_nocmt"
+assert_eq "local finding (null thread) issued no call for it" "" "$(printf '%s\n' "$CALLS_TEXT" | grep -c 'local' | tr -d ' ' | sed 's/^0$//')"
+
+# A failing gh call surfaces as a non-zero exit.
+FAKE_FAIL="$SCRATCH/fake-gh-fail.sh"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$FAKE_FAIL"; chmod +x "$FAKE_FAIL"
+GH="$FAKE_FAIL" "$RESOLVE" "$SCRATCH/dispositions.json" >/dev/null 2>&1
+assert_eq "executor exits non-zero when a gh call fails" 1 "$?"
+
 if [ "$FAILS" -gt 0 ]; then echo "$FAILS TEST(S) FAILED"; exit 1; fi
 echo "ALL TESTS PASSED"
