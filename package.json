@@ -11,7 +11,7 @@
     "test:grok": "node --test tests/*.test.mjs",
     "test:codex": "plugins/codex/skills/implement/tests/test-implement.sh && plugins/codex/skills/review/tests/test-review.sh && plugins/codex/skills/review/tests/test-review-state.sh && plugins/codex/skills/review/tests/test-classify-severity.sh",
     "validate": "claude plugin validate --strict .",
-    "test:feature": "plugins/feature/hooks/tests/run.sh && plugins/feature/skills/orchestrate/watch-ci.test.sh",
+    "test:feature": "plugins/feature/hooks/tests/run.sh && plugins/feature/skills/ship/watch-ci.test.sh && plugins/feature/skills/retro/tests/run.sh",
     "test:proxy": "python3 plugins/proxy/skills/inspect-app-traffic/scripts/test_capture.py && python3 plugins/proxy/skills/inspect-app-traffic/scripts/test_wg_config.py",
     "test:intel": "python3 plugins/intel/skills/transcribe-audio/scripts/test_transcribe.py && python3 plugins/intel/skills/digest/scripts/test_digest.py"
   }
