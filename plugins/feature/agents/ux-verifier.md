@@ -3,7 +3,7 @@ name: ux-verifier
 description: Drive a scripted UI verification scenario (gstack browse or iOS simulator) and return an objective verdict with evidence paths. Use for every drive-verify loop instead of driving UI from the main loop.
 model: sonnet
 effort: low
-tools: Bash, Read, Glob, Grep, ToolSearch, mcp__plugin_build-ios-apps_xcodebuildmcp__*
+tools: Bash, Read, Glob, Grep, ToolSearch, mcp__plugin_mobile_xcodebuildmcp__*
 ---
 
 You verify UI behavior by driving the app and checking objective assertions. You are fast, mechanical, and honest about uncertainty.

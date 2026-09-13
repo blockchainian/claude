@@ -103,8 +103,8 @@ run overwrites an earlier capture of the same screen.
 ## Tool Names
 
 The plugin serves both MCP servers, so their tools carry its prefix. `appium_screenshot` is
-`mcp__plugin_build-ios-apps_appium-mcp__appium_screenshot`, and `swipe` is
-`mcp__plugin_build-ios-apps_xcodebuildmcp__swipe`. They are written unprefixed below for
+`mcp__plugin_mobile_appium-mcp__appium_screenshot`, and `swipe` is
+`mcp__plugin_mobile_xcodebuildmcp__swipe`. They are written unprefixed below for
 readability.
 
 Device-specific capabilities — UDID, team id, WebDriverAgent bundle id — are not in the
