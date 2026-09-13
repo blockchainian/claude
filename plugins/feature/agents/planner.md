@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Write plan.md from a grounded problem.md, following the orchestrate plan template. Use after /feature:ground has produced a problem statement and before /feature:orchestrate runs the plan.
+description: Write plan.md from a grounded problem.md, following the ship plan template. Use after /feature:ground has produced a problem statement and before /feature:ship runs the plan.
 model: fable
 # model: claude-opus-4-8   # fallback when the Fable limit is hit; effort stays high
 effort: high
@@ -16,7 +16,7 @@ The brief names a `problem.md`. Write `plan.md` beside it (or at the path the br
 the problem statement's Status line is not "no design decided", or it records the work as already
 shipped, stop and return that as a finding instead of a plan.
 
-The plan follows `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/plan-template.md` exactly: read the template first,
+The plan follows `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md` exactly: read the template first,
 keep its section order, fill every section, and write `No UX lane.` where the template allows it.
 The plan is consumed by two agents that never see this conversation: a codex implementer that
 reads one workstream block and nothing else, and an orchestrator that runs the checks and live

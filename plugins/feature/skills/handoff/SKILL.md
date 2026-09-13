@@ -35,9 +35,9 @@ handoff for the same topic.
 
 ## Two shapes
 
-**Development flow** (ground → plan → orchestrate → review-fix → deploy): "Done" is SHAs and
+**Development flow** (ground → plan → ship → review-fix → deploy): "Done" is SHAs and
 phase docs; "Next" is the phase after the one that produced the last document: the `planner` agent
-on `problem.md`, the orchestrate step on `plan.md`, or the PR round; "Do not redo" is the probes already
+on `problem.md`, the ship step on `plan.md`, or the PR round; "Do not redo" is the probes already
 green and the workstreams already merged (with the check output path).
 
 **Research session** (gather → analyse → derive → report): there is no phase doc, and mid-session

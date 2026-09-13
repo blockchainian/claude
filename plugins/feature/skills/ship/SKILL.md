@@ -1,15 +1,15 @@
 ---
-name: orchestrate
+name: ship
 description: >
   Run a written plan through the codex and UX lanes to a shipped feature —
   launch the workstreams, write and run the probes, verify staging, triage the
   local review, run the fix lanes, decide production. Use when a `plan.md` exists and has passed
-  the path checker: "/feature:orchestrate <plan.md>", "run this plan", "ship this
+  the path checker: "/feature:ship <plan.md>", "run this plan", "ship this
   plan". NOT for planning, and not for a change small enough to do in one
   turn — there the launch overhead is the whole cost.
 ---
 
-# Orchestrate — run the plan, never write the code
+# Ship — run the plan, never write the code
 
 The orchestrator is the one seat that sees both lanes. It launches, verifies and decides; it does
 not implement, and it does not drive UI. Every hour it spends editing the branch is an hour the
@@ -24,7 +24,7 @@ then drop back.
 
 ## What plan.md must contain
 
-The plan follows `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/plan-template.md`: Scope, Facts, Constraints,
+The plan follows `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md`: Scope, Facts, Constraints,
 Workstreams, UX workstreams, Dependencies, Invariants, UX checklist per surface, New files, Checks,
 Live checks, Outcome. A program that touches many screens is one plan with many UX workstreams,
 not one plan per screen: grounding and planning run once, the implementers run at once. Each workstream block is the implementer's whole brief: `codex:implement` passes
@@ -130,7 +130,7 @@ why reading alone does not find it.
 
 9. **Decide production, then record the outcome.** Production ships only when every finding is
    closed AND the re-run probes are green — never a half-shipped mixed feature. Then run
-   `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/watch-ci.sh <ref> [out-file]` against the fixed head
+   `${CLAUDE_PLUGIN_ROOT}/skills/ship/watch-ci.sh <ref> [out-file]` against the fixed head
    (the branch tip after step 8's pushes, or the original push when step 7 found nothing) and read
    its verdict JSON; gate on the `conclusion`
    field, never on prose. Merge only on `conclusion: success`: a plain `gh pr merge`, never
