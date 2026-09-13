@@ -1,0 +1,22 @@
+{
+  "name": "proxyman",
+  "version": "0.1.0",
+  "description": "Capture and decode the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy: one-time cert setup, per-run isolated capture on its own port and output directory, target-only host filtering, and offline flow/host/WebSocket readers.",
+  "author": {
+    "name": "blockchainian"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/blockchainian/claude",
+  "repository": "https://github.com/blockchainian/claude",
+  "keywords": [
+    "mitmproxy",
+    "proxy",
+    "traffic-capture",
+    "api",
+    "websocket",
+    "wireguard",
+    "reverse-engineering",
+    "ios",
+    "web"
+  ]
+}
