@@ -233,6 +233,38 @@ def _reader_output(record: dict, addon: str, extra: list[str]) -> str:
     return subprocess.run(cmd, capture_output=True, text=True).stdout
 
 
+def _log_counts(record: dict) -> tuple[int, int]:
+    """Count this capture's client connections and requests from the hub log.
+
+    connlog.py writes a timestamped line per client connection and per request host, so a
+    capture's window (start time) and hosts are counted straight from the log — no re-parse of
+    the whole shared flow file, whatever its size.
+    """
+    since = float(record.get("started_at", 0) or 0)
+    rx = record.get("hostRegex") or ""
+    try:
+        text = (hub_dir() / "mitmdump.log").read_text(errors="replace")
+    except FileNotFoundError:
+        return 0, 0
+    clients = requests = 0
+    for line in text.splitlines():
+        parts = line.split(maxsplit=2)
+        if len(parts) >= 2 and parts[0] == "PROXY_CLIENT_CONNECTED":
+            try:
+                if float(parts[1]) >= since:
+                    clients += 1
+            except ValueError:
+                pass
+        elif len(parts) == 3 and parts[0] == "PROXY_REQUEST":
+            try:
+                fresh = float(parts[1]) >= since
+            except ValueError:
+                continue
+            if fresh and (not rx or re.search(rx, parts[2])):
+                requests += 1
+    return clients, requests
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     record = _capture(args.capture)
     if not record:
@@ -244,11 +276,7 @@ def cmd_check(args: argparse.Namespace) -> int:
                           "verdict": "the hub is not running — start a capture first"}))
         return 0
 
-    log = Path(meta.get("log", ""))
-    text = log.read_text(errors="replace") if log.exists() else ""
-    clients = text.count("PROXY_CLIENT_CONNECTED")
-    lines = [ln for ln in _reader_output(record, "flowlog.py", []).splitlines() if ln.strip()]
-    requests = len(lines)
+    clients, requests = _log_counts(record)
 
     if clients == 0:
         verdict = ("nothing has connected to the hub — enable Zero Omega for the site (proxy "
@@ -287,9 +315,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
     if not record:
         print(json.dumps({"stopped": False, "reason": "capture not found", "capture": args.capture}))
         return 2
-    n = 0
-    if hub_running():
-        n = len([ln for ln in _reader_output(record, "flowlog.py", []).splitlines() if ln.strip()])
+    _, n = _log_counts(record)
     path.unlink(missing_ok=True)
     print(json.dumps({"stopped": True, "capture": args.capture, "requests": n,
                       "note": "the hub keeps running; use `down` to stop it"}, indent=2))

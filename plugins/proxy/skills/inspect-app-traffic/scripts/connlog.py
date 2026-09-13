@@ -1,15 +1,17 @@
-# ABOUTME: capture-side addon that logs proxy client connections and intercepted requests to
-# ABOUTME: the run log, so `capture.py check` can tell "proxy enabled" from "target host missed".
+# ABOUTME: hub-side addon that logs, with a timestamp, each proxy client connection and each
+# ABOUTME: request host, so `capture.py check`/`stop` count a capture's traffic from the log.
+import time
+
 from mitmproxy import http
 
 
 def client_connected(client) -> None:
-    # Fires when anything points at the proxy port, before any HTTP — the signal that the
-    # proxy (Zero Omega, a phone, a system proxy) is actually enabled and connecting.
-    print("PROXY_CLIENT_CONNECTED", flush=True)
+    # Fires when anything points at the hub port, before any HTTP — the signal that the proxy
+    # (Zero Omega, a phone, a system proxy) is actually enabled and connecting.
+    print(f"PROXY_CLIENT_CONNECTED {time.time():.3f}", flush=True)
 
 
 def request(flow: http.HTTPFlow) -> None:
-    # With allow_hosts set, only target hosts are intercepted, so this fires for target
-    # traffic only; non-target hosts pass through as raw tunnels and never reach here.
-    print(f"PROXY_REQUEST {flow.request.pretty_host}", flush=True)
+    # One line per request, with the host, so a capture's window and hosts can be counted from
+    # the log alone — no need to re-parse the whole shared flow file.
+    print(f"PROXY_REQUEST {time.time():.3f} {flow.request.pretty_host}", flush=True)
