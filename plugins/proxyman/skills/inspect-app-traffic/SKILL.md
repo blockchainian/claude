@@ -206,8 +206,8 @@ format, re-readable only by mitmproxy tools, which is why these go through `mitm
 # One line per request: method, status, host+path, content-type.
 mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/flowlog.py"
 
-# WebSocket frames; WSHOST filters to one host, WSMAX sets the truncation width.
-WSHOST=pump.fun mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/wslog.py"
+# WebSocket frames; --set wshost= filters to one host, --set wsmax= sets the truncation width.
+mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/wslog.py" --set wshost=pump.fun
 
 # Host tally, to confirm the scope held or to pick hosts after a discovery pass.
 mitmdump -q -nr "$PROXYMAN_DIR/$RUN/flows.mitm" -s "$SKILL_DIR/scripts/hosts.py"
