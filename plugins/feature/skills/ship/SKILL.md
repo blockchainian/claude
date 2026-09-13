@@ -40,9 +40,11 @@ Before the plan ships, and after every revision, run `${CLAUDE_PLUGIN_ROOT}/skil
 <plan> [skip-regex]` from inside the repo. It exits 1 on any `MISSING:` or `AMBIGUOUS:` path;
 mark files the plan creates `(new)` on their own line so they are skipped. Run
 `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-overlap.sh <plan>` beside it; it exits 1 when two
-workstreams list the same file, which is a merge conflict scheduled in advance. Then grep each
-function, route, table, column and env var the plan names — a miss there reads fluently, which is
-why reading alone does not find it.
+workstreams list the same file, which is a merge conflict scheduled in advance. Run
+`${CLAUDE_PLUGIN_ROOT}/skills/ground/check-acceptance.py <plan> <problem.md>` too; it exits 1 on
+`UNCOVERED: AC<n>` — an acceptance criterion no test references, an unbuilt part of the feature —
+and sends the plan back to the planner. Then grep each function, route, table, column and env var
+the plan names — a miss there reads fluently, which is why reading alone does not find it.
 
 ## Procedure
 
@@ -135,7 +137,10 @@ why reading alone does not find it.
    that comment is the review's record.
 
 9. **Decide production, then record the outcome.** Production ships only when every finding is
-   closed AND the re-run probes are green — never a half-shipped mixed feature. Then run
+   closed AND the re-run probes are green AND every acceptance criterion is met — the gate's
+   `[AC<n>]`-tagged tests pass and each `ui` criterion's probe is green; a criterion whose test
+   never ran or went red is an unmet acceptance, a finding for the user, never a ship. This is
+   what makes the shipped feature equal the definition, not a half-shipped mixed feature. Then run
    `${CLAUDE_PLUGIN_ROOT}/skills/ship/watch-ci.sh <ref> [out-file]` against the fixed head
    (the branch tip after step 8's pushes, or the original push when step 7 found nothing) and read
    its verdict JSON; gate on the `conclusion`

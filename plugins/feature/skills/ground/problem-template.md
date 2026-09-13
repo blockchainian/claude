@@ -9,6 +9,21 @@ Base: `<short sha>` on branch `<branch>`, <date>.
 
 Decision in one sentence: <what is being changed and why now>.
 
+## Accepted when
+
+The desired state decomposed into individually testable behaviours, verbatim from
+the user, one per bullet, each numbered `AC<n>` and tagged with the kind of test
+that settles it (unit | integration | ui | benchmark). Together these define the
+feature: the planner turns each into at least one named test, and
+`check-acceptance.py` enforces that every `AC<n>` is referenced by a test in the
+plan. These are optative — the desired end state, carried through, never swept for
+truth — but the facts each one presupposes are pulled into Facts and verified with
+the rest (a criterion citing `GET /trades` presupposes that route exists). Not
+"none": a feature with no acceptance criteria was rejected at grounding.
+
+- **AC1** (integration): <one behaviour a test can assert>.
+- **AC2** (unit): <another>.
+
 ## Facts
 
 One bullet per fact, evidence inline. Code as `path.ts:120`; measurements as

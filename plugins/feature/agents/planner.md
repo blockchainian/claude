@@ -30,6 +30,14 @@ and repeat every question in your final message. File locations, test-file names
 
 Scope is exactly the ask in `problem.md`. Do not add steps that were not requested.
 
+`problem.md`'s "Accepted when" section is the feature's definition: turn every criterion `AC<n>`
+into at least one named test, tagged `[AC<n>]` on the case that settles it. Route by the
+criterion's kind — a `ui` criterion becomes an assertion in the UX checklist for its surface, a
+unit/integration criterion a case on the owning workstream's `Tests:` line, a benchmark a case in
+`Tests:` or a `Live checks` line. These tests are both the acceptance gate and the regression
+guard; a criterion with no test is an unbuilt part of the feature. Do not invent criteria the
+problem statement does not list, and do not drop one.
+
 ## Rules
 
 - Record `git rev-parse --short HEAD` as the plan's base. If it differs from the SHA `problem.md`
@@ -40,6 +48,9 @@ Scope is exactly the ask in `problem.md`. Do not add steps that were not request
   `(new)` on their own line.
 - Then grep every function, route, table, column and env var the plan names; a miss there reads
   fluently, which is why reading alone does not find it.
+- Then run `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-acceptance.py <plan.md> <problem.md>` and fix
+  every `UNCOVERED: AC<n>` (add the missing test, tagged) and `UNKNOWN: AC<n>` (a tag that names no
+  criterion) before finishing.
 - Frontend is one lane. When any frontend change is UX-changing, every frontend change goes into
   the UX workstreams for Fable; codex workstreams get frontend files only when the plan has no UX
   lane. Never split frontend between the lanes.
@@ -50,5 +61,6 @@ Scope is exactly the ask in `problem.md`. Do not add steps that were not request
   every `OVERLAP:` by giving the file to one workstream.
 - Do not modify any file in the repo. Do not spawn agents.
 
-Your final message is: the plan path, its word count, both checkers' exit codes, and every
-`QUESTION:` line verbatim. Nothing else.
+Your final message is: the plan path, its word count, the three checkers' exit codes
+(check-paths.sh, check-overlap.sh, check-acceptance.py), and every `QUESTION:` line verbatim.
+Nothing else.
