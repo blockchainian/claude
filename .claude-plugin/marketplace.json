@@ -56,12 +56,12 @@
       "source": "./plugins/cloudflare"
     },
     {
-      "name": "proxyman",
+      "name": "proxy",
       "description": "Capture and decode the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy: one-time cert setup, per-run isolated capture on its own port and output directory, target-only host filtering, and offline flow/host/WebSocket readers.",
       "author": {
         "name": "blockchainian"
       },
-      "source": "./plugins/proxyman"
+      "source": "./plugins/proxy"
     },
     {
       "name": "intel",
