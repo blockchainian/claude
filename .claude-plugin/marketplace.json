@@ -57,7 +57,7 @@
     },
     {
       "name": "proxy",
-      "description": "Capture and decode the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy: one-time cert setup, per-run isolated capture on its own port and output directory, target-only host filtering, and offline flow/host/WebSocket readers.",
+      "description": "Capture and decode the HTTP and WebSocket traffic of a target web or mobile app with mitmproxy: one shared proxy on port 8080 that every session reuses, captures taken as filtered views of its stream, WireGuard for phones, and readers for flows, hosts, WebSockets, and shared-domain callers.",
       "author": {
         "name": "blockchainian"
       },

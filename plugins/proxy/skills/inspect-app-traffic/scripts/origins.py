@@ -1,9 +1,13 @@
 # ABOUTME: mitmproxy addon to attribute a shared-domain capture to the app that made each
 # ABOUTME: request, by Origin/Referer/app-id header — since one host can serve several apps.
+import re
+
 from mitmproxy import ctx, http
 
 
 def load(loader) -> None:
+    loader.add_option("since", str, "", "only flows started at or after this epoch time")
+    loader.add_option("host", str, "", "regex; only flows whose host matches are considered")
     # Controlled with `--set source=<substring>`. When set, only flows whose caller
     # (Origin / Referer / *-app-id header) contains it are printed, one line each — pull one
     # app's calls out of a shared capture. When empty, on `done` a table of (host, caller) ->
@@ -15,6 +19,13 @@ def load(loader) -> None:
 
 
 _seen: dict[tuple[str, str], int] = {}
+
+
+def _passes(flow: http.HTTPFlow) -> bool:
+    if (flow.request.timestamp_start or 0) < float(ctx.options.since or 0):
+        return False
+    h = ctx.options.host
+    return not h or bool(re.search(h, flow.request.pretty_host))
 
 
 def _source_of(flow: http.HTTPFlow) -> str:
@@ -29,6 +40,8 @@ def _source_of(flow: http.HTTPFlow) -> str:
 
 
 def response(flow: http.HTTPFlow) -> None:
+    if not _passes(flow):
+        return
     src = _source_of(flow)
     source = ctx.options.source
     if source:

@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
-"""Run one target-scoped mitmproxy capture, isolated so many can run at once.
+"""Drive one shared mitmproxy hub, and take app captures as views into its stream.
 
-Each capture is a run: its own listen port, its own output directory, its own mitmdump
-process. Two sessions or agents can capture different apps side by side without touching
-each other's ports or files. The only shared thing is the mitmproxy CA in ~/.mitmproxy,
-which every run reuses — that is the whole point of installing it once.
+One long-lived mitmdump — the hub — serves the HTTP proxy (for a Mac browser via Zero Omega)
+and, when asked, WireGuard (for a phone) at the same time, on the fixed port 8080. Every
+session and agent shares it: the browser needs only one Zero Omega profile, pointed at 8080,
+and the phone needs only one tunnel. The hub records everything routed to it into one flow
+file, unfiltered — Zero Omega and WireGuard already decide what reaches it.
 
-Target scoping is the reason to use this over raw mitmdump. Given a list of the target
-app's domains, only those hosts are decrypted (--allow-hosts) and only their flows are
-written (save_stream_filter). Everything else on the machine or phone — a bank, iMessage,
-another app — passes through as an opaque tunnel and is never saved. That keeps the capture
-about the one app and keeps unrelated private traffic out of the file.
+A capture is not a process; it is a named, time-stamped view into the hub's stream. `start`
+notes the moment and the target hosts; the readers then show only that capture's window,
+scoped to its hosts (and, for a shared host, its caller). So two agents capturing two apps at
+once are two records over one hub, separated at read time — no second proxy, no second port,
+no second Zero Omega profile.
 
 Subcommands:
-  start   launch a capture; prints the connection info and where flows are written
-  stop    stop a running capture and report the final flow file and its size
-  status  list this user's captures and whether each is still running
+  start   ensure the hub is up and open a capture; prints its id and the 8080 address
+  check   is the hub up, and is this capture's traffic arriving?
+  read    show this capture's flows / websocket frames / hosts / callers
+  stop    close a capture (the hub keeps running); prints its summary
+  status  the hub's state and the open captures
+  down    stop the hub itself; --wipe also deletes its flow file
 
-Ports and the single WireGuard slot are held with lock files under TMPDIR, so a second
-start never lands on a port or the UDP slot another run already took. Exit 0 on success,
-2 on bad arguments, 3 when a needed resource (the WireGuard slot) is already held.
+Exit 0 on success, 1 on failure, 2 on bad arguments.
 """
 
 from __future__ import annotations
@@ -40,16 +42,27 @@ def out_root() -> Path:
     return Path(os.environ.get("PROXY_DIR") or "/tmp/proxy")
 
 
-def tmp() -> Path:
-    return Path(os.environ.get("TMPDIR") or "/tmp")
+def hub_dir() -> Path:
+    return out_root() / "hub"
 
 
-def port_lock(port: int) -> Path:
-    return tmp() / f"proxy-port.{port}.json"
+def captures_dir() -> Path:
+    return out_root() / "captures"
 
 
-def wg_lock() -> Path:
-    return tmp() / "proxy-wireguard.json"
+def hub_flow_file() -> Path:
+    return hub_dir() / "flows.mitm"
+
+
+def hub_meta_path() -> Path:
+    return hub_dir() / "meta.json"
+
+
+def hub_lock() -> Path:
+    return Path(os.environ.get("TMPDIR") or "/tmp") / "proxy-hub.json"
+
+
+HUB_PORT = 8080
 
 
 def pid_alive(pid: int) -> bool:
@@ -65,45 +78,12 @@ def pid_alive(pid: int) -> bool:
 def host_regex(domains: list[str]) -> str:
     """Build a host-matching regex from plain domains.
 
-    Matches the domain itself and any subdomain, with an optional :port, anchored at the
-    end so "pump.fun" does not also match "notpump.fun". Used for both --allow-hosts and,
-    via ~d, the save filter.
+    Matches the domain itself and any subdomain, with an optional :port, anchored at the end
+    so "pump.fun" does not also match "notpump.fun". Saved on a capture and used by the
+    readers to scope to that app's hosts.
     """
     alts = "|".join(re.escape(d.strip()) for d in domains if d.strip())
     return rf"(?:^|\.)(?:{alts})(?::\d+)?$"
-
-
-def claim_port(preferred: int | None, run_id: str) -> int:
-    """Atomically claim a free port for this run, returning it.
-
-    Defaults to 8080 — mitmproxy's conventional port, which a Zero Omega profile is normally
-    pinned to — then falls back to 9081-9279 when 8080 is taken (a local dev server, or a
-    second concurrent capture), so parallel captures still each get their own port. 8081 is
-    left out of the fallback: a Metro/Expo bundler on 8081 was a real conflict. A port is free
-    when nothing listens on it and no live lock holds it.
-    """
-    candidates = ([preferred] if preferred else [8080]) + [
-        p for p in range(9081, 9280)
-    ]
-    for port in candidates:
-        lp = port_lock(port)
-        existing = _read(lp)
-        if existing and existing.get("run") != run_id and pid_alive(existing.get("pid", -1)):
-            continue
-        if _port_in_use(port):
-            continue
-        if existing:
-            # A stale lock (dead holder) or our own: clear it so the atomic create below
-            # can recreate it. A live foreign holder was already skipped above.
-            lp.unlink(missing_ok=True)
-        try:
-            fd = os.open(lp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError:
-            continue
-        with os.fdopen(fd, "w") as f:
-            json.dump({"run": run_id, "port": port, "pid": os.getpid(), "since": time.time()}, f)
-        return port
-    raise SystemExit("no free port found in 9080-9279")
 
 
 def _port_in_use(port: int) -> bool:
@@ -135,6 +115,14 @@ def _read(path: Path) -> dict | None:
         return None
 
 
+def _human(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}TB"
+
+
 def lan_ip() -> str:
     try:
         iface = subprocess.check_output(["route", "-n", "get", "default"], text=True)
@@ -148,120 +136,188 @@ def lan_ip() -> str:
     return "<your-mac-lan-ip>"
 
 
-def cmd_start(args: argparse.Namespace) -> int:
-    run_id = os.environ.get("PROXY_RUN_ID") or f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
-    if args.label:
-        run_id = f"{run_id}-{re.sub(r'[^A-Za-z0-9_-]', '', args.label)}"
-    rundir = out_root() / run_id
-    rundir.mkdir(parents=True, exist_ok=True)
-    flow_file = rundir / "flows.mitm"
-    log_file = rundir / "mitmdump.log"
+def hub_running() -> dict | None:
+    meta = _read(hub_meta_path())
+    if meta and pid_alive(meta.get("pid", -1)):
+        return meta
+    return None
 
-    domains = [d for d in (args.hosts or "").split(",") if d.strip()]
-    regex = args.host_regex or (host_regex(domains) if domains else None)
 
+def ensure_hub(wireguard: bool) -> tuple[dict | None, str | None]:
+    """Return (meta, error). Start the hub if it is not already running.
+
+    The hub is one mitmdump serving `regular@8080` and, if asked, `wireguard`, writing every
+    flow to the shared file. If it is already up, it is reused as-is; a WireGuard request
+    against a hub that has no WireGuard mode is reported so the caller can restart it.
+    """
+    meta = hub_running()
+    if meta:
+        if wireguard and "wireguard" not in meta.get("modes", []):
+            return meta, "hub is running without WireGuard; run `down` then `start --wireguard`"
+        return meta, None
+
+    if _port_in_use(HUB_PORT):
+        return None, (f"port {HUB_PORT} is held by another process — free it, then start "
+                      "(the hub needs 8080)")
+
+    hub_dir().mkdir(parents=True, exist_ok=True)
+    flow_file = hub_flow_file()
+    log_file = hub_dir() / "mitmdump.log"
     connlog = Path(__file__).with_name("connlog.py")
+    modes = ["regular@8080"] + (["wireguard"] if wireguard else [])
     cmd = ["mitmdump", "-q", "-s", str(connlog), "--set", f"save_stream_file={flow_file}"]
-    if regex:
-        # allow_hosts is a plain regex; save_stream_filter is mitmproxy's filter language,
-        # where | and () are operators — the regex must be quoted so they stay literal.
-        cmd += ["--allow-hosts", regex, "--set", f'save_stream_filter=~d "{regex}"']
-    # Without a filter we capture everything: this is discovery mode, used to find which
-    # hosts an app talks to before scoping to them. Warn, because the file will hold
-    # unrelated traffic.
-
-    wg_held = None
-    if args.mode == "wireguard":
-        lp = wg_lock()
-        held = _read(lp)
-        if held and pid_alive(held.get("pid", -1)) and held.get("run") != run_id:
-            print(json.dumps({"started": False, "reason": "wireguard-slot-held",
-                              "heldBy": held.get("run")}))
-            print(f"WireGuard slot (UDP 51820) is held by run {held.get('run')}. "
-                  f"Only one WireGuard capture runs at a time; stop it or use --mode proxy.",
-                  file=sys.stderr)
-            return 3
-        cmd += ["--mode", "wireguard"]
-        wg_held = lp
-        port = 51820
-    else:
-        port = claim_port(args.port, run_id)
-        cmd += ["--mode", "regular", "--listen-port", str(port)]
+    for m in modes:
+        cmd += ["--mode", m]
 
     with open(log_file, "w") as log:
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
                                 start_new_session=True)
-
-    if wg_held is not None:
-        wg_held.write_text(json.dumps({"run": run_id, "pid": proc.pid, "since": time.time()}))
-
-    meta = {
-        "run": run_id, "mode": args.mode, "pid": proc.pid, "port": port,
-        "hosts": domains, "hostRegex": regex, "flowFile": str(flow_file),
-        "log": str(log_file), "since": time.time(),
-    }
-    (rundir / "meta.json").write_text(json.dumps(meta, indent=2))
-
-    # Give mitmdump a moment to fail loudly (bad option, port race) rather than reporting a
-    # dead capture as live.
-    time.sleep(0.6)
-    if not pid_alive(proc.pid):
+    time.sleep(0.7)
+    if not pid_alive(proc.pid) or not _port_in_use(HUB_PORT):
         tail = log_file.read_text()[-500:] if log_file.exists() else ""
-        print(json.dumps({"started": False, "reason": "mitmdump exited", "log": tail}))
-        _release(port, wg_held, run_id)
+        if pid_alive(proc.pid):
+            proc.terminate()
+        return None, f"hub failed to start: {tail.strip()}"
+
+    meta = {"pid": proc.pid, "since": time.time(), "port": HUB_PORT,
+            "modes": ["regular"] + (["wireguard"] if wireguard else []),
+            "flowFile": str(flow_file), "log": str(log_file)}
+    hub_meta_path().write_text(json.dumps(meta, indent=2))
+    hub_lock().write_text(json.dumps({"pid": proc.pid, "since": meta["since"]}))
+    return meta, None
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    meta, err = ensure_hub(args.wireguard)
+    if err and not meta:
+        print(json.dumps({"started": False, "reason": err}))
         return 1
 
-    # Confirm the port is actually being served — a capture that lost a bind race can stay
-    # alive without listening, and would otherwise be reported as started.
-    if args.mode == "proxy" and not _port_in_use(port):
-        proc.terminate()
-        print(json.dumps({"started": False, "reason": f"nothing listening on {port} "
-                          "after launch — the port may be held by another process"}))
-        _release(port, wg_held, run_id)
-        return 1
+    cap_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+    if args.label:
+        cap_id = f"{cap_id}-{re.sub(r'[^A-Za-z0-9_-]', '', args.label)}"
+    domains = [d for d in (args.hosts or "").split(",") if d.strip()]
+    regex = args.host_regex or (host_regex(domains) if domains else "")
+    record = {"id": cap_id, "label": args.label, "started_at": time.time(),
+              "hosts": domains, "hostRegex": regex}
+    captures_dir().mkdir(parents=True, exist_ok=True)
+    (captures_dir() / f"{cap_id}.json").write_text(json.dumps(record, indent=2))
 
-    out: dict[str, object] = dict(meta, started=True)
-    if args.mode == "wireguard":
+    out: dict[str, object] = {"started": True, "capture": cap_id, "hosts": domains,
+                              "proxy": f"{lan_ip()}:{HUB_PORT}", "proxyLocal": f"127.0.0.1:{HUB_PORT}",
+                              "hubModes": (meta or {}).get("modes", [])}
+    if err:
+        out["warning"] = err
+    if "wireguard" in (meta or {}).get("modes", []):
         out["wireguardConfigHint"] = "run wg_config.py to emit the client config and QR"
         out["endpoint"] = f"{lan_ip()}:51820"
-    else:
-        out["proxy"] = f"{lan_ip()}:{port}"
-        out["proxyLocal"] = f"127.0.0.1:{port}"
-    if not regex:
-        out["warning"] = "no host filter: capturing ALL traffic (discovery mode)"
+    if not domains:
+        out["note"] = "no --hosts: readers show every host in the capture window; pass --hosts to scope"
     print(json.dumps(out, indent=2))
     return 0
 
 
-def _release(port: int, wg_held: Path | None, run_id: str | None) -> None:
-    lp = port_lock(port)
-    held = _read(lp)
-    if held and held.get("run") == run_id:
-        lp.unlink(missing_ok=True)
-    if wg_held is not None:
-        held = _read(wg_held)
-        if held and held.get("run") == run_id:
-            wg_held.unlink(missing_ok=True)
+def _capture(cap_id: str) -> dict | None:
+    return _read(captures_dir() / f"{cap_id}.json")
 
 
-def _find_meta(run: str) -> Path | None:
-    direct = out_root() / run / "meta.json"
-    if direct.exists():
-        return direct
-    for m in out_root().glob("*/meta.json"):
-        data = _read(m)
-        if data and data.get("run") == run:
-            return m
-    return None
+def _reader_output(record: dict, addon: str, extra: list[str]) -> str:
+    """Run a reader addon over the hub file, scoped to this capture's window and hosts."""
+    hub = hub_flow_file()
+    if not hub.exists():
+        return ""
+    cmd = ["mitmdump", "-q", "-nr", str(hub),
+           "-s", str(Path(__file__).with_name(addon)),
+           "--set", f"since={record.get('started_at', 0)}",
+           "--set", f"host={record.get('hostRegex') or ''}"] + extra
+    return subprocess.run(cmd, capture_output=True, text=True).stdout
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    record = _capture(args.capture)
+    if not record:
+        print(json.dumps({"ok": False, "reason": "capture not found", "capture": args.capture}))
+        return 2
+    meta = hub_running()
+    if not meta:
+        print(json.dumps({"ok": False, "capture": args.capture, "hubRunning": False,
+                          "verdict": "the hub is not running — start a capture first"}))
+        return 0
+
+    log = Path(meta.get("log", ""))
+    text = log.read_text(errors="replace") if log.exists() else ""
+    clients = text.count("PROXY_CLIENT_CONNECTED")
+    lines = [ln for ln in _reader_output(record, "flowlog.py", []).splitlines() if ln.strip()]
+    requests = len(lines)
+
+    if clients == 0:
+        verdict = ("nothing has connected to the hub — enable Zero Omega for the site (proxy "
+                   "8080) or turn on the phone tunnel, then use the app")
+    elif requests == 0:
+        verdict = ("the hub has traffic but none for this capture's hosts since it started — "
+                   "widen --hosts, or the Zero Omega rule does not cover the app's hosts")
+    else:
+        verdict = f"capturing: {requests} request(s) to this capture's hosts"
+    print(json.dumps({"ok": requests > 0, "capture": args.capture, "hubRunning": True,
+                      "clientsConnected": clients, "requests": requests, "verdict": verdict},
+                     indent=2))
+    return 0
+
+
+READERS = {"flows": "flowlog.py", "ws": "wslog.py", "hosts": "hosts.py", "origins": "origins.py"}
+
+
+def cmd_read(args: argparse.Namespace) -> int:
+    record = _capture(args.capture)
+    if not record:
+        print(f"capture not found: {args.capture}", file=sys.stderr)
+        return 2
+    extra: list[str] = []
+    if args.source:
+        extra += ["--set", f"source={args.source}"]
+    if args.wsmax:
+        extra += ["--set", f"wsmax={args.wsmax}"]
+    sys.stdout.write(_reader_output(record, READERS[args.kind], extra))
+    return 0
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
-    meta_path = _find_meta(args.run)
-    if not meta_path:
-        print(json.dumps({"stopped": False, "reason": "run not found", "run": args.run}))
+    path = captures_dir() / f"{args.capture}.json"
+    record = _read(path)
+    if not record:
+        print(json.dumps({"stopped": False, "reason": "capture not found", "capture": args.capture}))
         return 2
-    meta = _read(meta_path) or {}
-    pid = meta.get("pid", -1)
+    n = 0
+    if hub_running():
+        n = len([ln for ln in _reader_output(record, "flowlog.py", []).splitlines() if ln.strip()])
+    path.unlink(missing_ok=True)
+    print(json.dumps({"stopped": True, "capture": args.capture, "requests": n,
+                      "note": "the hub keeps running; use `down` to stop it"}, indent=2))
+    return 0
+
+
+def cmd_status(_: argparse.Namespace) -> int:
+    meta = hub_running()
+    hub = hub_flow_file()
+    captures = []
+    for p in sorted(captures_dir().glob("*.json")):
+        r = _read(p)
+        if r:
+            captures.append({"capture": r.get("id"), "label": r.get("label"),
+                             "hosts": r.get("hosts")})
+    print(json.dumps({
+        "hubRunning": meta is not None,
+        "hubModes": (meta or {}).get("modes", []),
+        "hubBytes": hub.stat().st_size if hub.exists() else 0,
+        "hubHuman": _human(hub.stat().st_size) if hub.exists() else "0B",
+        "captures": captures,
+    }, indent=2))
+    return 0
+
+
+def cmd_down(args: argparse.Namespace) -> int:
+    meta = _read(hub_meta_path())
+    pid = (meta or {}).get("pid", -1)
     if pid_alive(pid):
         try:
             os.kill(pid, signal.SIGTERM)
@@ -273,81 +329,14 @@ def cmd_stop(args: argparse.Namespace) -> int:
             time.sleep(0.1)
         if pid_alive(pid):
             os.kill(pid, signal.SIGKILL)
-    _release(meta.get("port", -1), wg_lock() if meta.get("mode") == "wireguard" else None,
-             meta.get("run"))
-    flow = Path(meta.get("flowFile", ""))
-    size = flow.stat().st_size if flow.exists() else 0
-    print(json.dumps({"stopped": True, "run": meta.get("run"), "flowFile": str(flow),
-                      "flowBytes": size, "flowHuman": _human(size)}, indent=2))
+    hub_meta_path().unlink(missing_ok=True)
+    hub_lock().unlink(missing_ok=True)
+    wiped = False
+    if args.wipe and hub_flow_file().exists():
+        hub_flow_file().unlink()
+        wiped = True
+    print(json.dumps({"down": True, "wiped": wiped}, indent=2))
     return 0
-
-
-def cmd_status(_: argparse.Namespace) -> int:
-    runs = []
-    for m in sorted(out_root().glob("*/meta.json")):
-        meta = _read(m)
-        if not meta:
-            continue
-        flow = Path(meta.get("flowFile", ""))
-        runs.append({
-            "run": meta.get("run"), "mode": meta.get("mode"), "port": meta.get("port"),
-            "hosts": meta.get("hosts"), "running": pid_alive(meta.get("pid", -1)),
-            "flowBytes": flow.stat().st_size if flow.exists() else 0,
-            "flowFile": str(flow),
-        })
-    print(json.dumps({"captures": runs}, indent=2))
-    return 0
-
-
-def cmd_check(args: argparse.Namespace) -> int:
-    """Report whether the app's traffic is actually reaching the proxy.
-
-    proxy cannot read Zero Omega's on/off state, but it sees what connects to it. The
-    capture logs a line when a client connects and when a target-host request is intercepted
-    (connlog.py); counting those in the run log tells the three cases apart: nothing
-    connected (proxy not enabled), connected but no target requests (rule misses the host),
-    or target requests flowing (working).
-    """
-    meta_path = _find_meta(args.run)
-    if not meta_path:
-        print(json.dumps({"ok": False, "reason": "run not found", "run": args.run}))
-        return 2
-    meta = _read(meta_path) or {}
-    log = Path(meta.get("log", ""))
-    text = log.read_text(errors="replace") if log.exists() else ""
-    clients = text.count("PROXY_CLIENT_CONNECTED")
-    requests = text.count("PROXY_REQUEST ")
-    flow = Path(meta.get("flowFile", ""))
-    size = flow.stat().st_size if flow.exists() else 0
-    running = pid_alive(meta.get("pid", -1))
-
-    if not running:
-        verdict = "capture is not running — start it first"
-    elif clients == 0:
-        verdict = ("no client has connected to the proxy — the proxy is not enabled "
-                   "(enable Zero Omega for the site, or connect the phone), or the app has "
-                   "not been used yet")
-    elif requests == 0:
-        verdict = ("proxy is connected but no target-host requests seen — check the Zero "
-                   "Omega rule covers the app's hosts, then use the app")
-    else:
-        verdict = f"capturing: {requests} request(s) to the target hosts"
-
-    print(json.dumps({
-        "ok": requests > 0, "run": meta.get("run"), "running": running,
-        "hosts": meta.get("hosts"), "clientsConnected": clients,
-        "targetRequests": requests, "flowBytes": size, "flowHuman": _human(size),
-        "verdict": verdict,
-    }, indent=2))
-    return 0
-
-
-def _human(n: float) -> str:
-    for unit in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
-        n /= 1024
-    return f"{n:.1f}TB"
 
 
 def main() -> int:
@@ -355,27 +344,34 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("start", help="launch a capture")
-    s.add_argument("--mode", choices=["proxy", "wireguard"], default="proxy",
-                   help="proxy: HTTP proxy for a Mac website via Zero Omega. "
-                        "wireguard: whole-iPhone capture over a VPN tunnel.")
-    s.add_argument("--hosts", help="comma-separated target domains, e.g. pump.fun,api.pump.fun. "
-                                   "Omit for discovery mode (captures everything).")
-    s.add_argument("--host-regex", help="raw mitmproxy host regex, overrides --hosts")
-    s.add_argument("--port", type=int, help="preferred proxy port (proxy mode only)")
-    s.add_argument("--label", help="short suffix added to the run id, for your own labelling")
+    s = sub.add_parser("start", help="ensure the hub is up and open a capture")
+    s.add_argument("--label", help="short name for the capture")
+    s.add_argument("--hosts", help="comma-separated target domains to scope the readers to")
+    s.add_argument("--host-regex", help="raw host regex, overrides --hosts")
+    s.add_argument("--wireguard", action="store_true", help="also serve WireGuard for a phone")
     s.set_defaults(func=cmd_start)
 
-    p = sub.add_parser("stop", help="stop a capture")
-    p.add_argument("run", help="run id (or its label suffix as printed by status)")
+    c = sub.add_parser("check", help="is this capture's traffic arriving?")
+    c.add_argument("capture", help="capture id from start")
+    c.set_defaults(func=cmd_check)
+
+    r = sub.add_parser("read", help="show this capture's flows/ws/hosts/callers")
+    r.add_argument("capture", help="capture id from start")
+    r.add_argument("--kind", choices=list(READERS), default="flows")
+    r.add_argument("--source", help="origins: pull one caller (Origin/Referer/app-id substring)")
+    r.add_argument("--wsmax", type=int, help="ws: max chars per frame")
+    r.set_defaults(func=cmd_read)
+
+    p = sub.add_parser("stop", help="close a capture (hub keeps running)")
+    p.add_argument("capture", help="capture id from start")
     p.set_defaults(func=cmd_stop)
 
-    st = sub.add_parser("status", help="list captures")
+    st = sub.add_parser("status", help="hub state and open captures")
     st.set_defaults(func=cmd_status)
 
-    c = sub.add_parser("check", help="is the app's traffic reaching the proxy?")
-    c.add_argument("run", help="run id (or its label suffix as printed by status)")
-    c.set_defaults(func=cmd_check)
+    d = sub.add_parser("down", help="stop the hub itself")
+    d.add_argument("--wipe", action="store_true", help="also delete the hub flow file")
+    d.set_defaults(func=cmd_down)
 
     args = ap.parse_args()
     return args.func(args)
