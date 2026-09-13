@@ -46,8 +46,8 @@ concern.
    meant. So before anything else, find the mood-ambiguous lines and settle
    each at its source — the user's intent, the one bit the repo does not hold.
    Ask the user directly, one tight yes/no question per ambiguous line, batched
-   into a single prompt — "Is this a requirement? <the line>", answered Yes or
-   No. Keep the question to that: the line and the one bit you need, no third
+   into a single prompt — "Is <the line> a requirement?", answered Yes or No.
+   Keep the question to that: the line and the one bit you need, no third
    option and no essay. Yes makes it a desired change, respected; No makes it a
    claim about current code, a Premise the sweep then verifies like any other —
    the answer settles the mood, not the truth, so a "No" the code refutes still
