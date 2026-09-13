@@ -1,0 +1,2 @@
+{"type":"session_meta","payload":{"id":"other-thread","originator":"Claude Code","cwd":"/some/other/repo","timestamp":"2026-09-13T00:05:00Z"}}
+{"type":"token_usage_record","payload":{"thread_token_usage":{"input_tokens":9999,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":9999,"reasoning_output_tokens":0,"total_tokens":19998}}}
