@@ -1,6 +1,6 @@
 {
   "name": "proxyman",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Capture and decode the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy: one-time cert setup, per-run isolated capture on its own port and output directory, target-only host filtering, and offline flow/host/WebSocket readers.",
   "author": {
     "name": "blockchainian"
