@@ -19,10 +19,13 @@ and review afterwards has poor recall. The counter is to remove the
 opportunity: investigate in a turn that is forbidden to design, and write
 only what was observed.
 
-The input is the user's ask in the shape of `docs/user-template.md` (Ask,
-Example, Accept when, Constraints, Premises, Keep unchanged). Every factual
-claim in it, on the Premises line or not, is unverified until checked; a
-refuted one becomes an open question, never a silent fix.
+The input is the user's ask, in whatever shape they think in — a goal, a list
+of requirements, a design, or all three at once. The sweep works from six
+fields (Ask, Example, Accept when, Constraints, Premises, Keep unchanged);
+step 1 sorts the input into them so the user never has to pre-sort into a
+schema shaped for this skill. Every factual claim in it, wherever it sat in
+the input, is unverified until checked; a refuted one becomes an open
+question, never a silent fix.
 
 The output is one file, `specs/<date>-<topic>/problem.md`, in the shape of
 `${CLAUDE_PLUGIN_ROOT}/skills/ground/problem-template.md`. Its consumer is a later
@@ -32,11 +35,27 @@ concern.
 
 ## Procedure
 
-1. **Name the decision and pin the base commit.** One sentence on what is
+1. **Classify the ask, and confirm what will be tested.** The user writes in
+   whatever shape they think in; sort that material into the six fields and
+   echo the mapping back in one short block before sweeping. The one
+   classification that carries weight: separate a **decision the user is
+   imposing** (a Constraint — respected, not tested) from an **assumption
+   about how the code works** (a Premise — verified). A design states both in
+   the same breath, so pull every load-bearing assumption out of it: whatever
+   a plan would rest on and could be false is a Premise, wherever it sat in
+   the input. List those Premises back under "here is what I will try to
+   break — confirm or correct," and wait for the answer. This surfaces the
+   falsification target instead of demanding the user pre-sort into it, and
+   catches the dangerous case early: an assumption the user filed as a settled
+   decision, flagged before the sweep builds on it. If the input is already
+   clean and the split is obvious, echo it in one line and move on — do not
+   turn this into an interview.
+
+2. **Name the decision and pin the base commit.** One sentence on what is
    being changed and why now. Record `git rev-parse --short HEAD`; every line
    number in the doc is valid only at that SHA.
 
-2. **Sweep, read-only, delegated.** Spawn Explore agents (`model: "sonnet"`)
+3. **Sweep, read-only, delegated.** Spawn Explore agents (`model: "sonnet"`)
    for the file-finding fan-out; they return locations and conclusions, not
    file dumps. Run the measuring commands yourself: probes, D1 queries, a
    real request against the producer. Nothing enters the doc from recall.
@@ -45,7 +64,7 @@ concern.
    (the plugin's `subagent-no-spawn` hook) blocks nested spawning, so a
    subagent invoking `/ground` must sweep by hand.
 
-3. **Write the doc** from the template, then check its paths and anchors
+4. **Write the doc** from the template, then check its paths and anchors
    from inside the repo and fix every flag before stopping:
 
    ```
@@ -65,7 +84,7 @@ concern.
    own bullet (`UNANCHORED`). Fix the doc, not the symbol: a flag means the
    line, the file or the claim is wrong, and the printed lines show which.
 
-4. **Stop.** Do not propose a design in this turn, not even a sketch.
+5. **Stop.** Do not propose a design in this turn, not even a sketch.
 
 ## What counts as a fact
 
