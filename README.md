@@ -11,7 +11,7 @@ ships.
 | [render](plugins/render/README.md) | The Render plugin with only the nine skills this desk uses, plus its MCP server, agent, and hook. |
 | [cloudflare](plugins/cloudflare/README.md) | The Cloudflare plugin with only the six skills this desk uses, plus its five MCP servers. |
 | [proxyman](plugins/proxyman/README.md) | Captures and decodes the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy, scoped to that app's hosts. |
-| [intel](plugins/intel/README.md) | Transcribes audio locally with whisper and turns podcast transcripts into durable, searchable highlights. |
+| [intel](plugins/intel/README.md) | Transcribes audio locally with whisper and turns any long-form source (article, podcast, video) into durable, searchable highlights. |
 
 ## Install
 
@@ -40,7 +40,7 @@ plugins/mobile/                   the iOS plugin
 plugins/render/                   the Render plugin, trimmed to nine skills
 plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
 plugins/proxyman/                 the mitmproxy traffic-capture plugin
-plugins/intel/                    the audio-transcription and podcast plugin
+plugins/intel/                    the audio-transcription and highlights plugin
 tests/                            grok's node suite
 ```
 
