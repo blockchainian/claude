@@ -147,6 +147,25 @@ class HubCaptures(unittest.TestCase):
         out = self._run(argparse.Namespace(func=capture.cmd_check, capture="nope"))
         self.assertFalse(out["ok"])
 
+    def test_check_counts_from_log_by_since_and_host(self):
+        self._fake_hub()
+        t0 = 1_000_000.0
+        cap = "20260101-000000-1-x"
+        capture.captures_dir().mkdir(parents=True, exist_ok=True)
+        (capture.captures_dir() / f"{cap}.json").write_text(json.dumps(
+            {"id": cap, "label": "x", "started_at": t0, "hosts": ["api.foo.com"],
+             "hostRegex": capture.host_regex(["api.foo.com"])}))
+        (capture.hub_dir() / "mitmdump.log").write_text(
+            f"PROXY_CLIENT_CONNECTED {t0 - 5:.3f}\n"       # before start -> not counted
+            f"PROXY_CLIENT_CONNECTED {t0 + 1:.3f}\n"       # after -> counted
+            f"PROXY_REQUEST {t0 - 1:.3f} api.foo.com\n"    # before start -> no
+            f"PROXY_REQUEST {t0 + 1:.3f} api.foo.com\n"    # after + host match -> yes
+            f"PROXY_REQUEST {t0 + 2:.3f} other.com\n")     # after but wrong host -> no
+        out = self._run(argparse.Namespace(func=capture.cmd_check, capture=cap))
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["clientsConnected"], 1)
+        self.assertEqual(out["requests"], 1)
+
     def test_down_clears_a_dead_hub(self):
         self._fake_hub(alive=False)
         out = self._run(argparse.Namespace(func=capture.cmd_down, wipe=False))
