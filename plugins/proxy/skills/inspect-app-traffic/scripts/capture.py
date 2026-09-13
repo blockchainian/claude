@@ -295,7 +295,8 @@ def cmd_check(args: argparse.Namespace) -> int:
                    "its certificate")
     elif requests == 0:
         verdict = ("the hub has traffic but none for this capture's hosts since it started — "
-                   "widen --hosts, or the Zero Omega rule does not cover the app's hosts")
+                   "widen --hosts, or whatever routes to the hub (Zero Omega for the browser, "
+                   "the WireGuard tunnel for the phone) is not sending the app's hosts")
     else:
         verdict = f"capturing: {requests} request(s) to this capture's hosts"
     print(json.dumps({"ok": requests > 0, "capture": args.capture, "hubRunning": True,
