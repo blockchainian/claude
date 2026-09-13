@@ -12,6 +12,7 @@ connected iPhone.
 | `ios-ettrace-performance` | Simulator | Capture symbolicated ETTrace flamegraphs for one focused flow and report the hot stacks |
 | `ios-memgraph-leaks` | Simulator | Capture and compare `.memgraph` files to root-cause leaks with before/after evidence |
 | `ios-take-screenshot` | Simulator or real device | Capture a whole app screen, including everything below the fold, as one stitched PNG |
+| `check-mobile-design` | Simulator or real device | Diff a built iOS screen against a design reference and report the off-by colours, positions, and missing/extra views |
 
 Target matters when choosing a skill: the first three drive a booted simulator
 through XcodeBuildMCP. `ios-take-screenshot` drives either, XcodeBuildMCP for a

@@ -17,6 +17,17 @@ test("the marketplace lists every plugin in the repository", async () => {
   }
 });
 
+test("the shared check-design engine stays byte-identical across plugins", async () => {
+  const copies = [
+    "plugins/mobile/skills/check-mobile-design/scripts",
+    "plugins/web/skills/check-web-design/scripts",
+  ];
+  for (const file of ["check_design.py", "test_check_design.py"]) {
+    const [a, b] = await Promise.all(copies.map((dir) => readFile(`${dir}/${file}`, "utf8")));
+    assert.equal(a, b, `${file} has drifted between the mobile and web copies`);
+  }
+});
+
 test("slash command files expose the expected Grok commands", async () => {
   for (const command of commands) {
     const markdown = await readFile(`plugins/grok/commands/${command}.md`, "utf8");

@@ -1,9 +1,9 @@
 ---
-name: check-design
-description: Check a built screen against a design reference and report how far off it is, as measured JSON plus a composite PNG. Use when implementing a screen to match a design pixel-close, iterating an "actual vs desired" loop, or asking why a built screen does not match a reference. Attributes each difference to a named on-screen element when given the app's view frames.
+name: check-mobile-design
+description: Check a built iOS screen against a design reference and report how far off it is, as measured JSON plus a composite PNG. Use when implementing an iOS screen to match a design pixel-close, iterating an "actual vs desired" loop, or asking why a built screen does not match a reference. Attributes each difference to a named view when given the app's frames from snapshot_ui.
 ---
 
-# Check Design
+# Check Mobile Design
 
 Drive the "build this screen from a reference" loop: compare the app you are
 building (**actual**) against a given design (**desired**), find what differs,
@@ -31,7 +31,7 @@ identical designs differ by a few units; chasing zero never converges. The
 3. **Run the diff:**
 
    ```
-   uv run "${CLAUDE_PLUGIN_ROOT}/skills/check-design/scripts/check_design.py" \
+   uv run "${CLAUDE_PLUGIN_ROOT}/skills/check-mobile-design/scripts/check_design.py" \
      --actual actual.png --desired desired.png --out-dir diff \
      [--hierarchy elements.json] \
      [--mask-top 47 --mask-bottom 34] \

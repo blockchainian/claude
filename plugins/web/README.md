@@ -1,13 +1,14 @@
 # web
 
-Inspect web apps from Claude Code. Today: find memory leaks by diffing V8 heap
-snapshots captured from a running Chrome over the DevTools protocol.
+Inspect web apps from Claude Code: find memory leaks by diffing V8 heap
+snapshots, and check a built page against a design reference.
 
 ## Skills
 
 | Skill | What it does |
 |---|---|
 | `heap-snapshot-leaks` | Capture two heap snapshots around a repeated action and diff them into a ranked report of the constructors that grew and the DOM nodes left detached |
+| `check-web-design` | Diff a built web page against a design reference and report the off-by colours, positions, and missing/extra elements |
 
 ## How it works
 
@@ -25,6 +26,12 @@ The comparison is what carries the signal: a leak is a constructor whose live
 count and bytes climb with each repeat of an action, or DOM nodes the page still
 holds after they left the document.
 
+`check-web-design` diffs a browser screenshot (actual) against a design mock
+(desired). Its `check_design.py` engine is platform-neutral and is shared,
+byte-identical, with the `mobile` plugin's `check-mobile-design`; a repo test
+fails if the two copies ever drift. The web SKILL.md carries the browser capture
+recipe (screenshot + DOM `getBoundingClientRect`).
+
 ## Install
 
 ```
@@ -34,5 +41,5 @@ holds after they left the document.
 
 ## Requirements
 
-- Google Chrome, started with `--remote-debugging-port` (any recent version)
-- `uv` on PATH
+- `uv` on PATH (both skills; the scripts declare their own dependencies)
+- for `heap-snapshot-leaks`: Google Chrome, started with `--remote-debugging-port`
