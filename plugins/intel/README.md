@@ -6,10 +6,13 @@ durable, attributable notes come out.
 
 ## Skills
 
-- **`transcribe-audio`** — turn an audio file or URL into plain-text words,
-  transcribed locally with whisper (`mlx-whisper`, Apple Silicon). No cloud, no
-  API key. A reusable audio-to-text step: any skill that has audio and needs
-  its words calls this one.
+- **`transcribe-audio`** — turn audio into plain-text words, transcribed
+  locally with whisper (`mlx-whisper`, Apple Silicon). No cloud, no API key.
+  Handles a finite file or URL (batch) and an ongoing **live stream** — a
+  direct HLS/Icecast/RTMP URL, or a Twitch/YouTube/X Spaces live resolved with
+  `streamlink`/`yt-dlp` — segmented and transcribed as it plays. Idempotent
+  `setup.sh` auto-installs what's missing. A reusable audio-to-text step: any
+  skill that has audio and needs its words calls this one.
 - **`podcast`** — turn a podcast transcript URL into durable highlights, stored
   and searchable. Reads ordinary transcript pages and YouTube subtitles; for a
   thin page that only offers audio, it falls back to `transcribe-audio`.
@@ -24,8 +27,9 @@ talks) slot in beside `podcast`, reusing `transcribe-audio` for the audio leg.
 
 ## Requirements
 
-- `transcribe-audio`: Apple Silicon, and either `mlx_whisper` or `uv` on
-  `PATH`. `curl` for URL downloads.
+- `transcribe-audio`: Apple Silicon; `setup.sh` installs `ffmpeg`,
+  `streamlink`, `yt-dlp`, and a whisper runner (`mlx_whisper`/`uv`) via
+  Homebrew. `curl` for URL downloads.
 - `podcast`: `curl`; `yt-dlp` for YouTube sources.
 
 ## Tests
