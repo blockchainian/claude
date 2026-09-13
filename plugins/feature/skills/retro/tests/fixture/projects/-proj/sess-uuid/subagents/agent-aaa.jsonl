@@ -1,0 +1,2 @@
+{"type":"assistant","isSidechain":true,"message":{"model":"claude-fable-5-1","usage":{"input_tokens":0,"cache_creation_input_tokens":400,"output_tokens":100,"cache_read_input_tokens":9000}}}
+{"type":"assistant","isSidechain":true,"message":{"model":"claude-fable-5-1","usage":{"input_tokens":0,"cache_creation_input_tokens":400,"output_tokens":100,"cache_read_input_tokens":9000}}}

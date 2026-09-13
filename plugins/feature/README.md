@@ -17,6 +17,10 @@ stop in under 40 lines.
 The pipeline is `/feature:ground` → `planner` → `/feature:ship` →
 review-fix → deploy. Grounding takes its ask in the shape of the project's
 `docs/user-template.md` (Ask, Example, Accept when, Constraints, Premises, Keep unchanged).
+`/feature:retro` closes the loop: run in a fresh session on a finished session,
+it ranks the biggest wastes by real token cost (joining the orchestrator
+transcript to each subagent's recorded usage) and routes each fix back into
+ground, the planner and ship.
 
 ## Skills
 
@@ -25,7 +29,9 @@ review-fix → deploy. Grounding takes its ask in the shape of the project's
 | `/feature:ship` | Run a `plan.md` through the codex and UX lanes to a shipped feature |
 | `/feature:handoff` | Write a mid-phase handoff: stopped at, done, next, unverified, do not redo |
 | `/feature:ground` | Pin repo facts into `problem.md` before planning; checks every path and anchor against the base commit; pins a reproduced wire contract as a `fixtures/<domain>.json` file |
+| `/feature:retro` | Run in a fresh session on a finished session: rank the biggest wastes by real token cost, classify each (knowable-fact miss / topology deviation / planner defect), and propose fixes to ground, the planner and ship |
 | `check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the planner and the orchestrator run it beside the path checker |
+| `retro/extract.py` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json` |
 
 ## Agents
 
@@ -106,8 +112,9 @@ npm run test:feature
 ```
 
 Runs `hooks/tests/run.sh` (every case in `hooks/tests/cases.jsonl` through the
-three hook scripts) and `skills/ship/watch-ci.test.sh` (the CI-watch
-poller against a stubbed `gh`).
+three hook scripts), `skills/ship/watch-ci.test.sh` (the CI-watch
+poller against a stubbed `gh`), and `skills/retro/tests/run.sh` (the retro
+extractor against a hermetic fixture session).
 
 ## License
 
