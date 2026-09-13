@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Idempotent auto-setup for transcribe-audio: installs only what's missing.
+# ABOUTME: Idempotent auto-setup for transcribe: installs only what's missing.
 # ABOUTME: ffmpeg + streamlink + yt-dlp + a whisper runner; --check only reports.
 
 set -euo pipefail
@@ -55,7 +55,7 @@ else
   fi
 fi
 
-echo "transcribe-audio setup: present=[${present[*]:-}] missing=[${missing[*]:-}] installed=[${installed[*]:-}]"
+echo "transcribe setup: present=[${present[*]:-}] missing=[${missing[*]:-}] installed=[${installed[*]:-}]"
 # The whisper model (whisper-large-v3-turbo, ~1.5GB) is not fetched here: mlx-whisper
 # downloads it on the first transcription and caches it, so it self-installs once.
 echo "note: the whisper model downloads on first transcription, then is cached." >&2
