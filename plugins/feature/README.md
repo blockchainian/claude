@@ -1,7 +1,7 @@
 # feature
 
 Ship a feature from a written plan, with Claude orchestrating and never
-implementing. `/feature:orchestrate` reads `plan.md`, launches the backend lane
+implementing. `/feature:ship` reads `plan.md`, launches the backend lane
 through [codex](../codex/README.md)'s `/codex:implement`, launches the UX lane as
 one `ux-implementer` agent per UX workstream, all at once and in parallel with
 codex, writes the UI probes while they run,
@@ -11,10 +11,10 @@ once per plan and triages it into `findings.json`, fixes in two lanes (`codex-re
 decides production only when every finding is closed and the probes are
 green. The
 `planner` agent writes `plan.md` from a grounded `problem.md` following
-`skills/orchestrate/plan-template.md`; `/feature:handoff` records a mid-phase
+`skills/ship/plan-template.md`; `/feature:handoff` records a mid-phase
 stop in under 40 lines.
 
-The pipeline is `/feature:ground` → `planner` → `/feature:orchestrate` →
+The pipeline is `/feature:ground` → `planner` → `/feature:ship` →
 review-fix → deploy. Grounding takes its ask in the shape of the project's
 `docs/user-template.md` (Ask, Example, Accept when, Constraints, Premises, Keep unchanged).
 
@@ -22,7 +22,7 @@ review-fix → deploy. Grounding takes its ask in the shape of the project's
 
 | Skill | What it does |
 |---|---|
-| `/feature:orchestrate` | Run a `plan.md` through the codex and UX lanes to a shipped feature |
+| `/feature:ship` | Run a `plan.md` through the codex and UX lanes to a shipped feature |
 | `/feature:handoff` | Write a mid-phase handoff: stopped at, done, next, unverified, do not redo |
 | `/feature:ground` | Pin repo facts into `problem.md` before planning; checks every path and anchor against the base commit; pins a reproduced wire contract as a `fixtures/<domain>.json` file |
 | `check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the planner and the orchestrator run it beside the path checker |
@@ -85,7 +85,7 @@ the per-module gate is `yarn --cwd <module> tsc --noEmit && yarn --cwd <module> 
 gate)"); `yarn dev -p <port>` with port 3004 reserved.
 
 CI-watching needs no project contract: the plugin ships its own GitHub/`gh`-based
-poller, `skills/orchestrate/watch-ci.sh <ref> [out-file]`, used by the
+poller, `skills/ship/watch-ci.sh <ref> [out-file]`, used by the
 production merge gate (step 9) against every project.
 
 ## Install
@@ -106,7 +106,7 @@ npm run test:feature
 ```
 
 Runs `hooks/tests/run.sh` (every case in `hooks/tests/cases.jsonl` through the
-three hook scripts) and `skills/orchestrate/watch-ci.test.sh` (the CI-watch
+three hook scripts) and `skills/ship/watch-ci.test.sh` (the CI-watch
 poller against a stubbed `gh`).
 
 ## License
