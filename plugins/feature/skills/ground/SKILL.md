@@ -45,16 +45,19 @@ concern.
    the code the same way on either reading, and no sweep says which the user
    meant. So before anything else, find the mood-ambiguous lines and settle
    each at its source — the user's intent, the one bit the repo does not hold.
-   Ask the user directly, one question per ambiguous line, batched into a
-   single prompt: "Did you mean this as a change you want, or as a description
-   of how the code works today?" A *want* becomes desired state, respected; a
-   *description of today* becomes a Premise, verified by the sweep like any
-   claim — the answer settles the mood, not the truth, so a description the
-   code refutes still surfaces as a refuted premise. Do not guess the mood, and
-   do not sweep around it. On a non-interactive run with no user to ask, reject
-   with the flagged lines instead — a current fact wants the present indicative
-   ("X currently does Y"), a want the imperative ("change Y to Z"). Either way
-   the ambiguity is never resolved by guessing.
+   Ask the user directly, one tight yes/no question per ambiguous line, batched
+   into a single prompt — "Is this a requirement? <the line>", answered Yes or
+   No. Keep the question to that: the line and the one bit you need, no third
+   option and no essay. Yes makes it a desired change, respected; No makes it a
+   claim about current code, a Premise the sweep then verifies like any other —
+   the answer settles the mood, not the truth, so a "No" the code refutes still
+   surfaces as a refuted premise. Do not guess the mood, and do not sweep around
+   it. On a non-interactive run with no user to ask, reject with the flagged
+   lines instead — a current fact wants an explicit now-marker, not bare present
+   tense ("X *currently* does Y", "today X is Y"), and a want wants the
+   imperative ("change Y to Z"); bare present tense is the ambiguous case
+   itself, so it draws the same flag. Either way the ambiguity is never resolved
+   by guessing.
 
 2. **Classify the survivors, and confirm what will be tested.** Sort the
    mood-clear material into the six fields and echo the mapping back in one
