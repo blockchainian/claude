@@ -59,8 +59,8 @@ if [ "\$1" = api ] && [ "\$2" = graphql ]; then
       "reviews":{"nodes":[{"submittedAt":"2026-09-11T15:05:00Z","author":{"login":"chatgpt-codex-connector"},"commit":{"oid":"$HEAD_A"}}]},
       "reactions":{"nodes":[]},
       "reviewThreads":{"nodes":[
-        {"path":"proxy/src/a.ts","line":10,"isResolved":false,"comments":{"nodes":[{"author":{"login":"chatgpt-codex-connector"},"body":"**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Fix the thing**\n\nDetail.\n\nUseful? React with 👍 / 👎."}]}},
-        {"path":"proxy/src/b.ts","line":20,"isResolved":false,"comments":{"nodes":[{"author":{"login":"chatgpt-codex-connector"},"body":"**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Nit the thing**\n\nDetail.\n\nUseful? React with 👍 / 👎."}]}}
+        {"id":"PRRT_a","path":"proxy/src/a.ts","line":10,"isResolved":false,"comments":{"nodes":[{"id":"PRRC_a","author":{"login":"chatgpt-codex-connector"},"body":"**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Fix the thing**\n\nDetail.\n\nUseful? React with 👍 / 👎."}]}},
+        {"id":"PRRT_b","path":"proxy/src/b.ts","line":20,"isResolved":false,"comments":{"nodes":[{"id":"PRRC_b","author":{"login":"chatgpt-codex-connector"},"body":"**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Nit the thing**\n\nDetail.\n\nUseful? React with 👍 / 👎."}]}}
       ]}
     }}}}'
   fi
@@ -91,6 +91,7 @@ run_review_state "$HEAD_A" "$OUT_FILE"
 assert_eq "reviewed run exits 0" 0 "$RC"
 assert "reviewed verdict shape" check "d['pr'] == 42 and d['head'] == '$HEAD_A' and d['state'] == 'reviewed'"
 assert "reviewed verdict carries the P1 as must-fix" check "len(d['must_fix']) == 1 and d['must_fix'][0]['file'] == 'proxy/src/a.ts' and d['must_fix'][0]['claim'] == 'Fix the thing'"
+assert "must-fix carries thread_id + comment_id for closing the loop" check "d['must_fix'][0]['thread_id'] == 'PRRT_a' and d['must_fix'][0]['comment_id'] == 'PRRC_a'"
 assert "reviewed verdict carries the P2 as a nit" check "len(d['nits']) == 1 and d['nits'][0]['file'] == 'proxy/src/b.ts'"
 if [ -f "$OUT_FILE" ] && [ "$(cat "$OUT_FILE")" = "$OUT" ]; then
   echo "PASS: verdict is written to the out-file too"
