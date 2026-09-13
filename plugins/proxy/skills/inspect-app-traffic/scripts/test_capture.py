@@ -76,14 +76,14 @@ class PortClaim(unittest.TestCase):
 class CheckCommand(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self._old = os.environ.get("PROXYMAN_DIR")
-        os.environ["PROXYMAN_DIR"] = self._tmp.name
+        self._old = os.environ.get("PROXY_DIR")
+        os.environ["PROXY_DIR"] = self._tmp.name
 
     def tearDown(self):
         if self._old is None:
-            os.environ.pop("PROXYMAN_DIR", None)
+            os.environ.pop("PROXY_DIR", None)
         else:
-            os.environ["PROXYMAN_DIR"] = self._old
+            os.environ["PROXY_DIR"] = self._old
         self._tmp.cleanup()
 
     def _run(self, log_body: str, alive: bool = True) -> dict:

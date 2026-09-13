@@ -37,7 +37,7 @@ from pathlib import Path
 
 
 def out_root() -> Path:
-    return Path(os.environ.get("PROXYMAN_DIR") or "/tmp/proxyman")
+    return Path(os.environ.get("PROXY_DIR") or "/tmp/proxy")
 
 
 def tmp() -> Path:
@@ -45,11 +45,11 @@ def tmp() -> Path:
 
 
 def port_lock(port: int) -> Path:
-    return tmp() / f"proxyman-port.{port}.json"
+    return tmp() / f"proxy-port.{port}.json"
 
 
 def wg_lock() -> Path:
-    return tmp() / "proxyman-wireguard.json"
+    return tmp() / "proxy-wireguard.json"
 
 
 def pid_alive(pid: int) -> bool:
@@ -135,7 +135,7 @@ def lan_ip() -> str:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
-    run_id = os.environ.get("PROXYMAN_RUN_ID") or f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+    run_id = os.environ.get("PROXY_RUN_ID") or f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
     if args.label:
         run_id = f"{run_id}-{re.sub(r'[^A-Za-z0-9_-]', '', args.label)}"
     rundir = out_root() / run_id
@@ -279,7 +279,7 @@ def cmd_status(_: argparse.Namespace) -> int:
 def cmd_check(args: argparse.Namespace) -> int:
     """Report whether the app's traffic is actually reaching the proxy.
 
-    proxyman cannot read Zero Omega's on/off state, but it sees what connects to it. The
+    proxy cannot read Zero Omega's on/off state, but it sees what connects to it. The
     capture logs a line when a client connects and when a target-host request is intercepted
     (connlog.py); counting those in the run log tells the three cases apart: nothing
     connected (proxy not enabled), connected but no target requests (rule misses the host),

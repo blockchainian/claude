@@ -1,4 +1,4 @@
-# proxyman
+# proxy
 
 Capture and decode the HTTP and WebSocket traffic of **one target web or mobile app** with
 [mitmproxy](https://mitmproxy.org), scoped to that app's hosts so unrelated traffic is passed
@@ -14,7 +14,7 @@ iPhone via a WireGuard tunnel), read the flows, tear it down.
   decrypted (`--allow-hosts`) and saved (`save_stream_filter`); everything else — a bank,
   iMessage, other apps — passes through as an opaque tunnel and is never written.
 - **Parallel-safe.** Each capture is a run with its own port, output directory under
-  `PROXYMAN_DIR` (default `/tmp/proxyman`), and mitmdump process, held with lock files. Two
+  `PROXY_DIR` (default `/tmp/proxy`), and mitmdump process, held with lock files. Two
   agents can capture two apps at once. WireGuard mode is the one single-holder resource.
 - **Setup that skips itself.** `setup.sh` detects an existing user (mitmdump installed, CA
   generated and trusted) and exits 0; otherwise it prints the exact remaining steps.
@@ -37,4 +37,4 @@ python3 skills/inspect-app-traffic/scripts/test_capture.py
 python3 skills/inspect-app-traffic/scripts/test_wg_config.py
 ```
 
-Or from the marketplace root: `npm run test:proxyman`.
+Or from the marketplace root: `npm run test:proxy`.
