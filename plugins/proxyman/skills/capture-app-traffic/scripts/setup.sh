@@ -17,8 +17,10 @@ CA_PEM="$CONFDIR/mitmproxy-ca-cert.pem"
 have_mitmdump=false
 ca_present=false
 ca_trusted=false
+have_qrencode=false
 
 command -v mitmdump >/dev/null 2>&1 && have_mitmdump=true
+command -v qrencode >/dev/null 2>&1 && have_qrencode=true
 [ -f "$CA_PEM" ] && ca_present=true
 
 # The CA counts as trusted only if it is present in the System keychain. add-trusted-cert
@@ -39,6 +41,10 @@ fi
 if ! $ca_trusted; then
   steps+=("sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \"$CA_PEM\"  # run in a real terminal; needs your password")
 fi
+
+# qrencode is not required — wg_config.py falls back to printing the config as text — but the
+# WireGuard QR is the easy path, so recommend it. It does not gate readiness.
+$have_qrencode || steps+=("brew install qrencode  # optional: for the WireGuard QR")
 
 ready=false
 $have_mitmdump && $ca_present && $ca_trusted && ready=true
@@ -66,11 +72,12 @@ if [ "${1:-}" = "--generate-ca" ]; then
 fi
 
 # Emit the state report as JSON plus, on stderr, the human-readable next steps.
-printf '{"ready":%s,"mitmdump":%s,"caPresent":%s,"caTrusted":%s,"caPath":"%s"}\n' \
-  "$ready" "$have_mitmdump" "$ca_present" "$ca_trusted" "$CA_PEM"
+printf '{"ready":%s,"mitmdump":%s,"caPresent":%s,"caTrusted":%s,"qrencode":%s,"caPath":"%s"}\n' \
+  "$ready" "$have_mitmdump" "$ca_present" "$ca_trusted" "$have_qrencode" "$CA_PEM"
 
 if $ready; then
   echo "Ready. Existing setup detected — skip setup and go straight to capture." >&2
+  $have_qrencode || echo "Note: qrencode is missing — 'brew install qrencode' for the WireGuard QR (optional)." >&2
   exit 0
 fi
 
@@ -80,7 +87,8 @@ for s in "${steps[@]}"; do
   echo "  $i. $s" >&2
   i=$((i + 1))
 done
-echo "iPhone only: after the CA is trusted on the Mac, the phone must trust it too — install" >&2
-echo "  http://mitm.it while pointed at the proxy, then Settings > General > About > Certificate" >&2
-echo "  Trust Settings and toggle the mitmproxy CA on." >&2
+echo "iPhone: the phone must also trust the CA, and this can only be done once a WireGuard" >&2
+echo "  capture is running — with the tunnel on, open http://mitm.it in Safari (it is served" >&2
+echo "  over the tunnel), install the profile, then Settings > General > About > Certificate" >&2
+echo "  Trust Settings and toggle the mitmproxy CA on. It cannot be verified from the Mac." >&2
 exit 1

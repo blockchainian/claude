@@ -6,7 +6,7 @@ through untouched and never saved.
 
 One skill, `capture-app-traffic`, owns the run end to end: check setup, start a
 target-scoped capture, connect the client (a Mac browser via the Zero Omega extension, or an
-iPhone via a Wi-Fi proxy or a WireGuard tunnel), read the flows, tear it down.
+iPhone via a WireGuard tunnel), read the flows, tear it down.
 
 ## What it gives you
 
