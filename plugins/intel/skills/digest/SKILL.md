@@ -3,7 +3,7 @@ name: digest
 description: >
   Turn a long-form source — an article, a podcast transcript, a YouTube video,
   a page that only offers audio — into durable, searchable highlights. Use for
-  "/digest", "/digest read <url>", "highlights of <url>", "what did <source>
+  "/digest <url>", "highlights of <url>", "what did <source>
   say about X", "summarize this article/episode", "search my notes".
   Handles ordinary article and transcript pages, YouTube (via subtitles), and
   audio pages (via the transcribe-audio skill).
@@ -14,15 +14,15 @@ description: >
 
 # Digest — highlights from any source, stored and searchable
 
-Three commands. The argument after `/digest` selects one; a bare URL means
-`read`.
+A source URL after `/digest` is fetched, read, and turned into a highlights
+draft — that is the default. Two keywords instead select a store command.
 
-| Command | Argument | What it does |
-|---|---|---|
-| `read` | a source URL | Fetch the text, read it, write a highlights draft |
-| `save` | none (or a draft path) | Store the item (no-op if already stored) |
-| `save` | take-aways (text) | Append them to the item's `## Take-aways` |
-| `search` | query (regex ok) | Search everything saved |
+| Argument | What it does |
+|---|---|
+| a source URL | Fetch the text, read it, write a highlights draft |
+| `save` (none, or a draft path) | Store the item (no-op if already stored) |
+| `save` take-aways (text) | Append them to the item's `## Take-aways` |
+| `search` query (regex ok) | Search everything saved |
 
 The store is `~/.claude/podcast-highlights/` (override with
 `PODCAST_HIGHLIGHTS_DIR`). Items live in `episodes/<slug>.md`, listed in
@@ -44,7 +44,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
 It ensures `uv` (runs the trafilatura article extractor in an ephemeral env)
 and `yt-dlp` (YouTube subtitles).
 
-## read
+## Digest a URL (the default)
 
 1. **Fetch.**
 
@@ -160,7 +160,7 @@ take-aways to it.
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.py" save "<draft path>"
 ```
 
-Save the draft from the `read` run in this session (no draft in the session →
+Save the draft from the digest run in this session (no draft in the session →
 ask which one rather than guessing). The script refuses a draft missing `title`
 or `url`, stamps `saved:` with today's date, and rebuilds `index.md`. A
 different item landing on the same slug is filed alongside it as `<slug>-2.md`.
@@ -207,4 +207,4 @@ The query is a case-insensitive regex over the whole file, frontmatter included,
 so `search coinbase` finds it in `topics` as well as in the body. Report what
 matched in your own words with the item and its URL; do not paste the raw match
 block unless the user asks for it. Zero matches is an answer — say the store has
-nothing on it, and offer to run `read` on a source that would.
+nothing on it, and offer to digest a source that would.
