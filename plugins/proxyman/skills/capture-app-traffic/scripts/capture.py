@@ -290,7 +290,7 @@ def main() -> int:
 
     s = sub.add_parser("start", help="launch a capture")
     s.add_argument("--mode", choices=["proxy", "wireguard"], default="proxy",
-                   help="proxy: HTTP proxy for Mac (Zero Omega) or an iPhone Wi-Fi proxy. "
+                   help="proxy: HTTP proxy for a Mac website via Zero Omega. "
                         "wireguard: whole-iPhone capture over a VPN tunnel.")
     s.add_argument("--hosts", help="comma-separated target domains, e.g. pump.fun,api.pump.fun. "
                                    "Omit for discovery mode (captures everything).")
