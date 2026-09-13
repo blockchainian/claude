@@ -74,6 +74,21 @@ concern.
    exactly where a confident but unverified premise hides, so extract the
    claims anyway. Don't turn a genuinely claim-free ask into an interview.
 
+   The **Accept when** material is the desired state decomposed into testable
+   behaviors, and it defines the feature: it goes into the doc's "Accepted when"
+   section verbatim, one per bullet, numbered `AC<n>` and tagged with the kind of
+   test that settles it (unit | integration | ui | benchmark). Carry the criteria
+   through — they are optative, never swept for truth — but treat each like a
+   Constraint for its presuppositions: a criterion citing `GET /trades`
+   presupposes that route, so pull that out as a Premise and verify it with the
+   rest. If the ask describes a desired state but carries no acceptance criteria,
+   do not invent them and do not proceed on the desired state alone: interactively,
+   ask the user to state them — "how do we know <desired state> holds? one testable
+   line each" — in a single prompt; non-interactively, reject with
+   `MISSING ACCEPTANCE: <ask> states a desired state but no Accepted-when` and the
+   uncovered elements listed. A feature grounded here always leaves with acceptance
+   criteria; "none" is not a valid Accepted-when.
+
 3. **Name the decision and pin the base commit.** One sentence on what is
    being changed and why now. Record `git rev-parse --short HEAD`; every line
    number in the doc is valid only at that SHA.
@@ -93,11 +108,15 @@ concern.
    ```
    ${CLAUDE_PLUGIN_ROOT}/skills/ground/check-paths.sh specs/<date>-<topic>/problem.md [skip-regex]
    ${CLAUDE_PLUGIN_ROOT}/skills/ground/check-anchors.py specs/<date>-<topic>/problem.md [skip-regex]
+   ${CLAUDE_PLUGIN_ROOT}/skills/ground/check-acceptance.py specs/<date>-<topic>/problem.md
    ```
 
-   Both exit 1 on any flag. The optional regex skips paths that are
+   All three exit 1 on any flag. The optional regex skips paths that are
    deliberately not repo files (recordings, third-party URLs). A bare
    basename that matches several files is `AMBIGUOUS`; write the full path.
+   `check-acceptance.py` on the problem doc alone flags `NO-ACCEPTANCE` when
+   the "Accepted when" section is empty and `DUPLICATE: AC<n>` when a criterion
+   id repeats; fix the section, not the checker.
 
    `check-anchors.py` reads every `path:line` at the doc's `Base:` commit and
    requires a symbol named in the same sentence (a backticked identifier or a
