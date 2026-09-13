@@ -50,8 +50,12 @@ def captures_dir() -> Path:
     return out_root() / "captures"
 
 
-def hub_flow_file() -> Path:
-    return hub_dir() / "flows.mitm"
+def cap_dir() -> Path:
+    return out_root() / "cap"
+
+
+def cap_file(cap_id: str) -> Path:
+    return cap_dir() / f"{cap_id}.mitm"
 
 
 def hub_meta_path() -> Path:
@@ -161,11 +165,12 @@ def ensure_hub(wireguard: bool) -> tuple[dict | None, str | None]:
                       "(the hub needs 8080)")
 
     hub_dir().mkdir(parents=True, exist_ok=True)
-    flow_file = hub_flow_file()
     log_file = hub_dir() / "mitmdump.log"
-    connlog = Path(__file__).with_name("connlog.py")
+    scripts = Path(__file__).parent
+    # connlog.py records the timestamped connection/request log (for a fast `check`);
+    # dispatch.py fans each flow out into the file of every active capture it matches.
     modes = ["regular@8080"] + (["wireguard"] if wireguard else [])
-    cmd = ["mitmdump", "-q", "-s", str(connlog), "--set", f"save_stream_file={flow_file}"]
+    cmd = ["mitmdump", "-q", "-s", str(scripts / "connlog.py"), "-s", str(scripts / "dispatch.py")]
     for m in modes:
         cmd += ["--mode", m]
 
@@ -181,7 +186,7 @@ def ensure_hub(wireguard: bool) -> tuple[dict | None, str | None]:
 
     meta = {"pid": proc.pid, "since": time.time(), "port": HUB_PORT,
             "modes": ["regular"] + (["wireguard"] if wireguard else []),
-            "flowFile": str(flow_file), "log": str(log_file)}
+            "log": str(log_file)}
     hub_meta_path().write_text(json.dumps(meta, indent=2))
     hub_lock().write_text(json.dumps({"pid": proc.pid, "since": meta["since"]}))
     return meta, None
@@ -222,14 +227,13 @@ def _capture(cap_id: str) -> dict | None:
 
 
 def _reader_output(record: dict, addon: str, extra: list[str]) -> str:
-    """Run a reader addon over the hub file, scoped to this capture's window and hosts."""
-    hub = hub_flow_file()
-    if not hub.exists():
+    """Run a reader addon over this capture's own file — already scoped by host and window,
+    so a read touches only this app's data, not the whole hub."""
+    f = cap_file(record["id"])
+    if not f.exists():
         return ""
-    cmd = ["mitmdump", "-q", "-nr", str(hub),
-           "-s", str(Path(__file__).with_name(addon)),
-           "--set", f"since={record.get('started_at', 0)}",
-           "--set", f"host={record.get('hostRegex') or ''}"] + extra
+    cmd = ["mitmdump", "-q", "-nr", str(f),
+           "-s", str(Path(__file__).with_name(addon))] + extra
     return subprocess.run(cmd, capture_output=True, text=True).stdout
 
 
@@ -324,18 +328,17 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 def cmd_status(_: argparse.Namespace) -> int:
     meta = hub_running()
-    hub = hub_flow_file()
     captures = []
     for p in sorted(captures_dir().glob("*.json")):
         r = _read(p)
         if r:
+            f = cap_file(r["id"])
+            size = f.stat().st_size if f.exists() else 0
             captures.append({"capture": r.get("id"), "label": r.get("label"),
-                             "hosts": r.get("hosts")})
+                             "hosts": r.get("hosts"), "bytes": size, "human": _human(size)})
     print(json.dumps({
         "hubRunning": meta is not None,
         "hubModes": (meta or {}).get("modes", []),
-        "hubBytes": hub.stat().st_size if hub.exists() else 0,
-        "hubHuman": _human(hub.stat().st_size) if hub.exists() else "0B",
         "captures": captures,
     }, indent=2))
     return 0
@@ -358,8 +361,11 @@ def cmd_down(args: argparse.Namespace) -> int:
     hub_meta_path().unlink(missing_ok=True)
     hub_lock().unlink(missing_ok=True)
     wiped = False
-    if args.wipe and hub_flow_file().exists():
-        hub_flow_file().unlink()
+    if args.wipe:
+        for f in cap_dir().glob("*.mitm"):
+            f.unlink()
+        for p in captures_dir().glob("*.json"):
+            p.unlink()
         wiped = True
     print(json.dumps({"down": True, "wiped": wiped}, indent=2))
     return 0
