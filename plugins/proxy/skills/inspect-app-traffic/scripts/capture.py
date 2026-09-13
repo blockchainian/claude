@@ -107,18 +107,20 @@ def claim_port(preferred: int | None, run_id: str) -> int:
 
 
 def _port_in_use(port: int) -> bool:
-    """True if anything already holds this port.
+    """True if anything already holds this port, mirroring how mitmdump binds.
 
-    Two checks: a connect (catches a listener on any address), and a wildcard bind with no
-    SO_REUSEADDR. mitmdump binds all interfaces, so a wildcard listener such as a running
-    mitmweb must count as in-use — a SO_REUSEADDR bind to 127.0.0.1 wrongly succeeds against
-    a 0.0.0.0 listener and would let a capture silently claim an occupied port.
+    Two checks: a connect (catches a listener on any address), and a wildcard bind with
+    SO_REUSEADDR — the same options mitmdump uses. Binding the wildcard address detects a
+    0.0.0.0 listener such as a running mitmweb (which a bind to 127.0.0.1 misses), while
+    SO_REUSEADDR keeps a port in TIME_WAIT — e.g. just after killing the previous holder —
+    from reading as in-use, since mitmdump can bind it.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as c:
         c.settimeout(0.3)
         if c.connect_ex(("127.0.0.1", port)) == 0:
             return True
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("", port))
         except OSError:
