@@ -83,4 +83,24 @@ expect "skip regex silences the non-repo anchor" "" 0 "$out" $rc
 out=$(cd / && "$anchors" "$here/fixture-anchors-clean.md" 2>&1); rc=$?
 expect "anchors: refuses to run outside a git repo" "check-anchors.py: not inside a git repo" 2 "$out" $rc
 
+acceptance="$here/../check-acceptance.py"
+
+out=$("$acceptance" "$here/fixture-acceptance-problem-clean.md"); rc=$?
+expect "one-arg: well-formed acceptance criteria pass" "" 0 "$out" $rc
+
+out=$("$acceptance" "$here/fixture-acceptance-problem-none.md"); rc=$?
+expect "one-arg: an empty acceptance section is flagged" "NO-ACCEPTANCE: no acceptance criteria found" 1 "$out" $rc
+
+out=$("$acceptance" "$here/fixture-acceptance-problem-dup.md"); rc=$?
+expect "one-arg: a duplicate criterion id is flagged" "DUPLICATE: AC1" 1 "$out" $rc
+
+out=$("$acceptance" "$here/fixture-acceptance-plan-clean.md" "$here/fixture-acceptance-problem-clean.md"); rc=$?
+expect "two-arg: every criterion referenced by the plan passes" "" 0 "$out" $rc
+
+out=$("$acceptance" "$here/fixture-acceptance-plan-uncovered.md" "$here/fixture-acceptance-problem-clean.md"); rc=$?
+expect "two-arg: a criterion no test references is UNCOVERED" "UNCOVERED: AC2" 1 "$out" $rc
+
+out=$("$acceptance" "$here/fixture-acceptance-plan-unknown.md" "$here/fixture-acceptance-problem-clean.md"); rc=$?
+expect "two-arg: a plan reference to a nonexistent criterion is UNKNOWN" "UNKNOWN: AC3" 1 "$out" $rc
+
 exit $fail
