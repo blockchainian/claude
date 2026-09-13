@@ -15,8 +15,8 @@ d = json.loads(sys.argv[2])
 sys.exit(0 if eval(sys.argv[1]) else 1)
 ' "$1" "$OUT"; }
 
-HEAD_A=aaaaaaa1111111111111111111111111111111a
-HEAD_B=bbbbbbb2222222222222222222222222222222b
+HEAD_A=a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+HEAD_B=b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
 HEAD_TIME=2026-09-11T15:00:00Z
 
 # fake gh serves three request shapes: `api repos/{owner}/{repo}` (repo identity), `api
@@ -134,6 +134,53 @@ OUT=$(GH="$FAKE_GH" FAKE_GH_STATE_DIR="$STATE_DIR" REVIEW_STATE_TIMEOUT_S=1 REVI
 RC=$?
 assert_eq "timeout exits non-zero" 1 "$RC"
 assert "timeout verdict shape" check "d['state'] == 'timeout' and d['must_fix'] == [] and d['nits'] == []"
+
+# ---------- symbolic "HEAD" ref is resolved to the PR head oid ----------
+# Regression: a literal "HEAD" was polled against a 40-char commit.oid and never matched (false
+# timeout). The poller must resolve any non-full-SHA ref to the PR's headRefOid via `gh pr view`.
+FAKE_DIR4="$SCRATCH/fake4"; mkdir -p "$FAKE_DIR4"
+# A fake gh that also answers `pr view 42 --json headRefOid -q .headRefOid` with HEAD_A, so the
+# poller can resolve a symbolic "HEAD" arg to the full PR head oid before matching.
+cat > "$FAKE_DIR4/fake-gh.sh" <<SH
+#!/bin/bash
+set -u
+count_file="\$FAKE_GH_STATE_DIR/count"
+if [ "\$1" = pr ] && [ "\$2" = view ]; then
+  printf '%s\n' '$HEAD_A'
+  exit 0
+fi
+if [ "\$1" = api ] && [ "\$2" = "repos/{owner}/{repo}" ]; then
+  printf '%s\n' '{"owner":{"login":"acme"},"name":"widget"}'
+  exit 0
+fi
+if [ "\$1" = api ] && [ "\$2" = "repos/acme/widget/commits/$HEAD_A" ]; then
+  printf '%s\n' '{"commit":{"committer":{"date":"$HEAD_TIME"}}}'
+  exit 0
+fi
+if [ "\$1" = api ] && [ "\$2" = graphql ]; then
+  n=\$((\$(cat "\$count_file" 2>/dev/null || echo 0) + 1))
+  printf '%s' "\$n" > "\$count_file"
+  if [ "\$n" -lt 3 ]; then
+    printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviews":{"nodes":[]},"reactions":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}'
+    exit 0
+  fi
+  printf '%s\n' '{"data":{"repository":{"pullRequest":{
+    "reviews":{"nodes":[{"submittedAt":"2026-09-11T15:05:00Z","author":{"login":"chatgpt-codex-connector"},"commit":{"oid":"$HEAD_A"}}]},
+    "reactions":{"nodes":[]},
+    "reviewThreads":{"nodes":[]}
+  }}}}'
+  exit 0
+fi
+echo "fake-gh: unhandled args: \$*" >&2
+exit 1
+SH
+chmod +x "$FAKE_DIR4/fake-gh.sh"
+FAKE_GH="$FAKE_DIR4/fake-gh.sh"
+STATE_DIR=$(mktemp -d)
+MODE=must-fix
+run_review_state HEAD
+assert_eq "symbolic HEAD run exits 0" 0 "$RC"
+assert "symbolic HEAD resolves to the PR head oid" check "d['head'] == '$HEAD_A' and d['state'] == 'reviewed'"
 
 # ---------- missing arguments ----------
 ERR_FILE=$(mktemp)
