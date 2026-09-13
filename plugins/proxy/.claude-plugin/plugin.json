@@ -1,6 +1,6 @@
 {
   "name": "proxy",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Capture and decode the HTTP and WebSocket traffic of a target web or mobile app with mitmproxy: one shared proxy on port 8080 that every session reuses, each capture fanned out to its own file so a read never pays for another capture, WireGuard for phones, and readers for flows, hosts, WebSockets, and shared-domain callers.",
   "author": {
     "name": "blockchainian"
