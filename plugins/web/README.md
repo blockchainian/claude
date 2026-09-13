@@ -7,7 +7,7 @@ snapshots captured from a running Chrome over the DevTools protocol.
 
 | Skill | What it does |
 |---|---|
-| `find-leaks` | Capture two heap snapshots around a repeated action and diff them into a ranked report of the constructors that grew and the DOM nodes left detached |
+| `heap-snapshot-leaks` | Capture two heap snapshots around a repeated action and diff them into a ranked report of the constructors that grew and the DOM nodes left detached |
 
 ## How it works
 
@@ -36,8 +36,3 @@ holds after they left the document.
 
 - Google Chrome, started with `--remote-debugging-port` (any recent version)
 - `uv` on PATH
-
-## Related
-
-Design-matching a built screen against a reference is the platform-neutral
-`check-design` skill in the `mobile` plugin; it works for web captures too.
