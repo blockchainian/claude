@@ -3,9 +3,9 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow", "numpy"]
 # ///
-# ABOUTME: Regression tests for compare_screens.py, using synthetic screenshot pairs.
+# ABOUTME: Regression tests for check_design.py, using synthetic screenshot pairs.
 # ABOUTME: Builds known colour, position, resize and mask differences and asserts the report.
-"""Run: ./test_compare_screens.py
+"""Run: ./test_check_design.py
 
 Each case builds a pair of images whose one difference is known, then checks the
 report names it: a recolour as a region, a recoloured element as `color`, a
@@ -24,7 +24,7 @@ import numpy as np
 from PIL import Image
 
 W, H = 240, 480
-SCRIPT = Path(__file__).with_name("compare_screens.py")
+SCRIPT = Path(__file__).with_name("check_design.py")
 
 
 def bg(seed: int = 7) -> np.ndarray:
@@ -51,7 +51,7 @@ def run(td: Path, actual: np.ndarray, desired: np.ndarray,
         cmd += [f"--{k.replace('_', '-')}", str(v)]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
-        raise SystemExit(f"compare_screens.py failed ({proc.returncode}): {proc.stderr}")
+        raise SystemExit(f"check_design.py failed ({proc.returncode}): {proc.stderr}")
     return json.loads(proc.stdout), out
 
 
