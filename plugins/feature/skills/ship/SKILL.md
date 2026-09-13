@@ -26,10 +26,14 @@ then drop back.
 
 The plan follows `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md`: Scope, Facts, Constraints,
 Workstreams, UX workstreams, Dependencies, Invariants, UX checklist per surface, New files, Checks,
-Live checks, Outcome. A program that touches many screens is one plan with many UX workstreams,
-not one plan per screen: grounding and planning run once, the implementers run at once. Each workstream block is the implementer's whole brief: `codex:implement` passes
-the plan itself as the spec and writes one pointer line per workstream, adding no facts. The `planner` agent (`${CLAUDE_PLUGIN_ROOT}/agents/planner.md`, Fable high) writes it;
-its brief carries these two lines verbatim:
+Live checks. It is agent-facing only — no decision rationale, no shipped outcome. A program that
+touches many screens is one plan with many UX workstreams, not one plan per screen: grounding and
+planning run once, the implementers run at once. Each workstream block is the implementer's whole
+brief: `codex:implement` passes the plan as the spec and writes one pointer line per workstream
+that scopes the agent to the shared core plus its block, adding no facts. The `planner` agent
+(`${CLAUDE_PLUGIN_ROOT}/agents/planner.md`, Fable high) writes it, and beside it `decisions.md` —
+the pre-launch human gate (rationale, rejected alternatives, risks, open questions) that no agent
+reads and the user reviews before you launch. The planner's brief carries these two lines verbatim:
 
 > Repo facts come from `<path>/problem.md` only. If you need a fact that is not in it, stop and
 > ask — do not infer it from naming, convention, or what a file like this usually contains.
@@ -149,10 +153,14 @@ the plan names — a miss there reads fluently, which is why reading alone does 
    scope for this gate and goes to the user instead. Services that deploy from the default branch
    on merge need nothing more, and the rest go through the codex lane's deploy command (the
    project contract in the plugin README says which). Then run the plan's Live checks against production. The
-   phase's record is the PR, the deploy SHAs, the probe verdicts and the live-check results; write
-   them into `plan.md` under its Outcome heading, write the memory files, and end. Write a separate
-   `specs/<date>-<topic>/handoff.md` only if you must stop mid-phase (context past ~300k, quota
-   exhausted), naming exactly where to resume.
+   phase's record is `specs/<date>-<topic>/outcome.md`, written from
+   `${CLAUDE_PLUGIN_ROOT}/skills/ship/outcome-template.md`: the per-`AC<n>` acceptance verdict and
+   the test or probe that settled each, the code-review must-fix findings each as issue-tldr /
+   fix-tldr / commit SHA, the PR and deploy SHAs, the live-check results, and the follow-ups left
+   out of this ship. It is for the user and for memory — write it clear, succinct and fast to read,
+   no code anchors. `plan.md` stays input-only; do not write an outcome into it. Then write the
+   memory files and end. Write a separate `specs/<date>-<topic>/handoff.md` only if you must stop
+   mid-phase (context past ~300k, quota exhausted), naming exactly where to resume.
 
 ## Hard rules
 
