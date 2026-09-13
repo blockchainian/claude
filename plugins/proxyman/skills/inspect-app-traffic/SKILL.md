@@ -93,11 +93,18 @@ a proxy profile pointing at that host and port and switch it on **for the target
 is untouched. The capture's host filter is a second line of defence: even a global proxy
 setting would only ever save the target hosts.
 
+**Use the user's own logged-in Chrome, not a throwaway profile.** The sites worth capturing
+are login-gated (often Google OAuth), and the Claude Chrome extension drives that main
+profile — so route it through the proxy in place. A separate Chrome launched with
+`--user-data-dir`/`--proxy-server` has no logins (it forces a fresh Google + site sign-in
+every run, and Google frequently blocks OAuth from a flagged/automated Chrome) and no Claude
+extension (the browser tools cannot control it). It is a dead end for this workflow; do not
+suggest it. Zero Omega on the main profile keeps the logins and the extension, and the host
+filter still scopes what is saved.
+
 If the browser shows `NET::ERR_CERT_AUTHORITY_INVALID` or an HSTS block with no bypass, the
 CA is not trusted yet — go back to setup. HSTS sites (axiom among them) forbid clicking
-through, so the CA must be trusted; there is no skip. As a throwaway alternative for one
-site, launch Chrome with `--ignore-certificate-errors --user-data-dir=/tmp/chrome-proxy
---proxy-server=127.0.0.1:$PORT`, which sidesteps the keychain entirely.
+through, so the CA must be trusted; there is no skip.
 
 ### iPhone app — WireGuard
 
