@@ -13,6 +13,6 @@
     "validate": "claude plugin validate --strict .",
     "test:feature": "plugins/feature/hooks/tests/run.sh && plugins/feature/skills/ship/watch-ci.test.sh && plugins/feature/skills/retro/tests/run.sh",
     "test:proxy": "python3 plugins/proxy/skills/inspect-app-traffic/scripts/test_capture.py && python3 plugins/proxy/skills/inspect-app-traffic/scripts/test_wg_config.py",
-    "test:intel": "python3 plugins/intel/skills/transcribe-audio/scripts/test_transcribe.py && python3 plugins/intel/skills/digest/scripts/test_digest.py"
+    "test:intel": "python3 plugins/intel/skills/transcribe/scripts/test_transcribe.py && python3 plugins/intel/skills/digest/scripts/test_digest.py"
   }
 }

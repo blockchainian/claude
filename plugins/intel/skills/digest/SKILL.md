@@ -6,7 +6,7 @@ description: >
   "/digest <url>", "highlights of <url>", "what did <source>
   say about X", "summarize this article/episode", "search my notes".
   Handles ordinary article and transcript pages, YouTube (via subtitles), and
-  audio pages (via the transcribe-audio skill).
+  audio pages (via the transcribe skill).
 
   NOT for: general web research across many pages (use agent-reach), or
   evaluating a tool or vendor (use evaluate).
@@ -66,12 +66,12 @@ and `yt-dlp` (YouTube subtitles).
 1b. **Decide what the page gave you.**
    - If `audio_url` is **non-null** (the page links audio, or the URL itself was
      an audio file) and the text is thin, transcribe the audio with the
-     `transcribe-audio` skill. It is long-running (model download on first use,
+     `transcribe` skill. It is long-running (model download on first use,
      then faster than realtime), so run it in the **background** and wait:
 
      ```bash
-     bash   "${CLAUDE_PLUGIN_ROOT}/skills/transcribe-audio/scripts/setup.sh"
-     python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe-audio/scripts/transcribe_audio.py" \
+     bash   "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/setup.sh"
+     python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe_audio.py" \
        "<audio_url>" "<transcript path>"
      ```
 
@@ -79,7 +79,7 @@ and `yt-dlp` (YouTube subtitles).
      new `words`/`thin`. A transcribed transcript has **no speaker labels**, and
      downloaded audio often carries **dynamically-inserted modern ads** with
      whisper occasionally looping on a garbled stretch — note both and
-     exclude/repair them when reading. See the `transcribe-audio` skill for more.
+     exclude/repair them when reading. See the `transcribe` skill for more.
    - Otherwise, **read the text you have.** `thin` (under 1500 words) is only a
      hint: a short *article* is still a real article — highlight it. But if the
      page is a bare player or paywall shell with no real prose and no
