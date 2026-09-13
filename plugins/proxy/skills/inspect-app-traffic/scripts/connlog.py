@@ -15,3 +15,14 @@ def request(flow: http.HTTPFlow) -> None:
     # One line per request, with the host, so a capture's window and hosts can be counted from
     # the log alone — no need to re-parse the whole shared flow file.
     print(f"PROXY_REQUEST {time.time():.3f} {flow.request.pretty_host}", flush=True)
+
+
+def tls_failed_client(data) -> None:
+    # The client rejected the mitmproxy certificate: the CA is not trusted on the client (the
+    # phone, or macOS) or the app pins its cert. Logged with the SNI so `check` can tell this
+    # from a plain host-filter miss — a connection arrives but no request ever completes.
+    conn = getattr(data, "conn", None)
+    sni = getattr(conn, "sni", None) or "?"
+    if isinstance(sni, bytes):
+        sni = sni.decode("idna", "replace")
+    print(f"PROXY_TLS_FAILED {time.time():.3f} {sni}", flush=True)

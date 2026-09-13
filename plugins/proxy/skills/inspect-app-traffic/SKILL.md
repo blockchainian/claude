@@ -105,9 +105,12 @@ After the user enables the proxy and loads the app once:
 ```
 
 It cannot read Zero Omega's on/off state, but it sees what reaches the hub. `clientsConnected`
-0 means nothing is routed — the proxy is not enabled. Connected with 0 requests for this
-capture's hosts means the Zero Omega rule does not cover the app's hosts (widen it). Requests
-flowing means it is working. Run it before investing in a drive.
+0 means nothing is routed — the proxy is not enabled (or the phone tunnel is off). Connected
+with `tlsFailed` > 0 and 0 requests means the client is **rejecting the mitmproxy certificate**
+— the CA is not trusted (on the phone: install via `mitm.it`, then Certificate Trust Settings)
+or the app pins its cert. Connected with 0 requests and no TLS failures means the Zero Omega
+rule does not cover the app's hosts (widen it). Requests flowing means it is working. Run it
+before investing in a drive.
 
 Capturing is passive: traffic can come from the user clicking through the app or from the
 Claude Chrome extension driving it. Either way, enable Zero Omega first.
