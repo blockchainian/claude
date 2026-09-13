@@ -22,9 +22,12 @@ magnitude 4x wrong and matching no real accounting basis. So this runs in a
 auditor, not the author. The transcript's own stated reasoning is available, but
 treated as a claim to verify, never as justification for a deviation.
 
-The output is one file, `specs/<date>-retro-<session>/retro.md`: the ranked
-wastes with their evidence, then the proposed fixes. Diagnosis and fixes are two
-gates — write and confirm the diagnosis before touching anything.
+The output is one file, `~/.claude/retros/<date>-<session>/retro.md`: the ranked
+wastes with their evidence, then the proposed fixes. Write it there, never into a
+repo — the analysed session's worktree is often deleted after it finishes, and
+this stable archive sits beside the transcripts it reads (`~/.claude/projects/`).
+Diagnosis and fixes are two gates — write and confirm the diagnosis before
+touching anything.
 
 ## Procedure
 
@@ -86,10 +89,10 @@ gates — write and confirm the diagnosis before touching anything.
    discarded-workstream count × mean joined per-workstream cost, plus the
    orchestrator's own (measured) reaction tokens. Never present a proxy as measured.
 
-5. **Write `retro.md` and stop at the gate.** Ranked wastes with evidence
-   (token cost, the `path:line` or memory that held the answer, the axis). Then
-   the proposed fixes, grouped by destination (ground / planner / ship / memory).
-   Confirm the diagnosis before applying anything.
+5. **Write `retro.md` to `~/.claude/retros/<date>-<session>/` and stop at the
+   gate.** Ranked wastes with evidence (token cost, the `path:line` or memory that
+   held the answer, the axis). Then the proposed fixes, grouped by destination
+   (ground / planner / ship / memory). Confirm the diagnosis before applying anything.
 
 6. **Apply, on approval, smallest first.** Memory writes (sharpened so the next
    session front-loads the check) apply on approval. Edits to `ground`, the
