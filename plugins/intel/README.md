@@ -16,8 +16,8 @@ goes in; durable, attributable notes come out.
 - **`digest`** — turn a source URL into durable highlights, stored and
   searchable. Extracts an article's main body (trafilatura) or a podcast
   transcript, reads YouTube via subtitles, and for a page that only offers
-  audio falls back to `transcribe-audio`. `read` / `save` / `search`, with
-  per-item take-aways.
+  audio falls back to `transcribe-audio`. A bare URL digests; `save` / `search`
+  manage the store, with per-item take-aways.
 
 ## Why they live together
 
