@@ -76,12 +76,14 @@ def host_regex(domains: list[str]) -> str:
 def claim_port(preferred: int | None, run_id: str) -> int:
     """Atomically claim a free port for this run, returning it.
 
-    Tries the preferred port first, then scans upward from 9080, skipping 8080 and 8081
-    (they collide with common dev servers — a Metro/Expo bundler on 8081 was a real
-    conflict). A port is free when nothing listens on it and no live lock holds it.
+    Defaults to 8080 — mitmproxy's conventional port, which a Zero Omega profile is normally
+    pinned to — then falls back to 9081-9279 when 8080 is taken (a local dev server, or a
+    second concurrent capture), so parallel captures still each get their own port. 8081 is
+    left out of the fallback: a Metro/Expo bundler on 8081 was a real conflict. A port is free
+    when nothing listens on it and no live lock holds it.
     """
-    candidates = ([preferred] if preferred else []) + [
-        p for p in range(9080, 9280) if p not in (8080, 8081)
+    candidates = ([preferred] if preferred else [8080]) + [
+        p for p in range(9081, 9280)
     ]
     for port in candidates:
         lp = port_lock(port)

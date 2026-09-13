@@ -125,8 +125,9 @@ co-mingling entirely, capture the apps sequentially instead of at once.
 ```
 
 No `--hosts` — Zero Omega already scopes to the app (section 1). Read `proxyLocal` (e.g.
-`127.0.0.1:9080`) from the JSON. In the Zero Omega extension, point the mitmproxy profile at
-that host and port and enable it for the web app; it routes all of the app's traffic, across
+`127.0.0.1:8080`, the default; a run falls back to 9081+ only when 8080 is taken) from the
+JSON. In the Zero Omega extension, point the mitmproxy profile at that host and port and
+enable it for the web app; it routes all of the app's traffic, across
 every domain, to the proxy, and the capture keeps whatever arrives. If you must run Zero Omega
 as a *global* proxy instead of per-app, then pass `--hosts` to keep the file to the app —
 but list every domain the app uses, or its cross-domain calls are dropped.
