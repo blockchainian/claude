@@ -75,10 +75,16 @@ gates — write and confirm the diagnosis before touching anything.
    exploration, a gate-fix the plan could not have avoided. Honesty about what
    was not waste is what makes the ranking credible.
 
-4. **State the blind spot.** The codex lane's implement/rescue token cost is not
-   in these transcripts — codex runs in an external runtime. The plan that drove
-   it and the fact that rescue ran are visible; the codex burn is not. Say so;
-   never estimate it as if measured.
+4. **Account for the codex lane.** Codex runs in an external runtime, so its cost
+   is not in the Claude transcript — but `extract.py` recovers it from
+   `~/.codex/sessions`: by the codex thread id that `codex:implement` now records
+   in its status JSON (exact), else by originator + worktree + time window
+   (correlation — conservative, may miss runs outside this session's window and
+   cannot split per-workstream). Rank the joined codex cost against the Claude
+   buckets. For a codex **failure event** whose cost does not join (ephemeral,
+   pruned, pre-fix), never drop it: surface it and size it by a labeled proxy —
+   discarded-workstream count × mean joined per-workstream cost, plus the
+   orchestrator's own (measured) reaction tokens. Never present a proxy as measured.
 
 5. **Write `retro.md` and stop at the gate.** Ranked wastes with evidence
    (token cost, the `path:line` or memory that held the answer, the axis). Then
