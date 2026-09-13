@@ -46,9 +46,15 @@ why reading alone does not find it.
 
 ## Procedure
 
-1. **Pin the base.** Read the plan. Compare `git rev-parse --short HEAD` against the SHA the plan
-   records. If they differ, rebase onto the plan's base or re-check the plan's paths before
-   launching — a plan is valid only at its SHA. Confirm the tree is clean.
+1. **Pin the base, and prove the gate.** Read the plan. Compare `git rev-parse --short HEAD` against
+   the SHA the plan records. If they differ, rebase onto the plan's base or re-check the plan's paths
+   before launching — a plan is valid only at its SHA. Confirm the tree is clean. Then run each
+   workstream's `--check` command on this clean baseline before any fan-out: it MUST pass (exit 0). A
+   gate already red on the untouched tree is not a code signal — it fails every workstream identically
+   and discards the whole run regardless of what the code does. Reject any such gate and send the plan
+   back to fix the check (gate on a differential — new errors in touched files only — or on a command
+   that passes) before launching. This one check is the cheapest guard against the most expensive
+   waste; never skip it because the gate came straight from `AGENTS.md`.
 
 2. **Launch the backend lane.** Invoke the `codex:implement` skill with the plan's codex workstreams
    (backend; frontend only when the plan has no UX lane). It runs in the background, verifies
