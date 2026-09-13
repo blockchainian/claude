@@ -31,7 +31,8 @@ ground, the planner and ship.
 | `/feature:ground` | Pin repo facts into `problem.md` before planning; checks every path and anchor against the base commit; pins a reproduced wire contract as a `fixtures/<domain>.json` file |
 | `/feature:retro` | Run in a fresh session on a finished session: rank the biggest wastes by real token cost, classify each (knowable-fact miss / topology deviation / planner defect), and propose fixes to ground, the planner and ship |
 | `check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the planner and the orchestrator run it beside the path checker |
-| `retro/extract.py` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json` |
+| `retro/extract.py` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
+| `retro/efficacy.py` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
 
 ## Agents
 
