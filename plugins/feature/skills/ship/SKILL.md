@@ -50,6 +50,30 @@ workstreams list the same file, which is a merge conflict scheduled in advance. 
 and sends the plan back to the planner. Then grep each function, route, table, column and env var
 the plan names — a miss there reads fluently, which is why reading alone does not find it.
 
+## Task board — the run's live view
+
+Open a task board so the run's shape is visible while it works: one `TaskCreate` per workstream and
+per checkpoint, wired with the plan's Dependencies as `addBlockedBy`, its status flipped as each
+transition lands. It is a **view, not the record** — `plan.md`, the PR and the verdict JSONs stay
+authoritative; the board only mirrors them and is never read back as a source of truth. Only the
+orchestrator touches it — the lane agents have no Task tools and never self-report.
+
+- **Create** the tasks in step 1, all `pending`, right after the base is pinned and the check is
+  green: one per codex workstream, one per UX workstream, and one per checkpoint the procedure
+  already has — probes, staging verify, review triage, production.
+- **Name** each task for its outcome, taken verbatim from the workstream's goal in `plan.md` —
+  imperative and domain-level: `Add limit-order contract parity to acme-compat`, not
+  `codex workstream 1`, not `UX lane A`. Keep the lane, agent, model and tool out of the subject —
+  that is the "how", and `owner` already carries who. Keep ordering words out too (`after backend`,
+  `step 2`); the deps carry order. Add the module when two names would collide. `activeForm` is the
+  present-continuous of the same outcome (`Adding limit-order parity to acme-compat`).
+- **Wire** the plan's Dependencies as `addBlockedBy`, so the board shows what cannot start yet — a
+  `needs-backend` UX workstream is blocked by the backend task it waits on; production is blocked by
+  triage and the probe checkpoint.
+- **Flip status** at the transitions the procedure already defines: `in_progress` when you launch a
+  lane or start a checkpoint, `completed` when its branch merges clean or its verdict is green. A
+  finding sent back to a lane reopens that lane's task to `in_progress` until its re-run is green.
+
 ## Procedure
 
 1. **Confirm the decisions gate ran, pin the base, and prove the check.** First confirm the plan's
@@ -64,7 +88,9 @@ the plan names — a miss there reads fluently, which is why reading alone does 
    and discards the whole run regardless of what the code does. Reject any such gate and send the plan
    back to fix the check (gate on a differential — new errors in touched files only — or on a command
    that passes) before launching. This one check is the cheapest guard against the most expensive
-   waste; never skip it because the gate came straight from `AGENTS.md`.
+   waste; never skip it because the gate came straight from `AGENTS.md`. With the base pinned and the
+   check green, open the task board (see **Task board**) before any fan-out, so the rest of the run
+   is visible.
 
 2. **Launch the backend lane.** Invoke the `codex:implement` skill with the plan's codex workstreams
    (backend; frontend only when the plan has no UX lane). It runs in the background, verifies
