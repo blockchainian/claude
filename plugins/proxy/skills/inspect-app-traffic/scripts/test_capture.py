@@ -131,9 +131,21 @@ class HubCaptures(unittest.TestCase):
         started = self._run(argparse.Namespace(func=capture.cmd_start, label="b", hosts=None,
                                                host_regex=None, wireguard=False))
         cap = started["capture"]
-        out = self._run(argparse.Namespace(func=capture.cmd_stop, capture=cap))
+        out = self._run(argparse.Namespace(func=capture.cmd_stop, capture=cap, wipe=False))
         self.assertTrue(out["stopped"])
         self.assertFalse((capture.captures_dir() / f"{cap}.json").exists())
+
+    def test_stop_wipe_deletes_flow_file(self):
+        self._fake_hub()
+        started = self._run(argparse.Namespace(func=capture.cmd_start, label="w", hosts=None,
+                                               host_regex=None, wireguard=False))
+        cap = started["capture"]
+        f = capture.cap_file(cap)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"flowdata")
+        out = self._run(argparse.Namespace(func=capture.cmd_stop, capture=cap, wipe=True))
+        self.assertTrue(out["wiped"])
+        self.assertFalse(f.exists())
 
     def test_status_lists_open_captures(self):
         self._fake_hub()

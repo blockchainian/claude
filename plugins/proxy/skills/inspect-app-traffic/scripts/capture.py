@@ -321,7 +321,11 @@ def cmd_stop(args: argparse.Namespace) -> int:
         return 2
     _, n = _log_counts(record)
     path.unlink(missing_ok=True)
-    print(json.dumps({"stopped": True, "capture": args.capture, "requests": n,
+    wiped = False
+    if args.wipe:
+        cap_file(args.capture).unlink(missing_ok=True)
+        wiped = True
+    print(json.dumps({"stopped": True, "capture": args.capture, "requests": n, "wiped": wiped,
                       "note": "the hub keeps running; use `down` to stop it"}, indent=2))
     return 0
 
@@ -396,6 +400,7 @@ def main() -> int:
 
     p = sub.add_parser("stop", help="close a capture (hub keeps running)")
     p.add_argument("capture", help="capture id from start")
+    p.add_argument("--wipe", action="store_true", help="also delete this capture's flow file")
     p.set_defaults(func=cmd_stop)
 
     st = sub.add_parser("status", help="hub state and open captures")
