@@ -20,6 +20,7 @@ expect "session grand total (orchestrator + subagents): 1,430"
 expect "codex lane (1 rollouts, billable tokens; exact thread-id join)"
 expect "[exact] codex-thread-1"
 expect "codex TOTAL: 1,600"
+expect "mean joined rollout: 1,600 tok"   # proxy multiplier for un-joinable failed workstreams
 reject "other-thread"                     # different cwd + not a recorded thread id → excluded
 
 if [ "$fail" -eq 0 ]; then echo "retro/extract.py: all assertions passed"; else echo "$out"; exit 1; fi
