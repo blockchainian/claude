@@ -14,8 +14,9 @@ description: >
 
 The planner writes the plan; this skill makes its judgment calls the user's, fast. The planner is a
 background agent and cannot prompt the user, so the interactive gate lives here in the main loop.
-The skill never edits `plan.md` or `decisions.md` itself — the planner owns both and re-runs the
-checkers; this skill only asks, and routes the answers back.
+The skill never edits the *content* of `plan.md` or `decisions.md` — the planner owns both and
+re-runs the checkers; this skill only asks and routes the answers back. Its one write is the gate
+stamp it appends to `decisions.md` when the review settles (step 4), which is a record, not content.
 
 ## 1. Spawn the planner
 
@@ -65,8 +66,11 @@ Route each answer; the plan changes only through the planner.
 When the planner has revised, re-read `decisions.md` and re-gate **only** the decisions, questions or
 risks that changed — not the ones already approved. Cap this at two revision rounds; a decision that
 is still contested after two rounds goes to the user as a plain question, outside the gate. When
-every decision is approved, every open question resolved, and every risk accepted, the plan is
-launch-ready: say so and that the next step is `/feature:ship <plan.md>`.
+every decision is approved, every open question resolved, and every risk accepted, stamp the gate:
+append a top line to `decisions.md` reading `Gate: passed <date> — all decisions approved, open
+questions resolved, risks accepted` (a risk the user accepted only after discussion is still
+accepted). This line is what `/feature:ship` checks before launch. Then say the plan is launch-ready
+and the next step is `/feature:ship <plan.md>`.
 
 Non-interactive runs (no user to ask): skip the gate, leave `decisions.md` for manual review, and
 report that the plan is planned but unreviewed — do not auto-approve, and do not launch ship.

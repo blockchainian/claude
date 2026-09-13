@@ -9,6 +9,9 @@ user can grasp the whole page in one scan and still veto correctly, it is done. 
 workstream steps and Constraints. This file carries only the why, the rejected alternatives, and
 what a veto would change — never repeat the implementation steps here. -->
 
+<!-- Do NOT write a `Gate: passed` line — /feature:plan appends it here once the user has cleared the
+gate, and /feature:ship refuses to launch without it. -->
+
 ## Summary
 
 <!-- Two or three plain sentences: what this change does and why, in the user's language. No

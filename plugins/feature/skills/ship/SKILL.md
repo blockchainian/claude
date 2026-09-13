@@ -52,7 +52,11 @@ the plan names — a miss there reads fluently, which is why reading alone does 
 
 ## Procedure
 
-1. **Pin the base, and prove the gate.** Read the plan. Compare `git rev-parse --short HEAD` against
+1. **Confirm the decisions gate ran, pin the base, and prove the check.** First confirm the plan's
+   `decisions.md` carries a `Gate: passed` top line — the record that `/feature:plan` gated the
+   decisions, open questions and risks with the user. If it is absent, stop and tell the user to run
+   `/feature:plan <problem.md>` first; ship never gates decisions itself. Then read the plan and
+   compare `git rev-parse --short HEAD` against
    the SHA the plan records. If they differ, rebase onto the plan's base or re-check the plan's paths
    before launching — a plan is valid only at its SHA. Confirm the tree is clean. Then run each
    workstream's `--check` command on this clean baseline before any fan-out: it MUST pass (exit 0). A
