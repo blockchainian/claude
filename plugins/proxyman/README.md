@@ -4,7 +4,7 @@ Capture and decode the HTTP and WebSocket traffic of **one target web or mobile 
 [mitmproxy](https://mitmproxy.org), scoped to that app's hosts so unrelated traffic is passed
 through untouched and never saved.
 
-One skill, `capture-app-traffic`, owns the run end to end: check setup, start a
+One skill, `inspect-app-traffic`, owns the run end to end: check setup, start a
 target-scoped capture, connect the client (a Mac browser via the Zero Omega extension, or an
 iPhone via a WireGuard tunnel), read the flows, tear it down.
 
@@ -33,8 +33,8 @@ iPhone via a WireGuard tunnel), read the flows, tear it down.
 ## Test
 
 ```
-python3 skills/capture-app-traffic/scripts/test_capture.py
-python3 skills/capture-app-traffic/scripts/test_wg_config.py
+python3 skills/inspect-app-traffic/scripts/test_capture.py
+python3 skills/inspect-app-traffic/scripts/test_wg_config.py
 ```
 
 Or from the marketplace root: `npm run test:proxyman`.

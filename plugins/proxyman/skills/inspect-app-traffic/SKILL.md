@@ -1,9 +1,9 @@
 ---
-name: capture-app-traffic
+name: inspect-app-traffic
 description: Capture and decode the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy. Use when asked to see what API calls an app makes, intercept or sniff a web or iPhone app's requests, reverse-engineer an app's API or WebSocket protocol, or set up mitmproxy with Zero Omega. Scopes the capture to the target app's hosts and passes everything else through untouched.
 ---
 
-# Capture App Traffic
+# Inspect App Traffic
 
 Capture the network traffic of **one target app** — a website driven from this Mac, or an
 iPhone app — decrypt its TLS, and read its REST and WebSocket protocol. mitmproxy sits in
