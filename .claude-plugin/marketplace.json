@@ -32,12 +32,12 @@
       "source": "./plugins/grok"
     },
     {
-      "name": "build-ios-apps",
+      "name": "mobile",
       "description": "Drive iOS apps from Claude Code: build, run, and inspect on the simulator via XcodeBuildMCP, capture symbolicated ETTrace flamegraphs, root-cause memory leaks from memgraphs, and capture whole app screens, from a simulator or a connected iPhone.",
       "author": {
         "name": "blockchainian"
       },
-      "source": "./plugins/build-ios-apps"
+      "source": "./plugins/mobile"
     },
     {
       "name": "render",

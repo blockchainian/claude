@@ -1,7 +1,7 @@
 {
   "name": "blockchainian-claude",
   "private": true,
-  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, grok, build-ios-apps, render, cloudflare, proxyman, and intel plugins.",
+  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, grok, mobile, render, cloudflare, proxyman, and intel plugins.",
   "type": "module",
   "engines": {
     "node": ">=18.18"
