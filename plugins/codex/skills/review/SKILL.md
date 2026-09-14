@@ -110,5 +110,4 @@ must-fix a fix itself introduces ships unreviewed by design.
 
 Verified by `tests/test-review-state.sh`, `tests/test-classify-severity.sh`
 and `tests/test-resolve-threads.sh` (the last via `--dry-run`, so no live PR)
-against a stub `gh`, using the cloud bot's real comment format (from PR 623,
-`0xbabedead/chadwallet`) as fixtures.
+against a stub `gh`, using the cloud bot's native comment format as fixtures.

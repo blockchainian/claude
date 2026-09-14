@@ -62,11 +62,11 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
   green: one per codex workstream, one per UX workstream, and one per checkpoint the procedure
   already has — probes, staging verify, review triage, production.
 - **Name** each task for its outcome, taken verbatim from the workstream's goal in `plan.md` —
-  imperative and domain-level: `Add limit-order contract parity to acme-compat`, not
+  imperative and domain-level: `Add CSV export to the reports page`, not
   `codex workstream 1`, not `UX lane A`. Keep the lane, agent, model and tool out of the subject —
   that is the "how", and `owner` already carries who. Keep ordering words out too (`after backend`,
   `step 2`); the deps carry order. Add the module when two names would collide. `activeForm` is the
-  present-continuous of the same outcome (`Adding limit-order parity to acme-compat`).
+  present-continuous of the same outcome (`Adding CSV export to the reports page`).
 - **Wire** the plan's Dependencies as `addBlockedBy`, so the board shows what cannot start yet — a
   `needs-backend` UX workstream is blocked by the backend task it waits on; production is blocked by
   triage and the probe checkpoint.

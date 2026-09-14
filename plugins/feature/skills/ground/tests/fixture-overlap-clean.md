@@ -4,13 +4,13 @@
 
 ### `home-lanes` — home lanes
 
-Files: `mobile/app/(tabs)/index.tsx`
+Files: `src/screens/home.ts`
 
 ### `token-tabs` — token detail tabs
 
-Files: `mobile/app/token/[address].tsx`
+Files: `src/screens/detail.ts`
 
 ## Invariants
 
-- the client keeps its signature — `mobile/shared/data/api/core/client.ts`
-Files: `mobile/shared/data/api/core/client.ts`
+- the client keeps its signature — `src/shared/client.ts`
+Files: `src/shared/client.ts`

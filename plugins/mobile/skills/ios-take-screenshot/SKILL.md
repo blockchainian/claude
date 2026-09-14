@@ -561,7 +561,7 @@ The stitched PNG is the only artifact that survives. Name it for what it shows �
 Where a screen's own header and the tab that reaches it disagree — a tab bar reading
 "Account" above a page headed "Portfolio" — name it for the header, which is what the image
 shows. The app slug is the app's display name from `find_ios_app.sh`, lowercased, spaces to
-hyphens: `ChadWallet` becomes `chadwallet`.
+hyphens: `MyApp` becomes `myapp`.
 
 ## Tests
 

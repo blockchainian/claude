@@ -5,20 +5,20 @@
 ### `api-route` — add the route
 
 1. step
-Files: `proxy/src/routes/feed.ts`, `proxy/src/lib/feed.ts`
+Files: `src/routes/feed.ts`, `src/lib/feed.ts`
 
 ## UX workstreams (Fable)
 
 ### `home-lanes` — home lanes
 
 1. step
-Files: `mobile/app/(tabs)/index.tsx`, `mobile/shared/data/api/core/client.ts`
+Files: `src/screens/home.ts`, `src/shared/client.ts`
 
 ### `token-tabs` — token detail tabs
 
 1. step
-Files: `mobile/app/token/[address].tsx`, `mobile/shared/data/api/core/client.ts`
+Files: `src/screens/detail.ts`, `src/shared/client.ts`
 
 ## New files
 
-- `mobile/features/token/components/TokenDetailTabBar.tsx` (new)
+- `src/components/DetailTabBar.tsx` (new)

@@ -85,16 +85,14 @@ them there:
   that takes a port flag plus the default dev port to keep clear of, for the UX
   lane's probes.
 
-For chadwallet these are `website/scripts/ui-probes/`,
-`mobile/scripts/ui-probes/` and `scripts/ui-probes/lib.sh` (`yarn ios:dev-client`
-and `sim_reload` for the mobile app);
-`scripts/deploy-staging.sh` and `scripts/verify-staging.sh`; backend paths
-`proxy/`, `streamer/`, `scraper/`, `website/src/app/api/` and any test file;
-Render services and Vercel deploy from `main` on merge while the Cloudflare
-Workers (proxy, streamer) still go through the codex lane's deploy command; and
-the per-module gate is `yarn --cwd <module> tsc --noEmit && yarn --cwd <module> lint
-&& yarn --cwd <module> test <path>` (see chadwallet's AGENTS.md "Checks (the
-gate)"); `yarn dev -p <port>` with port 3004 reserved.
+A project might declare, for example, a web and a mobile UI-probe directory plus
+a shared probe helper library; a staging deploy script and a staging verify
+script; the backend module paths and which of them deploy on merge versus through
+the codex lane's deploy command; a per-module gate such as `yarn --cwd <module>
+tsc --noEmit && yarn --cwd <module> lint && yarn --cwd <module> test <path>` (named
+in the project's AGENTS.md "Checks (the gate)" section); and a dev-server command
+with a port flag and a reserved default port. The concrete values live in the
+project, never here.
 
 CI-watching needs no project contract: the plugin ships its own GitHub/`gh`-based
 poller, `skills/ship/watch-ci.sh <ref> [out-file]`, used by the

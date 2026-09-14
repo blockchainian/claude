@@ -1,12 +1,12 @@
 # Fixture: every anchor's sentence names a symbol found near the cited lines
-Base: `321ab7087` on branch `browse`, 2026-09-09.
+Base: `@SHA@` on branch `main`, 2026-09-14.
 
-- `launchpadLabel()` returns the `LAUNCHPAD_LABELS` entry, else the name unchanged when it has a space, else the first character uppercased — `website/src/components/chadwallet/token/launchpad.ts:26-36`; the `LAUNCHPAD_LABELS` lookup is at `:27`; `launchpadLabel` runs from `:26-…`.
-- `'/v1/trenches'`, `/defi/token_security` and `proxy/src` are routes and a directory, not files; `launchpadLabel` is still at `:26`.
-- `mapGmgnNewTokenRow` calls `mapGmgnTrenchesRows([row], chain)[0]` at `proxy/src/tokenListSources.ts:841`.
-- The constants list "Constants:" names `GRADUATED_FLOORS` — `docs/token-lists/graduated-and-bonding-lists.md:77-78`.
-- `TokenInfo.launchpad` fields — `mobile/shared/data/api/client.ts:211-214`.
+- `parseConfig()` returns the `CONFIG_MAP` entry, else the key unchanged when it has a slash, else the value uppercased — `src/app.ts:26-36`; the `CONFIG_MAP` lookup is at `:27`; `parseConfig` runs from `:26-…`.
+- `'/v1/status'`, `/defi/health` and `src/lib` are routes and a directory, not files; `parseConfig` is still at `:26`.
+- `mapRows` calls `normalizeRow(row)` at `src/rows.ts:12`.
+- The constants list "Constants:" names `FLOOR_LIMITS` — `docs/constants.md:6-7`.
+- `UserRecord.email` field — `src/apiClient.ts:9-12`.
 
 ```
-proxy/src/no-such-file.ts:12 inside a fenced block is output, not an anchor
+src/no-such-file.ts:12 inside a fenced block is output, not an anchor
 ```
