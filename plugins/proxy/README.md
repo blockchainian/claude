@@ -17,7 +17,7 @@ tunnel), read the flows, tear it down.
   readers show only that capture's window, scoped to its hosts. Two agents capturing two apps
   at once are two records over one hub, separated at read time — no second proxy, no second
   Zero Omega profile.
-- **Shared-domain attribution.** When two apps share a host (e.g. `privy.io`), `origins.py`
+- **Shared-domain attribution.** When two apps share a host (e.g. a shared auth provider), `origins.py`
   splits the capture by caller (`Origin`/`Referer`/app-id).
 - **Setup that skips itself.** `setup.sh` detects an existing user (mitmdump installed, CA
   generated and trusted) and exits 0; otherwise it prints the exact remaining steps.

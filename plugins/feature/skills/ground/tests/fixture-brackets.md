@@ -1,2 +1,2 @@
 # Fixture: bracketed route segments are checked
-See `mobile/app/token/[address].tsx` and `mobile/app/token/[nope].tsx`.
+See `src/routes/[id].tsx` and `src/routes/[missing].tsx`.

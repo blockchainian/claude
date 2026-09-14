@@ -1,7 +1,7 @@
 # Fixture plan for check-paths.sh
 
-Touches the shared probe helpers in `scripts/ui-probes/lib.sh`.
+Touches the shared helper in `src/app.ts`.
 
-Adds a route to `website/src/no-such-file-anywhere.ts`.
+Adds a route to `src/missing.ts`.
 
-**Files (new):** `scripts/deploy-staging.sh` (new)
+**Files (new):** `scripts/new-thing.sh` (new)
