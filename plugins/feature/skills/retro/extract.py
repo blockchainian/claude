@@ -24,9 +24,15 @@ def _tok(u, basis):
 
 
 def file_stats(path, basis):
-    """Return (tokens, turns, primary_model) for one transcript, model taken from its own turns."""
+    """Return (tokens, turns, primary_model) for one transcript, model taken from its own turns.
+
+    Dedupes by message.id: the harness can write one assistant response across several JSONL
+    lines that each repeat the same message.usage, so summing per line inflates the total
+    (measured ~3x on a real session). Lines without an id cannot be deduped and are each counted.
+    """
     tokens = turns = 0
     models = Counter()
+    seen = set()
     for line in open(path):
         try:
             o = json.loads(line)
@@ -34,6 +40,11 @@ def file_stats(path, basis):
             continue
         if o.get("type") == "assistant":
             m = o.get("message", {})
+            mid = m.get("id")
+            if mid is not None:
+                if mid in seen:
+                    continue
+                seen.add(mid)
             models[m.get("model")] += 1
             turns += 1
             tokens += _tok(m.get("usage", {}), basis)
