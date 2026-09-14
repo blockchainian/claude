@@ -519,5 +519,38 @@ assert_eq "collision workstream branch kept" 1 \
 rm -f "$FIX/a.txt"
 git -C "$FIX" branch -q -D workstreams/feat-n/1 2>/dev/null || true
 
+# ---------- scenario 14: session-worktree node_modules preflight ----------
+# A fresh git worktree has no node_modules (gitignored). The post-merge check runs in the session
+# worktree, so implement.sh must clone the touched module's node_modules from the main worktree, or
+# fail fast — not run for minutes and die on exit 127. The touched module is read from `--cwd <mod>`.
+MAINW="$SCRATCH/mainw"
+git init -q -b main "$MAINW"
+git -C "$MAINW" config user.email t@t && git -C "$MAINW" config user.name t
+echo "spec" > "$MAINW/spec.md"
+mkdir -p "$MAINW/mod/node_modules/.bin" && echo marker > "$MAINW/mod/node_modules/MARKER"
+printf 'WS-OK write z.txt per spec.md\n' > "$MAINW/workstreams.txt"
+git -C "$MAINW" add spec.md workstreams.txt && git -C "$MAINW" commit -qm base
+WT="$SCRATCH/wt"
+git -C "$MAINW" worktree add -q "$WT" -b feat-nm
+assert "fresh worktree starts without mod/node_modules" test ! -e "$WT/mod/node_modules"
+set +e
+"$IMPLEMENT" --workstreams "$MAINW/workstreams.txt" --feature feat-nm \
+  --check "true --cwd mod" --concurrency 1 --retries 0 --timeout 5 \
+  --repo "$WT" --no-push > "$SCRATCH/nm.log" 2>&1
+set -e 2>/dev/null || true
+assert "preflight cloned the touched module's node_modules into the session worktree" \
+  test -f "$WT/mod/node_modules/MARKER"
+assert "preflight announced the clone" grep -q 'cloning mod/node_modules' "$SCRATCH/nm.log"
+
+# fail-fast: a --cwd module with no node_modules anywhere aborts before the run
+set +e
+"$IMPLEMENT" --workstreams "$MAINW/workstreams.txt" --feature feat-ghost \
+  --check "true --cwd ghost" --concurrency 1 --retries 0 --timeout 5 \
+  --repo "$WT" --no-push > "$SCRATCH/nm-ghost.log" 2>&1
+RC_NM=$?
+set -e 2>/dev/null || true
+assert_eq "missing-source module fails fast (exit 1)" 1 "$RC_NM"
+assert "fail-fast names the missing module" grep -q 'lacks ghost/node_modules' "$SCRATCH/nm-ghost.log"
+
 echo
-if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; echo "-- run9 --"; tail -30 "$SCRATCH/run9.log"; exit 1; fi
+if [ "$FAILS" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$FAILS TEST(S) FAILED"; tail -40 "$SCRATCH/run.log"; echo "-- run3 --"; tail -30 "$SCRATCH/run3.log"; echo "-- run9 --"; tail -30 "$SCRATCH/run9.log"; echo "-- nm --"; tail -20 "$SCRATCH/nm.log"; exit 1; fi
