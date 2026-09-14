@@ -153,8 +153,14 @@ Every claim carries its evidence inline, or it does not go in:
 - **The existing client for any third-party API the plan will call or probe.** When a repo module exists to talk to a service, read it before improvising auth or transport — it holds the real recipe (token exchange, required headers, anti-bot client). Improvising instead burns probe after probe rediscovering what the module already encodes.
 - **The real cap behind any numeric bound a fix pins.** A limit or clamp value the plan cites must match the existing validation or schema cap it flows into; a value that contradicts it (a clamp to 150 into a `max(100)` schema) passes mocked tests and fails only live.
 
+**Facts a spec-shaped or external-API goal rests on.** A goal that generates a deliverable file or live-tests a third-party API carries premises that a "complete" criterion never tests. The project's own specifics (proxy/gateway, filenames, conventions) live in its memory or AGENTS.md — pull them in; the general premises to pin are:
+
+- **The on-disk layout of any deliverable the goal names by filename.** `ls` the sibling/precedent directories and pin where the analogous artifact lives and whether it is standalone or folded into another doc; an existing repo convention is a knowable fact. If the requested filename has NO precedent, record it as an open question and surface the consistency conflict before authoring rather than building the literal name and reworking it onto the convention later.
+- **A spec/data deliverable's acceptance criterion should assert it was verified against the live source this session, not merely "complete".** "Complete" lets verification defer, the user inject it later, and the session re-enter the whole verification method at full cost. Phrase the Accept-when as live-verified this session.
+- **The live-test protocol for any third-party/external API the plan will probe, pinned before the first call:** the sanctioned **egress** (the project's proxy/gateway, never the session/home IP for an abuse-sensitive API), the provider's **rate-limit model** (buckets, ban behavior, pacing floor, no fan-out), the **read/write route split** (enumerate and exclude state-changing / money-moving routes from live tests), and **sample-capture redaction** (strip keys, auth headers and user-identifying fields before any sample is written).
+
 **Diagnosis is not design.** A candidate mechanism named as a question with
-what would settle it belongs in Open questions: "Does GMGN drop a
+what would settle it belongs in Open questions: "Does the upstream feed drop a
 subscription on a duplicate subscribe? Settled by <probe>." Choosing among
 candidates, or proposing a change, does not: "We should re-subscribe on
 reconnect" waits for the planning turn.

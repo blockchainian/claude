@@ -4,7 +4,7 @@
 
 ### `trades` — return sorted trades
 
-1. sort by timestamp desc — `sortTrades()` `proxy/src/trades.ts:20`.
+1. sort by timestamp desc — `sortTrades()` `src/trades.ts:20`.
 
 Tests: trades sorted desc `[AC1]`.
-Files: `proxy/src/trades.ts`.
+Files: `src/trades.ts`.

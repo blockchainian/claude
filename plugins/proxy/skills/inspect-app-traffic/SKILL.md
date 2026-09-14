@@ -54,15 +54,15 @@ toggle the mitmproxy CA on. Without that, TLS interception fails on the phone.
 ## 1. Start a capture
 
 ```bash
-"$SKILL_DIR/scripts/capture.py" start --label chadwallet --hosts chadwallet.xyz
+"$SKILL_DIR/scripts/capture.py" start --label myapp --hosts myapp.com
 ```
 
 This brings the hub up on 8080 if it is not already running, and opens a capture. Read its
 `capture` id from the JSON — that is `$CAP` for every command below.
 
 - `--hosts` is the read scope, not an interception filter (the hub keeps everything). List
-  the app's domains; subdomains are matched automatically, so `chadwallet.xyz` also covers
-  `api.chadwallet.xyz` and `www.chadwallet.xyz`. Omit it to read every host in the window.
+  the app's domains; subdomains are matched automatically, so `myapp.com` also covers
+  `api.myapp.com` and `www.myapp.com`. Omit it to read every host in the window.
 - `--wireguard` also brings up the phone tunnel (below). Add it only for a phone capture.
 
 ### Mac website — Zero Omega (one profile, forever)
@@ -75,9 +75,9 @@ and no extension; do not use it. **Zero Omega's routing is a manual step — the
 cannot toggle it (its UI is a `chrome-extension://` page the browser tools cannot reach).**
 
 The Zero Omega auto-switch rule must cover **every** host the app calls — the API often sits
-on a different subdomain (`api.chadwallet.xyz`) than the page (`www.chadwallet.xyz`). A rule
+on a different subdomain (`api.myapp.com`) than the page (`www.myapp.com`). A rule
 matching only the bare domain misses the API, and nothing is captured. Use a wildcard
-(`*.chadwallet.xyz`) or route the whole site.
+(`*.myapp.com`) or route the whole site.
 
 If the browser shows `NET::ERR_CERT_AUTHORITY_INVALID` or an HSTS block, the CA is not trusted
 — go back to setup; HSTS sites forbid clicking through.
@@ -146,7 +146,7 @@ each app's flows into its own file, and each `read` touches only that file. Noth
 and no read pays for another capture's traffic — one proxy, one port, one Zero Omega profile,
 one file per app.
 
-When two apps share a host — `privy.io` for auth, a common RPC or analytics host — that host's
+When two apps share a host — a common auth provider, RPC, or analytics host — that host's
 flows are written to **both** captures' files (both match it). `--hosts` cannot separate apps
 on the *same* host. Split by **caller** with origins:
 
@@ -155,8 +155,8 @@ on the *same* host. Split by **caller** with origins:
 "$SKILL_DIR/scripts/capture.py" read "$CAP" --kind origins --source app-a.example  # one app's calls
 ```
 
-Each web app sends a distinct `Origin`/`Referer`, and Privy carries a per-app id header, so a
-shared host separates cleanly at read time.
+Each web app sends a distinct `Origin`/`Referer`, and some shared auth providers carry a per-app
+id header, so a shared host separates cleanly at read time.
 
 ## 5. Close a capture, and stop the hub
 

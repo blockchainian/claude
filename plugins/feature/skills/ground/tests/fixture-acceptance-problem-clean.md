@@ -7,4 +7,4 @@
 
 ## Facts
 
-- the route exists — `proxy/src/trades.ts:12`
+- the route exists — `src/trades.ts:12`
