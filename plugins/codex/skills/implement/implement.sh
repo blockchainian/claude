@@ -258,6 +258,28 @@ tree_dirty() { git -C "$REPO" status --porcelain --untracked-files=no; }
   || note "session worktree is dirty; workstreams branch from HEAD and delivery waits for a clean tree"
 [ -z "$(git -C "$REPO" branch --list "workstreams/$FEATURE/*")" ] \
   || fatal "leftover workstreams/$FEATURE/* branches exist; delete them or pick a new run name"
+
+# The post-merge check runs in the SESSION worktree, which --setup does NOT provision (it
+# provisions the pool worktrees). A fresh git worktree carries only tracked files, and
+# node_modules is gitignored, so a worktree that has only had source/doc edits has none — the
+# check then dies with exit 127 after the whole run. Provision the touched modules here: for each
+# `--cwd <mod>` the check cds into, clone that module's node_modules from the main worktree when it
+# is missing, or fail fast naming it. A for-loop over the module list (not `... | while`) keeps
+# fatal in the main shell so its exit actually stops the run.
+MAIN_WT="$(git -C "$REPO" worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+for mod in $(printf '%s\n' "$CHECK" | grep -oE -- '--cwd[ =]+[^ ]+' | sed -E 's/^--cwd[ =]+//' | sort -u); do
+  [ -d "$REPO/$mod/node_modules" ] && continue
+  if [ -n "$MAIN_WT" ] && [ "$MAIN_WT" != "$REPO" ] && [ -d "$MAIN_WT/$mod/node_modules" ]; then
+    note "[setup] cloning $mod/node_modules into the session worktree (a fresh worktree has none)"
+    mkdir -p "$REPO/$mod"
+    cp -Rc "$MAIN_WT/$mod/node_modules" "$REPO/$mod/node_modules" 2>/dev/null \
+      || cp -R "$MAIN_WT/$mod/node_modules" "$REPO/$mod/node_modules" \
+      || fatal "failed to clone $mod/node_modules from $MAIN_WT into the session worktree"
+  else
+    fatal "session worktree lacks $mod/node_modules and no source to clone (main worktree: ${MAIN_WT:-none}); install deps in $REPO/$mod first"
+  fi
+done
+
 BASE_SHA="$(git -C "$REPO" rev-parse HEAD)"
 
 if [ -z "$CONCURRENCY" ]; then
