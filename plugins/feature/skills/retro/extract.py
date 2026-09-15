@@ -255,8 +255,10 @@ def report(name, root, basis, codex_root):
               + ", ".join(f"{n}× {f}" for f, n in top)
               + " — each re-read re-adds the whole image to context **")
     if ncomp or h["peak_ctx"] > 700_000:
-        print("  ** context rode the ceiling: rank image-in-main-loop judging / monolithic session "
-              "as a topology waste — compaction hides in the token totals (it SHRINKS the prefix). **")
+        print("  ** context rode the ceiling: rank as a topology waste. Images never evict from a live "
+              "context, so loading many large ones into one session IS what forces compaction — a "
+              "capacity mechanic, not a judging one; compare images in bulk with a script. Compaction "
+              "hides in the token totals (it SHRINKS the prefix). **")
 
     sp = spawns(orch)
     ledger = Counter(v["subagent_type"] for v in sp.values())
