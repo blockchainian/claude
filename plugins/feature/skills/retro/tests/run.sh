@@ -9,6 +9,12 @@ expect() { if ! grep -qF "$1" <<<"$out"; then echo "FAIL: expected to find: $1";
 reject() { if grep -qF "$1" <<<"$out"; then echo "FAIL: should not find: $1"; fail=1; fi; }
 
 expect "orchestrator own cost: 150 tok (billable)"   # m-dup, split across two streamed lines, counted once (130 + one 20)
+
+# context health: peak from cache_read, compaction deduped to second precision, image reads + re-reads
+expect "peak 5,000 tok"
+expect "1 auto-compaction(s) at 2026-09-13T00:05:00"
+expect "2 image read(s) into main loop"
+expect "2× shot.png"
 expect "spawn ledger: {'general-purpose': 1, 'feature:ux-verifier': 1, 'codex:codex-rescue': 1}"
 expect "subagent TOTAL: 1,300"
 expect "claude-fable-5-1=1,000 (77%)"

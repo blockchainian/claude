@@ -81,6 +81,73 @@ def _parse_ts(value):
         return None
 
 
+def context_health(orch):
+    """Profile the orchestrator's OWN context: compaction boundaries, peak context, and what filled it.
+
+    A monolithic session that rides the context ceiling and auto-compacts is a topology waste the
+    per-role token totals hide (compaction shrinks the prefix, so it leaves no spike). It also names
+    the content driving the climb — images (screenshots/composites read into the main loop) cost tens
+    of thousands of tokens each and dwarf text, and the same file re-read N times is pure waste.
+    Returns a dict; prints nothing.
+    """
+    name_of, path_of = {}, {}
+    compactions, peak_ctx, peak_ts = [], 0, None
+    cc_sum = out_sum = 0
+    img_reads = img_b64 = txt_result = 0
+    reads = Counter()
+    seen = set()
+    for line in open(orch):
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if o.get("subtype") == "compact_boundary" or o.get("isCompactSummary"):
+            compactions.append(o.get("timestamp"))
+        m = o.get("message", {})
+        content = m.get("content") if isinstance(m, dict) else None
+        if o.get("type") == "assistant" and isinstance(m, dict):
+            u = m.get("usage", {}) or {}
+            cr = u.get("cache_read_input_tokens", 0)
+            if cr > peak_ctx:
+                peak_ctx, peak_ts = cr, o.get("timestamp")
+            mid = m.get("id")
+            if mid is None or mid not in seen:
+                if mid is not None:
+                    seen.add(mid)
+                cc_sum += u.get("cache_creation_input_tokens", 0)
+                out_sum += u.get("output_tokens", 0)
+        if isinstance(content, list):
+            for b in content:
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "tool_use" and b.get("name") == "Read":
+                    name_of[b.get("id")] = "Read"
+                    path_of[b.get("id")] = str(b.get("input", {}).get("file_path", "")).split("/")[-1]
+                if b.get("type") == "tool_result":
+                    cont = b.get("content", "")
+                    if isinstance(cont, list):
+                        for x in cont:
+                            if not isinstance(x, dict):
+                                continue
+                            if x.get("type") == "image":
+                                img_reads += 1
+                                src = x.get("source", {})
+                                img_b64 += len(src.get("data", "")) if isinstance(src, dict) else 0
+                                if name_of.get(b.get("tool_use_id")) == "Read":
+                                    reads[path_of.get(b.get("tool_use_id"), "?")] += 1
+                            elif x.get("type") == "text":
+                                txt_result += len(x.get("text", ""))
+    return {
+        # one compaction writes both a compact_boundary and an isCompactSummary record, with
+        # sub-second-different stamps — dedup to second precision
+        "compactions": sorted({str(c)[:19] for c in compactions if c}),
+        "peak_ctx": peak_ctx, "peak_ts": peak_ts,
+        "cc_sum": cc_sum, "out_sum": out_sum,
+        "img_reads": img_reads, "img_b64": img_b64, "txt_result_tok": txt_result // 4,
+        "reread": {k: v for k, v in reads.items() if v > 1},
+    }
+
+
 def orch_context(orch):
     """cwd, [min_ts, max_ts], and any codex thread ids recorded in the orchestrator transcript."""
     cwds = Counter(); lo = hi = None; threads = set()
@@ -171,6 +238,25 @@ def report(name, root, basis, codex_root):
 
     ot, oturns, omodel = file_stats(orch, basis)
     print(f"  orchestrator own cost: {ot:,} tok ({basis}), {oturns} turns, {omodel}")
+
+    h = context_health(orch)
+    ncomp = len(h["compactions"])
+    print(f"  orchestrator context: peak {h['peak_ctx']:,} tok"
+          + (f" @{str(h['peak_ts'])[:19]}" if h["peak_ts"] else "")
+          + f"; {ncomp} auto-compaction(s)"
+          + (f" at {', '.join(str(c)[:19] for c in h['compactions'])}" if ncomp else "")
+          + f"; cache_creation {h['cc_sum']:,} vs output {h['out_sum']:,}")
+    print(f"  orchestrator content: {h['img_reads']} image read(s) into main loop "
+          f"(base64 {h['img_b64']:,} chars; images cost ~tens-of-k tok each, dwarf text — "
+          f"text tool_results only ~{h['txt_result_tok']:,} tok)")
+    if h["reread"]:
+        top = sorted(h["reread"].items(), key=lambda x: -x[1])[:6]
+        print(f"  ** redundant image re-reads (same file, N×): "
+              + ", ".join(f"{n}× {f}" for f, n in top)
+              + " — each re-read re-adds the whole image to context **")
+    if ncomp or h["peak_ctx"] > 700_000:
+        print("  ** context rode the ceiling: rank image-in-main-loop judging / monolithic session "
+              "as a topology waste — compaction hides in the token totals (it SHRINKS the prefix). **")
 
     sp = spawns(orch)
     ledger = Counter(v["subagent_type"] for v in sp.values())
