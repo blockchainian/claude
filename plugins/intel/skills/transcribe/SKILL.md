@@ -84,14 +84,3 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe_live.py" \
 
 Apple Silicon. `setup.sh` installs the rest (Homebrew required). The first run
 without `setup.sh` errors and names the missing tool.
-
-## Tests
-
-`scripts/test_transcribe.py` covers the batch and live command shapes, the
-chunk-readiness logic, platform resolution, and `setup.sh --check`; when `ffmpeg`
-and a whisper runner are present it also runs a real end-to-end batch and live
-transcription of a generated clip:
-
-```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/test_transcribe.py"
-```
