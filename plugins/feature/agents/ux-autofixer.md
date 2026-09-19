@@ -23,6 +23,15 @@ Your final message is EXACTLY this flat JSON, no XML tags, no surrounding prose:
 
 {"status": "done" | "blocked" | "needs-backend", "commits": [...], "probes": [verdict JSON...], "findings": [...]}
 
+```json
+{"status": "done", "commits": ["a1b2c3d"], "probes": [], "findings": ["src/screens/Report.tsx:42 — the second finding does not reproduce: the row already guards the empty list"]}
+```
+
+The example shows the shape only, never values to copy. `commits` is the short SHAs you made, in
+the order you made them; `probes` is the verdict JSON each probe script printed, `[]` when you ran
+none; `findings` is one-line strings, each `path:line — claim`, with `path:line` left off a finding
+that has no place in the code.
+
 ## Rules
 
 - One finding, one coherent fix, one commit. NEVER end a turn with uncommitted edits: the deploy

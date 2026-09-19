@@ -38,6 +38,11 @@ naming, convention, or what a file like this usually contains. Write a line star
 question in your final message. File locations, test-file names and each module's
 `package.json` scripts are not facts: confirm them with grep or glob and cite what you find.
 
+Every entry under `problem.md`'s `## Open questions` and `## Unverified` goes to one of two
+places, and none is dropped silently: a fact the plan needs and you may not infer becomes a
+`QUESTION:` line in the workstream that needs it, and anything that needs the user's judgment is
+carried into `decisions.md`'s Open questions in the user's words.
+
 Scope is exactly the ask in `problem.md`. Do not add steps that were not requested.
 
 `problem.md`'s "Accepted when" section is the feature's definition: turn every criterion `AC<n>`

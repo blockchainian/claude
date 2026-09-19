@@ -34,7 +34,8 @@ write `None identified.` rather than inventing risks. -->
 
 ## Open questions
 
-<!-- Anything still needing the user's judgment before ship — distinct from problem.md's open
-questions, which the planner already resolved. Empty is the normal case; write `None.` -->
+<!-- Anything still needing the user's judgment before ship — including any of problem.md's open
+questions the planner carried here instead of turning into a `QUESTION:` line. Empty is the normal
+case; write `None.` -->
 
 - <question>
