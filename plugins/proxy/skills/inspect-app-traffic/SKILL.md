@@ -23,13 +23,15 @@ capture's traffic.
 
 ## Every name here is a value to paste, not a variable
 
-Each Bash call runs in its own shell; nothing assigned in one command survives to the next.
-Where this document writes `$CAP`, `$SKILL_DIR` or `$PROXY_DIR`, it means the actual value —
-read it out of the JSON a previous command printed and type it in full. `$SKILL_DIR` is the
-absolute path of this loaded skill folder, which you already know; do not derive it from the
-target app's working directory. All scripts print JSON on stdout — parse stdout, act on it.
-The hub and the per-capture flow files live under `$PROXY_DIR` (default `/tmp/proxy`); point it at a
-durable directory to keep captures across a reboot.
+Each Bash call runs in its own shell, so a variable assigned in one command is empty in the
+next. Where this document writes `$CAP`, `$SKILL_DIR` or `$PROXY_DIR`, paste the actual value
+— read it out of the JSON a previous command printed and type it in full, or run the whole
+sequence as one command.
+
+`$SKILL_DIR` is the absolute path of this loaded skill folder, which you already know; do not
+derive it from the target app's working directory. All scripts print JSON on stdout — parse
+stdout, act on it. The hub and the per-capture flow files live under `$PROXY_DIR` (default
+`/tmp/proxy`); point it at a durable directory to keep captures across a reboot.
 
 ## 0. Setup (skip if already set up)
 
@@ -118,10 +120,6 @@ Claude Chrome extension driving it. Either way, enable Zero Omega first.
 
 ## 3. Read the capture
 
-Each capture has its **own** file — the hub fans every flow into the file of each active
-capture whose hosts and window it matches — so a read touches only that app's data, however
-much other traffic the hub is handling at the same time:
-
 ```bash
 "$SKILL_DIR/scripts/capture.py" read "$CAP" --kind flows     # one line per request
 "$SKILL_DIR/scripts/capture.py" read "$CAP" --kind ws        # websocket frames
@@ -140,11 +138,6 @@ A WebSocket flow is written to the capture's file when it closes, so read its fr
 the socket ends or after `down` — a socket still open mid-capture is not in the file yet.
 
 ## 4. Concurrent captures and shared domains
-
-Two agents can capture two apps at once: each `start` opens its own capture, the hub writes
-each app's flows into its own file, and each `read` touches only that file. Nothing collides
-and no read pays for another capture's traffic — one proxy, one port, one Zero Omega profile,
-one file per app.
 
 When two apps share a host — a common auth provider, RPC, or analytics host — that host's
 flows are written to **both** captures' files (both match it). `--hosts` cannot separate apps
@@ -195,12 +188,3 @@ When a capture is on a phone, the user is often on another device — send the W
 `SendUserFile` rather than only printing a path. State the target hosts, the flow file, and
 for the findings give the endpoint shapes and WebSocket message formats — never the tokens.
 
-## Tests
-
-`scripts/test_capture.py` covers the pure logic and the hub orchestration without launching
-mitmdump: the host regex matches an app's domains and subdomains but not lookalikes; the port
-check detects a wildcard listener and allows a TIME_WAIT port; and `start`/`stop`/`status`/
-`down`/`check` act on capture records over a faked hub. Run it with
-`python3 scripts/test_capture.py`. `scripts/test_wg_config.py` pins the pure-Python X25519
-derivation against a known mitmproxy key pair and the RFC 7748 vector. The hub lifecycle, the
-fan-out into per-capture files, and the caller scoping are verified in a live capture.
