@@ -95,7 +95,8 @@ plugins/codex/skills/review/review.sh . \
 | `--no-push` | stop after merge | off |
 
 The session worktree must be clean when the run starts; results are delivered
-by merging onto its branch at the end of the run. Red = check failed, codex
+by merging onto its branch at the end of the run. Each workstream commits to
+its own branch, `workstreams/<feature>/<n>`. Red = check failed, codex
 timeout, codex error, or no diff produced. Failed workstreams are excluded
 from the merge and reported in the summary and PR body; their branches are
 kept when they contain commits. Exit codes: `0` all green + delivered, `2`
@@ -103,10 +104,19 @@ partial (some workstreams failed; session branch green and delivered), `1`
 post-merge check red (session branch restored to its pre-merge commit; green
 workstream branches kept), merge blocked (worktree stayed dirty past
 `--deliver-wait`, switched branch mid-run, or another run held the delivery
-lock too long), or push failed. Delivery waits for a clean tree and serializes
-across concurrent runs in the same repo instead of aborting; the lock covers
-merge + post-merge check only, and a push rejected by a moved remote is retried
-once after merging the remote tip in and re-running the check.
+lock too long), or push failed. Delivery waits for a clean tree (untracked
+files never delay it) and serializes across concurrent runs in the same repo
+instead of aborting; the lock covers merge + post-merge check only, and a push
+rejected by a moved remote is retried once after merging the remote tip in and
+re-running the check. A workstream whose files collide with an untracked file
+is excluded, its branch kept, without a codex conflict-resolution round.
+
+Pre-merge HEAD is recorded both as the git ref
+`refs/codex-implement/<feature>/pre-merge` and as
+`.git/codex-implement/<feature>/pre-merge.sha`, which `/codex:review` takes as
+its review base. The PR is opened from the session branch to the default
+branch, which needs `gh`; it is skipped when the session is already on the
+default branch.
 
 Run state lives under `.git/codex-implement/<feature>/` (per-workstream status
 JSON, logs, `pre-merge.sha`, `summary.json`); worktrees under
@@ -232,7 +242,11 @@ no-diff, merge-conflict resolution, session-branch delivery, restore-on-red,
 delivery lock and wait, existing-PR update, pool bounds, cleanup, guard rails);
 `skills/review/tests/test-review.sh` covers the review script's arguments,
 sandbox and schema flags, prompt, output and failure exit against the same
-stub. `implement.sh` is additionally verified against the real codex CLI.
+stub. `skills/review/tests/test-review-state.sh`,
+`test-classify-severity.sh` and `test-resolve-threads.sh` (the last via
+`--dry-run`, so no live PR) cover the cloud-review scripts against a stub
+`gh`, using the cloud bot's native comment format as fixtures. `implement.sh`
+is additionally verified against the real codex CLI.
 
 ## License
 
