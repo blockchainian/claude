@@ -182,8 +182,6 @@ terminal). Leave the CA installed otherwise; re-trusting it is the slow part.
   transactions. Reaching a screen is the user's to do, or another skill's.
 - Cert pinning defeats a proxy: a pinned app's TLS simply fails. That needs Frida/objection
   and is out of scope — report it as pinned rather than retrying.
-- **iOS simulators are off-limits unless the user explicitly asks.** Do not add the CA to a
-  simulator keychain to make a capture work.
 
 ## Reporting
 
