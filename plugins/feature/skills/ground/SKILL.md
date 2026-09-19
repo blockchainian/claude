@@ -36,8 +36,10 @@ concern.
 ## Procedure
 
 1. **Read each statement's mood; resolve what is ambiguous.** For each line of
-   the ask decide: current fact, wanted change, or unclear. "The flag defaults
-   to on" can be either, and the code contradicts both readings the same way,
+   the ask decide: current fact, wanted change, or unclear. "Exports currently
+   time out after 30 s" is a current fact: verify it in the code. "Add a CSV
+   option to the export menu" is a wanted change: it passes through. "The flag
+   defaults to on" can be either, and the code contradicts both readings the same way,
    so only the user can say. Ask all unclear lines in one prompt, one yes/no
    each: "<line> — requirement?". Yes = wanted change. No = a claim about
    current code; verify it like any premise, and if the code refutes it, report
