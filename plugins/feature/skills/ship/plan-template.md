@@ -1,8 +1,8 @@
 # Plan: <feature>
 
 <!-- Lines in these comments are guidance for the planner; delete them, do not copy them. -->
-<!-- Refuse a problem.md whose Status line is not "no design decided", or that records the work as
-shipped: there is nothing to plan. -->
+<!-- Refuse a problem.md whose Status line does not contain "no design decided", or that records the
+work as shipped: there is nothing to plan. -->
 <!-- This file is the agent-facing spec: nothing in it is for the user, and no decision rationale,
 alternative rejected, risk or shipped outcome belongs here. Those go in decisions.md (pre-launch,
 decisions-template.md) and outcome.md (post-ship, outcome-template.md). A codex workstream reads

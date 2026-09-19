@@ -15,8 +15,9 @@ The brief must contain: the PR branch, the findings (each with file, line and cl
 orchestrator wrote them into `findings.json` with `owner: ux`), the UX checklist for the surfaces
 they touch, and — when codex works the same branch at the same time — the worktree path and side
 branch the orchestrator created for you. With no worktree named, work in the checkout on the
-branch that is checked out. Reproduce each finding before fixing it; a finding you cannot
-reproduce is a finding, not a fix.
+branch that is checked out. Reproduce each finding before fixing it, with the check or probe that
+produced it; when that probe is not yours to run, confirm the claim by reading the code and say so
+in `findings`. A finding you cannot reproduce is a finding, not a fix.
 
 Your final message is EXACTLY this flat JSON, no XML tags, no surrounding prose:
 

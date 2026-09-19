@@ -16,7 +16,8 @@ The planner writes the plan; this skill makes its judgment calls the user's, fas
 background agent and cannot prompt the user, so the interactive gate lives here in the main loop.
 The skill never edits the *content* of `plan.md` or `decisions.md` — the planner owns both and
 re-runs the checkers; this skill only asks and routes the answers back. Its one write is the gate
-stamp it appends to `decisions.md` when the review settles (step 4), which is a record, not content.
+stamp it inserts as the first line of `decisions.md` when the review settles (step 4), which is a
+record, not content.
 
 ## 1. Spawn the planner
 
@@ -24,8 +25,8 @@ The input is a grounded `problem.md` (from `/feature:ground`). If there is none,
 ground first. Spawn the `planner` agent (`feature:planner`) with the problem.md path and
 end the turn; its completion re-invokes you. It writes `plan.md` (the agent-facing spec) and
 `decisions.md` (the human gate) beside `problem.md`, and reports the two paths, the plan's word
-count and the three checkers' exit codes. If any checker is non-zero, or the planner returned
-`QUESTION:` lines instead of a plan, resolve those first (feed answers back by `SendMessage` to the
+count and the three checkers' exit codes. If any checker is non-zero, or the plan carries
+`QUESTION:` lines, resolve those first (feed answers back by `SendMessage` to the
 same planner — it is idle, not dead) before gating.
 
 ## 2. Gate `decisions.md` with the user
@@ -67,7 +68,7 @@ When the planner has revised, re-read `decisions.md` and re-gate **only** the de
 risks that changed — not the ones already approved. Cap this at two revision rounds; a decision that
 is still contested after two rounds goes to the user as a plain question, outside the gate. When
 every decision is approved, every open question resolved, and every risk accepted, stamp the gate:
-append a top line to `decisions.md` reading `Gate: passed <date> — all decisions approved, open
+insert as the first line of `decisions.md` a line reading `Gate: passed <date> — all decisions approved, open
 questions resolved, risks accepted` (a risk the user accepted only after discussion is still
 accepted). This line is what `/feature:ship` checks before launch. Then say the plan is launch-ready
 and the next step is `/feature:ship <plan.md>`.

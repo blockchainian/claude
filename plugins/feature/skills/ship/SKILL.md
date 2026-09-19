@@ -16,9 +16,10 @@ not implement, and it does not drive UI. Every hour it spends editing the branch
 backend lane cannot merge onto it, and every UI step it drives by hand is a step a probe would have
 answered in one background call.
 
-Run this on Opus 4.8 medium (`/model claude-opus-4-8`, `/effort medium`) in a fresh session, reading `plan.md` and its `problem.md` — a phase
-boundary is a task boundary, and the grounding sweep's stale tool output would cost reads without
-helping. Within the phase, never `/clear` for size. Effort is set once at session start; escalate only for one hard problem,
+This skill is tuned for Opus 4.8 medium (`/model claude-opus-4-8`, `/effort medium`) in a fresh
+session that reads `plan.md` and its `problem.md`; if the session differs, say so in one line and
+continue. A phase boundary is a task boundary, and the grounding sweep's stale tool output would
+cost reads without helping. Within the phase, never `/clear` for size. Effort is set once at session start; escalate only for one hard problem,
 then drop back.
 
 ## What plan.md must contain
@@ -117,65 +118,80 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 4. **While both run, write the probes.** Turn each line of the plan's UX checklist into a probe
    in the project's probe library, using its shared helpers (the project contract in the plugin
    README says where both live). This is the overlap the pipeline is built for. If no probe is
-   needed, ground the next feature or poll the previous PR. NEVER edit the branch codex merges onto.
+   needed, end the turn. Apart from new probe scripts, never edit the branch codex merges onto;
+   leave new probes untracked or commit them before codex delivers.
 
-5. **Review and deploy staging, both on the push.** Watch `implement.sh`'s output with `Monitor` for
-   the line `pushed to origin` and act on it, not on the run's exit. First start the review in the
-   background: `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/review.sh <repo> <base> HEAD
-   specs/<date>-<topic>/review.json <plan.md>`, where `<base>` is the
-   `.git/codex-implement/<feature>/pre-merge.sha` the script recorded. A plan with no codex workstream has no
-   `implement.sh` run: start the same command when the UX lane reports `done`, with `<base>` the plan's base
-   SHA. One review per plan, one round. Alongside it, start the cloud round's poller in the
-   background: `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/review-state.sh <pr> HEAD
-   specs/<date>-<topic>/cloud-review.json`, where `<pr>` is `gh pr view --json number -q .number`
-   on the pushed branch. The local review pre-filters; the GitHub cloud review
-   (`chatgpt-codex-connector`) is the authoritative merge gate for step 9 — one round, so the
-   poller waits only for the first post or clean reaction on this exact head, never for a review
-   of whatever step 8 later pushes. Then run the project's staging deploy command, read the `sha` from its JSON, and record it as `STAGING_SHA`. Then run the project's
-   staging verify command and read its verdict JSON. Both exit non-zero on failure; gate the next
-   step on the exit code, not on the text. Then run the plan's Live checks against staging, a
-   minute after the deploy returns — the first request after a deploy can still hit the old build. Only staging runs from
-   here — production is the codex lane's command.
+5. **Review and deploy staging, both on the push.**
+
+   a. Watch `implement.sh`'s output with `Monitor` for the line `pushed to origin` and act on it,
+      not on the run's exit.
+   b. First start the review in the background:
+      `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/review.sh <repo> <base> HEAD
+      specs/<date>-<topic>/review.json <plan.md>`, where `<base>` is the
+      `.git/codex-implement/<feature>/pre-merge.sha` the script recorded. A plan with no codex
+      workstream has no `implement.sh` run: start the same command when the UX lane reports
+      `done`, with `<base>` the plan's base SHA. One review per plan, one round.
+   c. Alongside it, start the cloud round's poller in the background:
+      `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/review-state.sh <pr> HEAD
+      specs/<date>-<topic>/cloud-review.json`, where `<pr>` is `gh pr view --json number -q
+      .number` on the pushed branch. The local review pre-filters; the GitHub cloud review
+      (`chatgpt-codex-connector`) is the authoritative review and an input to step 7's triage —
+      one round, so the poller waits only for the first post or clean reaction on this exact head,
+      never for a review of whatever step 8 later pushes.
+   d. Then run the project's staging deploy command, read the `sha` from its JSON, and record it
+      as `STAGING_SHA`.
+   e. Then run the project's staging verify command and read its verdict JSON. Both exit non-zero
+      on failure; gate the next step on the exit code, not on the text.
+   f. Then run the plan's Live checks against staging, a minute after the deploy returns — the
+      first request after a deploy can still hit the old build. Only staging runs from here —
+      production is the codex lane's command.
 
 6. **Run the UX probes against staging.** Run them with `run_in_background` and read the verdict
    JSON. Failures go back to the UX agent that owns the surface by SendMessage — it is idle, not
    dead, and keeps its context. At most two rounds; a finding that survives two rounds goes to the
    user.
 
-7. **Triage, once.** When the review has written `review.json` (its process exits; a fail exit
-   means no review, which is a finding for the user) and the cloud poller has written
-   `cloud-review.json`, drop every `nit` from both. A cloud `state` of `timeout` is a finding for
-   the user — step 9's merge gate needs a real verdict, not a guess; `clean` contributes no
-   findings. Verify each `must-fix` (local and cloud) against the code — severity is the reviewer's claim,
-   not a fact — and add the probe failures from step 6 as findings of their own. Then decide the
-   owner of each finding, exactly once: a finding in a backend module, an API route or a test
-   file is `codex` without further thought (the project contract in the plugin README names the
-   paths); for the rest ask one question, does the fix change what the user sees or does — `ux`
-   if yes, `codex` if no. Findings in the same file get the same owner. Write them to
-   `specs/<date>-<topic>/findings.json` as `[{file, line, claim, owner, thread_id, comment_id,
-   disposition}]`, carrying `thread_id` and `comment_id` verbatim from the `cloud-review.json`
-   must-fix (both `null` for a local finding or a probe failure, which have no GitHub thread).
-   `disposition` starts `fixed` for a finding you keep and `rejected` — with a one-line `reason` —
-   for a cloud must-fix you verify as a false positive (it asks to revert an intended change, or
-   the code already handles it): record the rejected ones here even though they skip the fix round,
-   so step 8 still closes their threads. No kept findings means no fix round, but a rejected cloud
-   finding still needs its thread closed: go to step 8's close step, then step 9.
+7. **Triage, once.**
 
-8. **Fix, both lanes at once, one round.** Give the UX lane its own tree so neither lane can
-   dirty the other's: the worktree recipe from step 3 with `../.ux-<branch>`, branch
-   `ux/<branch>`, base `origin/<branch>`, for the module the UX findings touch (another module's
-   only for a finding there). Spawn `codex:codex-rescue` with
-   the `codex` findings, told to work in the session checkout, commit, rebase onto the remote
-   branch and push; spawn `ux-autofixer` with the `ux` findings, the worktree path, the side
-   branch `ux/<branch>`, the PR branch and the UX checklist. A finding touching `.claude/**` or
-   `CLAUDE.md` comes back for the user. There is no re-review: when both lanes are done, redeploy
-   staging if the codex lane pushed, re-run only the probes for surfaces the fixes touched, then
-   remove the tree. Post one PR comment summarising the findings and their dispositions;
-   that comment is the review's record. Then close the loop on the cloud-review threads: pipe the
-   `findings.json` entries to `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/resolve-threads.sh` —
-   it reacts (👍 fixed, 👎 rejected), replies with the `reason` on a rejection, and resolves each
-   thread, skipping the entries with a `null` `thread_id`. The summary comment stays the record for
-   local findings and for a reaction-only cloud review that left no threads.
+   a. When the review has written `review.json` (its process exits; a fail exit means no review,
+      which is a finding for the user) and the cloud poller has written `cloud-review.json`, drop
+      every `nit` from both. A cloud `state` of `timeout` is a finding for the user — step 9's
+      merge gate needs a real verdict, not a guess; `clean` contributes no findings.
+   b. Verify each `must-fix` (local and cloud) against the code — severity is the reviewer's
+      claim, not a fact — and add the probe failures from step 6 as findings of their own.
+   c. Then decide the owner of each finding, exactly once: a finding in a backend module, an API
+      route or a test file is `codex` without further thought (the project contract in the plugin
+      README names the paths); for the rest ask one question, does the fix change what the user
+      sees or does — `ux` if yes, `codex` if no. Findings in the same file get the same owner.
+   d. Write them to `specs/<date>-<topic>/findings.json` as `[{file, line, claim, owner,
+      thread_id, comment_id, disposition}]`, carrying `thread_id` and `comment_id` verbatim from
+      the `cloud-review.json` must-fix (both `null` for a local finding or a probe failure, which
+      have no GitHub thread).
+   e. `disposition` starts `fixed` for a finding you keep and `rejected` — with a one-line
+      `reason` — for a cloud must-fix you verify as a false positive (it asks to revert an
+      intended change, or the code already handles it): record the rejected ones here even though
+      they skip the fix round, so step 8 still closes their threads.
+   f. No kept findings means no fix round, but a rejected cloud finding still needs its thread
+      closed: go to step 8's close step, then step 9.
+
+8. **Fix, both lanes at once, one round.**
+
+   a. Give the UX lane its own tree so neither lane can dirty the other's: the worktree recipe
+      from step 3 with `../.ux-<branch>`, branch `ux/<branch>`, base `origin/<branch>`, for the
+      module the UX findings touch (another module's only for a finding there).
+   b. Spawn `codex:codex-rescue` with the `codex` findings, told to work in the session checkout,
+      commit, rebase onto the remote branch and push; spawn `ux-autofixer` with the `ux`
+      findings, the worktree path, the side branch `ux/<branch>`, the PR branch and the UX
+      checklist. A finding touching `.claude/**` or `CLAUDE.md` comes back for the user.
+   c. There is no re-review: when both lanes are done, redeploy staging if the codex lane pushed,
+      re-run only the probes for surfaces the fixes touched, then remove the tree.
+   d. Post one PR comment summarising the findings and their dispositions; that comment is the
+      review's record.
+   e. Then close the loop on the cloud-review threads: pipe the `findings.json` entries to
+      `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/resolve-threads.sh` — it reacts (👍 fixed,
+      👎 rejected), replies with the `reason` on a rejection, and resolves each thread, skipping
+      the entries with a `null` `thread_id`. The summary comment stays the record for local
+      findings and for a reaction-only cloud review that left no threads.
 
 9. **Decide production, then record the outcome.** Production ships only when every finding is
    closed AND the re-run probes are green AND every acceptance criterion is met — the gate's
@@ -197,7 +213,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    out of this ship. It is for the user and for memory — write it clear, succinct and fast to read,
    no code anchors. `plan.md` stays input-only; do not write an outcome into it. Then write the
    memory files and end. Write a separate `specs/<date>-<topic>/handoff.md` only if you must stop
-   mid-phase (context past ~300k, quota exhausted), naming exactly where to resume.
+   mid-phase (the context safety rail set in the user's CLAUDE.md, quota exhausted), naming exactly
+   where to resume.
 
 ## Hard rules
 
