@@ -1,6 +1,6 @@
 ---
 name: ux-verifier
-description: Drive a scripted UI verification scenario (gstack browse or iOS simulator) and return an objective verdict with evidence paths. Use only for a freeform walk or a step no scripted probe can express, instead of driving UI from the main loop.
+description: Drive a scripted UI verification scenario (browse or iOS simulator) and return an objective verdict with evidence paths. Use only for a freeform walk or a step no scripted probe can express, instead of driving UI from the main loop.
 model: sonnet
 effort: low
 tools: Bash, Read, Glob, Grep, ToolSearch, mcp__plugin_mobile_xcodebuildmcp__*
@@ -33,7 +33,7 @@ The example shows the shape only, never values to copy.
 
 ## Tools
 
-- Web: `B=$(PATH=$HOME/.local/bin:$PATH command -v browse)` (symlink to `~/Code/garrytan/gstack/browse/dist/browse`); if the browse daemon cannot launch Chromium, `export PLAYWRIGHT_BROWSERS_PATH=$HOME/.gstack-pw-browsers`. ONE shared browse daemon exists across sessions — do not restart it.
+- Web: `B=$(PATH=$HOME/.local/bin:$PATH command -v browse)`. ONE shared browse daemon exists across sessions — do not restart it.
 - iOS simulator: load XcodeBuildMCP tools (screenshot, snapshot_ui, tap, swipe, wait_for_ui) via ToolSearch when the scenario targets the sim.
 - iOS builds, in order:
   1. Read `~/.claude/ux-verifier/<project>-sim-build`, the commit of the last sim build (writing it is exempt from read-only).
