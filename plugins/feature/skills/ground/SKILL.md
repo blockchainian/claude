@@ -35,29 +35,15 @@ concern.
 
 ## Procedure
 
-1. **Read each statement's mood; resolve what is ambiguous.** Every line in the
-   ask is one of three things — a claim about the current state, a description
-   of the desired state, or a claim that is simply wrong. The first and third
-   are the same grammatical kind, an indicative claim about what *is*, and the
-   sweep tells them apart by checking; the desired state is optative, what
-   *should be*. What the repo can never disambiguate is a line whose mood is
-   unclear: "the flag defaults to on" reads as fact and as wish, contradicts
-   the code the same way on either reading, and no sweep says which the user
-   meant. So before anything else, find the mood-ambiguous lines and settle
-   each at its source — the user's intent, the one bit the repo does not hold.
-   Ask the user directly, one tight yes/no question per ambiguous line, batched
-   into a single prompt — "<the line> — requirement?", answered Yes or No.
-   Keep the question to that: the line and the one bit you need, no third
-   option and no essay. Yes makes it a desired change, respected; No makes it a
-   claim about current code, a Premise the sweep then verifies like any other —
-   the answer settles the mood, not the truth, so a "No" the code refutes still
-   surfaces as a refuted premise. Do not guess the mood, and do not sweep around
-   it. On a non-interactive run with no user to ask, reject with the flagged
-   lines instead — a current fact wants an explicit now-marker, not bare present
-   tense ("X *currently* does Y", "today X is Y"), and a want wants the
-   imperative ("change Y to Z"); bare present tense is the ambiguous case
-   itself, so it draws the same flag. Either way the ambiguity is never resolved
-   by guessing.
+1. **Read each statement's mood; resolve what is ambiguous.** For each line of
+   the ask decide: current fact, wanted change, or unclear. "The flag defaults
+   to on" can be either, and the code contradicts both readings the same way,
+   so only the user can say. Ask all unclear lines in one prompt, one yes/no
+   each: "<line> — requirement?". Yes = wanted change. No = a claim about
+   current code; verify it like any premise, and if the code refutes it, report
+   it as refuted. Never guess. With no user to ask, reject and list the flagged
+   lines; tell the author to write facts as "X currently does Y" and wants as
+   "change Y to Z".
 
 2. **Classify the survivors, and confirm what will be tested.** Sort the
    mood-clear material into the six fields and echo the mapping back in one
@@ -68,7 +54,7 @@ concern.
    verdict JSON shape" presupposes that JSON exists with a known shape — pull
    that presupposition out as a Premise and verify it with the rest.
    List the Premises back under "here is what I will try to break — confirm or
-   correct." The one-line shortcut is only for an ask that carries no claim
+   correct." Skip the echo-back only for an ask that carries no claim
    about existing behavior to pull — one stated purely as goal and imposed
    decisions; tidy phrasing is not that case, since a well-organized design is
    exactly where a confident but unverified premise hides, so extract the
@@ -98,8 +84,8 @@ concern.
    file dumps. Run the measuring commands yourself: probes, D1 queries, a
    real request against the producer. Nothing enters the doc from recall.
 
-   Run this skill from the main session: the `SubagentStart` hook
-   (the plugin's `subagent-no-spawn` hook) blocks nested spawning, so a
+   Run this skill from the main session: the harness blocks nested spawning
+   (the plugin's `subagent-no-spawn` hook tells each subagent so), so a
    subagent invoking `/ground` must sweep by hand.
 
 5. **Write the doc** from the template, then check its paths and anchors
@@ -146,17 +132,52 @@ Every claim carries its evidence inline, or it does not go in:
 - **Constraints already decided** — link the memory or prior handoff rather
   than restating it.
 
-**Facts a plan's gate or fix will rest on.** Pin these before they detonate downstream, where no exit code catches them:
+**Facts a plan's gate or fix will rest on.** Pin these before a wrong one
+breaks the work later, where no exit code catches it:
 
-- **The `--check` command, run on the clean baseline.** If the plan will gate on a build/check command, run it at the base SHA and record pass/fail and which errors are pre-existing. A gate already red on baseline is not a code signal — the plan must then gate on a differential (new errors in touched files only) or on a command that actually passes. A whole codex run can write correct code and be discarded against a check that never passed on that module.
-- **The existing client for any third-party API the plan will call or probe.** When a repo module exists to talk to a service, read it before improvising auth or transport — it holds the real recipe (token exchange, required headers, anti-bot client). Improvising instead burns probe after probe rediscovering what the module already encodes.
-- **The real cap behind any numeric bound a fix pins.** A limit or clamp value the plan cites must match the existing validation or schema cap it flows into; a value that contradicts it (a clamp to 150 into a `max(100)` schema) passes mocked tests and fails only live.
+- **The `--check` command, run on the clean baseline.** If the plan will
+  gate on a build/check command, run it at the base SHA. Record pass/fail
+  and which errors are pre-existing. A gate already red on baseline is not
+  a code signal. The plan must then gate on a differential (new errors in
+  touched files only) or on a command that actually passes. A whole codex
+  run can write correct code and still be discarded against a check that
+  never passed on that module.
+- **The existing client for any third-party API the plan will call or
+  probe.** When a repo module exists to talk to a service, read it before
+  improvising auth or transport. It holds the real recipe: token exchange,
+  required headers, anti-bot client. Improvising instead burns probe after
+  probe rediscovering what the module already encodes.
+- **The real cap behind any numeric bound a fix pins.** A limit or clamp
+  value the plan cites must match the existing validation or schema cap it
+  flows into. A value that contradicts it — a clamp to 150 into a
+  `max(100)` schema — passes mocked tests and fails only live.
 
-**Facts a spec-shaped or external-API goal rests on.** A goal that generates a deliverable file or live-tests a third-party API carries premises that a "complete" criterion never tests. The project's own specifics (proxy/gateway, filenames, conventions) live in its memory or AGENTS.md — pull them in; the general premises to pin are:
+**Facts a spec-shaped or external-API goal rests on.** A goal that
+generates a deliverable file or live-tests a third-party API carries
+premises that a "complete" criterion never tests. The project's own
+specifics (proxy/gateway, filenames, conventions) live in its memory or
+AGENTS.md — pull them in; the general premises to pin are:
 
-- **The on-disk layout of any deliverable the goal names by filename.** `ls` the sibling/precedent directories and pin where the analogous artifact lives and whether it is standalone or folded into another doc; an existing repo convention is a knowable fact. If the requested filename has NO precedent, record it as an open question and surface the consistency conflict before authoring rather than building the literal name and reworking it onto the convention later.
-- **A spec/data deliverable's acceptance criterion should assert it was verified against the live source this session, not merely "complete".** "Complete" lets verification defer, the user inject it later, and the session re-enter the whole verification method at full cost. Phrase the Accept-when as live-verified this session.
-- **The live-test protocol for any third-party/external API the plan will probe, pinned before the first call:** the sanctioned **egress** (the project's proxy/gateway, never the session/home IP for an abuse-sensitive API), the provider's **rate-limit model** (buckets, ban behavior, pacing floor, no fan-out), the **read/write route split** (enumerate and exclude state-changing / money-moving routes from live tests), and **sample-capture redaction** (strip keys, auth headers and user-identifying fields before any sample is written).
+- **The on-disk layout of any deliverable the goal names by filename.**
+  `ls` the sibling/precedent directories. Pin where the analogous artifact
+  lives and whether it is standalone or folded into another doc; an
+  existing repo convention is a knowable fact. If the requested filename
+  has NO precedent, record it as an open question and surface the
+  consistency conflict before authoring. Building the literal name first
+  means reworking it onto the convention later.
+- **A spec/data deliverable's acceptance criterion should assert it was
+  verified against the live source this session, not merely "complete".**
+  "Complete" lets verification defer, the user inject it later, and the
+  session re-enter the whole verification method at full cost. Phrase the
+  Accept-when as live-verified this session.
+- **The live-test protocol for any third-party/external API the plan will
+  probe, pinned before the first call.** Four things: the sanctioned
+  **egress** (the project's proxy/gateway, never the session/home IP for
+  an abuse-sensitive API); the provider's **rate-limit model** (buckets,
+  ban behavior, pacing floor, no fan-out); the **read/write route split**
+  (enumerate and exclude state-changing / money-moving routes from live
+  tests); and **sample-capture redaction** (strip keys, auth headers and
+  user-identifying fields before any sample is written).
 
 **Diagnosis is not design.** A candidate mechanism named as a question with
 what would settle it belongs in Open questions: "Does the upstream feed drop a

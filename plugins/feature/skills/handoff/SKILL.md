@@ -2,7 +2,8 @@
 name: handoff
 description: >
   Write a mid-phase handoff when a session must stop before its phase's output exists —
-  quota exhausted, end of day, the context rail, or the 55-minute idle wake-up firing.
+  quota exhausted, end of day, the context safety rail in the user's CLAUDE.md, or the
+  55-minute idle wake-up firing.
   Use for "/feature:handoff", "write a handoff", or when the idle wake-up prompt says to. NOT at a
   phase end: a phase's output (problem.md, plan.md, the PR, verdict JSONs, the report) is its
   own record and needs no handoff.
@@ -35,7 +36,7 @@ handoff for the same topic.
 
 ## Two shapes
 
-**Development flow** (ground → plan → ship → review-fix → deploy): "Done" is SHAs and
+**Development flow** (ground → plan → ship): "Done" is SHAs and
 phase docs; "Next" is the phase after the one that produced the last document: the `planner` agent
 on `problem.md`, the ship step on `plan.md`, or the PR round; "Do not redo" is the probes already
 green and the workstreams already merged (with the check output path).
