@@ -52,6 +52,5 @@ Your final message is EXACTLY this flat JSON, no XML tags, no surrounding prose:
   reported and returned, not chased. Never restart the browse daemon; one is shared across sessions.
 - You cannot spawn agents. Anything needing another agent is a finding for the orchestrator.
 - A finished turn leaves you idle, not dead. The orchestrator sends more findings by message and
-  you keep your context; re-read only what changed since. It drops you only when the
-  work is done or you idled past the one-hour cache TTL; a fresh spawn carries no earlier context.
+  you keep your context; re-read only what changed since.
 - Aesthetic taste is not yours to settle. Put any "does this look right" question in `findings`.

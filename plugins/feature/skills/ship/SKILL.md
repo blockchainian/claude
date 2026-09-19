@@ -18,8 +18,7 @@ answered in one background call.
 
 Run this on Opus 4.8 medium (`/model claude-opus-4-8`, `/effort medium`) in a fresh session, reading `plan.md` and its `problem.md` — a phase
 boundary is a task boundary, and the grounding sweep's stale tool output would cost reads without
-helping (Complexity Trap, arXiv 2508.21433: masking it cut cost 52% at parity). Within the phase,
-never `/clear` for size. Effort is set once at session start; escalate only for one hard problem,
+helping. Within the phase, never `/clear` for size. Effort is set once at session start; escalate only for one hard problem,
 then drop back.
 
 ## What plan.md must contain
@@ -31,24 +30,22 @@ touches many screens is one plan with many UX workstreams, not one plan per scre
 planning run once, the implementers run at once. Each workstream block is the implementer's whole
 brief: `codex:implement` passes the plan as the spec and writes one pointer line per workstream
 that scopes the agent to the shared core plus its block, adding no facts. The `planner` agent
-(`${CLAUDE_PLUGIN_ROOT}/agents/planner.md`, Fable high) writes it, and beside it `decisions.md` —
+(`${CLAUDE_PLUGIN_ROOT}/agents/planner.md`) writes it, and beside it `decisions.md` —
 the pre-launch human gate (rationale, rejected alternatives, risks, open questions) that no agent
-reads and the user reviews before you launch. The planner's brief carries these two lines verbatim:
+reads and the user reviews before you launch.
 
-> Repo facts come from `<path>/problem.md` only. If you need a fact that is not in it, stop and
-> ask — do not infer it from naming, convention, or what a file like this usually contains.
->
-> Scope is exactly <the ask>. Do not add steps that were not requested.
+Before the plan ships, and after every revision, run these three from inside the repo:
 
-Before the plan ships, and after every revision, run `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-paths.sh
-<plan> [skip-regex]` from inside the repo. It exits 1 on any `MISSING:` or `AMBIGUOUS:` path;
-mark files the plan creates `(new)` on their own line so they are skipped. Run
-`${CLAUDE_PLUGIN_ROOT}/skills/ground/check-overlap.sh <plan>` beside it; it exits 1 when two
-workstreams list the same file, which is a merge conflict scheduled in advance. Run
-`${CLAUDE_PLUGIN_ROOT}/skills/ground/check-acceptance.py <plan> <problem.md>` too; it exits 1 on
-`UNCOVERED: AC<n>` — an acceptance criterion no test references, an unbuilt part of the feature —
-and sends the plan back to the planner. Then grep each function, route, table, column and env var
-the plan names — a miss there reads fluently, which is why reading alone does not find it.
+- `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-paths.sh <plan> [skip-regex]` — exits 1 on a
+  `MISSING:` or `AMBIGUOUS:` path; mark files the plan creates `(new)` on their own line so they
+  are skipped.
+- `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-overlap.sh <plan>` — exits 1 when two workstreams
+  list the same file, a merge conflict scheduled in advance.
+- `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-acceptance.py <plan> <problem.md>` — exits 1 on
+  `UNCOVERED: AC<n>`, an acceptance criterion no test references, which sends the plan back to
+  the planner.
+
+Then grep each function, route, table, column and env var the plan names.
 
 ## Task board — the run's live view
 
@@ -205,7 +202,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 ## Hard rules
 
 - **Every wait ends the turn.** Launch, say one line about what is running, and stop. Task
-  notifications re-invoke you when a lane finishes. NEVER idle-wait, and NEVER call `TaskOutput`.
+  notifications re-invoke you when a lane finishes. NEVER idle-wait, and NEVER call blocking
+  `TaskOutput`.
 - **No `sleep` in the foreground.** Anything that waits runs with `run_in_background`.
 - **No UI driving from the main loop.** Probes only, run with `run_in_background`, verdict JSON
   read back. Delegate to `ux-verifier` only what a probe cannot express: a freeform walk, or a step
