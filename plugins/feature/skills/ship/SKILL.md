@@ -19,8 +19,8 @@ answered in one background call.
 This skill is tuned for Opus 4.8 medium (`/model claude-opus-4-8`, `/effort medium`) in a fresh
 session that reads `plan.md` and its `problem.md`; if the session differs, say so in one line and
 continue. A phase boundary is a task boundary, and the grounding sweep's stale tool output would
-cost reads without helping. Within the phase, never `/clear` for size. Effort is set once at session start; escalate only for one hard problem,
-then drop back.
+cost reads without helping. Within the phase, never `/clear` for size. Effort is set once at session start. If one problem needs more, tell the user to raise
+`/effort` and leave it raised for the phase: every change rewrites the whole prompt cache.
 
 ## What plan.md must contain
 
@@ -207,8 +207,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
   `TaskOutput`.
 - **No `sleep` in the foreground.** Anything that waits runs with `run_in_background`.
 - **No UI driving from the main loop.** Probes only, run with `run_in_background`, verdict JSON
-  read back. Delegate to `ux-verifier` only what a probe cannot express: a freeform walk, or a step
-  needing judgment in flight. Judge screenshots yourself; taste calls go to the user.
+  read back. Delegate to `ux-verifier` only a freeform walk with objective assertions that no probe
+  can express. Judgment stays with you: judge screenshots yourself; taste calls go to the user.
 - **Inconclusive is not a pass.** Fix the probe or the environment and re-run. "Probe may be stale"
   means the screen model no longer matches the app: update the probe with the deliberate change, or
   treat the mismatch itself as the finding.
@@ -218,8 +218,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 - **Disjoint work runs at once.** Workstreams with disjoint `Files:` lines are launched in the same
   message, never one after another. Serial slices were the whole cost of the 2026-09-11 mobile
   session: 66 minutes of implementation took 4 h 40 min of wall clock.
-- **Effort is not toggled**, and ad-hoc Agent spawns cannot set effort — that is why the UX lanes
-  are defined agents. Do not spawn agents from a high-effort turn.
+- **Ad-hoc Agent spawns cannot set effort** and inherit the session's — that is why the UX lanes
+  are defined agents. Once the user has raised effort, spawn defined agents only.
 - **Agents are idle, not dead.** Send findings back by message and keep their context. Drop one only
   when its work is done or it has idled past the one-hour cache TTL, then spawn fresh with a short
   brief.
