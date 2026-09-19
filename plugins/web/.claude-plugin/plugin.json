@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Inspect web apps from Claude Code: find memory leaks by diffing V8 heap snapshots captured over the Chrome DevTools protocol, and check a built page against a design reference.",
   "author": {
     "name": "blockchainian"

@@ -32,6 +32,11 @@ byte-identical, with the `mobile` plugin's `check-mobile-design`; a repo test
 fails if the two copies ever drift. The web SKILL.md carries the browser capture
 recipe (screenshot + DOM `getBoundingClientRect`).
 
+Maintainer note: the two SKILL.md files also mirror each other in the sections
+"Reading `diff.json`", "Tolerances" and "Requirements", which differ only in the
+platform nouns (element/view, page/screen). No test covers the prose — change
+both copies together.
+
 ## Install
 
 ```
