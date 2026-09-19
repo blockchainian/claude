@@ -125,9 +125,9 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 
    a. Watch `implement.sh`'s output with `Monitor` for the line `pushed to origin` and act on it,
       not on the run's exit.
-   b. First start the review in the background:
-      `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/review.sh <repo> <base> HEAD
-      specs/<date>-<topic>/review.json <plan.md>`, where `<base>` is the
+   b. First start the review in the background: invoke the `codex:review` skill, which names its
+      script, and run it as `review.sh <repo> <base> HEAD specs/<date>-<topic>/review.json
+      <plan.md>`, where `<base>` is the
       `.git/codex-implement/<feature>/pre-merge.sha` the script recorded. A plan with no codex
       workstream has no `implement.sh` run: start the same command when the UX lane reports
       `done`, with `<base>` the plan's base SHA. One review per plan, one round.
@@ -227,6 +227,11 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
   re-review; the re-run of the probes on the surfaces the fixes touched is the second gate. A
   finding that survives its last round goes to the user. Review severity labels are unranked
   input; verify a finding before acting on it.
+- **Three strikes on your own steps.** A step of yours — an inconclusive probe's re-run, the
+  staging deploy or verify, `watch-ci.sh` — that fails three times in a row for the same reason
+  goes to the user with its raw output. A re-run with nothing changed in between counts as a
+  strike; a different failure reason restarts the count; waiting on CI or a deploy is not a
+  failure. A turn that only restates status or rewrites the plan is a strike too.
 - **The merge gate is CI, not prose.** `gh pr merge` runs only after `watch-ci.sh` reports
   `conclusion: success` on the fixed head. Never `--admin`. Auto-push and
   auto-merge are PR-scoped only — never a prod, secret or infra mutation from this skill; a
