@@ -15,7 +15,7 @@ Follow this sequence unless the user asks for a narrower action.
 
 ### 1) Discover the booted simulator
 - Call `mcp__plugin_mobile_xcodebuildmcp__list_sims` and select the simulator with state `Booted`.
-- If none are booted, ask the user to boot one (do not boot automatically unless asked).
+- If none are booted, boot one with `mcp__plugin_mobile_xcodebuildmcp__boot_sim`.
 
 ### 2) Set session defaults
 - Call `mcp__plugin_mobile_xcodebuildmcp__session_set_defaults` with:
