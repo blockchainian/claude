@@ -61,11 +61,11 @@ Under `/feature:ship`, the ship skill's triage step owns this
 routing (its fix lanes are `codex-rescue` and `ux-autofixer`); do not repeat
 it there.
 
-## The cloud review as the merge gate
+## The cloud review as the authoritative review
 
 `review.sh` is a local, structured pre-filter. The GitHub cloud review (the
 `chatgpt-codex-connector` bot configured on the repo) is slower and
-unstructured, but it is the authoritative merge gate under
+unstructured, but it is the authoritative review, an input to triage, under
 `/feature:ship` — its findings are native prose with a `![P0/P1/P2
 Badge]` severity marker on each PR review thread, not schema JSON, so two
 scripts turn it into the same shape as a local review:
