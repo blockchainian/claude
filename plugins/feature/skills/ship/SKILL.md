@@ -131,48 +131,37 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
       `.git/codex-implement/<feature>/pre-merge.sha` the script recorded. A plan with no codex
       workstream has no `implement.sh` run: start the same command when the UX lane reports
       `done`, with `<base>` the plan's base SHA. One review per plan, one round.
-   c. Alongside it, start the cloud round's poller in the background:
-      `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/review-state.sh <pr> HEAD
-      specs/<date>-<topic>/cloud-review.json`, where `<pr>` is `gh pr view --json number -q
-      .number` on the pushed branch. The local review pre-filters; the GitHub cloud review
-      (`chatgpt-codex-connector`) is the authoritative review and an input to step 7's triage —
-      one round, so the poller waits only for the first post or clean reaction on this exact head,
-      never for a review of whatever step 8 later pushes.
-   d. Then run the project's staging deploy command, read the `sha` from its JSON, and record it
+   c. Then run the project's staging deploy command, read the `sha` from its JSON, and record it
       as `STAGING_SHA`.
-   e. Then run the project's staging verify command and read its verdict JSON. Both exit non-zero
+   d. Then run the project's staging verify command and read its verdict JSON. Both exit non-zero
       on failure; gate the next step on the exit code, not on the text.
-   f. Then run the plan's Live checks against staging, a minute after the deploy returns — the
+   e. Then run the plan's Live checks against staging, a minute after the deploy returns — the
       first request after a deploy can still hit the old build. Only staging runs from here —
       production is the codex lane's command.
 
 6. **Run the UX probes against staging.** Run them with `run_in_background` and read the verdict
    JSON. Failures go back to the UX agent that owns the surface by SendMessage — it is idle, not
-   dead, and keeps its context. At most two rounds; a finding that survives two rounds goes to the
-   user.
+   dead, and keeps its context. A failure still red after its rounds here (the cap is in Hard
+   rules) becomes a finding in step 7.
 
 7. **Triage, once.**
 
    a. When the review has written `review.json` (its process exits; a fail exit means no review,
-      which is a finding for the user) and the cloud poller has written `cloud-review.json`, drop
-      every `nit` from both. A cloud `state` of `timeout` is a finding for the user — step 9's
-      merge gate needs a real verdict, not a guess; `clean` contributes no findings.
-   b. Verify each `must-fix` (local and cloud) against the code — severity is the reviewer's
-      claim, not a fact — and add the probe failures from step 6 as findings of their own.
+      which is a finding for the user), drop every `nit`.
+   b. Verify each `must-fix` against the code — severity is the reviewer's claim, not a fact —
+      and add the probe failures that survived step 6 as findings of their own.
    c. Then decide the owner of each finding, exactly once: a finding in a backend module, an API
       route or a test file is `codex` without further thought (the project contract in the plugin
       README names the paths); for the rest ask one question, does the fix change what the user
       sees or does — `ux` if yes, `codex` if no. Findings in the same file get the same owner.
    d. Write them to `specs/<date>-<topic>/findings.json` as `[{file, line, claim, owner,
-      thread_id, comment_id, disposition}]`, carrying `thread_id` and `comment_id` verbatim from
-      the `cloud-review.json` must-fix (both `null` for a local finding or a probe failure, which
-      have no GitHub thread).
+      disposition}]`.
    e. `disposition` starts `fixed` for a finding you keep and `rejected` — with a one-line
-      `reason` — for a cloud must-fix you verify as a false positive (it asks to revert an
-      intended change, or the code already handles it): record the rejected ones here even though
-      they skip the fix round, so step 8 still closes their threads.
-   f. No kept findings means no fix round, but a rejected cloud finding still needs its thread
-      closed: go to step 8's close step, then step 9.
+      `reason` — for a must-fix you verify as a false positive (it asks to revert an intended
+      change, or the code already handles it): record the rejected ones here even though they
+      skip the fix round, so step 8's summary comment carries them.
+   f. No kept findings means no fix round: post step 8's summary comment if a finding was
+      rejected, then go to step 9.
 
 8. **Fix, both lanes at once, one round.**
 
@@ -187,11 +176,6 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
       re-run only the probes for surfaces the fixes touched, then remove the tree.
    d. Post one PR comment summarising the findings and their dispositions; that comment is the
       review's record.
-   e. Then close the loop on the cloud-review threads: pipe the `findings.json` entries to
-      `${CLAUDE_PLUGIN_ROOT}/../codex/skills/review/resolve-threads.sh` — it reacts (👍 fixed,
-      👎 rejected), replies with the `reason` on a rejection, and resolves each thread, skipping
-      the entries with a `null` `thread_id`. The summary comment stays the record for local
-      findings and for a reaction-only cloud review that left no threads.
 
 9. **Decide production, then record the outcome.** Production ships only when every finding is
    closed AND the re-run probes are green AND every acceptance criterion is met — the gate's
@@ -239,12 +223,14 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 - **Agents are idle, not dead.** Send findings back by message and keep their context. Drop one only
   when its work is done or it has idled past the one-hour cache TTL, then spawn fresh with a short
   brief.
-- **Loops are capped.** One fix round and no re-review; the re-run of the probes on the surfaces
-  the fixes touched is the second gate. A finding that survives the round goes to the user.
-  Review severity labels are unranked input; verify a finding before acting on it. The cloud
-  review gets the same one round: a must-fix its own fix introduces ships unreviewed.
+- **Loops are capped.** A probe failure gets at most three fix rounds: two with the owning UX
+  agent in step 6, then step 8's round. A review finding gets step 8's one round and no
+  re-review; the re-run of the probes on the surfaces the fixes touched is the second gate. A
+  finding that survives its last round goes to the user. Review severity labels are unranked
+  input; verify a finding before acting on it.
 - **The merge gate is CI, not prose.** `gh pr merge` runs only after `watch-ci.sh` reports
   `conclusion: success` on the fixed head. Never `--admin`. Auto-push and
   auto-merge are PR-scoped only — never a prod, secret or infra mutation from this skill; a
   finding that needs one goes to the user, not into the fix round.
-- **Memory at the phase end only** — written in step 9, not mid-turn; no handoff unless stopping mid-phase.
+- **Memory at the phase end only** — written in step 9, not mid-turn, because a memory write in
+  the middle of a session invalidates the prompt cache; no handoff unless stopping mid-phase.
