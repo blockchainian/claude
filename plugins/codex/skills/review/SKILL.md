@@ -17,7 +17,7 @@ Once per plan, one round, after the push that lands the implementation:
 - for a plan with no codex workstream, when the UX lane reports done, with
   the base the plan's recorded SHA.
 
-Under `/feature:orchestrate` the orchestrator runs it and triages; standalone,
+Under `/feature:ship` the orchestrator runs it and triages; standalone,
 run it yourself. `implement.sh` never calls it.
 
 ## Run
@@ -39,9 +39,7 @@ findings schema; a finding is `must-fix` only when the change breaks
 behaviour, violates a stated invariant, or leaves an input or error path
 unhandled, and everything else is a `nit`. Style, naming and refactoring
 preferences are not reported. `codex exec review --base` is not used because
-codex-cli rejects combining `--base` with custom instructions, and no
-`@codex review` comment is posted on the PR: the GitHub review is slow,
-unobservable, and its threads need polling.
+codex-cli rejects combining `--base` with custom instructions.
 
 Exit 0 with `review.json` written; exit 1 when codex failed (the `.log` says
 why). A failed review is a finding for the user, not a pass.
@@ -59,19 +57,16 @@ reviewer's claim, not a fact. Route the survivors by scope, not severity:
   followed by another `codex:review` over that run's delta — re-reviewing the
   fix is the point of routing it this way.
 
-Under `/feature:orchestrate`, the orchestrate skill's triage step owns this
+Under `/feature:ship`, the ship skill's triage step owns this
 routing (its fix lanes are `codex-rescue` and `ux-autofixer`); do not repeat
 it there.
-
-Verified by `tests/test-review.sh` against the stub codex in
-`../implement/tests/stub-codex`.
 
 ## The cloud review as the merge gate
 
 `review.sh` is a local, structured pre-filter. The GitHub cloud review (the
 `chatgpt-codex-connector` bot configured on the repo) is slower and
 unstructured, but it is the authoritative merge gate under
-`/feature:orchestrate` — its findings are native prose with a `![P0/P1/P2
+`/feature:ship` — its findings are native prose with a `![P0/P1/P2
 Badge]` severity marker on each PR review thread, not schema JSON, so two
 scripts turn it into the same shape as a local review:
 
@@ -101,13 +96,5 @@ scripts turn it into the same shape as a local review:
   GitHub. `/feature:ship` step 8 pipes `findings.json` to it after posting the
   summary comment.
 
-Under `/feature:orchestrate`: step 5 starts `review-state.sh` in the
-background alongside the local review, against the head `implement.sh` (or
-the UX lane) just pushed; step 7 folds its `must_fix` into the same
-`findings.json` triage as the local review and the probes; step 9 gates the
-merge on CI, after round 1's fixes are pushed — there is no round 2, so a
-must-fix a fix itself introduces ships unreviewed by design.
-
-Verified by `tests/test-review-state.sh`, `tests/test-classify-severity.sh`
-and `tests/test-resolve-threads.sh` (the last via `--dry-run`, so no live PR)
-against a stub `gh`, using the cloud bot's native comment format as fixtures.
+The `/feature:ship` skill's steps 5, 7 and 9 own how this round is started,
+triaged and gated; follow them there.

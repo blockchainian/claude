@@ -73,50 +73,27 @@ workstreams and merge resolutions as rows in `codex agents`; `--runner exec`
 
 ## 2. Execute (implement.sh, no Claude)
 
-- A worktree pool sized to concurrency at `../.codex-implement-<feature>/w*`,
-  branched from the session branch's run-start commit, created on demand and
-  removed after merge. Workstream branches are `workstreams/<feature>/<n>`.
-- Per workstream: codex works in a free worktree, the script runs `--check`,
-  and commits the branch on green.
-- Red = check failed, codex timeout, codex nonzero exit, or no diff. A bounded
-  retry re-invokes codex in the same worktree with the failure tail appended.
-- A workstream that exhausts its retries is FAILED: excluded from the merge,
-  its branch kept only if it has commits, and listed in the summary and PR body.
+Codex implements each workstream in its own worktree, gated by `--check` with
+bounded retries, and commits it to `workstreams/<feature>/<n>` on green. A
+workstream that exhausts its retries is FAILED: excluded from the merge, its
+branch kept only if it has commits, and listed in `summary.json` and the PR
+body. Mechanics in `${CLAUDE_PLUGIN_ROOT}/README.md`.
 
 ## 3. Merge (implement.sh, no Claude)
 
-- Delivery takes a per-repo lock (`.git/codex-implement/deliver.lock`) so
-  concurrent runs merge one at a time, and waits up to `--deliver-wait` for
-  the session worktree to have no uncommitted changes to tracked files
-  (untracked files never delay it) and still be on the base branch — a sibling
-  session's uncommitted edits delay delivery instead of aborting it. A
-  workstream whose files collide with an untracked file is excluded, branch
-  kept, without a codex resolution round.
-- Pre-merge HEAD is recorded as `refs/codex-implement/<feature>/pre-merge`
-  and `.git/codex-implement/<feature>/pre-merge.sha`; `codex:review` uses it
-  as the review base.
-- Green workstream branches merge directly onto the session branch, in the
-  session worktree. Conflicts are resolved in place by codex with the spec as
-  context.
-- The post-merge `--check` runs on the session branch. RED restores it with
-  `git reset --keep` to the pre-merge commit and keeps every green workstream
-  branch for autopsy — the worktree ends exactly where it started. The lock
-  is released after this check.
+Green branches merge onto the session branch, in the session worktree, and one
+post-merge `--check` runs there. Pre-merge HEAD is recorded as
+`.git/codex-implement/<feature>/pre-merge.sha` — the review base `codex:review`
+takes. A workstream that could not be merged is reported `merge_failed`, its
+branch kept.
 
 ## 4. Deliver (implement.sh, no Claude)
 
-- The session branch is pushed; the script prints `pushed to origin`. A push
-  rejected because the remote moved is retried once after merging
-  `origin/<base>` in and re-running `--check` on the combination.
-- If the branch has an open PR it updates; otherwise a PR is opened FROM the
-  session branch to the default branch (needs `gh`; skipped on the default
-  branch). `--no-push` stops after merge.
-- Exit 0 = all green and delivered; 2 = partial (some workstreams failed,
-  session branch green and delivered); 1 = post-merge check red (branch
-  restored), merge blocked (tree stayed dirty past `--deliver-wait`, branch
-  switched, or lock held too long), or push failed.
-
-All of this is verified by `tests/test-implement.sh`.
+The session branch is pushed and the script prints `pushed to origin`; the
+branch's PR is updated, or opened if it has none. Exit 0 = all green and
+delivered; 2 = partial, some workstreams FAILED but the session branch is green
+and delivered; 1 = nothing delivered — post-merge check red (branch restored),
+merge blocked, or push failed.
 
 ## 5. Relay (you)
 
@@ -132,7 +109,7 @@ When the run finishes, relay `summary.json` and the PR URL. FAILED and
 merge-failed workstreams are listed in the PR body — offer to re-plan just those
 as a new small run (new run name) rather than re-entering the loop yourself.
 
-Review is not part of this skill. Under `/feature:orchestrate` the
+Review is not part of this skill. Under `/feature:ship` the
 orchestrator runs `codex:review` on the push and triages the findings;
 standalone, run `codex:review` yourself when `implement.sh` reports `pushed to
 origin`.
