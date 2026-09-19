@@ -126,9 +126,10 @@ JSON, logs, `pre-merge.sha`, `summary.json`); worktrees under
 
 `review.sh REPO BASE HEAD OUT_JSON [SPEC]`: a plain `codex exec` in a
 read-only sandbox at high reasoning effort, with review instructions and
-`review-schema.json`. A finding is `must-fix` only when the change breaks
-behaviour, violates a stated invariant, or leaves an input or error path
-unhandled; anything else is a `nit`; style and naming are not reported.
+`review-schema.json`. It asks only for confident `must-fix` findings the change
+itself introduced — broken behaviour, a violated invariant, an unhandled input
+or error path, a security hole, a slowdown a user would notice — and no nits;
+style and naming are not reported.
 Codex's transcript lands in a `.log` beside the output. Exit 1 means no
 review was produced. `REVIEW_TIMEOUT` (default 2400) bounds the run.
 
