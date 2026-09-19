@@ -86,7 +86,11 @@ concern.
    agent reads excerpts and misses what sits outside them, so ask each for
    `path:line`, the symbol and the line quoted verbatim — not a verdict, not
    a file dump. Whether a Premise holds is your call, made from the quoted
-   lines; open the file only when they do not settle it.
+   lines; open the file only when they do not settle it. Each brief says
+   what the result is for ("I will write a spec from this and nobody
+   re-opens these files") and names the search breadth: "quick", "medium" or
+   "very thorough". Use the fewest agents that cover the ask — usually one,
+   at most three, one per disjoint area — and launch them in one message.
    Run the measuring commands yourself: probes, D1 queries, a
    real request against the producer. Nothing enters the doc from recall.
 
