@@ -28,6 +28,8 @@ Two scripts, both `uv run` (they declare their own deps):
    A separate `--user-data-dir` keeps it off your normal profile. The capture
    script connects without an `Origin` header, so `--remote-allow-origins` is not
    needed. Confirm the tab is visible: `capture_heap_snapshot.py --list`.
+   That profile carries no logins: if the page under test is behind one, log in
+   in that window before taking the baseline snapshot.
 
 2. **Baseline snapshot**, at rest:
 
