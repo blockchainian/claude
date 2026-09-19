@@ -38,6 +38,11 @@ naming, convention, or what a file like this usually contains. Write a line star
 question in your final message. File locations, test-file names and each module's
 `package.json` scripts are not facts: confirm them with grep or glob and cite what you find.
 
+A `Reusable:` fact in `problem.md` is code that already exists. Name it, with its anchor, in the
+workstream step that needs that behaviour — or in Constraints when several workstreams do — so the
+implementer, who reads only the shared core and its own block, calls it instead of writing a second
+copy.
+
 Every entry under `problem.md`'s `## Open questions` and `## Unverified` goes to one of two
 places, and none is dropped silently: a fact the plan needs and you may not infer becomes a
 `QUESTION:` line in the workstream that needs it, and anything that needs the user's judgment is
