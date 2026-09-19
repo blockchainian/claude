@@ -43,3 +43,8 @@ audio leg and `digest` for the notes.
 python3 skills/transcribe/scripts/test_transcribe.py
 python3 skills/digest/scripts/test_digest.py
 ```
+
+`test_transcribe.py` covers the batch and live command shapes, the
+chunk-readiness logic, platform resolution, and `setup.sh --check`; when
+`ffmpeg` and a whisper runner are present it also runs a real end-to-end batch
+and live transcription of a generated clip.
