@@ -73,7 +73,9 @@ extractor in an ephemeral env) and `yt-dlp` (YouTube subtitles).
    - If `audio_url` is **non-null** (the page links audio, or the URL itself was
      an audio file) and the text is thin, transcribe the audio with the
      `transcribe` skill. It is long-running (model download on first use,
-     then faster than realtime), so run it in the **background** and wait:
+     then faster than realtime), so run it in the **background** and end the
+     turn; its completion re-invokes you. A subagent runs it in the foreground
+     instead, because nothing wakes a subagent when a background job exits:
 
      ```bash
      bash   "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/setup.sh"
@@ -91,9 +93,10 @@ extractor in an ephemeral env) and `yt-dlp` (YouTube subtitles).
      page is a bare player or paywall shell with no real prose and no
      `audio_url`, say so and stop rather than inventing highlights.
 
-2. **Read all of it, in order.** Sequential chunks:
-   `sed -n '1,90p' <transcript>`, then `91,200p`, and so on. Cap each call with
-   `head -c 45000` so a chunk cannot blow up the context. Skimming the opening
+2. **Read all of it, in order.** Sequential chunks with the Read tool:
+   `offset: 1, limit: 90` on the transcript, then `offset: 91, limit: 110`, and
+   so on. Keep each chunk's `limit` small enough that it cannot blow up the
+   context — roughly 45000 characters. Skimming the opening
    and the closing produces highlights that miss the middle, which is where the
    content usually is. If a chunk is sponsor reads, navigation cruft, or
    sign-off banter, note that and move on.
