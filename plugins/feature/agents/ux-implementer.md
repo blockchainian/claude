@@ -46,6 +46,9 @@ that has no place in the code.
 - Probes are yours ONLY when the brief says the surface has no backend dependency. Otherwise the
   orchestrator runs them; return the checklist untested and let it. The probe library and its
   shared helpers are where the project's AGENTS.md says (the plugin README's project contract).
+  Run them against a dev server you start in the checkout the brief names, on a free port (the project's dev
+  command with a port flag, `BASE_URL` to the probe); never build, never use the project's default
+  dev port or another lane's server, and stop yours before you return.
 - On a failing check that is about your own change: fix it and re-run, at most twice. If it still
   fails, report the check output verbatim as a finding and return.
 - Everything else a probe surfaces — a browse error, a pre-existing console error, a failure on a
