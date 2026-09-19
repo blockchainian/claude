@@ -21,7 +21,7 @@ Your final message is EXACTLY this flat JSON, no XML tags, no surrounding prose:
 {"status": "done" | "blocked" | "needs-backend", "commits": [...], "probes": [verdict JSON...], "findings": [...]}
 
 ```json
-{"status": "needs-backend", "commits": ["a1b2c3d", "e4f5a6b"], "probes": [], "findings": ["src/screens/Report.tsx:42 — the export row renders the pinned contract, the endpoint it reads is not deployed yet", "the checklist's empty state has no wire contract, so it is untested"]}
+{"status": "needs-backend", "commits": ["a1b2c3d", "e4f5a6b"], "probes": [], "findings": ["src/screens/Report.tsx:42 — the export row renders the pinned contract, the endpoint it reads is not deployed yet", "whether the empty state's copy reads right is a taste call for the user"]}
 ```
 
 The example shows the shape only, never values to copy. `commits` is the short SHAs you made, in
