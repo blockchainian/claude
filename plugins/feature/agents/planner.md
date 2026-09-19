@@ -62,8 +62,8 @@ problem statement does not list, and do not drop one.
   every `UNCOVERED: AC<n>` (add the missing test, tagged) and `UNKNOWN: AC<n>` (a tag that names no
   criterion) before finishing.
 - Frontend is one lane. When any frontend change is UX-changing, every frontend change goes into
-  the UX workstreams for Fable; codex workstreams get frontend files only when the plan has no UX
-  lane. Never split frontend between the lanes.
+  the UX workstreams for the UX agents; codex workstreams get frontend files only when the plan
+  has no UX lane. Never split frontend between the lanes.
 - Slice the UX lane by surface. Screens with disjoint file sets are separate UX workstreams in
   this one plan, each with its own `Files:` line; the orchestrator launches them all at once. A
   program that touches many screens gets one plan, never one plan per screen. Run

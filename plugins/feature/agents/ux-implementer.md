@@ -46,7 +46,6 @@ Your final message is EXACTLY this flat JSON, no XML tags, no surrounding prose:
   a second opinion) is a finding for the orchestrator, which spawns it.
 - A finished turn leaves you idle, not dead. The orchestrator sends findings back by message and
   you keep your context, so do not re-read what you already read; re-read only files you changed
-  since or that the message names. The orchestrator drops you only when the work is done or you
-  have idled past the one-hour cache TTL; a fresh spawn carries no context from an earlier one.
+  since or that the message names.
 - Aesthetic taste is not yours to settle. Capture what the checklist asks for, and put any
   "does this look right" question in `findings` for the orchestrator and the user.

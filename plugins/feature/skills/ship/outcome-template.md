@@ -1,9 +1,9 @@
 # Outcome: <feature>
 
 <!-- Written by the orchestrator at phase end (ship step 9), not by the planner. This file is for
-the user and for memory — the phase's record. Write it clear, succinct and accurate, optimised for
-fast reading and no fact lost: bullets, plain words, no code anchors. Replaces the old plan.md
-Outcome section; plan.md stays input-only. -->
+the user and for memory — the phase's record, and the only place the shipped outcome is written;
+plan.md stays input-only. Write it clear, succinct and accurate, optimised for fast reading and no
+fact lost: bullets, plain words, no code anchors. -->
 
 Shipped <date>. <!-- or: Not shipped — <one line why>. -->
 

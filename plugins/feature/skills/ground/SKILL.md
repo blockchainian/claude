@@ -139,9 +139,8 @@ Every claim carries its evidence inline, or it does not go in:
 - **Behavior, limits, volumes** — the command and its real output, dated.
 - **Wire fields, upstream shapes** — a real response body from the producer,
   never a type definition or a client-side interface. A spec-invented wire
-  field once cleared every gate and broke in prod
-  (`cross-module-contract-probe-upstream`). When the feature reproduces the
-  shape rather than merely reading a field from it, also save the body as
+  field once cleared every gate and broke in prod. When the feature reproduces
+  the shape rather than merely reading a field from it, also save the body as
   `fixtures/<domain>.json` beside the doc and cite that path in the bullet;
   skip this when there is no external producer contract to reproduce.
 - **Constraints already decided** — link the memory or prior handoff rather
