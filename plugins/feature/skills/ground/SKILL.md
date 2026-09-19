@@ -82,8 +82,12 @@ concern.
    number in the doc is valid only at that SHA.
 
 4. **Sweep, read-only, delegated.** Spawn Explore agents (`model: "sonnet"`)
-   for the file-finding fan-out; they return locations and conclusions, not
-   file dumps. Run the measuring commands yourself: probes, D1 queries, a
+   for the file-finding fan-out. They locate, they do not judge: an Explore
+   agent reads excerpts and misses what sits outside them, so ask each for
+   `path:line`, the symbol and the line quoted verbatim — not a verdict, not
+   a file dump. Whether a Premise holds is your call, made from the quoted
+   lines; open the file only when they do not settle it.
+   Run the measuring commands yourself: probes, D1 queries, a
    real request against the producer. Nothing enters the doc from recall.
 
    Sweep also for code the change could reuse: an existing function, helper
