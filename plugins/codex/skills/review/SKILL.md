@@ -35,10 +35,11 @@ bounds the run; `IMPLEMENT_CODEX` overrides the codex binary.
 
 Run it in the background and end your turn. It is a plain `codex exec` in a
 read-only sandbox at high reasoning effort, with review instructions and the
-findings schema; a finding is `must-fix` only when the change breaks
-behaviour, violates a stated invariant, or leaves an input or error path
-unhandled, and everything else is a `nit`. Style, naming and refactoring
-preferences are not reported. `codex exec review --base` is not used because
+findings schema. It asks only for confident `must-fix` findings and no nits:
+the change breaks behaviour, violates a stated invariant, leaves an input or
+error path unhandled, opens a security hole or slows something a user would
+notice; the change introduced it; and a claim of broken code elsewhere names
+the file and line. Style, naming and refactoring preferences are not reported. `codex exec review --base` is not used because
 codex-cli rejects combining `--base` with custom instructions.
 
 Exit 0 with `review.json` written; exit 1 when codex failed (the `.log` says
