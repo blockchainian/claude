@@ -86,6 +86,11 @@ concern.
    file dumps. Run the measuring commands yourself: probes, D1 queries, a
    real request against the producer. Nothing enters the doc from recall.
 
+   Sweep also for code the change could reuse: an existing function, helper
+   or component that already does part of the ask. Record each as a
+   `Reusable:` fact with its anchor and one clause on what it does. That it
+   exists is a fact; whether the plan calls it is the planner's decision.
+
    Run this skill from the main session: the harness blocks nested spawning
    (the plugin's `subagent-no-spawn` hook tells each subagent so), so a
    subagent invoking `/ground` must sweep by hand.

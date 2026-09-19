@@ -32,9 +32,11 @@ the feature reproduces a wire shape rather than merely reading a field from
 it — a pagination cursor, timestamp, date, or any value the code must match
 verbatim — also save the body as `fixtures/<domain>.json` beside this doc and
 cite that path in the bullet. No external producer contract to reproduce:
-skip this, nothing to add.
+skip this, nothing to add. Existing code the change could reuse is a fact
+too, prefixed `Reusable:`, so the planner names it in the step that needs it.
 
 - <fact> — `path/file.ts:NN`
+- Reusable: `<symbol>` already <does what> — `path/file.ts:NN`
 - <measurement> — `<command>`, <date>:
 
   ```
