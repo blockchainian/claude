@@ -44,7 +44,7 @@ Run this one command and read the three values out of its output:
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 TMP="${TMPDIR:-/tmp}"
 SLICE_DIR="$(mktemp -d "${TMP%/}/ios-screenshot.XXXXXX")"
-OUT_ROOT="${IOS_SCREENSHOT_DIR:-/tmp/build-ios-app}/$RUN_ID"
+OUT_ROOT="${IOS_SCREENSHOT_DIR:-${TMP%/}/ios-screenshots}/$RUN_ID"
 mkdir -p "$SLICE_DIR" "$OUT_ROOT"
 printf 'RUN_ID=%s\nSLICE_DIR=%s\nOUT_ROOT=%s\n' "$RUN_ID" "$SLICE_DIR" "$OUT_ROOT"
 ```
@@ -64,8 +64,9 @@ $OUT_ROOT/<app-slug>/<screen-slug>.png
 Report the full path when you finish — a run-scoped directory is only useful to later tools
 if they are told where it is. A path given in the request always wins over the default.
 
-The default root lives under `/tmp`, which macOS clears on reboot. Point
-`IOS_SCREENSHOT_DIR` at a durable directory for screens worth keeping.
+Set `IOS_SCREENSHOT_DIR` to the session's scratchpad directory when your system prompt names
+one, and to a durable directory for screens worth keeping. With neither, the root falls under
+`$TMPDIR`, which macOS clears.
 
 Several agents can share that library safely; a phone or a simulator they cannot, so this
 skill provides a lock: `claim_simulator.py` holds one UDID for one `RUN_ID`, and
