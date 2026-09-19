@@ -124,6 +124,25 @@ extractor in an ephemeral env) and `yt-dlp` (YouTube subtitles).
 - Length scales with the source: a 3-hour episode or a 5000-word essay earns
   more than a short post, but padding is worse than brevity in both.
 
+<example>
+Excerpt: "We shipped the rewrite in March. Cold start went from 2.1 seconds
+to 400 milliseconds. Honestly, the migration was a disaster for two months —
+we lost a third of the team's time to flaky tests."
+
+Highlights written from it:
+
+## The rewrite
+- Shipped in March; cold start fell from 2.1s to 400ms.
+- The migration cost roughly two months, with a third of the team's time
+  going to flaky tests.
+
+## Quotes
+> "the migration was a disaster for two months" — the host
+
+Why: the one passage kept in the source's own wording is marked as a quote;
+everything not inside quote marks is paraphrase.
+</example>
+
 ### Draft template
 
 ```markdown
