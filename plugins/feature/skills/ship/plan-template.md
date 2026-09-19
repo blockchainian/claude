@@ -59,7 +59,7 @@ Files: `path/a.ts`, `path/b.ts`.
 
 <!-- Every workstream, codex or UX, ends with a `Files:` line; check-overlap.sh reads them. -->
 
-## UX workstreams (Fable)
+## UX workstreams
 
 <!-- One block per UX workstream, each implemented by its own Fable UX agent, all launched at once.
 The block is the whole brief: files it owns, surfaces it changes, whether each surface depends on

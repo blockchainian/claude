@@ -21,7 +21,7 @@ stamp it appends to `decisions.md` when the review settles (step 4), which is a 
 ## 1. Spawn the planner
 
 The input is a grounded `problem.md` (from `/feature:ground`). If there is none, stop and say to
-ground first. Spawn the `planner` agent (`feature:planner`, Fable high) with the problem.md path and
+ground first. Spawn the `planner` agent (`feature:planner`) with the problem.md path and
 end the turn; its completion re-invokes you. It writes `plan.md` (the agent-facing spec) and
 `decisions.md` (the human gate) beside `problem.md`, and reports the two paths, the plan's word
 count and the three checkers' exit codes. If any checker is non-zero, or the planner returned

@@ -60,6 +60,4 @@ The idle wake-up: a Stop hook in the dotfiles schedules a one-shot 55 minutes af
 end; if the session is still idle it fires "[idle-wakeup <session>] If still idle, write the
 handoff per the feature:handoff skill and end." The hook owns scheduling: never create, delete or
 reschedule the wake-up yourself. A later handoff for the same topic replaces the earlier file in
-place; never date a second file or append. Measured 2026-09-09: 49 away gaps over an hour per week
-cost $118 in prefix rewrites; one wake-up catches a third of them for about ten cents each and
-renews the cache once.
+place; never date a second file or append.
