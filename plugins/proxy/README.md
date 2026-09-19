@@ -41,3 +41,11 @@ python3 skills/inspect-app-traffic/scripts/test_wg_config.py
 ```
 
 Or from the marketplace root: `npm run test:proxy`.
+
+`test_capture.py` covers the pure logic and the hub orchestration without launching mitmdump:
+the host regex matches an app's domains and subdomains but not lookalikes; the port check
+detects a wildcard listener and allows a TIME_WAIT port; and `start`/`stop`/`status`/`down`/
+`check` act on capture records over a faked hub. `test_wg_config.py` pins the pure-Python
+X25519 derivation against a known mitmproxy key pair and the RFC 7748 vector. The hub
+lifecycle, the fan-out into per-capture files, and the caller scoping are verified in a live
+capture.
