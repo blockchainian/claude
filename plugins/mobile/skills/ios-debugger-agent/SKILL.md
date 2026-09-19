@@ -23,6 +23,7 @@ Follow this sequence unless the user asks for a narrower action.
   - `scheme` for the current app
   - `simulatorId` from the booted device
   - Optional: `configuration: "Debug"`, `useLatestOS: true`
+- Then call `mcp__plugin_mobile_xcodebuildmcp__session_show_defaults` once per session, before the first build or run, and check that the project/workspace, scheme and `simulatorId` are the ones you set. The defaults belong to the XcodeBuildMCP server, which every agent in this session shares, so they can already hold another project or simulator, and nothing warns you.
 
 ### 3) Build + run (when requested)
 - Call `mcp__plugin_mobile_xcodebuildmcp__build_run_sim`.
