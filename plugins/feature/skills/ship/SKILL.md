@@ -141,8 +141,10 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 
 6. **Run the UX probes against staging.** Run them with `run_in_background` and read the verdict
    JSON. Failures go back to the UX agent that owns the surface by SendMessage — it is idle, not
-   dead, and keeps its context. A failure still red after its rounds here (the cap is in Hard
-   rules) becomes a finding in step 7.
+   dead, and keeps its context. The agent never saw your probe run, so the message carries the
+   failing assertion as the verdict JSON states it (expected against actual) and the paths of the
+   verdict JSON and any screenshot — never just "the probe failed". A failure still red after its
+   rounds here (the cap is in Hard rules) becomes a finding in step 7.
 
 7. **Triage, once.**
 
