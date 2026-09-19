@@ -185,6 +185,7 @@ terminal). Leave the CA installed otherwise; re-trusting it is the slow part.
 ## Reporting
 
 When a capture is on a phone, the user is often on another device — send the WireGuard QR with
-`SendUserFile` rather than only printing a path. State the target hosts, the flow file, and
+`SendUserFile` rather than only printing a path. `SendUserFile` is a deferred tool: load it with
+`ToolSearch` ("select:SendUserFile") before calling it. State the target hosts, the flow file, and
 for the findings give the endpoint shapes and WebSocket message formats — never the tokens.
 
