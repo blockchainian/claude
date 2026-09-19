@@ -137,6 +137,9 @@ mitmdump -q -nr "$PROXY_DIR/cap/$CAP.mitm" '~u /api/trade & ~s' --set flow_detai
 A WebSocket flow is written to the capture's file when it closes, so read its frames after
 the socket ends or after `down` — a socket still open mid-capture is not in the file yet.
 
+When a body or a frame is base64 or binary, skip it or truncate it rather than printing it
+into context: a large base64 blob in tool output can trigger a false safety refusal.
+
 ## 4. Concurrent captures and shared domains
 
 When two apps share a host — a common auth provider, RPC, or analytics host — that host's
