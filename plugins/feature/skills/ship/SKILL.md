@@ -203,8 +203,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 ## Hard rules
 
 - **Every wait ends the turn.** Launch, say one line about what is running, and stop. Task
-  notifications re-invoke you when a lane finishes. NEVER idle-wait, and NEVER call blocking
-  `TaskOutput`.
+  notifications re-invoke you when a lane finishes. NEVER idle-wait.
 - **No `sleep` in the foreground.** Anything that waits runs with `run_in_background`.
 - **No UI driving from the main loop.** Probes only, run with `run_in_background`, verdict JSON
   read back. Delegate to `ux-verifier` only a freeform walk with objective assertions that no probe
