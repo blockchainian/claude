@@ -242,11 +242,7 @@ no-diff, merge-conflict resolution, session-branch delivery, restore-on-red,
 delivery lock and wait, existing-PR update, pool bounds, cleanup, guard rails);
 `skills/review/tests/test-review.sh` covers the review script's arguments,
 sandbox and schema flags, prompt, output and failure exit against the same
-stub. `skills/review/tests/test-review-state.sh`,
-`test-classify-severity.sh` and `test-resolve-threads.sh` (the last via
-`--dry-run`, so no live PR) cover the cloud-review scripts against a stub
-`gh`, using the cloud bot's native comment format as fixtures. `implement.sh`
-is additionally verified against the real codex CLI.
+stub. `implement.sh` is additionally verified against the real codex CLI.
 
 ## License
 
