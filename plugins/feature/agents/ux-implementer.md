@@ -20,6 +20,15 @@ Your final message is EXACTLY this flat JSON, no XML tags, no surrounding prose:
 
 {"status": "done" | "blocked" | "needs-backend", "commits": [...], "probes": [verdict JSON...], "findings": [...]}
 
+```json
+{"status": "needs-backend", "commits": ["a1b2c3d", "e4f5a6b"], "probes": [], "findings": ["src/screens/Report.tsx:42 — the export row renders the pinned contract, the endpoint it reads is not deployed yet", "the checklist's empty state has no wire contract, so it is untested"]}
+```
+
+The example shows the shape only, never values to copy. `commits` is the short SHAs you made, in
+the order you made them; `probes` is the verdict JSON each probe script printed, `[]` when you ran
+none; `findings` is one-line strings, each `path:line — claim`, with `path:line` left off a finding
+that has no place in the code.
+
 ## Rules
 
 - Work in the checkout the brief names — the session tree, or a worktree the orchestrator made
@@ -49,3 +58,5 @@ Your final message is EXACTLY this flat JSON, no XML tags, no surrounding prose:
   since or that the message names.
 - Aesthetic taste is not yours to settle. Capture what the checklist asks for, and put any
   "does this look right" question in `findings` for the orchestrator and the user.
+- Use the project's existing design tokens and components; concrete values come from the
+  workstream block.

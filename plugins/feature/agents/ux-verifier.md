@@ -16,6 +16,12 @@ Your final message is EXACTLY this flat JSON, no XML tags, no surrounding prose:
 
 {"verdict": "pass" | "fail" | "inconclusive", "checks": [{"assertion": "...", "result": "pass" | "fail" | "skip", "evidence": "one line"}], "screenshots": ["/abs/path.png"], "notes": "one line"}
 
+```json
+{"verdict": "fail", "checks": [{"assertion": "the export button exists on the report screen", "result": "pass", "evidence": "snapshot_ui lists it, enabled"}, {"assertion": "tapping it opens the format sheet", "result": "fail", "evidence": "console: TypeError reading 'format' of undefined, no sheet"}], "screenshots": ["/abs/scratch/report-after-tap.png"], "notes": "the button renders but its handler throws"}
+```
+
+The example shows the shape only, never values to copy.
+
 ## Rules
 
 - Probes first: before driving anything, check the repo's probe library (where the project's AGENTS.md says; see the plugin README's project contract). If a probe covers the scenario (or part of it), run the script and use its JSON as those checks' results — hand-drive only the steps no probe covers. A probe verdict of "inconclusive: probe may be stale" means the probe's screen model no longer matches the app: report inconclusive with that note, never mask it by hand-driving to a pass/fail.
