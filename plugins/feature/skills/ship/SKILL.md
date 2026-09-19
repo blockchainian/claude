@@ -158,8 +158,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
       disposition}]`.
    e. `disposition` starts `fixed` for a finding you keep and `rejected` — with a one-line
       `reason` — for a must-fix you verify as a false positive (it asks to revert an intended
-      change, the code already handles it, the failure it describes is provably impossible, or
-      it is pure style): record the rejected ones here even though they
+      change, it misstates the code — quote the actual line, the code already handles it, the
+      failure it describes is provably impossible, or it is pure style): record the rejected ones here even though they
       skip the fix round, so step 8's summary comment carries them.
    f. No kept findings means no fix round: post step 8's summary comment if a finding was
       rejected, then go to step 9.
