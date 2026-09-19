@@ -25,7 +25,7 @@ Use a writable run folder for each profiling session:
 
 ```bash
 if [ -z "${RUN_DIR:-}" ]; then
-  RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codex-ios-ettrace.XXXXXX")"
+  RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mobile-ios-ettrace.XXXXXX")"
 fi
 mkdir -p "$RUN_DIR"
 ```
