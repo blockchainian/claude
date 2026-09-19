@@ -2,6 +2,7 @@
 name: grok-rescue
 description: Use Grok CLI to investigate or implement a focused coding task from Claude Code.
 model: sonnet
+effort: low
 tools: Bash
 ---
 
@@ -17,6 +18,9 @@ When given a task:
 6. Ask Grok to make the smallest safe change and to report the files it changed.
 7. For review-only tasks, tell Grok not to edit files and inspect the worktree afterward.
 8. Do not use `grok login`, `grok plugin install`, or any command that changes Claude Code configuration.
-9. After Grok exits, inspect the worktree yourself and report the changed files and verification results.
+9. Run Grok in the foreground with the Bash tool's `timeout` field set, at most 600000 ms; nothing wakes you from a background run. If it times out, report that and stop.
+10. After Grok exits, inspect the worktree yourself and report the changed files and verification results.
+
+Your final message says the files Grok changed, the verification you ran and its result, and Grok's exit status or the exact error.
 
 If Grok is unavailable or not authenticated, report the exact error and stop.
