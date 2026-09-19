@@ -21,6 +21,13 @@ simulator and appium-mcp for a phone, and picks by what the request asks for.
 The two profiling skills build on `ios-debugger-agent` for the build, launch,
 and UI-driving steps.
 
+`check-mobile-design` shares its `check_design.py` engine byte-identically with
+the `web` plugin's `check-web-design`, and a repo test fails if the two copies
+drift. Maintainer note: the two SKILL.md files also mirror each other in the
+sections "Reading `diff.json`", "Tolerances" and "Requirements", which differ
+only in the platform nouns (view/element, screen/page). No test covers the
+prose — change both copies together.
+
 ## MCP servers
 
 The plugin ships two servers, declared in `.mcp.json` and launched on demand.
