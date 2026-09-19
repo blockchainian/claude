@@ -71,6 +71,32 @@ when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
   WebDriverAgent signed onto the device, and both Developer Mode and
   Settings -> Developer -> Enable UI Automation turned on
 
+## Tests
+
+```
+python3 skills/ios-take-screenshot/scripts/test_claim_simulator.py
+python3 skills/ios-take-screenshot/scripts/test_discover_ios_setup.py
+python3 skills/ios-take-screenshot/scripts/test_frame_diff.py
+python3 skills/ios-take-screenshot/scripts/test_stitch_screens.py
+```
+
+`test_claim_simulator.py` covers the simulator claim: one run holds a simulator, a
+second claim is refused with the holder named, only the holder releases, and capture
+refuses `booted`, an unclaimed simulator, and one held by another run.
+`test_discover_ios_setup.py` covers the simulator report: the pick is named in full, a
+shutdown UDID is reported as such, and two booted simulators ask for `--device`.
+
+`test_frame_diff.py` covers the frame comparison: a known scroll offset must be reported as
+scrolled, with and without the chrome flags, a static frame carrying a changed value must
+not, and frames of different sizes are refused.
+
+`test_stitch_screens.py` builds synthetic pages and asserts the stitch reconstructs them row
+for row: a vertical page with fixed chrome on both edges, including a pinned header carrying
+a live-updating value; the same page rotated, for the horizontal axis; a page whose large
+navigation title collapses after the first slice; and a still screen holding one
+sideways-scrolling carousel, which must be found and cropped to; two identical slices must
+be refused. Run it after any change to the stitcher.
+
 ## Attribution
 
 Forked from OpenAI's `build-ios-apps` Codex plugin

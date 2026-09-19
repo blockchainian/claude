@@ -29,17 +29,12 @@ content rather than the device. If the request does not say and both are availab
 
 ### Every name in this document is a value to paste, not a variable
 
-Each command runs in its own shell. Nothing you assign in one command exists in the next,
-so a `$SLICE_DIR` written in a later command expands to an empty string and the command
-acts on the wrong path. Where this document writes `$SLICE_DIR`, `$OUT_ROOT`, `$UDID` or
-`$SKILL_DIR`, it means **the absolute value you were given, typed out in full**.
-
-Getting this wrong is quiet rather than loud. A guard like `if [ -z "${SLICE_DIR:-}" ]`
-reads as "reuse the directory if there is one", but in a fresh shell there never is one, so
-it mints a new directory on every command — one slice in each, and a glob at stitch time
-that matches a single file. The stitch then succeeds on one slice and reports nothing
-wrong. If you would rather not paste paths, put the whole capture loop in a single command
-instead; what you cannot do is split it across commands and expect a variable to survive.
+Each command runs in its own shell, so a variable assigned in one command is empty in the
+next. Where this document writes `$SLICE_DIR`, `$OUT_ROOT`, `$UDID` or `$SKILL_DIR`, it means
+**the absolute value you were given, typed out in full** — or put the whole capture loop in a
+single command. Getting it wrong fails quietly: an `if [ -z "${SLICE_DIR:-}" ]` guard mints a
+new directory on every command, one slice in each, and the stitch succeeds on that single
+slice and reports nothing wrong.
 
 ### Set the run up once
 
@@ -562,25 +557,6 @@ Where a screen's own header and the tab that reaches it disagree — a tab bar r
 "Account" above a page headed "Portfolio" — name it for the header, which is what the image
 shows. The app slug is the app's display name from `find_ios_app.sh`, lowercased, spaces to
 hyphens: `MyApp` becomes `myapp`.
-
-## Tests
-
-`scripts/test_claim_simulator.py` covers the simulator claim: one run holds a simulator, a
-second claim is refused with the holder named, only the holder releases, and capture
-refuses `booted`, an unclaimed simulator, and one held by another run. `scripts/test_discover_ios_setup.py`
-covers the simulator report: the pick is named in full, a shutdown UDID is reported as
-such, and two booted simulators ask for `--device`.
-
-`scripts/test_frame_diff.py` covers the frame comparison: a known scroll offset must be
-reported as scrolled, with and without the chrome flags, a static frame carrying a changed
-value must not, and frames of different sizes are refused.
-
-`scripts/test_stitch_screens.py` builds synthetic pages and asserts the stitch reconstructs
-them row for row: a vertical page with fixed chrome on both edges, including a pinned header
-carrying a live-updating value; the same page rotated, for the horizontal axis; a page whose
-large navigation title collapses after the first slice; and a still screen holding one
-sideways-scrolling carousel, which must be found and cropped to; two identical slices must
-be refused. Run it after any change to the stitcher.
 
 ## Reporting
 
