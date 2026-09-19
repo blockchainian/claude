@@ -32,6 +32,7 @@ assert_eq "codex invoked once" 1 "$(wc -l < "$STUB_DIR/calls-REVIEW" | tr -d ' '
 assert "review runs at high reasoning effort" grep -q '^REVIEW cfg=model_reasoning_effort=high dir=' "$STUB_DIR/invocations.log"
 assert "review runs read-only against the findings schema" grep -q '^REVIEW sandbox=read-only schema=review-schema.json dir=' "$STUB_DIR/invocations.log"
 assert "prompt names both commits, the spec and must-fix" grep -q "^REVIEW prompt=.*$BASE.*$HEAD_SHA.*specs/x/spec.md.*must-fix" "$STUB_DIR/invocations.log"
+assert "prompt keeps out bugs the change did not introduce and unproven breakage" grep -q "^REVIEW prompt=.*already there.*name the file and line it breaks" "$STUB_DIR/invocations.log"
 assert_eq "findings written as JSON" '{"findings":[]}' "$(cat "$SCRATCH/review.json" 2>/dev/null)"
 assert "result line names the file" grep -q "^codex:review: result: $SCRATCH/review.json$" "$SCRATCH/run.log"
 
