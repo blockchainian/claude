@@ -35,7 +35,7 @@ ENCODED = []
 def encode(texts):
     ENCODED.extend(texts)
     # "fee" texts → +x, others → -x, so the fake clusterer separates them
-    # "fee" → +x, "airdrop" → -x, anything else → an outlier that sits nearest cluster 1
+    # "fee" → +x, "airdrop" → -x, anything else → an outlier
     return np.array([[1.0, 0.0] if "fee" in t else [-1.0, 0.0] if "airdrop" in t else [0.0, 1.0] for t in texts], dtype=np.float32)
 
 
@@ -53,8 +53,6 @@ class FakeClusterer:
         # x>0 → cluster 0, x<0 → cluster 1, x==0 → outlier
         return np.array([0 if e[0] > 0 else 1 if e[0] < 0 else -1 for e in emb], dtype=np.int32)
 
-    def nearest(self, emb):
-        return np.array([1 if e[1] > 0 else 0 for e in emb], dtype=np.int32)
 
 
 def test_cache_encodes_only_new_english_ids():
@@ -84,8 +82,7 @@ def test_refit_assigns_every_cached_tweet_and_hot_run_assigns_only_new():
         T.update_cache(FIX, cache, encode, sentiment)
         assert cache.topic.tolist() == [0, 0, T.UNASSIGNED, T.UNASSIGNED]
         T.assign_new(cache, cl)
-        assert cache.topic.tolist() == [0, 0, 1, 1], "the outlier lands in its nearest cluster"
-        assert cache.outlier.tolist() == [False, False, False, True]
+        assert cache.topic.tolist() == [0, 0, 1, -1], "an outlier stays -1"
 
 
 def named_cache(d):
@@ -102,7 +99,8 @@ def test_table_uses_names_then_keywords_and_buckets_other_languages():
         assert [list(r.keys()) for r in rows][0] == ["topic", "n", "authors", "likes", "peakDay", "peakN", "keywords"]
         assert [(r["topic"], r["n"], r["authors"], r["likes"], r["peakDay"], r["peakN"]) for r in rows] == [
             ("手续费", 2, 2, 59, "2026-09-02", 1),
-            ("airdrop", 2, 2, 5, "2026-09-04", 1),
+            ("airdrop", 1, 1, 3, "2026-09-04", 1),
+            (T.UNCLUSTERED, 1, 1, 2, "2026-09-05", 1),
             (T.OTHER_LANG, 1, 1, 1, "2026-09-04", 1),
         ]
         assert rows[0]["keywords"] == "fees, fee"
@@ -113,9 +111,9 @@ def test_clusters_sharing_a_name_are_one_row_and_noise_is_not_about():
         cache = named_cache(d)
         cache.names = {"0": "手续费", "1": "手续费"}
         rows = T.table(FIX, cache)
-        assert [(r["topic"], r["n"], r["keywords"]) for r in rows] == [("手续费", 4, "fees, fee, airdrop"), (T.OTHER_LANG, 1, "")]
+        assert [(r["topic"], r["n"], r["keywords"]) for r in rows] == [("手续费", 3, "fees, fee, airdrop"), (T.UNCLUSTERED, 1, ""), (T.OTHER_LANG, 1, "")]
         cache.names = {"0": T.NOISE}
-        assert [l["about"] for l in T.labels(FIX, cache)] == [False, False, True, False, True]
+        assert [l["about"] for l in T.labels(FIX, cache)] == [False, False, True, False, False]
 
 
 def test_window_filters_at_group_by_only():
@@ -138,13 +136,12 @@ def test_labels_and_clusters_for_naming():
             {"id": FIX[1]["id"], "about": True, "sentiment": "dislike", "topic": "手续费"},
             {"id": FIX[2]["id"], "about": True, "sentiment": "dislike", "topic": "airdrop"},
             {"id": FIX[3]["id"], "about": False, "sentiment": "neutral", "topic": T.OTHER_LANG},
-            {"id": FIX[4]["id"], "about": True, "sentiment": "neutral", "topic": "airdrop"},
+            {"id": FIX[4]["id"], "about": False, "sentiment": "neutral", "topic": T.UNCLUSTERED},
         ]
         unnamed = T.clusters_for_naming(FIX, cache, k=10)
         assert list(unnamed) == ["1"]
         assert unnamed["1"]["keywords"] == ["airdrop"]
-        assert unnamed["1"]["examples"] == [{"id": FIX[2]["id"], "likes": 3, "text": FIX[2]["text"]},
-                                            {"id": FIX[4]["id"], "likes": 2, "text": FIX[4]["text"]}]
+        assert unnamed["1"]["examples"] == [{"id": FIX[2]["id"], "likes": 3, "text": FIX[2]["text"]}]
 
 
 def test_names_file_round_trip_and_inheritance_across_refit():
