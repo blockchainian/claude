@@ -2,7 +2,10 @@
 // ABOUTME: topic counts and timeline, chunking, and the summary id/quote verification.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clean, facts } from "./clean.mjs";
+import { clean, facts, readLog } from "./clean.mjs";
+import { writeFileSync, mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { countTopics, timeline } from "./topics.mjs";
 import { chunk } from "./chunk.mjs";
 import { verifySummary, tally, byTopic, norm } from "./aggregate.mjs";
@@ -68,4 +71,15 @@ test("aggregate verifies ids and quotes and tallies labels", () => {
   assert.deepEqual(byTopic(labels.filter((l) => l.sentiment === "like"), byId), [
     { topic: "ui", count: 1, authors: 1 }, { topic: "fees", count: 1, authors: 1 },
   ]);
+});
+
+test("readLog parses tweets.jsonl and keeps the last line of a duplicated id", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "tweets-")), "tweets.jsonl");
+  writeFileSync(path, [
+    JSON.stringify({ id: "1", text: "a" }),
+    JSON.stringify({ id: "2", text: "b" }),
+    "",
+    JSON.stringify({ id: "1", text: "a2" }),
+  ].join("\n") + "\n");
+  assert.deepEqual(readLog(path), [{ id: "1", text: "a2" }, { id: "2", text: "b" }]);
 });

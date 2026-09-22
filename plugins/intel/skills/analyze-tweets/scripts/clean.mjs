@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// ABOUTME: Cleans a fetch-x-mentions tweets.json: drops bot alert templates, mass-tag posts,
+// ABOUTME: Cleans a fetch-x-mentions tweets.jsonl: drops bot alert templates, mass-tag posts,
 // ABOUTME: near-duplicates and stubs, then prints the corpus facts the reception doc opens with.
 //
-// Usage: clean.mjs <tweets.json> --out <clean.json> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--bot-pattern <regex>]
+// Usage: clean.mjs <tweets.jsonl> --out <clean.json> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--bot-pattern <regex>]
 import { readFileSync, writeFileSync } from "node:fs";
 
 // Token-alert bot templates and DM-spam; extend per corpus with --bot-pattern.
@@ -10,6 +10,18 @@ const BOT_DEFAULT =
   "Route: |Venue: |Launch: |MIGRATION|Migration |CTO SIGNAL|CTO ALERT|WALLET FLOW CHECK|Quick Buy|Quick Swap|CHECK EVENTS|dm us";
 const MAX_TAGS = 6;
 const MIN_LEN = 8;
+
+// The tweets in a fetch-x-mentions log, one JSON object per line, deduplicated by id
+// (a fill run may append a tweet already present; the last line wins).
+export function readLog(path) {
+  const byId = new Map();
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    const t = JSON.parse(line);
+    byId.set(t.id, t);
+  }
+  return [...byId.values()];
+}
 
 export function dayOf(t) {
   return new Date(t.created_at).toISOString().slice(0, 10);
@@ -61,10 +73,10 @@ function main() {
   const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : null);
   const pat = opt("--bot-pattern") ?? BOT_DEFAULT;
   if (!input || !out) {
-    console.error("Usage: clean.mjs <tweets.json> --out <clean.json> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--bot-pattern <regex>]");
+    console.error("Usage: clean.mjs <tweets.jsonl> --out <clean.json> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--bot-pattern <regex>]");
     process.exit(1);
   }
-  const raw = JSON.parse(readFileSync(input, "utf8")).tweets;
+  const raw = readLog(input);
   const { clean: cleaned, dropped } = clean(raw, pat, opt("--since"), opt("--until"));
   writeFileSync(out, JSON.stringify(cleaned));
   console.log(JSON.stringify({ ...facts(raw, cleaned), dropped }, null, 1));
