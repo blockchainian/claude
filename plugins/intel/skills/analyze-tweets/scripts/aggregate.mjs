@@ -3,7 +3,7 @@
 // ABOUTME: counts per topic, interested-party share of praise, and id/quote checks for every summary.
 //
 // Usage: aggregate.mjs <clean.json> <dir-with-summary*.txt> --labels <labels.jsonl> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--top 300]
-//        (without --labels it reads the labelsN.json files in <dir>)
+//        (without --labels it reads the labelsN.json files in <dir>; --timeline prints the top 3 posts of every day instead)
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { dayOf } from "./clean.mjs";
@@ -23,12 +23,34 @@ export const norm = (s) =>
   s.replace(/\s+/g, " ").replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/&amp;/g, "&")
     .toLowerCase().replace(/[.!?]+$/, "").trim();
 
-const INTERESTED = /callout|payout|paid out|\$[0-9]|rewards?|referral|sent from my/i;
+export function timeline(tweets, perDay = 3) {
+  const byDay = {};
+  for (const t of tweets) (byDay[dayOf(t)] = byDay[dayOf(t)] || []).push(t);
+  return Object.keys(byDay).sort().map((d) => ({
+    day: d, n: byDay[d].length, top: byDay[d].sort((a, b) => b.likes - a.likes).slice(0, perDay),
+  }));
+}
 
 export function tally(rows) {
   const o = {};
   for (const r of rows) o[r.sentiment] = (o[r.sentiment] || 0) + 1;
   return o;
+}
+
+export function byTopic(rows, byId) {
+  const n = {}, like = {}, dislike = {}, months = {};
+  for (const r of rows) {
+    const t = r.topic || "none";
+    n[t] = (n[t] || 0) + 1;
+    if (r.sentiment === "like") like[t] = (like[t] || 0) + 1;
+    if (r.sentiment === "dislike") dislike[t] = (dislike[t] || 0) + 1;
+    const p = byId.get(r.id);
+    if (p) { const m = dayOf(p).slice(0, 7); (months[t] = months[t] || {})[m] = (months[t][m] || 0) + 1; }
+  }
+  return Object.entries(n).sort((a, b) => b[1] - a[1]).map(([topic, count]) => ({
+    topic, count, like: like[topic] || 0, dislike: dislike[topic] || 0,
+    peak: Object.entries(months[topic] || {}).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+  }));
 }
 
 export function byFeature(rows, byId) {
@@ -76,7 +98,14 @@ function main() {
   const byId = new Map(tweets.map((t) => [t.id, t]));
   const since = opt("--since"), until = opt("--until");
   const windowed = tweets.filter((t) => { const d = dayOf(t); return (!since || d >= since) && (!until || d < until); });
-  const top = new Set(windowed.sort((a, b) => b.likes - a.likes).slice(0, topN).map((t) => t.id));
+  if (args.includes("--timeline")) {
+    for (const { day, n, top } of timeline(windowed)) {
+      console.log(`\n## ${day} (${n})`);
+      for (const t of top) console.log(`  [${t.likes}♥ ${t.id}] @${t.author}: ${t.text.replace(/\s+/g, " ").replace(/https?:\S+/g, "").slice(0, 160)}`);
+    }
+    return;
+  }
+  const top = new Set([...windowed].sort((a, b) => b.likes - a.likes).slice(0, topN).map((t) => t.id));
 
   let labels = [];
   const files = readdirSync(dir);
@@ -95,12 +124,13 @@ function main() {
   console.log("sentiment, all:", pct(tally(labels)));
   console.log(`sentiment, top ${topN} by likes:`, pct(tally(labels.filter((l) => top.has(l.id)))));
 
-  const likes = labels.filter((l) => l.sentiment === "like");
-  const interested = likes.filter((l) => /referral|callout|rewards/i.test(l.feature || "") || INTERESTED.test(byId.get(l.id)?.text || ""));
-  console.log(`likes ${likes.length}, interested-party ${interested.length} (${((100 * interested.length) / (likes.length || 1)).toFixed(0)}%)`);
+  const likes = labels.filter((l) => l.about && l.sentiment === "like");
+  const interested = likes.filter((l) => l.interest);
+  console.log(`likes ${likes.length}, interested-party ${interested.length} (${((100 * interested.length) / (likes.length || 1)).toFixed(0)}%):`, tally(interested.map((l) => ({ sentiment: l.interest }))));
   const dislikes = labels.filter((l) => l.sentiment === "dislike");
   const requests = labels.filter((l) => l.request);
-  console.log("\nlike by feature"); console.table(byFeature(likes, byId));
+  console.log("\ntopics (about=true)"); console.table(byTopic(labels.filter((l) => l.about && l.topic && l.topic !== "none"), byId));
+  console.log("like by feature"); console.table(byFeature(likes, byId));
   console.log("dislike by feature"); console.table(byFeature(dislikes, byId));
   console.log("requests by feature"); console.table(byFeature(requests, byId));
   console.log("top like points"); console.table(topTexts(likes, "point"));
