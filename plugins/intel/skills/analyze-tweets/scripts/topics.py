@@ -28,7 +28,7 @@ import numpy as np
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 SENTIMENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
 UNASSIGNED = -2  # cached but not yet run through the cluster model
-UNCLUSTERED = "无话题"  # only posts the cache has not seen; every cached post gets its nearest cluster
+UNCLUSTERED = "无话题"  # HDBSCAN outliers (over half of all tweets); pushing them into the nearest cluster was only 40% right
 OTHER_LANG = "其他语言"
 NOISE = "噪音"  # the name for spam and banter clusters; they never count as "about" the app
 SENTIMENT = {"negative": "dislike", "neutral": "neutral", "positive": "like"}
@@ -69,9 +69,6 @@ class Cache:
         n = len(self.ids)
         self.emb = np.load(self.dir / "emb.npy") if n else np.zeros((0, 0), dtype=np.float16)
         self.topic = np.load(self.dir / "topic.npy") if n else np.zeros(0, dtype=np.int32)
-        # HDBSCAN called the post an outlier before it was moved to its nearest cluster; the share of
-        # outliers among new posts is the signal that a refit is due
-        self.outlier = np.load(self.dir / "outlier.npy") if n else np.zeros(0, dtype=bool)
         self.index = {id: i for i, id in enumerate(self.ids)}
 
     def _json(self, name, default):
@@ -85,7 +82,6 @@ class Cache:
     def append(self, ids, docs, emb, sentiment):
         self.emb = emb.astype(np.float16) if not self.ids else np.vstack([self.emb, emb.astype(np.float16)])
         self.topic = np.concatenate([self.topic, np.full(len(ids), UNASSIGNED, dtype=np.int32)])
-        self.outlier = np.concatenate([self.outlier, np.zeros(len(ids), dtype=bool)])
         self.ids.extend(ids)
         self.docs.extend(docs)
         self.sentiment.extend(sentiment)
@@ -94,7 +90,6 @@ class Cache:
     def save(self):
         np.save(self.dir / "emb.npy", self.emb)
         np.save(self.dir / "topic.npy", self.topic)
-        np.save(self.dir / "outlier.npy", self.outlier)
         for name, v in [("ids.json", self.ids), ("docs.json", self.docs), ("sentiment.json", self.sentiment),
                         ("keywords.json", self.keywords)]:
             (self.dir / name).write_text(json.dumps(v))
@@ -150,23 +145,16 @@ def refit(cache, clusterer, sample):
     docs = cache.docs
     clusterer.fit([docs[i] for i in pick], cache.emb[pick].astype(np.float32))
     cache.keywords = {str(k): v for k, v in clusterer.keywords.items()}
-    _assign(cache, clusterer, np.arange(len(cache.ids)))
+    cache.topic = clusterer.transform(docs, cache.emb.astype(np.float32)).astype(np.int32)
 
 
 def assign_new(cache, clusterer):
+    """Cluster id per new post; -1 (outlier) stays -1 and counts as 无话题. The outlier share of the new
+    posts, against the all-time share, is the signal that a refit is due."""
     idx = np.flatnonzero(cache.topic == UNASSIGNED)
     if len(idx):
-        _assign(cache, clusterer, idx)
+        cache.topic[idx] = clusterer.transform([cache.docs[i] for i in idx], cache.emb[idx].astype(np.float32))
     return len(idx)
-
-
-def _assign(cache, clusterer, idx):
-    """HDBSCAN leaves over half of all tweets unclustered; those go to the nearest cluster by cosine."""
-    emb = cache.emb[idx].astype(np.float32)
-    raw = clusterer.transform([cache.docs[i] for i in idx], emb)
-    outlier = raw == -1
-    cache.outlier[idx] = outlier
-    cache.topic[idx] = np.where(outlier, clusterer.nearest(emb), raw).astype(np.int32)
 
 
 def _cluster_key(t, cache):
@@ -174,7 +162,7 @@ def _cluster_key(t, cache):
     if not is_english(t):
         return OTHER_LANG
     i = cache.index.get(t["id"])
-    if i is None:
+    if i is None or cache.topic[i] < 0:
         return UNCLUSTERED
     return str(int(cache.topic[i]))
 
@@ -309,13 +297,6 @@ class BertopicClusterer:
         topics, _ = self.model.transform([re.sub(r"@\w+", "", d) for d in docs], emb)
         return np.array(topics)
 
-    def nearest(self, emb):
-        """Cluster id whose centroid is closest by cosine; embeddings are already unit length."""
-        ids = [tid for tid in self.model.get_topics() if tid != -1]
-        cent = self.model.topic_embeddings_[[tid + (1 if -1 in self.model.get_topics() else 0) for tid in ids]]
-        cent = cent / np.linalg.norm(cent, axis=1, keepdims=True)
-        return np.array(ids)[(emb @ cent.T).argmax(1)]
-
     @property
     def keywords(self):
         return {tid: [w for w, _ in self.model.get_topic(tid)][:10] for tid in self.model.get_topics() if tid != -1}
@@ -363,7 +344,7 @@ def main():
     write_names(names_path, cache)
 
     if new:
-        lap(f"outlier share of new posts {100 * cache.outlier[-new:].mean():.0f}% (all cached {100 * cache.outlier.mean():.0f}%); rising → --refit")
+        lap(f"outlier share of new posts {100 * (cache.topic[-new:] == -1).mean():.0f}% (all cached {100 * (cache.topic == -1).mean():.0f}%); rising → --refit")
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

@@ -51,9 +51,9 @@ scores each one like / dislike / neutral. Everything is cached by post id under
 (under half a minute); the first run, or `--refit`, re-clusters on a 100k sample
 and assigns every post (measured 3.8 min on 173k posts; roughly 15–20 min per
 million, estimated). HDBSCAN leaves over half
-of all tweets unclustered; those go to their nearest cluster, and the share that
-were outliers is printed as the refit signal. Non-English posts are the row
-`其他语言`. `--since/--until` only filter the printed table, timeline and
+of all tweets unclustered; they are the row `无话题` and never get a topic (moving
+them to the nearest cluster was right only 4 times in 10), so the topic counts cover
+the posts the model is sure about. Non-English posts are the row `其他语言`. `--since/--until` only filter the printed table, timeline and
 `labels0.json`; the cache and the model stay all-time, so a weekly window and the
 full history use the same topic names.
 
