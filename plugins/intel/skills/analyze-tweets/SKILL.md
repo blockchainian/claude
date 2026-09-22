@@ -189,7 +189,10 @@ echo '{"out_dir":"<slug>/images","charts":[
 ]}' | $S/render_charts.py /dev/stdin
 ```
 
-Chinese labels, transparent background, dual-mode gray ink, title only. Open each
+Chinese labels, transparent background, dual-mode gray ink, title only. Event
+labels on the daily chart sit horizontally above their day, staggered on three
+levels with a leader line, so keep each event name short (about 8 characters) and
+mark at most ten days. `$` in a label is matplotlib mathtext; escape it. Open each
 PNG and check: no label collisions, headroom above the tallest bar.
 
 ### 6. Write `reception.md` (Chinese, concrete, evidence only)
