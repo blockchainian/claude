@@ -71,7 +71,7 @@ function main() {
   console.log("dislike by topic"); console.table(byTopic(labels.filter((l) => l.sentiment === "dislike"), byId));
   console.log("topics, about=true"); console.table(byTopic(labels.filter((l) => l.about), byId).slice(0, 20));
 
-  for (const f of files.filter((f) => /^summary\d+\.md$/.test(f)).sort()) {
+  for (const f of files.filter((f) => /^summary\d+\.(md|txt)$/.test(f)).sort()) {
     const v = verifySummary(readFileSync(join(dir, f), "utf8"), tweets, byId);
     console.log(`\n${f}: ids ${v.ids} (unknown ${v.unknownIds.length}), quotes ${v.quotes} (unverified ${v.unverified.length})`);
     for (const q of v.unverified) console.log("  ✗", q.slice(0, 90));
