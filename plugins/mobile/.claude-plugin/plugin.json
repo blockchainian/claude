@@ -1,7 +1,7 @@
 {
   "name": "mobile",
-  "version": "0.8.5",
-  "description": "Drive iOS apps from Claude Code: build, run, and inspect on the simulator via XcodeBuildMCP, capture symbolicated ETTrace flamegraphs, root-cause memory leaks from memgraphs, capture whole app screens from a simulator or a connected iPhone, and diff a built screen against a design reference.",
+  "version": "0.9.0",
+  "description": "Drive iOS apps from Claude Code: build, run, and inspect on the simulator via XcodeBuildMCP, capture symbolicated ETTrace flamegraphs, root-cause memory leaks from memgraphs, capture whole app screens from a simulator or a connected iPhone, diff a built screen against a design reference, and analyze an app's App Store reviews into a data-driven doc with charts.",
   "author": {
     "name": "blockchainian"
   },
@@ -18,6 +18,8 @@
     "performance",
     "profiling",
     "memory-leaks",
-    "debugging"
+    "debugging",
+    "reviews",
+    "app-store"
   ]
 }
