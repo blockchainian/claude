@@ -6,10 +6,9 @@ import { clean, facts, readLog } from "./clean.mjs";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { countTopics, timeline } from "./topics.mjs";
 import { chunk } from "./chunk.mjs";
-import { verifySummary, tally, byFeature, topTexts, norm, readLabels, inWindow } from "./aggregate.mjs";
-import { mergeLabels } from "./merge-labels.mjs";
+import { verifySummary, tally, byFeature, byTopic, topTexts, norm, readLabels, inWindow, timeline } from "./aggregate.mjs";
+import { mergeLabels, growVocab, applyAliases } from "./merge-labels.mjs";
 
 const id = (n) => "200000000000000000" + n; // 19-digit snowflake-shaped ids
 const T = (n, author, text, day, likes = 0) => ({
@@ -37,12 +36,8 @@ test("clean drops bots, mass tags, dupes, stubs and honors --since/--until", () 
   assert.equal(f.from, "2026-09-02"); assert.equal(f.to, "2026-09-05");
 });
 
-test("topics count hits, authors, likes and peak day; timeline lists top posts per day", () => {
+test("timeline lists the top posts per day", () => {
   const c = clean(fixture).clean;
-  const rows = countTopics(c, { 空投: "airdrop", 手续费: "\\bfees?\\b", 无: "zzz" });
-  assert.deepEqual(rows.map((r) => [r.topic, r.n, r.authors, r.likes, r.peakDay]), [
-    ["空投", 1, 1, 9, "2026-09-04"], ["手续费", 1, 1, 3, "2026-09-05"], ["无", 0, 0, 0, null],
-  ]);
   const tl = timeline(c, 1);
   assert.deepEqual(tl.map((d) => [d.day, d.n, d.top[0].id]), [
     ["2026-09-02", 1, id(1)], ["2026-09-04", 1, id(5)], ["2026-09-05", 1, id(7)],
@@ -73,6 +68,11 @@ test("aggregate verifies ids and quotes and tallies labels", () => {
     { feature: "ui", count: 1, authors: 1 }, { feature: "fees", count: 1, authors: 1 },
   ]);
   assert.deepEqual(topTexts(labels, "request"), [{ text: "ship the airdrop", count: 1 }]);
+  const topics = labels.map((l, i) => ({ ...l, topic: i === 1 ? "funding-revenue-growth" : "product-features" }));
+  assert.deepEqual(byTopic(topics, byId), [
+    { topic: "product-features", count: 2, like: 2, dislike: 0, peak: "2026-09" },
+    { topic: "funding-revenue-growth", count: 1, like: 0, dislike: 1, peak: "2026-09" },
+  ]);
 });
 
 test("chunk skips posts that already have a label and keeps only labeler fields", () => {
@@ -81,6 +81,7 @@ test("chunk skips posts that already have a label and keeps only labeler fields"
   assert.deepEqual(chunks.flat().map((t) => t.id), fixture.filter((t) => !labeled.has(t.id)).map((t) => t.id));
   assert.deepEqual(Object.keys(chunks[0][0]), ["id", "author", "likes", "replies", "date", "lang", "text"]);
   assert.equal(chunk(fixture, 3).flat().length, fixture.length);
+  assert.deepEqual(chunk(fixture, 3, new Set(), "2026-09-03", "2026-09-05").flat().map((t) => t.id), [id(3), id(4), id(5), id(6)]);
 });
 
 test("mergeLabels appends chunk labels into labels.jsonl, last write per id wins", () => {
@@ -91,10 +92,16 @@ test("mergeLabels appends chunk labels into labels.jsonl, last write per id wins
     { id: id(1), about: true, sentiment: "like", feature: "ui", point: "cleanest UI", request: null },
     { id: id(5), about: true, sentiment: "dislike", feature: "airdrop", point: "no airdrop", request: "ship the airdrop" },
   ]));
-  const r = mergeLabels(store, dir);
-  assert.deepEqual(r, { files: 1, added: 1, replaced: 1, total: 2 });
+  const { batch, ...r } = mergeLabels(store, dir, { feature: { airdrop: "airdrop-promise" } });
+  assert.deepEqual(r, { files: 1, added: 1, replaced: 1, renamed: 1, total: 2 });
   const rows = readLabels(store);
-  assert.deepEqual(rows.map((l) => [l.id, l.point]), [[id(1), "cleanest UI"], [id(5), "no airdrop"]]);
+  assert.deepEqual(rows.map((l) => [l.id, l.point, l.feature]), [[id(1), "cleanest UI", "ui"], [id(5), "no airdrop", "airdrop-promise"]]);
+  const vocab = { features: ["ui"] };
+  const g = growVocab(rows, vocab, 0.5);
+  assert.deepEqual(g, { added: { topics: [], features: [["airdrop-promise", 1]], interests: [] }, below: { topics: [], features: [], interests: [] }, threshold: 1 });
+  assert.deepEqual(vocab.features, ["ui", "airdrop-promise"]);
+  assert.equal(applyAliases(rows, { feature: { ui: "user-interface" } }), 1);
+  assert.equal(rows[0].feature, "user-interface");
 });
 
 test("inWindow filters labels by the post's day", () => {
