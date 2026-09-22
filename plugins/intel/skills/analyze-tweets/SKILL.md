@@ -62,9 +62,10 @@ competitors, and asks for two files per chunk:
   `about` true only if the post is about the app itself; `sentiment` like /
   dislike / neutral / noise; `topic` from a fixed list the prompt gives (plus free
   additions); `point` ≤ 12 words.
-- `summaryN.md`: top 5 topics, top 5 likes, top 5 dislikes, each with post ids and
-  a verbatim quote ≤ 25 words. If the labeler's harness blocks writing `.md`, it
-  returns the summary in its reply; save it as `summaryN.md` yourself.
+- `summaryN.txt` (plain text, not `.md`: the harness refuses subagent report-style
+  markdown): top 5 topics, top 5 likes, top 5 dislikes, each with post ids and a
+  verbatim quote ≤ 25 words. If the write is still refused, the labeler returns the
+  summary in its reply; save it yourself.
 
 ### 4. Aggregate and verify (script)
 
@@ -72,7 +73,9 @@ competitors, and asks for two files per chunk:
 node $S/aggregate.mjs <clean.json> <scratch> [--top 300]
 ```
 
-Prints how many chunks came back; sentiment over all posts and over the top-liked
+Prints how many chunks came back (re-run any chunk whose noise share is far below
+the others: a labeler that marks one-line reply banter as neutral instead of noise
+inflates "about" counts); sentiment over all posts and over the top-liked
 (volume share vs attention share); like and dislike counts per topic with unique
 authors; the interested-party share of likes (reward earners, token promoters,
 official and partner accounts); and, for every summary, unknown ids and quotes that
