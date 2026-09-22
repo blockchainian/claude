@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { countTopics, timeline } from "./topics.mjs";
 import { chunk } from "./chunk.mjs";
-import { verifySummary, tally, byFeature, topTexts, norm } from "./aggregate.mjs";
+import { verifySummary, tally, byFeature, topTexts, norm, readLabels, inWindow } from "./aggregate.mjs";
+import { mergeLabels } from "./merge-labels.mjs";
 
 const id = (n) => "200000000000000000" + n; // 19-digit snowflake-shaped ids
 const T = (n, author, text, day, likes = 0) => ({
@@ -72,6 +73,35 @@ test("aggregate verifies ids and quotes and tallies labels", () => {
     { feature: "ui", count: 1, authors: 1 }, { feature: "fees", count: 1, authors: 1 },
   ]);
   assert.deepEqual(topTexts(labels, "request"), [{ text: "ship the airdrop", count: 1 }]);
+});
+
+test("chunk skips posts that already have a label and keeps only labeler fields", () => {
+  const labeled = new Set([id(1), id(7)]);
+  const chunks = chunk(fixture, 3, labeled);
+  assert.deepEqual(chunks.flat().map((t) => t.id), fixture.filter((t) => !labeled.has(t.id)).map((t) => t.id));
+  assert.deepEqual(Object.keys(chunks[0][0]), ["id", "author", "likes", "replies", "date", "lang", "text"]);
+  assert.equal(chunk(fixture, 3).flat().length, fixture.length);
+});
+
+test("mergeLabels appends chunk labels into labels.jsonl, last write per id wins", () => {
+  const dir = mkdtempSync(join(tmpdir(), "labels-"));
+  const store = join(dir, "labels.jsonl");
+  writeFileSync(store, JSON.stringify({ id: id(1), about: true, sentiment: "like", feature: "ui", point: "old", request: null }) + "\n");
+  writeFileSync(join(dir, "labels0.json"), JSON.stringify([
+    { id: id(1), about: true, sentiment: "like", feature: "ui", point: "cleanest UI", request: null },
+    { id: id(5), about: true, sentiment: "dislike", feature: "airdrop", point: "no airdrop", request: "ship the airdrop" },
+  ]));
+  const r = mergeLabels(store, dir);
+  assert.deepEqual(r, { files: 1, added: 1, replaced: 1, total: 2 });
+  const rows = readLabels(store);
+  assert.deepEqual(rows.map((l) => [l.id, l.point]), [[id(1), "cleanest UI"], [id(5), "no airdrop"]]);
+});
+
+test("inWindow filters labels by the post's day", () => {
+  const byId = new Map(fixture.map((t) => [t.id, t]));
+  const rows = [{ id: id(1) }, { id: id(5) }, { id: id(7) }];
+  assert.deepEqual(rows.filter((l) => inWindow(l, byId, "2026-09-04", "2026-09-05")).map((l) => l.id), [id(5)]);
+  assert.equal(rows.filter((l) => inWindow(l, byId)).length, 3);
 });
 
 test("readLog parses tweets.jsonl and keeps the last line of a duplicated id", () => {

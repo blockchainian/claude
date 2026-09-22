@@ -49,43 +49,70 @@ competitor, App Store, the app's own feature names), hits / unique authors / lik
 peak day. The regex counts only what is listed; discovery of what users actually
 talk about comes from step 3, never from this list.
 
-### 3. Label every post (subagents)
+### 3. Label the posts that have no label yet (subagents)
 
 ```
-node $S/chunk.mjs <clean.json> --size 300 --out <scratch>
+node $S/chunk.mjs <clean.json> --size 2000 --out <scratch> --labels mentions/<slug>/labels.jsonl
 ```
 
-Every clean post lands in one `chunkN.json`. Spawn `general-purpose` Sonnet
-labelers, one chunk each, 8 per message; start the next wave when one finishes. The
-prompt names the app's official handles (current and former), products and
-competitors, and asks for two files per chunk:
+Only posts missing from `labels.jsonl` are chunked; each chunk is written as
+`chunkN.json` and `chunkN.tsv` (one post per line: id, author, likes, date, lang,
+text). Spawn `general-purpose` Sonnet labelers, one chunk each, about 10 in flight;
+start the next when one finishes. Write the prompt once to `<scratch>/PROMPT.md` and
+point each labeler at it. The prompt names the app's official handles (current and
+former), founder and team, products and features, and competitors, and says:
 
-- `labelsN.json`: for every post `{id, about, sentiment, feature, point, request}` —
-  `about` true only if the post is about the app itself; `sentiment` like /
-  dislike / neutral / noise; `feature` the app feature or behavior the post is
-  about, from the list the prompt gives (fees, cross-chain balance, copy trading,
-  leaderboard, token verification, limit orders, mobile app, web app, streaming,
-  callouts / creator rewards, airdrop, support, UI, stability, custody, referral;
-  plus free additions, `competitor` for comparisons, `none` when not about the app);
-  `point` ≤ 12 words saying what the post claims (the bug, the number, the
-  complaint), never the feature name alone; `request` ≤ 12 words when the post asks
-  to add, fix, change or remove something, else null. Chinese and other non-English
-  posts are labeled like the rest.
-- `summaryN.txt` (plain text, not `.md`: the harness refuses subagent report-style
-  markdown): top 5 likes, top 5 dislikes, top 5 requests, each with post ids and a
-  verbatim quote ≤ 25 words, then any facts worth the timeline: numbers, launches,
-  outages, funding, partnerships, with ids. If the write is still refused, the
-  labeler returns the summary in its reply; save it yourself.
+- First print all the posts, in batches of 100 as `id \t author \t likes \t date
+  \t lang \t text`, into batch files under a private `work_N/` directory (never a
+  shared one: labelers run side by side), then Read every batch file in a row
+  (the Read tool returns at most 25k tokens per call, Bash output about 30 KB, so
+  reading is batched whatever the prompt says). Do not write labels between
+  batches: read all batches first, then write ONE Python script holding the
+  labels of all posts and run it once to produce `labelsN.json` and check ids and
+  order. A labeler that wrote a labels file per batch and stitched them cost 2.7×
+  the one that built the whole array in one script (172 vs 74 turns).
+- Then two files:
+  - `labelsN.json`: one object per post, chunk order, every id present:
+    `{id, about, sentiment, feature, point, request}` — `about` true only if the
+    post is about the app itself; `sentiment` like / dislike / neutral / noise
+    (strict: a reply that says nothing about the app is noise); `feature` the app
+    feature or behavior the post is about, from the list the prompt gives (fees,
+    cross-chain balance, copy trading, leaderboard, token verification, limit
+    orders, mobile app, web app, streaming, callouts / creator rewards, airdrop,
+    support, UI, stability, custody, referral; plus free additions, `competitor` for
+    comparisons, `none` when not about the app); `point` ≤ 12 words saying what the
+    post claims (the bug, the number, the complaint), never the feature name alone;
+    `request` ≤ 12 words when the post asks to add, fix, change or remove
+    something, else null. Non-English posts are labeled like the rest, point and
+    request in English.
+  - `summaryN.txt` (plain text, not `.md`: the harness refuses subagent
+    report-style markdown): sections LIKES, DISLIKES, REQUESTS with the top 5 points
+    by post count, each with ids and one verbatim quote ≤ 25 words (Chinese posts
+    quoted in Chinese, never spanning a t.co link), then FACTS: numbers, launches,
+    outages, funding, partnerships, store removals, each with its id.
+- Reply with one line: `chunk N: <posts> labeled, <noise%> noise, <about%> about`.
+
+A 2000-post chunk is about 110k tokens of posts in and 70k of labels out, but a
+labeler runs 40–70 tool turns and re-sends its context each turn: measured 15M
+input tokens (about 2M billed-equivalent after cache reads) per 2000-post chunk.
+Sonnet's window is 1M and its output cap 128k, so do not go above ~3000 posts per
+chunk; below 2000 the fixed 59k-token setup per agent dominates.
+
+Then fold the chunks into the store:
+
+```
+node $S/merge-labels.mjs mentions/<slug>/labels.jsonl <scratch>
+```
 
 ### 4. Aggregate and verify (script)
 
 ```
-node $S/aggregate.mjs <clean.json> <scratch> [--top 300]
+node $S/aggregate.mjs <clean.json> <scratch> --labels mentions/<slug>/labels.jsonl [--since D] [--until D] [--top 300]
 ```
 
-Prints how many chunks came back (re-run any chunk whose noise share is far below
-the others: a labeler that marks one-line reply banter as neutral instead of noise
-inflates "about" counts); sentiment over all posts and over the top-liked
+Prints how many window posts have a label (re-run any chunk whose noise share is
+far below the others: a labeler that marks one-line reply banter as neutral instead
+of noise inflates "about" counts); sentiment over all posts and over the top-liked
 (volume share vs attention share); like, dislike and request counts per feature with
 unique authors; the most frequent `point` and `request` texts; the interested-party
 share of likes (reward earners, token promoters, official and partner accounts);
@@ -161,7 +188,8 @@ Rules:
 
 ### 7. Ship
 
-`git add` `reception.md` and `images/` only, commit, push.
+`git add` `reception.md`, `images/` and `labels.jsonl` only, commit, push.
+`clean.json`, the chunks, `labelsN.json` and `summaryN.txt` are scratch.
 
 ## Requirements
 
