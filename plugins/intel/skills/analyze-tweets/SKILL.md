@@ -73,13 +73,20 @@ former), founder and team, products and features, and competitors, and says:
 
 - First print all the posts, in batches of 100 as `id \t author \t likes \t date
   \t lang \t text`, into batch files under a private `work_N/` directory (never a
-  shared one: labelers run side by side), then Read every batch file in a row
-  (the Read tool returns at most 25k tokens per call, Bash output about 30 KB, so
-  reading is batched whatever the prompt says). Do not write labels between
-  batches: read all batches first, then write ONE Python script holding the
-  labels of all posts and run it once to produce `labelsN.json` and check ids and
-  order. A labeler that wrote a labels file per batch and stitched them cost 2.7×
-  the one that built the whole array in one script (172 vs 74 turns).
+  shared one: labelers run side by side), then Read every batch file (the Read
+  tool returns at most 25k tokens per call, Bash output about 30 KB, so reading
+  is batched whatever the prompt says). After each batch, write that batch's
+  labels as DATA — a file with one object per post id, the label the labeler
+  decided while reading — never a classifier: no keyword rules, no regex, no
+  function that derives labels from text. A final script only concatenates the
+  batch data files, checks ids and order, and writes `labelsN.json`. (A prompt
+  that asked for "one script holding all labels" made every labeler compress
+  its judgments into regex rules, which is the keyword whitelist again; the
+  per-batch data files are what keeps the labels per post.)
+- Before merging, audit each `work_N/`: a `.py` there with `re.compile`,
+  `re.search` or `in text`-style rules, or batch files whose ids add up to fewer
+  than the chunk's posts, means that chunk was classified by rules — discard it
+  and rerun that chunk.
 - Then two files:
   - `labelsN.json`: one object per post, chunk order, every id present:
     `{id, about, sentiment, topic, feature, point, request, interest}`.
@@ -130,10 +137,10 @@ former), founder and team, products and features, and competitors, and says:
 - Reply with one line: `chunk N: <posts> labeled, <noise%> noise, <about%> about`.
 
 A 2000-post chunk is about 110k tokens of posts in and 70k of labels out, but a
-labeler runs 40–70 tool turns and re-sends its context each turn: measured 15M
-input tokens (about 2M billed-equivalent after cache reads) per 2000-post chunk.
-Sonnet's window is 1M and its output cap 128k, so do not go above ~3000 posts per
-chunk; below 2000 the fixed 59k-token setup per agent dominates.
+labeler runs 40–70 tool turns and re-sends its context each turn: measured about
+15M input tokens (roughly $5 at Sonnet prices, mostly cache reads) per 2000-post
+chunk. Sonnet's window is 1M and its output cap 128k, so do not go above ~3000
+posts per chunk; below 2000 the fixed 59k-token setup per agent dominates.
 
 Then fold the chunks into the store and grow the vocabulary:
 
