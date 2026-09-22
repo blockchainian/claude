@@ -18,13 +18,23 @@ export function tally(rows) {
   return o;
 }
 
-export function byTopic(rows, byId) {
+export function byFeature(rows, byId) {
   const n = {}, authors = {};
   for (const r of rows) {
-    n[r.topic] = (n[r.topic] || 0) + 1;
-    (authors[r.topic] = authors[r.topic] || new Set()).add(byId.get(r.id)?.author);
+    n[r.feature] = (n[r.feature] || 0) + 1;
+    (authors[r.feature] = authors[r.feature] || new Set()).add(byId.get(r.id)?.author);
   }
-  return Object.entries(n).sort((a, b) => b[1] - a[1]).map(([topic, count]) => ({ topic, count, authors: authors[topic].size }));
+  return Object.entries(n).sort((a, b) => b[1] - a[1]).map(([feature, count]) => ({ feature, count, authors: authors[feature].size }));
+}
+
+// The most repeated short texts (points or requests), case-folded, for ranking findings by count.
+export function topTexts(rows, key, limit = 25) {
+  const n = {};
+  for (const r of rows) {
+    const t = (r[key] || "").trim().toLowerCase();
+    if (t) n[t] = (n[t] || 0) + 1;
+  }
+  return Object.entries(n).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([text, count]) => ({ text, count }));
 }
 
 export function verifySummary(md, tweets, byId) {
@@ -63,11 +73,16 @@ function main() {
   console.log(`sentiment, top ${topN} by likes:`, pct(tally(labels.filter((l) => top.has(l.id)))));
 
   const likes = labels.filter((l) => l.sentiment === "like");
-  const interested = likes.filter((l) => l.topic === "callout-rewards-kols" || INTERESTED.test(byId.get(l.id)?.text || ""));
+  const interested = likes.filter((l) => /referral|callout|rewards/i.test(l.feature || "") || INTERESTED.test(byId.get(l.id)?.text || ""));
   console.log(`likes ${likes.length}, interested-party ${interested.length} (${((100 * interested.length) / (likes.length || 1)).toFixed(0)}%)`);
-  console.log("\nlike by topic"); console.table(byTopic(likes, byId));
-  console.log("dislike by topic"); console.table(byTopic(labels.filter((l) => l.sentiment === "dislike"), byId));
-  console.log("topics, about=true"); console.table(byTopic(labels.filter((l) => l.about), byId).slice(0, 20));
+  const dislikes = labels.filter((l) => l.sentiment === "dislike");
+  const requests = labels.filter((l) => l.request);
+  console.log("\nlike by feature"); console.table(byFeature(likes, byId));
+  console.log("dislike by feature"); console.table(byFeature(dislikes, byId));
+  console.log("requests by feature"); console.table(byFeature(requests, byId));
+  console.log("top like points"); console.table(topTexts(likes, "point"));
+  console.log("top dislike points"); console.table(topTexts(dislikes, "point"));
+  console.log("top requests"); console.table(topTexts(requests, "request"));
 
   for (const f of files.filter((f) => /^summary\d+\.(md|txt)$/.test(f)).sort()) {
     const v = verifySummary(readFileSync(join(dir, f), "utf8"), tweets, byId);
