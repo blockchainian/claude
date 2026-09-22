@@ -1,8 +1,9 @@
 # intel
 
 Gather and distill knowledge from **long-form sources** — articles, podcasts,
-talks, videos, live streams — into text you can read and search. The source
-goes in; durable, attributable notes come out.
+talks, videos, live streams — and from **what people say** about an app — App
+Store reviews, X/Twitter mentions — into text you can read and search. The
+source goes in; durable, attributable notes come out.
 
 ## Skills
 
@@ -19,6 +20,12 @@ goes in; durable, attributable notes come out.
   pdfminer), and for a page that only offers audio falls back to `transcribe`.
   A bare URL or file digests; `save` / `search` manage the store, with per-item
   take-aways.
+- **`analyze-appstore-reviews`** — a scraped App Store reviews JSON → a concise
+  Chinese analysis doc with charts: likes, dislikes and feature requests ranked
+  by frequency, every claim backed by a verbatim review.
+- **`analyze-tweets`** — a fetched X mentions archive → a concise Chinese
+  reception doc with charts: hot topics on a dated timeline, likes, dislikes;
+  every post labeled (no sampling), every quote id-verified.
 
 ## Why they live together
 
@@ -42,6 +49,7 @@ audio leg and `digest` for the notes.
 ```
 python3 skills/transcribe/scripts/test_transcribe.py
 python3 skills/digest/scripts/test_digest.py
+node --test skills/analyze-tweets/scripts/test_analyze_tweets.mjs
 ```
 
 `test_transcribe.py` covers the batch and live command shapes, the
