@@ -33,7 +33,7 @@
     },
     {
       "name": "mobile",
-      "description": "Drive iOS apps from Claude Code: build, run, and inspect on the simulator via XcodeBuildMCP, capture symbolicated ETTrace flamegraphs, root-cause memory leaks from memgraphs, capture whole app screens from a simulator or a connected iPhone, and analyze an app's App Store reviews into a data-driven doc with charts.",
+      "description": "Drive iOS apps from Claude Code: build, run, and inspect on the simulator via XcodeBuildMCP, capture symbolicated ETTrace flamegraphs, root-cause memory leaks from memgraphs, capture whole app screens from a simulator or a connected iPhone, and diff a built screen against a design reference.",
       "author": {
         "name": "blockchainian"
       },
@@ -65,7 +65,7 @@
     },
     {
       "name": "intel",
-      "description": "Gather and distill knowledge from long-form sources: transcribe audio locally with whisper (the reusable transcribe skill), and turn an article, podcast transcript, or video into durable, searchable highlights (the digest skill).",
+      "description": "Gather and distill knowledge: transcribe audio locally with whisper, digest an article, podcast or video into searchable highlights, and analyze an app's App Store reviews or X/Twitter mentions into a data-driven Chinese doc with charts.",
       "author": {
         "name": "blockchainian"
       },
