@@ -1,6 +1,6 @@
 ---
 name: analyze-tweets
-description: Turn a fetched X/Twitter mentions archive (tweets.json from fetch-x-mentions) into a concise, data-driven Chinese reception doc plus charts — hot topics with a dated timeline, what people like, what people dislike, each ranked by frequency over every post and backed by id-verified quotes. Use when asked to analyze/分析 what X is saying about an app, brand or protocol from an existing mentions dataset. NOT for fetching the tweets (the JSON must already exist) and NOT for App Store reviews (use analyze-appstore-reviews).
+description: Turn a fetched X/Twitter mentions archive (tweets.jsonl from fetch-x-mentions) into a concise, data-driven Chinese reception doc plus charts — hot topics with a dated timeline, what people like, what people dislike, each ranked by frequency over every post and backed by id-verified quotes. Use when asked to analyze/分析 what X is saying about an app, brand or protocol from an existing mentions dataset. NOT for fetching the tweets (the archive must already exist) and NOT for App Store reviews (use analyze-appstore-reviews).
 ---
 
 # Analyze Tweets
@@ -12,8 +12,9 @@ narration.
 
 ## Input & output
 
-- **Input**: `mentions/<slug>/tweets.json` as written by `fetch-x-mentions.mjs`
-  (`tweets[]` with `id, author, text, created_at, likes, replies, lang, url`). Run
+- **Input**: `mentions/<slug>/tweets.jsonl` as written by `fetch-x-mentions.mjs`
+  (one tweet per line with `id, author, text, created_at, likes, replies, lang, url`;
+  `clean.mjs` dedups by id). Run
   on a finished archive; pass `--since/--until` to analyze a window of it. The doc
   title states the window.
 - **Output**, next to the input: `mentions/<slug>/reception.md` + `images/`.
@@ -25,7 +26,7 @@ narration.
 ### 1. Clean (script)
 
 ```
-node $S/clean.mjs <tweets.json> --out <scratch>/clean.json [--since YYYY-MM-DD] [--until YYYY-MM-DD]
+node $S/clean.mjs <tweets.jsonl> --out <scratch>/clean.json [--since YYYY-MM-DD] [--until YYYY-MM-DD]
 ```
 
 Drops bot alert templates (`Route:`, `MIGRATION`, `CTO SIGNAL`, `WALLET FLOW CHECK`,
