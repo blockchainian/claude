@@ -6,18 +6,18 @@ description: Turn a fetched X/Twitter mentions archive (tweets.jsonl from fetch-
 # Analyze Tweets
 
 One app's X mentions → a short, evidence-only reception doc: 热点、最喜欢、最讨厌.
-Every number comes from the JSON; every post is labeled (no sampling); every quote is
-verbatim and id-verified. The doc reads in one pass: result only, no method or process
+Every number comes from the JSON; every post is labeled by local models (no sampling);
+every quote is verbatim and id-verified. The doc reads in one pass: result only, no method or process
 narration.
 
 ## Input & output
 
 - **Input**: `mentions/<slug>/tweets.jsonl` as written by `fetch-x-mentions.mjs`
   (one tweet per line with `id, author, text, created_at, likes, replies, lang, url`;
-  `clean.mjs` dedups by id). Run
-  on a finished archive; pass `--since/--until` to analyze a window of it. The doc
-  title states the window.
-- **Output**, next to the input: `mentions/<slug>/reception.md` + `images/`.
+  `clean.mjs` dedups by id). Run on the whole archive; pass `--since/--until` to
+  `topics.py` to analyze a window of it. The doc title states the window.
+- **Output**, next to the input: `mentions/<slug>/reception.md` + `images/`. A windowed
+  run writes `reception-<since>.md` so it never overwrites the all-time doc.
 
 `S="${CLAUDE_PLUGIN_ROOT}/skills/analyze-tweets/scripts"` below.
 
@@ -26,66 +26,71 @@ narration.
 ### 1. Clean (script)
 
 ```
-node $S/clean.mjs <tweets.jsonl> --out <scratch>/clean.json [--since YYYY-MM-DD] [--until YYYY-MM-DD]
+node $S/clean.mjs <tweets.jsonl> --out <scratch>/clean.json
 ```
 
-Drops bot alert templates (`Route:`, `MIGRATION`, `CTO SIGNAL`, `WALLET FLOW CHECK`,
-`Quick Buy`, `dm us`; extend with `--bot-pattern`), posts tagging ≥ 6 handles,
-duplicates after stripping handles/urls, and texts under 8 chars. Prints raw/clean
-counts, date range, account count, top authors, clean count by day, and what was
-dropped. The raw→clean numbers become the doc's scope line.
+Always the whole archive: the topic cache below is all-time, and a window is applied
+in step 2. Drops bot alert templates (`Route:`, `MIGRATION`, `CTO SIGNAL`, `WALLET
+FLOW CHECK`, `Quick Buy`, `dm us`; extend with `--bot-pattern`), posts tagging ≥ 6
+handles, duplicates after stripping handles/urls, and texts under 8 chars. Prints
+raw/clean counts, date range, account count, top authors, clean count by day, and
+what was dropped. The raw→clean numbers become the doc's scope line.
 
-### 2. Hot topics on the whole clean set (script + judgment)
-
-```
-node $S/topics.mjs <clean.json> --topics <scratch>/topics.json
-```
-
-Write `topics.json` as `{"<中文标签>": "<regex>"}`: start from the generic set
-(手续费, 奖励, 空投, rug/捆绑/机器人, each named competitor, App Store, 直播, 慈善,
-"it's over") and add the app's own feature names once the timeline shows them. A
-handle that is merely tagged in replies is not a topic. The script prints per topic
-hits / unique authors / likes / peak day, then the top 3 posts by likes for every
-day — that list is the event timeline for the doc.
-
-### 3. Label every post (subagents)
+### 2. Topics and sentiment on every post (script)
 
 ```
-node $S/chunk.mjs <clean.json> --size 300 --out <scratch>
+$S/topics.py <scratch>/clean.json --cache ~/.cache/analyze-tweets/<slug> \
+  --names mentions/<slug>/topics.json --out <scratch> \
+  [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--refit]
 ```
 
-Every clean post lands in one `chunkN.json`. Spawn `general-purpose` Sonnet
-labelers, one chunk each, 8 per message; start the next wave when one finishes. The
-prompt names the app's official handles (current and former), products and
-competitors, and asks for two files per chunk:
+Local models, no keyword list: `bge-small-en-v1.5` embeds every English post,
+BERTopic (UMAP + HDBSCAN, fixed seed) clusters them, `twitter-roberta-base-sentiment`
+scores each one like / dislike / neutral. Everything is cached by post id under
+`--cache`, so a rerun only embeds and assigns the posts added since last time
+(under half a minute); the first run, or `--refit`, re-clusters on a 100k sample
+and assigns every post (measured 3.8 min on 173k posts; roughly 15–20 min per
+million, estimated). HDBSCAN leaves over half
+of all tweets unclustered; those go to their nearest cluster, and the share that
+were outliers is printed as the refit signal. Non-English posts are the row
+`其他语言`. `--since/--until` only filter the printed table, timeline and
+`labels0.json`; the cache and the model stay all-time, so a weekly window and the
+full history use the same topic names.
 
-- `labelsN.json`: for every post `{id, about, sentiment, topic, point}` —
-  `about` true only if the post is about the app itself; `sentiment` like /
-  dislike / neutral / noise; `topic` from a fixed list the prompt gives (plus free
-  additions); `point` ≤ 12 words.
-- `summaryN.txt` (plain text, not `.md`: the harness refuses subagent report-style
-  markdown): top 5 topics, top 5 likes, top 5 dislikes, each with post ids and a
-  verbatim quote ≤ 25 words. If the write is still refused, the labeler returns the
-  summary in its reply; save it yourself.
+Prints per topic hits / unique authors / likes / peak day / keywords, then the top 3
+posts by likes for every day — that list is the event timeline for the doc. Writes
+`<scratch>/labels0.json` (`{id, about, sentiment, topic}`; `about` = English and
+clustered) for step 3 and `<scratch>/clusters.json` with the keywords and 10
+most-liked posts of every cluster that has no name yet.
 
-### 4. Aggregate and verify (script)
+**Name the clusters yourself** (no API calls from scripts): read `clusters.json`
+and add every cluster to `--names` as `"<id>": {"name": "<中文标签>", "keywords":
+[...]}` (copy the keywords from `clusters.json`) — short, what the posts are about;
+merge near-duplicates by giving them the same name; spam and banter get `噪音` —
+then rerun the command. The names file is the one state worth committing: after a
+`--refit` the cluster ids change, and a new cluster inherits the name of the old one
+whose keywords it shares (Jaccard ≥ 0.5); only the rest need naming again, and
+names whose clusters vanished are dropped from the file.
+
+The run prints the outlier share of the new posts. When it is clearly above the
+all-cached share, a new topic has appeared: rerun with `--refit`, then name the new
+clusters.
+
+### 3. Aggregate and verify (script)
 
 ```
-node $S/aggregate.mjs <clean.json> <scratch> [--top 300]
+node $S/aggregate.mjs <scratch>/clean.json <scratch> [--top 300]
 ```
 
-Prints how many chunks came back (re-run any chunk whose noise share is far below
-the others: a labeler that marks one-line reply banter as neutral instead of noise
-inflates "about" counts); sentiment over all posts and over the top-liked
-(volume share vs attention share); like and dislike counts per topic with unique
-authors; the interested-party share of likes (reward earners, token promoters,
-official and partner accounts); and, for every summary, unknown ids and quotes that
-are not a substring of any post. Rank like/dislike points by their label counts;
-use the summaries only to pick quotes. Take the final quote text by id from
-`clean.json`, never from a labeler's paraphrase, and link it as
-`https://x.com/<author>/status/<id>`.
+Prints sentiment over all posts and over the top-liked (volume share vs attention
+share); like and dislike counts per topic with unique authors; and the
+interested-party share of likes (reward earners, token promoters, official and
+partner accounts). Rank like/dislike points by their label counts. Take every quote
+text by id from `clean.json` and link it as `https://x.com/<author>/status/<id>`;
+pick from the top-liked posts of the topic (the `clusters.json` examples are a good
+start) and drop any whose sentiment label reads wrong.
 
-### 5. Charts (script)
+### 4. Charts (script)
 
 ```
 echo '{"out_dir":"<slug>/images","charts":[
@@ -99,7 +104,7 @@ echo '{"out_dir":"<slug>/images","charts":[
 Chinese labels, transparent background, dual-mode gray ink, title only. Open each
 PNG and check: no label collisions, headroom above the tallest bar.
 
-### 6. Write `reception.md` (concise Chinese, result only)
+### 5. Write `reception.md` (concise Chinese, result only)
 
 ```
 # <App> 推特口碑（<start> → <end>）
@@ -130,23 +135,30 @@ one closing sentence: the common thread of the dislikes
 ```
 
 Rules:
-- No 数据源 / 方法 / 可信度 sections, no process narration, no agent counts.
+- No 数据源 / 方法 / 可信度 sections, no process narration, no model or agent talk.
 - Quote line is exactly `> @handle：[text](url)`: link on the text, handle plain,
   no like counts or any number next to the handle, no italics. Every quote line
   carries text.
 - Tight prose; parentheses are rare. Charts sit at the top of their section.
 
-### 7. Ship
+### 6. Ship
 
-`git add` `reception.md` and `images/` only, commit, push.
+`git add` `reception.md`, `images/` and `topics.json` only, commit, push.
+`clean.json`, `labels0.json` and `clusters.json` are scratch; the cache under
+`~/.cache/analyze-tweets/` (embeddings, sentiment, the 500 MB model) is rebuilt by
+`--refit` and never committed.
 
 ## Requirements
 
-- Node ≥ 20 for the `.mjs` scripts; `uv` for `render_charts.py` (matplotlib);
-  CJK font at `/System/Library/Fonts/Supplemental/Arial Unicode.ttf`.
+- Node ≥ 20 for the `.mjs` scripts; `uv` for the Python scripts (they declare their
+  own dependencies; the first `topics.py` run installs torch and friends, about 1 GB,
+  and downloads the two models, about 600 MB, from Hugging Face without a token);
+  Apple Silicon or CUDA for speed; CJK font at
+  `/System/Library/Fonts/Supplemental/Arial Unicode.ttf`.
 
 ## Tests
 
 ```
 node --test skills/analyze-tweets/scripts/test_analyze_tweets.mjs
+skills/analyze-tweets/scripts/test_topics.py
 ```

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// ABOUTME: Merges the labelers' output: sentiment over all posts and over the top-liked, like/dislike
+// ABOUTME: Merges the per-post labels: sentiment over all posts and over the top-liked, like/dislike
 // ABOUTME: counts per topic, interested-party share of praise, and id/quote checks for every summary.
 //
-// Usage: aggregate.mjs <clean.json> <dir-with-labels*.json-and-summary*.md> [--top 300]
+// Usage: aggregate.mjs <clean.json> <dir-with-labels*.json-and-summary*.txt> [--top 300]
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -53,12 +53,10 @@ function main() {
   const labels = [];
   const files = readdirSync(dir);
   for (const f of files.filter((f) => /^labels\d+\.json$/.test(f)).sort()) {
-    try { labels.push(...JSON.parse(readFileSync(join(dir, f), "utf8"))); }
+    try { for (const l of JSON.parse(readFileSync(join(dir, f), "utf8"))) labels.push(l); }  // spread overflows the stack past ~100k
     catch (e) { console.log(`bad ${f}: ${e.message}`); }
   }
-  const expected = files.filter((f) => /^chunk\d+\.json$/.test(f)).length;
-  const got = files.filter((f) => /^labels\d+\.json$/.test(f)).length;
-  console.log(`labels: ${labels.length} posts from ${got}/${expected} chunks`);
+  console.log(`labels: ${labels.length} posts`);
 
   const pct = (o) => { const n = Object.values(o).reduce((a, b) => a + b, 0); return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, `${v} (${((100 * v) / n).toFixed(1)}%)`])); };
   console.log("sentiment, all:", pct(tally(labels)));

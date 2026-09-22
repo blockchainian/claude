@@ -1,13 +1,11 @@
-// ABOUTME: Tests the analyze-tweets scripts on a tiny fixture: cleaning rules and date range,
-// ABOUTME: topic counts and timeline, chunking, and the summary id/quote verification.
+// ABOUTME: Tests the analyze-tweets node scripts on a tiny fixture: cleaning rules and date range,
+// ABOUTME: the jsonl reader, and the label tally and summary id/quote verification.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { clean, facts, readLog } from "./clean.mjs";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { countTopics, timeline } from "./topics.mjs";
-import { chunk } from "./chunk.mjs";
 import { verifySummary, tally, byTopic, norm } from "./aggregate.mjs";
 
 const id = (n) => "200000000000000000" + n; // 19-digit snowflake-shaped ids
@@ -34,25 +32,6 @@ test("clean drops bots, mass tags, dupes, stubs and honors --since/--until", () 
   const f = facts(fixture, c);
   assert.equal(f.raw, 7); assert.equal(f.clean, 3);
   assert.equal(f.from, "2026-09-02"); assert.equal(f.to, "2026-09-05");
-});
-
-test("topics count hits, authors, likes and peak day; timeline lists top posts per day", () => {
-  const c = clean(fixture).clean;
-  const rows = countTopics(c, { 空投: "airdrop", 手续费: "\\bfees?\\b", 无: "zzz" });
-  assert.deepEqual(rows.map((r) => [r.topic, r.n, r.authors, r.likes, r.peakDay]), [
-    ["空投", 1, 1, 9, "2026-09-04"], ["手续费", 1, 1, 3, "2026-09-05"], ["无", 0, 0, 0, null],
-  ]);
-  const tl = timeline(c, 1);
-  assert.deepEqual(tl.map((d) => [d.day, d.n, d.top[0].id]), [
-    ["2026-09-02", 1, id(1)], ["2026-09-04", 1, id(5)], ["2026-09-05", 1, id(7)],
-  ]);
-});
-
-test("chunk covers every post exactly once and keeps only labeler fields", () => {
-  const chunks = chunk(fixture, 3);
-  assert.equal(chunks.length, 3);
-  assert.deepEqual(chunks.flat().map((t) => t.id), fixture.map((t) => t.id));
-  assert.deepEqual(Object.keys(chunks[0][0]), ["id", "author", "likes", "replies", "date", "lang", "text"]);
 });
 
 test("aggregate verifies ids and quotes and tallies labels", () => {
