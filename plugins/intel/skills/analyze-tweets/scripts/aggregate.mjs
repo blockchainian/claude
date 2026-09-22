@@ -2,9 +2,22 @@
 // ABOUTME: Merges the per-post labels: sentiment over all posts and over the top-liked, like/dislike
 // ABOUTME: counts per topic, interested-party share of praise, and id/quote checks for every summary.
 //
-// Usage: aggregate.mjs <clean.json> <dir-with-labels*.json-and-summary*.txt> [--top 300]
-import { readFileSync, readdirSync } from "node:fs";
+// Usage: aggregate.mjs <clean.json> <dir-with-summary*.txt> --labels <labels.jsonl> [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--top 300]
+//        (without --labels it reads the labelsN.json files in <dir>)
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { dayOf } from "./clean.mjs";
+
+export function readLabels(path) {
+  return readFileSync(path, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
+
+export function inWindow(label, byId, since = null, until = null) {
+  const t = byId.get(label.id);
+  if (!t) return false;
+  const d = dayOf(t);
+  return (!since || d >= since) && (!until || d < until);
+}
 
 export const norm = (s) =>
   s.replace(/\s+/g, " ").replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/&amp;/g, "&")
@@ -50,23 +63,33 @@ export function verifySummary(md, tweets, byId) {
 
 function main() {
   const args = process.argv.slice(2);
-  const [cleanPath, dir] = args.filter((a) => !a.startsWith("--"));
-  const topN = args.includes("--top") ? Number(args[args.indexOf("--top") + 1]) : 300;
+  const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : null);
+  const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && ["--top", "--labels", "--since", "--until"].includes(args[i - 1])));
+  const [cleanPath, dir] = positional;
+  const topN = Number(opt("--top") ?? 300);
+  const store = opt("--labels");
   if (!cleanPath || !dir) {
-    console.error("Usage: aggregate.mjs <clean.json> <dir> [--top N]");
+    console.error("Usage: aggregate.mjs <clean.json> <dir> --labels <labels.jsonl> [--since D] [--until D] [--top N]");
     process.exit(1);
   }
   const tweets = JSON.parse(readFileSync(cleanPath, "utf8"));
   const byId = new Map(tweets.map((t) => [t.id, t]));
-  const top = new Set([...tweets].sort((a, b) => b.likes - a.likes).slice(0, topN).map((t) => t.id));
+  const since = opt("--since"), until = opt("--until");
+  const windowed = tweets.filter((t) => { const d = dayOf(t); return (!since || d >= since) && (!until || d < until); });
+  const top = new Set(windowed.sort((a, b) => b.likes - a.likes).slice(0, topN).map((t) => t.id));
 
-  const labels = [];
+  let labels = [];
   const files = readdirSync(dir);
-  for (const f of files.filter((f) => /^labels\d+\.json$/.test(f)).sort()) {
+  if (store && existsSync(store)) labels = readLabels(store);
+  else for (const f of files.filter((f) => /^labels\d+\.json$/.test(f)).sort()) {
     try { for (const l of JSON.parse(readFileSync(join(dir, f), "utf8"))) labels.push(l); }  // spread overflows the stack past ~100k
     catch (e) { console.log(`bad ${f}: ${e.message}`); }
   }
-  console.log(`labels: ${labels.length} posts`);
+  const all = labels.length;
+  labels = labels.filter((l) => inWindow(l, byId, since, until));
+  const labeledIds = new Set(labels.map((l) => l.id));
+  const missing = windowed.filter((t) => !labeledIds.has(t.id)).length;
+  console.log(`labels: ${labels.length} posts in window (${all} in store, ${missing} window posts without a label)`);
 
   const pct = (o) => { const n = Object.values(o).reduce((a, b) => a + b, 0); return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, `${v} (${((100 * v) / n).toFixed(1)}%)`])); };
   console.log("sentiment, all:", pct(tally(labels)));
