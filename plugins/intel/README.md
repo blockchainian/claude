@@ -26,6 +26,10 @@ source goes in; durable, attributable notes come out.
 - **`analyze-tweets`** — a fetched X mentions archive → a concise Chinese
   reception doc with charts: hot topics on a dated timeline, likes, dislikes;
   every post labeled (no sampling), every quote id-verified.
+- **`find-domain-names`** — brainstorm a brand name for a theme you give and
+  return only the ones whose domain is registrable: short coined words (then
+  metaphor words), checked live on `.xyz/.ai/.fun` via Namecheap's official API
+  (`check.mjs`), same-name collisions against anything popular filtered out.
 
 ## Why they live together
 
@@ -43,6 +47,8 @@ audio leg and `digest` for the notes.
   Homebrew. `curl` for URL downloads.
 - `digest`: `curl`; `setup.sh` installs `uv` (runs the trafilatura article
   extractor) and `yt-dlp` (YouTube subtitles).
+- `find-domain-names`: a Namecheap API key with the calling IP whitelisted,
+  stored at `~/.config/blockchainian/claude.json` (see the skill's Setup step).
 
 ## Tests
 
@@ -50,6 +56,7 @@ audio leg and `digest` for the notes.
 python3 skills/transcribe/scripts/test_transcribe.py
 python3 skills/digest/scripts/test_digest.py
 node --test skills/analyze-tweets/scripts/test_analyze_tweets.mjs
+node --test skills/find-domain-names/scripts/test_check.mjs
 ```
 
 `test_transcribe.py` covers the batch and live command shapes, the
