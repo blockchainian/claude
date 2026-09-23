@@ -39,7 +39,7 @@ The store makes every run incremental. Three ways to invoke this skill:
 
 - **First run on an app**: no `labels.jsonl` yet; every clean post is chunked and
   labeled; the all-time `reception.md` is written.
-- **New data arrived** ("analyze this week's acme tweets"): run steps 1–4 on the
+- **New data arrived** ("analyze this week's <app> tweets"): run steps 1–4 on the
   whole archive; chunk.mjs skips every post already in `labels.jsonl`, so only the
   new posts go to labelers; then aggregate with `--since/--until` for the window
   and write `reception-<from>..<to>.md`, or without a window to refresh
