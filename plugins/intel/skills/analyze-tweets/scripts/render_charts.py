@@ -95,7 +95,7 @@ def daily(path: str, title: str, days: list[str], values: list[int],
     for k, d in enumerate(marked):
         y = vmax * (1.25 + 0.22 * (k % 3))
         ax.annotate(events[d].replace("$", r"\$"), (d, values[days.index(d)]), xytext=(d, y),
-                    textcoords="data", ha="center", va="bottom", fontsize=8, color=INK,
+                    textcoords="data", ha="center", va="bottom", fontsize=11, color=INK,
                     arrowprops={"arrowstyle": "-", "color": SPINE, "lw": 0.8, "shrinkA": 0, "shrinkB": 2})
     ax.set_ylim(0, vmax * 1.9)
     ax.tick_params(colors=INK, labelsize=8)
