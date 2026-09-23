@@ -1,6 +1,6 @@
 {
   "name": "intel",
-  "version": "0.10.4",
+  "version": "0.10.5",
   "description": "Gather and distill knowledge from long-form sources and from what people say: transcribe audio locally with whisper, turn an article, podcast transcript, or video into durable, searchable highlights, and analyze an app's App Store reviews or its X/Twitter mentions into a data-driven Chinese doc with charts.",
   "author": {
     "name": "blockchainian"
