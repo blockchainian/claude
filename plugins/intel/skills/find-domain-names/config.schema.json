@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "blockchainian plugin config",
+  "description": "Shared per-user config at ~/.config/blockchainian/claude.json, keyed by skill name. Only keys a skill actually uses are defined.",
+  "type": "object",
+  "properties": {
+    "find-domain-names": {
+      "type": "object",
+      "properties": {
+        "namecheap": {
+          "type": "object",
+          "description": "Namecheap official API credentials for domains.check. The calling IP must be whitelisted in the Namecheap API Access page.",
+          "properties": {
+            "apiUser": { "type": "string", "description": "Namecheap account username (used for both ApiUser and UserName)." },
+            "apiKey": { "type": "string", "description": "Namecheap API key from Profile > Tools > API Access." }
+          },
+          "required": ["apiUser", "apiKey"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["namecheap"],
+      "additionalProperties": false
+    }
+  }
+}
