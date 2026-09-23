@@ -5,7 +5,7 @@ description: Turn a fetched X/Twitter mentions archive (tweets.jsonl from fetch-
 
 # Analyze Tweets
 
-One app's X mentions → an evidence-only reception doc: what the data is, what users
+One app's X mentions → an evidence-only reception doc: an overview, what users
 like and dislike about the app, what they ask for, the timeline, and what it means for
 us. Every number comes from the JSON; every post is read and labeled by a subagent (no
 sampling, no keyword filter, no clustering model: those drop the concrete content);
@@ -44,8 +44,9 @@ The store makes every run incremental. Three ways to invoke this skill:
   new posts go to labelers; then aggregate with `--since/--until` for the window
   and write `reception-<from>..<to>.md`, or without a window to refresh
   `reception.md`.
-- **Report only** ("report on August from what we have"): steps 1, 5, 6 only; no
-  labelers, everything comes from the store.
+- **Report only** ("report on August from what we have", or a rewrite of the doc
+  after a template change): steps 1, 2, 4, 5, 6; no labelers, every number comes
+  from the store.
 
 ## Procedure
 
@@ -59,7 +60,7 @@ Drops bot alert templates (`Route:`, `MIGRATION`, `CTO SIGNAL`, `WALLET FLOW CHE
 `Quick Buy`, `dm us`; extend with `--bot-pattern`), posts tagging ≥ 6 handles,
 duplicates after stripping handles/urls, and texts under 8 chars. Prints raw/clean
 counts, date range, account count, top authors, clean count by day, and what was
-dropped. The raw→clean numbers become the doc's scope line.
+dropped. The raw→clean numbers go under the volume chart in the timeline section.
 
 ### 2. Timeline (script)
 
@@ -197,6 +198,7 @@ never from a labeler's paraphrase, and link it as
 echo '{"out_dir":"<slug>/images","charts":[
   {"type":"bar","file":"<slug>-hot-topics.png","title":"热点话题（提及条数）","labels":[...],"values":[...],"color":"#2a78d6"},
   {"type":"daily","file":"<slug>-daily-volume.png","title":"每日提及量与当天事件","days":["09-02",...],"values":[...],"events":{"09-10":"App Store 下架"}},
+  (a window longer than ~3 months uses months as days: `<slug>-monthly-volume.png`, "每月提及量与当月事件", "days":["2025-01",...])
   {"type":"bar","file":"<slug>-likes.png","title":"用户喜欢 App 的什么","labels":[...],"values":[...],"color":"#1baf7a"},
   {"type":"bar","file":"<slug>-dislikes.png","title":"用户不满 App 的什么","labels":[...],"values":[...],"color":"#eb6834"},
   {"type":"bar","file":"<slug>-requests.png","title":"用户想要什么","labels":[...],"values":[...],"color":"#8a5cd6"}
@@ -214,13 +216,13 @@ PNG and check: no label collisions, headroom above the tallest bar.
 ```
 # <App> 推特口碑（<start> → <end>）
 
-## 一、这批数据是什么
-- what the app is, in two lines, as the posts describe it (product, chains, launch dates seen in the data)
-- days, raw count, accounts; clean count after dropping bots/mass-tags/dupes
-- composition over all posts: noise / shilling other tokens / referral / real praise / real complaints, in %
-- the volume story: when it jumped and why (one line each)
-- caveats about the search terms (other products sharing the name, gaps)
-![](images/<slug>-daily-volume.png)
+## 一、概况
+<three short paragraphs of prose, no bullets, no counts, no percentages, no window,
+no method: an overview a reader skims before the findings>
+<p1: what the app is, as the posts describe it — product, chains, how people use it>
+<p2: in plain words, what people like about it, what they complain about, and the
+one or two topics that dominate the conversation; the numbers live in 二–五>
+<p3: the company's history as the posts tell it: funding, launches, user milestones>
 
 ## 二、热点在哪儿
 ![](images/<slug>-hot-topics.png)
@@ -243,6 +245,8 @@ PNG and check: no label collisions, headroom above the tallest bar.
    > @handle：[verbatim text](url)
 
 ## 六、时间线：声量、情绪、关键事件
+![](images/<slug>-daily-volume.png)
+- the scope in one line: days, raw posts and accounts, clean posts after dropping bots / mass-tags / dupes; irrelevant and noise shares
 - MM-DD event, one line, with the number it moved
   > @handle：[verbatim text](url)
 - how like/dislike share moved over the window (by month or quarter)
@@ -260,8 +264,9 @@ Rules:
 - Quote line is exactly `> @handle：[text](url)`: link on the text, handle plain,
   no like counts or any number next to the handle, no italics. Every quote line
   carries text. Chinese posts are quoted in Chinese.
-- Every claim names the feature, the bug, the number or the date. "故障 bug" or
-  "骂战" is not a finding; "买入后 12 小时无法卖出，09-08 当天 41 条" is.
+- Every claim in 二–七 names the feature, the bug, the number or the date. "故障 bug" or
+  "骂战" is not a finding; "买入后 12 小时无法卖出，09-08 当天 41 条" is. 一 is the
+  exception: prose without numbers.
 - Charts sit at the top of their section.
 
 ### 7. Ship
