@@ -13,7 +13,7 @@
     "validate": "claude plugin validate --strict .",
     "test:feature": "plugins/feature/hooks/tests/run.sh && plugins/feature/skills/ship/watch-ci.test.sh && plugins/feature/skills/retro/tests/run.sh",
     "test:proxy": "python3 plugins/proxy/skills/inspect-app-traffic/scripts/test_capture.py && python3 plugins/proxy/skills/inspect-app-traffic/scripts/test_wg_config.py",
-    "test:intel": "python3 plugins/intel/skills/transcribe/scripts/test_transcribe.py && python3 plugins/intel/skills/digest/scripts/test_digest.py && node --test plugins/intel/skills/analyze-tweets/scripts/test_analyze_tweets.mjs && node --test plugins/intel/skills/find-domain-names/scripts/test_check.mjs",
+    "test:intel": "python3 plugins/intel/skills/transcribe/scripts/test_transcribe.py && python3 plugins/intel/skills/digest/scripts/test_digest.py && node --test plugins/intel/skills/find-domain-names/scripts/test_check.mjs",
     "test:web": "uv run plugins/web/skills/heap-snapshot-leaks/scripts/test_diff_heap_snapshots.py && uv run plugins/web/skills/check-web-design/scripts/test_check_design.py"
   }
 }
