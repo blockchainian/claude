@@ -146,3 +146,38 @@ test("label-codex builds one prompt per chunk and validates the model's labels a
   assert.throws(() => parseLabels(JSON.stringify({ labels: [good[1], good[0], ...good.slice(2)] }), posts), /order/);
   assert.throws(() => parseLabels(JSON.stringify({ labels: [...good, { ...good[0], n: 99 }] }), posts), /unknown/);
 });
+
+test("label-codex gap-fills only the posts the model dropped, and never writes a partial chunk", async () => {
+  const { collectLabels, labelWithRetry } = await import("./label-codex.mjs");
+  const posts = chunk(fixture, 10)[0];
+  const mk = (n) => ({ n, about: false, sentiment: "noise", topic: "none", feature: "none", point: "", request: null, interest: null });
+
+  // collectLabels is lenient: first-seen wins, out-of-range and un-parseable input drop to nothing, never throws.
+  const m = collectLabels(JSON.stringify({ labels: [mk(2), { ...mk(2), point: "dup" }, mk(99), mk(1)] }), posts.length);
+  assert.deepEqual([...m.keys()].sort((a, b) => a - b), [1, 2]);
+  assert.equal(m.get(2).point, "");
+  assert.equal(collectLabels("not json", posts.length).size, 0);
+
+  // A labeler that returns only the first post on pass 1, then the rest: the second pass asks for exactly the gap.
+  let pass = 0;
+  const flaky = (sub) => {
+    pass++;
+    const take = pass === 1 ? 1 : sub.length;
+    return { message: JSON.stringify({ labels: sub.slice(0, take).map((_, i) => mk(i + 1)) }), usage: { input_tokens: 10, output_tokens: 5 }, seconds: 1, tools: 0 };
+  };
+  const { labels, passes } = labelWithRetry(posts, flaky, { maxPasses: 3 });
+  assert.equal(labels.length, posts.length);
+  assert.deepEqual(labels.map((l) => l.id), posts.map((p) => p.id));
+  assert.ok(labels.every((l) => !("n" in l)));
+  assert.equal(passes.length, 2);
+  assert.equal(passes[1].asked, posts.length - 1);
+
+  // A labeler that always drops the last post throws rather than writing a short chunk.
+  const stuck = (sub) => ({ message: JSON.stringify({ labels: sub.slice(0, -1).map((_, i) => mk(i + 1)) }), usage: {}, seconds: 1, tools: 0 });
+  assert.throws(() => labelWithRetry(posts, stuck, { maxPasses: 3 }), /missing 1 of \d+ posts after 3 passes/);
+
+  // A labeler that throws on the first pass still recovers on the next.
+  let crash = 0;
+  const crashy = (sub) => { crash++; if (crash === 1) throw new Error("boom"); return { message: JSON.stringify({ labels: sub.map((_, i) => mk(i + 1)) }), usage: {}, seconds: 1, tools: 0 }; };
+  assert.equal(labelWithRetry(posts, crashy, { maxPasses: 3 }).labels.length, posts.length);
+});

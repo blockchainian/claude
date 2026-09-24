@@ -92,6 +92,43 @@ export function parseLabels(message, posts) {
   return labels.map((l, i) => Object.fromEntries(FIELDS.map((f) => [f, f === "id" ? posts[i].id : l[f]])));
 }
 
+// Every valid, in-range, first-seen label by post number. Lenient: a truncated answer (the model stops
+// numbering partway) or un-parseable output yields whatever came back, never a throw, so the caller can
+// re-ask for just the gap.
+export function collectLabels(message, count) {
+  let arr;
+  try { arr = JSON.parse(message).labels; } catch { return new Map(); }
+  if (!Array.isArray(arr)) return new Map();
+  const byN = new Map();
+  for (const l of arr) {
+    if (!Number.isInteger(l?.n) || l.n < 1 || l.n > count) continue;
+    if (!byN.has(l.n)) byN.set(l.n, l);
+  }
+  return byN;
+}
+
+// Label every post, re-asking only for the ones still missing (a shorter prompt the model rarely truncates),
+// up to maxPasses. Throws when a post never comes back, so a partial answer is never written as if complete.
+// callLabeler(subPosts) -> { message, usage, seconds, tools }.
+export function labelWithRetry(posts, callLabeler, { maxPasses = 3 } = {}) {
+  const filled = new Map();
+  const passes = [];
+  let remaining = posts.map((_, i) => i + 1);
+  let lastErr = null;
+  for (let pass = 1; pass <= maxPasses && remaining.length; pass++) {
+    const idx = remaining;
+    const subPosts = idx.map((n) => posts[n - 1]);
+    let r;
+    try { r = callLabeler(subPosts); } catch (e) { lastErr = e; passes.push({ error: e.message, asked: subPosts.length }); continue; }
+    passes.push({ usage: r.usage, seconds: r.seconds, tools: r.tools, asked: subPosts.length });
+    for (const [localN, l] of collectLabels(r.message, subPosts.length)) filled.set(idx[localN - 1], l);
+    remaining = posts.map((_, i) => i + 1).filter((n) => !filled.has(n));
+  }
+  if (remaining.length) throw new Error(`missing ${remaining.length} of ${posts.length} posts after ${passes.length} passes: ${remaining.slice(0, 3).join(", ")}${lastErr ? ` (last error: ${lastErr.message})` : ""}`);
+  const labels = posts.map((p, i) => Object.fromEntries(FIELDS.map((f) => [f, f === "id" ? p.id : filled.get(i + 1)[f]])));
+  return { labels, passes };
+}
+
 // Features whose tools or prompts a labeler never needs; off, the model has no tools and the call is one turn.
 const OFF = ["shell_tool", "unified_exec", "unified_exec_tty", "view_image", "sleep_tool", "tool_suggest", "multi_agent",
   "plugins", "apps", "skill_search", "memories", "goals", "image_generation", "browser_use", "computer_use", "hooks"];
@@ -147,13 +184,28 @@ function main() {
   const posts = JSON.parse(readFileSync(input, "utf8"));
   const events = join(out, `labels${n}.events.jsonl`);
   const vocab = existsSync(vocabPath) ? JSON.parse(readFileSync(vocabPath, "utf8")) : {};
-  const r = runCodex(buildPrompt(readFileSync(facts, "utf8"), posts, vocab), { model: opt("--model", "gpt-6-luna"), effort: opt("--effort", "low"), events });
-  writeFileSync(join(out, `labels${n}.raw.txt`), r.message);
-  const labels = parseLabels(r.message, posts);
+  const appFacts = readFileSync(facts, "utf8");
+  const model = opt("--model", "gpt-6-luna");
+  const effort = opt("--effort", "low");
+  let lastRaw = "";
+  const call = (subPosts) => {
+    const r = runCodex(buildPrompt(appFacts, subPosts, vocab), { model, effort, events });
+    lastRaw = r.message;
+    return r;
+  };
+  const { labels, passes } = labelWithRetry(posts, call, { maxPasses: 3 });
+  writeFileSync(join(out, `labels${n}.raw.txt`), lastRaw);
   writeFileSync(join(out, `labels${n}.json`), JSON.stringify(labels));
   const noise = labels.filter((l) => l.sentiment === "noise").length;
   const about = labels.filter((l) => l.about).length;
-  console.log(`chunk ${n}: ${labels.length} labeled, ${Math.round((100 * noise) / labels.length)}% noise, ${Math.round((100 * about) / labels.length)}% about; ${r.tools} tool calls, ${r.seconds}s, usage ${JSON.stringify(r.usage)}`);
+  const seconds = passes.reduce((s, p) => s + (p.seconds || 0), 0);
+  const tools = passes.reduce((s, p) => s + (p.tools || 0), 0);
+  const usage = passes.reduce((a, p) => {
+    for (const k of Object.keys(p.usage || {})) a[k] = (a[k] || 0) + p.usage[k];
+    return a;
+  }, {});
+  const passNote = passes.length > 1 ? `${passes.length} passes (gap-filled ${passes.slice(1).map((p) => p.asked).join("+")}), ` : "";
+  console.log(`chunk ${n}: ${labels.length} labeled, ${Math.round((100 * noise) / labels.length)}% noise, ${Math.round((100 * about) / labels.length)}% about; ${passNote}${tools} tool calls, ${seconds}s, usage ${JSON.stringify(usage)}`);
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) main();
