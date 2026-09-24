@@ -2,7 +2,9 @@
 // ABOUTME: Labels one chunk with a single no-tool codex exec call in a private CODEX_HOME: the rules are the
 // ABOUTME: model's instructions, app facts and posts the prompt, and the JSON answer is checked against the chunk.
 //
-// Usage: label-codex.mjs <chunkN.json> --facts <app-facts.md> --vocab <vocab.json> --out <dir> [--model gpt-6-luna] [--effort low]
+// Usage: label-codex.mjs <chunkN.json> --facts <app-facts.md> --vocab <vocab.json> --out <dir> [--model gpt-6-luna] [--effort low] [--service-tier priority]
+// Defaults to the Fast service tier ("priority": 1.5x speed, 2x price, still ~1/10 the cost of gpt-6-sol);
+// pass --service-tier standard to opt out. An unsupported tier silently downgrades to standard.
 // Writes labelsN.json (N from the chunk file name) plus labelsN.events.jsonl and prints one line of usage.
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
@@ -134,22 +136,25 @@ const OFF = ["shell_tool", "unified_exec", "unified_exec_tty", "view_image", "sl
   "plugins", "apps", "skill_search", "memories", "goals", "image_generation", "browser_use", "computer_use", "hooks"];
 
 // A private CODEX_HOME: the login copied from ~/.codex, no user config, AGENTS.md, plugins or hooks.
-export function codexHome(dir, { model, effort, instructions }) {
+export function codexHome(dir, { model, effort, instructions, serviceTier }) {
   const home = join(dir, "home");
   mkdirSync(home, { recursive: true });
   copyFileSync(join(process.env.CODEX_HOME || join(homedir(), ".codex"), "auth.json"), join(home, "auth.json"));
-  writeFileSync(join(home, "config.toml"), `model = "${model}"\nmodel_reasoning_effort = "${effort}"\nmodel_instructions_file = "${instructions}"\nproject_doc_max_bytes = 0\n`);
+  // "priority" is the Fast service tier (1.5x speed, 2x price; ~1/10 the cost of gpt-6-sol). A model
+  // that does not advertise the tier silently downgrades to standard, so this is safe to default on.
+  const tier = serviceTier && !["standard", "default"].includes(serviceTier) ? `service_tier = "${serviceTier}"\n` : "";
+  writeFileSync(join(home, "config.toml"), `model = "${model}"\nmodel_reasoning_effort = "${effort}"\nmodel_instructions_file = "${instructions}"\nproject_doc_max_bytes = 0\n${tier}`);
   return home;
 }
 
-export function runCodex(prompt, { model = "gpt-6-luna", effort = "low", events, timeoutMs = 3_600_000, tries = 2 }) {
+export function runCodex(prompt, { model = "gpt-6-luna", effort = "low", serviceTier = "priority", events, timeoutMs = 3_600_000, tries = 2 }) {
   const dir = mkdtempSync(join(tmpdir(), "label-codex-"));
   const schema = join(dir, "schema.json");
   const instructions = join(dir, "instructions.md");
   const last = join(dir, "last.txt");
   writeFileSync(schema, JSON.stringify(SCHEMA));
   writeFileSync(instructions, RULES);
-  const home = codexHome(dir, { model, effort, instructions });
+  const home = codexHome(dir, { model, effort, instructions, serviceTier });
   const args = [
     "exec", "--ignore-rules", "--skip-git-repo-check", "--ephemeral", "-C", dir, "-s", "read-only",
     ...OFF.flatMap((f) => ["--disable", f]), "--output-schema", schema, "--json", "-o", last, "-",
@@ -170,13 +175,13 @@ export function runCodex(prompt, { model = "gpt-6-luna", effort = "low", events,
 
 function main() {
   const args = process.argv.slice(2);
-  const input = args.find((a) => !a.startsWith("--") && !["--facts", "--vocab", "--out", "--model", "--effort"].includes(args[args.indexOf(a) - 1]));
+  const input = args.find((a) => !a.startsWith("--") && !["--facts", "--vocab", "--out", "--model", "--effort", "--service-tier"].includes(args[args.indexOf(a) - 1]));
   const opt = (k, d = null) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
   const out = opt("--out");
   const facts = opt("--facts");
   const vocabPath = opt("--vocab");
   if (!input || !out || !facts || !vocabPath) {
-    console.error("Usage: label-codex.mjs <chunkN.json> --facts <app-facts.md> --vocab <vocab.json> --out <dir> [--model gpt-6-luna] [--effort low]");
+    console.error("Usage: label-codex.mjs <chunkN.json> --facts <app-facts.md> --vocab <vocab.json> --out <dir> [--model gpt-6-luna] [--effort low] [--service-tier priority]");
     process.exit(1);
   }
   mkdirSync(out, { recursive: true });
@@ -187,9 +192,10 @@ function main() {
   const appFacts = readFileSync(facts, "utf8");
   const model = opt("--model", "gpt-6-luna");
   const effort = opt("--effort", "low");
+  const serviceTier = opt("--service-tier", "priority");
   let lastRaw = "";
   const call = (subPosts) => {
-    const r = runCodex(buildPrompt(appFacts, subPosts, vocab), { model, effort, events });
+    const r = runCodex(buildPrompt(appFacts, subPosts, vocab), { model, effort, serviceTier, events });
     lastRaw = r.message;
     return r;
   };
