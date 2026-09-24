@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 // Token-alert bot templates and DM-spam; extend per corpus with --bot-pattern.
 const BOT_DEFAULT =
-  "Route: |Venue: |Launch: |MIGRATION|Migration |CTO SIGNAL|CTO ALERT|WALLET FLOW CHECK|Quick Buy|Quick Swap|CHECK EVENTS|dm us";
+  "Route: |Venue: |Launch: |MIGRATION|Migration |CTO SIGNAL|CTO ALERT|WALLET FLOW CHECK|Quick Buy|Quick Swap|CHECK EVENTS|Volume Alert|dm us";
 const MAX_TAGS = 6;
 const MIN_LEN = 8;
 
