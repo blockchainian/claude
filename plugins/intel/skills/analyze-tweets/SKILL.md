@@ -7,7 +7,7 @@ description: Turn a fetched X/Twitter mentions archive (tweets.jsonl from fetch-
 
 One app's X mentions → an evidence-only reception doc: an overview, what users
 like and dislike about the app, what they ask for, the timeline, and what it means for
-us. Every number comes from the JSON; every post is read and labeled by a subagent (no
+us. Every number comes from the JSON; every post is read and labeled by a model (no
 sampling, no keyword filter, no clustering model: those drop the concrete content);
 every quote is verbatim and id-verified. Concrete beats short: name the feature, the
 bug, the number, the date.
@@ -72,19 +72,50 @@ Prints the top 3 posts by likes for every day of the window — the raw material
 of the timeline section. No keyword list: what users talk about comes from the
 labels in step 3.
 
-### 3. Label the posts that have no label yet (subagents)
+### 3. Label the posts that have no label yet
 
 ```
-node $S/chunk.mjs <clean.json> --size 2000 --out <scratch> --labels mentions/<slug>/labels.jsonl [--since D] [--until D]
+node $S/chunk.mjs <clean.json> --size 1500 --out <scratch> --labels mentions/<slug>/labels.jsonl [--since D] [--until D]
 ```
 
 Only posts missing from `labels.jsonl` (and inside the window, if given) are
-chunked; each chunk is written as
-`chunkN.json` and `chunkN.tsv` (one post per line: id, author, likes, date, lang,
-text). Spawn `general-purpose` Sonnet labelers, one chunk each, about 10 in flight;
-start the next when one finishes. Write the prompt once to `<scratch>/PROMPT.md` and
-point each labeler at it. The prompt names the app's official handles (current and
-former), founder and team, products and features, and competitors, and says:
+chunked; each chunk is written as `chunkN.json` and `chunkN.tsv` (one post per
+line: id, author, likes, date, lang, text).
+
+Write `<scratch>/app-facts.md` once: the app's official handles (current and
+former), founder and team, products and features, competitors, and the noise
+common in its mentions (referral spam, giveaway begging, bot alerts, user slang
+such as chain nicknames). Nothing else: the field definitions and the vocabulary
+come from the script.
+
+**Default labeler: gpt-6-luna through `codex exec`**, one call per chunk, run in
+the background, about 10 in flight:
+
+```
+ls <scratch>/chunk*.json | xargs -P 10 -I{} node $S/label-codex.mjs {} --facts <scratch>/app-facts.md --vocab mentions/vocab.json --out <scratch>
+```
+
+Each call runs in a private `CODEX_HOME` (the login copied, no user config,
+AGENTS.md, plugins, hooks or tools), the labeling rules as the model's
+instructions, the app facts, the eight field definitions with `vocab.json` as
+examples and every post inline in the prompt, and the answer under a JSON schema
+by post number (small models mistype 19-digit ids). The script checks that every
+post came back once and in order, writes `labelsN.json`, and prints
+`chunk N: <posts> labeled, <noise%> noise, <about%> about; <tool calls>, <seconds>, <usage>`.
+A call that fails or hangs is retried once after the timeout; a chunk that still
+fails is rerun by hand. Measured (2026-09-23): 300 posts ≈ 4 min, 1000 ≈
+12 min, 2000 ≈ 25 min (120k in / 82k out of the plan's 272k window), 0 tool calls,
+no quality drift with length; effort low, higher effort made replies drop out and
+likes inflate. Luna calls Sonnet's `noise` (content-free about=false posts)
+`irrelevant` most of the time: the doc reports one about=false share, never the
+split. Luna over-uses `mobile-app` as a feature for "I use the app": fold it with
+`--rename` when it dominates.
+
+**Fallback labeler: Sonnet subagents**, when the ChatGPT plan quota is out. Chunk
+with `--size 2000`, spawn `general-purpose` Sonnet labelers, one chunk each, about
+10 in flight; start the next when one finishes. Write the prompt once to
+`<scratch>/PROMPT.md` (the app facts plus the field definitions below) and point
+each labeler at it. The prompt says:
 
 - First print all the posts, in batches of 100 as `id \t author \t likes \t date
   \t lang \t text`, into batch files under a private `work_N/` directory (never a
@@ -112,7 +143,7 @@ former), founder and team, products and features, and competitors, and says:
       the app but content-free, e.g. "gm @app"); for about=false, `irrelevant`
       (talks about something else: another token, a person in the thread) or
       `noise` (content-free: one-word replies, emoji, giveaway begging, bot
-      alerts). Irrelevant and noise are reported separately in the data section.
+      alerts). The doc reports one about=false share for both.
     - `topic`: what the post is about as a subject people discuss (the event, the
       company, the ecosystem, the culture). The prompt lists the topics in
       `vocab.json` as examples (first run: product-features, outages-execution,
@@ -157,16 +188,17 @@ labeler runs 40–70 tool turns and re-sends its context each turn: measured abo
 chunk. Sonnet's window is 1M and its output cap 128k, so do not go above ~3000
 posts per chunk; below 2000 the fixed 59k-token setup per agent dominates.
 
-Then fold the chunks into the store and grow the vocabulary:
+Both labelers write the same `labelsN.json` shape; the field definitions are the
+same text (the script embeds them). Then fold the chunks into the store and grow
+the vocabulary:
 
 ```
 node $S/merge-labels.mjs mentions/<slug>/labels.jsonl <scratch> --vocab mentions/vocab.json [--rename topic:old=new ...]
 ```
 
 It folds the chunk files into `labels.jsonl` by id (a relabeled id overwrites),
-applies the aliases already in `vocab.json`, adds every new topic / feature /
-interest value that reaches 1% of this batch's about=true posts to `vocab.json`,
-and prints the values below that line with their counts. Read the printed lists:
+applies the aliases already in `vocab.json`, adds every new topic / feature / interest value that
+reaches 1% of this batch's about=true posts to `vocab.json`, and prints the values below that line with their counts. Read the printed lists:
 a new value that means the same as an existing one is folded with
 `--rename topic:old=new` (field-scoped; the rename rewrites the store and is kept
 as an alias so later runs fold it automatically); the rest stay in the labels but
@@ -186,9 +218,8 @@ the peak month of each; sentiment over all posts and over the top-liked
 (volume share vs attention share); like, dislike and request counts per feature with
 unique authors; the most frequent `point` and `request` texts; the interested-party
 share of likes by kind of `interest`;
-and, for every summary, unknown ids and quotes that are not a substring of any
-post. Rank likes, dislikes and requests by their label counts; use the summaries
-only to pick quotes and facts. Take the final quote text by id from `clean.json`,
+and, for every `summaryN.txt` present (Sonnet path only), unknown ids and quotes that are not a substring of any
+post. Rank likes, dislikes and requests by their label counts; pick quotes from the top `point` texts (and the summaries when present). Take the final quote text by id from `clean.json`,
 never from a labeler's paraphrase, and link it as
 `https://x.com/<author>/status/<id>`.
 
@@ -246,7 +277,7 @@ one or two topics that dominate the conversation; the numbers live in 二–五>
 
 ## 六、时间线：声量、情绪、关键事件
 ![](images/<slug>-daily-volume.png)
-- the scope in one line: days, raw posts and accounts, clean posts after dropping bots / mass-tags / dupes; irrelevant and noise shares
+- the scope in one line: days, raw posts and accounts, clean posts after dropping bots / mass-tags / dupes; about=false share
 - MM-DD event, one line, with the number it moved
   > @handle：[verbatim text](url)
 - how like/dislike share moved over the window (by month or quarter)
