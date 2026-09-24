@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { clean, facts, readLog } from "./clean.mjs";
-import { writeFileSync, mkdtempSync } from "node:fs";
+import { writeFileSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { chunk } from "./chunk.mjs";
@@ -120,4 +120,29 @@ test("readLog parses tweets.jsonl and keeps the last line of a duplicated id", (
     JSON.stringify({ id: "1", text: "a2" }),
   ].join("\n") + "\n");
   assert.deepEqual(readLog(path), [{ id: "1", text: "a2" }, { id: "2", text: "b" }]);
+});
+
+test("label-codex builds one prompt per chunk and validates the model's labels against it", async () => {
+  const { buildPrompt, parseLabels, codexHome, SCHEMA } = await import("./label-codex.mjs");
+  const posts = chunk(fixture, 10)[0];
+  const prompt = buildPrompt("APP FACTS", posts, { topics: ["fees-pricing"], features: ["ui"] });
+  assert.ok(prompt.startsWith("APP FACTS"));
+  assert.ok(prompt.includes("Examples: fees-pricing."));
+  assert.ok(prompt.includes("Examples: ui."));
+  assert.ok(prompt.includes("Examples: none yet"));
+  assert.ok(prompt.includes(`1\talice\t50\tSep 2 \ten\tacme app is the cleanest UI in crypto`));
+  assert.equal(SCHEMA.properties.labels.items.required.length, 8);
+  const dir = mkdtempSync(join(tmpdir(), "codex-home-"));
+  process.env.CODEX_HOME = dir;
+  writeFileSync(join(dir, "auth.json"), "{}");
+  writeFileSync(join(dir, "AGENTS.md"), "say hi");
+  const home = codexHome(dir, { model: "m", effort: "low", instructions: "/x/rules.md" });
+  assert.deepEqual(readdirSync(home).sort(), ["auth.json", "config.toml"]);
+  assert.match(readFileSync(join(home, "config.toml"), "utf8"), /model = "m"\nmodel_reasoning_effort = "low"\nmodel_instructions_file = "\/x\/rules.md"\nproject_doc_max_bytes = 0/);
+  const good = posts.map((p, i) => ({ n: i + 1, about: false, sentiment: "noise", topic: "none", feature: "none", point: "", request: null, interest: null }));
+  const want = posts.map((p, i) => ({ id: p.id, ...good[i], n: undefined }));
+  assert.deepEqual(parseLabels(JSON.stringify({ labels: good }), posts), want.map(({ n, ...l }) => l));
+  assert.throws(() => parseLabels(JSON.stringify({ labels: good.slice(1) }), posts), /missing 1 posts/);
+  assert.throws(() => parseLabels(JSON.stringify({ labels: [good[1], good[0], ...good.slice(2)] }), posts), /order/);
+  assert.throws(() => parseLabels(JSON.stringify({ labels: [...good, { ...good[0], n: 99 }] }), posts), /unknown/);
 });
