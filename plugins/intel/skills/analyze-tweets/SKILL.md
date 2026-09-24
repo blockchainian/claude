@@ -89,10 +89,10 @@ such as chain nicknames). Nothing else: the field definitions and the vocabulary
 come from the script.
 
 **Default labeler: gpt-6-luna through `codex exec`**, one call per chunk, run in
-the background, about 10 in flight:
+the background, about 20 in flight:
 
 ```
-ls <scratch>/chunk*.json | xargs -P 10 -I{} node $S/label-codex.mjs {} --facts <scratch>/app-facts.md --vocab mentions/vocab.json --out <scratch>
+ls <scratch>/chunk*.json | xargs -P 20 -I{} node $S/label-codex.mjs {} --facts <scratch>/app-facts.md --vocab mentions/vocab.json --out <scratch>
 ```
 
 Each call runs in a private `CODEX_HOME` (the login copied, no user config,
