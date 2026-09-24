@@ -102,8 +102,12 @@ examples and every post inline in the prompt, and the answer under a JSON schema
 by post number (small models mistype 19-digit ids). The script checks that every
 post came back once and in order, writes `labelsN.json`, and prints
 `chunk N: <posts> labeled, <noise%> noise, <about%> about; <tool calls>, <seconds>, <usage>`.
-A call that fails or hangs is retried once after the timeout; a chunk that still
-fails is rerun by hand. Measured (2026-09-23): 300 posts ≈ 4 min, 1000 ≈
+A crashed or hung call is retried once after the timeout. When the model instead
+returns a short answer (it stops numbering partway, ~1 chunk in 6 on 1500 posts),
+the script re-asks for only the missing posts — a shorter prompt it rarely
+truncates — up to three passes; the print line then reads `<P> passes (gap-filled
+<n>+<n>)`. A chunk still short after three passes throws (a partial answer is never
+written as complete) and is rerun by hand. Measured (2026-09-23): 300 posts ≈ 4 min, 1000 ≈
 12 min, 2000 ≈ 25 min (120k in / 82k out of the plan's 272k window), 0 tool calls,
 no quality drift with length; effort low, higher effort made replies drop out and
 likes inflate. Luna calls Sonnet's `noise` (content-free about=false posts)
