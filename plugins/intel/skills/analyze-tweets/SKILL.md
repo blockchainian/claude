@@ -99,7 +99,11 @@ Each call runs in a private `CODEX_HOME` (the login copied, no user config,
 AGENTS.md, plugins, hooks or tools), the labeling rules as the model's
 instructions, the app facts, the eight field definitions with `vocab.json` as
 examples and every post inline in the prompt, and the answer under a JSON schema
-by post number (small models mistype 19-digit ids). The script checks that every
+by post number (small models mistype 19-digit ids). The call defaults to the
+**Fast service tier** (`service_tier = "priority"`: ~1.5x speed at 2x price, still
+~1/10 the cost of gpt-6-sol; a labeling chunk is ~130k input tokens, well under the
+272k short-context line, so it stays on the cheap tier); pass `--service-tier standard`
+to opt out, and a model that does not advertise the tier silently downgrades. The script checks that every
 post came back once and in order, writes `labelsN.json`, and prints
 `chunk N: <posts> labeled, <noise%> noise, <about%> about; <tool calls>, <seconds>, <usage>`.
 A crashed or hung call is retried once after the timeout. When the model instead
