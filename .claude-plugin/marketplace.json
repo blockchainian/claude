@@ -65,7 +65,7 @@
     },
     {
       "name": "intel",
-      "description": "Gather and distill knowledge: transcribe audio locally with whisper, digest an article, podcast or video into searchable highlights, and analyze an app's App Store reviews or X/Twitter mentions into a data-driven Chinese doc with charts.",
+      "description": "Gather and distill knowledge: transcribe audio locally with whisper, digest an article, podcast or video into searchable highlights, and analyze an app's App Store reviews into a data-driven Chinese doc with charts.",
       "author": {
         "name": "blockchainian"
       },
