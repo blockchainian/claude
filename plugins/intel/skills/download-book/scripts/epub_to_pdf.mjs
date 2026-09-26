@@ -9,10 +9,13 @@ import os from 'node:os';
 
 // Page/background/text spec follows the English PDFs the format is modelled on.
 const BG = [0.0, 0.0157, 0.0353]; // #000409
+// One color for all text (body, headings, footnotes); !important beats the
+// EPUB's own heading styles, which otherwise stay near-black and vanish on the
+// dark page.
 const EXTRA_CSS =
   'html{background:#000409;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-  ' body{color:#606e6a;text-align:justify;line-height:1.5}' +
-  ' p{text-indent:2em} a,h1,h2,h3,h4{color:#606e6a}';
+  ' *{color:#606e6a !important}' +
+  ' body{text-align:justify;line-height:1.5} p{text-indent:2em}';
 
 function ebookConvertBin() {
   for (const c of ['ebook-convert', '/Applications/calibre.app/Contents/MacOS/ebook-convert']) {
