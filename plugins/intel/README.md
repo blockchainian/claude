@@ -22,9 +22,10 @@ source goes in; durable, attributable notes come out.
   take-aways.
 - **`translate`** — a whole English book PDF → a Chinese PDF in the original's
   format: same cover page, page size and colors, chapter structure, running
-  heads and folios, a regenerated 目录 and flat bookmarks. Sections come from
-  the PDF outline; each is one `gpt-6-luna` call through `codex exec`, 20 in
-  flight; headless Chrome typesets in Baskerville + Songti SC; pikepdf adds the
+  heads and folios, a regenerated clickable 目录 and flat bookmarks. Sections
+  come from the PDF outline, or from the printed contents page when there is
+  none; two-up scans are split first. Each section is one `gpt-6-luna` call
+  through `codex exec`, 20 in flight; headless Chrome typesets in Baskerville + Songti SC; pikepdf adds the
   cover and bookmarks. Resumable, per-section previews, plain-Markdown edits.
 - **`analyze-appstore-reviews`** — a scraped App Store reviews JSON → a concise
   Chinese analysis doc with charts: likes, dislikes and feature requests ranked

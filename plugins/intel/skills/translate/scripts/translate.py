@@ -23,7 +23,7 @@ Translate the whole section, faithfully and fluently, as a Chinese publisher wou
 never skip a paragraph, never add commentary.
 
 The source is OCR text from a scanned book. Repair it silently: obvious misreads ("Pretace" -> "Preface",
-"fraction" -> "traction", "mineteen" -> "nineteen"), missing spaces in italics ("ofcustomer"), a first
+"rnodern" -> "modern", "mineteen" -> "nineteen"), missing spaces in italics ("ofcustomer"), a first
 letter that a drop cap detached or lost ("n 2006" -> "In 2006", "Ria we get started" -> "Before we get
 started"), and duplicated or stray running heads.
 
@@ -32,10 +32,10 @@ Output Markdown only:
 - Sub-headings in the source (short title lines that are not sentences) become "## " lines.
 - One paragraph per source paragraph, blank line between paragraphs. Keep "> " block quotes as "> ".
 - Keep *emphasis*. Keep bullet lists as "- " lines.
-- Proper nouns: company and product names stay in English (Google, DuckDuckGo, Hacker News); people are
+- Proper nouns: company and product names stay in English (Google, Netflix, Y Combinator); people are
   given as 中文译名（English Name）the first time, then the Chinese name.
 - Book and publication titles: 《中文译名》(English Title) the first time.
-- Numbers, money and units stay as in the source (865 平方英尺, 2008 年秋天). Put one space between
+- Numbers, money and units stay as in the source (500 平方英尺, 2010 年秋天). Put one space between
   Chinese and Latin letters or digits.
 - Follow the glossary exactly when one is given.
 """

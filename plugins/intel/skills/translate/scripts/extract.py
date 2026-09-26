@@ -3,12 +3,13 @@
 # requires-python = ">=3.10"
 # dependencies = ["pikepdf>=9"]
 # ///
-# ABOUTME: Splits an English book PDF into sections from its outline and writes each section's cleaned
-# ABOUTME: text (running heads and folios stripped, paragraphs rebuilt) into the book's work directory.
+# ABOUTME: Splits an English book PDF into sections (from its outline, else from its printed contents page) and
+# ABOUTME: writes each section's cleaned text (heads, feet, folios stripped; paragraphs rebuilt) into a work directory.
 #
 # Usage: extract.py <book.pdf> [--work <dir>] [--sections <sections.json>]
+# Two-up scans (two book pages per PDF page) are split into single pages first (<work>/pages.pdf).
 # Writes <work>/sections.json and <work>/text/<id>-<slug>.txt; prints one line per section.
-# Without a usable outline it exits 2 and tells the caller how to hand-write sections.json.
+# When neither the outline nor the contents page yields sections it exits 2 and says how to hand-write them.
 import argparse
 import json
 import re
@@ -48,7 +49,7 @@ def slugify(title):
 
 
 def parse_title(title):
-    """'1. Traction Channels' / 'Chapter One: Traction Channels' -> (1, 'Traction Channels'); else (None, title)."""
+    """'1. Getting Started' / 'Chapter One: Getting Started' -> (1, 'Getting Started'); else (None, title)."""
     t = title.strip()
     m = re.match(r"^(\d+)[.:\s]+\s*(.+)$", t)
     if m:
@@ -131,6 +132,10 @@ def join_hyphen(prev, word):
     return stem + word
 
 
+# "DEFINITIONS 2-1", "LOA 4-2", "Appendix A-3": a section-numbered running foot.
+RUNNING_FOOT = re.compile(r"(?:\d+\s+)?(?:[A-Z][A-Za-z0-9 ,&/'’\-–]*\s+)?(?:[A-Za-z]+\s*)?(?:[A-Z]|\d+)-\d+")
+
+
 def clean_pages(pages, running_heads):
     """pdftotext -layout pages -> paragraphs. Drops running heads and folios, rebuilds paragraphs from
     indentation and blank lines, marks indented blocks as quotes, and re-joins words the line breaks hyphenated."""
@@ -171,6 +176,8 @@ def clean_pages(pages, running_heads):
                 continue
             if re.fullmatch(r"[ivxlcdm]+|\d+|[|=\-—_.\s]*\d+[|=\-—_.\s]*", stripped, re.I):
                 continue
+            if RUNNING_FOOT.fullmatch(stripped):
+                continue
             if not re.search(r"[A-Za-z]{2}", stripped):
                 continue
             kept.append(line)
@@ -203,8 +210,117 @@ def pdftotext_pages(pdf_path, start, end):
     return out.split("\f")[: end - start + 1]
 
 
+def split_two_up(book, out):
+    """Pages wider than tall hold two book pages side by side: write a PDF with each half as its own page.
+    Returns the path when anything was split, else None."""
+    src = pikepdf.open(book)
+    if not any((float(p.mediabox[2]) - float(p.mediabox[0])) > 1.25 * (float(p.mediabox[3]) - float(p.mediabox[1])) for p in src.pages):
+        return None
+    dst = pikepdf.new()
+    for page in src.pages:
+        x0, y0, x1, y1 = (float(v) for v in page.mediabox)
+        halves = [[x0, y0, (x0 + x1) / 2, y1], [(x0 + x1) / 2, y0, x1, y1]] if (x1 - x0) > 1.25 * (y1 - y0) else [[x0, y0, x1, y1]]
+        for box in halves:
+            dst.pages.append(page)
+            dst.pages[-1].mediabox = box
+            dst.pages[-1].cropbox = box
+    dst.save(out)
+    return out
+
+
+LABEL = r"(?:Section|Chapter|Part|Appendix|LOA|Article|Letter)\s+([A-Za-z]+|\d+)"
+LEADER_LINE = re.compile(r"^\s*(?:(" + LABEL + r")\s+)?(.+?)\s*[.…·]{3,}\s*([A-Za-z]*\s*\d+(?:-\d+)?|[ivxlc]+)\s*$", re.I)
+LABEL_LINE = re.compile(r"^\s*(" + LABEL + r")\s+(\S.*?)\s*$", re.I)
+HEAD_WORDS = {"loa": "letter of agreement"}
+INDEX_LINE = re.compile(r"\S.*?[.…·\uFFFD\u2022]{3,}\s*\d+(?:,\s*\d+)*\s*$")
+
+
+def page_lines(pdf_path, page):
+    return [l.strip() for l in pdftotext_pages(pdf_path, page, page)[0].splitlines() if l.strip()]
+
+
+def contents_entries(pdf_path, page_count):
+    """(first contents page, [(label or None, title)]) read from the printed table of contents: lines with dot
+    leaders and a page number, a wrapped title joined to its leader line."""
+    entries, first, pending = [], None, None
+    for page in range(1, min(page_count, 20) + 1):
+        lines = page_lines(pdf_path, page)
+        found = [m for m in (LEADER_LINE.match(l) for l in lines) if m]
+        if len(found) < 3:
+            if entries:
+                break
+            continue
+        first = first or page
+        for l in lines:
+            m = LEADER_LINE.match(l)
+            if m:
+                label, title = m.group(1), m.group(3)
+                if pending and not label:
+                    label, title = pending[0], pending[1] + " " + title
+                pending = None
+                if not re.fullmatch(r"(table of )?contents|letters? of agreement|appendices|index", title.strip(), re.I):
+                    entries.append((label, title.strip(" .")))
+            else:
+                lm = LABEL_LINE.match(l)
+                pending = (lm.group(1), lm.group(3)) if lm and "contents" not in l.lower() else None
+    return first, entries
+
+
+def label_number(label):
+    n = label.split()[-1].lower()
+    return int(n) if n.isdigit() else NUMBER_WORDS.get(n)
+
+
+def locate_sections(pdf_path, page_count, first_page, entries):
+    """Find each contents entry's start page by its heading (label or title in the first lines of a page),
+    scanning forward from the previous find. Returns [(title, zero-based page)] plus the entries not found."""
+    # A heading sits in the first lines of its page: match only against the start of the page's text.
+    all_lines = {p: page_lines(pdf_path, p) for p in range(first_page, page_count + 1)}
+    heads = {p: re.sub(r"^(\d+|the)", "", _norm(" ".join(all_lines[p][:5])))[:48] for p in all_lines}
+    found, missing, pos = [], [], first_page
+    for label, title in entries:
+        keys, opening = [_norm(title)[:24]], []
+        if label:
+            word, n = label.split()[0].lower(), label_number(label)
+            keys += [_norm(label)] + [_norm(f"{word} {w}") for w, k in NUMBER_WORDS.items() if n is not None and k == n]
+            # a heading phrase such as "Letter of Agreement" must open the page, or it matches a closing formula
+            opening = [_norm(HEAD_WORDS[word])] if word in HEAD_WORDS else []
+        if opening:
+            keys = []
+        hit = next((p for p in range(pos + 1, page_count + 1)
+                    if any(k and k in heads[p] for k in keys) or any(heads[p].startswith(k) for k in opening)), None)
+        if hit is None:
+            missing.append(f"{label or ''} {title}".strip())
+            continue
+        pos = hit
+        n = label_number(label) if label else None
+        word = label.split()[0].lower() if label else ""
+        name = f"{n}. {title}" if word in ("chapter", "section") and n else f"{label}: {title}" if label else title
+        found.append((name, hit - 1))
+    # An index after the last section: a heading "Index", or pages of leader lines ("Term ....... 12, 40").
+    def index_like(p):
+        return heads[p].startswith("index") or sum(1 for l in all_lines[p] if INDEX_LINE.search(l)) >= 5
+    index = next((p for p in range(pos + 1, page_count + 1) if index_like(p)), None)
+    if index:
+        found.append(("Index", index - 1))
+    return found, missing
+
+
 def default_work(book):
-    return book.parent / ".translate" / slugify(book.stem)
+    """<book dir>/.translate/<slug>, or ~/Documents/translate/<slug> when the book's folder is not writable
+    (macOS keeps this process out of some folders); the book is copied there so every later step can read it."""
+    work = book.parent / ".translate" / slugify(book.stem)
+    try:
+        work.mkdir(parents=True, exist_ok=True)
+        return work, book
+    except (PermissionError, OSError):
+        work = Path.home() / "Documents" / "translate" / slugify(book.stem)
+        work.mkdir(parents=True, exist_ok=True)
+        copy = work / book.name
+        if not copy.exists():
+            copy.write_bytes(book.read_bytes())
+        print(f"{book.parent} is not writable: working in {work} on a copy of the book", file=sys.stderr)
+        return work, copy
 
 
 def main():
@@ -213,10 +329,17 @@ def main():
     ap.add_argument("--work")
     ap.add_argument("--sections", help="hand-written sections.json ([{title,start}] or full) to use instead of the outline")
     args = ap.parse_args()
-    book = Path(args.book).resolve()
-    work = Path(args.work).resolve() if args.work else default_work(book)
-    work.mkdir(parents=True, exist_ok=True)
+    source = Path(args.book).resolve()
+    if args.work:
+        work, book = Path(args.work).resolve(), source
+        work.mkdir(parents=True, exist_ok=True)
+    else:
+        work, book = default_work(source)
     (work / "text").mkdir(exist_ok=True)
+    split = split_two_up(book, work / "pages.pdf")
+    if split:
+        print(f"two-up pages split into {split}", file=sys.stderr)
+        book = split
 
     pdf = pikepdf.open(book)
     page_count = len(pdf.pages)
@@ -232,10 +355,18 @@ def main():
     else:
         entries = flatten_outline(pdf)
     if len(entries) < 2:
-        print(f"{book.name} has no usable outline. Write {work / 'sections.json'} by hand from the printed table of "
-              f"contents as [{{\"title\": \"Preface\", \"start\": 10}}, ...] (1-based PDF pages, in order) and rerun with "
-              f"--sections {work / 'sections.json'}", file=sys.stderr)
-        sys.exit(2)
+        first, listed = contents_entries(book, page_count)
+        located, missing = locate_sections(book, page_count, first, listed) if listed else ([], [])
+        if listed and len(located) >= max(2, 0.6 * len(listed)):
+            entries = [("COVER", 0), ("CONTENTS", first - 1)] + located
+            print(f"no outline: {len(listed) - len(missing)} of {len(listed)} contents entries located by their headings"
+                  + (f"; not found: {', '.join(missing)}" if missing else ""), file=sys.stderr)
+        else:
+            print(f"{book.name} has no usable outline and its contents page yields {len(located)} of {len(listed)} sections. "
+                  f"Write {work / 'sections.json'} by hand from the printed table of contents as "
+                  f"[{{\"title\": \"COVER\", \"start\": 1}}, {{\"title\": \"Preface\", \"start\": 10}}, ...] (1-based pages of "
+                  f"{book}, in order) and rerun with --sections {work / 'sections.json'}", file=sys.stderr)
+            sys.exit(2)
 
     sections = build_sections(entries, page_count)
     short_title = re.split(r"[:\-–—(]", title)[0].strip()
@@ -251,8 +382,8 @@ def main():
         s["words"] = sum(len(p.split()) for p in paragraphs)
         (work / s["file"]).write_text("\n\n".join(paragraphs) + "\n")
 
-    meta = {"book": str(book), "title": title, "author": author, "pages": page_count, "page_size": page_size,
-            "sections": sections}
+    meta = {"book": str(book), "source": str(source), "title": title, "author": author, "pages": page_count,
+            "page_size": page_size, "sections": sections}
     (work / "sections.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
     for s in sections:
         extra = f"{s['words']} words -> {s['file']}" if "file" in s else "(not translated)"
