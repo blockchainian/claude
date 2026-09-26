@@ -178,12 +178,10 @@ def render(work, opt):
         sys.exit("nothing to render")
 
     first_chapter = next((s for s in meta["sections"] if s["kind"] == "chapter"), meta["sections"][0])
-    bg, fg = sample_colors(book, min(first_chapter["start"] + 1, meta["pages"])) if "source" in (opt.bg, opt.fg) else (None, None)
-    if "iterm" in (opt.bg, opt.fg):
-        term_bg, term_fg = iterm_colors()
-        bg, fg = (term_bg if opt.bg == "iterm" else opt.bg or bg), (term_fg if opt.fg == "iterm" else opt.fg or fg)
-    else:
-        bg, fg = opt.bg or bg, opt.fg or fg
+    sampled = sample_colors(book, min(first_chapter["start"] + 1, meta["pages"])) if "source" in (opt.bg, opt.fg) else None
+    term = iterm_colors() if "iterm" in (opt.bg, opt.fg) else None
+    resolve = lambda v, i: sampled[i] if v == "source" else term[i] if v == "iterm" else v
+    bg, fg = resolve(opt.bg, 0), resolve(opt.fg, 1)
     style = css(meta["page_size"], bg, fg, [(s["id"], t, s["kind"]) for s, t, _ in ready], opt.font_size)
     title = opt.title or meta["title"]
     chrome = chrome_binary()
