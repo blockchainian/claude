@@ -20,6 +20,12 @@ source goes in; durable, attributable notes come out.
   pdfminer), and for a page that only offers audio falls back to `transcribe`.
   A bare URL or file digests; `save` / `search` manage the store, with per-item
   take-aways.
+- **`translate`** — a whole English book PDF → a Chinese PDF in the original's
+  format: same cover page, page size and colors, chapter structure, running
+  heads and folios, a regenerated 目录 and flat bookmarks. Sections come from
+  the PDF outline; each is one `gpt-6-luna` call through `codex exec`, 20 in
+  flight; headless Chrome typesets in Baskerville + Songti SC; pikepdf adds the
+  cover and bookmarks. Resumable, per-section previews, plain-Markdown edits.
 - **`analyze-appstore-reviews`** — a scraped App Store reviews JSON → a concise
   Chinese analysis doc with charts: likes, dislikes and feature requests ranked
   by frequency, every claim backed by a verbatim review.
@@ -44,6 +50,9 @@ audio leg and `digest` for the notes.
   Homebrew. `curl` for URL downloads.
 - `digest`: `curl`; `setup.sh` installs `uv` (runs the trafilatura article
   extractor) and `yt-dlp` (YouTube subtitles).
+- `translate`: `setup.sh` installs `poppler` and `uv`; needs a logged-in
+  `codex` CLI (ChatGPT plan, for gpt-6-luna) and Google Chrome (`CHROME=` to
+  point elsewhere).
 - `find-domain-names`: a Namecheap API key with the calling IP whitelisted,
   stored at `~/.config/blockchainian/claude.json` (see the skill's Setup step).
 
@@ -52,6 +61,7 @@ audio leg and `digest` for the notes.
 ```
 python3 skills/transcribe/scripts/test_transcribe.py
 python3 skills/digest/scripts/test_digest.py
+skills/translate/scripts/test_translate.py
 node --test skills/find-domain-names/scripts/test_check.mjs
 ```
 
