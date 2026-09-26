@@ -2,6 +2,11 @@
 // ABOUTME: Uses a small inline fixture mirroring the site's per-<li> option list; no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { parseLinks, selectSlowPaths } from './anna_archive_links.mjs';
 
 const MD5 = '26f03228f2f3ee0f980ae56f9bd97844';
@@ -24,4 +29,12 @@ test('selectSlowPaths falls back to the first entry when no waitlist labels exis
   const { primary, fallback } = selectSlowPaths(parseLinks(only).anchors, MD5);
   assert.ok(primary.href.endsWith('/0/8'), 'primary falls back to the only entry');
   assert.equal(fallback, null, 'no separate fallback when the only entry is already primary');
+});
+
+test('the script runs when invoked through a symlinked directory', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'anna-link-'));
+  const scripts = fileURLToPath(new URL('.', import.meta.url));
+  symlinkSync(scripts, join(dir, 'scripts'));
+  const run = spawnSync(process.execPath, [join(dir, 'scripts', 'anna_archive_links.mjs'), '--help'], { encoding: 'utf8' });
+  assert.match(run.stdout + run.stderr, /用法/, 'a symlinked invocation must print the usage line, not exit silently');
 });
