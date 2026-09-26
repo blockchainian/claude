@@ -131,9 +131,37 @@ def contents_html(entries, folios):
     for s, title in entries:
         pg = folios.get(s["id"], "000")
         rows.append(f'<div class="e {s["kind"]}"><span class="lbl">{html.escape(s.get("label") or "")}</span>'
-                    f'<span class="t">{html.escape(title)}</span><span class="pg">{pg}</span></div>')
+                    f'<span class="t">{html.escape(title)}<span class="mk">⟦T{s["id"]}⟧</span></span><span class="pg">{pg}</span></div>')
     return (f'<section class="contents front" id="toc"><div class="opener"><h1>目录<span class="mk">{MARK_TOC}</span></h1></div>'
             f'<div class="toc">{"".join(rows)}</div></section>')
+
+
+def contents_rows(pdf_path):
+    """Contents-row marker id -> (zero-based page, y center in PDF points from the top, page width, page height)."""
+    xml = subprocess.run(["pdftotext", "-bbox-layout", str(pdf_path), "-"], capture_output=True, text=True, check=True).stdout
+    rows = {}
+    for i, page in enumerate(re.findall(r"<page (.*?)</page>", xml, re.S)):
+        head = re.match(r'width="([\d.]+)" height="([\d.]+)"', page)
+        for m in re.finditer(r'<word xMin="[\d.]+" yMin="([\d.]+)" xMax="[\d.]+" yMax="([\d.]+)">⟦\s*T\s*([\d\s]+)\s*⟧</word>', page):
+            rows[re.sub(r"\s+", "", m.group(3))] = (i, (float(m.group(1)) + float(m.group(2))) / 2, float(head.group(1)), float(head.group(2)))
+    return rows
+
+
+def link_contents(pdf, front_pdf, offset, pages, ready, row_height):
+    """A Link annotation over every 目录 row, jumping to that section's opener page."""
+    rows = contents_rows(front_pdf)
+    for s, _, _ in ready:
+        if s["id"] not in rows:
+            continue
+        page_index, y, w, h = rows[s["id"]]
+        page = pdf.pages[page_index + offset]
+        target = pdf.pages[pages[f"S{s['id']}"] + offset]
+        rect = [w * 0.1, h - y - row_height / 2, w * 0.9, h - y + row_height / 2]
+        annot = pikepdf.Dictionary(Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Link, Rect=rect, Border=[0, 0, 0],
+                                   Dest=[target.obj, pikepdf.Name.Fit])
+        if "/Annots" not in page:
+            page.Annots = pikepdf.Array()
+        page.Annots.append(pdf.make_indirect(annot))
 
 
 def page_texts(pdf_path):
@@ -228,13 +256,13 @@ def render(work, opt):
 
     out = Path(opt.out) if opt.out else book.with_name(book.stem + "-zh.pdf")
     assemble(book, [front_pdf] + ([body_pdf] if body_pdf else []), out, ready, pages, meta, title, bg,
-             top_margin=meta["page_size"][1] * 0.082)
-    print(f"{out} ({len(pikepdf.open(out).pages)} pages, {len(ready)} sections, cover + 目录 + bookmarks)")
+             top_margin=meta["page_size"][1] * 0.082, row_height=opt.font_size * 1.8)
+    print(f"{out} ({len(pikepdf.open(out).pages)} pages, {len(ready)} sections, cover + linked 目录 + bookmarks)")
 
 
-def assemble(book, part_pdfs, out, ready, pages, meta, title, bg, top_margin):
+def assemble(book, part_pdfs, out, ready, pages, meta, title, bg, top_margin, row_height):
     """Cover page from the source + the typeset parts; every page underlaid with the background, the running
-    head masked on opener pages; flat bookmarks (Cover, 目录, one per section)."""
+    head masked on opener pages; 目录 rows linked to their sections; flat bookmarks (Cover, 目录, one per section)."""
     src = pikepdf.open(book)
     pdf = pikepdf.new()
     cover = next((s for s in meta["sections"] if s["kind"] == "cover"), None)
@@ -253,6 +281,7 @@ def assemble(book, part_pdfs, out, ready, pages, meta, title, bg, top_margin):
         page.contents_add(pikepdf.Stream(pdf, fill), prepend=True)
         mask = f"q {r:.4f} {g:.4f} {b:.4f} rg {x0} {y1 - top_margin + 2} {x1 - x0} {top_margin - 2} re f Q\n".encode() if i in openers else b""
         page.contents_add(pikepdf.Stream(pdf, b"Q\n" + mask), prepend=False)
+    link_contents(pdf, part_pdfs[0], offset, pages, ready, row_height)
     with pdf.open_outline() as outline:
         outline.root.append(pikepdf.OutlineItem("Cover", 0))
         if "TOC" in pages:

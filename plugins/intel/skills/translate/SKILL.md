@@ -91,12 +91,14 @@ with a hint of the terminal's teal. Neutral or warm grays glare on a black page 
 terminal's own teal is too dark to read as body text; that gray sits between the two. `--bg/--fg` take
 `#rrggbb`, `iterm` (either terminal color) or `source` (sampled from a body page of the book). Type is Baskerville for Latin and Songti SC for Chinese. Chapter openers carry the
 第N章 label, the title and a drop cap; body pages carry the chapter title as running head and a folio (roman in
-front matter, arabic from chapter 1). Bookmarks are flat: Cover, 目录, one per section. Sections without a
+front matter, arabic from chapter 1). Every 目录 row is a link to its section, and the bookmarks are flat:
+Cover, 目录, one per section. Sections without a
 translation yet are skipped with a warning, so a partial book renders at any time.
 
 Then look, do not assume: render the cover, the 目录, one chapter opener and one body page to PNG
 (`pdftoppm -r 45`) and check that the header is masked on openers, folios restart at chapter 1, and 目录 page
-numbers match the bookmarks. Open the PDF for the user.
+numbers match the bookmarks (pikepdf: the 目录 page's `/Annots` links point at the same pages). Open the PDF for
+the user.
 
 ## Editing after the fact
 
