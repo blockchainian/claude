@@ -2,6 +2,7 @@
 // ABOUTME: Finds the most downloaded EPUB on one Anna's Archive search page and its download links.
 // ABOUTME: All site requests go through a headed Chrome session that passes the DDoS-Guard check.
 
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { isChallenge, openSession } from './site_session.mjs';
@@ -244,6 +245,7 @@ async function main() {
   finally { await (await session)?.close(); }
 }
 
-if (pathToFileURL(process.argv[1]).href === import.meta.url) {
+// Node resolves the main module through symlinks, so argv[1] must be resolved the same way.
+if (pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url) {
   main().catch(error => { console.error(`错误：${error.message}`); process.exitCode = 1; });
 }
