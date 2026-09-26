@@ -109,6 +109,9 @@ def test_render_units(rd):
     check("markdown title split off", title == "章名" and "<h1" not in body)
     check("markdown body html", "<em>强调</em>" in body and "<blockquote>" in body and "<h2>小标题</h2>" in body)
     check("roman folios", [rd.folio_for(i, None) for i in range(3)] == ["i", "ii", "iii"])
+    check("roman folio past the table falls back to arabic (long front matter)",
+          rd.roman_folio(len(rd.ROMAN) - 1) == str(len(rd.ROMAN)) and rd.folio_for(len(rd.ROMAN) + 5, None) == str(len(rd.ROMAN) + 6),
+          f"{rd.roman_folio(len(rd.ROMAN) - 1)} / {rd.folio_for(len(rd.ROMAN) + 5, None)}")
     style = rd.css([427.6, 660], "#181a1d", "#e1ddd5", [("03", "前言", "front"), ("04", "第一章", "chapter")])
     check("css page size and colors", "size: 427.6pt 660pt" in style and "--bg: #181a1d" in style and "Baskerville" in style)
     check("css front roman, body arabic", '@page s03 { @top-center { content: "前言"' in style and "counter(page, lower-roman)" in style.split("@page s03")[1].split("}}")[0]
