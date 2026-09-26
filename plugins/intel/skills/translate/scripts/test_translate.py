@@ -70,6 +70,16 @@ def test_extract(ex):
     check("indented block becomes one quote", sum(p.startswith("> ") for p in paras) == 1 and any(p.startswith("> Traction is basically") and "the bar is low" in p for p in paras), str(paras))
     check("paragraph continues across pages", any(p.startswith("Next paragraph starts here and continues") for p in paras), str(paras))
     check("paragraph count", len(paras) == 5, str(len(paras)) + " " + str(paras))
+    feet = ["DEFINITIONS 2-1", "8      DEFINITIONS 2-1", "LOA 4-2", "Appendix A-3", "SCHEDULING 7-14"]
+    check("section-numbered running feet dropped", all(ex.RUNNING_FOOT.fullmatch(f.strip()) for f in feet)
+          and not ex.RUNNING_FOOT.fullmatch("Flights 2-1 and 3-4 are paired"), str([bool(ex.RUNNING_FOOT.fullmatch(f.strip())) for f in feet]))
+    paras = ex.clean_pages(["    Body text of the page.\nand its second line.\n\n8      DEFINITIONS 2-1\n", "     Next page body.\nsecond line.\n"], [])
+    check("running foot never joins the next paragraph", paras == ["Body text of the page. and its second line.", "Next page body. second line."], str(paras))
+    m = ex.LEADER_LINE.match("Section 12   Vacations............................................. 12-1")
+    check("contents leader line parsed", m and m.group(1) == "Section 12" and m.group(3) == "Vacations", str(m and m.groups()))
+    m = ex.LEADER_LINE.match("Preface: Why This Book ........ ix")
+    check("unlabelled leader line parsed", m and m.group(1) is None and m.group(3) == "Preface: Why This Book", str(m and m.groups()))
+    check("label numbers", ex.label_number("Chapter Twelve") == 12 and ex.label_number("Section 7") == 7 and ex.label_number("LOA 3") == 3)
 
 
 def test_translate(tr):
@@ -130,6 +140,55 @@ def make_source_book(path, chrome):
     pdf.save(path)
 
 
+def make_two_up_book(path, chrome):
+    """A landscape 2-up PDF (two book pages per sheet), no outline, with a printed contents page, three sections
+    headed 'SECTION N', a 'LETTER OF AGREEMENT' and an index of leader lines."""
+    html_path = path.with_suffix(".html")
+    body = "Body text for this page. " * 40
+    pages = ['<div class="pg"><h1>TINY AGREEMENT</h1></div>',
+             '<div class="pg"><h2>Table of Contents</h2><p>Section 1 Recognition ................ 1-1</p>'
+             '<p>Section 2 Definitions ................ 2-1</p><p>Section 3 Minimum Pay and Credit,</p><p>Hours of Service ................ 3-1</p>'
+             '<p>LOA 1 Staff Travel ................ LOA 1-1</p></div>',
+             f'<div class="pg"><h2>SECTION 1</h2><h2>RECOGNITION</h2><p>{body}</p><p class="ft">RECOGNITION 1-1</p></div>',
+             f'<div class="pg"><p>{body}</p><p class="ft">RECOGNITION 1-2</p></div>',
+             f'<div class="pg"><h2>SECTION 2</h2><h2>DEFINITIONS</h2><p>{body}</p><p class="ft">DEFINITIONS 2-1</p></div>',
+             f'<div class="pg"><h2>SECTION 3</h2><h2>MINIMUM PAY AND CREDIT,</h2><p>{body}</p></div>',
+             f'<div class="pg"><h2>LETTER OF AGREEMENT</h2><h2>BETWEEN</h2><p>{body}</p></div>',
+             f'<div class="pg"><p>The parties have signed this Letter of Agreement. {body}</p></div>',
+             '<div class="pg">' + "".join(f"<p>Term {i} ........................ {i}, {i + 3}</p>" for i in range(8)) + "</div>",
+             '<div class="pg"></div>']
+    sheets = ['<div class="pg one">' + pages[0] + "</div>"] + [f'<div class="sheet">{pages[i]}{pages[i + 1]}</div>' for i in range(1, len(pages) - 1, 2)]
+    html_path.write_text('<!doctype html><meta charset="utf-8"><style>@page{size:792pt 612pt;margin:0}'
+                         'body{margin:0;font:11pt Baskerville}.sheet{display:flex;width:792pt;height:612pt;break-after:page}'
+                         '.sheet .pg{width:396pt;height:612pt;padding:40pt;box-sizing:border-box}'
+                         '.one{width:792pt;height:612pt;break-after:page}.one .pg{padding:40pt}'
+                         'h2{font-size:12pt;text-align:center;margin:4pt}p{margin:0 0 6pt}.ft{margin-top:24pt;text-align:center}</style>'
+                         + "".join(sheets))
+    subprocess.run([chrome, "--headless=new", "--disable-gpu", "--no-pdf-header-footer", f"--print-to-pdf={path}",
+                    f"file://{html_path}"], check=True, capture_output=True)
+
+
+def test_two_up_no_outline(chrome):
+    with tempfile.TemporaryDirectory() as d:
+        book = Path(d) / "tiny-2up.pdf"
+        make_two_up_book(book, chrome)
+        work = Path(d) / "work"
+        r = subprocess.run([sys.executable, str(HERE / "extract.py"), str(book), "--work", str(work)], capture_output=True, text=True)
+        check("extract runs on a two-up book without an outline", r.returncode == 0, r.stderr[-800:] + r.stdout[-400:])
+        if r.returncode != 0:
+            return
+        check("two-up sheets split into single pages", (work / "pages.pdf").exists() and len(pikepdf.open(work / "pages.pdf").pages) == 10)
+        meta = json.loads((work / "sections.json").read_text())
+        got = [(s["outline_title"], s["start"]) for s in meta["sections"]]
+        # the cover sheet is landscape too, so it splits into pages 1 and 2
+        want = [("COVER", 1), ("CONTENTS", 3), ("1. Recognition", 4), ("2. Definitions", 6),
+                ("3. Minimum Pay and Credit, Hours of Service", 7), ("LOA 1: Staff Travel", 8), ("Index", 10)]
+        check("sections found from the printed contents page", got == want, str(got))
+        check("page size is the single page", meta["page_size"] == [396.0, 612.0], str(meta["page_size"]))
+        text = (work / "text" / "03-recognition.txt").read_text()
+        check("running feet stripped from the section text", "1-1" not in text and "1-2" not in text and "Body text" in text, text[-200:])
+
+
 def test_render_e2e(rd):
     chrome = None
     for c in [os.environ.get("CHROME"), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -177,6 +236,7 @@ def test_render_e2e(rd):
         opt = SimpleNamespace(only=meta["sections"][2]["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=12)
         rd.render(work, opt)
         check("single-section preview written", any((work / "pdf").glob("*.pdf")))
+    test_two_up_no_outline(chrome)
 
 
 def test_luna_e2e(tr):
