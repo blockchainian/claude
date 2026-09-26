@@ -179,9 +179,13 @@ def page_map(pdf_path):
     return found
 
 
+def roman_folio(page_index):
+    return ROMAN[page_index + 1] if page_index + 1 < len(ROMAN) else str(page_index + 1)
+
+
 def folio_for(page_index, first_body_index):
     if first_body_index is None or page_index < first_body_index:
-        return ROMAN[page_index + 1] if page_index + 1 < len(ROMAN) else str(page_index + 1)
+        return roman_folio(page_index)
     return str(page_index - first_body_index + 1)
 
 
@@ -245,7 +249,7 @@ def render(work, opt):
     front_pdf, front_pages = None, {}
     for _ in range(3):
         front_pdf, front_pages = typeset("front", [contents_html(entries, folios)] + [section_html(*r) for r in front])
-        new = {**folios, **{s["id"]: ROMAN[front_pages[f"S{s['id']}"] + 1] for s, _, _ in front}}
+        new = {**folios, **{s["id"]: roman_folio(front_pages[f"S{s['id']}"]) for s, _, _ in front}}
         if new == folios:
             break
         folios = new
