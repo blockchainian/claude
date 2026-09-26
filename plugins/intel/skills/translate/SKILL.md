@@ -86,8 +86,10 @@ is assembled.
 
 Writes `<book>-zh.pdf`: the source's cover page, a 目录 with folios, then every translated section. Page size
 comes from the source's first page; background and text colors are sampled from a body page of the source
-(`--bg/--fg` override with `#rrggbb`, or `iterm` for the iTerm2 default profile's dark-mode colors: the user
-wants the book's background to match the terminal, `--bg iterm`); type is Baskerville for Latin and Songti SC for Chinese. Chapter openers carry the
+(`--bg/--fg` override with `#rrggbb`, or `iterm` for the iTerm2 default profile's dark-mode colors). The user's
+standing choice for dark books, picked page by page on 2026-09-25: `--bg iterm --fg "#606e6a"`, a cool gray
+with a hint of the terminal's teal. Neutral or warm grays glare on a black page even when dimmed, and the
+terminal's own teal is too dark to read as body text; that gray sits between the two. Type is Baskerville for Latin and Songti SC for Chinese. Chapter openers carry the
 第N章 label, the title and a drop cap; body pages carry the chapter title as running head and a folio (roman in
 front matter, arabic from chapter 1). Bookmarks are flat: Cover, 目录, one per section. Sections without a
 translation yet are skipped with a warning, so a partial book renders at any time.
