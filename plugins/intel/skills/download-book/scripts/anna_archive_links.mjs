@@ -3,6 +3,7 @@
 // ABOUTME: All site requests go through a headed Chrome session that passes the DDoS-Guard check.
 
 import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { isChallenge, openSession } from './site_session.mjs';
 
 const DEFAULT_BASE = 'https://annas-archive.pk';
@@ -20,7 +21,7 @@ function decodeHtml(value) {
   });
 }
 
-function parseLinks(html) {
+export function parseLinks(html) {
   const anchors = [];
   const copyUrls = [];
   const stack = [];
@@ -135,23 +136,60 @@ function directUrl(html) {
   return links.copyUrls[0] ?? null;
 }
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const isNoWaitlist = anchor => (anchor.li?.text ?? '').toLowerCase().includes('no waitlist');
+
+// The waitlist servers ("slightly faster but with waitlist") download at megabytes per second after a
+// ~50s server-side queue; the "no waitlist" servers are immediate but throttled to tens of KB/s. Prefer
+// the first waitlist server, keeping the first no-waitlist one as a fallback that always yields a link.
+export function selectSlowPaths(anchors, md5) {
+  const paths = anchors.filter(anchor => SLOW_LINK.exec(anchor.href)?.[1] === md5);
+  const primary = paths.find(anchor => !isNoWaitlist(anchor)) ?? paths[0] ?? null;
+  const fallback = paths.find(anchor => isNoWaitlist(anchor) && anchor.href !== primary?.href) ?? null;
+  return { primary, fallback };
+}
+
+const SLOW_POLL_MS = 8_000;
+const SLOW_WAIT_MS = 130_000;
+
+// Polls an entry until its direct link appears (the waitlist page reveals it only after the queue),
+// or the deadline passes. Returns the link, a redirect error, or the last response for the caller to judge.
+async function resolveSlow(base, entryHref, deadline) {
+  const entry = new URL(entryHref, base).href;
+  let last = { status: 0, body: '' };
+  do {
+    const { status, redirected, body } = await get(entry, false);
+    if (redirected) return { entry, error: '入口发生跳转，未跟随' };
+    last = { status, body };
+    const url = status === 200 ? directUrl(body) : null;
+    if (url) return { entry, status, source: 'live', url };
+    if (Date.now() < deadline) await sleep(SLOW_POLL_MS);
+  } while (Date.now() < deadline);
+  return { entry, status: last.status, body: last.body };
+}
+
 async function slowUrl(base, md5, detailHtml, savedSlowHtml) {
   const detail = detailHtml ?? checkedHtml(await get(`${base}/md5/${md5}`), '详情页');
-  const paths = parseLinks(detail).anchors.filter(anchor => SLOW_LINK.exec(anchor.href)?.[1] === md5);
-  if (!paths.length) return { error: '详情页没有慢速下载入口' };
-  const selected = paths.find(anchor => anchor.li?.text.toLowerCase().includes('no waitlist')) ?? paths[0];
-  const entry = new URL(selected.href, base).href;
-  const { status, redirected, body } = await get(entry, false);
-  if (redirected) return { entry, error: '入口发生跳转，未跟随' };
-  const liveUrl = status === 200 ? directUrl(body) : null;
-  if (liveUrl) return { entry, status, source: 'live', url: liveUrl };
-  if (savedSlowHtml !== null) {
-    if (!savedSlowHtml.includes(`/md5/${md5}`)) return { entry, status, error: '保存的慢速页面与获选记录不符' };
-    const savedUrl = directUrl(savedSlowHtml);
-    if (savedUrl) return { entry, status, source: 'saved_html', url: savedUrl };
+  const { primary, fallback } = selectSlowPaths(parseLinks(detail).anchors, md5);
+  if (!primary) return { error: '详情页没有慢速下载入口' };
+  // A saved slow page means the live entry is blocked, so do not sit through the queue: try live once.
+  const wait = savedSlowHtml !== null ? 0 : SLOW_WAIT_MS;
+  let result = await resolveSlow(base, primary.href, Date.now() + wait);
+  if (result.url) return result;
+  if (result.error) return { entry: result.entry, error: result.error };
+  if (fallback) {
+    const alt = await resolveSlow(base, fallback.href, Date.now());
+    if (alt.url) return alt;
+    if (alt.status) result = alt;
   }
-  const error = isChallenge(body) ? '未通过浏览器验证' : status !== 200 ? '慢速入口不可用' : '仍在等待或页面未提供直链';
-  return { entry, status, error };
+  if (savedSlowHtml !== null) {
+    if (!savedSlowHtml.includes(`/md5/${md5}`)) return { entry: result.entry, status: result.status, error: '保存的慢速页面与获选记录不符' };
+    const savedUrl = directUrl(savedSlowHtml);
+    if (savedUrl) return { entry: result.entry, status: result.status, source: 'saved_html', url: savedUrl };
+  }
+  const error = isChallenge(result.body ?? '') ? '未通过浏览器验证' : result.status !== 200 ? '慢速入口不可用' : '仍在等待或页面未提供直链';
+  return { entry: result.entry, status: result.status, error };
 }
 
 function args(argv) {
@@ -206,4 +244,6 @@ async function main() {
   finally { await (await session)?.close(); }
 }
 
-main().catch(error => { console.error(`错误：${error.message}`); process.exitCode = 1; });
+if (pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch(error => { console.error(`错误：${error.message}`); process.exitCode = 1; });
+}
