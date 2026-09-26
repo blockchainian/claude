@@ -6,7 +6,7 @@
 # ABOUTME: Typesets the translated Markdown sections into a PDF in the source book's format (page size, colors,
 # ABOUTME: running heads, folios, contents page) with headless Chrome, then adds the original cover and bookmarks.
 #
-# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg #181a1d --fg #e1ddd5]
+# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg #181a1d --fg #e1ddd5] [--font-size 9.25]
 # Without --only: the whole book (cover + 目录 + every translated section) to --out (default <book>-zh.pdf next
 # to the source). With --only: one section to <work>/pdf/<id>-<slug>.pdf for a quick look, no cover or contents.
 import argparse
@@ -61,7 +61,7 @@ def md_to_html(md_text):
     return title, markdown.markdown(body, extensions=["smarty"], output_format="html")
 
 
-def css(page_size, bg, fg, heads):
+def css(page_size, bg, fg, heads, font_size=9.25):
     w, h = page_size
     top, side, bottom = round(h * 0.082, 1), round(w * 0.135, 1), round(h * 0.068, 1)
     margin_font = 'font-family: Baskerville, "Songti SC", serif;'
@@ -76,7 +76,7 @@ def css(page_size, bg, fg, heads):
         @bottom-center {{ content: counter(page, lower-roman); font-size: 8pt; color: {fg}; {margin_font} }} }}
 {named}
 html {{ background: var(--bg); }}
-body {{ margin: 0; color: var(--fg); font-family: Baskerville, "Songti SC", serif; font-size: 10.5pt; line-height: 1.8; }}
+body {{ margin: 0; color: var(--fg); font-family: Baskerville, "Songti SC", serif; font-size: {font_size}pt; line-height: 1.8; }}
 section {{ break-before: page; }}
 .opener {{ padding-top: {round(h * 0.2)}pt; text-align: center; margin-bottom: {round(h * 0.07)}pt; }}
 .opener .label {{ font-size: 9pt; letter-spacing: 3pt; margin-bottom: 14pt; }}
@@ -163,7 +163,7 @@ def render(work, opt):
 
     first_chapter = next((s for s in meta["sections"] if s["kind"] == "chapter"), meta["sections"][0])
     bg, fg = (opt.bg, opt.fg) if opt.bg and opt.fg else sample_colors(book, min(first_chapter["start"] + 1, meta["pages"]))
-    style = css(meta["page_size"], bg, fg, [(s["id"], t, s["kind"]) for s, t, _ in ready])
+    style = css(meta["page_size"], bg, fg, [(s["id"], t, s["kind"]) for s, t, _ in ready], opt.font_size)
     title = opt.title or meta["title"]
     chrome = chrome_binary()
     tmp = Path(tempfile.mkdtemp(prefix="render-"))
@@ -259,6 +259,7 @@ def main():
     ap.add_argument("--title", help="Chinese book title for the PDF metadata")
     ap.add_argument("--bg", help="page background, e.g. #181a1d (default: sampled from the source)")
     ap.add_argument("--fg", help="text color, e.g. #e1ddd5 (default: sampled from the source)")
+    ap.add_argument("--font-size", type=float, default=9.25, help="body size in pt (default 9.25)")
     opt = ap.parse_args()
     render(Path(opt.work).resolve(), opt)
 

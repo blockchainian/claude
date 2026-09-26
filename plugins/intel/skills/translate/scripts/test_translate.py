@@ -150,7 +150,7 @@ def test_render_e2e(rd):
             if s.get("file"):
                 (work / "md" / (Path(s["file"]).stem + ".md")).write_text(f"# {s['title']}译\n\n" + ("正文。" * 400 + "\n\n") * 6)
         out = Path(d) / "tiny-zh.pdf"
-        opt = SimpleNamespace(only=None, out=str(out), title="小书", bg=None, fg=None)
+        opt = SimpleNamespace(only=None, out=str(out), title="小书", bg=None, fg=None, font_size=9.25)
         rd.render(work, opt)
         pdf = pikepdf.open(out)
         with pdf.open_outline() as outline:
@@ -166,7 +166,7 @@ def test_render_e2e(rd):
         src_box = [float(v) for v in src.pages[0].mediabox]
         cover_box = [float(v) for v in pdf.pages[0].mediabox]
         check("cover page copied from the source", cover_box == src_box and "COVER" in text[0], f"{cover_box} vs {src_box}")
-        opt = SimpleNamespace(only=meta["sections"][2]["id"], out=None, title=None, bg="#ffffff", fg="#000000")
+        opt = SimpleNamespace(only=meta["sections"][2]["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=12)
         rd.render(work, opt)
         check("single-section preview written", any((work / "pdf").glob("*.pdf")))
 
