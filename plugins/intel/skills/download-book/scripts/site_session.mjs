@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const PROFILE_DIR = join(homedir(), '.cache', 'blockchainian', 'download-book-profile');
+const PROFILE_DIR = join(homedir(), '.cache', 'secrets-manager', 'profiles', 'download-book');
 // The site's own pages mention DDoS-Guard in script comments; only the challenge page carries these markers.
 const CHALLENGE = /<title>\s*DDoS-Guard\s*<\/title>|\/\.well-known\/ddos-guard\/(js-challenge|ddg-captcha-page)\//i;
 const CHALLENGE_TIMEOUT = 45_000;
@@ -48,6 +48,7 @@ export async function openSession(origin) {
   const context = await chromium.launchPersistentContext(PROFILE_DIR, {
     headless: false,
     channel: 'chrome',
+    chromiumSandbox: true,
     viewport: null,
     args: ['--disable-blink-features=AutomationControlled'],
     ignoreDefaultArgs: ['--enable-automation', '--disable-extensions', '--disable-component-extensions-with-background-pages', '--disable-popup-blocking', '--disable-component-update', '--disable-default-apps'],
