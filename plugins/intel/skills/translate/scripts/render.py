@@ -6,7 +6,7 @@
 # ABOUTME: Typesets the translated Markdown sections into a PDF in the source book's format (page size, colors,
 # ABOUTME: running heads, folios, contents page) with headless Chrome, then adds the original cover and bookmarks.
 #
-# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg #181a1d|iterm --fg #e1ddd5|iterm] [--font-size 9.25]
+# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg iterm|source|#rrggbb --fg #606e6a|iterm|source] [--font-size 9.25]
 # Without --only: the whole book (cover + 目录 + every translated section) to --out (default <book>-zh.pdf next
 # to the source). With --only: one section to <work>/pdf/<id>-<slug>.pdf for a quick look, no cover or contents.
 import argparse
@@ -178,7 +178,7 @@ def render(work, opt):
         sys.exit("nothing to render")
 
     first_chapter = next((s for s in meta["sections"] if s["kind"] == "chapter"), meta["sections"][0])
-    bg, fg = sample_colors(book, min(first_chapter["start"] + 1, meta["pages"]))
+    bg, fg = sample_colors(book, min(first_chapter["start"] + 1, meta["pages"])) if "source" in (opt.bg, opt.fg) else (None, None)
     if "iterm" in (opt.bg, opt.fg):
         term_bg, term_fg = iterm_colors()
         bg, fg = (term_bg if opt.bg == "iterm" else opt.bg or bg), (term_fg if opt.fg == "iterm" else opt.fg or fg)
@@ -278,8 +278,8 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--only", help="one section id: quick single-section PDF into <work>/pdf/")
     ap.add_argument("--title", help="Chinese book title for the PDF metadata")
-    ap.add_argument("--bg", help="page background: #rrggbb, or 'iterm' for the iTerm2 default profile's dark background (default: sampled from the source)")
-    ap.add_argument("--fg", help="text color: #rrggbb, or 'iterm' for the iTerm2 dark foreground (default: sampled from the source)")
+    ap.add_argument("--bg", default="iterm", help="page background: #rrggbb, 'iterm' (the iTerm2 default profile's dark background, the default) or 'source' (sampled from the book)")
+    ap.add_argument("--fg", default="#606e6a", help="text color: #rrggbb (default #606e6a, a cool gray), 'iterm' (the terminal's foreground) or 'source' (sampled from the book)")
     ap.add_argument("--font-size", type=float, default=9.25, help="body size in pt (default 9.25)")
     opt = ap.parse_args()
     render(Path(opt.work).resolve(), opt)
