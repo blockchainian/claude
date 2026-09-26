@@ -76,11 +76,15 @@ def classify(title, chapter, seen_chapter):
     return "back" if seen_chapter else "front"
 
 
+PART_TITLE = re.compile(r"^\s*part\b", re.I)
+
+
 def flatten_outline(pdf):
-    """The outline as a flat, page-sorted list of (title, zero-based page)."""
+    """The outline as a flat, page-sorted list of (title, zero-based page): the root entries, the children of
+    Part entries, and the children of a lone root entry. Deeper entries are subsections within a chapter."""
     out = []
     with pdf.open_outline() as outline:
-        def walk(items):
+        def walk(items, descend):
             for it in items:
                 page = None
                 dest = it.destination
@@ -94,8 +98,9 @@ def flatten_outline(pdf):
                     page = None
                 if page is not None:
                     out.append((str(it.title), page))
-                walk(it.children)
-        walk(outline.root)
+                if descend(it):
+                    walk(it.children, lambda child: PART_TITLE.match(str(child.title)) is not None)
+        walk(outline.root, lambda it: len(outline.root) == 1 or PART_TITLE.match(str(it.title)) is not None)
     out.sort(key=lambda x: x[1])
     return out
 
@@ -105,7 +110,9 @@ def build_sections(entries, page_count):
     sections = []
     seen_chapter = False
     for i, (title, page) in enumerate(entries):
-        end = entries[i + 1][1] if i + 1 < len(entries) else page_count
+        # Two consecutive bookmarks can point at the same page (e.g. a part divider and a chapter opener),
+        # which would make end < start; keep every range at least one page so it stays a valid inclusive span.
+        end = max(entries[i + 1][1] if i + 1 < len(entries) else page_count, page + 1)
         chapter, clean = parse_title(title)
         kind = classify(title, chapter, seen_chapter)
         if kind == "chapter":
@@ -205,6 +212,8 @@ def clean_pages(pages, running_heads):
 
 
 def pdftotext_pages(pdf_path, start, end):
+    if end < start:
+        return []
     out = subprocess.run(["pdftotext", "-layout", "-f", str(start), "-l", str(end), str(pdf_path), "-"],
                          capture_output=True, text=True, check=True).stdout
     return out.split("\f")[: end - start + 1]
