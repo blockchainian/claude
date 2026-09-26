@@ -47,6 +47,25 @@ def test_extract(ex):
     check("section ranges", [(s["start"], s["end"]) for s in secs][2:5] == [(10, 17), (18, 24), (25, 30)])
     check("chapter label", secs[3]["label"] == "第一章" and secs[2]["label"] is None)
 
+    # A nested outline (Part > Chapter > subsection) yields parts and chapters only: subsections start on
+    # the chapter's own page and would otherwise become empty sections that crash pdftotext.
+    with tempfile.TemporaryDirectory() as d:
+        nested = pikepdf.new()
+        for _ in range(12):
+            nested.add_blank_page(page_size=(200, 300))
+        with nested.open_outline() as ol:
+            part = pikepdf.OutlineItem("Part I", 0)
+            ch1 = pikepdf.OutlineItem("Chapter 1: One", 1)
+            ch1.children.extend([pikepdf.OutlineItem("Sub a", 1), pikepdf.OutlineItem("Sub b", 3)])
+            ch2 = pikepdf.OutlineItem("Chapter 2: Two", 5)
+            ch2.children.append(pikepdf.OutlineItem("Sub c", 5))
+            part.children.extend([ch1, ch2])
+            ol.root.extend([part, pikepdf.OutlineItem("Epilogue", 9)])
+        nested.save(Path(d) / "nested.pdf")
+        flat = ex.flatten_outline(pikepdf.open(Path(d) / "nested.pdf"))
+        check("nested outline keeps parts and chapters only",
+              flat == [("Part I", 0), ("Chapter 1: One", 1), ("Chapter 2: Two", 5), ("Epilogue", 9)], str(flat))
+
     pages = ["      PREFACE: TRACTION TRUMPS EVERYTHING\n\n"
              "    n 2006 I sold a company. It was strange for many rea-\n"
              "sons, not the least of which was that we had no employees.\n"
