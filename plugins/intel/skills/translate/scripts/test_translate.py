@@ -161,6 +161,11 @@ def test_render_e2e(rd):
         check("bookmarks: Cover, 目录, sections", [m[0] for m in marks] == ["Cover", "目录", "Preface译", "第一章　One译"], str(marks))
         check("bookmark pages ascend from the cover", marks[0][1] == 0 and marks[1][1] == 1 and marks[2][1] == 2 < marks[3][1], str(marks))
         check("title metadata", str(pdf.docinfo["/Title"]) == "小书" and str(pdf.docinfo["/Author"]) == "Tester")
+        links = [a for a in pdf.pages[1].get("/Annots", []) if a.get("/Subtype") == "/Link"]
+        targets = sorted(pikepdf.Page(a.Dest[0]).index for a in links)
+        check("目录 rows link to the sections", len(links) == 2 and targets == [marks[2][1], marks[3][1]], f"{len(links)} links -> {targets}")
+        rects = [[float(v) for v in a.Rect] for a in links]
+        check("目录 links are full-width rows in page bounds", all(0 < r[0] < r[2] <= 427.6 and 0 < r[1] < r[3] <= 660 for r in rects), str(rects))
         text = subprocess.run(["pdftotext", "-layout", str(out), "-"], capture_output=True, text=True).stdout.split("\f")
         folios = [ln.strip() for pg in text for ln in pg.splitlines() if ln.strip() in ("i", "ii", "iii", "iv", "1", "2", "3", "4")]
         check("front roman then body arabic from 1", folios[:2] == ["i", "ii"] and "1" in folios and folios.index("1") > folios.index("ii"), str(folios))
