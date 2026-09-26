@@ -1,0 +1,8 @@
+{
+  "name": "download-book-scripts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}
