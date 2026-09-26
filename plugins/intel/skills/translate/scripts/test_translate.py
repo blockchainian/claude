@@ -92,6 +92,9 @@ def test_translate(tr):
 
 
 def test_render_units(rd):
+    if (Path.home() / "Library/Preferences/com.googlecode.iterm2.plist").exists():
+        bg, fg = rd.iterm_colors()
+        check("iterm colors are hex", bg.startswith("#") and len(bg) == 7 and fg.startswith("#") and len(fg) == 7, f"{bg} {fg}")
     title, body = rd.md_to_html("# 章名\n\n第一段 *强调*。\n\n> 引文\n\n## 小标题\n\n第二段。\n")
     check("markdown title split off", title == "章名" and "<h1" not in body)
     check("markdown body html", "<em>强调</em>" in body and "<blockquote>" in body and "<h2>小标题</h2>" in body)

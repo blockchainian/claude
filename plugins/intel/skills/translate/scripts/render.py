@@ -6,7 +6,7 @@
 # ABOUTME: Typesets the translated Markdown sections into a PDF in the source book's format (page size, colors,
 # ABOUTME: running heads, folios, contents page) with headless Chrome, then adds the original cover and bookmarks.
 #
-# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg #181a1d --fg #e1ddd5] [--font-size 9.25]
+# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg #181a1d|iterm --fg #e1ddd5|iterm] [--font-size 9.25]
 # Without --only: the whole book (cover + 目录 + every translated section) to --out (default <book>-zh.pdf next
 # to the source). With --only: one section to <work>/pdf/<id>-<slug>.pdf for a quick look, no cover or contents.
 import argparse
@@ -50,6 +50,22 @@ def sample_colors(book, page):
     far = [(c, n) for c, n in counts.items() if abs(lum(c) - lum(bg)) > 100]
     fg = max(far, key=lambda x: x[1])[0] if far else ((20, 20, 20) if lum(bg) > 128 else (225, 221, 213))
     return "#%02x%02x%02x" % bg, "#%02x%02x%02x" % fg
+
+
+def iterm_colors():
+    """The iTerm2 default profile's dark-mode background and foreground, as #rrggbb."""
+    import plistlib
+    plist = Path.home() / "Library/Preferences/com.googlecode.iterm2.plist"
+    if not plist.exists():
+        sys.exit("iTerm2 preferences not found")
+    prefs = plistlib.load(plist.open("rb"))
+    guid = prefs.get("Default Bookmark Guid")
+    profile = next((b for b in prefs.get("New Bookmarks", []) if b.get("Guid") == guid), None) or prefs["New Bookmarks"][0]
+    def hx(key):
+        c = profile.get(key + " (Dark)") if profile.get("Use Separate Colors for Light and Dark Mode") else None
+        c = c or profile[key]
+        return "#%02x%02x%02x" % tuple(round(c[k] * 255) for k in ("Red Component", "Green Component", "Blue Component"))
+    return hx("Background Color"), hx("Foreground Color")
 
 
 def md_to_html(md_text):
@@ -162,7 +178,12 @@ def render(work, opt):
         sys.exit("nothing to render")
 
     first_chapter = next((s for s in meta["sections"] if s["kind"] == "chapter"), meta["sections"][0])
-    bg, fg = (opt.bg, opt.fg) if opt.bg and opt.fg else sample_colors(book, min(first_chapter["start"] + 1, meta["pages"]))
+    bg, fg = sample_colors(book, min(first_chapter["start"] + 1, meta["pages"]))
+    if "iterm" in (opt.bg, opt.fg):
+        term_bg, term_fg = iterm_colors()
+        bg, fg = (term_bg if opt.bg == "iterm" else opt.bg or bg), (term_fg if opt.fg == "iterm" else opt.fg or fg)
+    else:
+        bg, fg = opt.bg or bg, opt.fg or fg
     style = css(meta["page_size"], bg, fg, [(s["id"], t, s["kind"]) for s, t, _ in ready], opt.font_size)
     title = opt.title or meta["title"]
     chrome = chrome_binary()
@@ -257,8 +278,8 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--only", help="one section id: quick single-section PDF into <work>/pdf/")
     ap.add_argument("--title", help="Chinese book title for the PDF metadata")
-    ap.add_argument("--bg", help="page background, e.g. #181a1d (default: sampled from the source)")
-    ap.add_argument("--fg", help="text color, e.g. #e1ddd5 (default: sampled from the source)")
+    ap.add_argument("--bg", help="page background: #rrggbb, or 'iterm' for the iTerm2 default profile's dark background (default: sampled from the source)")
+    ap.add_argument("--fg", help="text color: #rrggbb, or 'iterm' for the iTerm2 dark foreground (default: sampled from the source)")
     ap.add_argument("--font-size", type=float, default=9.25, help="body size in pt (default 9.25)")
     opt = ap.parse_args()
     render(Path(opt.work).resolve(), opt)
