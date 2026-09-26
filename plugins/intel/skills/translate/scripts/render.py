@@ -53,11 +53,12 @@ def sample_colors(book, page):
 
 
 def iterm_colors():
-    """The iTerm2 default profile's dark-mode background and foreground, as #rrggbb."""
+    """The iTerm2 default profile's dark-mode background and foreground, as #rrggbb; a near-black page and the
+    default text gray when iTerm2 is not installed."""
     import plistlib
     plist = Path.home() / "Library/Preferences/com.googlecode.iterm2.plist"
     if not plist.exists():
-        sys.exit("iTerm2 preferences not found")
+        return "#000409", "#606e6a"
     prefs = plistlib.load(plist.open("rb"))
     guid = prefs.get("Default Bookmark Guid")
     profile = next((b for b in prefs.get("New Bookmarks", []) if b.get("Guid") == guid), None) or prefs["New Bookmarks"][0]
@@ -254,10 +255,21 @@ def render(work, opt):
     n_front = len(page_texts(front_pdf)) - 1
     pages = {**{k: v for k, v in front_pages.items()}, **{k: v + n_front for k, v in body_pages.items()}}
 
-    out = Path(opt.out) if opt.out else book.with_name(book.stem + "-zh.pdf")
+    out = Path(opt.out) if opt.out else default_out(Path(meta.get("source", book)), work)
     assemble(book, [front_pdf] + ([body_pdf] if body_pdf else []), out, ready, pages, meta, title, bg,
              top_margin=meta["page_size"][1] * 0.082, row_height=opt.font_size * 1.8)
     print(f"{out} ({len(pikepdf.open(out).pages)} pages, {len(ready)} sections, cover + linked 目录 + bookmarks)")
+
+
+def default_out(source, work):
+    """<source>-zh.pdf next to the original, or next to the work dir when the original's folder is not writable."""
+    target = source.with_name(source.stem + "-zh.pdf")
+    try:
+        target.parent.joinpath(".translate-write-test").touch()
+        target.parent.joinpath(".translate-write-test").unlink()
+        return target
+    except (PermissionError, OSError):
+        return work.parent / target.name
 
 
 def assemble(book, part_pdfs, out, ready, pages, meta, title, bg, top_margin, row_height):
