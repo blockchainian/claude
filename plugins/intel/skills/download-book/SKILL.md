@@ -13,7 +13,7 @@ The site sits behind DDoS-Guard, which serves a captcha to headless browsers and
 npm install --prefix "${CLAUDE_PLUGIN_ROOT}/skills/download-book/scripts"
 ```
 
-The browser profile persists at `~/.cache/blockchainian/download-book-profile`. A Chrome window opens for the run and closes when the script finishes; do not use it meanwhile.
+The browser profile persists at `~/.cache/secrets-manager/profiles/download-book`. A Chrome window opens for the run and closes when the script finishes; do not use it meanwhile.
 
 ## Run
 
