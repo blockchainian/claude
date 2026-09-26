@@ -2,8 +2,8 @@
 
 Gather and distill knowledge from **long-form sources** — articles, podcasts,
 talks, videos, live streams — and from **what people say** about an app — App
-Store reviews — into text you can read and search. The
-source goes in; durable, attributable notes come out.
+Store reviews — into text you can read and search. The plugin also finds book
+download links and checks domain names.
 
 ## Skills
 
@@ -34,10 +34,13 @@ source goes in; durable, attributable notes come out.
   return only the ones whose domain is registrable: short coined words (then
   metaphor words), checked live on `.xyz/.ai/.fun` via Namecheap's official API
   (`check.mjs`), same-name collisions against anything popular filtered out.
+- **`download-book`** — search Anna's Archive for EPUB results, compare their
+  download counts, and return fast and slow download links without fetching
+  the book file.
 
 ## Why they live together
 
-Both skills answer the same question — *what was actually said or written, and
+`transcribe` and `digest` answer the same question — *what was actually said or written, and
 what of it is worth keeping* — from different source shapes. `transcribe`
 is the floor: it gets words out of sound. `digest` builds highlighting and a
 searchable store on top, over whatever produced the words. New source kinds
@@ -56,6 +59,10 @@ audio leg and `digest` for the notes.
   point elsewhere).
 - `find-domain-names`: a Namecheap API key with the calling IP whitelisted,
   stored at `~/.config/blockchainian/claude.json` (see the skill's Setup step).
+- `download-book`: Node.js 18+, Google Chrome, and `npm install` in the skill's
+  `scripts/` dir (Playwright drives a headed Chrome window through the site's
+  DDoS-Guard check; headless browsers get a captcha). Optional `ANNA_SECRET_KEY`
+  for the member fast download API.
 
 ## Tests
 
@@ -64,6 +71,7 @@ python3 skills/transcribe/scripts/test_transcribe.py
 python3 skills/digest/scripts/test_digest.py
 skills/translate/scripts/test_translate.py
 node --test skills/find-domain-names/scripts/test_check.mjs
+node --test skills/download-book/scripts/test_site_session.mjs
 ```
 
 `test_transcribe.py` covers the batch and live command shapes, the
