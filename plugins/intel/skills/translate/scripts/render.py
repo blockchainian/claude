@@ -80,8 +80,8 @@ body {{ margin: 0; color: var(--fg); font-family: Baskerville, "Songti SC", seri
 section {{ break-before: page; }}
 .opener {{ padding-top: {round(h * 0.2)}pt; text-align: center; margin-bottom: {round(h * 0.07)}pt; }}
 .opener .label {{ font-size: 9pt; letter-spacing: 3pt; margin-bottom: 14pt; }}
-.opener h1 {{ font-weight: normal; font-size: 16pt; letter-spacing: 1pt; margin: 0; line-height: 1.5; }}
-.mk {{ font-size: 1pt; color: transparent; letter-spacing: 0; }}
+.opener h1 {{ font-family: "Hiragino Sans GB", "PingFang SC", "Heiti SC", Baskerville, sans-serif; font-weight: 300; font-size: 22pt; letter-spacing: 2pt; margin: 0; line-height: 1.5; }}
+.mk {{ font-size: 1pt; color: transparent; letter-spacing: 0; white-space: nowrap; font-family: Baskerville, "Songti SC", serif; }}
 p {{ margin: 0; text-indent: 2em; text-align: justify; }}
 .body-text > p:first-of-type {{ text-indent: 0; }}
 .body-text > p:first-of-type::first-letter {{ float: left; font-size: 2.6em; line-height: 0.85; padding: 3pt 4pt 0 0; }}
