@@ -2,6 +2,9 @@
   "name": "download-book-scripts",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node --test test_links.mjs test_site_session.mjs"
+  },
   "dependencies": {
     "pdf-lib": "^1.17.1",
     "playwright": "^1.63.0"
