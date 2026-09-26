@@ -153,7 +153,7 @@ def test_render_e2e(rd):
             if s.get("file"):
                 (work / "md" / (Path(s["file"]).stem + ".md")).write_text(f"# {s['title']}译\n\n" + ("正文。" * 400 + "\n\n") * 6)
         out = Path(d) / "tiny-zh.pdf"
-        opt = SimpleNamespace(only=None, out=str(out), title="小书", bg=None, fg=None, font_size=9.25)
+        opt = SimpleNamespace(only=None, out=str(out), title="小书", bg="source", fg="source", font_size=9.25)
         rd.render(work, opt)
         pdf = pikepdf.open(out)
         with pdf.open_outline() as outline:
