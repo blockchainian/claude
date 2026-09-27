@@ -30,14 +30,20 @@ ROMAN = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", 
 MARK_TOC = "⟦TOC⟧"
 
 # KaTeX typesets the inline \(..\) / display \[..\] LaTeX in the browser before Chrome prints (see print_pdf's
-# --virtual-time-budget). Loaded from the CDN; headless Chrome has network access.
+# --virtual-time-budget). Loaded from the CDN; headless Chrome has network access. After typesetting, any display
+# equation still wider than the text column is scaled down in place to fit: a single over-wide element otherwise
+# makes Chrome's print scale the WHOLE document's font down uniformly (see css()'s overflow guard).
 KATEX_HEAD = (
     '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">'
     '<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>'
     '<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" '
     'onload="renderMathInElement(document.body,{delimiters:['
     "{left:'\\\\[',right:'\\\\]',display:true},{left:'\\\\(',right:'\\\\)',display:false}"
-    '],throwOnError:false});"></script>'
+    '],throwOnError:false});'
+    "document.querySelectorAll('.katex-display').forEach(function(d){var i=d.firstElementChild;"
+    "if(i&&d.scrollWidth>d.clientWidth+1){var s=d.clientWidth/d.scrollWidth;"
+    "i.style.display='inline-block';i.style.transformOrigin='left center';i.style.transform='scale('+s+')';}});"
+    '"></script>'
 )
 
 
@@ -187,20 +193,27 @@ def css(page_size, bg, fg, heads, font_size=9.25, bold=None):
     hei = 'Baskerville, "PingFang SC", "Heiti SC", "Hiragino Sans GB", sans-serif'
     top, side, bottom = round(h * 0.082, 1), round(w * 0.135, 1), round(h * 0.068, 1)
     margin_font = 'font-family: Baskerville, "Songti SC", serif;'
-    # Folios (page numbers) are painted onto the assembled PDF, not set by CSS: the body is printed in several
-    # chunks and Chrome ignores counter-reset, so its per-document page counter cannot be made continuous.
+    folio = lambda kind: "counter(page, lower-roman)" if kind == "front" else "counter(page)"
     named = "\n".join(
-        f'@page s{sid} {{ @top-center {{ content: "{html.escape(t)}"; font-size: 7pt; letter-spacing: 2pt; color: {fg}; {margin_font} }} }}'
+        f'@page s{sid} {{ @top-center {{ content: "{html.escape(t)}"; font-size: 7pt; letter-spacing: 2pt; color: {fg}; {margin_font} }}'
+        f' @bottom-center {{ content: {folio(kind)}; font-size: 8pt; color: {fg}; {margin_font} }} }}'
         for sid, t, kind in heads)
     return f"""
 :root {{ --bg: {bg}; --fg: {fg}; }}
-@page {{ size: {w}pt {h}pt; margin: {top}pt {side}pt {bottom}pt; background: var(--bg); }}
+@page {{ size: {w}pt {h}pt; margin: {top}pt {side}pt {bottom}pt; background: var(--bg);
+        @bottom-center {{ content: counter(page, lower-roman); font-size: 8pt; color: {fg}; {margin_font} }} }}
 {named}
 html {{ background: var(--bg); }}
-body {{ margin: 0; color: var(--fg); font-family: Baskerville, "Songti SC", serif; font-size: {font_size}pt; line-height: 1.8; }}
+body {{ margin: 0; color: var(--fg); font-family: Baskerville, "Songti SC", serif; font-size: {font_size}pt; line-height: 1.8; overflow-wrap: break-word; }}
 strong, b {{ font-family: {hei}; font-weight: 700; color: {bold}; }}
 .katex {{ color: {fg}; font-size: 1em; }}
-section {{ break-before: page; }}
+/* Chrome's print scales the WHOLE document's font down uniformly to fit the single widest element that overflows
+   the text column (a long display equation, a wide image or table, an unbreakable line). Contain every section's
+   horizontal overflow so one wide element can never shrink the book; each kind of wide content is also made to fit
+   (equations scaled by KATEX_HEAD, media capped at 100%, code/long tokens wrapped) so clipping never bites. */
+section {{ break-before: page; overflow-x: clip; }}
+img, table, pre, .katex-display {{ max-width: 100%; }}
+pre {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
 .opener {{ padding-top: {round(h * 0.2)}pt; text-align: center; margin-bottom: {round(h * 0.07)}pt; }}
 .opener .label {{ font-family: {hei}; font-weight: 700; color: {bold}; font-size: 9pt; letter-spacing: 3pt; margin-bottom: 14pt; }}
 .opener h1 {{ font-family: {hei}; font-weight: 700; color: {bold}; font-size: 22pt; letter-spacing: 2pt; margin: 0; line-height: 1.5; }}
@@ -333,7 +346,6 @@ def render(work, opt):
         md_path = work / "md" / (Path(s["file"]).stem + ".md")
         if md_path.exists():
             title_zh, body = md_to_html(md_path.read_text())
-            s["_nimg"] = body.count("⟦IMG:")  # image load per section, for body chunking
             if images:
                 eq_scale = getattr(opt, "eq_scale", 0.6) if meta.get("source_kind") == "epub" else None
                 body = place_images(body, work, images, fg, bg, eq_scale)
@@ -348,14 +360,14 @@ def render(work, opt):
     chrome = chrome_binary()
     tmp = Path(tempfile.mkdtemp(prefix="render-"))
 
-    def document(parts, extra_style=""):
+    def document(parts):
         return (f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>{html.escape(title)}</title>'
-                f'{KATEX_HEAD}<style>{style}{extra_style}</style></head><body>{"".join(parts)}</body></html>')
+                f'{KATEX_HEAD}<style>{style}</style></head><body>{"".join(parts)}</body></html>')
 
-    def typeset(name, parts, extra_style=""):
+    def typeset(name, parts):
         """Chrome-print one HTML document; returns (pdf path, marker -> page index within it)."""
         html_path, pdf_path = tmp / f"{name}.html", tmp / f"{name}.pdf"
-        html_path.write_text(document(parts, extra_style))
+        html_path.write_text(document(parts))
         print_pdf(chrome, html_path, pdf_path)
         return pdf_path, page_map(pdf_path)
 
@@ -368,36 +380,10 @@ def render(work, opt):
         return
 
     # Front matter (roman folios) and body (arabic folios from 1) are separate Chrome documents, because
-    # Chrome cannot reset the page counter mid-document. The body is further split into modest chunks and joined:
-    # Chrome scales an over-large, image-heavy print job down (the whole book renders at a fraction of the font
-    # size), so each chunk is printed on its own with the arabic page counter continued via counter-reset.
+    # Chrome cannot reset the page counter mid-document; the contents page is re-typeset once the folios are known.
     front = [r for r in ready if r[0]["kind"] == "front"]
     body = [r for r in ready if r[0]["kind"] != "front"]
-
-    def chunk_body(items, max_words=20000, max_imgs=60):
-        # Cut on words OR image load: images are what pushes Chrome to scale the print job down, so an
-        # image-dense chapter needs a smaller chunk than a text-only one of the same length.
-        chunks, cur, words, imgs = [], [], 0, 0
-        for r in items:
-            w = r[0].get("words") or 0
-            n = r[0].get("_nimg") or 0
-            if cur and (words + w > max_words or imgs + n > max_imgs):
-                chunks.append(cur)
-                cur, words, imgs = [], 0, 0
-            cur.append(r)
-            words += w
-            imgs += n
-        if cur:
-            chunks.append(cur)
-        return chunks
-
-    body_pdfs, body_pages, body_offset = [], {}, 0
-    for ci, chunk in enumerate(chunk_body(body)):
-        pdf_i, pages_i = typeset(f"body{ci}", [section_html(*r) for r in chunk])
-        for k, v in pages_i.items():
-            body_pages[k] = v + body_offset
-        body_pdfs.append(pdf_i)
-        body_offset += len(page_texts(pdf_i)) - 1
+    body_pdf, body_pages = typeset("body", [section_html(*r) for r in body]) if body else (None, {})
     folios = {s["id"]: str(body_pages[f"S{s['id']}"] + 1) for s, _, _ in body}
     entries = [(s, t) for s, t, _ in ready]
     front_pdf, front_pages = None, {}
@@ -415,7 +401,7 @@ def render(work, opt):
 
     out = Path(opt.out) if opt.out else default_out(Path(meta.get("source") or book), work)
     cover_pdf = build_cover(meta, work, book, bg, chrome, tmp)
-    assemble(cover_pdf, [front_pdf] + body_pdfs, out, ready, pages, meta, title, bg, fg, n_front,
+    assemble(cover_pdf, [front_pdf] + ([body_pdf] if body_pdf else []), out, ready, pages, meta, title, bg,
              top_margin=meta["page_size"][1] * 0.082, row_height=opt.font_size * 1.8)
     print(f"{out} ({len(pikepdf.open(out).pages)} pages, {len(ready)} sections, cover + linked 目录 + bookmarks)")
 
@@ -457,10 +443,9 @@ def build_cover(meta, work, book, bg, chrome, tmp):
     return out
 
 
-def assemble(cover_pdf, part_pdfs, out, ready, pages, meta, title, bg, fg, n_front, top_margin, row_height):
+def assemble(cover_pdf, part_pdfs, out, ready, pages, meta, title, bg, top_margin, row_height):
     """Cover page + the typeset parts; every page underlaid with the background, the running head masked on
-    opener pages, the folio (roman in front matter, arabic from the first body page) painted at the bottom;
-    目录 rows linked to their sections; flat bookmarks (Cover, 目录, one per section)."""
+    opener pages; 目录 rows linked to their sections; flat bookmarks (Cover, 目录, one per section)."""
     pdf = pikepdf.new()
     cov = pikepdf.open(cover_pdf)
     pdf.pages.append(cov.pages[0])
@@ -468,11 +453,7 @@ def assemble(cover_pdf, part_pdfs, out, ready, pages, meta, title, bg, fg, n_fro
     for part in parts:
         pdf.pages.extend(part.pages)
     offset = 1
-    body_start = offset + n_front  # first physical page of the body (arabic folios); front matter is roman
     r, g, b = (int(bg[i:i + 2], 16) / 255 for i in (1, 3, 5))
-    fr, fg_, fb = (int(fg[i:i + 2], 16) / 255 for i in (1, 3, 5))
-    folio_font = pdf.make_indirect(pikepdf.Dictionary(
-        Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1, BaseFont=pikepdf.Name.Helvetica))
     openers = {pages[f"S{s['id']}"] + offset for s, _, _ in ready}
     for i, page in enumerate(pdf.pages):
         if i < offset:
@@ -481,17 +462,7 @@ def assemble(cover_pdf, part_pdfs, out, ready, pages, meta, title, bg, fg, n_fro
         fill = f"q {r:.4f} {g:.4f} {b:.4f} rg {x0} {y0} {x1 - x0} {y1 - y0} re f Q\nq\n".encode()
         page.contents_add(pikepdf.Stream(pdf, fill), prepend=True)
         mask = f"q {r:.4f} {g:.4f} {b:.4f} rg {x0} {y1 - top_margin + 2} {x1 - x0} {top_margin - 2} re f Q\n".encode() if i in openers else b""
-        folio = roman_folio(i - offset) if i < body_start else str(i - body_start + 1)
-        fs = 8.0
-        tx = (x0 + x1) / 2 - len(folio) * fs * 0.28
-        ty = y0 + (y1 - y0) * 0.035
-        paint = f"q BT /Fol {fs} Tf {fr:.4f} {fg_:.4f} {fb:.4f} rg {tx:.1f} {ty:.1f} Td ({folio}) Tj ET Q\n".encode()
-        page.contents_add(pikepdf.Stream(pdf, b"Q\n" + mask + paint), prepend=False)
-        if "/Resources" not in page:
-            page.Resources = pikepdf.Dictionary()
-        if "/Font" not in page.Resources:
-            page.Resources.Font = pikepdf.Dictionary()
-        page.Resources.Font["/Fol"] = folio_font
+        page.contents_add(pikepdf.Stream(pdf, b"Q\n" + mask), prepend=False)
     link_contents(pdf, part_pdfs[0], offset, pages, ready, row_height)
     with pdf.open_outline() as outline:
         outline.root.append(pikepdf.OutlineItem("Cover", 0))
