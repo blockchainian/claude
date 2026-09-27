@@ -81,18 +81,53 @@ def md_to_html(md_text):
 IMG_TOKEN_RE = re.compile(r"⟦IMG:([^⟧]+)⟧")
 
 
-def place_images(body_html, work, images):
-    """Replace ⟦IMG:key⟧ placeholders with the extracted figure/equation images. A block image becomes its
-    own centered figure (breaking the surrounding paragraph); an inline image sits in the line. Both get a
-    white plate so black line-art stays legible on the dark page."""
+def is_line_art(im):
+    """True when an image is black-on-white line art (an equation or a line diagram) rather than a colour
+    figure: a downsampled copy has almost no saturated pixels."""
+    from PIL import Image
+    small = im.convert("RGB")
+    small.thumbnail((64, 64))
+    sat = small.convert("HSV").getchannel("S").getdata()
+    px = list(sat)
+    return sum(1 for s in px if s > 40) / max(1, len(px)) < 0.03
+
+
+def recolor_line_art(src, fg, dest):
+    """Recolour black-on-white line art to the page foreground on a transparent background, so an equation
+    sits on the dark page in the body colour with no white plate. Returns True when it was line art (and dest
+    written), False for a colour figure (left as is)."""
+    from PIL import Image
+    im = Image.open(src)
+    if not is_line_art(im):
+        return False
+    alpha = im.convert("L").point(lambda v: 255 - v)  # dark ink -> opaque, white paper -> transparent
+    r, g, b = int(fg[1:3], 16), int(fg[3:5], 16), int(fg[5:7], 16)
+    plate = Image.new("RGBA", im.size, (r, g, b, 0))
+    plate.putalpha(alpha)
+    plate.save(dest)
+    return True
+
+
+def place_images(body_html, work, images, fg):
+    """Replace ⟦IMG:key⟧ placeholders with the extracted images. Line art (equations, diagrams) is recoloured
+    to the page foreground on a transparent background so it blends into the dark page; a colour figure keeps a
+    white plate (inverting a photo would ruin it). Block images become their own centred figure; inline ones
+    sit in the line."""
     def repl(m):
         meta = images.get(m.group(1))
         if not meta:
             return ""
-        uri = (work / "images" / meta["file"]).resolve().as_uri()
+        src = work / "images" / meta["file"]
+        rc = src.with_suffix(".rc.png")
+        try:
+            line = recolor_line_art(src, fg, rc)
+        except Exception:
+            line = False
+        uri = (rc if line else src).resolve().as_uri()
+        plate = "" if line else " plate"
         if meta.get("block"):
-            return (f'</p><figure class="fig"><img src="{uri}" style="max-width:100%"></figure><p>')
-        return f'<img class="infig" src="{uri}" style="height:{meta["h"] * 1.05:.0f}pt">'
+            return f'</p><figure class="fig{plate}"><img src="{uri}" style="max-width:100%"></figure><p>'
+        return f'<img class="infig{plate}" src="{uri}" style="height:{meta["h"] * 1.05:.0f}pt">'
     return IMG_TOKEN_RE.sub(repl, body_html)
 
 
@@ -128,8 +163,10 @@ ul, ol {{ margin: 4pt 0 4pt 2em; padding: 0; }}
 li {{ margin: 2pt 0; }}
 em {{ font-style: italic; }}
 .fig {{ margin: 10pt auto; text-align: center; break-inside: avoid; }}
-.fig img {{ background: #fff; padding: 4pt 6pt; border-radius: 3pt; max-width: calc(100% - 16pt); }}
-.infig {{ background: #fff; padding: 0 2pt; border-radius: 2pt; vertical-align: middle; }}
+.fig img {{ max-width: calc(100% - 16pt); }}
+.fig.plate img {{ background: #fff; padding: 4pt 6pt; border-radius: 3pt; }}
+.infig {{ vertical-align: middle; }}
+.infig.plate {{ background: #fff; padding: 0 2pt; border-radius: 2pt; }}
 .contents .opener {{ margin-bottom: {round(h * 0.05)}pt; }}
 .toc {{ font-size: 9.5pt; }}
 .toc .e {{ display: flex; align-items: baseline; margin: 0 0 9pt; }}
@@ -223,24 +260,25 @@ def render(work, opt):
         sections = [s for s in sections if s["id"] == opt.only] or sys.exit(f"no section {opt.only}")
     images_path = work / "images.json"
     images = json.loads(images_path.read_text()) if images_path.exists() else {}
-    ready = []
-    for s in sections:
-        md_path = work / "md" / (Path(s["file"]).stem + ".md")
-        if md_path.exists():
-            title_zh, body = md_to_html(md_path.read_text())
-            if images:
-                body = place_images(body, work, images)
-            ready.append((s, title_zh, body))
-        else:
-            print(f"skip {s['id']} {s['title']}: not translated yet", file=sys.stderr)
-    if not ready:
-        sys.exit("nothing to render")
 
     first_chapter = next((s for s in meta["sections"] if s["kind"] == "chapter"), meta["sections"][0])
     sampled = sample_colors(book, min(first_chapter["start"] + 1, meta["pages"])) if "source" in (opt.bg, opt.fg) else None
     term = iterm_colors() if "iterm" in (opt.bg, opt.fg) else None
     resolve = lambda v, i: sampled[i] if v == "source" else term[i] if v == "iterm" else v
     bg, fg = resolve(opt.bg, 0), resolve(opt.fg, 1)
+
+    ready = []
+    for s in sections:
+        md_path = work / "md" / (Path(s["file"]).stem + ".md")
+        if md_path.exists():
+            title_zh, body = md_to_html(md_path.read_text())
+            if images:
+                body = place_images(body, work, images, fg)
+            ready.append((s, title_zh, body))
+        else:
+            print(f"skip {s['id']} {s['title']}: not translated yet", file=sys.stderr)
+    if not ready:
+        sys.exit("nothing to render")
     style = css(meta["page_size"], bg, fg, [(s["id"], t, s["kind"]) for s, t, _ in ready], opt.font_size)
     title = opt.title or meta["title"]
     chrome = chrome_binary()
