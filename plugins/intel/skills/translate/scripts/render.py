@@ -127,7 +127,7 @@ def place_images(body_html, work, images, fg):
         plate = "" if line else " plate"
         if meta.get("block"):
             return f'</p><figure class="fig{plate}"><img src="{uri}" style="max-width:100%"></figure><p>'
-        return f'<img class="infig{plate}" src="{uri}" style="height:{meta["h"] * 1.05:.0f}pt">'
+        return f'<img class="infig{plate}" src="{uri}">'
     return IMG_TOKEN_RE.sub(repl, body_html)
 
 
@@ -165,7 +165,7 @@ em {{ font-style: italic; }}
 .fig {{ margin: 10pt auto; text-align: center; break-inside: avoid; }}
 .fig img {{ max-width: calc(100% - 16pt); }}
 .fig.plate img {{ background: #fff; padding: 4pt 6pt; border-radius: 3pt; }}
-.infig {{ vertical-align: middle; }}
+.infig {{ max-height: 1.4em; width: auto; vertical-align: middle; }}
 .infig.plate {{ background: #fff; padding: 0 2pt; border-radius: 2pt; }}
 .contents .opener {{ margin-bottom: {round(h * 0.05)}pt; }}
 .toc {{ font-size: 9.5pt; }}
