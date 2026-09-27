@@ -142,6 +142,28 @@ Then look, do not assume: render the cover, the 目录, one chapter opener and o
 numbers match the bookmarks (pikepdf: the 目录 page's `/Annots` links point at the same pages). Open the PDF for
 the user.
 
+## 5. Fix any equations the guard flags
+
+An equation KaTeX cannot parse renders as its raw LaTeX source in red. `render.py` guards against shipping that:
+after writing the PDF it scans for the errors and, if any, **exits non-zero** listing every one as
+`section NN (page P)`. A render that exits non-zero is not done — fix the listed equations and re-render until it
+exits 0. Never hand the user a book the guard rejected.
+
+`md_to_html`/`repair_math` already auto-fix the translator's common LaTeX mistakes (promote inline `\tag` to a
+display equation, escape a literal `$`, strip leaked `> ` blockquote markers, `\（`/`\）`→`\(`/`\)`, `\mbox`→`\text`),
+so what reaches the guard is the structural residual — usually 0–2 per book. Fix each by editing the section's
+Markdown in `<work>/md/` (find the failing `\(..\)`/`\[..\]` near the reported spot) and re-running step 4:
+
+- **Unbalanced braces / a `\begin{aligned}` row with CJK punctuation outside `\text`** → balance the braces and
+  wrap the Chinese in `\text{…}`.
+- **An `⟦IMG:key⟧` token inside `\(..\)`/`\[..\]`** is a *symbol* the EPUB stored as an image (KaTeX cannot embed
+  an image, so it fails). Open `<work>/images/<file>` (from `images.json`) to see the glyph — e.g. an accented
+  q̂ / v̂ — and write it as LaTeX (`\hat{q}`, `\hat{v}`); keep `⟦IMG⟧` tokens only for real figures, outside math.
+- **Markdown (`**bold**`) or a stray `\(` inside math** → move the markup outside the math, restructure the line.
+
+Editing the md directly (you can view the symbol image and re-render to verify) is faster and higher-fidelity than
+re-translating; retranslate the section only if the prose itself is wrong.
+
 ## Editing after the fact
 
 The translation is plain Markdown in `<work>/md/`: fix a sentence there and rerun step 4 (seconds). Retranslate
