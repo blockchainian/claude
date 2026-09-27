@@ -452,13 +452,35 @@ def epub_titles(z, nav_href, ncx_href):
     return titles
 
 
-def epub_first_heading(z, href):
+def epub_headings(z, href):
+    """The text of every <h1>..<h6> in a file, in order."""
     try:
         raw = z.read(href).decode("utf-8", "replace")
     except KeyError:
-        return None
-    m = re.search(r"<h[1-6][^>]*>(.*?)</h[1-6]>", raw, re.S | re.I)
-    return " ".join(re.sub(r"<[^>]+>", "", m.group(1)).split()) if m else None
+        return []
+    return [" ".join(re.sub(r"<[^>]+>", "", m).split())
+            for m in re.findall(r"<h[1-6][^>]*>(.*?)</h[1-6]>", raw, re.S | re.I)]
+
+
+def epub_first_heading(z, href):
+    hs = epub_headings(z, href)
+    return hs[0] if hs else None
+
+
+PART_TITLE_RE = re.compile(r"^\s*(?:part\s+)?[ivxlcdm]+\b", re.I)  # "I …", "II …", "Part IV …" (word boundary keeps "Introduction" out)
+
+
+def chapter_from_headings(headings):
+    """A chapter number + title read from a file's headings: 'CHAPTER 3' then 'Solving Problems by Searching', or a
+    single 'N Title' heading. Used when the opener file's nav title is a part name, not the chapter title."""
+    for i, h in enumerate(headings):
+        m = re.match(r"^\s*chapter\s+(\d+)\b", h, re.I)
+        if m:
+            return int(m.group(1)), (headings[i + 1].strip().title() if i + 1 < len(headings) else h)
+        num, clean = parse_title(h)
+        if num is not None:
+            return num, clean
+    return None, None
 
 
 _BLOCK_TAG = re.compile(r"</?(?:p|div|li|ul|ol|table|tr|td|section|figure|figcaption|h[1-6]|br|blockquote)\b[^>]*>", re.I)
@@ -518,7 +540,7 @@ def epub_fragment(z, href, work, keep_images, counter):
 
 
 PART_STEM = re.compile(r"^part\d*$", re.I)
-EPUB_SKIP_STEM = re.compile(r"^(cover|titlepage|halftitle|copyright|toc|nav|ncx|index|bibliography)\d*$", re.I)
+EPUB_SKIP_STEM = re.compile(r"^(cover|titlepage|halftitle|title|copyright|toc|nav|ncx|index|bibliography)\d*$", re.I)
 
 
 def extract_epub(source, work, keep_images, page_size):
@@ -587,6 +609,12 @@ def extract_epub(source, work, keep_images, page_size):
         is_part = bool(PART_STEM.match(stem)) or bool(re.match(r"^\s*part\b", stitle, re.I))
         if EPUB_SKIP_STEM.match(stem):
             continue
+        if chapter is None and not is_part and PART_TITLE_RE.match(stitle):
+            # First chapter of a part: this opener file's nav title is the PART name, so the chapter number and
+            # title live in its headings ("CHAPTER 3" / "Solving Problems by Searching"). See translate-roman parts.
+            hnum, htitle = chapter_from_headings(epub_headings(z, href))
+            if hnum is not None:
+                chapter, clean, is_subsection = hnum, htitle, False
         frag, sec_imgs, counter = epub_fragment(z, href, work, keep_images, counter)
         if is_part and chapter is None:  # a part divider folds into the head of the next chapter
             pending_prefix += frag + "\n\n"
@@ -611,6 +639,15 @@ def extract_epub(source, work, keep_images, page_size):
         cur = {"title": clean, "outline_title": stitle, "chapter": chapter,
                "label": f"第{chinese_number(chapter)}章" if chapter else None, "kind": kind, "frag": body_frag}
     flush()
+
+    nums = [s["chapter"] for s in sections if s.get("chapter")]
+    if nums:  # a gap or duplicate means an opener was not recognised — the general safety net for a new EPUB layout
+        gaps = [n for n in range(min(nums), max(nums) + 1) if n not in nums]
+        dupes = sorted({n for n in nums if nums.count(n) > 1})
+        if gaps:
+            print(f"warn: chapter numbers skip {gaps} — an opener may be mislabelled", file=sys.stderr)
+        if dupes:
+            print(f"warn: chapter numbers repeat {dupes} — subsections may not be grouping", file=sys.stderr)
 
     cover_file = None
     if cover_id and cover_id in manifest:
