@@ -39,6 +39,19 @@ is present. Luna runs on the user's ChatGPT plan through `codex`; when its quota
 "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.py" <book.pdf>
 ```
 
+**Prefer an EPUB when the book has one.** PDF→text flattens math and drops all formatting: bold vectors/matrices,
+sub/superscript position (L² becomes an ambiguous "L 2"), and transposes are lost, so the translation of a
+maths-heavy book comes out wrong. The EPUB keeps that structure. Pass the `.epub` instead and extraction walks
+its OPF spine (order) and nav/ncx (titles), keeping each section as a cleaned XHTML fragment whose `<strong>`,
+`<em>`, `<sub>`, `<sup>` tags the translator turns into correct LaTeX; part-divider files fold into the next
+chapter, the cover comes from the OPF, and the page size is `--page-size WxH` (default 468x680pt). Add
+`--keep-images` here too. There is no source PDF, so `render.py --bg/--fg source` is unavailable — pass an
+explicit `#rrggbb`.
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.py" <book.epub> --keep-images
+```
+
 Prints one line per section (`id kind pages title: words`) and the work dir. Kinds: `cover` (page copied
 as-is), `contents` and `skip` (Index, Notes: not translated; the 目录 is regenerated), `front` (preface,
 roman folios), `chapter` (第N章, arabic folios from 1), `back` (acknowledgments, appendix, letters). Text is
@@ -107,12 +120,18 @@ is assembled.
 "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/render.py" <work> --title "<中文书名>"
 ```
 
-Writes `<book>-zh.pdf`: the source's cover page, a 目录 with folios, then every translated section. Page size
-comes from the source's first page. Colors default to a dark reading page: the background follows the iTerm2
+Writes `<book>-zh.pdf`: the cover (the source PDF's cover page, or the EPUB's cover image rendered full-bleed), a
+目录 with folios, then every translated section. Page size comes from the source's first page (PDF) or
+`--page-size` (EPUB). Colors default to a dark reading page: the background follows the iTerm2
 default profile's dark-mode background when iTerm2 is installed (else near-black), the text is `#606e6a`, a
 cool gray chosen for long reading on black (neutral or warm grays glare on a black page even when dimmed;
 a saturated terminal foreground is too dark for body text). `--bg/--fg` take `#rrggbb`, `iterm` (either
-terminal color) or `source` (sampled from a body page of the book). Type is Baskerville for Latin and Songti SC for Chinese. Chapter openers carry the
+terminal color) or `source` (sampled from a body page of the book — PDF only). Type is Baskerville for Latin and
+Songti SC for Chinese. Inline `\(..\)` / `\[..\]` LaTeX is typeset by KaTeX (loaded from the CDN, so rendering
+needs network). Chinese **bold** — the source's term emphasis and the translator's highlights — is set in a
+gothic (黑体) face a step brighter than the body (`--bold-factor`, default 1.25), because Songti's bold is nearly
+invisible; chapter openers and headings match. Picture-type (image) equations are centered at `--fig-width`% of
+the column (default 60). Chapter openers carry the
 第N章 label, the title and a drop cap; body pages carry the chapter title as running head and a folio (roman in
 front matter, arabic from chapter 1). Every 目录 row is a link to its section, and the bookmarks are flat:
 Cover, 目录, one per section. Sections without a

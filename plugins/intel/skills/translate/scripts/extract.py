@@ -12,11 +12,13 @@
 # When neither the outline nor the contents page yields sections it exits 2 and says how to hand-write them.
 import argparse
 import json
+import posixpath
 import re
 import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 import pikepdf
@@ -409,6 +411,214 @@ def default_work(book):
         return work, copy
 
 
+def _ln(tag):
+    """Local name of a namespaced ElementTree tag ('{ns}item' -> 'item')."""
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def epub_titles(z, nav_href, ncx_href):
+    """Map each content file (basename, fragment dropped) to its TOC title, from the EPUB3 nav or EPUB2 ncx.
+    The first title seen for a file wins, which is the file-level entry (sub-section entries carry #fragments)."""
+    titles = {}
+    base = lambda href: posixpath.basename(href.split("#", 1)[0])
+    if nav_href:
+        try:
+            root = ET.fromstring(z.read(nav_href))
+        except (KeyError, ET.ParseError):
+            root = None
+        if root is not None:
+            for a in root.iter():
+                if _ln(a.tag) == "a" and a.get("href"):
+                    txt = " ".join("".join(a.itertext()).split())
+                    b = base(a.get("href"))
+                    if txt and b and b not in titles:
+                        titles[b] = txt
+    if not titles and ncx_href:
+        try:
+            root = ET.fromstring(z.read(ncx_href))
+        except (KeyError, ET.ParseError):
+            root = None
+        if root is not None:
+            for np in root.iter():
+                if _ln(np.tag) != "navPoint":
+                    continue
+                label = next((e for e in np.iter() if _ln(e.tag) == "navLabel"), None)
+                content = next((e for e in np.iter() if _ln(e.tag) == "content"), None)
+                if label is not None and content is not None and content.get("src"):
+                    txt = " ".join("".join(label.itertext()).split())
+                    b = base(content.get("src"))
+                    if txt and b not in titles:
+                        titles[b] = txt
+    return titles
+
+
+def epub_first_heading(z, href):
+    try:
+        raw = z.read(href).decode("utf-8", "replace")
+    except KeyError:
+        return None
+    m = re.search(r"<h[1-6][^>]*>(.*?)</h[1-6]>", raw, re.S | re.I)
+    return " ".join(re.sub(r"<[^>]+>", "", m.group(1)).split()) if m else None
+
+
+_BLOCK_TAG = re.compile(r"</?(?:p|div|li|ul|ol|table|tr|td|section|figure|figcaption|h[1-6]|br|blockquote)\b[^>]*>", re.I)
+
+
+def _img_inline(body, pos):
+    """An <img> is inline (a symbol within a line of text) only when a word character sits right before or after
+    it WITHIN THE SAME block element; a display equation alone in its own <p>/<div> is a block. Looking only up
+    to the nearest block boundary avoids picking up text from a neighbouring paragraph."""
+    end = body.find(">", pos) + 1
+    left = re.sub(r"<[^>]+>", "", _BLOCK_TAG.split(body[max(0, pos - 240):pos])[-1]).rstrip()
+    right = re.sub(r"<[^>]+>", "", _BLOCK_TAG.split(body[end:end + 240])[0]).lstrip()
+    W = re.compile(r"[0-9A-Za-z一-鿿]")
+    return bool(left and W.match(left[-1])) or bool(right and W.match(right[0]))
+
+
+def epub_fragment(z, href, work, keep_images, counter):
+    """Clean one XHTML file into a fragment for translation: body only, scripts/anchors removed, each <img>
+    replaced by an ⟦IMG:key⟧ placeholder (block on its own line, inline within the line) and the image copied
+    into <work>/images. The math and emphasis tags (strong/em/sub/sup/span) are kept for the translator. Returns
+    (fragment, {key: {file, w, h, block}}, next counter)."""
+    raw = z.read(href).decode("utf-8", "replace")
+    m = re.search(r"<body[^>]*>(.*)</body>", raw, re.S | re.I)
+    body = m.group(1) if m else raw
+    body = re.sub(r"<script.*?</script>", "", body, flags=re.S | re.I)
+    body = re.sub(r"<style.*?</style>", "", body, flags=re.S | re.I)
+    body = re.sub(r"<a\b[^>]*>(.*?)</a>", r"\1", body, flags=re.S | re.I)
+    body = re.sub(r"<a\b[^>]*?/>", "", body, flags=re.I)  # self-closing target anchors (<a id=.../>)
+    imgs = {}
+    hdir = posixpath.dirname(href)
+
+    def img_repl(mm):
+        nonlocal counter
+        src = re.search(r'src="([^"]+)"', mm.group(0)) or re.search(r"src='([^']+)'", mm.group(0))
+        if not src:
+            return ""
+        counter += 1
+        key = f"e{counter}"
+        img_href = posixpath.normpath(posixpath.join(hdir, src.group(1)))
+        inline = _img_inline(body, mm.start())
+        if not keep_images:
+            return ""
+        try:
+            data = z.read(img_href)
+        except KeyError:
+            return ""
+        ext = Path(img_href).suffix or ".png"
+        (work / "images" / f"{key}{ext}").write_bytes(data)
+        imgs[key] = {"file": f"{key}{ext}", "w": 0, "h": 0, "block": not inline}
+        token = IMG_TOKEN.format(key)
+        return token if inline else f"\n{token}\n"
+
+    body = re.sub(r"<img\b[^>]*?/?>", img_repl, body, flags=re.I)
+    body = re.sub(r"[ \t]+", " ", body)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    return body, imgs, counter
+
+
+PART_STEM = re.compile(r"^part\d*$", re.I)
+EPUB_SKIP_STEM = re.compile(r"^(cover|titlepage|halftitle|copyright|toc|nav|ncx|index|bibliography)\d*$", re.I)
+
+
+def extract_epub(source, work, keep_images, page_size):
+    """Split an EPUB into sections from its OPF spine (order) and nav/ncx (titles), keeping the XHTML formatting
+    that PDF extraction destroys (bold vectors, sub/superscripts, prose emphasis). Part-divider files are folded
+    into the head of the next chapter. Writes the same work-dir layout as the PDF path, with source_kind=epub."""
+    z = zipfile.ZipFile(source)
+    cont = ET.fromstring(z.read("META-INF/container.xml"))
+    opf_path = next(el.get("full-path") for el in cont.iter() if _ln(el.tag) == "rootfile")
+    opf_dir = posixpath.dirname(opf_path)
+    opf = ET.fromstring(z.read(opf_path))
+    resolve = lambda href: posixpath.normpath(posixpath.join(opf_dir, href))
+    manifest, cover_id, title, author, nav_href, ncx_href = {}, None, source.stem, "", None, None
+    for el in opf.iter():
+        ln, a = _ln(el.tag), el.attrib
+        if ln == "item":
+            manifest[a["id"]] = {"href": resolve(a["href"]), "media": a.get("media-type", ""), "props": a.get("properties", "")}
+            if "nav" in a.get("properties", ""):
+                nav_href = resolve(a["href"])
+            if "cover-image" in a.get("properties", ""):  # EPUB3 cover
+                cover_id = a["id"]
+            if a.get("media-type") == "application/x-dtbncx+xml":
+                ncx_href = resolve(a["href"])
+        elif ln == "meta" and a.get("name") == "cover":  # EPUB2 cover
+            cover_id = a.get("content")
+        elif ln == "title" and (el.text or "").strip() and title == source.stem:
+            title = el.text.strip()
+        elif ln == "creator" and (el.text or "").strip() and not author:
+            author = el.text.strip()
+    spine = [el.get("idref") for el in opf.iter() if _ln(el.tag) == "itemref" and el.get("idref") in manifest]
+    titles = epub_titles(z, nav_href, ncx_href)
+
+    (work / "text").mkdir(exist_ok=True)
+    if keep_images:
+        (work / "images").mkdir(exist_ok=True)
+    sections, images, pending_prefix, seen_chapter, counter, idx = [], {}, "", False, 0, 0
+    for idref in spine:
+        item = manifest[idref]
+        if not item["media"].startswith("application/xhtml"):
+            continue
+        href = item["href"]
+        stem = Path(posixpath.basename(href)).stem
+        stitle = titles.get(posixpath.basename(href)) or epub_first_heading(z, href) or stem
+        if re.fullmatch(r"[ivxlcdm]+|\d+", stitle.strip(), re.I):  # a bare page number/roman: a series-ad or filler page
+            continue
+        chapter, clean = parse_title(stitle)
+        is_part = bool(PART_STEM.match(stem)) or bool(re.match(r"^\s*part\b", stitle, re.I))
+        if is_part and chapter is None:
+            frag, sec_imgs, counter = epub_fragment(z, href, work, keep_images, counter)
+            pending_prefix += frag + "\n\n"
+            images.update(sec_imgs)
+            continue
+        if EPUB_SKIP_STEM.match(stem):
+            continue
+        kind = classify(stitle, chapter, seen_chapter)
+        if kind in ("cover", "contents", "skip"):
+            continue
+        if kind == "chapter":
+            seen_chapter = True
+        idx += 1
+        sid = f"{idx:02d}"
+        frag, sec_imgs, counter = epub_fragment(z, href, work, keep_images, counter)
+        images.update(sec_imgs)
+        body_frag = (pending_prefix + frag) if kind == "chapter" and pending_prefix else frag
+        pending_prefix = "" if kind == "chapter" else pending_prefix
+        sfile = f"text/{sid}-{slugify(clean)}.xhtml"
+        (work / sfile).write_text(body_frag)
+        words = len(re.sub(r"<[^>]+>", " ", IMG_TOKEN_RE.sub(" ", body_frag)).split())
+        sections.append({"id": sid, "title": clean, "outline_title": stitle, "chapter": chapter,
+                         "label": f"第{chinese_number(chapter)}章" if chapter else None, "kind": kind,
+                         "start": 0, "end": 0, "file": sfile, "words": words})
+
+    cover_file = None
+    if cover_id and cover_id in manifest:
+        ch = manifest[cover_id]
+        img_href = ch["href"]
+        if not ch["media"].startswith("image"):
+            craw = z.read(ch["href"]).decode("utf-8", "replace")
+            mm = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', craw)
+            img_href = posixpath.normpath(posixpath.join(posixpath.dirname(ch["href"]), mm.group(1))) if mm else None
+        if img_href:
+            try:
+                ext = Path(img_href).suffix or ".jpg"
+                (work / f"cover{ext}").write_bytes(z.read(img_href))
+                cover_file = f"cover{ext}"
+            except KeyError:
+                cover_file = None
+
+    meta = {"source": str(source), "source_kind": "epub", "title": title, "author": author,
+            "page_size": page_size, "cover_image": cover_file, "sections": sections}
+    (work / "sections.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    if keep_images:
+        (work / "images.json").write_text(json.dumps(images, ensure_ascii=False, indent=1))
+        print(f"kept {len(images)} images in {work / 'images'}", file=sys.stderr)
+    for s in sections:
+        print(f"{s['id']} {s['kind']:8} {s['outline_title']}: {s['words']} words -> {s['file']}")
+    print(f"cover: {cover_file}; page size: {page_size[0]}x{page_size[1]}pt", file=sys.stderr)
+    print(f"work dir: {work}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("book")
@@ -417,13 +627,22 @@ def main():
     ap.add_argument("--keep-images", action="store_true",
                     help="keep figures and equations that are stored as images: extract each section's text with "
                          "⟦IMG:key⟧ placeholders at the image positions and copy the images into <work>/images")
+    ap.add_argument("--page-size", default="468x680",
+                    help="EPUB only: rendered page size in pt as WxH (default 468x680, a 6.5x9.4in trade book)")
     args = ap.parse_args()
     source = Path(args.book).resolve()
     if args.work:
-        work, book = Path(args.work).resolve(), source
+        work = Path(args.work).resolve()
         work.mkdir(parents=True, exist_ok=True)
     else:
-        work, book = default_work(source)
+        work, _ = default_work(source)
+
+    if source.suffix.lower() == ".epub":
+        page_size = [round(float(x), 2) for x in args.page_size.lower().split("x")]
+        extract_epub(source, work, args.keep_images, page_size)
+        return
+
+    book = source
     (work / "text").mkdir(exist_ok=True)
     split = split_two_up(book, work / "pages.pdf")
     if split:
