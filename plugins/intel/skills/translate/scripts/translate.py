@@ -43,6 +43,45 @@ Output Markdown only:
 - Follow the glossary exactly when one is given.
 """
 
+RULES_EPUB = """You are a professional literary translator (English -> Simplified Chinese) working on a published
+non-fiction book. Everything you need is in the message: do not run commands, do not read or write files.
+Translate the whole section, faithfully and fluently, as a Chinese publisher would print it. Never summarize,
+never skip a paragraph, never add commentary.
+
+The source is a fragment of the book's ORIGINAL EPUB XHTML, so its formatting tags are intact and carry meaning
+you must preserve. Use them; do not print the tags themselves.
+
+Math (the important part) -- convert inline math to correct LaTeX inside \\( ... \\), using the tags:
+- <em><strong>x</strong></em> (bold italic) = a vector or matrix -> \\(\\mathbf{x}\\) (uppercase too, e.g. matrix \\(\\mathbf{A}\\)).
+- a sans-serif capital (a tensor) -> \\(\\mathsf{A}\\).
+- <em>x</em> (plain italic) = a scalar -> \\(x\\).
+- <sub>i</sub> = subscript -> _{i};  <sup>2</sup> = superscript -> ^{2}. Keep superscript vs subscript straight,
+  do not flip them (e.g. the L2 norm is \\(L^{2}\\) with a superscript; the norm selector is \\(\\|\\mathbf{x}\\|_2\\)).
+- a transpose mark (superscript T or the character ⊤) -> ^{\\top}; never drop it.
+- ℝ (often <span class="font3">ℝ</span>) -> \\(\\mathbb{R}\\); × -> \\times; ⊙ -> \\odot; ∈ -> \\in.
+
+Emphasis and structure:
+- <strong> around a word or term (not a math variable) -> Chinese **bold**. <em> used for prose emphasis (not a
+  math variable) -> *italic*.
+- Ignore navigation links (<a href="toc...">); keep only their visible text.
+- Some fragments carry image placeholders ⟦IMG:key⟧ standing for a figure or displayed equation stored as an
+  image. Copy every ⟦IMG:...⟧ token EXACTLY, in place; never translate, renumber, merge, drop, or invent one.
+
+Highlights (a high bar -- be sparing):
+- While translating, mark the section's MOST important content in **bold** as reading highlights: core
+  conclusions, key definitions, the section's thesis. Usually 1-4 per section, each at most one sentence (a key
+  phrase is better). NEVER bold whole paragraphs or several sentences in a row -- that ruins the page and defeats
+  the purpose. When in doubt, mark less. Highlight bold uses the same **...** as term bold.
+
+Output Markdown only:
+- First line: "# " + the section title in Chinese (no chapter number: the layout adds it).
+- Sub-headings become "## " lines. One paragraph per source paragraph, blank line between paragraphs.
+- Proper nouns: company and product names stay in English; people are 中文译名（English Name）the first time.
+- Book and publication titles: 《中文译名》(English Title) the first time.
+- Numbers, money and units stay as in the source. Put one space between Chinese and Latin letters or digits.
+- Follow the glossary exactly when one is given.
+"""
+
 
 def load_sections(work):
     meta = json.loads((work / "sections.json").read_text())
@@ -87,10 +126,10 @@ def codex_home(dir_, model, effort, instructions, service_tier):
     return home
 
 
-def run_codex(prompt, model, effort, service_tier, events=None, timeout=3600, tries=2):
+def run_codex(prompt, model, effort, service_tier, events=None, timeout=3600, tries=2, rules=RULES):
     dir_ = Path(tempfile.mkdtemp(prefix="translate-"))
     instructions = dir_ / "instructions.md"
-    instructions.write_text(RULES)
+    instructions.write_text(rules)
     last = dir_ / "last.txt"
     home = codex_home(dir_, model, effort, instructions, service_tier)
     args = ["codex", "exec", "--ignore-rules", "--skip-git-repo-check", "--ephemeral", "-C", str(dir_), "-s", "read-only"]
@@ -127,11 +166,12 @@ def run_codex(prompt, model, effort, service_tier, events=None, timeout=3600, tr
 def translate_one(work, meta, section, opt):
     text = (work / section["file"]).read_text()
     prompt = build_prompt(meta, section, text, opt.glossary_text)
+    rules = RULES_EPUB if meta.get("source_kind") == "epub" else RULES
     out = work / "md" / (Path(section["file"]).stem + ".md")
     events = work / "md" / (section["id"] + ".events.jsonl")
     problem = None
     for attempt in (1, 2):
-        md, usage, seconds = run_codex(prompt, opt.model, opt.effort, opt.service_tier, events)
+        md, usage, seconds = run_codex(prompt, opt.model, opt.effort, opt.service_tier, events, rules=rules)
         problem = check_output(md, section.get("words"))
         if not problem:
             break
@@ -164,7 +204,8 @@ def main():
     todo = [s for s in sections if opt.force or not (work / "md" / (Path(s["file"]).stem + ".md")).exists()]
     if opt.dry_run:
         s = todo[0] if todo else sections[0]
-        print(RULES + "\n-----\n" + build_prompt(meta, s, (work / s["file"]).read_text(), opt.glossary_text))
+        rules = RULES_EPUB if meta.get("source_kind") == "epub" else RULES
+        print(rules + "\n-----\n" + build_prompt(meta, s, (work / s["file"]).read_text(), opt.glossary_text))
         return
     print(f"{len(todo)} of {len(sections)} sections to translate with {opt.model}/{opt.effort}/{opt.service_tier}, "
           f"{opt.jobs} in flight", flush=True)

@@ -156,6 +156,29 @@ def test_render_units(rd):
     check("contents row", "⟦TOC⟧" in toc and '<span class="pg">1</span>' in toc)
 
 
+def test_epub_units(ex, rd):
+    # Inline/display LaTeX must survive Markdown untouched (its _ and * not eaten), so KaTeX can typeset it.
+    _, body = rd.md_to_html("# T\n\n设 \\(x_{1}\\)、\\(L^{2}\\)，且 \\[y = a_{i}\\]。\n")
+    check("inline/display LaTeX survives markdown",
+          "\\(x_{1}\\)" in body and "\\(L^{2}\\)" in body and "\\[y = a_{i}\\]" in body and "<em>" not in body, body)
+    # A display equation alone in its block is a block figure; a symbol within a text line is inline.
+    b1 = '<p><img src="e.png"/></p>'
+    b2 = '<p>当 <img src="s.png"/> 时</p>'
+    check("display equation alone in <p> is block", ex._img_inline(b1, b1.find("<img")) is False)
+    check("symbol image within a line is inline", ex._img_inline(b2, b2.find("<img")) is True)
+    # epub_fragment keeps the math/emphasis tags and turns each <img> into an ⟦IMG⟧ placeholder.
+    import tempfile as _t, zipfile
+    with _t.TemporaryDirectory() as d:
+        work = Path(d); (work / "images").mkdir()
+        zp = work / "t.epub"
+        with zipfile.ZipFile(zp, "w") as z:
+            z.writestr("c.xhtml", '<html><body><p><strong>x</strong> is <em>a</em><sub>1</sub> <img src="i.png"/></p></body></html>')
+            z.writestr("i.png", b"\x89PNG\r\n\x1a\n")
+        frag, imgs, n = ex.epub_fragment(zipfile.ZipFile(zp), "c.xhtml", work, True, 0)
+        check("epub_fragment keeps tags and placeholders the image",
+              "<strong>x</strong>" in frag and "<sub>1</sub>" in frag and "⟦IMG:" in frag and len(imgs) == 1 and n == 1, frag)
+
+
 def make_source_book(path, chrome):
     """A three-page 'English' book with an outline (Cover, Preface, 1. One) printed by Chrome, cover page colored."""
     html_path = path.with_suffix(".html")
@@ -290,6 +313,7 @@ def main():
     test_extract(ex)
     test_translate(tr)
     test_render_units(rd)
+    test_epub_units(ex, rd)
     test_render_e2e(rd)
     test_luna_e2e(tr)
     r = subprocess.run(["bash", str(HERE / "setup.sh"), "--check"], capture_output=True, text=True)
