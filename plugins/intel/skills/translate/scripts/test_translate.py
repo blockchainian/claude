@@ -177,6 +177,34 @@ def test_epub_units(ex, rd):
         frag, imgs, n = ex.epub_fragment(zipfile.ZipFile(zp), "c.xhtml", work, True, 0)
         check("epub_fragment keeps tags and placeholders the image",
               "<strong>x</strong>" in frag and "<sub>1</sub>" in frag and "⟦IMG:" in frag and len(imgs) == 1 and n == 1, frag)
+    # A per-subsection-file EPUB groups its subsections under the parent chapter (one section, ## sub-headings).
+    with _t.TemporaryDirectory() as d:
+        work = Path(d); epub = work / "b.epub"
+        opf = ('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+               '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>B</dc:title></metadata>'
+               '<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+               '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
+               '<item id="c1a" href="c1a.xhtml" media-type="application/xhtml+xml"/>'
+               '<item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/></manifest>'
+               '<spine><itemref idref="c1"/><itemref idref="c1a"/><itemref idref="c2"/></spine></package>')
+        nav = ('<html><body><nav><ol><li><a href="c1.xhtml">1. Intro</a></li>'
+               '<li><a href="c1a.xhtml">1.1. First</a></li><li><a href="c2.xhtml">2. Next</a></li></ol></nav></body></html>')
+        with zipfile.ZipFile(epub, "w") as z:
+            z.writestr("META-INF/container.xml",
+                       '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                       '<rootfiles><rootfile full-path="package.opf"/></rootfiles></container>')
+            z.writestr("package.opf", opf)
+            z.writestr("nav.xhtml", nav)
+            z.writestr("c1.xhtml", "<html><body><p>chapter one body</p></body></html>")
+            z.writestr("c1a.xhtml", "<html><body><p>subsection one one body</p></body></html>")
+            z.writestr("c2.xhtml", "<html><body><p>chapter two body</p></body></html>")
+        ex.extract_epub(epub, work, False, [468, 680])
+        m = json.loads((work / "sections.json").read_text())
+        secs = m["sections"]
+        ch1 = work / secs[0]["file"]
+        check("subsection grouped under its chapter (one section per chapter, not per subsection)",
+              len(secs) == 2 and secs[0]["label"] == "第一章" and secs[1]["label"] == "第二章"
+              and "subsection one one body" in ch1.read_text(), [s["outline_title"] for s in secs])
 
 
 def make_source_book(path, chrome):
