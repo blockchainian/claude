@@ -23,6 +23,7 @@ import pikepdf
 
 IMG_TOKEN = "⟦IMG:{}⟧"  # placeholder for a figure/equation stored as an image, kept verbatim through translation
 IMG_TOKEN_RE = re.compile(r"⟦IMG:[^⟧]+⟧")
+IMG_ZOOM = 4  # render extracted images at 4x (~288dpi) so small equations stay crisp; coordinates are divided back to pt
 
 NUMBER_WORDS = {w: i for i, w in enumerate(
     ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
@@ -233,9 +234,10 @@ def image_pages(pdf_path, start, end, images_dir):
         return [], {}
     images_dir.mkdir(parents=True, exist_ok=True)
     page_texts, mapping = [], {}
+    z = IMG_ZOOM
     for page in range(start, end + 1):
         base = images_dir / f"_x{page}"
-        subprocess.run(["pdftohtml", "-xml", "-zoom", "1", "-f", str(page), "-l", str(page), str(pdf_path), str(base)],
+        subprocess.run(["pdftohtml", "-xml", "-zoom", str(z), "-f", str(page), "-l", str(page), str(pdf_path), str(base)],
                        capture_output=True, check=True)
         xml = base.with_suffix(".xml")
         root = ET.parse(xml).getroot() if xml.exists() else ET.Element("pdf2xml")
@@ -245,12 +247,12 @@ def image_pages(pdf_path, start, end, images_dir):
                 t = "".join(el.itertext())
                 if t.strip():
                     a = el.attrib
-                    texts.append({"top": float(a["top"]), "left": float(a["left"]),
-                                  "w": float(a["width"]), "h": float(a["height"]), "t": re.sub(r"\s+", " ", t)})
+                    texts.append({"top": float(a["top"]) / z, "left": float(a["left"]) / z,
+                                  "w": float(a["width"]) / z, "h": float(a["height"]) / z, "t": re.sub(r"\s+", " ", t)})
             elif el.tag == "image":
                 a = el.attrib
-                images.append({"top": float(a["top"]), "left": float(a["left"]),
-                               "w": float(a["width"]), "h": float(a["height"]), "src": a["src"]})
+                images.append({"top": float(a["top"]) / z, "left": float(a["left"]) / z,
+                               "w": float(a["width"]) / z, "h": float(a["height"]) / z, "src": a["src"]})
         for i, img in enumerate(images, 1):
             key = f"{page}_{i}"
             band_lo, band_hi = img["top"], img["top"] + img["h"]
