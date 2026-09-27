@@ -78,6 +78,24 @@ def md_to_html(md_text):
     return title, markdown.markdown(body, extensions=["smarty"], output_format="html")
 
 
+IMG_TOKEN_RE = re.compile(r"⟦IMG:([^⟧]+)⟧")
+
+
+def place_images(body_html, work, images):
+    """Replace ⟦IMG:key⟧ placeholders with the extracted figure/equation images. A block image becomes its
+    own centered figure (breaking the surrounding paragraph); an inline image sits in the line. Both get a
+    white plate so black line-art stays legible on the dark page."""
+    def repl(m):
+        meta = images.get(m.group(1))
+        if not meta:
+            return ""
+        uri = (work / "images" / meta["file"]).resolve().as_uri()
+        if meta.get("block"):
+            return (f'</p><figure class="fig"><img src="{uri}" style="max-width:100%"></figure><p>')
+        return f'<img class="infig" src="{uri}" style="height:{meta["h"] * 1.05:.0f}pt">'
+    return IMG_TOKEN_RE.sub(repl, body_html)
+
+
 def css(page_size, bg, fg, heads, font_size=9.25):
     w, h = page_size
     top, side, bottom = round(h * 0.082, 1), round(w * 0.135, 1), round(h * 0.068, 1)
@@ -109,6 +127,9 @@ blockquote p {{ text-indent: 0; }}
 ul, ol {{ margin: 4pt 0 4pt 2em; padding: 0; }}
 li {{ margin: 2pt 0; }}
 em {{ font-style: italic; }}
+.fig {{ margin: 10pt auto; text-align: center; break-inside: avoid; }}
+.fig img {{ background: #fff; padding: 4pt 6pt; border-radius: 3pt; max-width: calc(100% - 16pt); }}
+.infig {{ background: #fff; padding: 0 2pt; border-radius: 2pt; vertical-align: middle; }}
 .contents .opener {{ margin-bottom: {round(h * 0.05)}pt; }}
 .toc {{ font-size: 9.5pt; }}
 .toc .e {{ display: flex; align-items: baseline; margin: 0 0 9pt; }}
@@ -200,11 +221,16 @@ def render(work, opt):
     sections = [s for s in meta["sections"] if s.get("file")]
     if opt.only:
         sections = [s for s in sections if s["id"] == opt.only] or sys.exit(f"no section {opt.only}")
+    images_path = work / "images.json"
+    images = json.loads(images_path.read_text()) if images_path.exists() else {}
     ready = []
     for s in sections:
         md_path = work / "md" / (Path(s["file"]).stem + ".md")
         if md_path.exists():
-            ready.append((s, *md_to_html(md_path.read_text())))
+            title_zh, body = md_to_html(md_path.read_text())
+            if images:
+                body = place_images(body, work, images)
+            ready.append((s, title_zh, body))
         else:
             print(f"skip {s['id']} {s['title']}: not translated yet", file=sys.stderr)
     if not ready:

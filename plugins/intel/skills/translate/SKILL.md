@@ -48,6 +48,14 @@ undone, paragraphs rebuilt, indented blocks marked `> `.
 Two-up scans (a landscape sheet holding two book pages) are split into single pages first, into
 `<work>/pages.pdf`; every later step, including the cover and the page size, uses that file.
 
+Pass `--keep-images` for books whose figures and equations are stored as images (e.g. an EPUB-derived PDF of a
+textbook): each section's text then carries an `⟦IMG:key⟧` placeholder at every image's position (block images
+on their own line, inline symbols within the line), the images are copied into `<work>/images/` and mapped in
+`<work>/images.json`. The translator is told to keep the placeholders verbatim, and `render.py` puts the images
+back — block ones as centered figures, inline ones in the line, each on a white plate so black line-art stays
+legible on the dark page. Without the flag, extraction is text-only as before. The interleaved text is rougher
+around inline math (pdftohtml splits glyphs), but Luna repairs it; use the flag only when images matter.
+
 Without an outline, the sections come from the printed contents page: lines with dot leaders give the titles
 (`Section 12  Vacations ..... 12-1`, `Chapter Three ..... 27`, `LOA 4 ..... LOA 4-1`), and each start page is
 the first page after the previous section whose top lines carry that label or title (a `LOA` entry matches a
@@ -124,8 +132,9 @@ one section with `translate.py <work> --force --only <id>`. A different look (li
 
 - Source PDFs are often scans with an OCR layer: the extractor cannot tell a sub-heading from a short line, so
   Luna is told to promote title-like lines to `##`, repair OCR misreads and drop-cap damage, and rebuild
-  paragraphs. Figures and tables do not survive (a rate table comes out as prose); say so in the summary when
-  the source has them, and point the reader at the source pages for numbers.
+  paragraphs. Figures and tables do not survive by default (a rate table comes out as prose); say so in the
+  summary when the source has them, and point the reader at the source pages for numbers — or run extraction
+  with `--keep-images` to carry figures and image equations through as placeholders and render them back.
 - Chrome cannot reset the page counter mid-document, so front matter and body are typeset as two documents and
   joined with pikepdf; the running head on opener pages is masked by a background rectangle after the fact.
 - The PDF text layer keeps the tiny invisible `⟦S04⟧` markers the page map uses; they are 1pt and transparent.
