@@ -61,8 +61,9 @@ Math (the important part) -- convert inline math to correct LaTeX inside \\( ...
 - ℝ (often <span class="font3">ℝ</span>) -> \\(\\mathbb{R}\\); × -> \\times; ⊙ -> \\odot; ∈ -> \\in.
 
 Emphasis and structure:
-- <strong> around a word or term (not a math variable) -> Chinese **bold**. <em> used for prose emphasis (not a
-  math variable) -> *italic*.
+- <strong> around a word or term, and <em> used for prose emphasis (neither being a math variable) -> Chinese
+  **bold**. (Chinese emphasises with bold, not italic; italicised Chinese is illegible. Math variables still
+  become \\( \\) LaTeX, never bold.)
 - Ignore navigation links (<a href="toc...">); keep only their visible text.
 - Some fragments carry image placeholders ⟦IMG:key⟧ standing for a figure or displayed equation stored as an
   image. Copy every ⟦IMG:...⟧ token EXACTLY, in place; never translate, renumber, merge, drop, or invent one.
