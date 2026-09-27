@@ -172,6 +172,7 @@ def test_epub_units(ex, rd):
     # and a blockquote wrapping a display equation is unwrapped so a wide equation gets the full column.
     check("inline \\tag promoted to display", rd.repair_math("\\(x\\tag{1}\\)") == "\\[x\\tag{1}\\]")
     check("currency $ escaped inside math", rd.repair_math("\\($100\\)") == "\\(\\$100\\)")
+    check("\\mbox (unsupported by KaTeX) rewritten to \\text", rd.repair_math("\\(\\mathrm{IS\\mbox{-}GOAL}\\)") == "\\(\\mathrm{IS\\text{-}GOAL}\\)")
     check("blockquote markers stripped from multi-line display", "\n>" not in rd.repair_math("\\[\n> a\\\\\n> b\n> \\]"))
     check("\\\\[2pt] array row-skip inside a display is not corrupted", rd.repair_math("\\[a\\\\[2pt]b\\]") == "\\[a\\\\[2pt]b\\]")
     _, bq = rd.md_to_html("# T\n\n> \\[\n> a\\Rightarrow b\n> \\]\n")
