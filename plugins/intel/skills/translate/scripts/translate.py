@@ -102,10 +102,13 @@ def cjk_count(s):
 
 
 def check_output(md, words):
-    """A translation must start with the title heading and be long enough to have covered the source."""
+    """A translation must start with the title heading and be long enough to have covered the source. The length
+    floor is 0.6 Chinese characters per English word: Chinese is more compact, and sections dense with names,
+    citations or math (a notation table, a bibliography, a history section) legitimately fall well under parity —
+    0.9 kept false-rejecting complete translations. A real truncation lands far below 0.6, so it is still caught."""
     if not md.strip().startswith("# "):
         return "does not start with '# title'"
-    if words and cjk_count(md) < 0.9 * words:
+    if words and cjk_count(md) < 0.6 * words:
         return f"too short: {cjk_count(md)} Chinese characters for {words} English words"
     return None
 
