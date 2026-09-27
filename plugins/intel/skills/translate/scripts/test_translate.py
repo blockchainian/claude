@@ -108,6 +108,7 @@ def test_translate(tr):
     check("prompt names book, section and glossary", "Book: Traction by Weinberg" in prompt and "第一章 Traction Channels" in prompt
           and "traction → 牵引力" in prompt and prompt.rstrip().endswith("Hello world."))
     check("rules forbid tools and demand the title line", "do not run commands" in tr.RULES and '"# "' in tr.RULES)
+    check("rules tell the model to keep image placeholders", "⟦IMG:" in tr.RULES and "Copy every" in tr.RULES)
     check("answer without title rejected", tr.check_output("正文而已", 5) is not None)
     check("short answer rejected", tr.check_output("# 标题\n\n短", 100) is not None)
     check("good answer accepted", tr.check_output("# 标题\n\n" + "汉" * 200, 100) is None)
@@ -127,6 +128,16 @@ def test_render_units(rd):
     title, body = rd.md_to_html("# 章名\n\n第一段 *强调*。\n\n> 引文\n\n## 小标题\n\n第二段。\n")
     check("markdown title split off", title == "章名" and "<h1" not in body)
     check("markdown body html", "<em>强调</em>" in body and "<blockquote>" in body and "<h2>小标题</h2>" in body)
+    import tempfile as _tmp
+    with _tmp.TemporaryDirectory() as d:
+        work = Path(d); (work / "images").mkdir()
+        (work / "images" / "5_1.png").write_bytes(b"x"); (work / "images" / "5_2.png").write_bytes(b"x")
+        images = {"5_1": {"file": "5_1.png", "w": 300, "h": 12, "block": True},
+                  "5_2": {"file": "5_2.png", "w": 40, "h": 10, "block": False}}
+        out = rd.place_images("<p>ascent in ⟦IMG:5_1⟧ where ⟦IMG:5_2⟧ is</p>", work, images)
+        check("block image becomes its own figure", '<figure class="fig">' in out and "5_1.png" in out)
+        check("inline image stays inline", 'class="infig"' in out and "5_2.png" in out and "<figure" not in out.split("5_2")[0].rsplit("</figure>",1)[-1])
+        check("unknown placeholder dropped, not left raw", rd.place_images("a⟦IMG:zz⟧b", work, images) == "ab")
     check("roman folios", [rd.folio_for(i, None) for i in range(3)] == ["i", "ii", "iii"])
     check("roman folio past the table falls back to arabic (long front matter)",
           rd.roman_folio(len(rd.ROMAN) - 1) == str(len(rd.ROMAN)) and rd.folio_for(len(rd.ROMAN) + 5, None) == str(len(rd.ROMAN) + 6),

@@ -13,11 +13,16 @@
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pikepdf
+
+IMG_TOKEN = "⟦IMG:{}⟧"  # placeholder for a figure/equation stored as an image, kept verbatim through translation
+IMG_TOKEN_RE = re.compile(r"⟦IMG:[^⟧]+⟧")
 
 NUMBER_WORDS = {w: i for i, w in enumerate(
     ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
@@ -219,6 +224,76 @@ def pdftotext_pages(pdf_path, start, end):
     return out.split("\f")[: end - start + 1]
 
 
+def image_pages(pdf_path, start, end, images_dir):
+    """Text of pages [start, end] with each figure/equation image replaced by an ⟦IMG:key⟧ placeholder at its
+    position. pdftohtml -xml gives text runs and extracted PNGs with pt coordinates (zoom 1); an image whose
+    vertical band overlaps no text line is a block (own line), otherwise inline (placed by horizontal order).
+    Returns (page strings, {key: {file, w, h, block}}) with the PNGs copied into images_dir as <key>.png."""
+    if end < start:
+        return [], {}
+    images_dir.mkdir(parents=True, exist_ok=True)
+    page_texts, mapping = [], {}
+    for page in range(start, end + 1):
+        base = images_dir / f"_x{page}"
+        subprocess.run(["pdftohtml", "-xml", "-zoom", "1", "-f", str(page), "-l", str(page), str(pdf_path), str(base)],
+                       capture_output=True, check=True)
+        xml = base.with_suffix(".xml")
+        root = ET.parse(xml).getroot() if xml.exists() else ET.Element("pdf2xml")
+        texts, images = [], []
+        for el in root.iter():
+            if el.tag == "text":
+                t = "".join(el.itertext())
+                if t.strip():
+                    a = el.attrib
+                    texts.append({"top": float(a["top"]), "left": float(a["left"]),
+                                  "w": float(a["width"]), "h": float(a["height"]), "t": re.sub(r"\s+", " ", t)})
+            elif el.tag == "image":
+                a = el.attrib
+                images.append({"top": float(a["top"]), "left": float(a["left"]),
+                               "w": float(a["width"]), "h": float(a["height"]), "src": a["src"]})
+        for i, img in enumerate(images, 1):
+            key = f"{page}_{i}"
+            band_lo, band_hi = img["top"], img["top"] + img["h"]
+            block = not any(t["top"] < band_hi and t["top"] + t["h"] > band_lo for t in texts)
+            dest = images_dir / f"{key}{Path(img['src']).suffix or '.png'}"
+            try:
+                shutil.copyfile(img["src"], dest)
+            except OSError:
+                continue
+            img["key"] = key
+            img["block"] = block
+            mapping[key] = {"file": dest.name, "w": img["w"], "h": img["h"], "block": block}
+        # group text runs into lines (top within 4pt), then place inline images into their line by horizontal order
+        items = sorted(texts, key=lambda e: (e["top"], e["left"]))
+        lines, cur, curtop = [], [], None
+        for e in items:
+            if curtop is None or abs(e["top"] - curtop) <= 4:
+                cur.append(e)
+                curtop = e["top"] if curtop is None else curtop
+            else:
+                lines.append((curtop, cur))
+                cur, curtop = [e], e["top"]
+        if cur:
+            lines.append((curtop, cur))
+        rendered = []
+        for top, runs in lines:
+            toks = [(r["left"], r["t"]) for r in runs]
+            for img in images:
+                if img.get("key") is not None and not img["block"] and img["top"] < top + 10 and img["top"] + img["h"] > top - 2:
+                    toks.append((img["left"], IMG_TOKEN.format(img["key"])))
+                    img["key"] = None  # place an inline image on one line only
+            toks.sort()
+            rendered.append((top, " ".join(s for _, s in toks if s)))
+        for img in images:
+            if img.get("key") and img["block"]:
+                rendered.append((img["top"], IMG_TOKEN.format(img["key"])))
+        rendered.sort()
+        page_texts.append("\n".join(s for _, s in rendered))
+    for tmp in images_dir.glob("_x*"):  # drop pdftohtml's raw xml and its original-named image files
+        tmp.unlink()
+    return page_texts, mapping
+
+
 def split_two_up(book, out):
     """Pages wider than tall hold two book pages side by side: write a PDF with each half as its own page.
     Returns the path when anything was split, else None."""
@@ -337,6 +412,9 @@ def main():
     ap.add_argument("book")
     ap.add_argument("--work")
     ap.add_argument("--sections", help="hand-written sections.json ([{title,start}] or full) to use instead of the outline")
+    ap.add_argument("--keep-images", action="store_true",
+                    help="keep figures and equations that are stored as images: extract each section's text with "
+                         "⟦IMG:key⟧ placeholders at the image positions and copy the images into <work>/images")
     args = ap.parse_args()
     source = Path(args.book).resolve()
     if args.work:
@@ -379,17 +457,26 @@ def main():
 
     sections = build_sections(entries, page_count)
     short_title = re.split(r"[:\-–—(]", title)[0].strip()
+    images = {}
     for s in sections:
         if s["kind"] in ("cover", "contents", "skip"):
             continue
         heads = [s["title"], s["outline_title"], short_title, title]
         if s["chapter"]:
             heads += [f"chapter {s['chapter']}"] + [f"chapter {w}" for w, n in NUMBER_WORDS.items() if n == s["chapter"]]
-        pages = pdftotext_pages(book, s["start"], s["end"])
+        if args.keep_images:
+            pages, section_images = image_pages(book, s["start"], s["end"], work / "images")
+            images.update(section_images)
+        else:
+            pages = pdftotext_pages(book, s["start"], s["end"])
         paragraphs = clean_pages(pages, heads)
         s["file"] = f"text/{s['id']}-{slugify(s['title'])}.txt"
-        s["words"] = sum(len(p.split()) for p in paragraphs)
+        s["words"] = sum(len(p.split()) for p in paragraphs if not IMG_TOKEN_RE.fullmatch(p.strip()))
         (work / s["file"]).write_text("\n\n".join(paragraphs) + "\n")
+
+    if args.keep_images:
+        (work / "images.json").write_text(json.dumps(images, ensure_ascii=False, indent=1))
+        print(f"kept {len(images)} images in {work / 'images'}", file=sys.stderr)
 
     meta = {"book": str(book), "source": str(source), "title": title, "author": author, "pages": page_count,
             "page_size": page_size, "sections": sections}

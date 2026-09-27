@@ -37,6 +37,9 @@ Output Markdown only:
 - Book and publication titles: 《中文译名》(English Title) the first time.
 - Numbers, money and units stay as in the source (500 平方英尺, 2010 年秋天). Put one space between
   Chinese and Latin letters or digits.
+- Some text carries image placeholders of the form ⟦IMG:key⟧ standing for a figure or equation stored as
+  an image. Copy every ⟦IMG:...⟧ token EXACTLY as written, in the same place relative to the surrounding
+  words. Never translate, renumber, merge, or drop one, and never invent new ones.
 - Follow the glossary exactly when one is given.
 """
 
