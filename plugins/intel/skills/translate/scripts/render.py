@@ -108,11 +108,13 @@ def repair_math(raw):
     source or (for leaked blockquote markers) with spurious symbols:
     - blockquote continuation markers that leaked into a multi-line display (\\n> ...) -> drop them;
     - inline \\(..\\) that carries a \\tag (KaTeX allows \\tag only in display math) -> promote to display \\[..\\];
-    - a literal currency $ inside math (KaTeX reads $ as a math-mode delimiter) -> escape it as \\$."""
+    - a literal currency $ inside math (KaTeX reads $ as a math-mode delimiter) -> escape it as \\$;
+    - \\mbox (a LaTeX box command KaTeX does not implement, used for hyphens in operator names) -> \\text."""
     raw = re.sub(r"\n>[ \t]?", "\n", raw)
     if raw.startswith("\\(") and "\\tag" in raw:
         raw = "\\[" + raw[2:-2] + "\\]"
     raw = re.sub(r"(?<!\\)\$", r"\\$", raw)
+    raw = raw.replace("\\mbox", "\\text")
     return raw
 
 
