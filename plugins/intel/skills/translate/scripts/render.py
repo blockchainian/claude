@@ -94,15 +94,18 @@ def is_line_art(im):
 
 def recolor_line_art(src, fg, dest):
     """Recolour black-on-white line art to the page foreground on a transparent background, so an equation
-    sits on the dark page in the body colour with no white plate. Returns True when it was line art (and dest
-    written), False for a colour figure (left as is)."""
-    from PIL import Image
+    sits on the dark page in the body colour with no white plate. The grey is upscaled (Lanczos) and sharpened
+    first, so the low-resolution equation images degrade gracefully when zoomed. Returns True when it was line
+    art (and dest written), False for a colour figure (left as is)."""
+    from PIL import Image, ImageFilter
     im = Image.open(src)
     if not is_line_art(im):
         return False
-    alpha = im.convert("L").point(lambda v: 255 - v)  # dark ink -> opaque, white paper -> transparent
+    grey = im.convert("L").resize((im.width * 2, im.height * 2), Image.LANCZOS)
+    grey = grey.filter(ImageFilter.UnsharpMask(radius=2, percent=130, threshold=2))
+    alpha = grey.point(lambda v: 255 - v)  # dark ink -> opaque, white paper -> transparent
     r, g, b = int(fg[1:3], 16), int(fg[3:5], 16), int(fg[5:7], 16)
-    plate = Image.new("RGBA", im.size, (r, g, b, 0))
+    plate = Image.new("RGBA", grey.size, (r, g, b, 0))
     plate.putalpha(alpha)
     plate.save(dest)
     return True
