@@ -147,8 +147,8 @@ def test_render_units(rd):
           f"{rd.roman_folio(len(rd.ROMAN) - 1)} / {rd.folio_for(len(rd.ROMAN) + 5, None)}")
     style = rd.css([427.6, 660], "#181a1d", "#e1ddd5", [("03", "前言", "front"), ("04", "第一章", "chapter")])
     check("css page size and colors", "size: 427.6pt 660pt" in style and "--bg: #181a1d" in style and "Baskerville" in style)
-    check("css front roman, body arabic", '@page s03 { @top-center { content: "前言"' in style and "counter(page, lower-roman)" in style.split("@page s03")[1].split("}}")[0]
-          and "content: counter(page);" in style.split("@page s04")[1].split("} }")[0])
+    check("css sets running heads, no page counter (folios are painted onto the assembled PDF)",
+          '@page s03 { @top-center { content: "前言"' in style and "counter(page" not in style)
     sec = {"id": "04", "kind": "chapter", "label": "第一章"}
     frag = rd.section_html(sec, "标题", "<p>x</p>")
     check("section carries marker, label, named page", "⟦S04⟧" in frag and "第一章" in frag and 'page: s04' in frag)
