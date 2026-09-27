@@ -215,7 +215,7 @@ blockquote {{ margin: 8pt 2em; font-style: italic; }}
 blockquote p {{ text-indent: 0; }}
 ul, ol {{ margin: 4pt 0 4pt 2em; padding: 0; }}
 li {{ margin: 2pt 0; }}
-em {{ font-style: italic; }}
+em {{ font-family: {hei}; font-weight: 700; font-style: normal; color: {bold}; }}  /* Chinese emphasis: 黑体 bold, not italic (Songti italic is illegible); math variables are KaTeX, not <em> */
 .fig {{ margin: 10pt auto; text-align: center; break-inside: avoid; }}
 .fig img {{ max-width: 100%; height: auto; }}
 .fig.plate img {{ background: #fff; padding: 4pt 6pt; border-radius: 3pt; }}
