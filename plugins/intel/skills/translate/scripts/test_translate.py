@@ -147,8 +147,13 @@ def test_render_units(rd):
           f"{rd.roman_folio(len(rd.ROMAN) - 1)} / {rd.folio_for(len(rd.ROMAN) + 5, None)}")
     style = rd.css([427.6, 660], "#181a1d", "#e1ddd5", [("03", "前言", "front"), ("04", "第一章", "chapter")])
     check("css page size and colors", "size: 427.6pt 660pt" in style and "--bg: #181a1d" in style and "Baskerville" in style)
-    check("css sets running heads, no page counter (folios are painted onto the assembled PDF)",
-          '@page s03 { @top-center { content: "前言"' in style and "counter(page" not in style)
+    check("css front roman, body arabic", '@page s03 { @top-center { content: "前言"' in style and "counter(page, lower-roman)" in style.split("@page s03")[1].split("}}")[0]
+          and "content: counter(page);" in style.split("@page s04")[1].split("} }")[0])
+    # A single element wider than the text column makes Chrome's print scale the whole book's font down uniformly.
+    # css() must contain each section's horizontal overflow, and KATEX_HEAD must scale over-wide display equations.
+    check("css contains section overflow so one wide element can't shrink the book", "overflow-x: clip" in style.split("section {")[1].split("}")[0])
+    check("css caps media and wraps code/long tokens", ".katex-display { max-width: 100%" in style and "white-space: pre-wrap" in style and "overflow-wrap: break-word" in style)
+    check("katex head scales over-wide display equations to fit", ".katex-display" in rd.KATEX_HEAD and "scrollWidth>d.clientWidth" in rd.KATEX_HEAD and "scale(" in rd.KATEX_HEAD)
     sec = {"id": "04", "kind": "chapter", "label": "第一章"}
     frag = rd.section_html(sec, "标题", "<p>x</p>")
     check("section carries marker, label, named page", "⟦S04⟧" in frag and "第一章" in frag and 'page: s04' in frag)
