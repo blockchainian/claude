@@ -555,6 +555,24 @@ def extract_epub(source, work, keep_images, page_size):
     if keep_images:
         (work / "images").mkdir(exist_ok=True)
     sections, images, pending_prefix, seen_chapter, counter, idx = [], {}, "", False, 0, 0
+    cur = None  # the chapter/section being accumulated; subsections and trailing notes append to it
+
+    def words_of(frag):
+        return len(re.sub(r"<[^>]+>", " ", IMG_TOKEN_RE.sub(" ", frag)).split())
+
+    def flush():
+        nonlocal cur, idx
+        if cur is None:
+            return
+        idx += 1
+        sid = f"{idx:02d}"
+        sfile = f"text/{sid}-{slugify(cur['title'])}.xhtml"
+        (work / sfile).write_text(cur["frag"])
+        sections.append({"id": sid, "title": cur["title"], "outline_title": cur["outline_title"],
+                         "chapter": cur["chapter"], "label": cur["label"], "kind": cur["kind"],
+                         "start": 0, "end": 0, "file": sfile, "words": words_of(cur["frag"])})
+        cur = None
+
     for idref in spine:
         item = manifest[idref]
         if not item["media"].startswith("application/xhtml"):
@@ -565,31 +583,34 @@ def extract_epub(source, work, keep_images, page_size):
         if re.fullmatch(r"[ivxlcdm]+|\d+", stitle.strip(), re.I):  # a bare page number/roman: a series-ad or filler page
             continue
         chapter, clean = parse_title(stitle)
+        is_subsection = bool(re.match(r"^\s*\d+(?:\.\d+)+", stitle))  # 1.1, 2.10 … a subsection, not a chapter
         is_part = bool(PART_STEM.match(stem)) or bool(re.match(r"^\s*part\b", stitle, re.I))
-        if is_part and chapter is None:
-            frag, sec_imgs, counter = epub_fragment(z, href, work, keep_images, counter)
+        if EPUB_SKIP_STEM.match(stem):
+            continue
+        frag, sec_imgs, counter = epub_fragment(z, href, work, keep_images, counter)
+        if is_part and chapter is None:  # a part divider folds into the head of the next chapter
             pending_prefix += frag + "\n\n"
             images.update(sec_imgs)
-            continue
-        if EPUB_SKIP_STEM.match(stem):
             continue
         kind = classify(stitle, chapter, seen_chapter)
         if kind in ("cover", "contents", "skip"):
             continue
+        # A subsection (1.1 …) or a chapter's trailing notes (its Bibliographical Remarks etc.) belong under the
+        # current chapter, becoming ## sub-headings, so a per-subsection-file EPUB groups into one section per
+        # chapter like a per-chapter-file one.
+        if cur is not None and (is_subsection or kind == "back"):
+            cur["frag"] += "\n\n" + frag
+            images.update(sec_imgs)
+            continue
+        flush()  # a new top-level section starts: emit the accumulated one
         if kind == "chapter":
             seen_chapter = True
-        idx += 1
-        sid = f"{idx:02d}"
-        frag, sec_imgs, counter = epub_fragment(z, href, work, keep_images, counter)
         images.update(sec_imgs)
         body_frag = (pending_prefix + frag) if kind == "chapter" and pending_prefix else frag
         pending_prefix = "" if kind == "chapter" else pending_prefix
-        sfile = f"text/{sid}-{slugify(clean)}.xhtml"
-        (work / sfile).write_text(body_frag)
-        words = len(re.sub(r"<[^>]+>", " ", IMG_TOKEN_RE.sub(" ", body_frag)).split())
-        sections.append({"id": sid, "title": clean, "outline_title": stitle, "chapter": chapter,
-                         "label": f"第{chinese_number(chapter)}章" if chapter else None, "kind": kind,
-                         "start": 0, "end": 0, "file": sfile, "words": words})
+        cur = {"title": clean, "outline_title": stitle, "chapter": chapter,
+               "label": f"第{chinese_number(chapter)}章" if chapter else None, "kind": kind, "frag": body_frag}
+    flush()
 
     cover_file = None
     if cover_id and cover_id in manifest:
