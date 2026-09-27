@@ -25,10 +25,10 @@ draft — that is the default. Two keywords instead select a store command.
 | `save` take-aways (text) | Append them to the item's `## Take-aways` |
 | `search` query (regex ok) | Search everything saved |
 
-The store is `~/.claude/podcast-highlights/` (override with
-`PODCAST_HIGHLIGHTS_DIR`). Items live in `episodes/<slug>.md`, listed in
-`index.md`. Drafts stage in `.work/<slug>/` until saved. (The directory keeps
-its original name; the store holds articles and episodes alike.)
+The store is `~/Documents/highlights/` (override with
+`HIGHLIGHTS_DIR`). Items live in `items/<slug>.md`, listed in
+`index.md`. Drafts stage in `.work/<slug>/` until saved. (The store holds
+articles, episodes, videos and papers alike.)
 
 `${CLAUDE_PLUGIN_ROOT}` below is this plugin's root; this skill lives at
 `${CLAUDE_PLUGIN_ROOT}/skills/digest`.

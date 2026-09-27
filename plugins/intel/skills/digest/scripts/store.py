@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ABOUTME: Central store for source highlights - save, list and search.
-# ABOUTME: One markdown file per item under episodes/, rebuilt index.md.
+# ABOUTME: One markdown file per item under items/, rebuilt index.md.
 
 import os
 import re
@@ -8,9 +8,9 @@ import sys
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(os.environ.get("PODCAST_HIGHLIGHTS_DIR",
-                           Path.home() / ".claude" / "podcast-highlights"))
-EPISODES = ROOT / "episodes"
+ROOT = Path(os.environ.get("HIGHLIGHTS_DIR",
+                           Path.home() / "Documents" / "highlights"))
+ITEMS = ROOT / "items"
 INDEX = ROOT / "index.md"
 
 
@@ -30,13 +30,13 @@ def parse_frontmatter(text):
 
 def rebuild_index():
     rows = []
-    for f in sorted(EPISODES.glob("*.md")):
+    for f in sorted(ITEMS.glob("*.md")):
         meta, _ = parse_frontmatter(f.read_text(encoding="utf-8"))
         rows.append((meta.get("saved", ""), meta.get("source") or meta.get("show") or "?",
                      meta.get("title", f.stem), f.name, meta.get("url", "")))
     rows.sort(reverse=True)
     lines = ["# Highlights", ""]
-    lines += [f"- {saved} — **{show}** — [{title}](episodes/{name}) — {url}"
+    lines += [f"- {saved} — **{show}** — [{title}](items/{name}) — {url}"
               for saved, show, title, name, url in rows]
     INDEX.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return len(rows)
@@ -44,14 +44,14 @@ def rebuild_index():
 
 def free_slot(slug, url):
     """The file for this episode: its own, or the next free name beside it."""
-    base, n = EPISODES / f"{slug}.md", 1
+    base, n = ITEMS / f"{slug}.md", 1
     dest = base
     while dest.exists():
         meta, _ = parse_frontmatter(dest.read_text(encoding="utf-8"))
         if meta.get("url", "") == url:
             return dest, True
         n += 1
-        dest = EPISODES / f"{slug}-{n}.md"
+        dest = ITEMS / f"{slug}-{n}.md"
     return dest, False
 
 
@@ -67,10 +67,10 @@ def cmd_save(draft):
     if not meta.get("saved"):
         text = text.replace("---\n", f"---\nsaved: {date.today()}\n", 1)
         meta["saved"] = str(date.today())
-    slug = meta.get("slug") or (src.stem if src.parent == EPISODES
+    slug = meta.get("slug") or (src.stem if src.parent == ITEMS
                                 else src.parent.name)
     slug = re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-") or "item"
-    EPISODES.mkdir(parents=True, exist_ok=True)
+    ITEMS.mkdir(parents=True, exist_ok=True)
     dest, existed = free_slot(slug, meta["url"])
     if existed:
         print(f"already saved: {dest}")
@@ -141,7 +141,7 @@ def print_takeaways(items):
 
 def cmd_takeaway(target, action, index, text):
     dest = Path(target)
-    if dest.parent != EPISODES or not dest.is_file():
+    if dest.parent != ITEMS or not dest.is_file():
         raise SystemExit(
             f"not a stored item: {dest}\n"
             "save the item first; take-aways attach to the stored file.")
@@ -161,15 +161,15 @@ def cmd_takeaway(target, action, index, text):
 
 
 def cmd_search(query):
-    if not EPISODES.is_dir():
-        raise SystemExit(f"nothing saved yet ({EPISODES} does not exist)")
+    if not ITEMS.is_dir():
+        raise SystemExit(f"nothing saved yet ({ITEMS} does not exist)")
     try:
         pattern = re.compile(query, re.IGNORECASE)
     except re.error as exc:
         print(f"not a valid regex ({exc}) - searching for it literally")
         pattern = re.compile(re.escape(query), re.IGNORECASE)
     hits = 0
-    for f in sorted(EPISODES.glob("*.md")):
+    for f in sorted(ITEMS.glob("*.md")):
         text = f.read_text(encoding="utf-8")
         meta, _ = parse_frontmatter(text)
         matches = [(n, l.strip()) for n, l in enumerate(text.splitlines(), 1)

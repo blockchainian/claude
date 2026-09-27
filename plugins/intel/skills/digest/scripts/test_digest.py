@@ -108,10 +108,18 @@ def main():
     else:
         print("SKIP: pdf extraction (no uv/pdfminer available)")
 
+    # --- store default location + env override ---
+    os.environ.pop("HIGHLIGHTS_DIR", None)
+    store_default = load("store")
+    check("default store is ~/Documents/highlights",
+          store_default.ROOT == Path.home() / "Documents" / "highlights",
+          str(store_default.ROOT))
+
     # --- store: an article draft (no 'show') saves ---
     root = Path(tempfile.mkdtemp())
-    os.environ["PODCAST_HIGHLIGHTS_DIR"] = str(root)
+    os.environ["HIGHLIGHTS_DIR"] = str(root)
     store = load("store")
+    check("HIGHLIGHTS_DIR overrides the default", store.ROOT == root, str(store.ROOT))
 
     draft = root / "draft.md"
     draft.write_text(
@@ -119,7 +127,7 @@ def main():
         "slug: why-x-wins\nsource: Example Blog\ntopics: [x]\n---\n"
         "# Why X Wins\n\n## Point\n- a point\n", encoding="utf-8")
     store.cmd_save(str(draft))
-    saved = store.EPISODES / "why-x-wins.md"
+    saved = store.ITEMS / "why-x-wins.md"
     check("article (no show) saved", saved.is_file(), str(saved))
     if saved.is_file():
         meta, _ = store.parse_frontmatter(saved.read_text(encoding="utf-8"))
