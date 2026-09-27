@@ -534,6 +534,12 @@ def epub_fragment(z, href, work, keep_images, counter):
         return token if inline else f"\n{token}\n"
 
     body = re.sub(r"<img\b[^>]*?/?>", img_repl, body, flags=re.I)
+    # Drop EPUB styling leftovers that would distort the page and confuse the translator, keeping their text:
+    # <small> (and class="small" spans) actually shrink the rendered text, spans/anchors are noise. The math and
+    # emphasis tags (strong/em/sub/sup) are kept.
+    body = re.sub(r"</?small\b[^>]*>", "", body, flags=re.I)
+    body = re.sub(r"<span\b[^>]*>|</span>", "", body, flags=re.I)
+    body = re.sub(r"<a\b[^>]*>|</a>", "", body, flags=re.I)
     body = re.sub(r"[ \t]+", " ", body)
     body = re.sub(r"\n{3,}", "\n\n", body).strip()
     return body, imgs, counter
