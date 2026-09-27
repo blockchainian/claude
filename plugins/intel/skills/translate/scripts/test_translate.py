@@ -205,6 +205,12 @@ def test_epub_units(ex, rd):
         check("subsection grouped under its chapter (one section per chapter, not per subsection)",
               len(secs) == 2 and secs[0]["label"] == "第一章" and secs[1]["label"] == "第二章"
               and "subsection one one body" in ch1.read_text(), [s["outline_title"] for s in secs])
+    # A part's first chapter carries the part name as its nav title; the chapter number/title come from headings.
+    check("chapter read from 'CHAPTER n' + title headings",
+          ex.chapter_from_headings(["CHAPTER 3", "Solving Problems by Searching"]) == (3, "Solving Problems By Searching"))
+    check("chapter read from a single 'n Title' heading", ex.chapter_from_headings(["4 Search"]) == (4, "Search"))
+    check("part-title regex matches a roman part, not a word starting with I/V/X",
+          bool(ex.PART_TITLE_RE.match("II Problem Solving")) and not ex.PART_TITLE_RE.match("Introduction"))
 
 
 def make_source_book(path, chrome):
