@@ -153,7 +153,9 @@ def test_render_units(rd):
     # css() must contain each section's horizontal overflow, and KATEX_HEAD must scale over-wide display equations.
     check("css contains section overflow so one wide element can't shrink the book", "overflow-x: clip" in style.split("section {")[1].split("}")[0])
     check("css caps media and wraps code/long tokens", ".katex-display { max-width: 100%" in style and "white-space: pre-wrap" in style and "overflow-wrap: break-word" in style)
-    check("katex head scales over-wide display equations to fit", ".katex-display" in rd.KATEX_HEAD and "scrollWidth>d.clientWidth" in rd.KATEX_HEAD and "scale(" in rd.KATEX_HEAD)
+    check("katex head scales over-wide display equations to fit", ".katex-display" in rd.KATEX_HEAD and "--eqcol-w" in rd.KATEX_HEAD and "fontSize" in rd.KATEX_HEAD and "document.fonts.ready" in rd.KATEX_HEAD)
+    check("katex head marks parse errors for the render guard", "katex-error" in rd.KATEX_HEAD and "cc0000" in rd.KATEX_HEAD and "KERR" in rd.KATEX_HEAD)
+    check("css exposes the text-column width for the equation fit", "--eqcol-w:" in style)
     sec = {"id": "04", "kind": "chapter", "label": "第一章"}
     frag = rd.section_html(sec, "标题", "<p>x</p>")
     check("section carries marker, label, named page", "⟦S04⟧" in frag and "第一章" in frag and 'page: s04' in frag)
@@ -166,6 +168,16 @@ def test_epub_units(ex, rd):
     _, body = rd.md_to_html("# T\n\n设 \\(x_{1}\\)、\\(L^{2}\\)，且 \\[y = a_{i}\\]。\n")
     check("inline/display LaTeX survives markdown",
           "\\(x_{1}\\)" in body and "\\(L^{2}\\)" in body and "\\[y = a_{i}\\]" in body and "<em>" not in body, body)
+    # The translator's common LaTeX mistakes are repaired so KaTeX never renders red error source (repair_math),
+    # and a blockquote wrapping a display equation is unwrapped so a wide equation gets the full column.
+    check("inline \\tag promoted to display", rd.repair_math("\\(x\\tag{1}\\)") == "\\[x\\tag{1}\\]")
+    check("currency $ escaped inside math", rd.repair_math("\\($100\\)") == "\\(\\$100\\)")
+    check("blockquote markers stripped from multi-line display", "\n>" not in rd.repair_math("\\[\n> a\\\\\n> b\n> \\]"))
+    check("\\\\[2pt] array row-skip inside a display is not corrupted", rd.repair_math("\\[a\\\\[2pt]b\\]") == "\\[a\\\\[2pt]b\\]")
+    _, bq = rd.md_to_html("# T\n\n> \\[\n> a\\Rightarrow b\n> \\]\n")
+    check("math-only blockquote unwrapped (no <blockquote>)", "<blockquote>" not in bq and "\\[" in bq and "\n>" not in bq, bq)
+    _, fw = rd.md_to_html("# T\n\n设 \\(x=1\\）在……\n")
+    check("mis-typed full-width close delimiter fixed", "\\(x=1\\)" in fw, fw)
     # A display equation alone in its block is a block figure; a symbol within a text line is inline.
     b1 = '<p><img src="e.png"/></p>'
     b2 = '<p>当 <img src="s.png"/> 时</p>'
@@ -334,6 +346,16 @@ def test_render_e2e(rd):
         opt = SimpleNamespace(only=meta["sections"][2]["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=12)
         rd.render(work, opt)
         check("single-section preview written", any((work / "pdf").glob("*.pdf")))
+        # Last, because it corrupts a section's md: an equation KaTeX cannot parse (an undefined command) renders
+        # as red source; the render must fail on it rather than ship it silently.
+        chap = next(s for s in meta["sections"] if s["kind"] == "chapter")
+        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text("# 坏公式译\n\n见 \\(\\zzbadmacro\\)。\n\n" + "正文。" * 60)
+        try:
+            rd.render(work, SimpleNamespace(only=None, out=str(Path(d) / "bad-zh.pdf"), title="小书", bg="source", fg="source", font_size=9.25))
+            guarded = False
+        except SystemExit as e:
+            guarded = "failed to render" in str(e)
+        check("render fails on an unparseable equation (KaTeX error guard)", guarded)
     test_two_up_no_outline(chrome)
 
 

@@ -60,6 +60,15 @@ Math (the important part) -- convert inline math to correct LaTeX inside \\( ...
 - a transpose mark (superscript T or the character ⊤) -> ^{\\top}; never drop it.
 - ℝ (often <span class="font3">ℝ</span>) -> \\(\\mathbb{R}\\); × -> \\times; ⊙ -> \\odot; ∈ -> \\in.
 
+LaTeX that must parse (a renderer typesets it; malformed LaTeX prints as red error source):
+- Close inline math with a half-width \\) -- never \\） or \\。 or any other character.
+- A numbered equation is DISPLAY math: \\[ ... \\tag{9.3} \\]. Never put \\tag in inline \\( ... \\) (it is a parse error).
+- Never wrap a display equation in a Markdown blockquote ("> "). Put \\[ ... \\] on its own, unindented.
+- No Markdown inside math: write **bold** and function names as text OUTSIDE the \\( \\), not within it.
+- A currency dollar sign inside math is \\$ (a bare $ is read as a math delimiter): \\(\\$100\\), or just write it as text.
+- An image placeholder ⟦IMG:...⟧ is NEVER valid inside \\( \\) or \\[ \\]. If a symbol (e.g. an accented q̂) is only
+  available as an image, write it as LaTeX instead (\\(\\hat{q}\\)); keep ⟦IMG⟧ tokens for real figures, outside math.
+
 Emphasis and structure:
 - <strong> around a word or term, and <em> used for prose emphasis (neither being a math variable) -> Chinese
   **bold**. (Chinese emphasises with bold, not italic; italicised Chinese is illegible. Math variables still

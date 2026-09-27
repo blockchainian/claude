@@ -30,9 +30,12 @@ ROMAN = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", 
 MARK_TOC = "⟦TOC⟧"
 
 # KaTeX typesets the inline \(..\) / display \[..\] LaTeX in the browser before Chrome prints (see print_pdf's
-# --virtual-time-budget). Loaded from the CDN; headless Chrome has network access. After typesetting, any display
-# equation still wider than the text column is scaled down in place to fit: a single over-wide element otherwise
-# makes Chrome's print scale the WHOLE document's font down uniformly (see css()'s overflow guard).
+# --virtual-time-budget). Loaded from the CDN; headless Chrome has network access. Once the KaTeX web fonts have
+# loaded (document.fonts.ready — measuring before they load under-scales, and the fonts then widen the equation
+# and it gets clipped), any display equation still wider than the text column is shrunk with font-size to fit: a
+# single over-wide element otherwise makes Chrome's print scale the WHOLE document's font down uniformly (see
+# css()'s overflow guard). Any equation KaTeX could not parse renders as a red .katex-error with its raw source;
+# a ⟦KERR⟧ marker is dropped next to each so render() can detect them and fail instead of shipping red source.
 KATEX_HEAD = (
     '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">'
     '<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>'
@@ -40,9 +43,15 @@ KATEX_HEAD = (
     'onload="renderMathInElement(document.body,{delimiters:['
     "{left:'\\\\[',right:'\\\\]',display:true},{left:'\\\\(',right:'\\\\)',display:false}"
     '],throwOnError:false});'
-    "document.querySelectorAll('.katex-display').forEach(function(d){var i=d.firstElementChild;"
-    "if(i&&d.scrollWidth>d.clientWidth+1){var s=d.clientWidth/d.scrollWidth;"
-    "i.style.display='inline-block';i.style.transformOrigin='left center';i.style.transform='scale('+s+')';}});"
+    "var bad=[];document.querySelectorAll('.katex-error').forEach(function(e){bad.push(e);});"  # structural errors,
+    "document.querySelectorAll('.katex').forEach(function(k){if(/#cc0000/i.test(k.innerHTML))bad.push(k);});"  # and
+    "bad.forEach(function(e){var m=document.createElement('span');m.className='mk';"  # inline red (undefined cmd) ones;
+    "m.textContent='\\u27e6KERR\\u27e7';e.parentNode.insertBefore(m,e.nextSibling);});"  # mark now, not in fonts.ready
+    "document.fonts.ready.then(function(){"
+    "var col=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--eqcol-w'))||1e9;"
+    "document.querySelectorAll('.katex-display').forEach(function(d){var w=0;"
+    "d.querySelectorAll('.base').forEach(function(b){w=Math.max(w,b.getBoundingClientRect().width);});"
+    "if(w>col){d.style.fontSize=(0.98*col/w)+'em';}});});"
     '"></script>'
 )
 
@@ -94,21 +103,38 @@ def iterm_colors():
 MATH_RE = re.compile(r"\\\[.*?\\\]|\\\(.*?\\\)", re.S)
 
 
+def repair_math(raw):
+    """Fix the LaTeX mistakes the translator commonly makes, which KaTeX would otherwise render as red error
+    source or (for leaked blockquote markers) with spurious symbols:
+    - blockquote continuation markers that leaked into a multi-line display (\\n> ...) -> drop them;
+    - inline \\(..\\) that carries a \\tag (KaTeX allows \\tag only in display math) -> promote to display \\[..\\];
+    - a literal currency $ inside math (KaTeX reads $ as a math-mode delimiter) -> escape it as \\$."""
+    raw = re.sub(r"\n>[ \t]?", "\n", raw)
+    if raw.startswith("\\(") and "\\tag" in raw:
+        raw = "\\[" + raw[2:-2] + "\\]"
+    raw = re.sub(r"(?<!\\)\$", r"\\$", raw)
+    return raw
+
+
 def md_to_html(md_text):
     """Section Markdown -> body HTML: the first '# ' line is the title (returned separately). Inline LaTeX
     (\\(..\\), \\[..\\]) is stashed before Markdown runs, because Markdown would treat the _ and * inside it as
-    emphasis and corrupt it; the raw math is restored (HTML-escaped) for KaTeX to typeset in the browser."""
+    emphasis and corrupt it; the raw math is restored (HTML-escaped) for KaTeX to typeset in the browser. Along
+    the way the math is repaired (see repair_math) and math-only blockquote lines are unwrapped, so a display
+    equation sits in the full text column (a blockquote's narrower column would clip a wide equation)."""
     lines = md_text.strip().splitlines()
     title = lines[0][2:].strip() if lines and lines[0].startswith("# ") else ""
     body = "\n".join(lines[1:] if title else lines)
     body = re.sub(r"^# ", "## ", body, flags=re.M)
+    body = body.replace("\\（", "\\(").replace("\\）", "\\)")  # a mis-typed full-width delimiter breaks math pairing
     vault = []
 
     def stash(m):
-        vault.append(m.group(0))
+        vault.append(repair_math(m.group(0)))
         return f"@@MATH{len(vault) - 1}@@"
 
     body = MATH_RE.sub(stash, body)
+    body = re.sub(r"^>[ \t]?(@@MATH\d+@@)[ \t]*$", r"\1", body, flags=re.M)  # unwrap a math-only blockquote line
     out = markdown.markdown(body, extensions=["smarty"], output_format="html")
     for i, raw in enumerate(vault):
         out = out.replace(f"@@MATH{i}@@", html.escape(raw))
@@ -198,8 +224,9 @@ def css(page_size, bg, fg, heads, font_size=9.25, bold=None):
         f'@page s{sid} {{ @top-center {{ content: "{html.escape(t)}"; font-size: 7pt; letter-spacing: 2pt; color: {fg}; {margin_font} }}'
         f' @bottom-center {{ content: {folio(kind)}; font-size: 8pt; color: {fg}; {margin_font} }} }}'
         for sid, t, kind in heads)
+    colpx = round((w - 2 * side) * 96 / 72, 1)  # printable text-column width in CSS px, for KATEX_HEAD's equation fit
     return f"""
-:root {{ --bg: {bg}; --fg: {fg}; }}
+:root {{ --bg: {bg}; --fg: {fg}; --eqcol-w: {colpx}px; }}
 @page {{ size: {w}pt {h}pt; margin: {top}pt {side}pt {bottom}pt; background: var(--bg);
         @bottom-center {{ content: counter(page, lower-roman); font-size: 8pt; color: {fg}; {margin_font} }} }}
 {named}
@@ -211,7 +238,7 @@ strong, b {{ font-family: {hei}; font-weight: 700; color: {bold}; }}
    the text column (a long display equation, a wide image or table, an unbreakable line). Contain every section's
    horizontal overflow so one wide element can never shrink the book; each kind of wide content is also made to fit
    (equations scaled by KATEX_HEAD, media capped at 100%, code/long tokens wrapped) so clipping never bites. */
-section {{ break-before: page; overflow-x: clip; }}
+section {{ break-before: page; overflow-x: clip; overflow-clip-margin: 6pt; }}
 img, table, pre, .katex-display {{ max-width: 100%; }}
 pre {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
 .opener {{ padding-top: {round(h * 0.2)}pt; text-align: center; margin-bottom: {round(h * 0.07)}pt; }}
@@ -303,6 +330,19 @@ def page_map(pdf_path):
     return found
 
 
+def katex_errors(pdf_path, marker_pages):
+    """(page index, section id) for every page carrying a ⟦KERR⟧ marker. KATEX_HEAD drops that marker next to
+    each equation KaTeX could not parse (which otherwise ships as red raw LaTeX source); render() fails on any,
+    so a broken formula can never pass silently. marker_pages maps 'S<id>'/'TOC' -> page index in this PDF."""
+    sec_at = sorted((v, k[1:]) for k, v in marker_pages.items() if k.startswith("S"))
+    errs = []
+    for i, text in enumerate(page_texts(pdf_path)):
+        if re.search(r"⟦\s*K\s*E\s*R\s*R\s*⟧", text):
+            sid = next((s for p, s in reversed(sec_at) if p <= i), "?")
+            errs.append((i, sid))
+    return errs
+
+
 def roman_folio(page_index):
     return ROMAN[page_index + 1] if page_index + 1 < len(ROMAN) else str(page_index + 1)
 
@@ -377,6 +417,7 @@ def render(work, opt):
         out.parent.mkdir(exist_ok=True)
         shutil.copyfile(pdf_path, out)
         print(f"{out} ({len(page_texts(pdf_path)) - 1} pages)")
+        report_katex_errors(katex_errors(pdf_path, pages))
         return
 
     # Front matter (roman folios) and body (arabic folios from 1) are separate Chrome documents, because
@@ -404,6 +445,17 @@ def render(work, opt):
     assemble(cover_pdf, [front_pdf] + ([body_pdf] if body_pdf else []), out, ready, pages, meta, title, bg,
              top_margin=meta["page_size"][1] * 0.082, row_height=opt.font_size * 1.8)
     print(f"{out} ({len(pikepdf.open(out).pages)} pages, {len(ready)} sections, cover + linked 目录 + bookmarks)")
+    errs = katex_errors(body_pdf, body_pages) if body_pdf else []
+    errs += katex_errors(front_pdf, front_pages)
+    report_katex_errors(errs)
+
+
+def report_katex_errors(errs):
+    """Fail (after the PDF is written, so it can be inspected) if any equation rendered as a red KaTeX error."""
+    if not errs:
+        return
+    where = ", ".join(f"section {sid} (page {p + 1})" for p, sid in errs)
+    sys.exit(f"{len(errs)} equation(s) failed to render (red raw LaTeX source) in {where}; fix the LaTeX and re-render")
 
 
 def default_out(source, work):
