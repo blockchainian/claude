@@ -92,30 +92,38 @@ def is_line_art(im):
     return sum(1 for s in px if s > 40) / max(1, len(px)) < 0.03
 
 
-def recolor_line_art(src, fg, dest):
-    """Recolour black-on-white line art to the page foreground on a transparent background, so an equation
-    sits on the dark page in the body colour with no white plate. The grey is upscaled (Lanczos) and sharpened
-    first, so the low-resolution equation images degrade gracefully when zoomed. Returns True when it was line
-    art (and dest written), False for a colour figure (left as is)."""
+def _hex(c):
+    return (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
+
+
+def recolor_line_art(src, fg, bg, dest):
+    """Recolour black-on-white line art to foreground ink on an OPAQUE page-coloured background, so an equation
+    blends into the dark page in the body colour with no white plate. Opaque (no alpha) is deliberate: a
+    transparent plate renders inconsistently across PDF viewers — some do not composite it over the page and the
+    ink disappears. The grey is upscaled (Lanczos) and sharpened first so low-resolution equations degrade
+    gracefully when zoomed. Returns True when it was line art (and dest written), False for a colour figure."""
     from PIL import Image, ImageFilter
     im = Image.open(src)
     if not is_line_art(im):
         return False
-    grey = im.convert("L").resize((im.width * 2, im.height * 2), Image.LANCZOS)
+    grey = im.convert("L")
+    # Upscale small equations (which need it) but not large diagrams (which would bloat the file); cap the size.
+    if max(grey.size) < 700:
+        grey = grey.resize((grey.width * 2, grey.height * 2), Image.LANCZOS)
+    if max(grey.size) > 1600:
+        grey.thumbnail((1600, 1600), Image.LANCZOS)
     grey = grey.filter(ImageFilter.UnsharpMask(radius=2, percent=130, threshold=2))
-    alpha = grey.point(lambda v: 255 - v)  # dark ink -> opaque, white paper -> transparent
-    r, g, b = int(fg[1:3], 16), int(fg[3:5], 16), int(fg[5:7], 16)
-    plate = Image.new("RGBA", grey.size, (r, g, b, 0))
-    plate.putalpha(alpha)
-    plate.save(dest)
+    ink = grey.point(lambda v: 255 - v)  # dark ink -> full weight, white paper -> none
+    out = Image.composite(Image.new("RGB", grey.size, _hex(fg)), Image.new("RGB", grey.size, _hex(bg)), ink)
+    out.save(dest, optimize=True)
     return True
 
 
-def place_images(body_html, work, images, fg):
+def place_images(body_html, work, images, fg, bg):
     """Replace ⟦IMG:key⟧ placeholders with the extracted images. Line art (equations, diagrams) is recoloured
-    to the page foreground on a transparent background so it blends into the dark page; a colour figure keeps a
-    white plate (inverting a photo would ruin it). Block images become their own centred figure; inline ones
-    sit in the line."""
+    to foreground ink on the opaque page colour so it blends into the dark page; a colour figure keeps a white
+    plate (inverting a photo would ruin it). Block images become their own centred figure; inline ones sit in
+    the line."""
     def repl(m):
         meta = images.get(m.group(1))
         if not meta:
@@ -123,7 +131,7 @@ def place_images(body_html, work, images, fg):
         src = work / "images" / meta["file"]
         rc = src.with_suffix(".rc.png")
         try:
-            line = recolor_line_art(src, fg, rc)
+            line = recolor_line_art(src, fg, bg, rc)
         except Exception:
             line = False
         uri = (rc if line else src).resolve().as_uri()
@@ -276,7 +284,7 @@ def render(work, opt):
         if md_path.exists():
             title_zh, body = md_to_html(md_path.read_text())
             if images:
-                body = place_images(body, work, images, fg)
+                body = place_images(body, work, images, fg, bg)
             ready.append((s, title_zh, body))
         else:
             print(f"skip {s['id']} {s['title']}: not translated yet", file=sys.stderr)

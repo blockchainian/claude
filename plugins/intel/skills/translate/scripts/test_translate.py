@@ -137,10 +137,10 @@ def test_render_units(rd):
         photo = Image.new("RGB", (40, 10), (200, 40, 40)); photo.save(work / "images" / "5_2.png")  # colour figure
         images = {"5_1": {"file": "5_1.png", "w": 300, "h": 12, "block": True},
                   "5_2": {"file": "5_2.png", "w": 40, "h": 10, "block": False}}
-        out = rd.place_images("<p>ascent in ⟦IMG:5_1⟧ where ⟦IMG:5_2⟧ is</p>", work, images, "#c9c4b8")
+        out = rd.place_images("<p>ascent in ⟦IMG:5_1⟧ where ⟦IMG:5_2⟧ is</p>", work, images, "#c9c4b8", "#000409")
         check("line-art equation is recoloured, no white plate", '<figure class="fig">' in out and "5_1.rc.png" in out and (work / "images" / "5_1.rc.png").exists())
         check("colour figure keeps a white plate", 'class="infig plate"' in out and "5_2.png" in out)
-        check("unknown placeholder dropped, not left raw", rd.place_images("a⟦IMG:zz⟧b", work, images, "#c9c4b8") == "ab")
+        check("unknown placeholder dropped, not left raw", rd.place_images("a⟦IMG:zz⟧b", work, images, "#c9c4b8", "#000409") == "ab")
     check("roman folios", [rd.folio_for(i, None) for i in range(3)] == ["i", "ii", "iii"])
     check("roman folio past the table falls back to arabic (long front matter)",
           rd.roman_folio(len(rd.ROMAN) - 1) == str(len(rd.ROMAN)) and rd.folio_for(len(rd.ROMAN) + 5, None) == str(len(rd.ROMAN) + 6),
