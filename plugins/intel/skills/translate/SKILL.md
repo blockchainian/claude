@@ -52,8 +52,9 @@ Pass `--keep-images` for books whose figures and equations are stored as images 
 textbook): each section's text then carries an `⟦IMG:key⟧` placeholder at every image's position (block images
 on their own line, inline symbols within the line), the images are copied into `<work>/images/` and mapped in
 `<work>/images.json`. The translator is told to keep the placeholders verbatim, and `render.py` puts the images
-back — block ones as centered figures, inline ones in the line, each on a white plate so black line-art stays
-legible on the dark page. Without the flag, extraction is text-only as before. The interleaved text is rougher
+back — block ones as centered figures, inline ones in the line. Line art (equations, diagrams) is recoloured to
+the page foreground on a transparent background so it blends into the dark page like the body text; a colour
+figure keeps a white plate (inverting a photo would ruin it). Without the flag, extraction is text-only as before. The interleaved text is rougher
 around inline math (pdftohtml splits glyphs), but Luna repairs it; use the flag only when images matter.
 
 Without an outline, the sections come from the printed contents page: lines with dot leaders give the titles
