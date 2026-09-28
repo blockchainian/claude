@@ -226,6 +226,69 @@ def test_epub_units(ex, rd):
         check("subsection grouped under its chapter (one section per chapter, not per subsection)",
               len(secs) == 2 and secs[0]["label"] == "第一章" and secs[1]["label"] == "第二章"
               and "subsection one one body" in ch1.read_text(), [s["outline_title"] for s in secs])
+    # Terminal back-matter (Notes, its untitled continuation, References, Index) after the last chapter is not
+    # translated: it is dropped, not folded into the last chapter as trailing notes. References/Bibliography are
+    # skipped like Notes/Index, and an untitled continuation file after Notes goes with the back-matter.
+    def mk_epub(path, files, spine, nav):  # files: {href: body}; spine: [id...]==hrefs; nav: {href: title}
+        items = "".join(f'<item id="{h}" href="{h}" media-type="application/xhtml+xml"/>' for h in files)
+        opf = ('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+               '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>B</dc:title></metadata>'
+               f'<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>{items}</manifest>'
+               '<spine>' + "".join(f'<itemref idref="{h}"/>' for h in spine) + '</spine></package>')
+        lis = "".join(f'<li><a href="{h}">{t}</a></li>' for h, t in nav.items())
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("META-INF/container.xml",
+                       '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                       '<rootfiles><rootfile full-path="package.opf"/></rootfiles></container>')
+            z.writestr("package.opf", opf)
+            z.writestr("nav.xhtml", f'<html><body><nav><ol>{lis}</ol></nav></body></html>')
+            for h, body in files.items():
+                z.writestr(h, f"<html><body>{body}</body></html>")
+    with _t.TemporaryDirectory() as d:
+        work = Path(d); epub = work / "b.epub"
+        mk_epub(epub,
+                {"c1.xhtml": "<p>chapter one body</p>", "c2.xhtml": "<p>chapter two body</p>",
+                 "notes.xhtml": "<p>NOTE1BODY endnote text</p>", "notescont.xhtml": "<p>NOTESCONT more endnotes</p>",
+                 "refs.xhtml": "<p>REFSENTRY bibliography line</p>", "index.xhtml": "<p>INDEXTERM 12, 40</p>"},
+                ["c1.xhtml", "c2.xhtml", "notes.xhtml", "notescont.xhtml", "refs.xhtml", "index.xhtml"],
+                {"c1.xhtml": "1. Intro", "c2.xhtml": "2. Next", "notes.xhtml": "Notes",
+                 "refs.xhtml": "References", "index.xhtml": "Index"})  # notescont.xhtml has no nav title
+        ex.extract_epub(epub, work, False, [468, 680])
+        secs = json.loads((work / "sections.json").read_text())["sections"]
+        blob = "".join((work / s["file"]).read_text() for s in secs)
+        check("terminal back-matter (notes/refs/index + untitled continuation) dropped after last chapter",
+              len(secs) == 2 and not any(m in blob for m in ("NOTE1BODY", "NOTESCONT", "REFSENTRY", "INDEXTERM")),
+              [(s["label"], s["words"]) for s in secs])
+    with _t.TemporaryDirectory() as d:  # a per-chapter "Notes" BETWEEN chapters must not drop the chapters after it
+        work = Path(d); epub = work / "b.epub"
+        mk_epub(epub,
+                {"c1.xhtml": "<p>chapter one body</p>", "n1.xhtml": "<p>MIDNOTE chapter one endnotes</p>",
+                 "c2.xhtml": "<p>chapter two body survives</p>"},
+                ["c1.xhtml", "n1.xhtml", "c2.xhtml"],
+                {"c1.xhtml": "1. One", "n1.xhtml": "Notes", "c2.xhtml": "2. Two"})
+        ex.extract_epub(epub, work, False, [468, 680])
+        secs = json.loads((work / "sections.json").read_text())["sections"]
+        blob = "".join((work / s["file"]).read_text() for s in secs)
+        check("mid-book Notes between chapters does not latch away later chapters",
+              len(secs) == 2 and "chapter two body survives" in blob and "MIDNOTE" not in blob,
+              [(s["label"], s["words"]) for s in secs])
+    with _t.TemporaryDirectory() as d:  # a Conclusion opens its own section (not folded into the last chapter); its untitled continuation appends to it
+        work = Path(d); epub = work / "b.epub"
+        mk_epub(epub,
+                {"c1.xhtml": "<p>only chapter body</p>", "concl.xhtml": "<p>CONCLUSIONBODY closing argument</p>",
+                 "conclcont.xhtml": "<p>CONCLCONT rest of the conclusion</p>", "index.xhtml": "<p>INDEXTERM 3, 9</p>"},
+                ["c1.xhtml", "concl.xhtml", "conclcont.xhtml", "index.xhtml"],
+                {"c1.xhtml": "1. Only", "concl.xhtml": "Conclusion: The End", "index.xhtml": "Index"})
+        ex.extract_epub(epub, work, False, [468, 680])
+        secs = json.loads((work / "sections.json").read_text())["sections"]
+        by_file = {s["file"]: (work / s["file"]).read_text() for s in secs}
+        concl = next((s for s in secs if s["kind"] == "back"), None)
+        ch1 = next(s for s in secs if s["label"] == "第一章")
+        check("conclusion opens its own back section with its continuation, chapter not bloated",
+              len(secs) == 2 and concl is not None
+              and "CONCLUSIONBODY" in by_file[concl["file"]] and "CONCLCONT" in by_file[concl["file"]]
+              and "CONCLUSIONBODY" not in by_file[ch1["file"]] and "INDEXTERM" not in "".join(by_file.values()),
+              [(s["label"], s["kind"], s["words"]) for s in secs])
     # A part's first chapter carries the part name as its nav title; the chapter number/title come from headings.
     check("chapter read from 'CHAPTER n' + title headings",
           ex.chapter_from_headings(["CHAPTER 3", "Solving Problems by Searching"]) == (3, "Solving Problems By Searching"))
