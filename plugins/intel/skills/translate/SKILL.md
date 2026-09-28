@@ -56,9 +56,9 @@ Prints one line per section (`id kind pages title: words`) and the work dir. Kin
 as-is), `contents` and `skip` (Index, Notes, References/Bibliography: not translated; the 目录 is regenerated),
 `front` (preface, roman folios), `chapter` (第N章, arabic folios from 1), `back` (acknowledgments, appendix,
 letters; a Conclusion/Epilogue/Afterword opens its own back section). In an EPUB, once the book's terminal
-back-matter starts (Notes/References/Bibliography/Index) past the last chapter, it and every file after it —
-including untitled Calibre-split continuations — is skipped, so endnotes and the index never fold into the last
-chapter. Text is
+back-matter starts (Notes/References/Bibliography/Index) past the last chapter, it and every spine file after
+it (continuations with no nav title of their own included) is skipped, so endnotes and the index never fold
+into the last chapter. Text is
 cleaned: running heads, section-numbered running feet ("DEFINITIONS 2-1") and folios dropped, hyphenation
 undone, paragraphs rebuilt, indented blocks marked `> `.
 
