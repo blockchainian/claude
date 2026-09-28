@@ -156,6 +156,9 @@ def test_render_units(rd):
     check("katex head scales over-wide display equations to fit", ".katex-display" in rd.KATEX_HEAD and "--eqcol-w" in rd.KATEX_HEAD and "fontSize" in rd.KATEX_HEAD and "document.fonts.ready" in rd.KATEX_HEAD)
     check("katex head marks parse errors for the render guard", "katex-error" in rd.KATEX_HEAD and "cc0000" in rd.KATEX_HEAD and "KERR" in rd.KATEX_HEAD)
     check("css exposes the text-column width for the equation fit", "--eqcol-w:" in style)
+    # A Markdown rule (---, a scene break) becomes <hr>; Chrome's default inset border paints a light bar on a dark page.
+    hr = style.split("\nhr {")[1].split("}")[0] if "\nhr {" in style else ""
+    check("css renders a scene-break rule as blank space, no border", "border: 0" in hr and "hr + p { text-indent: 0" in style, hr)
     sec = {"id": "04", "kind": "chapter", "label": "第一章"}
     frag = rd.section_html(sec, "标题", "<p>x</p>")
     check("section carries marker, label, named page", "⟦S04⟧" in frag and "第一章" in frag and 'page: s04' in frag)
