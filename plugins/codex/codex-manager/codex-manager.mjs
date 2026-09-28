@@ -2,10 +2,11 @@
 // ABOUTME: Lets Claude Code run codex threads on the shared app-server daemon as supervised workers.
 // ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them.
 
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
 import { SessionStore } from "./inbox.mjs";
@@ -476,7 +477,16 @@ export async function main(argv) {
   throw new Error(command ? `unknown command: ${command}` : "missing command");
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// ~/.claude may be a symlink (dotfiles), so the invoked path is compared by its real location.
+function invokedDirectly() {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === scriptPath;
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch (error) {

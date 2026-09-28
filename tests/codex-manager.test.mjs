@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -47,6 +47,25 @@ test("resolveSessionId prefers the environment, then the parent claude session f
     await assert.rejects(resolveSessionId({ env: {}, sessionsDir: sessions, parents: [{ pid: 7, comm: "zsh" }] }), /cannot determine the Claude session/);
   } finally {
     await rm(sessions, { recursive: true, force: true });
+  }
+});
+
+test("whoami runs when the script is reached through a symlinked plugin directory", async () => {
+  const link = await mkdtemp(path.join(os.tmpdir(), "codex-manager-link-"));
+  try {
+    await symlink(path.dirname(path.dirname(manager)), path.join(link, "codex"));
+    const viaLink = path.join(link, "codex", "codex-manager", "codex-manager.mjs");
+    const result = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [viaLink, "whoami"], { env: { ...process.env, CLAUDE_CODE_SESSION_ID: session }, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.on("close", (code) => resolve({ code, stdout }));
+    });
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, `${session}\n`);
+  } finally {
+    await rm(link, { recursive: true, force: true });
   }
 });
 
