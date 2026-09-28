@@ -28,16 +28,18 @@ export function parentProcesses(pid = process.pid) {
   return rows;
 }
 
+/**
+ * The session file is keyed by the pid Claude Code registered, which may be a shell wrapper
+ * rather than a process named claude, so every ancestor is tried in order.
+ */
 export async function resolveSessionId({ env = process.env, sessionsDir = defaultSessionsDir(), parents } = {}) {
   if (env.CLAUDE_CODE_SESSION_ID) return env.CLAUDE_CODE_SESSION_ID;
-  const chain = parents ?? parentProcesses();
-  const claude = chain.find((row) => path.basename(row.comm).includes("claude"));
-  if (claude) {
+  for (const { pid } of parents ?? parentProcesses()) {
     try {
-      const record = JSON.parse(await readFile(path.join(sessionsDir, `${claude.pid}.json`), "utf8"));
+      const record = JSON.parse(await readFile(path.join(sessionsDir, `${pid}.json`), "utf8"));
       if (record.sessionId) return record.sessionId;
     } catch {
-      // fall through to the error below
+      // not this ancestor
     }
   }
   throw new Error("cannot determine the Claude session: set CLAUDE_CODE_SESSION_ID or run under Claude Code");
