@@ -77,7 +77,8 @@ def classify(title, chapter, seen_chapter):
         return "cover"
     if t in ("contents", "table of contents"):
         return "contents"
-    if t in ("index", "notes", "endnotes", "copyright", "title page", "half title", "also by", "about the author"):
+    if t in ("index", "notes", "endnotes", "references", "bibliography", "works cited", "further reading",
+             "copyright", "title page", "half title", "also by", "about the author"):
         return "skip"
     if chapter is not None:
         return "chapter"
@@ -547,6 +548,11 @@ def epub_fragment(z, href, work, keep_images, counter):
 
 PART_STEM = re.compile(r"^part\d*$", re.I)
 EPUB_SKIP_STEM = re.compile(r"^(cover|titlepage|halftitle|title|copyright|toc|nav|ncx|index|bibliography)\d*$", re.I)
+# A book's terminal back-matter opens with one of these; once past the last chapter it and everything after it
+# (including untitled Calibre-split continuations that carry no nav title) is skipped rather than translated.
+BACKMATTER_START = re.compile(r"^(notes|endnotes|references|bibliography|works cited|further reading|index)\b", re.I)
+# A conclusion-like closing section is real content: it opens its own section rather than folding into the last chapter.
+OWN_BACK_SECTION = re.compile(r"^(conclusion|epilogue|afterword|postscript|coda)\b", re.I)
 
 
 def extract_epub(source, work, keep_images, page_size):
@@ -601,13 +607,33 @@ def extract_epub(source, work, keep_images, page_size):
                          "start": 0, "end": 0, "file": sfile, "words": words_of(cur["frag"])})
         cur = None
 
-    for idref in spine:
+    def chapter_at(idref):  # the chapter number this spine file opens, or None — mirrors the loop's chapter logic
         item = manifest[idref]
         if not item["media"].startswith("application/xhtml"):
+            return None
+        base = posixpath.basename(item["href"])
+        stitle = titles.get(base) or epub_first_heading(z, item["href"]) or Path(base).stem
+        chap, _ = parse_title(stitle)
+        if chap is None and not (PART_STEM.match(Path(base).stem) or PART_TITLE.match(stitle)) and PART_TITLE_RE.match(stitle):
+            chap = chapter_from_headings(epub_headings(z, item["href"]))[0]
+        return chap
+
+    # Arm the back-matter latch only past the last chapter, so a per-chapter "Notes" between chapters still passes.
+    last_chapter_pos = max((i for i, idref in enumerate(spine) if chapter_at(idref) is not None), default=-1)
+    in_backmatter = False
+
+    for pos, idref in enumerate(spine):
+        item = manifest[idref]
+        if not item["media"].startswith("application/xhtml"):
+            continue
+        if in_backmatter:  # the book's terminal back-matter has started — skip it and everything after
             continue
         href = item["href"]
         stem = Path(posixpath.basename(href)).stem
         stitle = titles.get(posixpath.basename(href)) or epub_first_heading(z, href) or stem
+        if pos > last_chapter_pos and BACKMATTER_START.match(stitle.strip()):
+            in_backmatter = True
+            continue
         if re.fullmatch(r"[ivxlcdm]+|\d+", stitle.strip(), re.I):  # a bare page number/roman: a series-ad or filler page
             continue
         chapter, clean = parse_title(stitle)
@@ -631,8 +657,10 @@ def extract_epub(source, work, keep_images, page_size):
             continue
         # A subsection (1.1 …) or a chapter's trailing notes (its Bibliographical Remarks etc.) belong under the
         # current chapter, becoming ## sub-headings, so a per-subsection-file EPUB groups into one section per
-        # chapter like a per-chapter-file one.
-        if cur is not None and (is_subsection or kind == "back"):
+        # chapter like a per-chapter-file one. A Conclusion/Epilogue/Afterword is substantial standalone content,
+        # so it opens its own section instead — its own untitled continuation files then append to it.
+        is_own_back = kind == "back" and bool(OWN_BACK_SECTION.match(clean or stitle))
+        if cur is not None and (is_subsection or (kind == "back" and not is_own_back)):
             cur["frag"] += "\n\n" + frag
             images.update(sec_imgs)
             continue
