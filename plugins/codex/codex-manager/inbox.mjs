@@ -1,7 +1,7 @@
 // ABOUTME: Per-session storage for codex-manager: state.json, one inbox per codex thread,
 // ABOUTME: and reader-owned cursors so events are delivered to Claude exactly once.
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -79,6 +79,41 @@ export class SessionStore {
   /** Marks everything before `end` as delivered; only readers call this. */
   advance(threadId, end) {
     writeFileSync(this.cursorPath(threadId), String(end));
+  }
+
+  /**
+   * Takes the unread lines and advances the cursor under a lock, so `await` and the Stop hook
+   * never deliver the same event twice. Returns [] when the lock is busy or nothing is unread.
+   */
+  claim(threadId) {
+    const lock = `${this.inboxPath(threadId)}.lock`;
+    if (!this.acquire(lock)) return [];
+    try {
+      const { lines, end } = this.unread(threadId);
+      if (lines.length) this.advance(threadId, end);
+      return lines;
+    } finally {
+      rmSync(lock, { recursive: true, force: true });
+    }
+  }
+
+  acquire(lock) {
+    mkdirSync(this.dir, { recursive: true });
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      try {
+        mkdirSync(lock);
+        return true;
+      } catch {
+        // A holder that died mid-claim must not block readers forever.
+        try {
+          if (Date.now() - statSync(lock).mtimeMs > 5000) rmSync(lock, { recursive: true, force: true });
+        } catch {
+          // lock vanished between the failed mkdir and the stat; retry
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      }
+    }
+    return false;
   }
 
   threadIds() {

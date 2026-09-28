@@ -51,16 +51,18 @@ optionally `gh` (authenticated) for automatic PR creation.
 
 The plugin also registers an MCP server, `codex-manager`, that lets Claude run
 codex threads on the shared local app-server daemon as supervised workers:
-start one, give it follow-up prompts, interrupt it, list what is running, and
-get woken when it finishes or has something to say. Nothing is installed on the
-codex side; codex sees one extra tool, `notify_claude`, declared per thread.
+start one, give it follow-up prompts, answer its questions and approval
+requests, interrupt it, list what is running, and get woken when it finishes or
+has something to say. Nothing is installed on the codex side; codex sees two
+extra tools declared per thread, `notify_claude` and `ask_claude`.
 
 ### Tools
 
 | Tool | Does |
 |---|---|
-| `start(cwd, prompt, name?)` | `thread/start` on the daemon (approval `never`, sandbox `workspace-write` with network access), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. |
-| `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule). |
+| `start(cwd, prompt, name?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. |
+| `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule); the result says which happened. |
+| `reply(threadId, text, callId?)` | Answer what the thread is waiting for: the text becomes the result of its `ask_claude` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
 | `interrupt(threadId)` | `turn/interrupt` the thread's current turn. |
 | `list()` | The threads this Claude session started, their last turn status, and the unread inbox count per thread. |
 
@@ -74,7 +76,7 @@ node <plugin>/codex-manager/codex-manager.mjs await --thread <id> [--timeout <s>
 ```
 
 It prints the next unread inbox events as JSON lines and exits 0, which wakes
-Claude. Two kinds of event arrive:
+Claude. Four kinds of event arrive:
 
 - `{"kind":"completed","status":"completed|interrupted|failed","lastMessage":…}`
   from `turn/completed`. A codex turn is a whole task, so this fires once per
@@ -82,16 +84,37 @@ Claude. Two kinds of event arrive:
 - `{"kind":"notify","text":…}` when codex calls `notify_claude`. The daemon
   routes that dynamic-tool call back to the MCP server, which answers it at
   once and appends the text to the inbox; codex keeps working.
+- `{"kind":"ask","callId":…,"text":…}` when codex calls `ask_claude`. The MCP
+  server holds the daemon's request open, so codex blocks inside the same turn
+  until Claude calls `reply`; the reply text is what codex receives as the
+  tool's result.
+- `{"kind":"approval","callId":…,"text":…,"decisions":[…],…}` when codex asks
+  to run a command or change files outside its sandbox
+  (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`).
+  Claude answers with `reply` and one of the listed decisions.
+
+A held ask or approval that Claude does not answer within
+`CODEX_MANAGER_ASK_TIMEOUT` seconds (default 300) is answered by the MCP
+server: asks get "proceed on your own judgment", approvals get `decline`.
+While something is held, every tool result carries an `attention` list and the
+Stop hook nudges once per stop. When the turn ends or a new one starts the
+daemon aborts whatever was still held, and the manager forgets it too.
 
 `--timeout` exits 124 with no output when nothing arrives. The plugin's Stop
 hook (`codex-manager pending`) is the fallback: when Claude tries to stop with
-undelivered events, the hook blocks once and hands them over.
+undelivered events, the hook blocks once and hands them over. `await` and the
+hook take events under a per-thread lock, so an event is delivered once even
+when both are reading.
+
+If the daemon connection drops (a daemon restart, say) the MCP server
+reconnects with backoff while it has threads, `thread/resume`s them, and the
+daemon replays any request that was still waiting for an answer.
 
 ### State
 
 ```
 ~/.claude/codex-manager/<claude-session-id>/
-  state.json            threads: id, name, cwd, turnId, lastStatus
+  state.json            threads: id, name, cwd, turnId, lastStatus, waiting (held asks/approvals)
   <codex-thread-id>.jsonl   the inbox, appended by the MCP server
   <codex-thread-id>.cursor  byte offset of delivered events, written by await/pending only
 ```
@@ -101,7 +124,8 @@ parent claude process's record in `~/.claude/sessions/`. Because `claude
 --resume` keeps the id, a resumed session reconnects to its threads: the MCP
 server `thread/resume`s each recorded thread (which subscribes it to that
 thread's notifications and replays any pending tool call) and backfills a
-`completed` event for turns that finished while Claude was away. Codex threads
+`completed` event for turns that finished while Claude was away. Dynamic tools
+are stored in the thread's rollout, so a resumed thread keeps them. Codex threads
 outlive the Claude session: a running turn finishes on its own, and the daemon
 unloads an idle, unsubscribed thread after `thread_unload_delay_secs`.
 
@@ -303,8 +327,9 @@ node --test tests/*.test.mjs
 
 `tests/codex-manager.test.mjs` drives the MCP server and the `await`/`pending`
 readers against a fake daemon (`tests/helpers/fake-daemon.mjs`): thread start
-parameters, `notify_claude` relay, completion delivery, adoption on restart,
-and daemon-down error reporting.
+parameters, `notify_claude` relay, `ask_claude` hold and `reply`, ask timeout,
+approval forwarding, completion delivery, adoption on restart, reconnect after
+a dropped daemon connection, and daemon-down error reporting.
 
 `skills/implement/tests/test-implement.sh` runs `implement.sh` against a fixture
 repo with a stubbed codex CLI (pass, retry-with-failure-context, hang/timeout,

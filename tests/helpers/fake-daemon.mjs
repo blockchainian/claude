@@ -50,9 +50,9 @@ export function decodeClientFrames(buffer) {
   return { frames, rest: buffer.subarray(offset) };
 }
 
-export async function fakeDaemon(onMessage, onFrame = () => {}) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "daemon-run-test-"));
-  const socketPath = path.join(directory, "daemon.sock");
+export async function fakeDaemon(onMessage, onFrame = () => {}, { socketPath: reuse } = {}) {
+  const directory = reuse ? undefined : await mkdtemp(path.join(os.tmpdir(), "daemon-run-test-"));
+  const socketPath = reuse ?? path.join(directory, "daemon.sock");
   const connections = new Set();
   const server = net.createServer((socket) => {
     connections.add(socket);
@@ -89,7 +89,7 @@ export async function fakeDaemon(onMessage, onFrame = () => {}) {
     async close() {
       for (const socket of connections) socket.destroy();
       await new Promise((resolve) => server.close(resolve));
-      await rm(directory, { recursive: true, force: true });
+      if (directory) await rm(directory, { recursive: true, force: true });
     }
   };
 }

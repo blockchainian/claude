@@ -6,6 +6,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../../lib/daemon-client.mjs";
+import { readStdin } from "../../lib/stdin.mjs";
 
 const usage = "usage: daemon-run.mjs -C <dir> -o <file> --name <name> --timeout <seconds> [-s <sandbox>] <prompt|->";
 
@@ -119,12 +120,7 @@ async function run(options) {
 let options;
 try {
   options = parseArgs(process.argv.slice(2));
-  if (options.prompt === "-") options.prompt = await new Promise((resolve) => {
-    let input = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => { input += chunk; });
-    process.stdin.on("end", () => resolve(input));
-  });
+  if (options.prompt === "-") options.prompt = await readStdin();
 } catch (error) {
   console.error(`${error.message}\n${usage}`);
   process.exitCode = 2;
