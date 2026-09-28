@@ -252,6 +252,8 @@ p {{ margin: 0; text-indent: 2em; text-align: justify; }}
 .body-text > p:first-of-type::first-letter {{ float: left; font-size: 2.6em; line-height: 0.85; padding: 3pt 4pt 0 0; }}
 h2 {{ font-family: {hei}; font-size: 11pt; font-weight: 700; color: {bold}; margin: 18pt 0 6pt; break-after: avoid; }}
 h3 {{ font-family: {hei}; font-size: 10.5pt; font-weight: 700; color: {bold}; margin: 12pt 0 4pt; break-after: avoid; }}
+hr {{ border: 0; height: 0; margin: 1.2em 0; break-after: avoid; }}  /* a scene break (Markdown ---): blank space, never the browser's inset light border */
+hr + p {{ text-indent: 0; }}
 blockquote {{ margin: 8pt 2em; font-style: italic; }}
 blockquote p {{ text-indent: 0; }}
 ul, ol {{ margin: 4pt 0 4pt 2em; padding: 0; }}
