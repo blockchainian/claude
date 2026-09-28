@@ -47,6 +47,69 @@ optionally `gh` (authenticated) for automatic PR creation.
 | `/codex:implement` | Turn `plan.md` into `workstreams.txt`, launch `implement.sh` in the background, relay `summary.json` and the PR when it exits. |
 | `/codex:review` | Run `review.sh` over a commit range and write `review.json` (`{findings: [{file, line, severity, claim}]}`, severity `must-fix` or `nit`) for the caller to triage. |
 
+## codex-manager
+
+The plugin also registers an MCP server, `codex-manager`, that lets Claude run
+codex threads on the shared local app-server daemon as supervised workers:
+start one, give it follow-up prompts, interrupt it, list what is running, and
+get woken when it finishes or has something to say. Nothing is installed on the
+codex side; codex sees one extra tool, `notify_claude`, declared per thread.
+
+### Tools
+
+| Tool | Does |
+|---|---|
+| `start(cwd, prompt, name?)` | `thread/start` on the daemon (approval `never`, sandbox `workspace-write` with network access), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. |
+| `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule). |
+| `interrupt(threadId)` | `turn/interrupt` the thread's current turn. |
+| `list()` | The threads this Claude session started, their last turn status, and the unread inbox count per thread. |
+
+### Getting woken
+
+Every `start`/`send` result carries an await command. Run it with
+`run_in_background`:
+
+```
+node <plugin>/codex-manager/codex-manager.mjs await --thread <id> [--timeout <s>]
+```
+
+It prints the next unread inbox events as JSON lines and exits 0, which wakes
+Claude. Two kinds of event arrive:
+
+- `{"kind":"completed","status":"completed|interrupted|failed","lastMessage":…}`
+  from `turn/completed`. A codex turn is a whole task, so this fires once per
+  prompt, never per tool call.
+- `{"kind":"notify","text":…}` when codex calls `notify_claude`. The daemon
+  routes that dynamic-tool call back to the MCP server, which answers it at
+  once and appends the text to the inbox; codex keeps working.
+
+`--timeout` exits 124 with no output when nothing arrives. The plugin's Stop
+hook (`codex-manager pending`) is the fallback: when Claude tries to stop with
+undelivered events, the hook blocks once and hands them over.
+
+### State
+
+```
+~/.claude/codex-manager/<claude-session-id>/
+  state.json            threads: id, name, cwd, turnId, lastStatus
+  <codex-thread-id>.jsonl   the inbox, appended by the MCP server
+  <codex-thread-id>.cursor  byte offset of delivered events, written by await/pending only
+```
+
+The session id comes from `CLAUDE_CODE_SESSION_ID` when set, else from the
+parent claude process's record in `~/.claude/sessions/`. Because `claude
+--resume` keeps the id, a resumed session reconnects to its threads: the MCP
+server `thread/resume`s each recorded thread (which subscribes it to that
+thread's notifications and replays any pending tool call) and backfills a
+`completed` event for turns that finished while Claude was away. Codex threads
+outlive the Claude session: a running turn finishes on its own, and the daemon
+unloads an idle, unsubscribed thread after `thread_unload_delay_secs`.
+
+The daemon is reached over `~/.codex/app-server-control/app-server-control.sock`
+(override with `CODEX_MANAGER_DAEMON_SOCKET`; state root with
+`CODEX_MANAGER_HOME`). `dynamicTools` on `thread/start` is an experimental
+app-server API, so the client initializes with `experimentalApi: true`.
+
 `implement.sh` never reviews; the caller (the feature plugin's orchestrator, or
 you when running standalone) runs `/codex:review` once per plan after
 `implement.sh` reports `pushed to origin`.
@@ -235,7 +298,13 @@ labelled at the source, not on a single model's judgment used as a gate.
 
 ```
 npm run test:codex
+node --test tests/*.test.mjs
 ```
+
+`tests/codex-manager.test.mjs` drives the MCP server and the `await`/`pending`
+readers against a fake daemon (`tests/helpers/fake-daemon.mjs`): thread start
+parameters, `notify_claude` relay, completion delivery, adoption on restart,
+and daemon-down error reporting.
 
 `skills/implement/tests/test-implement.sh` runs `implement.sh` against a fixture
 repo with a stubbed codex CLI (pass, retry-with-failure-context, hang/timeout,
