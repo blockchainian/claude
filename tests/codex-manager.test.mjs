@@ -40,8 +40,9 @@ function run(args, { env = {}, stdin } = {}) {
 test("resolveSessionId prefers the environment, then the parent claude session file", async () => {
   const sessions = await mkdtemp(path.join(os.tmpdir(), "claude-sessions-"));
   try {
+    // Claude Code registers the pid it was launched as, which can be a shell wrapper, not `claude`.
     await writeFile(path.join(sessions, "4242.json"), JSON.stringify({ pid: 4242, sessionId: "from-file" }));
-    const parents = [{ pid: 7, comm: "zsh" }, { pid: 4242, comm: "claude" }, { pid: 1, comm: "launchd" }];
+    const parents = [{ pid: 7, comm: "node" }, { pid: 4242, comm: "/bin/zsh" }, { pid: 1827, comm: "claude" }, { pid: 1, comm: "launchd" }];
     assert.equal(await resolveSessionId({ env: { CLAUDE_CODE_SESSION_ID: "from-env" }, sessionsDir: sessions, parents }), "from-env");
     assert.equal(await resolveSessionId({ env: {}, sessionsDir: sessions, parents }), "from-file");
     await assert.rejects(resolveSessionId({ env: {}, sessionsDir: sessions, parents: [{ pid: 7, comm: "zsh" }] }), /cannot determine the Claude session/);
