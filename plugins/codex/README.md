@@ -120,7 +120,8 @@ daemon replays any request that was still waiting for an answer.
 ```
 
 The session id comes from `CLAUDE_CODE_SESSION_ID` when set, else from the
-parent claude process's record in `~/.claude/sessions/`. Because `claude
+first ancestor process that has a record in `~/.claude/sessions/` (Claude
+Code registers the pid it was launched as, which may be a shell wrapper). Because `claude
 --resume` keeps the id, a resumed session reconnects to its threads: the MCP
 server `thread/resume`s each recorded thread (which subscribes it to that
 thread's notifications and replays any pending tool call) and backfills a
