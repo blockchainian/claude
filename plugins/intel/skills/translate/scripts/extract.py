@@ -548,8 +548,8 @@ def epub_fragment(z, href, work, keep_images, counter):
 
 PART_STEM = re.compile(r"^part\d*$", re.I)
 EPUB_SKIP_STEM = re.compile(r"^(cover|titlepage|halftitle|title|copyright|toc|nav|ncx|index|bibliography)\d*$", re.I)
-# A book's terminal back-matter opens with one of these; once past the last chapter it and everything after it
-# (including untitled Calibre-split continuations that carry no nav title) is skipped rather than translated.
+# A book's terminal back-matter opens with one of these; once past the last chapter it and every spine file
+# after it (continuations that carry no nav title of their own included) are skipped rather than translated.
 BACKMATTER_START = re.compile(r"^(notes|endnotes|references|bibliography|works cited|further reading|index)\b", re.I)
 # A conclusion-like closing section is real content: it opens its own section rather than folding into the last chapter.
 OWN_BACK_SECTION = re.compile(r"^(conclusion|epilogue|afterword|postscript|coda)\b", re.I)
@@ -607,7 +607,9 @@ def extract_epub(source, work, keep_images, page_size):
                          "start": 0, "end": 0, "file": sfile, "words": words_of(cur["frag"])})
         cur = None
 
-    def chapter_at(idref):  # the chapter number this spine file opens, or None — mirrors the loop's chapter logic
+    def chapter_at(idref):  # the chapter number this spine file opens, or None. Must track the main loop's
+        # chapter resolution below (parse_title + part-opener headings); if that changes, change this too, or
+        # last_chapter_pos drifts and the back-matter latch arms on the wrong file.
         item = manifest[idref]
         if not item["media"].startswith("application/xhtml"):
             return None
