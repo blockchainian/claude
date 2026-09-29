@@ -1,5 +1,5 @@
 // ABOUTME: Tests codex-manager: session resolution, the await and pending readers, and the MCP
-// ABOUTME: server's daemon conversation (thread start, notify_claude, turn completion, adoption).
+// ABOUTME: server's daemon conversation (thread start and attach, notify_claude, turn completion, adoption).
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -170,6 +170,8 @@ function daemonScript() {
     messages,
     sockets,
     activeTurn: undefined,
+    threads: [],
+    pageSize: 2,
     handler(message, socket) {
       sockets.add(socket);
       messages.push(message);
@@ -185,7 +187,12 @@ function daemonScript() {
       }
       if (message.method === "turn/interrupt") reply({});
       if (message.method === "review/start") reply({ turn: { id: "turn-review", status: "inProgress" }, reviewThreadId: message.params.threadId });
-      if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId }, initialTurnsPage: { data: [{ id: "turn-old", status: "completed", items: script.resumeItems ?? [{ type: "agentMessage", text: "done while you were away" }] }] } });
+      if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId }, initialTurnsPage: { data: script.resumeTurns ?? [{ id: "turn-old", status: "completed", items: script.resumeItems ?? [{ type: "agentMessage", text: "done while you were away" }] }] } });
+      if (message.method === "thread/list") {
+        const from = Number(message.params.cursor ?? 0);
+        const next = from + script.pageSize;
+        reply({ data: script.threads.slice(from, next), nextCursor: next < script.threads.length ? String(next) : null });
+      }
     }
   };
   return script;
@@ -218,7 +225,7 @@ test("mcp starts a thread with dynamic tools, relays notify_claude and completio
     const init = await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
     assert.equal(init.result.serverInfo.name, "codex-manager");
     const tools = await mcp.request("tools/list", {});
-    assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["start", "send", "reply", "interrupt", "list", "review"]);
+    assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["start", "attach", "send", "reply", "interrupt", "list", "review"]);
 
     const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", name: "fix-bug" });
     assert.equal(started.isError, false, started.text);
@@ -758,6 +765,205 @@ test("review points the reviewer at the decisions made during the run", { timeou
     assert.doesNotMatch(last.target.instructions, /decisions/);
   } finally {
     await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+const sessionsOnDaemon = () => [
+  { id: "thread-1", name: "fix-login", cwd: "/repo/a", status: { type: "idle" } },
+  { id: "thread-2", name: "twin", cwd: "/repo/b", status: { type: "active", activeFlags: [] } },
+  { id: "thread-3", name: null, cwd: "/repo/c", status: { type: "notLoaded" } },
+  { id: "thread-4", name: "twin", cwd: "/repo/d", status: { type: "notLoaded" } },
+  { id: "thread-5", name: "slow-requests", cwd: "/repo/e", status: { type: "active", activeFlags: [] } }
+];
+
+async function mcpChild(home, daemon, env) {
+  const mcp = new McpChild(home.home, daemon.socketPath, env);
+  await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
+  return mcp;
+}
+
+test("attach finds a session by name across pages, subscribes without changing its settings, and wakes on its completion", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  script.threads = sessionsOnDaemon();
+  script.resumeTurns = [{ id: "turn-live", status: "inProgress", items: [] }];
+  script.activeTurn = "turn-live";
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = await mcpChild(home, daemon);
+  try {
+    const attached = await mcp.call("attach", { thread: "slow-requests" });
+    assert.equal(attached.isError, false, attached.text);
+    assert.deepEqual(attached.json, {
+      threadId: "thread-5",
+      name: "slow-requests",
+      cwd: "/repo/e",
+      attached: true,
+      lastStatus: "inProgress",
+      await: `node ${JSON.stringify(manager)} await --thread thread-5`,
+      note: attached.json.note
+    });
+    assert.match(attached.json.note, /Approvals and questions stay with the client/);
+
+    const lists = script.messages.filter((message) => message.method === "thread/list");
+    assert.deepEqual(lists.map((message) => message.params.cursor), [undefined, "2", "4"]);
+    assert.equal(lists[0].params.searchTerm, undefined);
+    const resumes = script.messages.filter((message) => message.method === "thread/resume");
+    assert.deepEqual(resumes.map((message) => message.params), [{ threadId: "thread-5", initialTurnsPage: { limit: 1, sortDirection: "desc" } }]);
+    assert.equal(script.messages.some((message) => message.method === "thread/start"), false);
+
+    const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
+    assert.deepEqual(state.threads, [{ id: "thread-5", name: "slow-requests", cwd: "/repo/e", turnId: "turn-live", lastStatus: "inProgress", waiting: [], attached: true }]);
+
+    const sent = await mcp.call("send", { threadId: "thread-5", prompt: "steer: use the index instead" });
+    assert.equal(sent.isError, false, sent.text);
+    assert.equal(script.messages.at(-1).params.threadId, "thread-5");
+    assert.equal(sent.json.steered, true);
+    const interrupted = await mcp.call("interrupt", { threadId: "thread-5" });
+    assert.equal(interrupted.isError, false, interrupted.text);
+    assert.deepEqual(script.messages.at(-1).params, { threadId: "thread-5", turnId: "turn-live" });
+
+    const [socket] = script.sockets;
+    const turnId = sent.json.turnId;
+    send(socket, { method: "item/completed", params: { threadId: "thread-5", turnId, item: { type: "agentMessage", id: "m1", text: "Switched to the index" } } });
+    send(socket, { method: "turn/completed", params: { threadId: "thread-5", turn: { id: turnId, status: "completed" } } });
+    const inbox = path.join(home.dir, "thread-5.jsonl");
+    await waitFor(() => inboxLines(inbox).length === 1);
+    const [done] = inboxLines(inbox);
+    assert.equal(done.kind, "completed");
+    assert.equal(done.lastMessage, "Switched to the index");
+    const listed = await mcp.call("list", {});
+    assert.equal(listed.json.threads[0].attached, true);
+    assert.equal(listed.json.threads[0].lastStatus, "completed");
+    assert.equal(listed.json.threads[0].unread, 1);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("attach takes a thread id, reports a finished session without an inbox event, and is repeatable", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  script.threads = sessionsOnDaemon();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = await mcpChild(home, daemon);
+  try {
+    const attached = await mcp.call("attach", { thread: "thread-4" });
+    assert.equal(attached.isError, false, attached.text);
+    assert.equal(attached.json.threadId, "thread-4");
+    assert.equal(attached.json.name, "twin");
+    assert.equal(attached.json.lastStatus, "completed");
+    assert.deepEqual(inboxLines(path.join(home.dir, "thread-4.jsonl")), []);
+
+    const again = await mcp.call("attach", { thread: "thread-4" });
+    assert.equal(again.isError, false, again.text);
+    assert.equal(again.json.threadId, "thread-4");
+    assert.equal(script.messages.filter((message) => message.method === "thread/resume").length, 1);
+    const listed = await mcp.call("list", {});
+    assert.equal(listed.json.threads.length, 1);
+
+    script.resumeTurns = [];
+    const untouched = await mcp.call("attach", { thread: "fix-login" });
+    assert.equal(untouched.json.lastStatus, "idle");
+    const noTurn = await mcp.call("interrupt", { threadId: "thread-1" });
+    assert.match(noTurn.text, /no turn to interrupt/);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("attach refuses a name no session has, and a name several sessions share", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  script.threads = sessionsOnDaemon();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = await mcpChild(home, daemon);
+  try {
+    const missing = await mcp.call("attach", { thread: "fix-log" });
+    assert.equal(missing.isError, true);
+    assert.match(missing.text, /no codex session has the id or name "fix-log"/);
+    const shared = await mcp.call("attach", { thread: "twin" });
+    assert.equal(shared.isError, true);
+    assert.match(shared.text, /2 codex sessions are named "twin"/);
+    assert.match(shared.text, /thread-2 \(active, \/repo\/b\)/);
+    assert.match(shared.text, /thread-4 \(notLoaded, \/repo\/d\)/);
+    const unnamed = await mcp.call("attach", {});
+    assert.equal(unnamed.isError, true);
+    assert.match(unnamed.text, /thread is required/);
+    assert.equal(script.messages.some((message) => message.method === "thread/resume"), false);
+    assert.deepEqual((await mcp.call("list", {})).json.threads, []);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("attach records nothing when the daemon cannot resume the session", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  script.threads = sessionsOnDaemon();
+  const refusing = (message, socket) => {
+    if (message.method === "thread/resume") return send(socket, { id: message.id, error: { code: -32000, message: "no rollout found" } });
+    script.handler(message, socket);
+  };
+  const daemon = await fakeDaemon(refusing);
+  const mcp = await mcpChild(home, daemon);
+  try {
+    const attached = await mcp.call("attach", { thread: "fix-login" });
+    assert.equal(attached.isError, true);
+    assert.match(attached.text, /no rollout found/);
+    assert.deepEqual((await mcp.call("list", {})).json.threads, []);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("requests the daemon sends for an attached session are left to the client it runs in, also after a restart", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  script.threads = sessionsOnDaemon();
+  script.resumeTurns = [{ id: "turn-live", status: "inProgress", items: [] }];
+  const daemon = await fakeDaemon(script.handler);
+  const env = { CODEX_MANAGER_ASK_TIMEOUT: "1" };
+  const mcp = await mcpChild(home, daemon, env);
+  const inbox = path.join(home.dir, "thread-5.jsonl");
+  const silentOn = async (socket, firstId) => {
+    send(socket, { id: firstId, method: "item/commandExecution/requestApproval", params: { threadId: "thread-5", turnId: "turn-live", itemId: "item-cmd", command: "rm -rf build" } });
+    send(socket, { id: firstId + 1, method: "item/fileChange/requestApproval", params: { threadId: "thread-5", turnId: "turn-live", itemId: "item-fc" } });
+    send(socket, { id: firstId + 2, method: "item/tool/call", params: { threadId: "thread-5", turnId: "turn-live", callId: "call-1", tool: "create_thread", arguments: {} } });
+    // Longer than the ask timeout, so a held request would have been answered by now.
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    assert.deepEqual(script.messages.filter((message) => message.id >= firstId && message.method === undefined), []);
+    assert.deepEqual(inboxLines(inbox), []);
+  };
+  try {
+    await mcp.call("attach", { thread: "slow-requests" });
+    const [socket] = script.sockets;
+    await silentOn(socket, 970);
+    const listed = await mcp.call("list", {});
+    assert.deepEqual(listed.json.threads[0].waiting, []);
+    assert.equal(listed.json.attention, undefined);
+    await mcp.close();
+
+    const later = await mcpChild(home, daemon, env);
+    try {
+      const adopted = await later.call("list", {});
+      assert.equal(adopted.json.threads[0].attached, true);
+      assert.equal(script.messages.filter((message) => message.method === "thread/resume").length, 2);
+      await waitFor(() => script.sockets.size === 2);
+      await silentOn([...script.sockets][1], 980);
+    } finally {
+      await later.close();
+    }
+  } finally {
     await daemon.close();
     await home.close();
   }
