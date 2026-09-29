@@ -27,6 +27,11 @@ Files: `path/a.tsx`.
 
 ## Dependencies
 
+<!-- A workstream whose Checks cannot pass without what another workstream produces — a module,
+a crate, a table, a schema, a generated file — is listed here after that one; ship starts it when
+that one merges, so its worktree already carries the dependency. Workstreams not listed here start
+at once. -->
+
 - <order between workstreams, or `none`>
 - <wire contract the UX lane codes against, as a real response body>
 

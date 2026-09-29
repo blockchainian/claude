@@ -41,8 +41,10 @@ that has no place in the code.
 - You start at the same time as the backend lane, not after it. Implement against the pinned wire
   contract and keep going; the only thing you wait for is verification.
 - When the brief names a backend dependency, implement the surface against the contract, commit,
-  and return `needs-backend`. Do not stub the backend, do not deploy, do not poll for it. The
-  orchestrator resumes you only when a probe against the deployed backend fails.
+  and return `needs-backend`. Do not stub the backend anywhere — not in the checkout, not in a
+  scratch directory, not as a fake server for a probe — do not deploy, do not poll for it. The
+  orchestrator runs the probes against the real backend after the merge and resumes you only when
+  one fails.
 - Probes are yours ONLY when the brief says the surface has no backend dependency. Otherwise the
   orchestrator runs them; return the checklist untested and let it. The probes are the plan's UX
   checks for your surfaces, quoted in your brief as commands.

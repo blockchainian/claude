@@ -99,8 +99,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
   `step 2`); the deps carry order. Add the module when two names would collide. `activeForm` is the
   present-continuous of the same outcome (`Adding CSV export to the reports page`).
 - **Wire** the plan's Dependencies as `addBlockedBy`, so the board shows what cannot start yet — a
-  `needs-backend` UX workstream is blocked by the backend task it waits on; production is blocked by
-  triage and the UX checks checkpoint.
+  codex workstream that waits for another one's merge, a `needs-backend` UX workstream blocked by
+  the backend task it waits on; production is blocked by triage and the UX checks checkpoint.
 - **Flip status** at the transitions the procedure already defines: `in_progress` when you launch a
   lane or start a checkpoint, `completed` when its branch merges clean or its verdict is green. A
   finding sent back to a lane reopens that lane's task to `in_progress` until its re-run is green.
@@ -117,14 +117,18 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    waste; never skip it because the gate came straight from `AGENTS.md`. With the check green, open
    the task board (see **Task board**) before any fan-out, so the rest of the run is visible.
 
-2. **Launch the codex lane — one thread per workstream.** For EVERY codex workstream in the plan,
+2. **Launch the codex lane — one thread per workstream.** For EVERY codex workstream in the plan
+   whose Dependencies are already merged (none, at the start),
    in one message: `workstream.sh open <id>`, then codex-manager `start` with `cwd` the printed
    path, `name` the id, and a prompt that is the workstream block verbatim plus the plan's
    Dependencies and Checks, and these standing instructions: work only in this directory, commit
    after every coherent step, run the Checks command before finishing and leave it green, never
    push, and use `ask_claude` for a question the block does not answer instead of guessing. Run
    each returned await command with `run_in_background` and end the turn. Copy any untracked env
-   file a module needs into the worktree before starting the thread.
+   file a module needs into the worktree before starting the thread. A workstream that the plan's
+   Dependencies put after another one is opened and started the same way, in the message where
+   that one merges: `open` branches from the merged HEAD, so its worktree already carries what it
+   depends on and its Checks can pass alone.
 
 3. **Launch the UX lane, in parallel — one implementer per UX workstream.** In the same message,
    `workstream.sh open <id>` for EVERY UX workstream and spawn a `ux-implementer` agent per
@@ -190,8 +194,9 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 
 7. **Fix, both lanes at once, one round.**
 
-   a. `workstream.sh open fix-codex` and `workstream.sh open fix-ux`, so neither lane can dirty
-      the other's tree or the session branch.
+   a. `workstream.sh open fix-codex` when there are `codex` findings and `workstream.sh open
+      fix-ux` when there are `ux` findings, so neither lane can dirty the other's tree or the
+      session branch.
    b. codex-manager `start` in the codex worktree with the `codex` findings and the same standing
       instructions as step 2; spawn `ux-autofixer` with the `ux` findings, its worktree path and
       the UX checks for its surfaces. A finding touching `.claude/**` or `CLAUDE.md` comes back
