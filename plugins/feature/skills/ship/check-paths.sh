@@ -1,5 +1,5 @@
 #!/bin/sh
-# ABOUTME: Flags file paths named in a plan or grounding doc that do not exist in the repo.
+# ABOUTME: Flags file paths named in a plan that do not exist in the repo.
 # ABOUTME: Usage: check-paths.sh <doc> [skip-regex]   — run anywhere inside the repo; exits 1 on any miss.
 #
 # Only backticked paths with a code or config extension are checked. A line containing

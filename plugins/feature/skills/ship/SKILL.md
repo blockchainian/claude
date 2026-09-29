@@ -3,10 +3,10 @@ name: ship
 description: >
   Run a written plan through the codex and UX lanes to a shipped feature —
   launch the workstreams, write and run the probes, verify staging, triage the
-  local review, run the fix lanes, decide production. Use when a `plan.md` exists and has passed
-  the path checker: "/feature:ship <plan.md>", "run this plan", "ship this
-  plan". NOT for planning, and not for a change small enough to do in one
-  turn — there the launch overhead is the whole cost.
+  local review, run the fix lanes, decide production. Use when a `plan.md` exists — written in
+  plan mode, by hand, or by any agent — with Workstreams, Dependencies and Checks sections:
+  "/feature:ship <plan.md>", "run this plan", "ship this plan". NOT for planning, and not for a
+  change small enough to do in one turn — there the launch overhead is the whole cost.
 ---
 
 # Ship — run the plan, never write the code
@@ -17,36 +17,43 @@ backend lane cannot merge onto it, and every UI step it drives by hand is a step
 answered in one background call.
 
 This skill is tuned for Opus 4.8 medium (`/model claude-opus-4-8`, `/effort medium`) in a fresh
-session that reads `plan.md` and its `problem.md`; if the session differs, say so in one line and
-continue. A phase boundary is a task boundary, and the grounding sweep's stale tool output would
-cost reads without helping. Within the phase, never `/clear` for size. Effort is set once at session start. If one problem needs more, tell the user to raise
+session that reads `plan.md`; if the session differs, say so in one line and continue. A phase
+boundary is a task boundary, and the planning turn's stale tool output would cost reads without
+helping. Within the phase, never `/clear` for size. Effort is set once at session start. If one problem needs more, tell the user to raise
 `/effort` and leave it raised for the phase: every change rewrites the whole prompt cache.
 
 ## What plan.md must contain
 
-The plan follows `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md`: Scope, Facts, Constraints,
-Workstreams, UX workstreams, Dependencies, Invariants, UX checklist per surface, New files, Checks,
-Live checks. It is agent-facing only — no decision rationale, no shipped outcome. A program that
-touches many screens is one plan with many UX workstreams, not one plan per screen: grounding and
-planning run once, the implementers run at once. Each workstream block is the implementer's whole
-brief: `codex:implement` passes the plan as the spec and writes one pointer line per workstream
-that scopes the agent to the shared core plus its block, adding no facts. The `planner` agent
-(`${CLAUDE_PLUGIN_ROOT}/agents/planner.md`) writes it, and beside it `decisions.md` —
-the pre-launch human gate (rationale, rejected alternatives, risks, open questions) that no agent
-reads and the user reviews before you launch.
+The plan is whatever the user wrote or approved — plan mode, a hand-written spec, any author. Ship
+reads it by section, so three sections are required and the rest are read when present:
 
-Before the plan ships, and after every revision, run these three from inside the repo:
+- **Workstreams** — one `### <id>` block per codex workstream, each ending with a `Files:` line
+  naming the files it owns. `codex:implement` passes the plan as the spec and writes one pointer
+  line per workstream that scopes the agent to the shared core plus its block, adding no facts, so
+  each block must be the implementer's whole brief.
+- **Dependencies** — the order between workstreams, if any, and the wire contract the UX lane codes
+  against. Ship wires these into the task board as `addBlockedBy`.
+- **Checks** — exactly one command line; `implement.sh` runs it in every worktree and after merge.
 
-- `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-paths.sh <plan> [skip-regex]` — exits 1 on a
+Optional, each read by the step that names it: **UX workstreams** (`### <id>` blocks with a
+`Surfaces:` and a `Files:` line; without this section there is no UX lane), **UX checklist per
+surface** (the assertions step 4 turns into probes), **Invariants**, **Intended changes**, **New
+files** (marked `(new)` so the path checker skips them), **Live checks**, and a `Base:` line naming
+the SHA the plan was written at. `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md` shows the
+full shape; a plan that has the three required sections in that shape is enough. It is agent-facing
+only — no decision rationale, no shipped outcome. A program that touches many screens is one plan
+with many UX workstreams, not one plan per screen: planning runs once, the implementers run at once.
+
+Before the plan ships, and after every revision, run these two from inside the repo:
+
+- `${CLAUDE_PLUGIN_ROOT}/skills/ship/check-paths.sh <plan> [skip-regex]` — exits 1 on a
   `MISSING:` or `AMBIGUOUS:` path; mark files the plan creates `(new)` on their own line so they
   are skipped.
-- `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-overlap.sh <plan>` — exits 1 when two workstreams
+- `${CLAUDE_PLUGIN_ROOT}/skills/ship/check-overlap.sh <plan>` — exits 1 when two workstreams
   list the same file, a merge conflict scheduled in advance.
-- `${CLAUDE_PLUGIN_ROOT}/skills/ground/check-acceptance.py <plan> <problem.md>` — exits 1 on
-  `UNCOVERED: AC<n>`, an acceptance criterion no test references, which sends the plan back to
-  the planner.
 
-Then grep each function, route, table, column and env var the plan names.
+A plan that fails either goes back to the user with the checker's output; ship never edits the
+plan. Then grep each function, route, table, column and env var the plan names.
 
 ## Task board — the run's live view
 
@@ -74,13 +81,11 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 
 ## Procedure
 
-1. **Confirm the decisions gate ran, pin the base, and prove the check.** First confirm the plan's
-   `decisions.md` carries a `Gate: passed` top line — the record that `/feature:plan` gated the
-   decisions, open questions and risks with the user. If it is absent, stop and tell the user to run
-   `/feature:plan <problem.md>` first; ship never gates decisions itself. Then read the plan and
-   compare `git rev-parse --short HEAD` against
-   the SHA the plan records. If they differ, rebase onto the plan's base or re-check the plan's paths
-   before launching — a plan is valid only at its SHA. Confirm the tree is clean. Then run each
+1. **Check the plan, pin the base, and prove the check.** Read the plan, confirm it has the three
+   required sections, and run the two checkers above. If the plan records a `Base:` SHA, compare it
+   against `git rev-parse --short HEAD`; if they differ, rebase onto the plan's base or re-check
+   the plan's paths before launching — a plan is valid only at its SHA. Without a `Base:` line,
+   HEAD is the base; record it. Confirm the tree is clean. Then run each
    workstream's `--check` command on this clean baseline before any fan-out: it MUST pass (exit 0). A
    gate already red on the untouched tree is not a code signal — it fails every workstream identically
    and discards the whole run regardless of what the code does. Reject any such gate and send the plan
@@ -181,10 +186,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
       review's record.
 
 9. **Decide production, then record the outcome.** Production ships only when every finding is
-   closed AND the re-run probes are green AND every acceptance criterion is met — the gate's
-   `[AC<n>]`-tagged tests pass and each `ui` criterion's probe is green; a criterion whose test
-   never ran or went red is an unmet acceptance, a finding for the user, never a ship. This is
-   what makes the shipped feature equal the definition, not a half-shipped mixed feature. Then run
+   closed AND the re-run probes are green AND every test the plan's workstreams name has run and
+   passed; a test that never ran or went red is a finding for the user, never a ship. Then run
    `${CLAUDE_PLUGIN_ROOT}/skills/ship/watch-ci.sh <ref> [out-file]` against the fixed head
    (the branch tip after step 8's pushes, or the original push when step 7 found nothing) and read
    its verdict JSON; gate on the `conclusion`
@@ -194,8 +197,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    on merge need nothing more, and the rest go through the codex lane's deploy command (the
    project contract in the plugin README says which). Then run the plan's Live checks against production. The
    phase's record is `specs/<date>-<topic>/outcome.md`, written from
-   `${CLAUDE_PLUGIN_ROOT}/skills/ship/outcome-template.md`: the per-`AC<n>` acceptance verdict and
-   the test or probe that settled each, the code-review must-fix findings each as issue-tldr /
+   `${CLAUDE_PLUGIN_ROOT}/skills/ship/outcome-template.md`: what each workstream delivered and
+   the test or probe that proved it, the code-review must-fix findings each as issue-tldr /
    fix-tldr / commit SHA, the PR and deploy SHAs, the live-check results, and the follow-ups left
    out of this ship. It is for the user and for memory — write it clear, succinct and fast to read,
    no code anchors. `plan.md` stays input-only; do not write an outcome into it. Then write the

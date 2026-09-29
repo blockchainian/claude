@@ -9,22 +9,17 @@ deploys and verifies staging, runs the local schema review (`/codex:review`)
 once per plan and triages it into `findings.json`, fixes in two lanes (`codex-rescue` and the
 `ux-autofixer` agent) with no re-review, re-probes the touched surfaces, and
 decides production only when every finding is closed and the probes are
-green. The
-`planner` agent writes `plan.md` from a grounded `problem.md` following
-`skills/ship/plan-template.md`; `/feature:handoff` records a mid-phase
-stop in under 40 lines.
+green. `/feature:handoff` records a mid-phase stop in under 40 lines.
 
-The pipeline is `/feature:ground` → `planner` → `/feature:ship` →
-review-fix → deploy. Grounding takes its ask in the shape of the project's
-`docs/user-template.md` (Ask, Example, Accept when, Constraints, Premises, Keep unchanged).
-The **Accept when** criteria are the feature's definition: grounding carries them into
-`problem.md` verbatim as numbered `AC<n>`, the `planner` turns each into a named `[AC<n>]`-tagged
-test, and `check-acceptance.py` gates that every criterion is covered so nothing ships that its
-tests do not define — the same tests then guard against regression.
+The plan is the user's: written in plan mode, by hand, or by any agent. Ship
+reads it by section and requires only Workstreams (each block ending in a
+`Files:` line), Dependencies and Checks; `skills/ship/plan-template.md` shows
+the full shape. Two checkers gate it before launch: `check-paths.sh` (every path
+exists at the base commit) and `check-overlap.sh` (no file on two workstreams).
 `/feature:retro` closes the loop: run in a fresh session on a finished session,
 it ranks the biggest wastes by real token cost (joining the orchestrator
 transcript to each subagent's recorded usage) and routes each fix back into
-ground, the planner and ship.
+ship, the plan template and memory.
 
 ## Skills
 
@@ -32,10 +27,9 @@ ground, the planner and ship.
 |---|---|
 | `/feature:ship` | Run a `plan.md` through the codex and UX lanes to a shipped feature |
 | `/feature:handoff` | Write a mid-phase handoff: stopped at, done, next, unverified, do not redo |
-| `/feature:ground` | Pin repo facts into `problem.md` before planning; checks every path and anchor against the base commit; pins a reproduced wire contract as a `fixtures/<domain>.json` file |
-| `/feature:retro` | Run in a fresh session on a finished session: rank the biggest wastes by real token cost, classify each (knowable-fact miss / topology deviation / planner defect), and propose fixes to ground, the planner and ship |
-| `check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the planner and the orchestrator run it beside the path checker |
-| `check-acceptance.py` | Gates the acceptance chain: validates `problem.md`'s numbered `AC<n>` criteria, then checks every one is referenced by a `[AC<n>]`-tagged test in `plan.md`; run by ground, the planner and the orchestrator |
+| `/feature:retro` | Run in a fresh session on a finished session: rank the biggest wastes by real token cost, classify each (knowable-fact miss / topology deviation / plan defect), and propose fixes to ship, the plan template and memory |
+| `ship/check-paths.sh` | Flags a path named in the plan that does not exist at the base commit; `(new)` files are skipped |
+| `ship/check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the orchestrator runs it beside the path checker |
 | `retro/extract.py` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
 | `retro/efficacy.py` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
 
@@ -43,7 +37,6 @@ ground, the planner and ship.
 
 | Agent | Model | What it does |
 |---|---|---|
-| `planner` | Fable high | Write `plan.md` from `problem.md` using the plan template; repo facts from `problem.md` only |
 | `ux-implementer` | Fable medium | Implement one UX workstream in the checkout its brief names (the session tree or its own worktree), commit after every step, return flat JSON |
 | `ux-autofixer` | Fable medium | Fix the PR threads labelled `claude-code-ux` in the UX lane's worktree, push, reply, resolve |
 | `ux-verifier` | Sonnet low | Drive a scripted UI scenario (browse or iOS simulator) and return a verdict with evidence paths |
@@ -80,8 +73,8 @@ them there:
   orchestrator triggers it only through that lane.
 - **A per-module gate** — the type/compile check, linter, and test command (the
   last callable with a path filter) — declared in the project's AGENTS.md
-  "Checks (the gate)" section, which `/feature:ground` pins into `problem.md` and
-  the plan's single `Checks` command chains with `&&`; and **a dev-server command**
+  "Checks (the gate)" section, which the plan's single `Checks` command chains
+  with `&&`; and **a dev-server command**
   that takes a port flag plus the default dev port to keep clear of, for the UX
   lane's probes.
 
@@ -116,7 +109,8 @@ npm run test:feature
 ```
 
 Runs `hooks/tests/run.sh` (every case in `hooks/tests/cases.jsonl` through the
-three hook scripts), `skills/ship/watch-ci.test.sh` (the CI-watch
+three hook scripts), `skills/ship/tests/run.sh` (the two plan checkers against
+fixture plans in a throwaway repo), `skills/ship/watch-ci.test.sh` (the CI-watch
 poller against a stubbed `gh`), and `skills/retro/tests/run.sh` (the retro
 extractor against a hermetic fixture session).
 

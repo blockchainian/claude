@@ -7,7 +7,7 @@ the same `codex` plugin name, so its two skills join the official plugin's
 `/codex:` namespace as `/codex:implement` and `/codex:review`.
 
 **The DX:** plan a feature with Claude Code (the [feature](../feature/README.md)
-plugin's planner writes `plan.md`), then hand the plan to `/codex:implement`.
+user writes `plan.md` — plan mode, by hand, or any agent), then hand the plan to `/codex:implement`.
 Claude writes `workstreams.txt`, one pointer line per workstream, and launches
 `implement.sh` in the background. Codex implements the workstreams in parallel
 worktrees, each gated by the plan's check command with bounded retries; green
@@ -268,7 +268,7 @@ however many workstreams run.
 
 **Handover is Claude's one turn.** Decomposition is the step that trades on
 reasoning depth rather than speed, and workstream independence — which the
-whole pipeline assumes — is produced by the planner, not checked at runtime.
+whole pipeline assumes — is produced by whoever writes the plan, not checked at runtime.
 Partition along file boundaries so no two workstreams edit the same file;
 when overlap is unavoidable the plan's Dependencies records it so the merge
 expects the conflict. `plan.md` is the spec codex reads; `workstreams.txt`
