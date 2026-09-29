@@ -7,11 +7,14 @@ optional and skipped when absent. Anything else in the file is context for the i
 
 <!-- One `###` block per codex workstream, ending in a `Files:` line. No file may appear on two
 workstreams' `Files:` lines (check-overlap.sh). Every path must exist in the repo, or carry
-`(new)` on its own line (check-paths.sh). -->
+`(new)` on its own line (check-paths.sh). `Rules:` is optional: what the code does at the edges
+the steps do not cover — empty, full, duplicate, out-of-range or malformed input, and what happens
+when a read, a write or a call fails. A rule left out is one the implementer has to ask about. -->
 
 ### `<id>` — <what changes and where>
 
 1. <change> — `symbol` `path.ts:NN`
+Rules: <edge case> → <behaviour>; <failure> → <behaviour>.
 Tests: <named cases>.
 Files: `path/a.ts`, `path/b.ts`.
 

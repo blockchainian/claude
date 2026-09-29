@@ -121,10 +121,12 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    whose Dependencies are already merged (none, at the start),
    in one message: `workstream.sh open <id>`, then codex-manager `start` with `cwd` the printed
    path, `name` the id, and a prompt that is the workstream block verbatim plus the plan's
-   Dependencies and Checks, and these standing instructions: work only in this directory, commit
-   after every coherent step, run the Checks command before finishing and leave it green, never
-   push, and use `ask_claude` for a question the block does not answer instead of guessing. Run
-   each returned await command with `run_in_background` and end the turn. Copy any untracked env
+   Dependencies and Checks, and the standing instructions in
+   `${CLAUDE_PLUGIN_ROOT}/skills/ship/codex-standing-instructions.md`, verbatim. Run
+   each returned await command with `run_in_background` and end the turn. The thread's last
+   message arrives in the completed event as flat JSON: its `decisions` go into the PR
+   description, the ones marked unconfirmed are yours to check against the plan first, and its
+   `findings` join the triage in step 6. Copy any untracked env
    file a module needs into the worktree before starting the thread. A workstream that the plan's
    Dependencies put after another one is opened and started the same way, in the message where
    that one merges: `open` branches from the merged HEAD, so its worktree already carries what it
