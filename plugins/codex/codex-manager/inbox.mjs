@@ -1,5 +1,5 @@
-// ABOUTME: Per-session storage for codex-manager: state.json, one inbox per codex thread,
-// ABOUTME: and reader-owned cursors so events are delivered to Claude exactly once.
+// ABOUTME: Per-session storage for codex-manager: state.json, one inbox per codex thread, reader-owned
+// ABOUTME: cursors so events reach Claude exactly once, and the questions codex is waiting on.
 
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -9,8 +9,34 @@ export function managerHome(env = process.env) {
   return env.CODEX_MANAGER_HOME || path.join(os.homedir(), ".claude", "codex-manager");
 }
 
+export const askTimeoutSeconds = (env = process.env) => Number(env.CODEX_MANAGER_ASK_TIMEOUT) > 0 ? Number(env.CODEX_MANAGER_ASK_TIMEOUT) : 300;
+
+function supervisorPath(threadId, env) {
+  return path.join(managerHome(env), "threads", `${threadId}.json`);
+}
+
+function readJson(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Names the Claude session, and its manager process, that a codex thread reports to; the last one to claim a thread has it. */
+export function writeSupervisor(threadId, supervisor, env = process.env) {
+  const target = supervisorPath(threadId, env);
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, JSON.stringify(supervisor));
+}
+
+export function readSupervisor(threadId, env = process.env) {
+  return readJson(supervisorPath(threadId, env));
+}
+
 export class SessionStore {
   constructor(sessionId, env = process.env) {
+    this.sessionId = sessionId;
     this.dir = path.join(managerHome(env), sessionId);
   }
 
@@ -114,6 +140,53 @@ export class SessionStore {
       }
     }
     return false;
+  }
+
+  askPath(threadId, callId) {
+    return path.join(this.dir, `${threadId}.ask.${encodeURIComponent(callId)}.json`);
+  }
+
+  replyPath(threadId, callId) {
+    return path.join(this.dir, `${threadId}.reply.${encodeURIComponent(callId)}.json`);
+  }
+
+  /** A question stays on disk while codex waits for its answer; only the process that asked writes it. */
+  writeAsk(threadId, ask) {
+    mkdirSync(this.dir, { recursive: true });
+    writeFileSync(this.askPath(threadId, ask.callId), JSON.stringify(ask));
+  }
+
+  hasAsk(threadId, callId) {
+    return existsSync(this.askPath(threadId, callId));
+  }
+
+  removeAsk(threadId, callId) {
+    rmSync(this.askPath(threadId, callId), { force: true });
+  }
+
+  /** The questions of a thread that nobody has answered yet, oldest first. */
+  asks(threadId) {
+    if (!this.exists()) return [];
+    const prefix = `${threadId}.ask.`;
+    return readdirSync(this.dir)
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => readJson(path.join(this.dir, name)))
+      .filter(Boolean)
+      .sort((first, second) => first.since - second.since);
+  }
+
+  /** The reply is complete before the question goes, so the asker never finds neither. */
+  writeReply(threadId, callId, text) {
+    const target = this.replyPath(threadId, callId);
+    writeFileSync(`${target}.tmp`, JSON.stringify({ text }));
+    renameSync(`${target}.tmp`, target);
+    this.removeAsk(threadId, callId);
+  }
+
+  takeReply(threadId, callId) {
+    const reply = readJson(this.replyPath(threadId, callId));
+    if (reply) rmSync(this.replyPath(threadId, callId), { force: true });
+    return reply;
   }
 
   threadIds() {

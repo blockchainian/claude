@@ -1,7 +1,7 @@
 {
   "name": "codex",
-  "version": "0.14.0",
-  "description": "codex-manager: an MCP server that runs codex threads on the shared daemon as supervised workers Claude can start, prompt, answer, approve, interrupt, get woken by, and ask for a code review in codex's own review mode.",
+  "version": "0.15.0",
+  "description": "codex-manager: an MCP server that runs codex threads on the shared daemon as supervised workers Claude can start or attach to, prompt, answer, approve, interrupt, get woken by, and ask for a code review in codex's own review mode.",
   "author": {
     "name": "blockchainian"
   },
