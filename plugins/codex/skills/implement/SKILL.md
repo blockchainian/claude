@@ -32,13 +32,13 @@ Do not re-plan and do not re-ask; the plan is the spec codex reads.
    each line a **pointer** into the plan, never the brief itself, that scopes
    the agent to the shared core plus its own block — necessary and sufficient
    to build correctly — for example `implement workstream "auth-token" per
-   specs/<date>-<topic>/plan.md: read only its Scope, Facts, Constraints,
-   Dependencies and Invariants and the "auth-token" workstream block; ignore
-   the other workstreams and any other section`.
+   specs/<date>-<topic>/plan.md: read its Dependencies and Checks, every
+   section that is not a workstream, and the "auth-token" workstream block;
+   ignore the other workstreams`.
    Skip the UX workstream; it is not codex's.
 3. Take the check command from the plan's Checks section verbatim;
-   `implement.sh` runs it in every worktree and after merge, so the plan's Invariants
-   must be covered by it — the gates replace a live review.
+   `implement.sh` runs it in every worktree and after merge, so everything the
+   plan says must not change has to be covered by it — the gates replace a live review.
 4. Commit `workstreams.txt`. The session worktree must have no uncommitted
    changes to tracked files when the script starts, because the run delivers
    onto this branch.
