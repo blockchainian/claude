@@ -44,8 +44,8 @@ that has no place in the code.
   and return `needs-backend`. Do not stub the backend, do not deploy, do not poll for it. The
   orchestrator resumes you only when a probe against the deployed backend fails.
 - Probes are yours ONLY when the brief says the surface has no backend dependency. Otherwise the
-  orchestrator runs them; return the checklist untested and let it. The probe library and its
-  shared helpers are where the project's AGENTS.md says (the plugin README's project contract).
+  orchestrator runs them; return the checklist untested and let it. The probes are the plan's UX
+  checks for your surfaces, quoted in your brief as commands.
   Run them against a dev server you start in the checkout the brief names, on a free port (the project's dev
   command with a port flag, `BASE_URL` to the probe); never build, never use the project's default
   dev port or another lane's server, and stop yours before you return.
