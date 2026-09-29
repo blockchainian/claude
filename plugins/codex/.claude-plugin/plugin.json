@@ -1,7 +1,7 @@
 {
   "name": "codex",
-  "version": "0.11.4",
-  "description": "Deliver a planned feature as parallel codex workstreams off Claude's critical path \u2014 implement: codex-workstreams.txt from plan.md, worktree-pool execution with per-workstream checks and bounded retries, merge onto the session branch with restore-on-red, push, PR; review: a schema-structured local codex review of the delta into review.json; codex-manager: an MCP server that runs codex threads on the shared daemon as supervised workers Claude can start, prompt, answer, approve, interrupt and get woken by.",
+  "version": "0.12.0",
+  "description": "codex-manager: an MCP server that runs codex threads on the shared daemon as supervised workers Claude can start, prompt, answer, approve, interrupt, get woken by, and ask for a code review in codex's own review mode.",
   "author": {
     "name": "blockchainian"
   },
@@ -10,10 +10,9 @@
   "repository": "https://github.com/blockchainian/claude",
   "keywords": [
     "codex",
-    "parallel",
-    "worktrees",
     "delegation",
-    "code-generation",
-    "review"
+    "workers",
+    "review",
+    "mcp"
   ]
 }

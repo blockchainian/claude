@@ -17,7 +17,7 @@
     },
     {
       "name": "codex",
-      "description": "Deliver a planned feature as parallel codex workstreams off Claude's critical path \u2014 merged onto your session branch and pushed \u2014 then review the delta into a findings file; and supervise long-lived codex worker threads on the shared daemon through the codex-manager MCP server.",
+      "description": "Supervise long-lived codex worker threads on the shared daemon through the codex-manager MCP server: start, prompt, answer, approve, interrupt, get woken, and run codex's review mode over a commit range.",
       "author": {
         "name": "blockchainian"
       },
