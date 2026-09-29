@@ -30,26 +30,29 @@ Files: `path/a.tsx`.
 - <order between workstreams, or `none`>
 - <wire contract the UX lane codes against, as a real response body>
 
-## UX checklist per surface
-
-<!-- Optional. One objective assertion per line; ship turns each into a probe. -->
-
-### <surface>
-
-- <assertion>
-
 ## New files
 
 - `path/to/new-file.ts` (new)
 
 ## Checks
 
-<!-- Exactly one command; implement.sh runs it in every worktree and after merge. -->
+<!-- Exactly one command, before merge; implement.sh runs it in every worktree and after merge.
+Chain with && for more than one. -->
 
 - `<command>`
 
+## UX checklist per surface
+
+<!-- Optional. Against staging, after deploy. One objective assertion per line; ship turns each
+into a probe. -->
+
+### <surface>
+
+- <assertion>
+
 ## Live checks
 
-<!-- Optional. Run against staging, then production. -->
+<!-- Optional. Against staging, then production, after deploy. For backend behaviour a probe
+cannot see: routes, webhooks, migrations, env-dependent paths. -->
 
 - `<command>` — expect <value>
