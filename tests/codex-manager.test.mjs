@@ -2,7 +2,7 @@
 // ABOUTME: server's daemon conversation (thread start and attach, turn completion, adoption), and the tools codex calls.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -582,11 +582,47 @@ test("pending blocks once for an unanswered ask and not again while the stop hoo
     const env = { CODEX_MANAGER_HOME: home.home };
     await mkdir(home.dir, { recursive: true });
     await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 1, threads: [{ id: "thread-C", lastStatus: "inProgress", waiting: [{ kind: "ask", callId: "c", since: 1, text: "which one?" }] }] }));
+    await writeFile(path.join(home.dir, `thread-C.await.${process.pid}`), "");
     const first = await run(["pending"], { env, stdin: JSON.stringify({ session_id: session, stop_hook_active: false }) });
     assert.equal(first.code, 0, first.stderr);
     assert.match(JSON.parse(first.stdout).reason, /thread-C is waiting for reply/);
     const second = await run(["pending"], { env, stdin: JSON.stringify({ session_id: session, stop_hook_active: true }) });
     assert.equal(second.stdout, "");
+  } finally {
+    await home.close();
+  }
+});
+
+test("pending blocks while a running thread has no await, however often Claude stops", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  try {
+    const env = { CODEX_MANAGER_HOME: home.home };
+    const stop = (active) => run(["pending"], { env, stdin: JSON.stringify({ session_id: session, stop_hook_active: active }) });
+    const command = `node ${JSON.stringify(manager)} await --thread thread-R`;
+    await mkdir(home.dir, { recursive: true });
+    await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 1, threads: [{ id: "thread-R", lastStatus: "inProgress", waiting: [] }, { id: "thread-I", lastStatus: "completed", waiting: [] }] }));
+
+    const unwatched = await stop(false);
+    assert.equal(unwatched.code, 0, unwatched.stderr);
+    const decision = JSON.parse(unwatched.stdout);
+    assert.equal(decision.decision, "block");
+    assert.ok(decision.reason.includes(command), decision.reason);
+    assert.match(decision.reason, /run_in_background/);
+    assert.doesNotMatch(decision.reason, /thread-I/);
+    assert.ok(JSON.parse((await stop(true)).stdout).reason.includes(command));
+
+    const waiting = run(["await", "--thread", "thread-R", "--timeout", "3"], { env });
+    await waitFor(() => readdirSync(home.dir).some((name) => name.startsWith("thread-R.await.")));
+    assert.equal((await stop(false)).stdout, "");
+    assert.equal((await waiting).code, 124);
+    assert.deepEqual(readdirSync(home.dir).filter((name) => name.startsWith("thread-R.await.")), []);
+    assert.ok(JSON.parse((await stop(false)).stdout).reason.includes(command));
+
+    const gone = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+    await new Promise((resolve) => gone.on("close", resolve));
+    await writeFile(path.join(home.dir, `thread-R.await.${gone.pid}`), "");
+    assert.ok(JSON.parse((await stop(false)).stdout).reason.includes(command));
+    assert.deepEqual(readdirSync(home.dir).filter((name) => name.startsWith("thread-R.await.")), []);
   } finally {
     await home.close();
   }

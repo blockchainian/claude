@@ -23,6 +23,15 @@ function readJson(file) {
   }
 }
 
+export function running(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
 /** Names the Claude session, and its manager process, that a codex thread reports to; the last one to claim a thread has it. */
 export function writeSupervisor(threadId, supervisor, env = process.env) {
   const target = supervisorPath(threadId, env);
@@ -140,6 +149,29 @@ export class SessionStore {
       }
     }
     return false;
+  }
+
+  awaitPath(threadId, pid) {
+    return path.join(this.dir, `${threadId}.await.${pid}`);
+  }
+
+  /** An await process marks the thread it waits on, so the Stop hook can tell a watched thread from an unwatched one. */
+  markAwait(threadId) {
+    mkdirSync(this.dir, { recursive: true });
+    writeFileSync(this.awaitPath(threadId, process.pid), "");
+  }
+
+  clearAwait(threadId) {
+    rmSync(this.awaitPath(threadId, process.pid), { force: true });
+  }
+
+  /** The pids waiting on a thread; the mark of a process that was killed before it could clear it is removed. */
+  awaiting(threadId) {
+    if (!this.exists()) return [];
+    const prefix = `${threadId}.await.`;
+    const pids = readdirSync(this.dir).filter((name) => name.startsWith(prefix)).map((name) => Number(name.slice(prefix.length)));
+    for (const pid of pids) if (!running(pid)) rmSync(this.awaitPath(threadId, pid), { force: true });
+    return pids.filter(running);
   }
 
   askPath(threadId, callId) {
