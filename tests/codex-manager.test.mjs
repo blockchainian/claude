@@ -747,7 +747,9 @@ test("review points the reviewer at the decisions made during the run", { timeou
     assert.match(started.target.instructions, /specs\/plan\.md/);
     assert.match(started.target.instructions, /specs\/decisions\.md/);
     assert.match(started.target.instructions, /do not flag one as a departure from the spec/);
-    assert.match(started.target.instructions, /do flag one that is itself a defect/);
+    assert.match(started.target.instructions, /judge each rule in it on its own/);
+    assert.match(started.target.instructions, /wrong result for a caller or a user/);
+    assert.match(started.target.instructions, /in code the changes did not touch/);
     assert.match(started.target.instructions, /Provide prioritized, actionable findings\.$/);
 
     const plain = await mcp.call("review", { cwd: "plugins", base: "abc1234", out });
