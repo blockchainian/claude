@@ -36,8 +36,8 @@ reads it by section, so three sections are required and the rest are read when p
 - **Checks** — exactly one command line; `implement.sh` runs it in every worktree and after merge.
 
 Optional, each read by the step that names it: **UX workstreams** (`### <id>` blocks with a
-`Surfaces:` and a `Files:` line; without this section there is no UX lane), **UX checklist per
-surface** (the assertions step 4 turns into probes), **Live checks**, and any file the plan creates
+`Surfaces:` and a `Files:` line; without this section there is no UX lane), **UX checks** (one
+assertion per surface, which step 4 turns into probes), **Live checks**, and any file the plan creates
 marked `(new)` on its own line so the path checker skips it. `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md` shows the shape. Anything
 else in the file is context for the implementers; ship does not read it. A program that touches
 many screens is one plan with many UX workstreams, not one plan per screen: planning runs once, the
@@ -101,7 +101,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 3. **Launch the UX lane, in parallel — one implementer per UX workstream.** Spawn a
    `ux-implementer` agent with the Agent tool for EVERY UX workstream in the plan, all in the same
    message, giving each its workstream block, the wire contract quoted as a real response body,
-   and the UX checklist for its surfaces. They start now, not after codex and not after each
+   and the UX checks for its surfaces. They start now, not after codex and not after each
    other. One workstream works on the session branch. Each further workstream gets its own tree
    first (the worktree recipe below, `../.ux-<id>` on branch `ux/<id>` from HEAD), and its brief
    names that path; when its agent reports `done`, merge `ux/<id>` onto the session branch
@@ -117,7 +117,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    background (about 15 s). Never `Agent isolation: "worktree"` — it branches from the default
    branch, not from HEAD.
 
-4. **While both run, write the probes.** Turn each line of the plan's UX checklist into a probe
+4. **While both run, write the probes.** Turn each line of the plan's UX checks into a probe
    in the project's probe library, using its shared helpers (the project contract in the plugin
    README says where both live). This is the overlap the pipeline is built for. If no probe is
    needed, end the turn. Apart from new probe scripts, never edit the branch codex merges onto;

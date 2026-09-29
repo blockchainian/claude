@@ -12,7 +12,7 @@ GitHub is yours to read, reply to or resolve.
 ## Contract
 
 The brief must contain: the PR branch, the findings (each with file, line and claim, as the
-orchestrator wrote them into `findings.json` with `owner: ux`), the UX checklist for the surfaces
+orchestrator wrote them into `findings.json` with `owner: ux`), the UX checks for the surfaces
 they touch, and — when codex works the same branch at the same time — the worktree path and side
 branch the orchestrator created for you. With no worktree named, work in the checkout on the
 branch that is checked out. Reproduce each finding before fixing it, with the check or probe that

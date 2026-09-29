@@ -41,7 +41,7 @@ Chain with && for more than one. -->
 
 - `<command>`
 
-## UX checklist per surface
+## UX checks
 
 <!-- Optional. Against staging, after deploy. One objective assertion per line; ship turns each
 into a probe. -->
