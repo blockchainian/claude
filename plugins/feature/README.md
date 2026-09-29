@@ -4,12 +4,12 @@ Ship a feature from a written plan, with Claude orchestrating and never
 implementing. `/feature:ship` reads `plan.md`, opens a worktree per workstream
 (`skills/ship/workstream.sh`), launches the codex lane as one thread per
 workstream through [codex](../codex/README.md)'s `codex-manager` and the UX lane
-as one `ux-implementer` agent per UX workstream, all at once, writes the UI
-probes while they run, checks and merges each workstream as it finishes behind
-the plan's Checks command, runs codex's review mode once per plan and triages
-it into `findings.json`, fixes in two lanes with no re-review, re-probes the
-touched surfaces, and decides production only when every finding is closed and
-the probes are green. `/feature:handoff` records a mid-phase stop in under 40
+as one `ux-implementer` agent per UX workstream, all at once, checks and
+merges each workstream as it finishes behind the plan's Checks command, deploys
+and runs the checks the plan names, runs codex's review mode once per plan and
+triages it into `findings.json`, fixes in two lanes with no re-review, re-runs
+the touched UX checks, and decides production only when every finding is
+closed and the checks are green. `/feature:handoff` records a mid-phase stop in under 40
 lines.
 
 The plan is the user's: written in plan mode, by hand, or by any agent. Ship
@@ -51,47 +51,18 @@ ship, the plan template and memory.
 | `deny-foreground-poll` | `PreToolUse` Bash | Rewrites foreground waits (`until`/`while` loops, `tail -f`, `sleep` ≥ 10 s) to `run_in_background`; subagents exempt |
 | `deny-blocking-taskoutput` | `PreToolUse` TaskOutput | Denies blocking `TaskOutput`; the task notification re-invokes the session instead |
 
-## Project contract
+## What the plan carries
 
-The skills and agents are written against a project that provides the
-following, described in its `AGENTS.md` (or `CLAUDE.md`) so every agent finds
-them there:
+Everything ship needs to know about the project is in the plan, so a repo
+needs no contract file: the Checks command (before merge), an optional Deploy
+section (`staging:` and `production:` commands printing JSON with the deployed
+`sha`), optional UX checks (probe commands that print a verdict JSON), and
+optional Deploy checks (commands run against each deploy). A CLI tool's plan
+has Checks and nothing else; a web app's names its deploys and probes.
 
-- **A UI probe library and its shared helpers.** Scripted probes, one per
-  surface, that print a verdict JSON and exit non-zero on failure; the
-  orchestrator writes new probes with the shared helpers and runs them with
-  `run_in_background`. Name the probe directories and the helper file. For a
-  native app, also a build-once dev-client script and a reload helper, so a
-  JavaScript change is verified by reload and only a native change rebuilds.
-- **A staging deploy command** that prints JSON containing the deployed `sha`
-  and exits non-zero on failure, and **a staging verify command** that prints a
-  verdict JSON and exits non-zero on failure. The orchestrator gates on exit
-  codes, never on output text.
-- **Backend paths**: the modules, API-route directories and test-file
-  patterns whose findings always belong to the codex lane, so the orchestrator
-  judges UX ownership only for the rest.
-- **Which services deploy from the default branch on merge**, and **a
-  production deploy command** owned by the codex lane for the rest; the
-  orchestrator triggers it only through that lane.
-- **A per-module gate** — the type/compile check, linter, and test command (the
-  last callable with a path filter) — declared in the project's AGENTS.md
-  "Checks (the gate)" section, which the plan's single `Checks` command chains
-  with `&&`; and **a dev-server command**
-  that takes a port flag plus the default dev port to keep clear of, for the UX
-  lane's probes.
-
-A project might declare, for example, a web and a mobile UI-probe directory plus
-a shared probe helper library; a staging deploy script and a staging verify
-script; the backend module paths and which of them deploy on merge versus through
-the codex lane's deploy command; a per-module gate such as `yarn --cwd <module>
-tsc --noEmit && yarn --cwd <module> lint && yarn --cwd <module> test <path>` (named
-in the project's AGENTS.md "Checks (the gate)" section); and a dev-server command
-with a port flag and a reserved default port. The concrete values live in the
-project, never here.
-
-CI-watching needs no project contract: the plugin ships its own GitHub/`gh`-based
-poller, `skills/ship/watch-ci.sh <ref> [out-file]`, used by the
-production merge gate (step 9) against every project.
+CI-watching needs nothing from the project: the plugin ships its own
+GitHub/`gh`-based poller, `skills/ship/watch-ci.sh <ref> [out-file]`, used by
+the production merge gate (step 8) whenever the branch has a PR.
 
 ## Install
 

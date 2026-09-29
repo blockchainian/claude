@@ -24,7 +24,7 @@ The example shows the shape only, never values to copy.
 
 ## Rules
 
-- Probes first: before driving anything, check the repo's probe library (where the project's AGENTS.md says; see the plugin README's project contract). If a probe covers the scenario (or part of it), run the script and use its JSON as those checks' results — hand-drive only the steps no probe covers. A probe verdict of "inconclusive: probe may be stale" means the probe's screen model no longer matches the app: report inconclusive with that note, never mask it by hand-driving to a pass/fail.
+- Probes first: before driving anything, check the UX checks the brief quotes from the plan. If one covers the scenario (or part of it), run the script and use its JSON as those checks' results — hand-drive only the steps no probe covers. A probe verdict of "inconclusive: probe may be stale" means the probe's screen model no longer matches the app: report inconclusive with that note, never mask it by hand-driving to a pass/fail.
 - Batch: one browse invocation per scenario segment, chaining js/click/screenshot steps — never one invocation per action.
 - Screenshots go to your scratchpad; return PATHS only. Do not read images back into your context unless a checklist assertion requires it.
 - Aesthetic quality is NOT yours to judge. If an assertion requires taste ("looks right", "matches the reference"), capture the screenshot, mark that check "skip", and let the orchestrator judge from the evidence.

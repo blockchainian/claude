@@ -50,8 +50,8 @@ that has no place in the code.
 - When a finding's fix depends on backend behaviour that is not deployed yet, implement against the
   pinned wire contract, commit, and return `needs-backend`. Do not deploy and do not poll.
 - Probes are yours ONLY when the brief says the surface has no backend dependency. Otherwise the
-  orchestrator runs them. The probe library and its shared helpers are where the project's
-  AGENTS.md says (the plugin README's project contract). Run them against a dev server you start
+  orchestrator runs them. The probes are the plan's UX checks for your surfaces, quoted in your
+  brief as commands. Run them against a dev server you start
   in your own worktree on a free port (the project's dev command with a port flag, `BASE_URL` to
   the probe); never build, never use the project's default dev port or another lane's server, and
   stop yours before you return.

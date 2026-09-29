@@ -36,23 +36,32 @@ Files: `path/a.tsx`.
 
 ## Checks
 
-<!-- Exactly one command; ship runs it in every worktree before merge and in the session tree after.
-Chain with && for more than one. -->
+<!-- One command per line, run in this order, stopping at the first red: in every worktree before
+merge and in the session tree after. -->
 
 - `<command>`
+- `<command>`
+
+## Deploy
+
+<!-- Optional. Commands that print JSON with the deployed `sha` and exit non-zero on failure.
+Without a staging line, UX checks run after the last merge; without a production line, the
+merge is the ship. -->
+
+- staging: `<command>`
+- production: `<command>`
 
 ## UX checks
 
-<!-- Optional. Against staging, after deploy. One objective assertion per line; ship turns each
-into a probe. -->
+<!-- Optional. One probe command per line: it drives the UI, prints a verdict JSON and exits
+non-zero on failure. The command names its own target (a staging URL, a local dev server, a
+simulator). Ship runs them after the staging deploy when Deploy has one, else after the last merge. -->
 
-### <surface>
+- `<command>` — <surface it covers>
 
-- <assertion>
+## Deploy checks
 
-## Live checks
-
-<!-- Optional. Against staging, then production, after deploy. For backend behaviour a probe
-cannot see: routes, webhooks, migrations, env-dependent paths. -->
+<!-- Optional. Run after each deploy, against what was deployed: staging, then production. For
+behaviour a probe cannot see: routes, webhooks, migrations, env-dependent paths. -->
 
 - `<command>` — expect <value>

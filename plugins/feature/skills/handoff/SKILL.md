@@ -5,7 +5,7 @@ description: >
   quota exhausted, end of day, the context safety rail in the user's CLAUDE.md, or the
   55-minute idle wake-up firing.
   Use for "/feature:handoff", "write a handoff", or when the idle wake-up prompt says to. NOT at a
-  phase end: a phase's output (plan.md, the PR, verdict JSONs, the report) is its
+  phase end: a phase's output (plan.md, the PR, verdict JSONs) is its
   own record and needs no handoff.
 ---
 

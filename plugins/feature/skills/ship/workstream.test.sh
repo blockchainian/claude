@@ -56,12 +56,16 @@ expect_eq "check runs the command in the worktree and passes its exit code" 0 "$
 "$WS" check auth 'exit 7' >/dev/null 2>&1; rc=$?
 expect_eq "check passes a red exit code through" 7 "$rc"
 rm -f "$FIXTURE/.workstream-auth/ran-here"
+"$WS" check auth 'touch first' 'exit 3' 'touch third' >/dev/null 2>&1; rc=$?
+expect_eq "several commands run in order and stop at the first red" 3 "$rc"
+[ -f "$FIXTURE/.workstream-auth/first" ] && [ ! -f "$FIXTURE/.workstream-auth/third" ] && report "the commands after a red one do not run" pass || report "the commands after a red one do not run" fail
+rm -f "$FIXTURE/.workstream-auth/first"
 
 # --- merge, green ---
 echo "two" > "$FIXTURE/.workstream-auth/b.txt"
 git -C "$FIXTURE/.workstream-auth" add b.txt && git -C "$FIXTURE/.workstream-auth" commit -qm "add b"
-out=$("$WS" merge auth 'test -f b.txt' 2>&1); rc=$?
-expect_eq "merge exits 0 when the post-merge check is green" 0 "$rc"
+out=$("$WS" merge auth 'test -f b.txt' 'test -f a.txt' 2>&1); rc=$?
+expect_eq "merge exits 0 when every post-merge check is green" 0 "$rc"
 expect_eq "merge prints the recorded base" "$BASE_SHA" "$out"
 [ -f "$REPO/b.txt" ] && report "merge lands the workstream's commit on the session branch" pass || report "merge lands the workstream's commit on the session branch" fail
 expect_eq "merge is a merge commit, not a fast-forward" 2 "$(git -C "$REPO" rev-list --parents -n1 HEAD | wc -w | tr -d ' ' | awk '{print $1-1}')"
