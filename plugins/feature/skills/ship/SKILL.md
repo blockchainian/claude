@@ -37,9 +37,8 @@ reads it by section, so three sections are required and the rest are read when p
 
 Optional, each read by the step that names it: **UX workstreams** (`### <id>` blocks with a
 `Surfaces:` and a `Files:` line; without this section there is no UX lane), **UX checklist per
-surface** (the assertions step 4 turns into probes), **Live checks**, a `Base:` line naming the SHA
-the plan was written at, and any file the plan creates marked `(new)` on its own line so the path
-checker skips it. `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md` shows the shape. Anything
+surface** (the assertions step 4 turns into probes), **Live checks**, and any file the plan creates
+marked `(new)` on its own line so the path checker skips it. `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md` shows the shape. Anything
 else in the file is context for the implementers; ship does not read it. A program that touches
 many screens is one plan with many UX workstreams, not one plan per screen: planning runs once, the
 implementers run at once.
@@ -82,10 +81,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 ## Procedure
 
 1. **Check the plan, pin the base, and prove the check.** Read the plan, confirm it has the three
-   required sections, and run the two checkers above. If the plan records a `Base:` SHA, compare it
-   against `git rev-parse --short HEAD`; if they differ, rebase onto the plan's base or re-check
-   the plan's paths before launching — a plan is valid only at its SHA. Without a `Base:` line,
-   HEAD is the base; record it. Confirm the tree is clean. Then run each
+   required sections, and run the two checkers above. Record `git rev-parse --short HEAD` as the
+   base. Confirm the tree is clean. Then run each
    workstream's `--check` command on this clean baseline before any fan-out: it MUST pass (exit 0). A
    gate already red on the untouched tree is not a code signal — it fails every workstream identically
    and discards the whole run regardless of what the code does. Reject any such gate and send the plan
@@ -135,7 +132,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
       <plan.md>`, where `<base>` is the
       `.git/codex-implement/<feature>/pre-merge.sha` the script recorded. A plan with no codex
       workstream has no `implement.sh` run: start the same command when the UX lane reports
-      `done`, with `<base>` the plan's base SHA. One review per plan, one round.
+      `done`, with `<base>` the base recorded in step 1. One review per plan, one round.
    c. Then run the project's staging deploy command, read the `sha` from its JSON, and record it
       as `STAGING_SHA`.
    d. Then run the project's staging verify command and read its verdict JSON. Both exit non-zero

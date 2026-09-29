@@ -15,7 +15,7 @@ The plan is the user's: written in plan mode, by hand, or by any agent. Ship
 reads it by section and requires only Workstreams (each block ending in a
 `Files:` line), Dependencies and Checks; `skills/ship/plan-template.md` shows
 the full shape. Two checkers gate it before launch: `check-paths.sh` (every path
-exists at the base commit) and `check-overlap.sh` (no file on two workstreams).
+exists in the repo) and `check-overlap.sh` (no file on two workstreams).
 `/feature:retro` closes the loop: run in a fresh session on a finished session,
 it ranks the biggest wastes by real token cost (joining the orchestrator
 transcript to each subagent's recorded usage) and routes each fix back into
@@ -28,7 +28,7 @@ ship, the plan template and memory.
 | `/feature:ship` | Run a `plan.md` through the codex and UX lanes to a shipped feature |
 | `/feature:handoff` | Write a mid-phase handoff: stopped at, done, next, unverified, do not redo |
 | `/feature:retro` | Run in a fresh session on a finished session: rank the biggest wastes by real token cost, classify each (knowable-fact miss / topology deviation / plan defect), and propose fixes to ship, the plan template and memory |
-| `ship/check-paths.sh` | Flags a path named in the plan that does not exist at the base commit; `(new)` files are skipped |
+| `ship/check-paths.sh` | Flags a path named in the plan that does not exist in the repo; `(new)` files are skipped |
 | `ship/check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the orchestrator runs it beside the path checker |
 | `retro/extract.py` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
 | `retro/efficacy.py` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
