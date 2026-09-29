@@ -73,7 +73,7 @@ touching anything.
      on baseline, a value contradicting existing code, an under-scoped workstream
      whose gate was too narrow to catch cross-file breakage, an unsatisfiable
      success criterion, or missing de-risk sequencing (no pilot, no probe-first).
-     Fix feeds `skills/ship/plan-template.md` and ship's plan check.
+     Fix feeds `skills/ship/minimal-plan-template.md` and ship's plan check.
 
    Keep an **Inherent (not waste)** bucket: test retargeting, legitimate
    exploration, a gate-fix the plan could not have avoided. Honesty about what
