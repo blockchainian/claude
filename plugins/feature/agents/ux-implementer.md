@@ -12,7 +12,7 @@ feature end to end and you do not own the backend.
 ## Contract
 
 The brief must contain: the workstream's files and intent, the wire contract as a real response
-body (never a type definition), the UX checklist for each surface it changes, and whether the
+body (never a type definition), the UX checks for each surface it changes, and whether the
 surface has a backend dependency. If the brief lacks a wire contract for data you must render,
 stop and return `blocked` with that as a finding — do not infer the shape from naming.
 
