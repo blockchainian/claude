@@ -733,3 +733,30 @@ test("review without a stance carries a focus and no adversarial wording", { tim
     await home.close();
   }
 });
+
+test("review points the reviewer at the decisions made during the run", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  const out = path.join(home.home, "specs", "review", "review.md");
+  try {
+    const review = await mcp.call("review", { cwd: "plugins", base: "abc1234", plan: "specs/plan.md", decisions: "specs/decisions.md", out });
+    assert.equal(review.isError, false, review.text);
+    const started = script.messages.find((message) => message.method === "review/start").params;
+    assert.match(started.target.instructions, /specs\/plan\.md/);
+    assert.match(started.target.instructions, /specs\/decisions\.md/);
+    assert.match(started.target.instructions, /do not flag one as a departure from the spec/);
+    assert.match(started.target.instructions, /do flag one that is itself a defect/);
+    assert.match(started.target.instructions, /Provide prioritized, actionable findings\.$/);
+
+    const plain = await mcp.call("review", { cwd: "plugins", base: "abc1234", out });
+    assert.equal(plain.isError, false, plain.text);
+    const last = script.messages.filter((message) => message.method === "review/start").at(-1).params;
+    assert.doesNotMatch(last.target.instructions, /decisions/);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
