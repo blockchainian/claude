@@ -38,11 +38,23 @@ with its app-server daemon running (`codex agents` starts one).
 | Tool | Does |
 |---|---|
 | `start(cwd, prompt, name?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. |
+| `attach(thread)` | Take over a session that is already running elsewhere (the codex TUI, say), found by its thread id or exact name. `thread/resume` with nothing but the id subscribes to it, so its settings stay as its own client set them. After that `send`, `interrupt`, `list` and the await command work on it. |
 | `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule); the result says which happened. |
 | `reply(threadId, text, callId?)` | Answer what the thread is waiting for: the text becomes the result of its `ask_claude` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
 | `interrupt(threadId)` | `turn/interrupt` the thread's current turn. |
-| `list()` | The threads this Claude session started, their last turn status, and the unread inbox count per thread. |
+| `list()` | The threads this Claude session started or attached, their last turn status, and the unread inbox count per thread. |
 | `review(cwd, base, out, plan?, decisions?, name?, stance?, focus?)` | A read-only thread running codex's own review mode (`review/start`, its rubric and P0–P3 priorities) over the commits since `base`; the rendered review — an overall verdict and one finding per line with its file and lines — is saved to `out`. With `plan`, the reviewer reads the spec first and does not flag a behaviour change the spec asks for. With `decisions`, the reviewer also reads the rules decided during the run: it does not report one as a departure from the spec, and judges each on its own, tracing what reads the result, also in code the changes did not touch. `stance: "adversarial"` adds a challenge stance (`codex-manager/adversarial-review.md`): the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. `focus` names what it should weigh most. |
+
+## Attached sessions
+
+`attach` pages through `thread/list` and matches the name itself, because the
+daemon's `searchTerm` filters titles. A name several sessions share is refused
+with the candidates' ids.
+
+The daemon sends a thread's approval requests and tool calls to every client
+subscribed to it, and the first answer settles them for all. So for an
+attached session the manager answers none of them, not even with an error:
+they stay with the client the session runs in.
 
 ## Getting woken
 
@@ -146,8 +158,8 @@ npm run test:codex
 readers against a fake daemon (`tests/helpers/fake-daemon.mjs`): thread start
 parameters, `notify_claude` relay, `ask_claude` hold and `reply`, ask timeout,
 approval forwarding, completion delivery, the review tool, adoption on
-restart, reconnect after a dropped daemon connection, and daemon-down error
-reporting.
+restart, reconnect after a dropped daemon connection, daemon-down error
+reporting, and attaching to a session by name or id.
 
 ## License
 
