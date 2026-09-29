@@ -686,3 +686,50 @@ test("review starts a read-only thread, runs codex's review mode on a base sha, 
     await home.close();
   }
 });
+
+test("review takes an adversarial stance and a focus, and refuses a stance it does not know", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  const out = path.join(home.home, "specs", "review", "adversarial.md");
+  try {
+    const refused = await mcp.call("review", { cwd: "plugins", base: "abc1234", out, stance: "friendly" });
+    assert.equal(refused.isError, true);
+    assert.match(refused.text, /stance must be "adversarial"/);
+    assert.equal(script.messages.some((message) => message.method === "review/start"), false);
+
+    const review = await mcp.call("review", { cwd: "plugins", base: "abc1234", plan: "specs/plan.md", out, stance: "adversarial", focus: "the retry path of the upload queue" });
+    assert.equal(review.isError, false, review.text);
+    const started = script.messages.find((message) => message.method === "review/start").params;
+    assert.equal(started.target.type, "custom");
+    assert.match(started.target.instructions, /^Review the code changes since commit abc1234\./);
+    assert.match(started.target.instructions, /specs\/plan\.md/);
+    assert.match(started.target.instructions, /strongest reasons this change should not ship/);
+    assert.match(started.target.instructions, /Focus: the retry path of the upload queue/);
+    assert.match(started.target.instructions, /Provide prioritized, actionable findings\.$/);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("review without a stance carries a focus and no adversarial wording", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  const out = path.join(home.home, "specs", "review", "review.md");
+  try {
+    const review = await mcp.call("review", { cwd: "plugins", base: "abc1234", out, focus: "the migration" });
+    assert.equal(review.isError, false, review.text);
+    const started = script.messages.find((message) => message.method === "review/start").params;
+    assert.match(started.target.instructions, /Focus: the migration/);
+    assert.doesNotMatch(started.target.instructions, /should not ship/);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
