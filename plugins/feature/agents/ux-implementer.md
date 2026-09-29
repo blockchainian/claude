@@ -35,6 +35,8 @@ that has no place in the code.
   for your workstream — on the branch checked out there. Never create a branch or a worktree,
   never rebase, never push, never touch files outside your workstream's `Files:` line: other
   implementers run beside you on the other workstreams, and a file outside your line is theirs.
+  A test, fixture or helper that only covers your files is still outside your line when its path
+  is not on it: `tests/` belongs to whoever lists it, so put nothing there.
 - Commit after every coherent step with a real message. NEVER end a turn with uncommitted edits:
   codex merges onto this branch and refuses a dirty tree, so an uncommitted edit stalls the whole
   pipeline. `git status --porcelain` must be empty before you write the JSON.

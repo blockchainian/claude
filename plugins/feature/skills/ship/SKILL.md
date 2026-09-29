@@ -39,7 +39,7 @@ Optional, each read by the step that names it: **UX workstreams** (`### <id>` bl
 `Surfaces:` and a `Files:` line; without this section there is no UX lane), **Deploy** (a
 `staging:` and/or `production:` command, each printing JSON with the deployed `sha`), **UX
 checks** (one probe command per line, each printing a verdict JSON and exiting non-zero on
-failure), **Deploy checks** (commands run against each deploy with the value they must show), and
+failure), **Deploy checks** (commands run after each deploy with `DEPLOY_ENV` and the deploy JSON's fields in the environment), and
 any file the plan creates marked `(new)` on its own line so the path checker skips it. Everything
 the run needs to know about the project is in the plan; ship reads no other contract. `${CLAUDE_PLUGIN_ROOT}/skills/ship/minimal-plan-template.md` shows the shape. Anything
 else in the file is context for the implementers; ship does not read it. A program that touches
@@ -156,9 +156,12 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
       merged workstream at once, in a read-only thread. One review per plan, one round.
    b. If the plan's Deploy section has a `staging:` command, run it, read the `sha` from its JSON
       and record it as `STAGING_SHA`; then, a minute later (the first request after a deploy can
-      still hit the old build), run the plan's Deploy checks against staging. Each exits non-zero
-      on failure; gate on the exit code, never on the text. Without a staging command there is
-      nothing to deploy yet: go on.
+      still hit the old build), run the plan's Deploy checks against staging. Each check runs
+      with `DEPLOY_ENV` set to the deploy line's label (`staging`) and every top-level string
+      field of the deploy's JSON exported as `DEPLOY_<FIELD>` in upper case (`DEPLOY_SHA` always,
+      `DEPLOY_URL` when the command printed a `url`, anything else the project adds), so the
+      command knows what it is checking. Each exits non-zero on failure; gate on the exit code,
+      never on the text. Without a staging command there is nothing to deploy yet: go on.
 
 5. **Run the plan's UX checks.** Each line is a probe command; run them with `run_in_background`
    and read the verdict JSON. Failures go back to the UX agent that owns the surface by
@@ -217,7 +220,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    `--admin`, or any prod, secret or infra mutation, is out of scope for this gate and goes to the
    user instead. A repo with no remote ends at the merged session branch. If the plan's Deploy
    section has a `production:` command, run it after the merge and then the plan's Deploy checks
-   against production; without one, the merge is the ship. The PR description is the phase's
+   against production, with `DEPLOY_ENV=production` and the deploy JSON's fields exported as in
+   step 4b; without one, the merge is the ship. The PR description is the phase's
    record: before merging, write it (or rewrite it) with what each workstream delivered and the
    test or check that proved it, the review findings each as issue-tldr / fix-tldr / commit SHA,
    the deploy SHAs and deploy-check results, and the follow-ups left out of this ship — clear,
