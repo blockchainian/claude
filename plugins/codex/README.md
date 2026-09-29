@@ -131,6 +131,10 @@ undelivered events, the hook blocks once and hands them over. `await` and the
 hook take events under a per-thread lock, so an event is delivered once even
 when both are reading.
 
+Only an `await` process wakes Claude after it has stopped, so the hook also
+blocks while a thread's turn is running and no `await` is waiting on it, and
+names the command to run. It does so on every stop, until one is running.
+
 If the daemon connection drops (a daemon restart, say) the MCP server
 reconnects with backoff while it has threads, `thread/resume`s them, and the
 daemon replays any request that was still waiting for an answer.
@@ -144,6 +148,7 @@ daemon replays any request that was still waiting for an answer.
     state.json                          threads: id, name, cwd, turnId, lastStatus, waiting (held approvals), attached, review (out file)
     <codex-thread-id>.jsonl             the inbox, appended by the manager and the tools server
     <codex-thread-id>.cursor            byte offset of delivered events, written by await/pending only
+    <codex-thread-id>.await.<pid>       an await process waiting on the thread, removed when it exits
     <codex-thread-id>.ask.<call>.json   a question codex is waiting on, written by the tools server
     <codex-thread-id>.reply.<call>.json its answer, written by reply and taken by the tools server
 ```

@@ -3,7 +3,7 @@
 
 import crypto from "node:crypto";
 import readline from "node:readline";
-import { SessionStore, askTimeoutSeconds, readSupervisor } from "./inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readSupervisor, running } from "./inbox.mjs";
 
 const textArgument = { type: "object", properties: { text: { type: "string", description: "The message for Claude." } }, required: ["text"], additionalProperties: false };
 const TOOLS = [
@@ -15,15 +15,6 @@ const POLL_MS = 250;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const said = (text) => ({ content: [{ type: "text", text }] });
 const failed = (text) => ({ ...said(text), isError: true });
-
-function running(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === "EPERM";
-  }
-}
 
 /** The store of the Claude session whose manager is running and has claimed the thread. */
 function supervisorStore(threadId) {

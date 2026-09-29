@@ -19,7 +19,7 @@ const adversarialStancePath = path.join(path.dirname(scriptPath), "adversarial-r
 const usage = `usage:
   codex-manager.mjs mcp                                   serve Claude's codex tools over stdio
   codex-manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
-  codex-manager.mjs pending                               Stop hook: block on undelivered events
+  codex-manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
   codex-manager.mjs claude-tools                          serve notify_claude and ask_claude to codex over stdio
   codex-manager.mjs whoami                                print the resolved Claude session id`;
 
@@ -74,14 +74,19 @@ async function runAwait(options) {
   const timeoutMs = options.timeout === undefined ? undefined : Number(options.timeout) * 1000;
   if (timeoutMs !== undefined && !(timeoutMs > 0)) throw new Error("--timeout must be a positive number of seconds");
   const started = Date.now();
-  for (;;) {
-    const lines = store.claim(options.thread);
-    if (lines.length) {
-      process.stdout.write(`${lines.join("\n")}\n`);
-      return 0;
+  store.markAwait(options.thread);
+  try {
+    for (;;) {
+      const lines = store.claim(options.thread);
+      if (lines.length) {
+        process.stdout.write(`${lines.join("\n")}\n`);
+        return 0;
+      }
+      if (timeoutMs !== undefined && Date.now() - started >= timeoutMs) return 124;
+      await sleep(250);
     }
-    if (timeoutMs !== undefined && Date.now() - started >= timeoutMs) return 124;
-    await sleep(250);
+  } finally {
+    store.clearAwait(options.thread);
   }
 }
 
@@ -109,6 +114,11 @@ async function runPending() {
         sections.push(`codex thread ${thread.id} is waiting for reply since ${new Date(waiting.since).toISOString()} (${waiting.kind} ${waiting.callId}): ${waiting.text}`);
       }
     }
+  }
+  // Only an await process wakes Claude once it has stopped, and starting one lifts this block, so it holds on every stop.
+  for (const thread of store.readState().threads) {
+    if (thread.lastStatus !== "inProgress" || store.awaiting(thread.id).length) continue;
+    sections.push(`codex thread ${thread.id} is running and nothing is waiting for it. Run this with run_in_background before you stop:\n${awaitCommand(thread.id)}`);
   }
   if (!sections.length) return 0;
   const reason = `codex-manager: ${sections.length} thread(s) need attention before you stop.\n\n${sections.join("\n\n")}`;
