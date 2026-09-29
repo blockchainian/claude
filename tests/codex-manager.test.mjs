@@ -1043,6 +1043,7 @@ test("requests the daemon sends for an attached session are left to the client i
   const daemon = await fakeDaemon(script.handler);
   const env = { CODEX_MANAGER_ASK_TIMEOUT: "1" };
   const mcp = await mcpChild(home, daemon, env);
+  let restarted = false;
   const inbox = path.join(home.dir, "thread-5.jsonl");
   const silentOn = async (socket, firstId) => {
     send(socket, { id: firstId, method: "item/commandExecution/requestApproval", params: { threadId: "thread-5", turnId: "turn-live", itemId: "item-cmd", command: "rm -rf build" } });
@@ -1061,6 +1062,7 @@ test("requests the daemon sends for an attached session are left to the client i
     assert.deepEqual(listed.json.threads[0].waiting, []);
     assert.equal(listed.json.attention, undefined);
     await mcp.close();
+    restarted = true;
 
     const later = await mcpChild(home, daemon, env);
     try {
@@ -1073,6 +1075,8 @@ test("requests the daemon sends for an attached session are left to the client i
       await later.close();
     }
   } finally {
+    // A failure before the restart would leave the first manager running and the test runner waiting on it.
+    if (!restarted) await mcp.close();
     await daemon.close();
     await home.close();
   }
