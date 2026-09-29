@@ -3,14 +3,14 @@
 # ABOUTME: check there, merge it onto the session branch behind the same check, and report the base.
 set -u
 
-usage="usage: workstream.sh open <id> | check <id> <cmd> | merge <id> <cmd> | base [--clear]
+usage="usage: workstream.sh open <id> | check <id> <cmd>... | merge <id> <cmd>... | base [--clear]
 
   open  <id>        add ../.workstream-<id> on branch workstream/<id> from HEAD, copy node_modules,
                     record the base (HEAD before the first open) and print the worktree path
-  check <id> <cmd>  run <cmd> in the workstream's worktree and exit with its status
-  merge <id> <cmd>  merge workstream/<id> onto the session branch (--no-ff), run <cmd> in the
-                    session tree, restore the branch if it is red, remove the worktree and branch
-                    if it is green, and print the base
+  check <id> <cmd>  run each <cmd> in order in the workstream's worktree; exit with the first red
+  merge <id> <cmd>  merge workstream/<id> onto the session branch (--no-ff), run each <cmd> in the
+                    session tree, restore the branch if one is red, remove the worktree and branch
+                    if all are green, and print the base
   base [--clear]    print the recorded base (HEAD when none is recorded); --clear forgets it"
 
 die() { printf 'workstream.sh: %s\n' "$*" >&2; exit "${2:-1}"; }
@@ -50,17 +50,22 @@ open() {
   printf '%s\n' "$dir"
 }
 
+run_all() { # run_all <dir> <cmd>... — each command in order, stopping at the first red
+  local dir=$1 cmd; shift
+  for cmd in "$@"; do (cd "$dir" && bash -c "$cmd") || return $?; done
+}
+
 check() {
-  local id=$1 cmd=${2:-} dir
-  [ -n "$id" ] && [ -n "$cmd" ] || die "check needs a workstream id and a command" 2
+  local id=$1 dir; shift
+  [ -n "$id" ] && [ $# -gt 0 ] || die "check needs a workstream id and at least one command" 2
   dir=$(worktree_of "$id")
   [ -d "$dir" ] || die "no worktree at $dir; open the workstream first"
-  (cd "$dir" && bash -c "$cmd")
+  run_all "$dir" "$@"
 }
 
 merge() {
-  local id=$1 cmd=${2:-} dir branch conflicted
-  [ -n "$id" ] && [ -n "$cmd" ] || die "merge needs a workstream id and a command" 2
+  local id=$1 dir branch conflicted; shift
+  [ -n "$id" ] && [ $# -gt 0 ] || die "merge needs a workstream id and at least one command" 2
   dir=$(worktree_of "$id"); branch=$(branch_of "$id")
   git -C "$ROOT" rev-parse -q --verify "refs/heads/$branch" >/dev/null || die "no branch $branch; open the workstream first"
   [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ] || die "the session tree has uncommitted changes; commit or stash them before merging"
@@ -69,7 +74,7 @@ merge() {
     git -C "$ROOT" merge --abort >/dev/null 2>&1
     die "merge of $branch conflicts in: ${conflicted:-unknown}; resolve in the worktree ($dir) and merge again"
   fi
-  if ! (cd "$ROOT" && bash -c "$cmd"); then
+  if ! run_all "$ROOT" "$@"; then
     git -C "$ROOT" reset -q --hard ORIG_HEAD
     die "check failed after merging $branch; the session branch is restored and the worktree kept at $dir"
   fi
@@ -85,8 +90,8 @@ base() {
 
 case "$COMMAND" in
   open) open "${2:-}" ;;
-  check) check "${2:-}" "${3:-}" ;;
-  merge) merge "${2:-}" "${3:-}" ;;
+  check) shift; check "$@" ;;
+  merge) shift; merge "$@" ;;
   base) base "${2:-}" ;;
   *) echo "$usage" >&2; exit 2 ;;
 esac
