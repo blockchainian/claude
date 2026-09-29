@@ -3,12 +3,10 @@
 <!-- Ship reads these sections. Workstreams, Dependencies and Checks are required; the rest are
 optional and skipped when absent. Anything else in the file is context for the implementers. -->
 
-Base: `<short sha>`
-
 ## Workstreams
 
 <!-- One `###` block per codex workstream, ending in a `Files:` line. No file may appear on two
-workstreams' `Files:` lines (check-overlap.sh). Every path must exist at the base SHA, or carry
+workstreams' `Files:` lines (check-overlap.sh). Every path must exist in the repo, or carry
 `(new)` on its own line (check-paths.sh). -->
 
 ### `<id>` — <what changes and where>
