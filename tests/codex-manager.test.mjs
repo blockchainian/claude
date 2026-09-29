@@ -201,7 +201,8 @@ function daemonScript() {
       }
       if (message.method === "turn/interrupt") reply({});
       if (message.method === "review/start") reply({ turn: { id: "turn-review", status: "inProgress" }, reviewThreadId: message.params.threadId });
-      if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId }, initialTurnsPage: { data: script.resumeTurns ?? [{ id: "turn-old", status: "completed", items: script.resumeItems ?? [{ type: "agentMessage", text: "done while you were away" }] }] } });
+      if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId } });
+      if (message.method === "thread/turns/list") reply({ data: script.resumeTurns ?? [{ id: "turn-old", status: "completed", items: script.resumeItems ?? [{ type: "agentMessage", text: "done while you were away" }] }] });
       if (message.method === "thread/list") {
         const from = Number(message.params.cursor ?? 0);
         const next = from + script.pageSize;
@@ -332,7 +333,10 @@ test("mcp adopts recorded threads on startup and backfills turns that finished m
     const listed = await mcp.call("list", {});
     assert.equal(listed.json.threads[0].lastStatus, "completed");
     const resume = script.messages.find((message) => message.method === "thread/resume");
-    assert.deepEqual(resume.params, { threadId: "thread-B", initialTurnsPage: { limit: 1, sortDirection: "desc" } });
+    assert.deepEqual(resume.params, { threadId: "thread-B" });
+    // The turns a resume returns show a finished review as still running, so the latest turn is listed.
+    const listing = script.messages.find((message) => message.method === "thread/turns/list");
+    assert.deepEqual(listing.params, { threadId: "thread-B", limit: 1, sortDirection: "desc", itemsView: "full" });
     const lines = inboxLines(path.join(home.dir, "thread-B.jsonl"));
     assert.equal(lines.length, 1);
     assert.equal(lines[0].kind, "completed");
@@ -768,9 +772,9 @@ test("reconnect keeps retrying while the daemon is down and does not redeliver a
     await rm(socketPath, { force: true });
     await new Promise((resolve) => setTimeout(resolve, 2500));
     const revived = { ...script, handler(message, socket) {
-      if (message.id !== undefined && message.method === "thread/resume") {
+      if (message.id !== undefined && message.method === "thread/turns/list") {
         script.messages.push(message);
-        return send(socket, { id: message.id, result: { thread: { id: "thread-A" }, initialTurnsPage: { data: [{ id: "turn-1", status: "completed", items: [] }] } } });
+        return send(socket, { id: message.id, result: { data: [{ id: "turn-1", status: "completed", items: [] }] } });
       }
       script.handler(message, socket);
     } };
@@ -958,7 +962,7 @@ test("attach finds a session by name across pages, subscribes without changing i
     assert.deepEqual(lists.map((message) => message.params.cursor), [undefined, "2", "4", "6"]);
     assert.equal(lists[0].params.searchTerm, undefined);
     const resumes = script.messages.filter((message) => message.method === "thread/resume");
-    assert.deepEqual(resumes.map((message) => message.params), [{ threadId: "thread-5", initialTurnsPage: { limit: 1, sortDirection: "desc" } }]);
+    assert.deepEqual(resumes.map((message) => message.params), [{ threadId: "thread-5" }]);
     assert.equal(script.messages.some((message) => message.method === "thread/start"), false);
 
     const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));

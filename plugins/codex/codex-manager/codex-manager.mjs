@@ -243,19 +243,28 @@ class Manager {
     }, delay).unref();
   }
 
+  /**
+   * Subscribes to a thread and returns its latest turn. The turns a resume returns show a finished
+   * review as still running, so the turn is listed instead.
+   */
+  async subscribe(client, threadId) {
+    await client.request("thread/resume", { threadId });
+    const turns = await client.request("thread/turns/list", { threadId, limit: 1, sortDirection: "desc", itemsView: "full" });
+    return turns.data?.[0];
+  }
+
   /** Re-subscribes to every recorded thread and backfills turns that ended while disconnected. */
   async adopt(client) {
     for (const thread of this.state().threads) {
       this.supervise(thread.id);
-      let resumed;
+      let latest;
       try {
-        resumed = await client.request("thread/resume", { threadId: thread.id, initialTurnsPage: { limit: 1, sortDirection: "desc" } });
+        latest = await this.subscribe(client, thread.id);
       } catch (error) {
         log(`cannot resume thread ${thread.id}: ${error.message}`);
         this.updateThread(thread.id, { lastStatus: "unavailable", error: error.message });
         continue;
       }
-      const latest = resumed.initialTurnsPage?.data?.[0];
       if (!latest) continue;
       if (latest.id === thread.turnId && latest.status === thread.lastStatus) continue;
       if (latest.status === "inProgress") this.updateThread(thread.id, { turnId: latest.id, lastStatus: "inProgress", error: undefined, waiting: latest.id === thread.turnId ? thread.waiting : [] });
@@ -429,14 +438,13 @@ class Manager {
     if (!this.owns(found.id)) {
       // Recorded before the resume so a turn that ends right behind the response is not missed.
       this.updateThread(found.id, { name: found.name ?? null, cwd: found.cwd, turnId: null, lastStatus: "idle", waiting: [], attached: true });
-      let resumed;
+      let latest;
       try {
-        resumed = await client.request("thread/resume", { threadId: found.id, initialTurnsPage: { limit: 1, sortDirection: "desc" } });
+        latest = await this.subscribe(client, found.id);
       } catch (error) {
         this.dropThread(found.id);
         throw error;
       }
-      const latest = resumed.initialTurnsPage?.data?.[0];
       if (latest && this.thread(found.id).turnId === null) this.updateThread(found.id, { turnId: latest.id, lastStatus: latest.status });
     }
     const { name, cwd, lastStatus, attached } = this.thread(found.id);
