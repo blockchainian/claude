@@ -54,6 +54,10 @@ Before the plan ships, and after every revision, run these two from inside the r
 A plan that fails either goes back to the user with the checker's output; ship never edits the
 plan. Then grep each function, route, table, column and env var the plan names.
 
+Everything the run writes goes next to the plan: `<dir>` below is the directory holding `plan.md`.
+`codex-workstreams.txt`, `outcome.md` and any `handoff.md` sit beside it; the review's
+`review.json` and the triaged `findings.json` go in `<dir>/review/`.
+
 ## Task board — the run's live view
 
 Open a task board so the run's shape is visible while it works: one `TaskCreate` per workstream and
@@ -128,7 +132,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    a. Watch `implement.sh`'s output with `Monitor` for the line `pushed to origin` and act on it,
       not on the run's exit.
    b. First start the review in the background: invoke the `codex:review` skill, which names its
-      script, and run it as `review.sh <repo> <base> HEAD specs/<date>-<topic>/review.json
+      script, and run it as `review.sh <repo> <base> HEAD <dir>/review/review.json
       <plan.md>`, where `<base>` is the
       `.git/codex-implement/<feature>/pre-merge.sha` the script recorded. A plan with no codex
       workstream has no `implement.sh` run: start the same command when the UX lane reports
@@ -158,7 +162,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
       route or a test file is `codex` without further thought (the project contract in the plugin
       README names the paths); for the rest ask one question, does the fix change what the user
       sees or does — `ux` if yes, `codex` if no. Findings in the same file get the same owner.
-   d. Write them to `specs/<date>-<topic>/findings.json` as `[{file, line, claim, owner,
+   d. Write them to `<dir>/review/findings.json` as `[{file, line, claim, owner,
       disposition}]`.
    e. `disposition` starts `fixed` for a finding you keep and `rejected` — with a one-line
       `reason` — for a must-fix you verify as a false positive (it asks to revert an intended
@@ -193,13 +197,13 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    scope for this gate and goes to the user instead. Services that deploy from the default branch
    on merge need nothing more, and the rest go through the codex lane's deploy command (the
    project contract in the plugin README says which). Then run the plan's Live checks against production. The
-   phase's record is `specs/<date>-<topic>/outcome.md`, written from
+   phase's record is `<dir>/outcome.md`, written from
    `${CLAUDE_PLUGIN_ROOT}/skills/ship/outcome-template.md`: what each workstream delivered and
    the test or probe that proved it, the code-review must-fix findings each as issue-tldr /
    fix-tldr / commit SHA, the PR and deploy SHAs, the live-check results, and the follow-ups left
    out of this ship. It is for the user and for memory — write it clear, succinct and fast to read,
    no code anchors. `plan.md` stays input-only; do not write an outcome into it. Then write the
-   memory files and end. Write a separate `specs/<date>-<topic>/handoff.md` only if you must stop
+   memory files and end. Write a separate `<dir>/handoff.md` only if you must stop
    mid-phase (the context safety rail set in the user's CLAUDE.md, quota exhausted), naming exactly
    where to resume.
 
