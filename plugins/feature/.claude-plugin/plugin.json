@@ -1,6 +1,6 @@
 {
   "name": "feature",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Ship a feature from a written plan: the ship skill takes any plan.md with Workstreams, Dependencies and Checks sections and runs the codex and UX lanes to a merged, verified, deployed PR; the ux-implementer, ux-autofixer and ux-verifier agents staff the UX lane; the handoff skill records a mid-phase stop; the retro skill ranks a finished session's biggest wastes by token cost and routes fixes back to ship and the plan template; hooks keep subagents and the main loop from blocking on each other.",
   "author": {
     "name": "blockchainian"
