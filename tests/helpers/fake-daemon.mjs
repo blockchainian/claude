@@ -51,7 +51,7 @@ export function decodeClientFrames(buffer) {
 }
 
 export async function fakeDaemon(onMessage, onFrame = () => {}, { socketPath: reuse } = {}) {
-  const directory = reuse ? undefined : await mkdtemp(path.join(os.tmpdir(), "daemon-run-test-"));
+  const directory = reuse ? undefined : await mkdtemp(path.join(os.tmpdir(), "fake-daemon-"));
   const socketPath = reuse ?? path.join(directory, "daemon.sock");
   const connections = new Set();
   const server = net.createServer((socket) => {
