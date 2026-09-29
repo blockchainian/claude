@@ -185,7 +185,7 @@ function daemonScript() {
       }
       if (message.method === "turn/interrupt") reply({});
       if (message.method === "review/start") reply({ turn: { id: "turn-review", status: "inProgress" }, reviewThreadId: message.params.threadId });
-      if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId }, initialTurnsPage: { data: [{ id: "turn-old", status: "completed", items: [{ type: "agentMessage", text: "done while you were away" }] }] } });
+      if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId }, initialTurnsPage: { data: [{ id: "turn-old", status: "completed", items: script.resumeItems ?? [{ type: "agentMessage", text: "done while you were away" }] }] } });
     }
   };
   return script;
@@ -318,6 +318,21 @@ test("mcp adopts recorded threads on startup and backfills turns that finished m
     assert.equal(lines[0].kind, "completed");
     assert.equal(lines[0].turnId, "turn-old");
     assert.equal(lines[0].lastMessage, "done while you were away");
+
+    // A review that finished while disconnected is written from the resumed turn's items.
+    const reviewOut = path.join(home.home, "late", "review.md");
+    await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 2, threads: [{ id: "thread-R", name: "review", cwd: "/tmp", turnId: "turn-r", lastStatus: "inProgress", review: reviewOut }] }));
+    script.resumeItems = [{ type: "exitedReviewMode", id: "x", review: "Review comment:\n\n- [P1] late finding — a.ts:1-2" }];
+    const later = new McpChild(home.home, daemon.socketPath);
+    try {
+      await later.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
+      await later.call("list", {});
+      assert.equal(await readFile(reviewOut, "utf8"), script.resumeItems[0].review);
+      const late = inboxLines(path.join(home.dir, "thread-R.jsonl"));
+      assert.equal(late[0].lastMessage, `Review written to ${reviewOut}`);
+    } finally {
+      await later.close();
+    }
   } finally {
     await mcp.close();
     await daemon.close();
@@ -654,6 +669,7 @@ test("review starts a read-only thread, runs codex's review mode on a base sha, 
     const [socket] = script.sockets;
     const text = "The patch is correct.\n\nReview comment:\n\n- [P2] Guard the empty list — src/a.ts:10-12\n  The loop assumes one element.";
     send(socket, { method: "item/completed", params: { threadId: "thread-A", turnId: "turn-review", item: { type: "exitedReviewMode", id: "r1", review: text } } });
+    send(socket, { method: "item/completed", params: { threadId: "thread-A", turnId: "turn-review", item: { type: "agentMessage", id: "m9", text } } });
     send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-review", status: "completed" } } });
     const inbox = path.join(home.dir, "thread-A.jsonl");
     await waitFor(() => inboxLines(inbox).length === 1);
