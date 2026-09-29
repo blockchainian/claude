@@ -161,6 +161,12 @@ class Manager {
     this.writeState(state);
   }
 
+  dropThread(threadId) {
+    const state = this.state();
+    state.threads = state.threads.filter((thread) => thread.id !== threadId);
+    this.writeState(state);
+  }
+
   connected() {
     return Boolean(this.client);
   }
@@ -286,6 +292,8 @@ class Manager {
     const { id, method, params = {} } = message;
     const reject = (text) => client.send({ id, error: { code: -32601, message: text } });
     if (!this.owns(params.threadId)) return reject(`codex-manager does not own thread ${params.threadId}`);
+    // Every subscriber receives an attached session's requests and the first answer settles them, errors included.
+    if (this.thread(params.threadId).attached) return undefined;
     if (method === "item/tool/call" && params.tool === NOTIFY_TOOL.name) {
       this.store.append(params.threadId, { kind: "notify", turnId: params.turnId, callId: params.callId, text: params.arguments?.text ?? "" });
       return client.send({ id, result: { contentItems: [{ type: "inputText", text: "Delivered to Claude." }], success: true } });
@@ -380,6 +388,45 @@ class Manager {
     return { threadId, turnId: response.turn.id, name: name ?? null, cwd: absolute, out: target, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when the review is written." };
   }
 
+  /** Finds a session on the daemon by id or exact name; the daemon's own searchTerm filters titles, not names. */
+  async findThread(client, wanted) {
+    const named = [];
+    let cursor;
+    do {
+      const page = await client.request("thread/list", { limit: 100, sortKey: "updated_at", cursor });
+      for (const thread of page.data ?? []) {
+        if (thread.id === wanted) return thread;
+        if (thread.name === wanted) named.push(thread);
+      }
+      cursor = page.nextCursor;
+    } while (cursor);
+    if (!named.length) throw new Error(`no codex session has the id or name ${JSON.stringify(wanted)}`);
+    if (named.length > 1) throw new Error(`${named.length} codex sessions are named ${JSON.stringify(wanted)}; pass the id of one: ${named.map((thread) => `${thread.id} (${thread.status?.type}, ${thread.cwd})`).join(", ")}`);
+    return named[0];
+  }
+
+  /** Subscribes to a session this manager did not start, leaving its settings as its own client set them. */
+  async attach({ thread }) {
+    if (!thread) throw new Error("thread is required");
+    const client = await this.connect();
+    const found = await this.findThread(client, thread);
+    if (!this.owns(found.id)) {
+      // Recorded before the resume so a turn that ends right behind the response is not missed.
+      this.updateThread(found.id, { name: found.name ?? null, cwd: found.cwd, turnId: null, lastStatus: "idle", waiting: [], attached: true });
+      let resumed;
+      try {
+        resumed = await client.request("thread/resume", { threadId: found.id, initialTurnsPage: { limit: 1, sortDirection: "desc" } });
+      } catch (error) {
+        this.dropThread(found.id);
+        throw error;
+      }
+      const latest = resumed.initialTurnsPage?.data?.[0];
+      if (latest && this.thread(found.id).turnId === null) this.updateThread(found.id, { turnId: latest.id, lastStatus: latest.status });
+    }
+    const { name, cwd, lastStatus, attached } = this.thread(found.id);
+    return { threadId: found.id, name, cwd, attached: Boolean(attached), lastStatus, await: awaitCommand(found.id), note: "Give it a prompt with send, then run the await command with run_in_background; it exits when codex finishes a turn. Approvals and questions stay with the client the session runs in." };
+  }
+
   async startTurn(client, threadId, prompt) {
     const response = await client.request("turn/start", { threadId, input: [{ type: "text", text: prompt, text_elements: [] }] });
     this.updateThread(threadId, { turnId: response.turn.id, lastStatus: "inProgress" });
@@ -446,10 +493,11 @@ function reviewInstructions(base, plan, decisions, stance, focus) {
 
 const TOOLS = [
   { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task. Returns the thread id and the await command to run in the background.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute working directory for the worker." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation." }, name: { type: "string", description: "Short human-readable thread name." } }, required: ["cwd", "prompt"] } },
+  { name: "attach", description: "Take over a codex session that is already running elsewhere, found by its thread id or exact name, so send, interrupt and the await command work on it. Its approvals stay with the client it runs in.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
   { name: "send", description: "Send a follow-up prompt to a codex thread. Starts a new turn when idle; when a turn is running the prompt is injected into it.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
   { name: "reply", description: "Answer a codex thread that is waiting: the text becomes the result of its ask_claude call, or, for an approval request, one of the decisions its inbox event listed. callId is needed only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
-  { name: "list", description: "List the codex threads this session started, their last turn status, what each is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: {} } },
+  { name: "list", description: "List the codex threads this session started or attached, their last turn status, what each is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: {} } },
   { name: "review", description: "Run codex's built-in review mode over the commits since a base sha in a read-only thread and save the rendered review (priority-tagged findings and an overall verdict) to a file; stance adversarial makes it a challenge review. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, decisions: { type: "string", description: "Path of the file listing the rules decided while the changes were built, relative to cwd or absolute." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." }, stance: { type: "string", enum: ["adversarial"], description: "adversarial: the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. Omit for the plain review." }, focus: { type: "string", description: "What the reviewer should weigh most, in a phrase." } }, required: ["cwd", "base", "out"] } }
 ];
 
