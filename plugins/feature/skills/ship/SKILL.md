@@ -37,12 +37,12 @@ reads it by section, so three sections are required and the rest are read when p
 
 Optional, each read by the step that names it: **UX workstreams** (`### <id>` blocks with a
 `Surfaces:` and a `Files:` line; without this section there is no UX lane), **UX checklist per
-surface** (the assertions step 4 turns into probes), **Invariants**, **Intended changes**, **New
-files** (marked `(new)` so the path checker skips them), **Live checks**, and a `Base:` line naming
-the SHA the plan was written at. `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md` shows the
-full shape; a plan that has the three required sections in that shape is enough. It is agent-facing
-only — no decision rationale, no shipped outcome. A program that touches many screens is one plan
-with many UX workstreams, not one plan per screen: planning runs once, the implementers run at once.
+surface** (the assertions step 4 turns into probes), **Live checks**, a `Base:` line naming the SHA
+the plan was written at, and any file the plan creates marked `(new)` on its own line so the path
+checker skips it. `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md` shows the shape. Anything
+else in the file is context for the implementers; ship does not read it. A program that touches
+many screens is one plan with many UX workstreams, not one plan per screen: planning runs once, the
+implementers run at once.
 
 Before the plan ships, and after every revision, run these two from inside the repo:
 
