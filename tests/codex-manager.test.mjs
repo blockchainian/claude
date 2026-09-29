@@ -1,5 +1,5 @@
 // ABOUTME: Tests codex-manager: session resolution, the await and pending readers, and the MCP
-// ABOUTME: server's daemon conversation (thread start and attach, notify_claude, turn completion, adoption).
+// ABOUTME: server's daemon conversation (thread start and attach, turn completion, adoption), and the tools codex calls.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -118,8 +118,8 @@ test("pending stays silent without state and blocks once on unread events", asyn
 });
 
 class McpChild {
-  constructor(home, socketPath, env = {}) {
-    this.child = spawn(process.execPath, [manager, "mcp"], {
+  constructor(home, socketPath, env = {}, command = "mcp") {
+    this.child = spawn(process.execPath, [manager, command], {
       env: { ...process.env, CLAUDE_CODE_SESSION_ID: session, CODEX_MANAGER_HOME: home, CODEX_MANAGER_DAEMON_SOCKET: socketPath, ...env },
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -150,16 +150,30 @@ class McpChild {
     return new Promise((resolve) => this.pending.set(id, resolve));
   }
 
-  async call(name, args) {
-    const response = await this.request("tools/call", { name, arguments: args });
+  async call(name, args, meta) {
+    const response = await this.request("tools/call", { name, arguments: args, _meta: meta });
     assert.equal(response.error, undefined, JSON.stringify(response));
     const text = response.result.content[0].text;
-    return { isError: response.result.isError === true, text, json: response.result.isError ? undefined : JSON.parse(text) };
+    let json;
+    try { json = JSON.parse(text); } catch { json = undefined; }
+    return { isError: response.result.isError === true, text, json };
   }
 
   async close() {
     this.child.stdin.end();
     await new Promise((resolve) => this.child.on("close", resolve));
+  }
+}
+
+/** The server codex runs for notify_claude and ask_claude; it gets no Claude session id of its own. */
+class ToolsChild extends McpChild {
+  constructor(home, env = {}) {
+    super(home, "unused", { CLAUDE_CODE_SESSION_ID: "", ...env }, "claude-tools");
+  }
+
+  tool(name, threadId, callId, text) {
+    const meta = { callId, threadId, "x-codex-turn-metadata": { thread_id: threadId, turn_id: "turn-1" } };
+    return this.call(name, { text }, threadId === undefined ? undefined : meta);
   }
 }
 
@@ -216,7 +230,7 @@ function waitFor(predicate, { timeout = 5000 } = {}) {
   });
 }
 
-test("mcp starts a thread with dynamic tools, relays notify_claude and completion into the inbox", { timeout: 20_000 }, async () => {
+test("mcp starts a thread that reaches Claude's tools over MCP, and relays completion into the inbox", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
@@ -243,9 +257,12 @@ test("mcp starts a thread with dynamic tools, relays notify_claude and completio
     assert.equal(start.sandbox, "workspace-write");
     assert.equal(start.ephemeral, false);
     assert.equal(start.serviceName, "codex-manager");
-    assert.deepEqual(start.config, { "sandbox_workspace_write.network_access": true });
-    assert.deepEqual(start.dynamicTools.map((tool) => [tool.type, tool.name]), [["function", "notify_claude"], ["function", "ask_claude"]]);
-    assert.deepEqual(start.dynamicTools[0].inputSchema.required, ["text"]);
+    assert.deepEqual(start.config, {
+      "sandbox_workspace_write.network_access": true,
+      "mcp_servers.claude": { command: process.execPath, args: [manager, "claude-tools"], env: { CODEX_MANAGER_HOME: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
+    });
+    assert.equal(start.dynamicTools, undefined);
+    assert.deepEqual(JSON.parse(await readFile(path.join(home.home, "threads", "thread-A.json"), "utf8")), { sessionId: session, pid: mcp.child.pid });
     assert.deepEqual(script.messages[3].params, { threadId: "thread-A", name: "fix-bug" });
     assert.equal(script.messages[4].params.input[0].text, "Fix the bug");
 
@@ -257,8 +274,7 @@ test("mcp starts a thread with dynamic tools, relays notify_claude and completio
     const [socket] = script.sockets;
     send(socket, { id: 900, method: "item/tool/call", params: { threadId: "thread-A", turnId: "turn-1", callId: "call-1", tool: "notify_claude", arguments: { text: "tests are red" } } });
     await waitFor(() => script.messages.some((message) => message.id === 900));
-    const answer = script.messages.find((message) => message.id === 900);
-    assert.deepEqual(answer.result, { contentItems: [{ type: "inputText", text: "Delivered to Claude." }], success: true });
+    assert.equal(script.messages.find((message) => message.id === 900).error.code, -32601);
 
     send(socket, { id: 901, method: "item/permissions/requestApproval", params: { threadId: "thread-A" } });
     await waitFor(() => script.messages.some((message) => message.id === 901));
@@ -267,17 +283,14 @@ test("mcp starts a thread with dynamic tools, relays notify_claude and completio
     send(socket, { method: "item/completed", params: { threadId: "thread-A", turnId: "turn-1", item: { type: "agentMessage", id: "m1", text: "All fixed" } } });
     send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-1", status: "completed" } } });
     const inbox = path.join(home.dir, "thread-A.jsonl");
-    await waitFor(() => inboxLines(inbox).length === 2);
+    await waitFor(() => inboxLines(inbox).length === 1);
     const lines = inboxLines(inbox);
-    assert.equal(lines[0].kind, "notify");
-    assert.equal(lines[0].text, "tests are red");
-    assert.equal(lines[0].turnId, "turn-1");
-    assert.equal(lines[1].kind, "completed");
-    assert.equal(lines[1].status, "completed");
-    assert.equal(lines[1].lastMessage, "All fixed");
+    assert.equal(lines[0].kind, "completed");
+    assert.equal(lines[0].status, "completed");
+    assert.equal(lines[0].lastMessage, "All fixed");
 
     const listed = await mcp.call("list", {});
-    assert.equal(listed.json.threads[0].unread, 2);
+    assert.equal(listed.json.threads[0].unread, 1);
     assert.equal(listed.json.threads[0].lastStatus, "completed");
 
     const sent = await mcp.call("send", { threadId: "thread-A", prompt: "Now add a test" });
@@ -373,38 +386,83 @@ async function startedThread(home, daemon, script) {
   return { mcp, socket };
 }
 
-test("ask_claude holds the daemon request until reply answers it, and replays do not duplicate the inbox", { timeout: 20_000 }, async () => {
+test("notify_claude and ask_claude reach the Claude session that supervises the calling thread", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
-  const { mcp, socket } = await startedThread(home, daemon, script);
+  const { mcp } = await startedThread(home, daemon, script);
+  const tools = new ToolsChild(home.home);
   try {
-    const ask = { threadId: "thread-A", turnId: "turn-1", callId: "call-ask", tool: "ask_claude", arguments: { text: "tests or implementation?" } };
-    send(socket, { id: 910, method: "item/tool/call", params: ask });
+    const init = await tools.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "codex-mcp-client", version: "0" } });
+    assert.equal(init.result.serverInfo.name, "claude");
+    const listedTools = await tools.request("tools/list", {});
+    assert.deepEqual(listedTools.result.tools.map((tool) => [tool.name, tool.inputSchema.required]), [["notify_claude", ["text"]], ["ask_claude", ["text"]]]);
+
     const inbox = path.join(home.dir, "thread-A.jsonl");
+    const noted = await tools.tool("notify_claude", "thread-A", "call-1", "tests are red");
+    assert.equal(noted.isError, false, noted.text);
+    assert.equal(noted.text, "Delivered to Claude.");
+    const [note] = inboxLines(inbox);
+    assert.deepEqual({ ...note, ts: undefined }, { ts: undefined, kind: "notify", turnId: "turn-1", callId: "call-1", text: "tests are red" });
+
+    let answered = false;
+    const asking = tools.tool("ask_claude", "thread-A", "call-ask", "tests or implementation?").then((result) => { answered = true; return result; });
     await waitFor(() => inboxLines(inbox).some((line) => line.kind === "ask"));
-    assert.equal(script.messages.some((message) => message.id === 910), false);
+    const ask = inboxLines(inbox).find((line) => line.kind === "ask");
+    assert.deepEqual({ ...ask, ts: undefined }, { ts: undefined, kind: "ask", turnId: "turn-1", callId: "call-ask", text: "tests or implementation?" });
     const listed = await mcp.call("list", {});
     assert.deepEqual(listed.json.threads[0].waiting, [{ kind: "ask", callId: "call-ask", since: listed.json.threads[0].waiting[0].since, text: "tests or implementation?" }]);
     assert.equal(listed.json.attention.length, 1);
     assert.match(listed.json.attention[0], /thread-A/);
-
-    // The daemon replays the same call after a resume; the inbox must not get a second ask line.
-    send(socket, { id: 911, method: "item/tool/call", params: ask });
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.equal(inboxLines(inbox).filter((line) => line.kind === "ask").length, 1);
+    const hook = await run(["pending"], { env: { CODEX_MANAGER_HOME: home.home }, stdin: JSON.stringify({ session_id: session, stop_hook_active: false }) });
+    assert.match(JSON.parse(hook.stdout).reason, /thread-A is waiting for reply .*tests or implementation\?/);
+    assert.equal(answered, false);
 
     const replied = await mcp.call("reply", { threadId: "thread-A", text: "Fix the implementation." });
     assert.equal(replied.isError, false, replied.text);
-    await waitFor(() => script.messages.some((message) => message.id === 911));
-    assert.deepEqual(script.messages.find((message) => message.id === 911).result, { contentItems: [{ type: "inputText", text: "Fix the implementation." }], success: true });
-    assert.deepEqual(script.messages.find((message) => message.id === 910)?.result, { contentItems: [{ type: "inputText", text: "Fix the implementation." }], success: true });
+    assert.equal(replied.json.kind, "ask");
+    const answer = await asking;
+    assert.equal(answer.isError, false, answer.text);
+    assert.equal(answer.text, "Fix the implementation.");
     const after = await mcp.call("list", {});
     assert.deepEqual(after.json.threads[0].waiting, []);
     assert.equal(after.json.attention, undefined);
+    const late = await mcp.call("reply", { threadId: "thread-A", text: "again" });
+    assert.equal(late.isError, true);
+    assert.match(late.text, /not waiting/);
   } finally {
+    await tools.close();
     await mcp.close();
     await daemon.close();
+    await home.close();
+  }
+});
+
+test("a thread nobody supervises, or whose Claude session is gone, is told so at once", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const tools = new ToolsChild(home.home);
+  try {
+    const stranger = await tools.tool("ask_claude", "thread-Z", "call-1", "anyone?");
+    assert.equal(stranger.isError, true);
+    assert.match(stranger.text, /No Claude session is supervising this thread/);
+    const unnamed = await tools.tool("notify_claude", undefined, "call-2", "hello");
+    assert.equal(unnamed.isError, true);
+    assert.match(unnamed.text, /No Claude session is supervising this thread/);
+
+    // A supervisor record whose process no longer runs.
+    const gone = spawn(process.execPath, ["-e", ""]);
+    await new Promise((resolve) => gone.on("close", resolve));
+    await mkdir(path.join(home.home, "threads"), { recursive: true });
+    await writeFile(path.join(home.home, "threads", "thread-Y.json"), JSON.stringify({ sessionId: session, pid: gone.pid }));
+    const orphan = await tools.tool("ask_claude", "thread-Y", "call-3", "anyone?");
+    assert.equal(orphan.isError, true);
+    assert.match(orphan.text, /No Claude session is supervising this thread/);
+    assert.deepEqual(inboxLines(path.join(home.dir, "thread-Y.jsonl")), []);
+    const unknown = await tools.call("shout", { text: "x" }, { threadId: "thread-Y" });
+    assert.equal(unknown.isError, true);
+    assert.match(unknown.text, /unknown tool: shout/);
+  } finally {
+    await tools.close();
     await home.close();
   }
 });
@@ -413,19 +471,67 @@ test("an unanswered ask times out with a proceed-on-your-own answer", { timeout:
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
-  const mcp = new McpChild(home.home, daemon.socketPath, { CODEX_MANAGER_ASK_TIMEOUT: "1" });
+  const { mcp } = await startedThread(home, daemon, script);
+  const tools = new ToolsChild(home.home, { CODEX_MANAGER_ASK_TIMEOUT: "1" });
   try {
-    await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
-    await mcp.call("start", { cwd: ".", prompt: "work" });
-    const [socket] = script.sockets;
-    send(socket, { id: 920, method: "item/tool/call", params: { threadId: "thread-A", turnId: "turn-1", callId: "call-slow", tool: "ask_claude", arguments: { text: "?" } } });
-    await waitFor(() => script.messages.some((message) => message.id === 920), { timeout: 5000 });
-    const answer = script.messages.find((message) => message.id === 920).result;
-    assert.equal(answer.success, true);
-    assert.match(answer.contentItems[0].text, /did not answer within 1 seconds/);
+    const answer = await tools.tool("ask_claude", "thread-A", "call-slow", "?");
+    assert.equal(answer.isError, false, answer.text);
+    assert.match(answer.text, /did not answer within 1 seconds/);
     const listed = await mcp.call("list", {});
     assert.deepEqual(listed.json.threads[0].waiting, []);
   } finally {
+    await tools.close();
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("a question is withdrawn when codex cancels the call or closes the server", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const { mcp } = await startedThread(home, daemon, script);
+  const tools = new ToolsChild(home.home);
+  const inbox = path.join(home.dir, "thread-A.jsonl");
+  const waitingNow = async () => (await mcp.call("list", {})).json.threads[0].waiting.map((entry) => entry.callId);
+  try {
+    const asking = tools.tool("ask_claude", "thread-A", "call-1", "first?");
+    await waitFor(() => inboxLines(inbox).length === 1);
+    assert.deepEqual(await waitingNow(), ["call-1"]);
+    tools.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: tools.nextId - 1 } })}\n`);
+    const cancelled = await asking;
+    assert.equal(cancelled.isError, true);
+    assert.match(cancelled.text, /cancelled/);
+    assert.deepEqual(await waitingNow(), []);
+
+    tools.tool("ask_claude", "thread-A", "call-2", "second?");
+    await waitFor(() => inboxLines(inbox).length === 2);
+    assert.deepEqual(await waitingNow(), ["call-2"]);
+    await tools.close();
+    assert.deepEqual(await waitingNow(), []);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("an attached session asks the Claude session that attached it", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  script.threads = sessionsOnDaemon();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = await mcpChild(home, daemon);
+  const tools = new ToolsChild(home.home);
+  try {
+    await mcp.call("attach", { thread: "slow-requests" });
+    const asking = tools.tool("ask_claude", "thread-5", "call-ask", "index or cache?");
+    await waitFor(() => inboxLines(path.join(home.dir, "thread-5.jsonl")).some((line) => line.kind === "ask"));
+    await mcp.call("reply", { threadId: "thread-5", text: "The index." });
+    assert.equal((await asking).text, "The index.");
+  } finally {
+    await tools.close();
     await mcp.close();
     await daemon.close();
     await home.close();
@@ -578,13 +684,14 @@ test("an unanswered approval times out with decline", { timeout: 20_000 }, async
   }
 });
 
-test("several held requests are answered by callId, and a finished turn clears what is left", { timeout: 20_000 }, async () => {
+test("several waiting requests are answered by callId, and a finished turn withdraws what is left", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
   const { mcp, socket } = await startedThread(home, daemon, script);
+  const tools = new ToolsChild(home.home);
   try {
-    send(socket, { id: 960, method: "item/tool/call", params: { threadId: "thread-A", turnId: "turn-1", callId: "ask-1", tool: "ask_claude", arguments: { text: "first?" } } });
+    const asking = tools.tool("ask_claude", "thread-A", "ask-1", "first?");
     send(socket, { id: 961, method: "item/commandExecution/requestApproval", params: { threadId: "thread-A", turnId: "turn-1", itemId: "cmd-1", command: "make deploy" } });
     await waitFor(() => inboxLines(path.join(home.dir, "thread-A.jsonl")).length === 2);
     const ambiguous = await mcp.call("reply", { threadId: "thread-A", text: "yes" });
@@ -595,14 +702,16 @@ test("several held requests are answered by callId, and a finished turn clears w
     assert.equal(answered.isError, false, answered.text);
     await waitFor(() => script.messages.some((message) => message.id === 961));
     assert.deepEqual(script.messages.find((message) => message.id === 961).result, { decision: "accept" });
-    assert.equal(script.messages.some((message) => message.id === 960), false);
 
     send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-1", status: "interrupted" } } });
-    await waitFor(() => inboxLines(path.join(home.dir, "thread-A.jsonl")).some((line) => line.kind === "completed"));
+    const withdrawn = await asking;
+    assert.equal(withdrawn.isError, true);
+    assert.match(withdrawn.text, /turn ended before Claude answered/);
     const listed = await mcp.call("list", {});
     assert.deepEqual(listed.json.threads[0].waiting, []);
     assert.equal(listed.json.attention, undefined);
   } finally {
+    await tools.close();
     await mcp.close();
     await daemon.close();
     await home.close();

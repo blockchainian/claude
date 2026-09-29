@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ABOUTME: Lets Claude Code run codex threads on the shared app-server daemon as supervised workers.
-// ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them.
+// ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them; `claude-tools` serves codex.
 
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -9,36 +9,34 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
-import { SessionStore } from "./inbox.mjs";
+import { runClaudeTools } from "./claude-tools.mjs";
+import { SessionStore, askTimeoutSeconds, writeSupervisor } from "./inbox.mjs";
 import { resolveSessionId } from "./session.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
+const pluginManifestPath = path.resolve(path.dirname(scriptPath), "../.claude-plugin/plugin.json");
 const adversarialStancePath = path.join(path.dirname(scriptPath), "adversarial-review.md");
 const usage = `usage:
   codex-manager.mjs mcp                                   serve Claude's codex tools over stdio
   codex-manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
   codex-manager.mjs pending                               Stop hook: block on undelivered events
+  codex-manager.mjs claude-tools                          serve notify_claude and ask_claude to codex over stdio
   codex-manager.mjs whoami                                print the resolved Claude session id`;
 
-const textArgument = { type: "object", properties: { text: { type: "string", description: "The message for Claude." } }, required: ["text"], additionalProperties: false };
-const NOTIFY_TOOL = {
-  type: "function",
-  name: "notify_claude",
-  description: "Send a short progress note to Claude, the supervisor who started this thread. Claude reads it asynchronously; keep working after calling it.",
-  inputSchema: textArgument
-};
-const ASK_TOOL = {
-  type: "function",
-  name: "ask_claude",
-  description: "Ask Claude, the supervisor who started this thread, for a decision and wait for the answer. The answer comes back as this tool's result. Use it only when you need a decision you cannot make yourself; if no answer arrives in time the result says so and you proceed on your own judgment.",
-  inputSchema: textArgument
-};
 const DEFAULT_DECISIONS = ["accept", "acceptForSession", "decline", "cancel"];
 const APPROVALS = {
   "item/commandExecution/requestApproval": ["command", "cwd", "reason"],
   "item/fileChange/requestApproval": ["reason", "grantRoot"]
 };
-const askTimeoutSeconds = () => Number(process.env.CODEX_MANAGER_ASK_TIMEOUT) > 0 ? Number(process.env.CODEX_MANAGER_ASK_TIMEOUT) : 300;
+// Codex gives up on a tool call after its own timeout, so that one has to outlast the wait for Claude's answer.
+const TOOL_TIMEOUT_MARGIN_SECONDS = 60;
+const FORWARDED_ENV = ["CODEX_MANAGER_HOME", "CODEX_MANAGER_ASK_TIMEOUT"];
+
+/** How codex launches the server that carries notify_claude and ask_claude, as an mcp_servers entry. */
+function claudeToolsServer() {
+  const env = Object.fromEntries(FORWARDED_ENV.filter((name) => process.env[name]).map((name) => [name, process.env[name]]));
+  return { command: process.execPath, args: [scriptPath, "claude-tools"], env, tool_timeout_sec: askTimeoutSeconds() + TOOL_TIMEOUT_MARGIN_SECONDS, default_tools_approval_mode: "approve" };
+}
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];
 
 function log(message) {
@@ -107,7 +105,7 @@ async function runPending() {
   // A held ask is nudged once per stop; when the hook itself caused this stop, only new events count.
   if (!hook.stop_hook_active) {
     for (const thread of store.readState().threads) {
-      for (const waiting of thread.waiting ?? []) {
+      for (const waiting of [...(thread.waiting ?? []), ...store.asks(thread.id)]) {
         sections.push(`codex thread ${thread.id} is waiting for reply since ${new Date(waiting.since).toISOString()} (${waiting.kind} ${waiting.callId}): ${waiting.text}`);
       }
     }
@@ -156,9 +154,21 @@ class Manager {
   updateThread(threadId, patch) {
     const state = this.state();
     const index = state.threads.findIndex((thread) => thread.id === threadId);
-    if (index === -1) state.threads.push({ id: threadId, ...patch });
-    else state.threads[index] = { ...state.threads[index], ...patch };
+    if (index === -1) {
+      state.threads.push({ id: threadId, ...patch });
+      this.supervise(threadId);
+    } else state.threads[index] = { ...state.threads[index], ...patch };
     this.writeState(state);
+  }
+
+  /** Points the thread's notify_claude and ask_claude calls at this session. */
+  supervise(threadId) {
+    writeSupervisor(threadId, { sessionId: this.store.sessionId, pid: process.pid });
+  }
+
+  /** What the thread is waiting on: approvals held for the daemon, and questions codex keeps on disk. */
+  waiting(thread) {
+    return [...(thread.waiting ?? []), ...this.store.asks(thread.id)];
   }
 
   dropThread(threadId) {
@@ -203,7 +213,7 @@ class Manager {
   onDisconnect(client, error) {
     if (this.client !== client) return;
     this.client = undefined;
-    // Held requests die with the connection; the daemon replays them on resume, with the deadline kept in state.
+    // Held approvals die with the connection; the daemon replays them on resume, with the deadline kept in state.
     for (const entries of this.held.values()) for (const entry of entries) clearTimeout(entry.timer);
     this.held.clear();
     log(`daemon connection lost: ${error.message}`);
@@ -226,6 +236,7 @@ class Manager {
   /** Re-subscribes to every recorded thread and backfills turns that ended while disconnected. */
   async adopt(client) {
     for (const thread of this.state().threads) {
+      this.supervise(thread.id);
       let resumed;
       try {
         resumed = await client.request("thread/resume", { threadId: thread.id, initialTurnsPage: { limit: 1, sortDirection: "desc" } });
@@ -263,8 +274,9 @@ class Manager {
     this.updateThread(threadId, { turnId: turn.id, lastStatus: turn.status, error: undefined, waiting: [] });
   }
 
-  /** The daemon aborts a thread's held requests when its turn ends or a new one starts. */
+  /** The daemon aborts a thread's held requests when its turn ends or a new one starts, and its questions go with them. */
   forget(threadId) {
+    for (const ask of this.store.asks(threadId)) this.store.removeAsk(threadId, ask.callId);
     for (const [callId, entries] of this.held) {
       if (entries[0]?.threadId !== threadId) continue;
       for (const entry of entries) clearTimeout(entry.timer);
@@ -294,13 +306,6 @@ class Manager {
     if (!this.owns(params.threadId)) return reject(`codex-manager does not own thread ${params.threadId}`);
     // Every subscriber receives an attached session's requests and the first answer settles them, errors included.
     if (this.thread(params.threadId).attached) return undefined;
-    if (method === "item/tool/call" && params.tool === NOTIFY_TOOL.name) {
-      this.store.append(params.threadId, { kind: "notify", turnId: params.turnId, callId: params.callId, text: params.arguments?.text ?? "" });
-      return client.send({ id, result: { contentItems: [{ type: "inputText", text: "Delivered to Claude." }], success: true } });
-    }
-    if (method === "item/tool/call" && params.tool === ASK_TOOL.name) {
-      return this.hold(client, id, params.threadId, { kind: "ask", callId: params.callId, turnId: params.turnId, text: params.arguments?.text ?? "" });
-    }
     const fields = APPROVALS[method];
     if (fields) {
       const details = Object.fromEntries(fields.filter((field) => params[field] != null).map((field) => [field, params[field]]));
@@ -313,7 +318,7 @@ class Manager {
     return reject(`codex-manager does not handle ${method}`);
   }
 
-  /** Parks a daemon request until Claude replies or the ask timeout answers for it. */
+  /** Parks an approval request until Claude replies or the ask timeout declines it. */
   hold(client, id, threadId, event) {
     const thread = this.thread(threadId);
     const waiting = thread.waiting ?? [];
@@ -332,11 +337,8 @@ class Manager {
 
   expire(threadId, event) {
     const seconds = askTimeoutSeconds();
-    const answer = event.kind === "approval"
-      ? { decision: "decline" }
-      : { contentItems: [{ type: "inputText", text: `Claude did not answer within ${seconds} seconds. Proceed on your own judgment and state the assumption you made in your final message.` }], success: true };
     log(`${event.kind} ${event.callId} on thread ${threadId} timed out after ${seconds}s`);
-    this.answer(threadId, event.callId, answer);
+    this.answer(threadId, event.callId, { decision: "decline" });
   }
 
   answer(threadId, callId, result) {
@@ -350,14 +352,14 @@ class Manager {
   }
 
   attention() {
-    const lines = this.state().threads.flatMap((thread) => (thread.waiting ?? []).map((entry) => `thread ${thread.id} is waiting for reply (${entry.kind} ${entry.callId}): ${entry.text}`));
+    const lines = this.state().threads.flatMap((thread) => this.waiting(thread).map((entry) => `thread ${thread.id} is waiting for reply (${entry.kind} ${entry.callId}): ${entry.text}`));
     return lines.length ? lines : undefined;
   }
 
-  async startThread(client, { cwd, name, sandbox, dynamicTools, record }) {
+  async startThread(client, { cwd, name, sandbox, claudeTools, record }) {
     const params = { cwd, approvalPolicy: "on-request", sandbox, serviceName: "codex-manager", ephemeral: false };
     if (sandbox === "workspace-write") params.config = { "sandbox_workspace_write.network_access": true };
-    if (dynamicTools) params.dynamicTools = dynamicTools;
+    if (claudeTools) params.config = { ...params.config, "mcp_servers.claude": claudeToolsServer() };
     const started = await client.request("thread/start", params);
     const threadId = started.thread.id;
     if (name) await client.request("thread/name/set", { threadId, name });
@@ -369,7 +371,7 @@ class Manager {
     if (!cwd || !prompt) throw new Error("cwd and prompt are required");
     const client = await this.connect();
     const absolute = path.resolve(cwd);
-    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", dynamicTools: [NOTIFY_TOOL, ASK_TOOL] });
+    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: true });
     const turn = await this.startTurn(client, threadId, prompt);
     return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when codex finishes the turn, calls notify_claude or ask_claude, or needs an approval." };
   }
@@ -447,21 +449,19 @@ class Manager {
     if (!threadId || !text) throw new Error("threadId and text are required");
     this.thread(threadId);
     await this.connect();
-    const waiting = this.thread(threadId).waiting ?? [];
+    const waiting = this.waiting(this.thread(threadId));
     if (!waiting.length) throw new Error(`thread ${threadId} is not waiting for a reply`);
     if (!callId && waiting.length > 1) throw new Error(`thread ${threadId} has several requests waiting; pass callId: ${waiting.map((entry) => `${entry.callId} (${entry.kind})`).join(", ")}`);
     const target = callId ? waiting.find((entry) => entry.callId === callId) : waiting[0];
     if (!target) throw new Error(`thread ${threadId} has no waiting request ${callId}`);
     const { kind, decisions } = target;
-    if (!this.held.has(target.callId)) throw new Error(`request ${target.callId} was not replayed by the daemon; its turn has probably ended`);
-    let result;
-    if (kind === "approval") {
-      if (!decisions.includes(text)) throw new Error(`approval reply must be one of: ${decisions.join(", ")}`);
-      result = { decision: text };
+    if (kind === "ask") {
+      this.store.writeReply(threadId, target.callId, text);
     } else {
-      result = { contentItems: [{ type: "inputText", text }], success: true };
+      if (!this.held.has(target.callId)) throw new Error(`request ${target.callId} was not replayed by the daemon; its turn has probably ended`);
+      if (!decisions.includes(text)) throw new Error(`approval reply must be one of: ${decisions.join(", ")}`);
+      this.answer(threadId, target.callId, { decision: text });
     }
-    this.answer(threadId, target.callId, result);
     return { threadId, callId: target.callId, kind, answered: true, await: awaitCommand(threadId) };
   }
 
@@ -476,7 +476,7 @@ class Manager {
 
   async list() {
     if (!this.client) await this.connect().catch((error) => log(`not connected: ${error.message}`));
-    const threads = this.state().threads.map((thread) => ({ waiting: [], ...thread, unread: this.store.unreadCount(thread.id), await: awaitCommand(thread.id) }));
+    const threads = this.state().threads.map((thread) => ({ ...thread, waiting: this.waiting(thread), unread: this.store.unreadCount(thread.id), await: awaitCommand(thread.id) }));
     return { connected: this.connected(), sessionDir: this.store.dir, threads };
   }
 }
@@ -502,7 +502,7 @@ const TOOLS = [
 ];
 
 async function runMcp() {
-  const plugin = JSON.parse(await readFile(path.resolve(path.dirname(scriptPath), "../.claude-plugin/plugin.json"), "utf8"));
+  const plugin = JSON.parse(await readFile(pluginManifestPath, "utf8"));
   const sessionId = await resolveSessionId();
   const store = new SessionStore(sessionId);
   const manager = new Manager(store, daemonSocketPath(process.env.CODEX_MANAGER_DAEMON_SOCKET), plugin.version);
@@ -557,6 +557,7 @@ export async function main(argv) {
   if (command === "mcp") return runMcp();
   if (command === "await") return runAwait(options);
   if (command === "pending") return runPending();
+  if (command === "claude-tools") return runClaudeTools(JSON.parse(await readFile(pluginManifestPath, "utf8")).version);
   if (command === "whoami") {
     process.stdout.write(`${await resolveSessionId()}\n`);
     return 0;
