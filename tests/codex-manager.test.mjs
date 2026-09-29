@@ -786,7 +786,8 @@ test("review starts a read-only thread, runs codex's review mode on a base sha, 
     const text = "The patch is correct.\n\nReview comment:\n\n- [P2] Guard the empty list — src/a.ts:10-12\n  The loop assumes one element.";
     send(socket, { method: "item/completed", params: { threadId: "thread-A", turnId: "turn-review", item: { type: "exitedReviewMode", id: "r1", review: text } } });
     send(socket, { method: "item/completed", params: { threadId: "thread-A", turnId: "turn-review", item: { type: "agentMessage", id: "m9", text } } });
-    send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-review", status: "completed" } } });
+    // The daemon's finished turn carries the agent message, which repeats the review, and not the review item.
+    send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-review", status: "completed", items: [{ type: "agentMessage", id: "m9", text }] } } });
     const inbox = path.join(home.dir, "thread-A.jsonl");
     await waitFor(() => inboxLines(inbox).length === 1);
     assert.equal(await readFile(out, "utf8"), text);
@@ -884,7 +885,9 @@ const sessionsOnDaemon = () => [
   { id: "thread-2", name: "twin", cwd: "/repo/b", status: { type: "active", activeFlags: [] } },
   { id: "thread-3", name: null, cwd: "/repo/c", status: { type: "notLoaded" } },
   { id: "thread-4", name: "twin", cwd: "/repo/d", status: { type: "notLoaded" } },
-  { id: "thread-5", name: "slow-requests", cwd: "/repo/e", status: { type: "active", activeFlags: [] } }
+  { id: "thread-5", name: "slow-requests", cwd: "/repo/e", status: { type: "active", activeFlags: [] } },
+  { id: "thread-6", name: "stale", cwd: "/repo/f", status: { type: "notLoaded" } },
+  { id: "thread-7", name: "stale", cwd: "/repo/g", status: { type: "notLoaded" } }
 ];
 
 async function mcpChild(home, daemon, env) {
@@ -916,7 +919,7 @@ test("attach finds a session by name across pages, subscribes without changing i
     assert.match(attached.json.note, /Approvals and questions stay with the client/);
 
     const lists = script.messages.filter((message) => message.method === "thread/list");
-    assert.deepEqual(lists.map((message) => message.params.cursor), [undefined, "2", "4"]);
+    assert.deepEqual(lists.map((message) => message.params.cursor), [undefined, "2", "4", "6"]);
     assert.equal(lists[0].params.searchTerm, undefined);
     const resumes = script.messages.filter((message) => message.method === "thread/resume");
     assert.deepEqual(resumes.map((message) => message.params), [{ threadId: "thread-5", initialTurnsPage: { limit: 1, sortDirection: "desc" } }]);
@@ -996,16 +999,40 @@ test("attach refuses a name no session has, and a name several sessions share", 
     const missing = await mcp.call("attach", { thread: "fix-log" });
     assert.equal(missing.isError, true);
     assert.match(missing.text, /no codex session has the id or name "fix-log"/);
-    const shared = await mcp.call("attach", { thread: "twin" });
+    const shared = await mcp.call("attach", { thread: "stale" });
     assert.equal(shared.isError, true);
-    assert.match(shared.text, /2 codex sessions are named "twin"/);
-    assert.match(shared.text, /thread-2 \(active, \/repo\/b\)/);
-    assert.match(shared.text, /thread-4 \(notLoaded, \/repo\/d\)/);
+    assert.match(shared.text, /2 codex sessions are named "stale"/);
+    assert.match(shared.text, /thread-6 \(notLoaded, \/repo\/f\)/);
+    assert.match(shared.text, /thread-7 \(notLoaded, \/repo\/g\)/);
     const unnamed = await mcp.call("attach", {});
     assert.equal(unnamed.isError, true);
     assert.match(unnamed.text, /thread is required/);
     assert.equal(script.messages.some((message) => message.method === "thread/resume"), false);
     assert.deepEqual((await mcp.call("list", {})).json.threads, []);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("attach takes the one session that is open when others share its name", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  script.threads = sessionsOnDaemon();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = await mcpChild(home, daemon);
+  try {
+    const attached = await mcp.call("attach", { thread: "twin" });
+    assert.equal(attached.isError, false, attached.text);
+    assert.equal(attached.json.threadId, "thread-2");
+
+    script.threads[3].status = { type: "idle" };
+    const bothOpen = await mcp.call("attach", { thread: "twin" });
+    assert.equal(bothOpen.isError, true);
+    assert.match(bothOpen.text, /2 codex sessions are named "twin"/);
+    assert.match(bothOpen.text, /thread-2 \(active, \/repo\/b\)/);
+    assert.match(bothOpen.text, /thread-4 \(idle, \/repo\/d\)/);
   } finally {
     await mcp.close();
     await daemon.close();

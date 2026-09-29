@@ -68,8 +68,9 @@ with its app-server daemon running (`codex agents` starts one).
 ## Attached sessions
 
 `attach` pages through `thread/list` and matches the name itself, because the
-daemon's `searchTerm` filters titles. A name several sessions share is refused
-with the candidates' ids.
+daemon's `searchTerm` filters titles. Sessions keep their name after they are
+closed, so when several share one, the only one that is open is taken; with
+none or several open, the name is refused with the candidates' ids.
 
 The daemon sends a thread's approval requests to every client subscribed to
 it, and the first answer settles them for all. So for an attached session the
