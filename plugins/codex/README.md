@@ -8,7 +8,7 @@ the same `codex` plugin name, so its two skills join the official plugin's
 
 **The DX:** plan a feature with Claude Code (the [feature](../feature/README.md)
 user writes `plan.md` — plan mode, by hand, or any agent), then hand the plan to `/codex:implement`.
-Claude writes `workstreams.txt`, one pointer line per workstream, and launches
+Claude writes `codex-workstreams.txt`, one pointer line per workstream, and launches
 `implement.sh` in the background. Codex implements the workstreams in parallel
 worktrees, each gated by the plan's check command with bounded retries; green
 workstream branches merge directly onto **the branch your session is on, in
@@ -44,7 +44,7 @@ optionally `gh` (authenticated) for automatic PR creation.
 
 | Skill | Responsibility |
 |---|---|
-| `/codex:implement` | Turn `plan.md` into `workstreams.txt`, launch `implement.sh` in the background, relay `summary.json` and the PR when it exits. |
+| `/codex:implement` | Turn `plan.md` into `codex-workstreams.txt`, launch `implement.sh` in the background, relay `summary.json` and the PR when it exits. |
 | `/codex:review` | Run `review.sh` over a commit range and write `review.json` (`{findings: [{file, line, severity, claim}]}`, severity `must-fix` or `nit`) for the caller to triage. |
 
 ## codex-manager
@@ -157,12 +157,12 @@ Both scripts also work standalone, no Claude required:
 
 ```
 plugins/codex/skills/implement/implement.sh \
-  --workstreams specs/my-feature/workstreams.txt --feature my-feature \
+  --workstreams specs/my-feature/codex-workstreams.txt --feature my-feature \
   --check "yarn test" --spec specs/my-feature/plan.md
 
 plugins/codex/skills/review/review.sh . \
   "$(cat .git/codex-implement/my-feature/pre-merge.sha)" HEAD \
-  specs/my-feature/review.json specs/my-feature/plan.md
+  specs/my-feature/review/review.json specs/my-feature/plan.md
 ```
 
 ### implement.sh
@@ -259,7 +259,7 @@ however many workstreams run.
 ### Pipeline
 
 ```
-1. Handover  — Claude (one turn): workstreams.txt from plan.md, then launch
+1. Handover  — Claude (one turn): codex-workstreams.txt from plan.md, then launch
 2. Execute   — codex ×N in parallel worktrees: workstream → check → branch (bounded retries)
 3. Merge     — workstream branches → the session branch, in the session worktree; conflicts resolved there
 4. Deliver   — post-merge check, push the session branch, update or open its PR
@@ -271,7 +271,7 @@ reasoning depth rather than speed, and workstream independence — which the
 whole pipeline assumes — is produced by whoever writes the plan, not checked at runtime.
 Partition along file boundaries so no two workstreams edit the same file;
 when overlap is unavoidable the plan's Dependencies records it so the merge
-expects the conflict. `plan.md` is the spec codex reads; `workstreams.txt`
+expects the conflict. `plan.md` is the spec codex reads; `codex-workstreams.txt`
 carries one pointer line per workstream, never the brief.
 
 **Execute** keeps a worktree pool sized to concurrency, not to workstream

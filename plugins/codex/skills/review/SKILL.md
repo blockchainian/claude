@@ -24,7 +24,7 @@ run it yourself. `implement.sh` never calls it.
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/review/review.sh <repo> <base-sha> HEAD \
-  specs/<date>-<topic>/review.json specs/<date>-<topic>/plan.md
+  <dir>/review/review.json <dir>/plan.md
 ```
 
 Arguments: the repo checkout, the commit the changes start after (excluded),
