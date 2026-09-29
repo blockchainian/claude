@@ -1,20 +1,19 @@
 # Outcome: <feature>
 
-<!-- Written by the orchestrator at phase end (ship step 9), not by the planner. This file is for
+<!-- Written by the orchestrator at phase end (ship step 9). This file is for
 the user and for memory — the phase's record, and the only place the shipped outcome is written;
 plan.md stays input-only. Write it clear, succinct and accurate, optimised for fast reading and no
 fact lost: bullets, plain words, no code anchors. -->
 
 Shipped <date>. <!-- or: Not shipped — <one line why>. -->
 
-## Acceptance
+## Delivered
 
-<!-- One line per acceptance criterion from problem.md's "Accepted when". Each: AC<n>, met or
-not-met, and the test or probe that settled it. This mirrors check-acceptance.py's coverage as a
-result: a criterion whose test never ran or went red is not-met and the feature did not fully ship.
--->
+<!-- One line per workstream in the plan. Each: the workstream id, delivered or not, and the test or
+probe that proved it. A workstream whose test never ran or went red is not delivered and the feature
+did not fully ship. -->
 
-- `AC<n>` — met · <test or probe name>
+- `<workstream id>` — delivered · <test or probe name>
 
 ## Code review
 
@@ -39,7 +38,7 @@ clean. -->
 ## Follow-ups
 
 <!-- Work deliberately left out of this ship: deferred items, non-blocking observations, lessons.
-One line each. A genuinely actionable follow-up seeds the next problem.md — name it. Empty is fine;
+One line each. A genuinely actionable follow-up seeds the next plan — name it. Empty is fine;
 write `None.` -->
 
 - <follow-up>

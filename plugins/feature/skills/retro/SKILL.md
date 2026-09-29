@@ -5,7 +5,7 @@ description: >
   route each fix back into the workflow it came from. Run in a SEPARATE
   session, passing the finished session's name: "/feature:retro <session-name>".
   Reads that session's transcript as evidence, ranks wastes by real token cost,
-  and proposes fixes to ground, the planner and ship. NOT in the session being
+  and proposes fixes to ship, the plan template and memory. NOT in the session being
   analysed (a session grading itself inherits the blind spot that caused the
   waste), and not for a one-turn task with nothing to rank.
 ---
@@ -52,7 +52,7 @@ touching anything.
 
    > A failed gate is not proof of bad code. Ask whether the **code** was wrong
    > or the **plan/gate** was wrong. A run where every workstream "failed its
-   > check" but all wrote correct code is a planner defect, not an agent defect.
+   > check" but all wrote correct code is a plan defect, not an agent defect.
 
 3. **Classify each waste on one axis, and name where the answer already was.**
    Every finding carries a token cost and a pointer to the fact/rule that would
@@ -60,19 +60,20 @@ touching anything.
 
    - **Axis A — knowable-fact miss.** The answer already existed in memory or the
      repo (a memory that warned of the gate; an existing client that held the
-     auth recipe). Fix feeds **`/feature:ground`**.
+     auth recipe). Fix feeds **memory**, so the next planning turn front-loads
+     the check.
    - **Axis B — workflow/topology deviation.** The session did not run the shape
      ship prescribes — UX work as `general-purpose` agents instead of
      `ux-implementer` + `ux-verifier`, hand-driving instead of probe-first. The
      spawn ledger shows this directly. Classify each as **lapse** (ship was
      clear, discipline failed → a ship guardrail) or **signal** (the shape did
      not fit → change the workflow). Fix feeds **`/feature:ship`**.
-   - **Axis C — planner defect.** The plan encoded a gate/spec/scope/criterion
+   - **Axis C — plan defect.** The plan encoded a gate/spec/scope/criterion
      that could not hold and detonated only downstream: a check that can't pass
      on baseline, a value contradicting existing code, an under-scoped workstream
      whose gate was too narrow to catch cross-file breakage, an unsatisfiable
      success criterion, or missing de-risk sequencing (no pilot, no probe-first).
-     Fix feeds the **`planner`** agent + `skills/ship/plan-template.md`.
+     Fix feeds `skills/ship/plan-template.md` and ship's plan check.
 
    Keep an **Inherent (not waste)** bucket: test retargeting, legitimate
    exploration, a gate-fix the plan could not have avoided. Honesty about what
@@ -92,7 +93,7 @@ touching anything.
 5. **Write `retro.md` and `retro.json` to `~/.claude/retros/<date>-<session>/`, then
    stop at the gate.** `retro.md` is the human record: ranked wastes with evidence
    (token cost, the `path:line` or memory that held the answer, the axis), then the
-   proposed fixes grouped by destination (ground / planner / ship / memory).
+   proposed fixes grouped by destination (ship / plan template / memory).
    `retro.json` is the machine record that makes efficacy analyzable later — one
    object:
 
@@ -110,8 +111,8 @@ touching anything.
    before applying anything.
 
 6. **Apply, on approval, smallest first — and log it.** Memory writes (sharpened so
-   the next session front-loads the check) apply on approval. Edits to `ground`, the
-   `planner` agent, `ship` or the plan template are **proposals** — they change how
+   the next session front-loads the check) apply on approval. Edits to `ship` or the
+   plan template are **proposals** — they change how
    every future run behaves, so never apply one without explicit sign-off. The
    cheapest ship guardrail, recurring across runs: validate each workstream's check
    command on the clean baseline before fan-out, and reject any gate already red.

@@ -1,13 +1,14 @@
 # Plan: <feature>
 
-<!-- Lines in these comments are guidance for the planner; delete them, do not copy them. -->
-<!-- Refuse a problem.md whose Status line does not contain "no design decided", or that records the
-work as shipped: there is nothing to plan. -->
+<!-- Lines in these comments are guidance for whoever writes the plan; delete them, do not copy them. -->
+<!-- Ship requires Workstreams (each block ending in a Files: line), Dependencies and Checks; every
+other section is optional and read only by the ship step that names it. -->
 <!-- This file is the agent-facing spec: nothing in it is for the user, and no decision rationale,
-alternative rejected, risk or shipped outcome belongs here. Those go in decisions.md (pre-launch,
-decisions-template.md) and outcome.md (post-ship, outcome-template.md). A codex workstream reads
-only the shared core — Scope, Facts, Constraints, Dependencies, Invariants — plus its own block, so
-that set must be necessary and sufficient to build the block correctly without any other section. -->
+alternative rejected, risk or shipped outcome belongs here. Decisions stay with the user's plan
+review; the shipped outcome goes to outcome.md (post-ship, outcome-template.md). A codex workstream
+reads only the shared core — Scope, Facts, Constraints, Dependencies, Invariants — plus its own
+block, so that set must be necessary and sufficient to build the block correctly without any other
+section. -->
 
 Base: `<short sha>` on branch `<branch>`, <date>. Every code anchor below is `symbol` plus
 `path.ts:NN` at that SHA; when they disagree, the symbol wins.
@@ -16,17 +17,15 @@ Base: `<short sha>` on branch `<branch>`, <date>. Every code anchor below is `sy
 
 The ask, verbatim: "<the user's words>".
 
-In scope: <the decided items, one line each, pointing at the `problem.md` section that decided them>.
+In scope: <the decided items, one line each>.
 Out of scope: <what a reader might expect and must not do>.
 
 ## Facts
 
-Repo facts come from `specs/<date>-<topic>/problem.md` at SHA `<short sha>` only. A fact that is
-not in that file is a question, not an inference.
-
-<!-- Anchors go inside the workstream steps, copied from problem.md; do not restate the file here.
-File locations, test-file names and each module's package.json scripts are not facts: confirm them
-with grep or glob and cite what you find in the workstream that needs them. -->
+<!-- Repo facts the workstreams build on, each checked in the repo at the Base SHA and cited as
+`symbol` `path.ts:NN`. A fact that was not checked is a question, not an inference. File locations,
+test-file names and each module's package.json scripts are confirmed with grep or glob and cited in
+the workstream that needs them. -->
 
 ## Constraints
 
@@ -39,10 +38,9 @@ conventions the implementer would otherwise guess (TDD, ABOUTME headers, no comp
 ## Workstreams
 
 <!-- One block per codex workstream. The block is the whole brief: the implementer reads nothing
-else. Every acceptance criterion `AC<n>` from problem.md's "Accepted when" becomes at least one
-named test here or in the UX checklist, tagged `[AC<n>]` on the case that settles it — a ui
-criterion belongs in the UX checklist, the rest in a workstream's Tests line, a benchmark in Tests
-or Live checks. check-acceptance.py flags any criterion no test references. -->
+else. Every behaviour the ask requires becomes at least one named test here or in the UX checklist
+— a ui behaviour belongs in the UX checklist, the rest in a workstream's Tests line, a benchmark in
+Tests or Live checks. -->
 
 ### `<id>` — <one sentence: what changes and where>
 
@@ -54,7 +52,7 @@ or Live checks. check-acceptance.py flags any criterion no test references. -->
 returned id/cursor/timestamp/date back through the code and assert the output matches the
 fixture; a literal invented in the test is a defect. If no fixture is pinned, this does not
 apply. -->
-Tests: <named cases, one per behaviour: the drop, the keep, each boundary, each missing input; tag each case that settles an acceptance criterion `[AC<n>]`>.
+Tests: <named cases, one per behaviour: the drop, the keep, each boundary, each missing input>.
 Files: `path/a.ts`, `path/b.ts`.
 
 <!-- Every workstream, codex or UX, ends with a `Files:` line; check-overlap.sh reads them. -->
@@ -83,8 +81,8 @@ Files: `path/a.tsx`, `path/b.tsx`.
 
 - Between workstreams: shared files and the disjoint functions each owns; which side of a merge
   conflict to keep; order, if any.
-- Backend → UX: the wire contract the UX workstreams code against, quoted from `problem.md` as a
-  real response body:
+- Backend → UX: the wire contract the UX workstreams code against, quoted as a real response
+  body:
 
 ```json
 { }
@@ -110,12 +108,11 @@ that proves the new behavior. Delete the section if nothing changes behavior. --
 
 <!-- Delete this whole section, heading included, when the UX workstreams read `No UX lane.`
 Otherwise one surface per heading, one objective assertion per line (element exists, computed
-style, console clean, navigation happened). These become the probe. Tag each assertion that
-settles a ui acceptance criterion `[AC<n>]`. -->
+style, console clean, navigation happened). These become the probe. -->
 
 ### <surface>
 
-- <assertion> `[AC<n>]`
+- <assertion>
 
 ## New files
 
@@ -127,11 +124,11 @@ skips it. Name test files too. -->
 ## Checks
 
 <!-- Exactly one command line; implement.sh runs the same command in every worktree and after
-merge. For each touched module compose its gate from problem.md's "Checks (the gate)" — its
-type/compile check, its linter, and its tests with a path filter; never name the runner (modules
-may run different runners). A green test+lint is not proof the module compiles: the type/compile
-check is required whenever problem.md declares one. Chain modules with && when more than one is
-touched. -->
+merge. For each touched module compose its gate from the project AGENTS.md's "Checks (the gate)" —
+its type/compile check, its linter, and its tests with a path filter; never name the runner
+(modules may run different runners). A green test+lint is not proof the module compiles: the
+type/compile check is required whenever the project declares one. Chain modules with && when more
+than one is touched. -->
 
 - `<command>`
 

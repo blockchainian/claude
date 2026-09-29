@@ -5,7 +5,7 @@ description: >
   quota exhausted, end of day, the context safety rail in the user's CLAUDE.md, or the
   55-minute idle wake-up firing.
   Use for "/feature:handoff", "write a handoff", or when the idle wake-up prompt says to. NOT at a
-  phase end: a phase's output (problem.md, plan.md, the PR, verdict JSONs, the report) is its
+  phase end: a phase's output (plan.md, the PR, verdict JSONs, the report) is its
   own record and needs no handoff.
 ---
 
@@ -30,15 +30,15 @@ handoff for the same topic.
 ## Rules
 
 - Every claim carries a SHA, path, URL or command. A sentence without one is narration; cut it.
-- Do not summarise the plan, the grounding doc or the report. Link them.
+- Do not summarise the plan or the report. Link them.
 - Do not record decisions already in a phase document or a memory file. Link them.
 - One next step, not a list. The resumer decides the rest from the phase document.
 
 ## Two shapes
 
-**Development flow** (ground → plan → ship): "Done" is SHAs and
-phase docs; "Next" is the phase after the one that produced the last document: the `planner` agent
-on `problem.md`, or the ship step on `plan.md`; "Do not redo" is the probes already
+**Development flow** (plan → ship): "Done" is SHAs and
+phase docs; "Next" is the phase after the one that produced the last document: writing `plan.md`,
+or the ship step on `plan.md`; "Do not redo" is the probes already
 green and the workstreams already merged (with the check output path).
 
 **Research session** (gather → analyse → derive → report): there is no phase doc, and mid-session
