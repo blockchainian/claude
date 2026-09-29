@@ -176,7 +176,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    b. Spawn `codex:codex-rescue` with the `codex` findings, told to work in the session checkout,
       commit, rebase onto the remote branch and push; spawn `ux-autofixer` with the `ux`
       findings, the worktree path, the side branch `ux/<branch>`, the PR branch and the UX
-      checklist. A finding touching `.claude/**` or `CLAUDE.md` comes back for the user.
+      checks. A finding touching `.claude/**` or `CLAUDE.md` comes back for the user.
    c. There is no re-review: when both lanes are done, redeploy staging if the codex lane pushed,
       re-run only the probes for surfaces the fixes touched, then remove the tree.
    d. Post one PR comment summarising the findings and their dispositions; that comment is the
