@@ -437,7 +437,7 @@ class Manager {
 /** Codex's own base-branch review wording, pointed at a commit and, when given, at the spec the changes implement. */
 function reviewInstructions(base, plan, decisions, stance, focus) {
   const spec = plan ? ` The changes implement the spec at ${plan}; read it first, and do not flag a behaviour change the spec asks for.` : "";
-  const decided = decisions ? ` The rules decided while the changes were built are in ${decisions}; read it too. They are not part of the spec: do not flag one as a departure from the spec, and do flag one that is itself a defect.` : "";
+  const decided = decisions ? ` The rules decided while the changes were built are in ${decisions}; read it too. They are not part of the spec and nobody has reviewed them: do not flag one as a departure from the spec, and judge each rule in it on its own. For each, trace what the rule makes the code return or store and what reads that, also in code the changes did not touch; when it leads to a wrong result for a caller or a user, report it as a finding that names the rule.` : "";
   const adversarial = stance === "adversarial" ? `\n\n${readFileSync(adversarialStancePath, "utf8").trim()}` : "";
   const focused = focus ? `\n\nFocus: ${focus}. Weigh it heavily, and still report any other material issue.` : "";
   const close = adversarial || focused ? "\n\n" : " ";
