@@ -38,7 +38,7 @@ reads it by section, so three sections are required and the rest are read when p
 Optional, each read by the step that names it: **UX workstreams** (`### <id>` blocks with a
 `Surfaces:` and a `Files:` line; without this section there is no UX lane), **UX checks** (one
 assertion per surface, which step 4 turns into probes), **Live checks**, and any file the plan creates
-marked `(new)` on its own line so the path checker skips it. `${CLAUDE_PLUGIN_ROOT}/skills/ship/plan-template.md` shows the shape. Anything
+marked `(new)` on its own line so the path checker skips it. `${CLAUDE_PLUGIN_ROOT}/skills/ship/minimal-plan-template.md` shows the shape. Anything
 else in the file is context for the implementers; ship does not read it. A program that touches
 many screens is one plan with many UX workstreams, not one plan per screen: planning runs once, the
 implementers run at once.

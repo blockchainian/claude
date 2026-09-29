@@ -13,7 +13,7 @@ green. `/feature:handoff` records a mid-phase stop in under 40 lines.
 
 The plan is the user's: written in plan mode, by hand, or by any agent. Ship
 reads it by section and requires only Workstreams (each block ending in a
-`Files:` line), Dependencies and Checks; `skills/ship/plan-template.md` shows
+`Files:` line), Dependencies and Checks; `skills/ship/minimal-plan-template.md` shows
 the full shape. Two checkers gate it before launch: `check-paths.sh` (every path
 exists in the repo) and `check-overlap.sh` (no file on two workstreams).
 `/feature:retro` closes the loop: run in a fresh session on a finished session,
