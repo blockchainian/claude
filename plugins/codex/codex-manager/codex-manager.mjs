@@ -266,7 +266,8 @@ class Manager {
   recordCompletion(threadId, turn) {
     const review = turn.items?.find((item) => item.type === "exitedReviewMode");
     if (review) this.saveReview(threadId, review);
-    const fromItems = review ? undefined : turn.items?.filter((item) => item.type === "agentMessage").at(-1)?.text;
+    // A review thread's agent message repeats the review, which the file already holds.
+    const fromItems = this.thread(threadId).review ? undefined : turn.items?.filter((item) => item.type === "agentMessage").at(-1)?.text;
     const lastMessage = fromItems ?? this.lastMessages.get(threadId) ?? "";
     this.lastMessages.delete(threadId);
     this.store.append(threadId, { kind: "completed", turnId: turn.id, status: turn.status, lastMessage, error: turn.error?.message });
@@ -390,7 +391,7 @@ class Manager {
     return { threadId, turnId: response.turn.id, name: name ?? null, cwd: absolute, out: target, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when the review is written." };
   }
 
-  /** Finds a session on the daemon by id or exact name; the daemon's own searchTerm filters titles, not names. */
+  /** Finds a session on the daemon by id or exact name, the open one first; the daemon's own searchTerm filters titles, not names. */
   async findThread(client, wanted) {
     const named = [];
     let cursor;
@@ -403,6 +404,9 @@ class Manager {
       cursor = page.nextCursor;
     } while (cursor);
     if (!named.length) throw new Error(`no codex session has the id or name ${JSON.stringify(wanted)}`);
+    // Sessions keep their name after they are closed, so the one that is open is the one meant.
+    const open = named.filter((thread) => thread.status?.type !== "notLoaded");
+    if (open.length === 1) return open[0];
     if (named.length > 1) throw new Error(`${named.length} codex sessions are named ${JSON.stringify(wanted)}; pass the id of one: ${named.map((thread) => `${thread.id} (${thread.status?.type}, ${thread.cwd})`).join(", ")}`);
     return named[0];
   }
