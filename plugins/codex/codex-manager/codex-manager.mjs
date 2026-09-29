@@ -367,14 +367,14 @@ class Manager {
   }
 
   /** Runs codex's own review mode (its rubric and priorities) over the commits since base; the rendered review lands in out. */
-  async review({ cwd, base, plan, out, name, stance, focus }) {
+  async review({ cwd, base, plan, decisions, out, name, stance, focus }) {
     if (!cwd || !base || !out) throw new Error("cwd, base and out are required");
     if (stance !== undefined && stance !== "adversarial") throw new Error('stance must be "adversarial" when given');
     const client = await this.connect();
     const absolute = path.resolve(cwd);
     const target = path.resolve(out);
     const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "read-only", record: { review: target } });
-    const instructions = reviewInstructions(base, plan, stance, focus);
+    const instructions = reviewInstructions(base, plan, decisions, stance, focus);
     const response = await client.request("review/start", { threadId, target: { type: "custom", instructions }, delivery: "inline" });
     this.updateThread(threadId, { turnId: response.turn.id, lastStatus: "inProgress" });
     return { threadId, turnId: response.turn.id, name: name ?? null, cwd: absolute, out: target, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when the review is written." };
@@ -435,12 +435,13 @@ class Manager {
 }
 
 /** Codex's own base-branch review wording, pointed at a commit and, when given, at the spec the changes implement. */
-function reviewInstructions(base, plan, stance, focus) {
+function reviewInstructions(base, plan, decisions, stance, focus) {
   const spec = plan ? ` The changes implement the spec at ${plan}; read it first, and do not flag a behaviour change the spec asks for.` : "";
+  const decided = decisions ? ` The rules decided while the changes were built are in ${decisions}; read it too. They are not part of the spec: do not flag one as a departure from the spec, and do flag one that is itself a defect.` : "";
   const adversarial = stance === "adversarial" ? `\n\n${readFileSync(adversarialStancePath, "utf8").trim()}` : "";
   const focused = focus ? `\n\nFocus: ${focus}. Weigh it heavily, and still report any other material issue.` : "";
   const close = adversarial || focused ? "\n\n" : " ";
-  return `Review the code changes since commit ${base}. Run \`git diff ${base}\` to inspect the changes.${spec}${adversarial}${focused}${close}Provide prioritized, actionable findings.`;
+  return `Review the code changes since commit ${base}. Run \`git diff ${base}\` to inspect the changes.${spec}${decided}${adversarial}${focused}${close}Provide prioritized, actionable findings.`;
 }
 
 const TOOLS = [
@@ -449,7 +450,7 @@ const TOOLS = [
   { name: "reply", description: "Answer a codex thread that is waiting: the text becomes the result of its ask_claude call, or, for an approval request, one of the decisions its inbox event listed. callId is needed only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "list", description: "List the codex threads this session started, their last turn status, what each is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: {} } },
-  { name: "review", description: "Run codex's built-in review mode over the commits since a base sha in a read-only thread and save the rendered review (priority-tagged findings and an overall verdict) to a file; stance adversarial makes it a challenge review. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." }, stance: { type: "string", enum: ["adversarial"], description: "adversarial: the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. Omit for the plain review." }, focus: { type: "string", description: "What the reviewer should weigh most, in a phrase." } }, required: ["cwd", "base", "out"] } }
+  { name: "review", description: "Run codex's built-in review mode over the commits since a base sha in a read-only thread and save the rendered review (priority-tagged findings and an overall verdict) to a file; stance adversarial makes it a challenge review. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, decisions: { type: "string", description: "Path of the file listing the rules decided while the changes were built, relative to cwd or absolute." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." }, stance: { type: "string", enum: ["adversarial"], description: "adversarial: the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. Omit for the plain review." }, focus: { type: "string", description: "What the reviewer should weigh most, in a phrase." } }, required: ["cwd", "base", "out"] } }
 ];
 
 async function runMcp() {
