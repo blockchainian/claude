@@ -188,6 +188,9 @@ expect "paths with line ranges are checked" "MISSING: src/missing-ranged.ts" 1 "
 out=$(cd "$repo" && "$check" "$here/fixture-brackets.md"); rc=$?
 expect "bracketed route paths are checked" "MISSING: src/routes/[missing].tsx" 1 "$out" $rc
 
+out=$(cd "$repo" && "$check" "$here/fixture-new.md"); rc=$?
+expect "a path marked (new) once is skipped everywhere, ./ prefix included" "" 0 "$out" $rc
+
 overlap="$here/../check-overlap.sh"
 
 out=$("$overlap" "$here/fixture-overlap.md"); rc=$?
