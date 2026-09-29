@@ -49,7 +49,8 @@ merge and in the session tree after. -->
 
 ## Deploy
 
-<!-- Optional. Commands that print JSON with the deployed `sha` and exit non-zero on failure.
+<!-- Optional. Commands that print JSON with the deployed `sha` (and any other field the Deploy
+checks need, such as `url`) and exit non-zero on failure.
 Without a staging line, UX checks run after the last merge; without a production line, the
 merge is the ship. -->
 
@@ -66,7 +67,9 @@ simulator). Ship runs them after the staging deploy when Deploy has one, else af
 
 ## Deploy checks
 
-<!-- Optional. Run after each deploy, against what was deployed: staging, then production. For
-behaviour a probe cannot see: routes, webhooks, migrations, env-dependent paths. -->
+<!-- Optional. Run after each deploy, against what was deployed: staging, then production. Each
+command gets `DEPLOY_ENV` (the deploy line's label) and every top-level string field of the
+deploy's JSON as `DEPLOY_<FIELD>` (`DEPLOY_SHA` always; `DEPLOY_URL` when the deploy prints a
+`url`). For behaviour a probe cannot see: routes, webhooks, migrations, env-dependent paths. -->
 
 - `<command>` — expect <value>
