@@ -58,8 +58,8 @@ A plan that fails either goes back to the user with the checker's output; ship n
 plan. Then grep each function, route, table, column and env var the plan names.
 
 Everything the run writes goes next to the plan: `<dir>` below is the directory holding `plan.md`.
-any `handoff.md` sits beside it; the review's `review.md` and the triaged `findings.json` go in
-`<dir>/review/`.
+any `handoff.md` sits beside it; the review's `review.md`, the triaged `findings.json` and the run's
+`decisions.md` go in `<dir>/review/`.
 
 ## Workstream worktrees
 
@@ -124,9 +124,12 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    Dependencies and Checks, and the standing instructions in
    `${CLAUDE_PLUGIN_ROOT}/skills/ship/codex-standing-instructions.md`, verbatim. Run
    each returned await command with `run_in_background` and end the turn. The thread's last
-   message arrives in the completed event as flat JSON: its `decisions` go into the PR
-   description, the ones marked unconfirmed are yours to check against the plan first, and its
-   `findings` join the triage in step 6. Copy any untracked env
+   message arrives in the completed event as flat JSON: append its `decisions`
+   to `<dir>/review/decisions.md` under a `## <id>` heading, one per line as the thread wrote
+   them, after checking the ones marked unconfirmed against the plan; its `findings` join the
+   triage in step 6. That file is the one place the rules decided during the run live: the
+   reviewer, the fix round and the PR description all read it, and the user decides afterwards
+   which of them belong in the plan. Copy any untracked env
    file a module needs into the worktree before starting the thread. A workstream that the plan's
    Dependencies put after another one is opened and started the same way, in the message where
    that one merges: `open` branches from the merged HEAD, so its worktree already carries what it
@@ -153,7 +156,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 4. **Review, then deploy and check staging.** Start when the last workstream is merged and pushed.
 
    a. First start the review: codex-manager `review` with `cwd` the session checkout, `base` the
-      output of `workstream.sh base`, `plan` the plan's path, and `out` `<dir>/review/review.md`.
+      output of `workstream.sh base`, `plan` the plan's path, `decisions` the path of `<dir>/review/decisions.md` when the run
+      wrote one, and `out` `<dir>/review/review.md`.
       Run its await command with `run_in_background`. It runs codex's own review mode over every
       merged workstream at once, in a read-only thread. One review per plan, one round.
    b. If the plan's Deploy section has a `staging:` command, run it, read the `sha` from its JSON
@@ -202,8 +206,9 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    a. `workstream.sh open fix-codex` when there are `codex` findings and `workstream.sh open
       fix-ux` when there are `ux` findings, so neither lane can dirty the other's tree or the
       session branch.
-   b. codex-manager `start` in the codex worktree with the `codex` findings and the same standing
-      instructions as step 2; spawn `ux-autofixer` with the `ux` findings, its worktree path and
+   b. codex-manager `start` in the codex worktree with the `codex` findings, the path of
+      `decisions.md` and the same standing instructions as step 2, and append what it decides
+      to that file as in step 2; spawn `ux-autofixer` with the `ux` findings, its worktree path and
       the UX checks for its surfaces. A finding touching `.claude/**` or `CLAUDE.md` comes back
       for the user.
    c. There is no re-review: as each lane completes, `workstream.sh check` then `merge` it as in
@@ -225,7 +230,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    against production, with `DEPLOY_ENV=production` and the deploy JSON's fields exported as in
    step 4b; without one, the merge is the ship. The PR description is the phase's
    record: before merging, write it (or rewrite it) with what each workstream delivered and the
-   test or check that proved it, the review findings each as issue-tldr / fix-tldr / commit SHA,
+   test or check that proved it, the rules in `decisions.md` that the plan did not state, the review findings each as
+   issue-tldr / fix-tldr / commit SHA,
    the deploy SHAs and deploy-check results, and the follow-ups left out of this ship — clear,
    succinct, no code anchors. Without a PR the same goes in your final message. `plan.md` stays
    input-only; do not write the record into it. Then `workstream.sh base --clear`, write the
