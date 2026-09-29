@@ -11,7 +11,7 @@ Rationale and measured numbers: `${CLAUDE_PLUGIN_ROOT}/README.md`.
 
 ## When to use
 
-A `plan.md` exists — written to the feature plugin's plan template, with one
+A `plan.md` exists — with one
 block per codex workstream and a single Checks command — and the user wants
 its backend workstreams implemented. Use for **independent, self-contained**
 workstreams codex can run in parallel. NOT for research or planning (keep
@@ -25,9 +25,9 @@ Do not re-plan and do not re-ask; the plan is the spec codex reads.
 
 1. Check the plan is usable as a spec: each workstream block ends with the
    files it owns, no two workstreams own the same file, and Dependencies names
-   any overlap the merge must expect. Conflict avoidance is the planner's job;
+   any overlap the merge must expect. Conflict avoidance is the plan author's job;
    `implement.sh` has no runtime check. A plan that fails this goes back to
-   the planner, not into the script.
+   the plan author, not into the script.
 2. Write `workstreams.txt` beside the plan: one line per codex workstream,
    each line a **pointer** into the plan, never the brief itself, that scopes
    the agent to the shared core plus its own block — necessary and sufficient
