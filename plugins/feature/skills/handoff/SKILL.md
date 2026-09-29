@@ -13,7 +13,7 @@ description: >
 
 A resumer reads the handoff plus the phase's document (or, for research, the materialized
 findings). Everything else must be pointed to, not restated. Target under 40 lines for the
-handoff itself. File: `specs/<date>-<topic>/handoff.md`, rewritten in place on every later
+handoff itself. File: `handoff.md` beside the phase document (`plan.md`), rewritten in place on every later
 handoff for the same topic.
 
 ## Five sections, in this order

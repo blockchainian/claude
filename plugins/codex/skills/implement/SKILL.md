@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Deliver a planned feature as parallel codex workstreams off the Claude critical path — write workstreams.txt from the session's plan.md, launch implement.sh in the background (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, push, PR), then relay summary.json. Use when a plan.md exists and its codex workstreams should be implemented many-at-once by codex.
+description: Deliver a planned feature as parallel codex workstreams off the Claude critical path — write codex-workstreams.txt from the session's plan.md, launch implement.sh in the background (worktree pool, per-workstream checks, bounded retries, merge onto the session branch, push, PR), then relay summary.json. Use when a plan.md exists and its codex workstreams should be implemented many-at-once by codex.
 ---
 
 # codex:implement — parallel codex implementation off the Claude critical path
@@ -28,22 +28,22 @@ Do not re-plan and do not re-ask; the plan is the spec codex reads.
    any overlap the merge must expect. Conflict avoidance is the plan author's job;
    `implement.sh` has no runtime check. A plan that fails this goes back to
    the plan author, not into the script.
-2. Write `workstreams.txt` beside the plan: one line per codex workstream,
+2. Write `codex-workstreams.txt` beside the plan: one line per codex workstream,
    each line a **pointer** into the plan, never the brief itself, that scopes
    the agent to the shared core plus its own block — necessary and sufficient
    to build correctly — for example `implement workstream "auth-token" per
-   specs/<date>-<topic>/plan.md: read its Dependencies and Checks, every
+   <dir>/plan.md: read its Dependencies and Checks, every
    section that is not a workstream, and the "auth-token" workstream block;
    ignore the other workstreams`.
    Skip the UX workstream; it is not codex's.
 3. Take the check command from the plan's Checks section verbatim;
    `implement.sh` runs it in every worktree and after merge, so everything the
    plan says must not change has to be covered by it — the gates replace a live review.
-4. Commit `workstreams.txt`. The session worktree must have no uncommitted
+4. Commit `codex-workstreams.txt`. The session worktree must have no uncommitted
    changes to tracked files when the script starts, because the run delivers
    onto this branch.
 
-Launch in the same turn. Never write a handoff: plan.md and workstreams.txt
+Launch in the same turn. Never write a handoff: plan.md and codex-workstreams.txt
 are the record, and a fresh session resumes from plan.md. The run's task
 notifications bind to the session that launches it, so never `/clear`
 mid-run. Set effort before the launching session starts; switching effort
@@ -51,8 +51,8 @@ mid-session invalidates the prompt cache.
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/skills/implement/implement.sh \
-  --workstreams specs/<date>-<topic>/workstreams.txt --feature <run-name> \
-  --check "<the plan's Checks command>" --spec specs/<date>-<topic>/plan.md \
+  --workstreams <dir>/codex-workstreams.txt --feature <run-name> \
+  --check "<the plan's Checks command>" --spec <dir>/plan.md \
   [--setup "<per-worktree deps cmd>"] \
   [--concurrency N] [--retries 2] [--timeout 2400] [--runner daemon|exec] \
   [--no-push] [--deliver-wait 1800]
