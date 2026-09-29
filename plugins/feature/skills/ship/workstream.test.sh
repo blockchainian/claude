@@ -23,8 +23,9 @@ expect_eq() { # <name> <expected> <actual>
 FIXTURE=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$FIXTURE"' EXIT
 REPO=$FIXTURE/repo
-mkdir -p "$REPO/app/node_modules/dep"
+mkdir -p "$REPO/app/node_modules/dep" "$REPO/apps/web/client/node_modules/deep"
 echo "module.exports = 1" > "$REPO/app/node_modules/dep/index.js"
+echo "module.exports = 2" > "$REPO/apps/web/client/node_modules/deep/index.js"
 git -C "$REPO" init -q -b main
 git -C "$REPO" config user.email test@example.com
 git -C "$REPO" config user.name test
@@ -42,6 +43,7 @@ expect_eq "open exits 0" 0 "$rc"
 expect_eq "open branches from HEAD" "$BASE_SHA" "$(git -C "$FIXTURE/.workstream-auth" rev-parse HEAD)"
 expect_eq "open checks out workstream/<id>" "workstream/auth" "$(git -C "$FIXTURE/.workstream-auth" rev-parse --abbrev-ref HEAD)"
 [ -f "$FIXTURE/.workstream-auth/app/node_modules/dep/index.js" ] && report "open copies node_modules into the worktree" pass || report "open copies node_modules into the worktree" fail
+[ -f "$FIXTURE/.workstream-auth/apps/web/client/node_modules/deep/index.js" ] && report "open copies node_modules at any depth" pass || report "open copies node_modules at any depth" fail
 expect_eq "open records the base once" "$BASE_SHA" "$("$WS" base)"
 out=$("$WS" open auth 2>&1); rc=$?
 expect_eq "a second open of the same id is refused" 1 "$rc"
@@ -100,6 +102,15 @@ out=$("$WS" merge clash 'true' 2>&1); rc=$?
 expect_eq "merge refuses a dirty session tree" 1 "$rc"
 case "$out" in *"uncommitted"*) report "the dirty refusal names the cause" pass ;; *) report "the dirty refusal names the cause" fail "$out" ;; esac
 git -C "$REPO" checkout -q a.txt
+
+# --- open, dependency copy fails ---
+chmod 000 "$REPO/app/node_modules/dep/index.js"
+out=$("$WS" open nodeps 2>&1); rc=$?
+chmod 644 "$REPO/app/node_modules/dep/index.js"
+expect_eq "open exits 1 when node_modules cannot be copied" 1 "$rc"
+case "$out" in *"node_modules"*) report "the copy failure names node_modules" pass ;; *) report "the copy failure names node_modules" fail "$out" ;; esac
+[ ! -d "$FIXTURE/.workstream-nodeps" ] && report "a failed open leaves no worktree behind" pass || report "a failed open leaves no worktree behind" fail
+git -C "$REPO" rev-parse -q --verify workstream/nodeps >/dev/null 2>&1 && report "a failed open leaves no branch behind" fail || report "a failed open leaves no branch behind" pass
 
 # --- base --clear, usage ---
 "$WS" base --clear

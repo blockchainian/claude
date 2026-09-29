@@ -236,8 +236,19 @@ class Manager {
     }
   }
 
+  /** A review thread's completion points at the file, not at the review text itself. */
+  saveReview(threadId, item) {
+    const out = this.thread(threadId).review;
+    if (!out) return;
+    mkdirSync(path.dirname(out), { recursive: true });
+    writeFileSync(out, item.review ?? "");
+    this.lastMessages.set(threadId, `Review written to ${out}`);
+  }
+
   recordCompletion(threadId, turn) {
-    const fromItems = turn.items?.filter((item) => item.type === "agentMessage").at(-1)?.text;
+    const review = turn.items?.find((item) => item.type === "exitedReviewMode");
+    if (review) this.saveReview(threadId, review);
+    const fromItems = review ? undefined : turn.items?.filter((item) => item.type === "agentMessage").at(-1)?.text;
     const lastMessage = fromItems ?? this.lastMessages.get(threadId) ?? "";
     this.lastMessages.delete(threadId);
     this.store.append(threadId, { kind: "completed", turnId: turn.id, status: turn.status, lastMessage, error: turn.error?.message });
@@ -258,14 +269,9 @@ class Manager {
     const threadId = params.threadId;
     if (!this.owns(threadId)) return;
     if (method === "item/completed" && params.item?.type === "agentMessage") {
-      this.lastMessages.set(threadId, params.item.text || "");
+      if (!this.thread(threadId).review) this.lastMessages.set(threadId, params.item.text || "");
     } else if (method === "item/completed" && params.item?.type === "exitedReviewMode") {
-      const out = this.thread(threadId).review;
-      if (out) {
-        mkdirSync(path.dirname(out), { recursive: true });
-        writeFileSync(out, params.item.review ?? "");
-        this.lastMessages.set(threadId, `Review written to ${out}`);
-      }
+      this.saveReview(threadId, params.item);
     } else if (method === "turn/started") {
       const thread = this.thread(threadId);
       if (params.turn?.id !== thread.turnId) this.forget(threadId);

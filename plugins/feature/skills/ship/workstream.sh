@@ -34,11 +34,19 @@ open() {
   [ -f "$BASE_FILE" ] || git -C "$ROOT" rev-parse HEAD > "$BASE_FILE"
   git -C "$ROOT" worktree add -q -b "$branch" "$dir" HEAD || die "worktree add failed"
   # A fresh worktree carries only tracked files; the checks need each module's dependencies.
-  find "$ROOT" -maxdepth 3 -name node_modules -type d -prune 2>/dev/null | while read -r modules; do
-    local relative=${modules#"$ROOT"/}
+  local modules relative
+  while IFS= read -r modules; do
+    relative=${modules#"$ROOT"/}
     mkdir -p "$(dirname "$dir/$relative")"
-    cp -Rc "$modules" "$dir/$relative" 2>/dev/null || cp -R "$modules" "$dir/$relative"
-  done
+    if ! cp -Rc "$modules" "$dir/$relative" 2>/dev/null; then
+      rm -rf "$dir/$relative"
+      if ! cp -R "$modules" "$dir/$relative" 2>/dev/null; then
+        git -C "$ROOT" worktree remove --force "$dir" >/dev/null 2>&1
+        git -C "$ROOT" branch -q -D "$branch" >/dev/null 2>&1
+        die "cannot copy $relative (node_modules) into the worktree"
+      fi
+    fi
+  done < <(find "$ROOT" \( -name .git -o -name node_modules \) -prune -name node_modules -type d -print 2>/dev/null)
   printf '%s\n' "$dir"
 }
 
