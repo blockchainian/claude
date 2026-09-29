@@ -162,11 +162,10 @@ def orch_context(orch):
         if ts is not None:
             lo = ts if lo is None else min(lo, ts)
             hi = ts if hi is None else max(hi, ts)
-        # "threads": ["id", ...] recorded by codex:implement's status JSON — it arrives
-        # inside a tool_result string, so unescape one level of JSON quoting first.
+        # codex-manager tool results carry "threadId": "<id>" — inside a tool_result
+        # string, so unescape one level of JSON quoting first.
         unescaped = line.replace('\\"', '"')
-        for m in re.finditer(r'"threads"\s*:\s*\[([^\]]*)\]', unescaped):
-            threads.update(re.findall(r'"([^"]+)"', m.group(1)))
+        threads.update(re.findall(r'"threadId"\s*:\s*"([^"]+)"', unescaped))
     cwd = cwds.most_common(1)[0][0] if cwds else None
     return cwd, lo, hi, threads
 

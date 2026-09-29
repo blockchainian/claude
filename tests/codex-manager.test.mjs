@@ -184,6 +184,7 @@ function daemonScript() {
         reply({ turn: { id: script.activeTurn, status: "inProgress" } });
       }
       if (message.method === "turn/interrupt") reply({});
+      if (message.method === "review/start") reply({ turn: { id: "turn-review", status: "inProgress" }, reviewThreadId: message.params.threadId });
       if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId }, initialTurnsPage: { data: [{ id: "turn-old", status: "completed", items: [{ type: "agentMessage", text: "done while you were away" }] }] } });
     }
   };
@@ -217,7 +218,7 @@ test("mcp starts a thread with dynamic tools, relays notify_claude and completio
     const init = await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
     assert.equal(init.result.serverInfo.name, "codex-manager");
     const tools = await mcp.request("tools/list", {});
-    assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["start", "send", "reply", "interrupt", "list"]);
+    assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["start", "send", "reply", "interrupt", "list", "review"]);
 
     const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", name: "fix-bug" });
     assert.equal(started.isError, false, started.text);
@@ -617,6 +618,55 @@ test("reconnect keeps retrying while the daemon is down and does not redeliver a
     }
   } finally {
     await mcp.close();
+    await home.close();
+  }
+});
+
+test("review starts a read-only thread, runs codex's review mode on a base sha, and saves the review text", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  const out = path.join(home.home, "specs", "review", "review.md");
+  try {
+    const review = await mcp.call("review", { cwd: "plugins", base: "abc1234", plan: "specs/plan.md", out, name: "review-feature" });
+    assert.equal(review.isError, false, review.text);
+    assert.equal(review.json.threadId, "thread-A");
+    assert.equal(review.json.turnId, "turn-review");
+    assert.equal(review.json.out, out);
+    assert.equal(review.json.await, `node ${JSON.stringify(manager)} await --thread thread-A`);
+
+    const methods = script.messages.map((message) => message.method);
+    assert.deepEqual(methods, ["initialize", "initialized", "thread/start", "thread/name/set", "review/start"]);
+    const start = script.messages[2].params;
+    assert.equal(start.cwd, path.resolve("plugins"));
+    assert.equal(start.sandbox, "read-only");
+    assert.equal(start.dynamicTools, undefined);
+    const started = script.messages[4].params;
+    assert.equal(started.threadId, "thread-A");
+    assert.equal(started.delivery, "inline");
+    assert.equal(started.target.type, "custom");
+    assert.match(started.target.instructions, /since commit abc1234/);
+    assert.match(started.target.instructions, /git diff abc1234/);
+    assert.match(started.target.instructions, /specs\/plan\.md/);
+    assert.match(started.target.instructions, /Provide prioritized, actionable findings\./);
+
+    const [socket] = script.sockets;
+    const text = "The patch is correct.\n\nReview comment:\n\n- [P2] Guard the empty list — src/a.ts:10-12\n  The loop assumes one element.";
+    send(socket, { method: "item/completed", params: { threadId: "thread-A", turnId: "turn-review", item: { type: "exitedReviewMode", id: "r1", review: text } } });
+    send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-review", status: "completed" } } });
+    const inbox = path.join(home.dir, "thread-A.jsonl");
+    await waitFor(() => inboxLines(inbox).length === 1);
+    assert.equal(await readFile(out, "utf8"), text);
+    const [done] = inboxLines(inbox);
+    assert.equal(done.kind, "completed");
+    assert.equal(done.status, "completed");
+    assert.equal(done.lastMessage, `Review written to ${out}`);
+    const listed = await mcp.call("list", {});
+    assert.equal(listed.json.threads[0].review, out);
+  } finally {
+    await mcp.close();
+    await daemon.close();
     await home.close();
   }
 });

@@ -1,15 +1,16 @@
 # feature
 
 Ship a feature from a written plan, with Claude orchestrating and never
-implementing. `/feature:ship` reads `plan.md`, launches the backend lane
-through [codex](../codex/README.md)'s `/codex:implement`, launches the UX lane as
-one `ux-implementer` agent per UX workstream, all at once and in parallel with
-codex, writes the UI probes while they run,
-deploys and verifies staging, runs the local schema review (`/codex:review`)
-once per plan and triages it into `findings.json`, fixes in two lanes (`codex-rescue` and the
-`ux-autofixer` agent) with no re-review, re-probes the touched surfaces, and
-decides production only when every finding is closed and the probes are
-green. `/feature:handoff` records a mid-phase stop in under 40 lines.
+implementing. `/feature:ship` reads `plan.md`, opens a worktree per workstream
+(`skills/ship/workstream.sh`), launches the codex lane as one thread per
+workstream through [codex](../codex/README.md)'s `codex-manager` and the UX lane
+as one `ux-implementer` agent per UX workstream, all at once, writes the UI
+probes while they run, checks and merges each workstream as it finishes behind
+the plan's Checks command, runs codex's review mode once per plan and triages
+it into `findings.json`, fixes in two lanes with no re-review, re-probes the
+touched surfaces, and decides production only when every finding is closed and
+the probes are green. `/feature:handoff` records a mid-phase stop in under 40
+lines.
 
 The plan is the user's: written in plan mode, by hand, or by any agent. Ship
 reads it by section and requires only Workstreams (each block ending in a
@@ -30,6 +31,7 @@ ship, the plan template and memory.
 | `/feature:retro` | Run in a fresh session on a finished session: rank the biggest wastes by real token cost, classify each (knowable-fact miss / topology deviation / plan defect), and propose fixes to ship, the plan template and memory |
 | `ship/check-paths.sh` | Flags a path named in the plan that does not exist in the repo; `(new)` files are skipped |
 | `ship/check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the orchestrator runs it beside the path checker |
+| `ship/workstream.sh` | `open <id>` a worktree per workstream, `check <id> <cmd>` in it, `merge <id> <cmd>` onto the session branch behind the same check, `base` for the review |
 | `retro/extract.py` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
 | `retro/efficacy.py` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
 
@@ -98,7 +100,7 @@ production merge gate (step 9) against every project.
 /plugin install feature@blockchainian
 ```
 
-Requires the [codex](../codex/README.md) plugin for the backend lane and `jq`
+Requires the [codex](../codex/README.md) plugin (its `codex-manager` MCP server) for the codex lane and `jq`
 for the hooks. If the same hooks are also wired in `~/.claude/settings.json`,
 remove them there; otherwise each fires twice.
 
@@ -110,7 +112,8 @@ npm run test:feature
 
 Runs `hooks/tests/run.sh` (every case in `hooks/tests/cases.jsonl` through the
 three hook scripts), `skills/ship/tests/run.sh` (the two plan checkers against
-fixture plans in a throwaway repo), `skills/ship/watch-ci.test.sh` (the CI-watch
+fixture plans in a throwaway repo), `skills/ship/workstream.test.sh` (open, check,
+merge and base against a throwaway repo), `skills/ship/watch-ci.test.sh` (the CI-watch
 poller against a stubbed `gh`), and `skills/retro/tests/run.sh` (the retro
 extractor against a hermetic fixture session).
 

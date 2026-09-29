@@ -2,7 +2,7 @@
 // ABOUTME: Lets Claude Code run codex threads on the shared app-server daemon as supervised workers.
 // ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them.
 
-import { realpathSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
@@ -259,6 +259,13 @@ class Manager {
     if (!this.owns(threadId)) return;
     if (method === "item/completed" && params.item?.type === "agentMessage") {
       this.lastMessages.set(threadId, params.item.text || "");
+    } else if (method === "item/completed" && params.item?.type === "exitedReviewMode") {
+      const out = this.thread(threadId).review;
+      if (out) {
+        mkdirSync(path.dirname(out), { recursive: true });
+        writeFileSync(out, params.item.review ?? "");
+        this.lastMessages.set(threadId, `Review written to ${out}`);
+      }
     } else if (method === "turn/started") {
       const thread = this.thread(threadId);
       if (params.turn?.id !== thread.turnId) this.forget(threadId);
@@ -332,24 +339,37 @@ class Manager {
     return lines.length ? lines : undefined;
   }
 
+  async startThread(client, { cwd, name, sandbox, dynamicTools, record }) {
+    const params = { cwd, approvalPolicy: "on-request", sandbox, serviceName: "codex-manager", ephemeral: false };
+    if (sandbox === "workspace-write") params.config = { "sandbox_workspace_write.network_access": true };
+    if (dynamicTools) params.dynamicTools = dynamicTools;
+    const started = await client.request("thread/start", params);
+    const threadId = started.thread.id;
+    if (name) await client.request("thread/name/set", { threadId, name });
+    this.updateThread(threadId, { name: name ?? null, cwd, turnId: null, lastStatus: "idle", waiting: [], ...record });
+    return threadId;
+  }
+
   async start({ cwd, prompt, name }) {
     if (!cwd || !prompt) throw new Error("cwd and prompt are required");
     const client = await this.connect();
     const absolute = path.resolve(cwd);
-    const started = await client.request("thread/start", {
-      cwd: absolute,
-      approvalPolicy: "on-request",
-      sandbox: "workspace-write",
-      config: { "sandbox_workspace_write.network_access": true },
-      serviceName: "codex-manager",
-      ephemeral: false,
-      dynamicTools: [NOTIFY_TOOL, ASK_TOOL]
-    });
-    const threadId = started.thread.id;
-    if (name) await client.request("thread/name/set", { threadId, name });
-    this.updateThread(threadId, { name: name ?? null, cwd: absolute, turnId: null, lastStatus: "idle", waiting: [] });
+    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", dynamicTools: [NOTIFY_TOOL, ASK_TOOL] });
     const turn = await this.startTurn(client, threadId, prompt);
     return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when codex finishes the turn, calls notify_claude or ask_claude, or needs an approval." };
+  }
+
+  /** Runs codex's own review mode (its rubric and priorities) over the commits since base; the rendered review lands in out. */
+  async review({ cwd, base, plan, out, name }) {
+    if (!cwd || !base || !out) throw new Error("cwd, base and out are required");
+    const client = await this.connect();
+    const absolute = path.resolve(cwd);
+    const target = path.resolve(out);
+    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "read-only", record: { review: target } });
+    const instructions = reviewInstructions(base, plan);
+    const response = await client.request("review/start", { threadId, target: { type: "custom", instructions }, delivery: "inline" });
+    this.updateThread(threadId, { turnId: response.turn.id, lastStatus: "inProgress" });
+    return { threadId, turnId: response.turn.id, name: name ?? null, cwd: absolute, out: target, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when the review is written." };
   }
 
   async startTurn(client, threadId, prompt) {
@@ -406,12 +426,19 @@ class Manager {
   }
 }
 
+/** Codex's own base-branch review wording, pointed at a commit and, when given, at the spec the changes implement. */
+function reviewInstructions(base, plan) {
+  const spec = plan ? ` The changes implement the spec at ${plan}; read it first, and do not flag a behaviour change the spec asks for.` : "";
+  return `Review the code changes since commit ${base}. Run \`git diff ${base}\` to inspect the changes.${spec} Provide prioritized, actionable findings.`;
+}
+
 const TOOLS = [
   { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task. Returns the thread id and the await command to run in the background.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute working directory for the worker." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation." }, name: { type: "string", description: "Short human-readable thread name." } }, required: ["cwd", "prompt"] } },
   { name: "send", description: "Send a follow-up prompt to a codex thread. Starts a new turn when idle; when a turn is running the prompt is injected into it.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
   { name: "reply", description: "Answer a codex thread that is waiting: the text becomes the result of its ask_claude call, or, for an approval request, one of the decisions its inbox event listed. callId is needed only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
-  { name: "list", description: "List the codex threads this session started, their last turn status, what each is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: {} } }
+  { name: "list", description: "List the codex threads this session started, their last turn status, what each is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: {} } },
+  { name: "review", description: "Run codex's built-in review mode over the commits since a base sha in a read-only thread and save the rendered review (priority-tagged findings and an overall verdict) to a file. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." } }, required: ["cwd", "base", "out"] } }
 ];
 
 async function runMcp() {

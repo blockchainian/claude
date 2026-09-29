@@ -81,8 +81,8 @@ touching anything.
 
 4. **Account for the codex lane.** Codex runs in an external runtime, so its cost
    is not in the Claude transcript — but `extract.py` recovers it from
-   `~/.codex/sessions`: by the codex thread id that `codex:implement` records
-   in its status JSON (exact), else by originator + worktree + time window
+   `~/.codex/sessions`: by the codex thread ids codex-manager returned in the
+   transcript (exact), else by originator + worktree + time window
    (correlation — conservative, may miss runs outside this session's window and
    cannot split per-workstream). Rank the joined codex cost against the Claude
    buckets. For a codex **failure event** whose cost does not join (ephemeral,

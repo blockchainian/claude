@@ -1,21 +1,17 @@
-# ABOUTME: CI for the plugins — the codex implement and review scripts on Linux and macOS, the grok node suite, and the feature hooks.
+# ABOUTME: CI for the plugins — the codex-manager node suite, the grok node suite, and the feature hooks and ship scripts.
 name: test
 on:
   push:
     branches: [main]
   pull_request:
 jobs:
-  codex-linux:
+  codex:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: npm run test:codex
-  codex-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: brew install coreutils
-      - run: sudo ln -sf "$(which gtimeout)" /usr/local/bin/timeout || ln -sf "$(which gtimeout)" "$(brew --prefix)/bin/timeout"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: npm run test:codex
   grok:
     runs-on: ubuntu-latest
@@ -29,4 +25,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: plugins/feature/hooks/tests/run.sh
+      - run: npm run test:feature

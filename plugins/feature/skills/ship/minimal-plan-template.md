@@ -36,7 +36,7 @@ Files: `path/a.tsx`.
 
 ## Checks
 
-<!-- Exactly one command, before merge; implement.sh runs it in every worktree and after merge.
+<!-- Exactly one command; ship runs it in every worktree before merge and in the session tree after.
 Chain with && for more than one. -->
 
 - `<command>`
