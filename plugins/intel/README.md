@@ -20,11 +20,11 @@ download links and checks domain names.
   pdfminer), and for a page that only offers audio falls back to `transcribe`.
   A bare URL or file digests; `save` / `search` manage the store, with per-item
   take-aways.
-- **`translate`** — a whole English book PDF → a Chinese PDF in the original's
-  format: same cover page, page size and colors, chapter structure, running
+- **`translate`** — a whole English EPUB → a Chinese PDF in the original's
+  format: same cover image, page size and colors, chapter structure, running
   heads and folios, a regenerated clickable 目录 and flat bookmarks. Sections
-  come from the PDF outline, or from the printed contents page when there is
-  none; two-up scans are split first. Each section is one `gpt-6-luna` call
+  come from the EPUB's OPF spine and nav/ncx, keeping bold, emphasis,
+  sub/superscripts and images. Each section is one `gpt-6-luna` call
   through `codex exec`, 20 in flight; headless Chrome typesets in Baskerville + Songti SC; pikepdf adds the
   cover and bookmarks. Resumable, per-section previews, plain-Markdown edits.
 - **`analyze-appstore-reviews`** — a scraped App Store reviews JSON → a concise

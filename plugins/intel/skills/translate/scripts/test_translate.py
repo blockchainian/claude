@@ -3,8 +3,8 @@
 # requires-python = ">=3.10"
 # dependencies = ["pikepdf>=9", "markdown>=3.5", "pillow>=10"]
 # ///
-# ABOUTME: Tests the translate skill: section derivation, OCR text cleanup, prompt/answer checks, Markdown
-# ABOUTME: typesetting, and (when Chrome is present) a real render of a small generated book with cover and bookmarks.
+# ABOUTME: Tests the translate skill: EPUB section derivation, prompt/answer checks, Markdown typesetting,
+# ABOUTME: and (when Chrome is present) a real render of a small generated EPUB with cover and bookmarks.
 import importlib.util
 import json
 import os
@@ -40,65 +40,11 @@ def test_extract(ex):
     check("parse '1. Title'", ex.parse_title("1. Traction Channels") == (1, "Traction Channels"))
     check("parse 'Chapter Twelve: X'", ex.parse_title("Chapter Twelve: SEO") == (12, "SEO"))
     check("parse plain title", ex.parse_title("Preface: Traction Trumps Everything") == (None, "Preface: Traction Trumps Everything"))
-    entries = [("COVER", 0), ("CONTENTS", 5), ("Preface", 9), ("1. One", 17), ("2. Two", 24), ("Acknowledgments", 30), ("Index", 33)]
-    secs = ex.build_sections(entries, 40)
-    kinds = [s["kind"] for s in secs]
-    check("section kinds", kinds == ["cover", "contents", "front", "chapter", "chapter", "back", "skip"], str(kinds))
-    check("section ranges", [(s["start"], s["end"]) for s in secs][2:5] == [(10, 17), (18, 24), (25, 30)])
-    check("chapter label", secs[3]["label"] == "第一章" and secs[2]["label"] is None)
-
-    # A nested outline (Part > Chapter > subsection) yields parts and chapters only: subsections start on
-    # the chapter's own page and would otherwise become empty sections that crash pdftotext.
-    with tempfile.TemporaryDirectory() as d:
-        nested = pikepdf.new()
-        for _ in range(12):
-            nested.add_blank_page(page_size=(200, 300))
-        with nested.open_outline() as ol:
-            part = pikepdf.OutlineItem("Part I", 0)
-            ch1 = pikepdf.OutlineItem("Chapter 1: One", 1)
-            ch1.children.extend([pikepdf.OutlineItem("Sub a", 1), pikepdf.OutlineItem("Sub b", 3)])
-            ch2 = pikepdf.OutlineItem("Chapter 2: Two", 5)
-            ch2.children.append(pikepdf.OutlineItem("Sub c", 5))
-            part.children.extend([ch1, ch2])
-            ol.root.extend([part, pikepdf.OutlineItem("Epilogue", 9)])
-        nested.save(Path(d) / "nested.pdf")
-        flat = ex.flatten_outline(pikepdf.open(Path(d) / "nested.pdf"))
-        check("nested outline keeps parts and chapters only",
-              flat == [("Part I", 0), ("Chapter 1: One", 1), ("Chapter 2: Two", 5), ("Epilogue", 9)], str(flat))
-
-    pages = ["      PREFACE: TRACTION TRUMPS EVERYTHING\n\n"
-             "    n 2006 I sold a company. It was strange for many rea-\n"
-             "sons, not the least of which was that we had no employees.\n"
-             "     The terms were such that I moved twenty-\n"
-             "five miles away.\n"
-             "         Traction is basically quantitative evidence\n"
-             "         of customer demand, says Naval.\n"
-             "\n"
-             "         So if you are in enterprise software the bar\n"
-             "         is low.\n"
-             "     Next paragraph starts here\n"
-             "                    ix\n",
-             "      TRACTION\n"
-             "and continues on the next page.\n"
-             "     A fresh paragraph.\n"
-             "                     10\n"]
-    paras = ex.clean_pages(pages, ["Preface: Traction Trumps Everything", "Traction"])
-    check("running heads and folios dropped", not any("PREFACE" in p or p.strip() in ("ix", "10") or p == "TRACTION" for p in paras), str(paras))
-    check("hyphenated word rejoined", any("reasons" in p for p in paras), str(paras))
-    check("real hyphen kept", any("twenty-five" in p for p in paras), str(paras))
-    check("indented block becomes one quote", sum(p.startswith("> ") for p in paras) == 1 and any(p.startswith("> Traction is basically") and "the bar is low" in p for p in paras), str(paras))
-    check("paragraph continues across pages", any(p.startswith("Next paragraph starts here and continues") for p in paras), str(paras))
-    check("paragraph count", len(paras) == 5, str(len(paras)) + " " + str(paras))
-    feet = ["DEFINITIONS 2-1", "8      DEFINITIONS 2-1", "LOA 4-2", "Appendix A-3", "SCHEDULING 7-14"]
-    check("section-numbered running feet dropped", all(ex.RUNNING_FOOT.fullmatch(f.strip()) for f in feet)
-          and not ex.RUNNING_FOOT.fullmatch("Flights 2-1 and 3-4 are paired"), str([bool(ex.RUNNING_FOOT.fullmatch(f.strip())) for f in feet]))
-    paras = ex.clean_pages(["    Body text of the page.\nand its second line.\n\n8      DEFINITIONS 2-1\n", "     Next page body.\nsecond line.\n"], [])
-    check("running foot never joins the next paragraph", paras == ["Body text of the page. and its second line.", "Next page body. second line."], str(paras))
-    m = ex.LEADER_LINE.match("Section 12   Vacations............................................. 12-1")
-    check("contents leader line parsed", m and m.group(1) == "Section 12" and m.group(3) == "Vacations", str(m and m.groups()))
-    m = ex.LEADER_LINE.match("Preface: Why This Book ........ ix")
-    check("unlabelled leader line parsed", m and m.group(1) is None and m.group(3) == "Preface: Why This Book", str(m and m.groups()))
-    check("label numbers", ex.label_number("Chapter Twelve") == 12 and ex.label_number("Section 7") == 7 and ex.label_number("LOA 3") == 3)
+    check("classify cover/contents/skip/chapter/front/back",
+          [ex.classify(t, c, seen) for t, c, seen in
+           [("Cover", None, False), ("Contents", None, False), ("Index", None, True),
+            ("One", 1, False), ("Preface", None, False), ("Acknowledgments", None, True)]]
+          == ["cover", "contents", "skip", "chapter", "front", "back"])
 
 
 def test_translate(tr):
@@ -297,73 +243,33 @@ def test_epub_units(ex, rd):
           bool(ex.PART_TITLE_RE.match("II Problem Solving")) and not ex.PART_TITLE_RE.match("Introduction"))
 
 
-def make_source_book(path, chrome):
-    """A three-page 'English' book with an outline (Cover, Preface, 1. One) printed by Chrome, cover page colored."""
-    html_path = path.with_suffix(".html")
-    html_path.write_text('<!doctype html><meta charset="utf-8"><style>@page{size:427.6pt 660pt;margin:0}'
-                         'body{margin:0;background:#181a1d;color:#e1ddd5;font:12pt Baskerville}'
-                         '.p{height:660pt;padding:60pt;box-sizing:border-box;break-after:page}</style>'
-                         '<div class="p" style="background:#2244aa">COVER</div><div class="p">Preface text here.</div>'
-                         '<div class="p">Chapter one text here.</div>')
-    subprocess.run([chrome, "--headless=new", "--disable-gpu", "--no-pdf-header-footer", f"--print-to-pdf={path}",
-                    f"file://{html_path}"], check=True, capture_output=True)
-    pdf = pikepdf.open(path, allow_overwriting_input=True)
-    with pdf.open_outline() as outline:
-        outline.root.append(pikepdf.OutlineItem("COVER", 0))
-        outline.root.append(pikepdf.OutlineItem("Preface", 1))
-        outline.root.append(pikepdf.OutlineItem("1. One", 2))
-    pdf.docinfo["/Title"] = "Tiny Book: A Test"
-    pdf.docinfo["/Author"] = "Tester"
-    pdf.save(path)
-
-
-def make_two_up_book(path, chrome):
-    """A landscape 2-up PDF (two book pages per sheet), no outline, with a printed contents page, three sections
-    headed 'SECTION N', a 'LETTER OF AGREEMENT' and an index of leader lines."""
-    html_path = path.with_suffix(".html")
-    body = "Body text for this page. " * 40
-    pages = ['<div class="pg"><h1>TINY AGREEMENT</h1></div>',
-             '<div class="pg"><h2>Table of Contents</h2><p>Section 1 Recognition ................ 1-1</p>'
-             '<p>Section 2 Definitions ................ 2-1</p><p>Section 3 Minimum Pay and Credit,</p><p>Hours of Service ................ 3-1</p>'
-             '<p>LOA 1 Staff Travel ................ LOA 1-1</p></div>',
-             f'<div class="pg"><h2>SECTION 1</h2><h2>RECOGNITION</h2><p>{body}</p><p class="ft">RECOGNITION 1-1</p></div>',
-             f'<div class="pg"><p>{body}</p><p class="ft">RECOGNITION 1-2</p></div>',
-             f'<div class="pg"><h2>SECTION 2</h2><h2>DEFINITIONS</h2><p>{body}</p><p class="ft">DEFINITIONS 2-1</p></div>',
-             f'<div class="pg"><h2>SECTION 3</h2><h2>MINIMUM PAY AND CREDIT,</h2><p>{body}</p></div>',
-             f'<div class="pg"><h2>LETTER OF AGREEMENT</h2><h2>BETWEEN</h2><p>{body}</p></div>',
-             f'<div class="pg"><p>The parties have signed this Letter of Agreement. {body}</p></div>',
-             '<div class="pg">' + "".join(f"<p>Term {i} ........................ {i}, {i + 3}</p>" for i in range(8)) + "</div>",
-             '<div class="pg"></div>']
-    sheets = ['<div class="pg one">' + pages[0] + "</div>"] + [f'<div class="sheet">{pages[i]}{pages[i + 1]}</div>' for i in range(1, len(pages) - 1, 2)]
-    html_path.write_text('<!doctype html><meta charset="utf-8"><style>@page{size:792pt 612pt;margin:0}'
-                         'body{margin:0;font:11pt Baskerville}.sheet{display:flex;width:792pt;height:612pt;break-after:page}'
-                         '.sheet .pg{width:396pt;height:612pt;padding:40pt;box-sizing:border-box}'
-                         '.one{width:792pt;height:612pt;break-after:page}.one .pg{padding:40pt}'
-                         'h2{font-size:12pt;text-align:center;margin:4pt}p{margin:0 0 6pt}.ft{margin-top:24pt;text-align:center}</style>'
-                         + "".join(sheets))
-    subprocess.run([chrome, "--headless=new", "--disable-gpu", "--no-pdf-header-footer", f"--print-to-pdf={path}",
-                    f"file://{html_path}"], check=True, capture_output=True)
-
-
-def test_two_up_no_outline(chrome):
+def make_epub_book(path):
+    """A small EPUB with a cover image, a Preface (front) and one chapter (1. One), for an end-to-end render test."""
+    import zipfile
+    from PIL import Image
     with tempfile.TemporaryDirectory() as d:
-        book = Path(d) / "tiny-2up.pdf"
-        make_two_up_book(book, chrome)
-        work = Path(d) / "work"
-        r = subprocess.run([sys.executable, str(HERE / "extract.py"), str(book), "--work", str(work)], capture_output=True, text=True)
-        check("extract runs on a two-up book without an outline", r.returncode == 0, r.stderr[-800:] + r.stdout[-400:])
-        if r.returncode != 0:
-            return
-        check("two-up sheets split into single pages", (work / "pages.pdf").exists() and len(pikepdf.open(work / "pages.pdf").pages) == 10)
-        meta = json.loads((work / "sections.json").read_text())
-        got = [(s["outline_title"], s["start"]) for s in meta["sections"]]
-        # the cover sheet is landscape too, so it splits into pages 1 and 2
-        want = [("COVER", 1), ("CONTENTS", 3), ("1. Recognition", 4), ("2. Definitions", 6),
-                ("3. Minimum Pay and Credit, Hours of Service", 7), ("LOA 1: Staff Travel", 8), ("Index", 10)]
-        check("sections found from the printed contents page", got == want, str(got))
-        check("page size is the single page", meta["page_size"] == [396.0, 612.0], str(meta["page_size"]))
-        text = (work / "text" / "03-recognition.txt").read_text()
-        check("running feet stripped from the section text", "1-1" not in text and "1-2" not in text and "Body text" in text, text[-200:])
+        cover = Path(d) / "cover.png"
+        Image.new("RGB", (60, 90), (34, 68, 170)).save(cover)
+        cover_bytes = cover.read_bytes()
+    opf = ('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+           '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+           '<dc:title>Tiny Book: A Test</dc:title><dc:creator>Tester</dc:creator></metadata>'
+           '<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+           '<item id="cover-img" href="cover.png" media-type="image/png" properties="cover-image"/>'
+           '<item id="pre" href="preface.xhtml" media-type="application/xhtml+xml"/>'
+           '<item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest>'
+           '<spine><itemref idref="pre"/><itemref idref="c1"/></spine></package>')
+    nav = ('<html><body><nav><ol><li><a href="preface.xhtml">Preface</a></li>'
+           '<li><a href="ch1.xhtml">1. One</a></li></ol></nav></body></html>')
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("META-INF/container.xml",
+                   '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                   '<rootfiles><rootfile full-path="package.opf"/></rootfiles></container>')
+        z.writestr("package.opf", opf)
+        z.writestr("nav.xhtml", nav)
+        z.writestr("cover.png", cover_bytes)
+        z.writestr("preface.xhtml", "<html><body><h1>Preface</h1><p>Preface text here.</p></body></html>")
+        z.writestr("ch1.xhtml", "<html><body><h1>1. One</h1><p>Chapter one text here.</p></body></html>")
 
 
 def test_render_e2e(rd):
@@ -376,20 +282,21 @@ def test_render_e2e(rd):
         print("SKIP: render e2e (Chrome or pdftotext missing)")
         return
     with tempfile.TemporaryDirectory() as d:
-        book = Path(d) / "tiny.pdf"
-        make_source_book(book, chrome)
+        book = Path(d) / "tiny.epub"
+        make_epub_book(book)
         work = Path(d) / "work"
         r = subprocess.run([sys.executable, str(HERE / "extract.py"), str(book), "--work", str(work)], capture_output=True, text=True)
-        check("extract runs on generated book", r.returncode == 0, r.stderr[-500:])
+        check("extract runs on generated EPUB", r.returncode == 0, r.stderr[-500:])
         meta = json.loads((work / "sections.json").read_text())
-        check("extract finds cover, front, chapter", [s["kind"] for s in meta["sections"]] == ["cover", "front", "chapter"], str(meta["sections"]))
-        check("extract page size from source", meta["page_size"][1] == 660.0, str(meta["page_size"]))
+        check("extract finds front, chapter", [s["kind"] for s in meta["sections"]] == ["front", "chapter"], str(meta["sections"]))
+        check("extract kept the cover image", bool(meta.get("cover_image")) and (work / meta["cover_image"]).exists(), str(meta.get("cover_image")))
+        check("extract page size default", meta["page_size"] == [468.0, 680.0], str(meta["page_size"]))
         (work / "md").mkdir()
         for s in meta["sections"]:
             if s.get("file"):
                 (work / "md" / (Path(s["file"]).stem + ".md")).write_text(f"# {s['title']}译\n\n" + ("正文。" * 400 + "\n\n") * 6)
         out = Path(d) / "tiny-zh.pdf"
-        opt = SimpleNamespace(only=None, out=str(out), title="小书", bg="source", fg="source", font_size=9.25)
+        opt = SimpleNamespace(only=None, out=str(out), title="小书", bg="#181a1d", fg="#e1ddd5", font_size=9.25, eq_scale=0.6, bold_factor=1.25)
         rd.render(work, opt)
         pdf = pikepdf.open(out)
         with pdf.open_outline() as outline:
@@ -401,16 +308,14 @@ def test_render_e2e(rd):
         targets = sorted(pikepdf.Page(a.Dest[0]).index for a in links)
         check("目录 rows link to the sections", len(links) == 2 and targets == [marks[2][1], marks[3][1]], f"{len(links)} links -> {targets}")
         rects = [[float(v) for v in a.Rect] for a in links]
-        check("目录 links are full-width rows in page bounds", all(0 < r[0] < r[2] <= 427.6 and 0 < r[1] < r[3] <= 660 for r in rects), str(rects))
+        check("目录 links are full-width rows in page bounds", all(0 < r[0] < r[2] <= 468 and 0 < r[1] < r[3] <= 680 for r in rects), str(rects))
         text = subprocess.run(["pdftotext", "-layout", str(out), "-"], capture_output=True, text=True).stdout.split("\f")
         folios = [ln.strip() for pg in text for ln in pg.splitlines() if ln.strip() in ("i", "ii", "iii", "iv", "1", "2", "3", "4")]
-        check("front roman then body arabic from 1", folios[:2] == ["i", "ii"] and "1" in folios and folios.index("1") > folios.index("ii"), str(folios))
+        check("front roman and body arabic folios present", "i" in folios and "1" in folios, str(folios))
         check("contents lists body page 1", any("One译" in ln and ln.rstrip().endswith("1") for ln in text[1].splitlines()), text[1])
-        src = pikepdf.open(book)
-        src_box = [float(v) for v in src.pages[0].mediabox]
         cover_box = [float(v) for v in pdf.pages[0].mediabox]
-        check("cover page copied from the source", cover_box == src_box and "COVER" in text[0], f"{cover_box} vs {src_box}")
-        opt = SimpleNamespace(only=meta["sections"][2]["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=12)
+        check("cover page is the book page size", round(cover_box[2] - cover_box[0]) == 468 and round(cover_box[3] - cover_box[1]) == 680, str(cover_box))
+        opt = SimpleNamespace(only=meta["sections"][1]["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=12, eq_scale=0.6, bold_factor=1.25)
         rd.render(work, opt)
         check("single-section preview written", any((work / "pdf").glob("*.pdf")))
         # Last, because it corrupts a section's md: an equation KaTeX cannot parse (an undefined command) renders
@@ -418,12 +323,11 @@ def test_render_e2e(rd):
         chap = next(s for s in meta["sections"] if s["kind"] == "chapter")
         (work / "md" / (Path(chap["file"]).stem + ".md")).write_text("# 坏公式译\n\n见 \\(\\zzbadmacro\\)。\n\n" + "正文。" * 60)
         try:
-            rd.render(work, SimpleNamespace(only=None, out=str(Path(d) / "bad-zh.pdf"), title="小书", bg="source", fg="source", font_size=9.25))
+            rd.render(work, SimpleNamespace(only=None, out=str(Path(d) / "bad-zh.pdf"), title="小书", bg="#181a1d", fg="#e1ddd5", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
             guarded = False
         except SystemExit as e:
             guarded = "failed to render" in str(e)
         check("render fails on an unparseable equation (KaTeX error guard)", guarded)
-    test_two_up_no_outline(chrome)
 
 
 def test_luna_e2e(tr):
