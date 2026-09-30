@@ -35,7 +35,9 @@ fs = load(HERE / "fetch_source.py")
 rd = load(HERE.parent.parent / "translate" / "scripts" / "render.py")  # the book format: css, Chrome print, background
 
 MARKER_RE = re.compile(r"⟦[^⟧]*⟧")  # the invisible page markers a translate-built PDF carries
-MIN_CHARS = 50  # a PDF with less text than this in total is image-only (scanned)
+# A scanned (image-only) PDF extracts to nothing or a few stray characters, while a real one-page note can be
+# under 200: refuse only below this total.
+MIN_CHARS = 50
 
 
 def bookmark_page(pdf, item, index):
