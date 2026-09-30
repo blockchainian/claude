@@ -1,31 +1,24 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pikepdf>=9"]
+# dependencies = []
 # ///
-# ABOUTME: Splits an English book PDF into sections (from its outline, else from its printed contents page) and
-# ABOUTME: writes each section's cleaned text (heads, feet, folios stripped; paragraphs rebuilt) into a work directory.
+# ABOUTME: Splits an EPUB book into sections from its OPF spine (order) and nav/ncx (titles), keeping each
+# ABOUTME: section's XHTML formatting (bold, emphasis, sub/superscripts, images) for translation, into a work directory.
 #
-# Usage: extract.py <book.pdf> [--work <dir>] [--sections <sections.json>]
-# Two-up scans (two book pages per PDF page) are split into single pages first (<work>/pages.pdf).
-# Writes <work>/sections.json and <work>/text/<id>-<slug>.txt; prints one line per section.
-# When neither the outline nor the contents page yields sections it exits 2 and says how to hand-write them.
+# Usage: extract.py <book.epub> [--work <dir>] [--keep-images] [--page-size WxH]
+# Writes <work>/sections.json and <work>/text/<id>-<slug>.xhtml; prints one line per section.
 import argparse
 import json
 import posixpath
 import re
-import shutil
-import subprocess
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-import pikepdf
-
 IMG_TOKEN = "⟦IMG:{}⟧"  # placeholder for a figure/equation stored as an image, kept verbatim through translation
 IMG_TOKEN_RE = re.compile(r"⟦IMG:[^⟧]+⟧")
-IMG_ZOOM = 4  # render extracted images at 4x (~288dpi) so small equations stay crisp; coordinates are divided back to pt
 
 NUMBER_WORDS = {w: i for i, w in enumerate(
     ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
@@ -86,313 +79,6 @@ def classify(title, chapter, seen_chapter):
 
 
 PART_TITLE = re.compile(r"^\s*part\b", re.I)
-
-
-def flatten_outline(pdf):
-    """The outline as a flat, page-sorted list of (title, zero-based page): the root entries, the children of
-    Part entries, and the children of a lone root entry. Deeper entries are subsections within a chapter."""
-    out = []
-    with pdf.open_outline() as outline:
-        def walk(items, descend):
-            for it in items:
-                page = None
-                dest = it.destination
-                try:
-                    if dest is None and it.action is not None and "/D" in it.action:
-                        dest = it.action.D
-                    if dest is not None:
-                        target = dest[0] if isinstance(dest, pikepdf.Array) else dest
-                        page = pikepdf.Page(target).index if isinstance(target, pikepdf.Dictionary) else int(target)
-                except Exception:
-                    page = None
-                if page is not None:
-                    out.append((str(it.title), page))
-                if descend(it):
-                    walk(it.children, lambda child: PART_TITLE.match(str(child.title)) is not None)
-        walk(outline.root, lambda it: len(outline.root) == 1 or PART_TITLE.match(str(it.title)) is not None)
-    out.sort(key=lambda x: x[1])
-    return out
-
-
-def build_sections(entries, page_count):
-    """Outline entries [(title, zero-based page)] -> section dicts with 1-based inclusive page ranges."""
-    sections = []
-    seen_chapter = False
-    for i, (title, page) in enumerate(entries):
-        # Two consecutive bookmarks can point at the same page (e.g. a part divider and a chapter opener),
-        # which would make end < start; keep every range at least one page so it stays a valid inclusive span.
-        end = max(entries[i + 1][1] if i + 1 < len(entries) else page_count, page + 1)
-        chapter, clean = parse_title(title)
-        kind = classify(title, chapter, seen_chapter)
-        if kind == "chapter":
-            seen_chapter = True
-        sections.append({"id": f"{i + 1:02d}", "title": clean, "outline_title": title, "chapter": chapter,
-                         "label": f"第{chinese_number(chapter)}章" if chapter else None, "kind": kind,
-                         "start": page + 1, "end": end})
-    return sections
-
-
-def _norm(s):
-    return re.sub(r"[^a-z0-9]+", "", s.lower())
-
-
-KEEP_HYPHEN = set(NUMBER_WORDS) | {"self", "non", "co", "pre", "re", "anti", "multi", "semi", "well", "long",
-                                     "short", "high", "low", "full", "half", "mid", "post", "cross", "e", "x"}
-
-
-def join_hyphen(prev, word):
-    """'rea-' + 'sons' -> 'reasons'; 'twenty-' + 'five' keeps its hyphen."""
-    stem = prev[:-1]
-    if stem.rsplit(" ", 1)[-1].lower() in KEEP_HYPHEN:
-        return prev + word
-    return stem + word
-
-
-# "DEFINITIONS 2-1", "LOA 4-2", "Appendix A-3": a section-numbered running foot.
-RUNNING_FOOT = re.compile(r"(?:\d+\s+)?(?:[A-Z][A-Za-z0-9 ,&/'’\-–]*\s+)?(?:[A-Za-z]+\s*)?(?:[A-Z]|\d+)-\d+")
-
-
-def clean_pages(pages, running_heads):
-    """pdftotext -layout pages -> paragraphs. Drops running heads and folios, rebuilds paragraphs from
-    indentation and blank lines, marks indented blocks as quotes, and re-joins words the line breaks hyphenated."""
-    heads = {_norm(h) for h in running_heads if _norm(h)}
-    paragraphs = []
-    current = []  # (text, indented)
-
-    def flush():
-        nonlocal current
-        if current:
-            text = " ".join(t for t, _ in current)
-            if len(current) > 1 and all(ind for _, ind in current):
-                text = "> " + text
-            paragraphs.append(text)
-        current = []
-
-    def add_line(text, indented, new_para):
-        if current and current[-1][0].endswith("-") and text[:1].islower():
-            first, _, rest = text.partition(" ")
-            current[-1] = (join_hyphen(current[-1][0], first), current[-1][1])
-            if rest:
-                current.append((rest, indented))
-            return
-        if new_para:
-            flush()
-        current.append((text, indented))
-
-    for page in pages:
-        kept = []
-        for raw in page.split("\n"):
-            line = raw.rstrip()
-            if not line.strip():
-                kept.append(None)
-                continue
-            stripped = line.strip()
-            norm = _norm(stripped)
-            if not norm or norm in heads:
-                continue
-            if re.fullmatch(r"[ivxlcdm]+|\d+|[|=\-—_.\s]*\d+[|=\-—_.\s]*", stripped, re.I):
-                continue
-            if RUNNING_FOOT.fullmatch(stripped):
-                continue
-            if not re.search(r"[A-Za-z]{2}", stripped):
-                continue
-            kept.append(line)
-        body = [k for k in kept if k is not None]
-        if not body:
-            continue
-        indent_min = min(len(k) - len(k.lstrip(" ")) for k in body)
-        blank_before = False
-        prev_indent = None
-        for k in kept:
-            if k is None:
-                blank_before = True
-                continue
-            indent = len(k) - len(k.lstrip(" "))
-            indented = indent >= indent_min + 3
-            same_block = indented and prev_indent is not None and abs(indent - prev_indent) <= 2  # a blank line inside a quote
-            deeper = indented and (prev_indent is None or indent > prev_indent + 2)
-            dedent = indented and prev_indent is not None and indent < prev_indent - 2  # a paragraph after a quote
-            new_para = deeper or dedent or (blank_before and prev_indent is not None and not same_block)
-            add_line(k.strip(), indented, new_para)
-            blank_before = False
-            prev_indent = indent
-    flush()
-    return [re.sub(r"\s+", " ", p).strip() for p in paragraphs if p.strip()]
-
-
-def pdftotext_pages(pdf_path, start, end):
-    if end < start:
-        return []
-    out = subprocess.run(["pdftotext", "-layout", "-f", str(start), "-l", str(end), str(pdf_path), "-"],
-                         capture_output=True, text=True, check=True).stdout
-    return out.split("\f")[: end - start + 1]
-
-
-def image_pages(pdf_path, start, end, images_dir):
-    """Text of pages [start, end] with each figure/equation image replaced by an ⟦IMG:key⟧ placeholder at its
-    position. pdftohtml -xml gives text runs and extracted PNGs with pt coordinates (zoom 1); an image whose
-    vertical band overlaps no text line is a block (own line), otherwise inline (placed by horizontal order).
-    Returns (page strings, {key: {file, w, h, block}}) with the PNGs copied into images_dir as <key>.png."""
-    if end < start:
-        return [], {}
-    images_dir.mkdir(parents=True, exist_ok=True)
-    page_texts, mapping = [], {}
-    z = IMG_ZOOM
-    for page in range(start, end + 1):
-        base = images_dir / f"_x{page}"
-        subprocess.run(["pdftohtml", "-xml", "-zoom", str(z), "-f", str(page), "-l", str(page), str(pdf_path), str(base)],
-                       capture_output=True, check=True)
-        xml = base.with_suffix(".xml")
-        root = ET.parse(xml).getroot() if xml.exists() else ET.Element("pdf2xml")
-        texts, images = [], []
-        for el in root.iter():
-            if el.tag == "text":
-                t = "".join(el.itertext())
-                if t.strip():
-                    a = el.attrib
-                    texts.append({"top": float(a["top"]) / z, "left": float(a["left"]) / z,
-                                  "w": float(a["width"]) / z, "h": float(a["height"]) / z, "t": re.sub(r"\s+", " ", t)})
-            elif el.tag == "image":
-                a = el.attrib
-                images.append({"top": float(a["top"]) / z, "left": float(a["left"]) / z,
-                               "w": float(a["width"]) / z, "h": float(a["height"]) / z, "src": a["src"]})
-        for i, img in enumerate(images, 1):
-            key = f"{page}_{i}"
-            band_lo, band_hi = img["top"], img["top"] + img["h"]
-            block = not any(t["top"] < band_hi and t["top"] + t["h"] > band_lo for t in texts)
-            dest = images_dir / f"{key}{Path(img['src']).suffix or '.png'}"
-            try:
-                shutil.copyfile(img["src"], dest)
-            except OSError:
-                continue
-            img["key"] = key
-            img["block"] = block
-            mapping[key] = {"file": dest.name, "w": img["w"], "h": img["h"], "block": block}
-        # group text runs into lines (top within 4pt), then place inline images into their line by horizontal order
-        items = sorted(texts, key=lambda e: (e["top"], e["left"]))
-        lines, cur, curtop = [], [], None
-        for e in items:
-            if curtop is None or abs(e["top"] - curtop) <= 4:
-                cur.append(e)
-                curtop = e["top"] if curtop is None else curtop
-            else:
-                lines.append((curtop, cur))
-                cur, curtop = [e], e["top"]
-        if cur:
-            lines.append((curtop, cur))
-        rendered = []
-        for top, runs in lines:
-            toks = [(r["left"], r["t"]) for r in runs]
-            for img in images:
-                if img.get("key") is not None and not img["block"] and img["top"] < top + 10 and img["top"] + img["h"] > top - 2:
-                    toks.append((img["left"], IMG_TOKEN.format(img["key"])))
-                    img["key"] = None  # place an inline image on one line only
-            toks.sort()
-            rendered.append((top, " ".join(s for _, s in toks if s)))
-        for img in images:
-            if img.get("key") and img["block"]:
-                rendered.append((img["top"], IMG_TOKEN.format(img["key"])))
-        rendered.sort()
-        page_texts.append("\n".join(s for _, s in rendered))
-    for tmp in images_dir.glob("_x*"):  # drop pdftohtml's raw xml and its original-named image files
-        tmp.unlink()
-    return page_texts, mapping
-
-
-def split_two_up(book, out):
-    """Pages wider than tall hold two book pages side by side: write a PDF with each half as its own page.
-    Returns the path when anything was split, else None."""
-    src = pikepdf.open(book)
-    if not any((float(p.mediabox[2]) - float(p.mediabox[0])) > 1.25 * (float(p.mediabox[3]) - float(p.mediabox[1])) for p in src.pages):
-        return None
-    dst = pikepdf.new()
-    for page in src.pages:
-        x0, y0, x1, y1 = (float(v) for v in page.mediabox)
-        halves = [[x0, y0, (x0 + x1) / 2, y1], [(x0 + x1) / 2, y0, x1, y1]] if (x1 - x0) > 1.25 * (y1 - y0) else [[x0, y0, x1, y1]]
-        for box in halves:
-            dst.pages.append(page)
-            dst.pages[-1].mediabox = box
-            dst.pages[-1].cropbox = box
-    dst.save(out)
-    return out
-
-
-LABEL = r"(?:Section|Chapter|Part|Appendix|LOA|Article|Letter)\s+([A-Za-z]+|\d+)"
-LEADER_LINE = re.compile(r"^\s*(?:(" + LABEL + r")\s+)?(.+?)\s*[.…·]{3,}\s*([A-Za-z]*\s*\d+(?:-\d+)?|[ivxlc]+)\s*$", re.I)
-LABEL_LINE = re.compile(r"^\s*(" + LABEL + r")\s+(\S.*?)\s*$", re.I)
-HEAD_WORDS = {"loa": "letter of agreement"}
-INDEX_LINE = re.compile(r"\S.*?[.…·\uFFFD\u2022]{3,}\s*\d+(?:,\s*\d+)*\s*$")
-
-
-def page_lines(pdf_path, page):
-    return [l.strip() for l in pdftotext_pages(pdf_path, page, page)[0].splitlines() if l.strip()]
-
-
-def contents_entries(pdf_path, page_count):
-    """(first contents page, [(label or None, title)]) read from the printed table of contents: lines with dot
-    leaders and a page number, a wrapped title joined to its leader line."""
-    entries, first, pending = [], None, None
-    for page in range(1, min(page_count, 20) + 1):
-        lines = page_lines(pdf_path, page)
-        found = [m for m in (LEADER_LINE.match(l) for l in lines) if m]
-        if len(found) < 3:
-            if entries:
-                break
-            continue
-        first = first or page
-        for l in lines:
-            m = LEADER_LINE.match(l)
-            if m:
-                label, title = m.group(1), m.group(3)
-                if pending and not label:
-                    label, title = pending[0], pending[1] + " " + title
-                pending = None
-                if not re.fullmatch(r"(table of )?contents|letters? of agreement|appendices|index", title.strip(), re.I):
-                    entries.append((label, title.strip(" .")))
-            else:
-                lm = LABEL_LINE.match(l)
-                pending = (lm.group(1), lm.group(3)) if lm and "contents" not in l.lower() else None
-    return first, entries
-
-
-def label_number(label):
-    n = label.split()[-1].lower()
-    return int(n) if n.isdigit() else NUMBER_WORDS.get(n)
-
-
-def locate_sections(pdf_path, page_count, first_page, entries):
-    """Find each contents entry's start page by its heading (label or title in the first lines of a page),
-    scanning forward from the previous find. Returns [(title, zero-based page)] plus the entries not found."""
-    # A heading sits in the first lines of its page: match only against the start of the page's text.
-    all_lines = {p: page_lines(pdf_path, p) for p in range(first_page, page_count + 1)}
-    heads = {p: re.sub(r"^(\d+|the)", "", _norm(" ".join(all_lines[p][:5])))[:48] for p in all_lines}
-    found, missing, pos = [], [], first_page
-    for label, title in entries:
-        keys, opening = [_norm(title)[:24]], []
-        if label:
-            word, n = label.split()[0].lower(), label_number(label)
-            keys += [_norm(label)] + [_norm(f"{word} {w}") for w, k in NUMBER_WORDS.items() if n is not None and k == n]
-            # a heading phrase such as "Letter of Agreement" must open the page, or it matches a closing formula
-            opening = [_norm(HEAD_WORDS[word])] if word in HEAD_WORDS else []
-        if opening:
-            keys = []
-        hit = next((p for p in range(pos + 1, page_count + 1)
-                    if any(k and k in heads[p] for k in keys) or any(heads[p].startswith(k) for k in opening)), None)
-        if hit is None:
-            missing.append(f"{label or ''} {title}".strip())
-            continue
-        pos = hit
-        n = label_number(label) if label else None
-        word = label.split()[0].lower() if label else ""
-        name = f"{n}. {title}" if word in ("chapter", "section") and n else f"{label}: {title}" if label else title
-        found.append((name, hit - 1))
-    # An index after the last section: a heading "Index", or pages of leader lines ("Term ....... 12, 40").
-    def index_like(p):
-        return heads[p].startswith("index") or sum(1 for l in all_lines[p] if INDEX_LINE.search(l)) >= 5
-    index = next((p for p in range(pos + 1, page_count + 1) if index_like(p)), None)
-    if index:
-        found.append(("Index", index - 1))
-    return found, missing
 
 
 def default_work(book):
@@ -717,89 +403,25 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("book")
     ap.add_argument("--work")
-    ap.add_argument("--sections", help="hand-written sections.json ([{title,start}] or full) to use instead of the outline")
     ap.add_argument("--keep-images", action="store_true",
                     help="keep figures and equations that are stored as images: extract each section's text with "
                          "⟦IMG:key⟧ placeholders at the image positions and copy the images into <work>/images")
     ap.add_argument("--page-size", default="468x680",
-                    help="EPUB only: rendered page size in pt as WxH (default 468x680, a 6.5x9.4in trade book)")
+                    help="rendered page size in pt as WxH (default 468x680, a 6.5x9.4in trade book)")
     args = ap.parse_args()
     source = Path(args.book).resolve()
+    if source.suffix.lower() != ".epub":
+        print(f"extract.py takes an EPUB; got {source.name}. Download the book's EPUB with the download-book skill "
+              f"and pass that.", file=sys.stderr)
+        sys.exit(2)
     if args.work:
         work = Path(args.work).resolve()
         work.mkdir(parents=True, exist_ok=True)
     else:
         work, _ = default_work(source)
 
-    if source.suffix.lower() == ".epub":
-        page_size = [round(float(x), 2) for x in args.page_size.lower().split("x")]
-        extract_epub(source, work, args.keep_images, page_size)
-        return
-
-    book = source
-    (work / "text").mkdir(exist_ok=True)
-    split = split_two_up(book, work / "pages.pdf")
-    if split:
-        print(f"two-up pages split into {split}", file=sys.stderr)
-        book = split
-
-    pdf = pikepdf.open(book)
-    page_count = len(pdf.pages)
-    info = pdf.docinfo
-    title = str(info.get("/Title", book.stem)).strip()
-    author = str(info.get("/Author", "")).strip()
-    box = [float(x) for x in pdf.pages[0].mediabox]
-    page_size = [round(box[2] - box[0], 2), round(box[3] - box[1], 2)]
-
-    if args.sections:
-        given = json.loads(Path(args.sections).read_text())
-        entries = [(s["title"], int(s["start"]) - 1) for s in (given["sections"] if isinstance(given, dict) else given)]
-    else:
-        entries = flatten_outline(pdf)
-    if len(entries) < 2:
-        first, listed = contents_entries(book, page_count)
-        located, missing = locate_sections(book, page_count, first, listed) if listed else ([], [])
-        if listed and len(located) >= max(2, 0.6 * len(listed)):
-            entries = [("COVER", 0), ("CONTENTS", first - 1)] + located
-            print(f"no outline: {len(listed) - len(missing)} of {len(listed)} contents entries located by their headings"
-                  + (f"; not found: {', '.join(missing)}" if missing else ""), file=sys.stderr)
-        else:
-            print(f"{book.name} has no usable outline and its contents page yields {len(located)} of {len(listed)} sections. "
-                  f"Write {work / 'sections.json'} by hand from the printed table of contents as "
-                  f"[{{\"title\": \"COVER\", \"start\": 1}}, {{\"title\": \"Preface\", \"start\": 10}}, ...] (1-based pages of "
-                  f"{book}, in order) and rerun with --sections {work / 'sections.json'}", file=sys.stderr)
-            sys.exit(2)
-
-    sections = build_sections(entries, page_count)
-    short_title = re.split(r"[:\-–—(]", title)[0].strip()
-    images = {}
-    for s in sections:
-        if s["kind"] in ("cover", "contents", "skip"):
-            continue
-        heads = [s["title"], s["outline_title"], short_title, title]
-        if s["chapter"]:
-            heads += [f"chapter {s['chapter']}"] + [f"chapter {w}" for w, n in NUMBER_WORDS.items() if n == s["chapter"]]
-        if args.keep_images:
-            pages, section_images = image_pages(book, s["start"], s["end"], work / "images")
-            images.update(section_images)
-        else:
-            pages = pdftotext_pages(book, s["start"], s["end"])
-        paragraphs = clean_pages(pages, heads)
-        s["file"] = f"text/{s['id']}-{slugify(s['title'])}.txt"
-        s["words"] = sum(len(p.split()) for p in paragraphs if not IMG_TOKEN_RE.fullmatch(p.strip()))
-        (work / s["file"]).write_text("\n\n".join(paragraphs) + "\n")
-
-    if args.keep_images:
-        (work / "images.json").write_text(json.dumps(images, ensure_ascii=False, indent=1))
-        print(f"kept {len(images)} images in {work / 'images'}", file=sys.stderr)
-
-    meta = {"book": str(book), "source": str(source), "title": title, "author": author, "pages": page_count,
-            "page_size": page_size, "sections": sections}
-    (work / "sections.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-    for s in sections:
-        extra = f"{s['words']} words -> {s['file']}" if "file" in s else "(not translated)"
-        print(f"{s['id']} {s['kind']:8} p{s['start']}-{s['end']:<4} {s['outline_title']}: {extra}")
-    print(f"work dir: {work}")
+    page_size = [round(float(x), 2) for x in args.page_size.lower().split("x")]
+    extract_epub(source, work, args.keep_images, page_size)
 
 
 if __name__ == "__main__":

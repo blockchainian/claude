@@ -1,21 +1,25 @@
 ---
 name: translate
 description: >
-  Translate a whole English book PDF into a Chinese PDF that keeps the original's format: the same cover
-  page, page size, chapter structure, running heads, folios, a clickable 目录 page and PDF bookmarks (Cover,
-  目录, one per chapter). Works from the PDF outline, or from the printed contents page when there is none,
-  and on two-up scans. Chapters are translated in parallel by gpt-6-luna through `codex exec`, one call
-  per chapter, and typeset with headless Chrome in Baskerville + Songti SC. Use for "/translate <book.pdf>",
-  "把这本书翻译成中文", "translate this book", or to re-render an already translated book after editing its
-  Markdown. NOT for a single page or article (just translate it inline), and not for digesting or
-  summarizing a source (use digest).
+  Translate a whole English EPUB book into a Chinese PDF that keeps the original's format: the same cover
+  image, page size, chapter structure, running heads, folios, a clickable 目录 page and PDF bookmarks (Cover,
+  目录, one per chapter). Reads the EPUB's OPF spine (order) and nav/ncx (titles), keeping each section's bold,
+  emphasis, sub/superscripts and images. Chapters are translated in parallel by gpt-6-luna through `codex exec`,
+  one call per chapter, and typeset with headless Chrome in Baskerville + Songti SC. Use for
+  "/translate <book.epub>", "把这本书翻译成中文", "translate this book", or to re-render an already translated
+  book after editing its Markdown. Needs the book as an EPUB — get it with the download-book skill first. NOT
+  for a single page or article (just translate it inline), and not for digesting or summarizing a source (use
+  digest).
 ---
 
-# Translate — an English book PDF into a Chinese PDF in the same format
+# Translate — an EPUB book into a Chinese PDF in the same format
 
-The book's sections drive everything: each section (from the PDF outline, else from the printed contents
-page) is one Luna call, and the finished sections are typeset into one book that copies the source's page size,
-chapter openers, running heads, roman/arabic folios and cover page.
+The book's sections drive everything: each section (from the EPUB's OPF spine and nav/ncx) is one Luna call, and
+the finished sections are typeset into one book that copies the source's page size, chapter openers, running
+heads, roman/arabic folios and cover image.
+
+extract.py takes an EPUB (`.epub`); it does not read PDFs. If you only have the book as a PDF, get its EPUB with
+the download-book skill first.
 
 `${CLAUDE_PLUGIN_ROOT}` below is this plugin's root; this skill lives at `${CLAUDE_PLUGIN_ROOT}/skills/translate`.
 Work lives in `<book dir>/.translate/<slug>/` (hidden, resumable); the deliverable is `<book>-zh.pdf` next to
@@ -29,62 +33,47 @@ result, lands there; it says so on stderr. Never leave other copies next to the 
 bash "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/setup.sh"
 ```
 
-Installs `poppler` (pdftotext/pdftoppm) and `uv` when missing; reports whether `codex` is logged in and Chrome
+Installs `poppler` (pdftotext) and `uv` when missing; reports whether `codex` is logged in and Chrome
 is present. Luna runs on the user's ChatGPT plan through `codex`; when its quota is out, wait or pass
 `--model` to a different codex model.
 
 ## 1. Extract
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.py" <book.pdf>
+"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.py" <book.epub>
 ```
 
-**Prefer an EPUB when the book has one.** PDF→text flattens math and drops all formatting: bold vectors/matrices,
-sub/superscript position (L² becomes an ambiguous "L 2"), and transposes are lost, so the translation of a
-maths-heavy book comes out wrong. The EPUB keeps that structure. Pass the `.epub` instead and extraction walks
-its OPF spine (order) and nav/ncx (titles), keeping each section as a cleaned XHTML fragment whose `<strong>`,
-`<em>`, `<sub>`, `<sup>` tags the translator turns into correct LaTeX; part-divider files fold into the next
-chapter, the cover comes from the OPF, and the page size is `--page-size WxH` (default 468x680pt). Add
-`--keep-images` here too. There is no source PDF, so `render.py --bg/--fg source` is unavailable — pass an
-explicit `#rrggbb`.
+Extraction walks the EPUB's OPF spine (order) and nav/ncx (titles), keeping each section as a cleaned XHTML
+fragment whose `<strong>`, `<em>`, `<sub>`, `<sup>` tags the translator turns into correct LaTeX; part-divider
+files fold into the next chapter, the cover comes from the OPF, and the page size is `--page-size WxH` (default
+468x680pt, a 6.5x9.4in trade book). Add `--keep-images` to carry figures and image equations through.
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.py" <book.epub> --keep-images
 ```
 
-Prints one line per section (`id kind pages title: words`) and the work dir. Kinds: `cover` (page copied
-as-is), `contents` and `skip` (Index, Notes, References/Bibliography: not translated; the 目录 is regenerated),
-`front` (preface, roman folios), `chapter` (第N章, arabic folios from 1), `back` (acknowledgments, appendix,
-letters; a Conclusion/Epilogue/Afterword opens its own back section). In an EPUB, once the book's terminal
-back-matter starts (Notes/References/Bibliography/Index) past the last chapter, it and every spine file after
-it (continuations with no nav title of their own included) is skipped, so endnotes and the index never fold
-into the last chapter. Text is
-cleaned: running heads, section-numbered running feet ("DEFINITIONS 2-1") and folios dropped, hyphenation
-undone, paragraphs rebuilt, indented blocks marked `> `.
+Prints one line per section (`id kind title: words`) and the work dir. Kinds: `contents` and `skip` (Cover,
+Index, Notes, References/Bibliography, copyright/title pages: not translated; the cover comes from the OPF and
+the 目录 is regenerated), `front` (preface, introduction — roman folios), `chapter` (第N章, arabic folios from
+1), `back` (acknowledgments, appendix, letters; a Conclusion/Epilogue/Afterword opens its own back section).
+Once the book's terminal back-matter starts (Notes/References/Bibliography/Index) past the last chapter, it and
+every spine file after it (continuations with no nav title of their own included) is skipped, so endnotes and
+the index never fold into the last chapter.
 
-Two-up scans (a landscape sheet holding two book pages) are split into single pages first, into
-`<work>/pages.pdf`; every later step, including the cover and the page size, uses that file.
-
-Pass `--keep-images` for books whose figures and equations are stored as images (e.g. an EPUB-derived PDF of a
-textbook): each section's text then carries an `⟦IMG:key⟧` placeholder at every image's position (block images
-on their own line, inline symbols within the line), the images are copied into `<work>/images/` and mapped in
+Pass `--keep-images` for books whose figures and equations are stored as images (e.g. a textbook): each
+section's text then carries an `⟦IMG:key⟧` placeholder at every image's position (block images on their own
+line, inline symbols within the line), the images are copied into `<work>/images/` and mapped in
 `<work>/images.json`. The translator is told to keep the placeholders verbatim, and `render.py` puts the images
 back — block ones as centered figures, inline ones in the line. Line art (equations, diagrams) is recoloured to
 the page foreground on a transparent background so it blends into the dark page like the body text; a colour
-figure keeps a white plate (inverting a photo would ruin it). Without the flag, extraction is text-only as before. The interleaved text is rougher
-around inline math (pdftohtml splits glyphs), but Luna repairs it; use the flag only when images matter.
+figure keeps a white plate (inverting a photo would ruin it). Without the flag, extraction is text-only. Use the
+flag only when images matter.
 
-Without an outline, the sections come from the printed contents page: lines with dot leaders give the titles
-(`Section 12  Vacations ..... 12-1`, `Chapter Three ..... 27`, `LOA 4 ..... LOA 4-1`), and each start page is
-the first page after the previous section whose top lines carry that label or title (a `LOA` entry matches a
-page opening with "Letter of Agreement"); a trailing index is detected by its leader lines. stderr says how
-many entries were located and names the ones that were not. `Section N` and `Chapter N` entries become
-numbered chapters; other labels keep their label (`LOA 4: Title`).
-
-Check the listing before spending calls: a section with suspiciously few or many words, or a title parsed
-wrong, means a start page is off. Exit 2 = neither outline nor contents page worked: write `sections.json` by
-hand (`[{"title": "COVER", "start": 1}, {"title": "Preface", "start": 10}, ...]`, 1-based pages of the file
-named in the message, in order) and rerun with `--sections`.
+Check the listing before spending calls: a section with suspiciously few or many words, or a title parsed wrong,
+means a spine file was mis-grouped. A warning that chapter numbers skip or repeat means an opener was not
+recognised — inspect the sections and, if needed, edit `<work>/sections.json` (drop an entry, or change its
+`kind`) before translating. A common case: a book that stores its endnotes per chapter under "Chapter N" nav
+titles; those are references, not chapters — remove them from `sections.json` so they are not translated.
 
 ## 2. Glossary (short, before translating)
 
@@ -102,7 +91,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/translate.py" <work> --g
 
 Run it with `run_in_background`. Defaults: `gpt-6-luna`, effort `low`, Fast service tier (`priority`), 20
 sections in flight, one no-tool `codex exec` per section in a private `CODEX_HOME`. Measured: a 250-page trade
-book (27 sections of 1.5–3.5k words) is back in about a minute, a 380-page agreement (54 sections, up to 12k
+book (27 sections of 1.5–3.5k words) is back in about a minute, a 380-page book (54 sections, up to 12k
 words) in about five; 7–15k input and 2–4k output tokens per section. Each answer is checked (starts with `# title`, at least 0.9 Chinese
 characters per English word) and retried once; a section that still fails is kept as `<id>.rejected.md` and
 reported as `FAILED`. Rerunning skips sections whose `.md` exists (`--force` redoes them, `--only 04,05`
@@ -124,13 +113,13 @@ is assembled.
 "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/render.py" <work> --title "<中文书名>"
 ```
 
-Writes `<book>-zh.pdf`: the cover (the source PDF's cover page, or the EPUB's cover image rendered full-bleed), a
-目录 with folios, then every translated section. Page size comes from the source's first page (PDF) or
-`--page-size` (EPUB). Colors default to a dark reading page: the background follows the iTerm2
+Writes `<book>-zh.pdf`: the cover (the EPUB's cover image rendered full-bleed), a
+目录 with folios, then every translated section. Page size is the one set at extract (`--page-size`). Colors
+default to a dark reading page: the background follows the iTerm2
 default profile's dark-mode background when iTerm2 is installed (else near-black), the text is `#606e6a`, a
 cool gray chosen for long reading on black (neutral or warm grays glare on a black page even when dimmed;
-a saturated terminal foreground is too dark for body text). `--bg/--fg` take `#rrggbb`, `iterm` (either
-terminal color) or `source` (sampled from a body page of the book — PDF only). Type is Baskerville for Latin and
+a saturated terminal foreground is too dark for body text). `--bg/--fg` take `#rrggbb` or `iterm` (either
+terminal color). Type is Baskerville for Latin and
 Songti SC for Chinese. Inline `\(..\)` / `\[..\]` LaTeX is typeset by KaTeX (loaded from the CDN, so rendering
 needs network). Chinese **bold** — the source's term emphasis and the translator's highlights — is set in a
 gothic (黑体) face a step brighter than the body (`--bold-factor`, default 1.25), because Songti's bold is nearly
@@ -177,11 +166,9 @@ one section with `translate.py <work> --force --only <id>`. A different look (li
 
 ## Notes
 
-- Source PDFs are often scans with an OCR layer: the extractor cannot tell a sub-heading from a short line, so
-  Luna is told to promote title-like lines to `##`, repair OCR misreads and drop-cap damage, and rebuild
-  paragraphs. Figures and tables do not survive by default (a rate table comes out as prose); say so in the
-  summary when the source has them, and point the reader at the source pages for numbers — or run extraction
-  with `--keep-images` to carry figures and image equations through as placeholders and render them back.
+- Figures and tables do not survive unless you pass `--keep-images`: a rate table comes out as prose. Say so in
+  the summary when the source has them, and point the reader at the source for the numbers — or re-extract with
+  `--keep-images` to carry figures and image equations through as placeholders and render them back.
 - Chrome cannot reset the page counter mid-document, so front matter and body are typeset as two documents and
   joined with pikepdf; the running head on opener pages is masked by a background rectangle after the fact.
 - The PDF text layer keeps the tiny invisible `⟦S04⟧` markers the page map uses; they are 1pt and transparent.
