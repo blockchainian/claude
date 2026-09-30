@@ -7,7 +7,9 @@ description: >
   of <url>", "what did <source> say about X", "summarize this
   article/episode/paper", "search my notes". Handles ordinary article and
   transcript pages, YouTube (via subtitles), PDFs (URL or local file), and
-  audio pages (via the transcribe skill).
+  audio pages (via the transcribe skill). A PDF is highlighted chapter by
+  chapter and the highlights come back as a PDF in the translate skill's book
+  format, at the source's page size.
 
   NOT for: general web research across many pages (use agent-reach), or
   evaluating a tool or vendor (use evaluate).
@@ -21,6 +23,7 @@ draft — that is the default. Two keywords instead select a store command.
 | Argument | What it does |
 |---|---|
 | a source URL | Fetch the text, read it, write a highlights draft |
+| a PDF (file or `.pdf` URL) | Highlights per chapter, typeset as `<name>-highlights.pdf` |
 | `save` (none, or a draft path) | Store the item (no-op if already stored) |
 | `save` take-aways (text) | Append them to the item's `## Take-aways` |
 | `search` query (regex ok) | Search everything saved |
@@ -42,8 +45,9 @@ everything is present, so it is safe to run every time.
 bash "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
 ```
 
-It ensures `uv` (runs the trafilatura article extractor and the pdfminer PDF
-extractor in an ephemeral env) and `yt-dlp` (YouTube subtitles).
+It ensures `uv` (runs the trafilatura article extractor and the PDF scripts
+in an ephemeral env), `yt-dlp` (YouTube subtitles) and `poppler` (`pdftotext`,
+for PDFs). Typesetting a highlights PDF also needs Google Chrome.
 
 ## Digest a URL (the default)
 
@@ -64,10 +68,8 @@ extractor in an ephemeral env) and `yt-dlp` (YouTube subtitles).
    the source, not a named speaker; with `manual` the labels may be present, so
    use them only where the text actually carries them.
 
-   A **PDF** (a `.pdf` URL, downloaded first, or a local file path passed
-   straight in) is extracted with pdfminer. A PDF that comes back with almost
-   no words is image-only (scanned) — there is no OCR here, so say it is scanned
-   and stop rather than writing highlights from nothing.
+   A **PDF** (a `.pdf` URL or a local file path) does not go through this
+   step — follow "Digest a PDF" below instead.
 
 1b. **Decide what the page gave you.**
    - If `audio_url` is **non-null** (the page links audio, or the URL itself was
@@ -106,6 +108,54 @@ extractor in an ephemeral env) and `yt-dlp` (YouTube subtitles).
    highlights, not a file path.
 
 4. Offer `/digest save` in one line. Do not save unprompted.
+
+## Digest a PDF (per chapter, PDF out)
+
+A PDF gets one set of highlights per chapter, and the result is itself a PDF:
+the translate skill's book format (dark page, Baskerville + Songti SC, chapter
+openers, running heads, folios, one bookmark per chapter) at the source PDF's
+own page size.
+
+1. **Split.**
+
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/pdf_highlights.py" split "<file.pdf or url>"
+   ```
+
+   It prints JSON: `work` (the work dir), `unit`, `page_size`, and `chapters`,
+   each with `id`, `title`, `pages`, `chars`, `text` and `highlights` (paths
+   relative to `work`). The chapters are the PDF's bookmarks; a PDF with no
+   bookmarks is split one section per page (`unit: "page"`), and `--by page`
+   forces that. An image-only (scanned) PDF exits with an error — there is no
+   OCR here, so say it is scanned and stop.
+
+2. **Write one highlights file per chapter.** For each chapter in order, Read
+   all of `<work>/<text>` (in chunks, as in step 2 above) and write
+   `<work>/<highlights>`: a `# <chapter title>` line, then themed `## ` sections
+   of bullets and an optional `## Quotes`, by the rules in "What makes a
+   highlight". No frontmatter and no TL;DR per chapter. Write in the language of
+   the PDF. Skip a chapter that carries no real content (cover, contents page,
+   index, copyright page, a near-zero `chars`) by not writing its file. For a
+   long book, finish and write each chapter before reading the next, so the
+   work survives a context compaction; chapters whose file already exists are
+   done.
+
+3. **Render.**
+
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/pdf_highlights.py" render "<work>"
+   ```
+
+   It typesets every chapter that has a highlights file into
+   `<source>-highlights.pdf` next to the source (in the work dir when the
+   source was a URL or its folder is not writable), prints that path, and
+   writes the combined `<work>/draft.md`. `--out`, `--bg`, `--fg` and
+   `--font-size` override the defaults, which are the translate skill's.
+   Re-run it after editing any chapter's file.
+
+4. Report the PDF path and a short per-chapter summary in the conversation.
+   Fill `source`, `author` and `topics` into the frontmatter of `draft.md`,
+   then offer `/digest save` in one line. Do not save unprompted.
 
 ### What makes a highlight
 
