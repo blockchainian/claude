@@ -6,7 +6,7 @@
 # ABOUTME: Typesets the translated Markdown sections into a PDF in the source book's format (page size, colors,
 # ABOUTME: running heads, folios, contents page) with headless Chrome, then adds the original cover and bookmarks.
 #
-# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg iterm|source|#rrggbb --fg #606e6a|iterm|source] [--font-size 9.25]
+# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg iterm|#rrggbb --fg #606e6a|iterm] [--font-size 9.25]
 # Without --only: the whole book (cover + 目录 + every translated section) to --out (default <book>-zh.pdf next
 # to the source). With --only: one section to <work>/pdf/<id>-<slug>.pdf for a quick look, no cover or contents.
 import argparse
@@ -18,7 +18,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections import Counter
 from pathlib import Path
 
 import markdown
@@ -67,20 +66,6 @@ def chrome_binary():
         if c and Path(c).exists():
             return c
     sys.exit("Chrome not found: set CHROME=/path/to/chrome")
-
-
-def sample_colors(book, page):
-    """Background = the most common color of a body page; text = the most common color far from it."""
-    with tempfile.TemporaryDirectory() as d:
-        subprocess.run(["pdftoppm", "-r", "30", "-f", str(page), "-l", str(page), "-png", str(book), f"{d}/p"], check=True)
-        png = next(Path(d).glob("p*.png"))
-        im = Image.open(png).convert("RGB")
-        counts = Counter(zip(*(im.getchannel(i).tobytes() for i in range(3))))
-    bg = counts.most_common(1)[0][0]
-    lum = lambda c: 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
-    far = [(c, n) for c, n in counts.items() if abs(lum(c) - lum(bg)) > 100]
-    fg = max(far, key=lambda x: x[1])[0] if far else ((20, 20, 20) if lum(bg) > 128 else (225, 221, 213))
-    return "#%02x%02x%02x" % bg, "#%02x%02x%02x" % fg
 
 
 def iterm_colors():
@@ -374,15 +359,8 @@ def render(work, opt):
     images_path = work / "images.json"
     images = json.loads(images_path.read_text()) if images_path.exists() else {}
 
-    first_chapter = next((s for s in meta["sections"] if s["kind"] == "chapter"), meta["sections"][0])
-    if "source" in (opt.bg, opt.fg):
-        if not book:
-            sys.exit("--bg/--fg 'source' samples the source PDF, which an EPUB build has none of; pass explicit #rrggbb")
-        sampled = sample_colors(book, min(first_chapter["start"] + 1, meta["pages"]))
-    else:
-        sampled = None
     term = iterm_colors() if "iterm" in (opt.bg, opt.fg) else None
-    resolve = lambda v, i: sampled[i] if v == "source" else term[i] if v == "iterm" else v
+    resolve = lambda v, i: term[i] if v == "iterm" else v
     bg, fg = resolve(opt.bg, 0), resolve(opt.fg, 1)
 
     ready = []
@@ -445,7 +423,7 @@ def render(work, opt):
     pages = {**{k: v for k, v in front_pages.items()}, **{k: v + n_front for k, v in body_pages.items()}}
 
     out = Path(opt.out) if opt.out else default_out(Path(meta.get("source") or book), work)
-    cover_pdf = build_cover(meta, work, book, bg, chrome, tmp)
+    cover_pdf = build_cover(meta, work, bg, chrome, tmp)
     assemble(cover_pdf, [front_pdf] + ([body_pdf] if body_pdf else []), out, ready, pages, meta, title, bg,
              top_margin=meta["page_size"][1] * 0.082, row_height=opt.font_size * 1.8)
     print(f"{out} ({len(pikepdf.open(out).pages)} pages, {len(ready)} sections, cover + linked 目录 + bookmarks)")
@@ -473,29 +451,21 @@ def default_out(source, work):
         return work.parent / target.name
 
 
-def build_cover(meta, work, book, bg, chrome, tmp):
-    """A one-page cover PDF: the source PDF's cover page (PDF build), or the EPUB's cover image rendered
-    full-bleed onto a page of the book's size (EPUB build)."""
+def build_cover(meta, work, bg, chrome, tmp):
+    """A one-page cover PDF: the EPUB's cover image rendered full-bleed onto a page of the book's size."""
     out = tmp / "cover.pdf"
-    if meta.get("source_kind") == "epub":
-        w, h = meta["page_size"]
-        img = meta.get("cover_image")
-        if img and (work / img).exists():
-            uri = (work / img).resolve().as_uri()
-            inner = f'<img src="{uri}" style="position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover">'
-        else:
-            inner = f'<div style="color:#888;font-family:sans-serif;padding:40pt">{html.escape(meta.get("title", ""))}</div>'
-        (tmp / "cover.html").write_text(
-            f'<!doctype html><html><head><meta charset="utf-8"><style>'
-            f'@page {{ size: {w}pt {h}pt; margin: 0; }} html,body {{ margin:0; background:{bg}; }}'
-            f'</style></head><body>{inner}</body></html>')
-        print_pdf(chrome, tmp / "cover.html", out)
-        return out
-    src = pikepdf.open(book)
-    cover = next((s for s in meta["sections"] if s["kind"] == "cover"), None)
-    cov = pikepdf.new()
-    cov.pages.append(src.pages[(cover["start"] - 1) if cover else 0])
-    cov.save(out)
+    w, h = meta["page_size"]
+    img = meta.get("cover_image")
+    if img and (work / img).exists():
+        uri = (work / img).resolve().as_uri()
+        inner = f'<img src="{uri}" style="position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover">'
+    else:
+        inner = f'<div style="color:#888;font-family:sans-serif;padding:40pt">{html.escape(meta.get("title", ""))}</div>'
+    (tmp / "cover.html").write_text(
+        f'<!doctype html><html><head><meta charset="utf-8"><style>'
+        f'@page {{ size: {w}pt {h}pt; margin: 0; }} html,body {{ margin:0; background:{bg}; }}'
+        f'</style></head><body>{inner}</body></html>')
+    print_pdf(chrome, tmp / "cover.html", out)
     return out
 
 
@@ -543,8 +513,8 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--only", help="one section id: quick single-section PDF into <work>/pdf/")
     ap.add_argument("--title", help="Chinese book title for the PDF metadata")
-    ap.add_argument("--bg", default="iterm", help="page background: #rrggbb, 'iterm' (the iTerm2 default profile's dark background, the default) or 'source' (sampled from the book)")
-    ap.add_argument("--fg", default="#606e6a", help="text color: #rrggbb (default #606e6a, a cool gray), 'iterm' (the terminal's foreground) or 'source' (sampled from the book)")
+    ap.add_argument("--bg", default="iterm", help="page background: #rrggbb or 'iterm' (the iTerm2 default profile's dark background, the default)")
+    ap.add_argument("--fg", default="#606e6a", help="text color: #rrggbb (default #606e6a, a cool gray) or 'iterm' (the terminal's foreground)")
     ap.add_argument("--font-size", type=float, default=9.25, help="body size in pt (default 9.25)")
     ap.add_argument("--eq-scale", type=float, default=0.6, help="EPUB build: block (display) equation images render at their intrinsic width times this (default 0.6), so all equations share one scale")
     ap.add_argument("--bold-factor", type=float, default=1.25, help="bold ink brightness relative to body text (default 1.25); Chinese bold uses a 黑体 face")

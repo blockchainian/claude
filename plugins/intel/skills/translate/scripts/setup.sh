@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Idempotent auto-setup for translate: installs only what's missing.
-# ABOUTME: poppler (pdftotext/pdftoppm), uv (runs the pikepdf scripts); reports codex and Chrome.
+# ABOUTME: poppler (pdftotext), uv (runs the scripts); reports codex and Chrome.
 
 set -euo pipefail
 
@@ -34,7 +34,7 @@ note_or_install() {
   brew install "$formula" >/dev/null && installed+=("$tool")
 }
 
-# pdftotext/pdftoppm split and sample the source PDF; uv runs the scripts with pikepdf, markdown and pillow.
+# pdftotext reads the rendered PDF's text for the 目录 links and equation-error check; uv runs the scripts (pikepdf, markdown, pillow).
 note_or_install pdftotext poppler
 note_or_install uv
 
