@@ -111,7 +111,8 @@ for PDFs). Typesetting a highlights PDF also needs Google Chrome.
 
 ## Digest a PDF (per chapter, PDF out)
 
-A PDF gets one set of highlights per chapter, and the result is itself a PDF:
+A PDF gets one set of highlights per chapter — connected paragraphs for a
+book, bullets for a per-page PDF — and the result is itself a PDF:
 the translate skill's book format (dark page, Baskerville + Songti SC, chapter
 openers, running heads, folios, one bookmark per chapter) at the source PDF's
 own page size.
@@ -131,10 +132,23 @@ own page size.
 
 2. **Write one highlights file per chapter.** For each chapter in order, Read
    all of `<work>/<text>` (in chunks, as in step 2 above) and write
-   `<work>/<highlights>`: a `# <chapter title>` line, then themed `## ` sections
-   of bullets and an optional `## Quotes`, by the rules in "What makes a
-   highlight". No frontmatter and no TL;DR per chapter. Write in the language of
-   the PDF. Skip a chapter that carries no real content (cover, contents page,
+   `<work>/<highlights>`: a `# <chapter title>` line, then themed `## `
+   sections, by the rules in "What makes a highlight". No frontmatter and no
+   TL;DR per chapter. Write in the language of the PDF.
+
+   **A book (`unit: "chapter"`) is written as prose, not bullets.** A book is
+   long, and a chapter of bullet points reads as disconnected notes. Open the
+   chapter with one paragraph stating what it argues, then make each `## `
+   section one to a few complete paragraphs that read straight through: each
+   paragraph carries one line of the argument, its sentences are connected
+   (because, so, but, as a result), and the numbers, names and dates sit
+   inside the sentences. No bullet lists and no `## Quotes` section — a short
+   quote goes inside the paragraph it belongs to, attributed there. The rules
+   in "What makes a highlight" still hold: theme over order, specifics kept,
+   disagreements recorded, nothing the source does not say. Only a PDF split
+   per page (`unit: "page"`: a deck, a filing, a form) keeps themed bullets and
+   an optional `## Quotes`; so do articles, podcasts and videos in the URL
+   flow above. Skip a chapter that carries no real content (cover, contents page,
    index, copyright page, a near-zero `chars`) by not writing its file. For a
    long book, finish and write each chapter before reading the next, so the
    work survives a context compaction; chapters whose file already exists are
