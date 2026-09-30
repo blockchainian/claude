@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Idempotent auto-setup for digest: installs only what's missing.
-# ABOUTME: uv (runs the trafilatura article extractor) + yt-dlp (YouTube subs).
+# ABOUTME: uv (article extractor, PDF scripts) + yt-dlp (YouTube subs) + poppler (pdftotext).
 
 set -euo pipefail
 
@@ -35,9 +35,10 @@ note_or_install() {
 }
 
 # uv runs trafilatura in an ephemeral env (article main-content extraction);
-# yt-dlp pulls YouTube subtitles.
+# yt-dlp pulls YouTube subtitles; pdftotext (poppler) reads a PDF's pages.
 note_or_install uv
 note_or_install yt-dlp
+note_or_install pdftotext poppler
 
 echo "digest setup: present=[${present[*]:-}] missing=[${missing[*]:-}] installed=[${installed[*]:-}]"
 # trafilatura is not installed globally: fetch_source.py runs it via `uv run

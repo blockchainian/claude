@@ -16,8 +16,10 @@ download links and checks domain names.
   skill that has audio and needs its words calls this one.
 - **`digest`** — turn a source into durable highlights, stored and searchable.
   Extracts an article's main body (trafilatura) or a podcast transcript, reads
-  YouTube via subtitles, pulls text from a PDF (URL or local file, via
-  pdfminer), and for a page that only offers audio falls back to `transcribe`.
+  YouTube via subtitles, and for a page that only offers audio falls back to
+  `transcribe`. A PDF (URL or local file) is highlighted chapter by chapter
+  (its bookmarks; per page without them) and the highlights are typeset as a
+  PDF in `translate`'s book format at the source's page size.
   A bare URL or file digests; `save` / `search` manage the store, with per-item
   take-aways.
 - **`translate`** — a whole English EPUB → a Chinese PDF in the original's
@@ -53,7 +55,8 @@ audio leg and `digest` for the notes.
   `streamlink`, `yt-dlp`, and a whisper runner (`mlx_whisper`/`uv`) via
   Homebrew. `curl` for URL downloads.
 - `digest`: `curl`; `setup.sh` installs `uv` (runs the trafilatura article
-  extractor) and `yt-dlp` (YouTube subtitles).
+  extractor and the PDF scripts), `yt-dlp` (YouTube subtitles) and `poppler`
+  (PDFs); a highlights PDF needs Google Chrome.
 - `translate`: `setup.sh` installs `poppler` and `uv`; needs a logged-in
   `codex` CLI (ChatGPT plan, for gpt-6-luna) and Google Chrome (`CHROME=` to
   point elsewhere).
@@ -69,6 +72,7 @@ audio leg and `digest` for the notes.
 ```
 python3 skills/transcribe/scripts/test_transcribe.py
 python3 skills/digest/scripts/test_digest.py
+skills/digest/scripts/test_pdf_highlights.py
 skills/translate/scripts/test_translate.py
 node --test skills/find-domain-names/scripts/test_check.mjs
 node --test skills/download-book/scripts/test_site_session.mjs
