@@ -6,7 +6,7 @@
 # ABOUTME: Typesets the translated Markdown sections into a PDF in the source book's format (page size, colors,
 # ABOUTME: running heads, folios, contents page) with headless Chrome, then adds the original cover and bookmarks.
 #
-# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg iterm|#rrggbb --fg #606e6a|iterm] [--font-size 9.25]
+# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg iterm|#rrggbb --fg #6e7f7a|iterm] [--font-size 9.25]
 # Without --only: the whole book (cover + 目录 + every translated section) to --out (default <book>-zh.pdf next
 # to the source). With --only: one section to <work>/pdf/<id>-<slug>.pdf for a quick look, no cover or contents.
 import argparse
@@ -74,7 +74,7 @@ def iterm_colors():
     import plistlib
     plist = Path.home() / "Library/Preferences/com.googlecode.iterm2.plist"
     if not plist.exists():
-        return "#000409", "#606e6a"
+        return "#000409", "#6e7f7a"
     prefs = plistlib.load(plist.open("rb"))
     guid = prefs.get("Default Bookmark Guid")
     profile = next((b for b in prefs.get("New Bookmarks", []) if b.get("Guid") == guid), None) or prefs["New Bookmarks"][0]
@@ -514,7 +514,7 @@ def main():
     ap.add_argument("--only", help="one section id: quick single-section PDF into <work>/pdf/")
     ap.add_argument("--title", help="Chinese book title for the PDF metadata")
     ap.add_argument("--bg", default="iterm", help="page background: #rrggbb or 'iterm' (the iTerm2 default profile's dark background, the default)")
-    ap.add_argument("--fg", default="#606e6a", help="text color: #rrggbb (default #606e6a, a cool gray) or 'iterm' (the terminal's foreground)")
+    ap.add_argument("--fg", default="#6e7f7a", help="text color: #rrggbb (default #6e7f7a, a cool gray) or 'iterm' (the terminal's foreground)")
     ap.add_argument("--font-size", type=float, default=9.25, help="body size in pt (default 9.25)")
     ap.add_argument("--eq-scale", type=float, default=0.6, help="EPUB build: block (display) equation images render at their intrinsic width times this (default 0.6), so all equations share one scale")
     ap.add_argument("--bold-factor", type=float, default=1.25, help="bold ink brightness relative to body text (default 1.25); Chinese bold uses a 黑体 face")

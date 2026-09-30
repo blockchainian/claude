@@ -116,7 +116,7 @@ is assembled.
 Writes `<book>-zh.pdf`: the cover (the EPUB's cover image rendered full-bleed), a
 目录 with folios, then every translated section. Page size is the one set at extract (`--page-size`). Colors
 default to a dark reading page: the background follows the iTerm2
-default profile's dark-mode background when iTerm2 is installed (else near-black), the text is `#606e6a`, a
+default profile's dark-mode background when iTerm2 is installed (else near-black), the text is `#6e7f7a`, a
 cool gray chosen for long reading on black (neutral or warm grays glare on a black page even when dimmed;
 a saturated terminal foreground is too dark for body text). `--bg/--fg` take `#rrggbb` or `iterm` (either
 terminal color). Type is Baskerville for Latin and
