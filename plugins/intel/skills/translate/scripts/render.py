@@ -342,6 +342,24 @@ def folio_for(page_index, first_body_index):
     return str(page_index - first_body_index + 1)
 
 
+def page_colors(opt):
+    """(background, foreground) as #rrggbb, with 'iterm' resolved to the iTerm2 profile's colors."""
+    term = iterm_colors() if "iterm" in (opt.bg, opt.fg) else None
+    resolve = lambda v, i: term[i] if v == "iterm" else v
+    return resolve(opt.bg, 0), resolve(opt.fg, 1)
+
+
+def paint_background(pdf, page, bg, masked_top=0):
+    """Underlay one page with the background color; masked_top > 0 also covers that much of the top margin
+    over the content (the running head on an opener page)."""
+    r, g, b = (c / 255 for c in _hex(bg))
+    x0, y0, x1, y1 = (float(v) for v in page.mediabox)
+    fill = f"q {r:.4f} {g:.4f} {b:.4f} rg {x0} {y0} {x1 - x0} {y1 - y0} re f Q\nq\n".encode()
+    page.contents_add(pikepdf.Stream(pdf, fill), prepend=True)
+    mask = f"q {r:.4f} {g:.4f} {b:.4f} rg {x0} {y1 - masked_top + 2} {x1 - x0} {masked_top - 2} re f Q\n".encode() if masked_top else b""
+    page.contents_add(pikepdf.Stream(pdf, b"Q\n" + mask), prepend=False)
+
+
 def print_pdf(chrome, html_path, pdf_path):
     # --virtual-time-budget lets KaTeX (loaded from the CDN) finish typesetting the math before the snapshot;
     # without it the page prints with raw \(...\) source.
@@ -359,9 +377,7 @@ def render(work, opt):
     images_path = work / "images.json"
     images = json.loads(images_path.read_text()) if images_path.exists() else {}
 
-    term = iterm_colors() if "iterm" in (opt.bg, opt.fg) else None
-    resolve = lambda v, i: term[i] if v == "iterm" else v
-    bg, fg = resolve(opt.bg, 0), resolve(opt.fg, 1)
+    bg, fg = page_colors(opt)
 
     ready = []
     for s in sections:
@@ -479,16 +495,11 @@ def assemble(cover_pdf, part_pdfs, out, ready, pages, meta, title, bg, top_margi
     for part in parts:
         pdf.pages.extend(part.pages)
     offset = 1
-    r, g, b = (int(bg[i:i + 2], 16) / 255 for i in (1, 3, 5))
     openers = {pages[f"S{s['id']}"] + offset for s, _, _ in ready}
     for i, page in enumerate(pdf.pages):
         if i < offset:
             continue
-        x0, y0, x1, y1 = (float(v) for v in page.mediabox)
-        fill = f"q {r:.4f} {g:.4f} {b:.4f} rg {x0} {y0} {x1 - x0} {y1 - y0} re f Q\nq\n".encode()
-        page.contents_add(pikepdf.Stream(pdf, fill), prepend=True)
-        mask = f"q {r:.4f} {g:.4f} {b:.4f} rg {x0} {y1 - top_margin + 2} {x1 - x0} {top_margin - 2} re f Q\n".encode() if i in openers else b""
-        page.contents_add(pikepdf.Stream(pdf, b"Q\n" + mask), prepend=False)
+        paint_background(pdf, page, bg, top_margin if i in openers else 0)
     link_contents(pdf, part_pdfs[0], offset, pages, ready, row_height)
     with pdf.open_outline() as outline:
         outline.root.append(pikepdf.OutlineItem("Cover", 0))
@@ -507,17 +518,22 @@ def assemble(cover_pdf, part_pdfs, out, ready, pages, meta, title, bg, top_margi
     pdf.save(out)
 
 
+def add_style_args(ap):
+    """The page-style options shared by every PDF typeset in this book format."""
+    ap.add_argument("--bg", default="iterm", help="page background: #rrggbb or 'iterm' (the iTerm2 default profile's dark background, the default)")
+    ap.add_argument("--fg", default="#6e7f7a", help="text color: #rrggbb (default #6e7f7a, a cool gray) or 'iterm' (the terminal's foreground)")
+    ap.add_argument("--font-size", type=float, default=9.25, help="body size in pt (default 9.25)")
+    ap.add_argument("--bold-factor", type=float, default=1.25, help="bold ink brightness relative to body text (default 1.25); Chinese bold uses a 黑体 face")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("work")
     ap.add_argument("--out")
     ap.add_argument("--only", help="one section id: quick single-section PDF into <work>/pdf/")
     ap.add_argument("--title", help="Chinese book title for the PDF metadata")
-    ap.add_argument("--bg", default="iterm", help="page background: #rrggbb or 'iterm' (the iTerm2 default profile's dark background, the default)")
-    ap.add_argument("--fg", default="#6e7f7a", help="text color: #rrggbb (default #6e7f7a, a cool gray) or 'iterm' (the terminal's foreground)")
-    ap.add_argument("--font-size", type=float, default=9.25, help="body size in pt (default 9.25)")
+    add_style_args(ap)
     ap.add_argument("--eq-scale", type=float, default=0.6, help="EPUB build: block (display) equation images render at their intrinsic width times this (default 0.6), so all equations share one scale")
-    ap.add_argument("--bold-factor", type=float, default=1.25, help="bold ink brightness relative to body text (default 1.25); Chinese bold uses a 黑体 face")
     opt = ap.parse_args()
     render(Path(opt.work).resolve(), opt)
 
