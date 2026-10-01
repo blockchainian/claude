@@ -10,6 +10,10 @@ types. Then search your lane only, as widely as the tools allow: several
 queries per growth phase, date-bounded searches for press from the time, the
 subject's home country and language, and the leads inside what you find.
 
+Append every source you accept to `notes/scout-<lane>.md` as you go (URL,
+outlet, year, type, one line). If that file already exists when you start, you
+were interrupted: read it, keep what is there, and continue.
+
 For every candidate open just enough to confirm it exists, is about the
 subject, and is the original (not a repost, an aggregator, a search page or a
 wiki). Leave out sellers of courses, coaching, tools or consulting, press
@@ -18,5 +22,5 @@ releases and content farms. Aim for 40 or more sources from many sites.
 Do not use the archive of profile pages, statistics sites or channel listings:
 the numbers agents own those.
 
-Return the list: for each source its URL, outlet, year, source type, and one
+Return the list from that file: for each source its URL, outlet, year, source type, and one
 line on what it should contain. No other text.

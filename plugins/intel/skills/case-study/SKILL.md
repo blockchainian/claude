@@ -180,6 +180,12 @@ ask for one name.
 - A product named with `--apply-to` appears only in the reasoning chapter
   written for it. Its terms are givens of the task, stated as such, never
   findings.
+- An agent that dies mid-stage (an account's usage limit, a crash) loses
+  nothing: every brief has the agent write its output file as it goes and,
+  when relaunched with the same message, read that file and continue. Relaunch
+  with `Workflow({scriptPath, resumeFromRunId})`: finished agents replay from
+  the cache, the others run again and pick up where their files stop. Do not
+  change the script or the args before resuming, or every agent reruns.
 - Machine-wide limits (a video site's session, a search quota) do not grow
   with the number of agents: pass them as `caps` and each agent gets a share.
   Archive pages are fetched only through `scripts/wayback.py`, by the archive
