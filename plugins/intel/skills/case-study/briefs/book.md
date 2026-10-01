@@ -37,15 +37,19 @@ know how the research was done.
    Where the subject's account and the record differ and the difference
    matters, state both in one plain sentence. A claim too weak to state
    plainly is left out.
-6. **Accusations keep their wording.** An allegation stays an allegation, with
+6. **Never firmer than the draft.** "Not found in any source" does not become
+   "did not happen": write that the public record shows none, or leave it out.
+   A report from a single outlet stays one outlet's report. Something the
+   draft inferred is not written as something that was seen.
+7. **Accusations keep their wording.** An allegation stays an allegation, with
    who made it and how it ended.
-7. **Plain, short, direct.** Short sentences. Everyday words. No figures of
+8. **Plain, short, direct.** Short sentences. Everyday words. No figures of
    speech, no rhetorical questions, no summaries of what a chapter is about to
    say or has just said. Each chapter reads on from the one before; a fact
    told once is not told again.
-8. **Reasoning chapters say so once**, in their lead paragraph, in plain
+9. **Reasoning chapters say so once**, in their lead paragraph, in plain
    words, then get on with it.
-9. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
+10. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
 
 ## Shape
 
