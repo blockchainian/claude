@@ -132,6 +132,21 @@ def test_render(ph, work, tmp):
     check("a store-ready draft is written", draft.startswith("---\ntitle: A Small Book\n") and "\nurl: " in draft
           and "## One: Beginnings" in draft and "### Theme" in draft and "## Three: Ends" in draft, draft[:300])
 
+    meta_path = work / "chapters.json"
+    meta = json.loads(meta_path.read_text())
+    meta["cover"] = "Jane Doe"
+    meta_path.write_text(json.dumps(meta))
+    ph.render(work, opt)
+    pdf = pikepdf.open(out)
+    check("a cover name adds one cover page in front", len(pdf.pages) == 3, len(pdf.pages))
+    cover_text = subprocess.run(["pdftotext", "-l", "1", str(out), "-"], capture_output=True, text=True).stdout
+    check("the cover shows the name and the book title", "Jane Doe" in cover_text and "A Small Book" in cover_text, cover_text[:200])
+    with pdf.open_outline() as o:
+        items = [(i.title, pdf.pages.index(pikepdf.Page(i.destination[0]))) for i in o.root]
+    check("bookmarks follow the chapters behind the cover", items == [("Jane Doe", 0), ("One: Beginnings", 1), ("Three: Ends", 2)], items)
+    meta.pop("cover")
+    meta_path.write_text(json.dumps(meta))
+
     default = ph.default_out(Path(json.loads((work / "chapters.json").read_text())["pdf"]), work)
     check("default output sits next to the source", default == tmp / "small-book-highlights.pdf", str(default))
 

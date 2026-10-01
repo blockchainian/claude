@@ -2,7 +2,7 @@
 
 Three independent reviewers audited the case study. Their findings are in the
 work directory: `review/sources.md`, `review/numbers.md`, `review/quotes.md`.
-Apply every finding. The standard is `references/evidence.md` (next to this
+Apply every finding to the sourced draft in `md/`. The standard is `references/evidence.md` (next to this
 brief's folder).
 
 1. A failed source leaves `sources.json`, and every sentence resting on it is

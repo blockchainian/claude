@@ -43,9 +43,11 @@ download links and checks domain names.
 - **`case-study`** — research one named creator in depth and typeset a sourced
   case study PDF in `digest`'s book format: starting point, the dated growth
   record from archive snapshots, methods, money, failures, and what can be
-  copied. One research agent writes the chapters; three independent reviewers
-  audit every source, number and quote; sellers of courses and growth tools
-  are never evidence. One subject per run.
+  copied. One research agent writes a sourced draft; three independent
+  reviewers audit every source, number and quote; sellers of courses and
+  growth tools are never evidence. A separate writer then turns the reviewed
+  draft into a short book: a cover with the subject's name, an introduction,
+  numbered chapters, no citations in the text. One subject per run.
 
 ## Why they live together
 
