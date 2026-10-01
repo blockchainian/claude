@@ -8,11 +8,9 @@ directory, your batch name, your URLs, and your share of the machine's caps.
 Read `references/evidence.md` and `references/tools.md` next to this brief's
 folder, and the chapter table in the type file.
 
-If `notes/<batch>.md` already exists when you start, you were interrupted:
-read it and continue from the first URL it does not cover.
-
 For each URL: open it and read it to the end (a long interview or transcript
-too). Save downloads under `raw/`. Then append to `notes/<batch>.md`:
+too). Save downloads under `raw/`. Then append to `notes/<batch>.md` (see "Writing
+as you go" in the evidence rules):
 
 ```
 ## <Outlet> — <title> (<date>)

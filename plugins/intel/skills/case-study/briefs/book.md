@@ -64,8 +64,8 @@ know how the research was done.
   and nothing about what could not be reached.
 
 Write each chapter file as soon as it is done. If `book/` already holds
-chapters when you start, you were interrupted: read them and continue from
-the first missing one.
+chapters when you start, you were interrupted: continue from the first missing
+one (re-read only the chapter before it, for continuity).
 
 ## Before finishing
 

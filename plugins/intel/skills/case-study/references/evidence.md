@@ -1,5 +1,13 @@
 # Evidence rules
 
+## Writing as you go
+
+Every agent writes its output file while it works, by appending (`>>` or an
+edit that adds lines), never by rewriting the whole file: a rewrite makes you
+produce the whole file again each time. When your output file already exists
+at start, you were interrupted: read that one file, nothing else extra, and
+continue from the first item it does not cover.
+
 Every agent in a case study — scout, reader, writer, reviewer, fixer — works
 to these.
 
