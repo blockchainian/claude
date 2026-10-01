@@ -5,7 +5,7 @@ export const meta = {
     { title: 'Scout', detail: 'four scouts find sources by lane', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources, plus two numbers agents', model: 'sonnet' },
     { title: 'Write', detail: 'one writer per chapter, then the introduction and reasoning chapters', model: 'sonnet' },
-    { title: 'Review', detail: 'three lenses, each split into slices' },
+    { title: 'Review', detail: 'three lenses, each split into small slices', model: 'sonnet' },
     { title: 'Fix', detail: 'one fixer per chapter', model: 'sonnet' },
   ],
 }
@@ -75,11 +75,11 @@ await parallel(FROM_CHAPTERS.map(write))
 phase('Review')
 const CHAPTERS = [...FROM_NOTES, ...FROM_CHAPTERS].sort()
 const blocks = []
-for (let i = 0; i < CHAPTERS.length; i += 3) blocks.push(CHAPTERS.slice(i, i + 3))
-const sliceCount = Math.ceil(sourceCount / 50)
+for (let i = 0; i < CHAPTERS.length; i += 2) blocks.push(CHAPTERS.slice(i, i + 2))
+const sliceCount = Math.ceil(sourceCount / 25)
 const review = (lens, name, slice) => () => agent(
   `${COMMON}\nYou are an independent adversarial reviewer. Follow ${S}/briefs/review.md. Your lens: ${lens}. Your output name: ${name}.\nYour slice:\n${slice}`,
-  { label: `review:${name}`, phase: 'Review', effort: 'high', agentType: 'general-purpose' })
+  { label: `review:${name}`, phase: 'Review', ...SONNET })
 const reviews = (await parallel([
   ...Array.from({ length: sliceCount }, (_, i) => review('sources', `sources-${i + 1}`,
     `the urls printed by: ${S}/scripts/case_study.py slice "${WORK}" ${i + 1} ${sliceCount}`)),

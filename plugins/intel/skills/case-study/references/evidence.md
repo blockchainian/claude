@@ -1,5 +1,19 @@
 # Evidence rules
 
+## Keeping your context small
+
+Every tool result you pull in is re-read on every later step, so a large dump
+is paid for dozens of times. Pull in only what you need:
+
+- A chapter: `grep -n` for the sentences that name your source or hold the
+  figure or quote you are checking, not the whole file. Read a whole chapter
+  only when your task is to write or fix it.
+- A page or transcript: search it for the passage you need (`grep -n -C 3`
+  on the saved file, or the fetch tool's `| grep` / `| head -c 6000`), not the
+  full text. Save the full text under `raw/` once and search that file.
+- A listing or a log: `head`, `tail`, `wc -l` or a count, not the whole thing.
+- Your own output file at restart: that one file, nothing else extra.
+
 ## Writing as you go
 
 Every agent writes its output file while it works, by appending (`>>` or an

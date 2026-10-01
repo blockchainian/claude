@@ -94,7 +94,7 @@ ask for one name.
    | Scout | 4, one per lane | Find sources; return URLs only |
    | Read | one per 8 sources, plus 2 numbers agents | Read into `notes/`, tagged by chapter; the curve comes from `scripts/wayback.py curve` in one batch |
    | Write | one per chapter; then the introduction and the reasoning chapters | The sourced draft in `md/`, from the notes only |
-   | Review | sources lens per 50 URLs; numbers and quotes lenses per 3 chapters | Findings in `review/`, every item checked |
+   | Review | sources lens per 25 URLs; numbers and quotes lenses per 2 chapters | Findings in `review/`, every item checked |
    | Fix | one per chapter; then the introduction and the reasoning chapters | Apply the findings to `md/` |
 
    Run it with the Workflow tool (this skill asks for it):
@@ -114,7 +114,9 @@ ask for one name.
    Parallel agents never share a file. Each writes its own notes, source list,
    gaps, findings and fix log; `case_study.py merge` builds `sources.json`,
    `gaps.md` and the draft's sources chapter from them. Reviewers are fresh
-   agents on the session's model, never the writers. The review is never
+   agents, never the writers; they run on Sonnet at high effort, because the
+   review is checking against sources, not judgment, and fourteen reviewers
+   on the largest model cost more in ten minutes than the rest of the run. The review is never
    sampled and never skipped: a first draft that looked complete has, in
    practice, carried dozens of findings — sources named but never opened,
    sellers' and managers' statements written as fact, archive captures missed
@@ -186,6 +188,9 @@ ask for one name.
   with `Workflow({scriptPath, resumeFromRunId})`: finished agents replay from
   the cache, the others run again and pick up where their files stop. Do not
   change the script or the args before resuming, or every agent reruns.
+- Slices are small on purpose. An agent's context grows with every item it
+  checks and is re-read on every step, so the cost of a slice grows with the
+  square of its size: two agents with 25 items cost less than one with 50.
 - Machine-wide limits (a video site's session, a search quota) do not grow
   with the number of agents: pass them as `caps` and each agent gets a share.
   Archive pages are fetched only through `scripts/wayback.py`, by the archive
