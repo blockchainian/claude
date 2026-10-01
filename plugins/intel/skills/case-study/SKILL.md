@@ -87,15 +87,18 @@ ask for one name.
    already said to include them, stop and ask.
 
 3. **Research, review and fix — the workflow.** Every stage that can run in
-   parallel does, so that each takes about ten minutes instead of an hour:
+   parallel does, and nothing waits for a stage it does not need:
 
    | Stage | Agents | Does |
    |---|---|---|
-   | Scout | 4, one per lane | Find sources; return URLs only |
-   | Read | one per 8 sources, plus 2 numbers agents | Read into `notes/`, tagged by chapter; the curve comes from `scripts/wayback.py curve` in one batch |
+   | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `scripts/wayback.py curve` in one batch |
+   | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Write | one per chapter; then the introduction and the reasoning chapters | The sourced draft in `md/`, from the notes only |
-   | Review | sources lens per 25 URLs; numbers and quotes lenses per 2 chapters | Findings in `review/`, every item checked |
-   | Fix | one per chapter; then the introduction and the reasoning chapters | Apply the findings to `md/` |
+   | Review | sources lens per 25 URLs, from the merge on, alongside the writers; numbers and quotes lenses per chapter, as soon as it is written | Findings in `review/`, every item checked |
+   | Fix | one per chapter, as soon as its two reviews and the sources lens are done; the introduction and the reasoning chapters after the others | Apply the findings to `md/` |
+
+   A chapter runs write → review → fix on its own; the slowest chapter sets
+   the time, not the slowest agent of every stage added up.
 
    Run it with the Workflow tool (this skill asks for it):
    `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.js`,
