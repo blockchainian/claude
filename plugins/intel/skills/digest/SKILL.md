@@ -130,11 +130,42 @@ own page size.
    forces that. An image-only (scanned) PDF exits with an error — there is no
    OCR here, so say it is scanned and stop.
 
-2. **Write one highlights file per chapter.** For each chapter in order, Read
-   all of `<work>/<text>` (in chunks, as in step 2 above) and write
-   `<work>/<highlights>`: a `# <chapter title>` line, then themed `## `
-   sections, by the rules in "What makes a highlight". No frontmatter and no
-   TL;DR per chapter. Write in the language of the PDF.
+2. **Write one highlights file per chapter — in parallel, one subagent per
+   chapter.** Each chapter is independent: its own text file in, its own
+   highlights file out. Fanning them out is faster than writing them one by one,
+   and it keeps each chapter's text out of your own context.
+
+   First, from the split JSON, pick the chapters that carry real content. **Skip
+   — do not dispatch —** any that is front or back matter (cover, contents page,
+   index, copyright page) or has a near-zero `chars`; a skipped chapter simply
+   gets no highlights file, and `render` ignores it.
+
+   Then dispatch the content chapters with the Agent tool: **one fresh
+   general-purpose subagent per chapter — not a fork** (each subagent needs only
+   its own chapter, never this conversation). Launch several in one message so
+   they run at once; for a long book keep each batch to about 6–8 subagents and
+   launch the next batch when the first returns. Give every subagent a prompt
+   that contains, filled in for its chapter:
+   - the absolute paths to read (`<work>/<text>`) and to write
+     (`<work>/<highlights>`), the chapter `title`, and the `unit`;
+   - this instruction: *Read all of the text file in chunks (Read tool,
+     offset/limit, ~45000 chars each — do not skim the middle), then write the
+     highlights file: a `# <title>` line followed by themed `## ` sections. No
+     frontmatter, no TL;DR. Write in the language of the PDF. Reply only `done`,
+     or the error if you could not write the file.*
+   - the **"Writing a chapter"** block and the **"What makes a highlight"**
+     section below, both copied verbatim — together they are the whole brief the
+     subagent writes to, since it cannot see this skill.
+
+   When the subagents return, verify every expected `<work>/<highlights>` exists
+   and is non-empty (`ls -l`); re-dispatch any that are missing or empty before
+   rendering.
+
+   A **per-page PDF** (`unit: "page"`: a deck, a filing, a form) is **not** fanned
+   out — its sections are single pages and there can be a great many, so write
+   those yourself, in order, as you read them.
+
+### Writing a chapter
 
    **A book (`unit: "chapter"`) is written as prose, not bullets.** A book is
    long, and a chapter of bullet points reads as disconnected notes. Open the
@@ -148,11 +179,7 @@ own page size.
    disagreements recorded, nothing the source does not say. Only a PDF split
    per page (`unit: "page"`: a deck, a filing, a form) keeps themed bullets and
    an optional `## Quotes`; so do articles, podcasts and videos in the URL
-   flow above. Skip a chapter that carries no real content (cover, contents page,
-   index, copyright page, a near-zero `chars`) by not writing its file. For a
-   long book, finish and write each chapter before reading the next, so the
-   work survives a context compaction; chapters whose file already exists are
-   done.
+   flow above.
 
 3. **Render.**
 
