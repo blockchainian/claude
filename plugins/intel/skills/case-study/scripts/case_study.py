@@ -4,6 +4,7 @@
 #
 # Usage: case_study.py init <slug> --title <title> --cover <name> --source <url> --out <pdf> [--chapters 12]
 #        case_study.py merge <work dir>
+#        case_study.py slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
 #        case_study.py check <work dir> [--draft]
 # A study has two layers: md/NN.md is the sourced draft the reviewers audit (sources named in every sentence);
 # book/NN.md is the text that is typeset (no citations, no account of the research).
@@ -76,6 +77,13 @@ def merge(work):
     last.write_text(f"# Sources\n\n{len(sources)} sources, listed in sources.json.\n\n## List\n\n"
                     + "\n".join(f"- {label}" for label in labels) + "\n", encoding="utf-8")
     return {"sources": len(sources), "failed": len(failed), "gaps": sum(g.count("\n") + 1 for g in gaps if g)}
+
+
+def slice_sources(work, index, of):
+    """Slice number index (from 1) of the source urls, sorted, cut into `of` near-equal parts."""
+    urls = sorted(read_json(Path(work) / "sources.json", dict))
+    size = -(-len(urls) // of)
+    return urls[(index - 1) * size:index * size]
 
 
 def has_lead_paragraph(text):
@@ -163,10 +171,17 @@ def main():
     p.add_argument("--chapters", type=int, default=12)
     p = sub.add_parser("merge")
     p.add_argument("work")
+    p = sub.add_parser("slice")
+    p.add_argument("work")
+    p.add_argument("index", type=int)
+    p.add_argument("of", type=int)
     p = sub.add_parser("check")
     p.add_argument("work")
     p.add_argument("--draft", action="store_true", help="pass on the sourced draft alone, before the book text exists")
     args = parser.parse_args()
+    if args.cmd == "slice":
+        print("\n".join(slice_sources(args.work, args.index, args.of)))
+        return
     if args.cmd == "init":
         result = init(args.slug, args.title, args.source, Path(args.out).expanduser(), args.chapters, args.cover)
         passed = True

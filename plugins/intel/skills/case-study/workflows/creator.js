@@ -60,7 +60,10 @@ await parallel([
     `${COMMON}\nYou are a numbers agent. Follow ${S}/briefs/numbers.md. Your lane: ${lane}.${share(agentsReading)}`,
     { label: `numbers:${lane}`, phase: 'Read', ...SONNET })),
 ])
-log(`read stage merged: ${await merge('merge:read')}`)
+const mergedRead = String(await merge('merge:read'))
+log(`read stage merged: ${mergedRead}`)
+// readers follow reposts to originals, so the sources to review are counted after the merge
+const sourceCount = Number((mergedRead.match(/"sources":\s*(\d+)/) || [])[1]) || urls.length
 
 phase('Write')
 const write = file => () => agent(
@@ -73,13 +76,13 @@ phase('Review')
 const CHAPTERS = [...FROM_NOTES, ...FROM_CHAPTERS].sort()
 const blocks = []
 for (let i = 0; i < CHAPTERS.length; i += 3) blocks.push(CHAPTERS.slice(i, i + 3))
-const slices = []
-for (let i = 0; i < urls.length; i += 50) slices.push(urls.slice(i, i + 50))
+const sliceCount = Math.ceil(sourceCount / 50)
 const review = (lens, name, slice) => () => agent(
-  `${COMMON}\nYou are an independent adversarial reviewer. Follow ${S}/briefs/review.md. Your lens: ${lens}. Your output name: ${name}.\nYour slice:\n${slice}\n(For the sources lens: check only the URLs of your slice that are keys of ${WORK}/sources.json.)`,
-  { label: `review:${name}`, phase: 'Review', agentType: 'general-purpose' })
+  `${COMMON}\nYou are an independent adversarial reviewer. Follow ${S}/briefs/review.md. Your lens: ${lens}. Your output name: ${name}.\nYour slice:\n${slice}`,
+  { label: `review:${name}`, phase: 'Review', effort: 'high', agentType: 'general-purpose' })
 const reviews = (await parallel([
-  ...slices.map((slice, i) => review('sources', `sources-${i + 1}`, slice.map(s => `- ${s.url}`).join('\n'))),
+  ...Array.from({ length: sliceCount }, (_, i) => review('sources', `sources-${i + 1}`,
+    `the urls printed by: ${S}/scripts/case_study.py slice "${WORK}" ${i + 1} ${sliceCount}`)),
   ...blocks.map((block, i) => review('numbers', `numbers-${i + 1}`, block.map(f => `- md/${f}.md`).join('\n'))),
   ...blocks.map((block, i) => review('quotes', `quotes-${i + 1}`, block.map(f => `- md/${f}.md`).join('\n'))),
 ])).filter(Boolean)
