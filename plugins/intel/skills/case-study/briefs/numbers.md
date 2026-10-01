@@ -37,7 +37,9 @@ the weeks around each acceleration the press mentions.
 
 ## Output, both lanes
 
-`notes/numbers-<lane>.md`: dated tables, one row per line, each row starting
+Write to `notes/numbers-<lane>.md` as you go, not at the end; if it already
+exists when you start, you were interrupted: read it and continue from where
+it stops. Dated tables, one row per line, each row starting
 with the chapter tags it serves (`[c03]`, `[c07]`…) and `[on record]`, and
 ending with the record's URL. `notes/numbers-<lane>.sources.json` and
 `notes/numbers-<lane>.gaps.md` as in the reader brief (a period with no

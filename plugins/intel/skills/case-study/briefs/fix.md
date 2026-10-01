@@ -31,8 +31,10 @@ find their labels in `sources.json`.
 
 Anything new you add meets the same rules as the first draft.
 
-Edit only `md/<your file>`. Do not edit `sources.json`. Write:
-- `review/fix-<NN>.md` — one line per finding: fixed, removed, relabelled,
+Edit only `md/<your file>`. Do not edit `sources.json`. Write, as you go:
+- `review/fix-<NN>.md` — one line per finding, appended right after you
+  apply it (if the file already exists when you start, you were interrupted:
+  read it and continue from the first finding it does not cover): fixed, removed, relabelled,
   re-sourced (with the new URL), or rejected (with the reason);
 - `review/fix-<NN>.added.json` — `{"<url>": "<Outlet Year>"}` for every source
   you opened and read in this round and now cite (`{}` when none).
