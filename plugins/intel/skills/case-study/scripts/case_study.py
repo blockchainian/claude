@@ -3,9 +3,13 @@
 # ABOUTME: init writes chapters.json + sources.json; check verifies the sourced draft, the book text and sources.
 #
 # Usage: case_study.py init <slug> --title <title> --cover <name> --source <url> --out <pdf> [--chapters 12]
+#        case_study.py merge <work dir>
 #        case_study.py check <work dir> [--draft]
 # A study has two layers: md/NN.md is the sourced draft the reviewers audit (sources named in every sentence);
 # book/NN.md is the text that is typeset (no citations, no account of the research).
+# Agents working in parallel never share a file: each writes its own notes/<name>.sources.json (url -> label) and
+# notes/<name>.gaps.md, reviewers write review/<name>.failed.json (a list of urls), fixers write
+# review/<name>.added.json (url -> label). merge turns those into sources.json, gaps.md and the draft's last chapter.
 import argparse
 import json
 import os
@@ -30,9 +34,9 @@ NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
 
 def init(slug, title, source, out, chapters, cover):
-    """Create <store>/.work/<slug>/ with md/, book/, raw/, review/, chapters.json and an empty sources.json."""
+    """Create <store>/.work/<slug>/ with md/, book/, notes/, raw/, review/, chapters.json and an empty sources.json."""
     work = ROOT / ".work" / slug
-    for sub in ("md", "book", "raw", "review"):
+    for sub in ("md", "book", "notes", "raw", "review"):
         (work / sub).mkdir(parents=True, exist_ok=True)
     ids = [f"{n:02d}" for n in range(1, chapters + 1)]
     meta = {"title": title, "cover": cover, "slug": slug, "source": source, "pdf": str(out), "work": str(work),
@@ -44,6 +48,34 @@ def init(slug, title, source, out, chapters, cover):
     if not sources.exists():
         sources.write_text("{}", encoding="utf-8")
     return meta
+
+
+def read_json(path, kind):
+    """The JSON in a file when it is of the expected kind, else an empty one."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return kind()
+    return data if isinstance(data, kind) else kind()
+
+
+def merge(work):
+    """Rebuild sources.json, gaps.md and the draft's sources chapter from the files the parallel agents wrote."""
+    work = Path(work)
+    meta = json.loads((work / "chapters.json").read_text(encoding="utf-8"))
+    sources = {}
+    for path in sorted((work / "notes").glob("*.sources.json")) + sorted((work / "review").glob("*.added.json")):
+        sources.update({k: v for k, v in read_json(path, dict).items() if isinstance(v, str)})
+    failed = {url for path in sorted((work / "review").glob("*.failed.json")) for url in read_json(path, list)}
+    sources = {url: label for url, label in sources.items() if url not in failed}
+    (work / "sources.json").write_text(json.dumps(sources, ensure_ascii=False, indent=2), encoding="utf-8")
+    gaps = [path.read_text(encoding="utf-8").strip() for path in sorted((work / "notes").glob("*.gaps.md"))]
+    (work / "gaps.md").write_text("\n".join(g for g in gaps if g) + "\n", encoding="utf-8")
+    labels = sorted({f"{label} ({urlparse(url).netloc.removeprefix('www.')})" for url, label in sources.items()})
+    last = work / "md" / f"{meta['chapters'][-1]['id']}.md"
+    last.write_text(f"# Sources\n\n{len(sources)} sources, listed in sources.json.\n\n## List\n\n"
+                    + "\n".join(f"- {label}" for label in labels) + "\n", encoding="utf-8")
+    return {"sources": len(sources), "failed": len(failed), "gaps": sum(g.count("\n") + 1 for g in gaps if g)}
 
 
 def has_lead_paragraph(text):
@@ -129,12 +161,17 @@ def main():
     p.add_argument("--source", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--chapters", type=int, default=12)
+    p = sub.add_parser("merge")
+    p.add_argument("work")
     p = sub.add_parser("check")
     p.add_argument("work")
     p.add_argument("--draft", action="store_true", help="pass on the sourced draft alone, before the book text exists")
     args = parser.parse_args()
     if args.cmd == "init":
         result = init(args.slug, args.title, args.source, Path(args.out).expanduser(), args.chapters, args.cover)
+        passed = True
+    elif args.cmd == "merge":
+        result = merge(args.work)
         passed = True
     else:
         result = check(args.work)

@@ -43,8 +43,10 @@ download links and checks domain names.
 - **`case-study`** — research one named creator in depth and typeset a sourced
   case study PDF in `digest`'s book format: starting point, the dated growth
   record from archive snapshots, methods, money, failures, and what can be
-  copied. One research agent writes a sourced draft; three independent
-  reviewers audit every source, number and quote; sellers of courses and
+  copied. A workflow runs each stage in parallel — scouts, readers in batches,
+  numbers from the archive in one batch, a writer per chapter, then
+  independent reviewers who audit every source, number and quote, and a fixer
+  per chapter; sellers of courses and
   growth tools are never evidence. A separate writer then turns the reviewed
   draft into a short book: a cover with the subject's name, an introduction,
   numbered chapters, no citations in the text. One subject per run.
@@ -89,6 +91,7 @@ node --test skills/find-domain-names/scripts/test_check.mjs
 node --test skills/download-book/scripts/test_site_session.mjs
 python3 skills/case-study/scripts/test_case_study.py
 python3 skills/case-study/scripts/test_wayback.py
+node --test skills/case-study/scripts/test_workflow.mjs
 ```
 
 `test_transcribe.py` covers the batch and live command shapes, the
