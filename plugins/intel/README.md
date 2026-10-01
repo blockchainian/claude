@@ -43,11 +43,11 @@ download links and checks domain names.
 - **`case-study`** — research one named creator in depth and typeset a sourced
   case study PDF in `digest`'s book format: starting point, the dated growth
   record from archive snapshots, methods, money, failures, and what can be
-  copied. A workflow runs each stage in parallel — scouts, readers in batches,
-  numbers from the archive in one batch, a writer per chapter, then
-  independent reviewers who audit every source, number and quote, and a fixer
-  per chapter; sellers of courses and
-  growth tools are never evidence. A separate writer then turns the reviewed
+  copied. A workflow runs everything in parallel — scouts, readers in batches,
+  numbers from the archive in one batch, then each chapter on its own: a
+  writer, independent reviewers who audit every source, number and quote, and
+  a fixer, with no chapter waiting for another; sellers of courses and growth
+  tools are never evidence. A separate writer then turns the reviewed
   draft into a short book: a cover with the subject's name, an introduction,
   numbered chapters, no citations in the text. One subject per run.
 

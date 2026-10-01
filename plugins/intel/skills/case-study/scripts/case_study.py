@@ -5,6 +5,7 @@
 # Usage: case_study.py init <slug> --title <title> --cover <name> --source <url> --out <pdf> [--chapters 12]
 #        case_study.py merge <work dir>
 #        case_study.py slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
+#        case_study.py findings <work dir> <NN>       (the review lines one fixer applies to chapter NN)
 #        case_study.py check <work dir> [--draft]
 # A study has two layers: md/NN.md is the sourced draft the reviewers audit (sources named in every sentence);
 # book/NN.md is the text that is typeset (no citations, no account of the research).
@@ -84,6 +85,20 @@ def slice_sources(work, index, of):
     urls = sorted(read_json(Path(work) / "sources.json", dict))
     size = -(-len(urls) // of)
     return urls[(index - 1) * size:index * size]
+
+
+def findings(work, chapter):
+    """The review lines a fixer applies to one chapter: those tagged with its number, and the sources-lens lines
+    (tagged with a source label) about labels the chapter names."""
+    work = Path(work)
+    text = (work / "md" / f"{chapter}.md").read_text(encoding="utf-8")
+    out = []
+    for path in sorted((work / "review").glob("*.md")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            tag = re.match(r"- \[([^\]]+)\]", line)
+            if tag and (tag.group(1) == chapter or (path.name.startswith("sources-") and tag.group(1) in text)):
+                out.append(line)
+    return out
 
 
 def has_lead_paragraph(text):
@@ -175,12 +190,18 @@ def main():
     p.add_argument("work")
     p.add_argument("index", type=int)
     p.add_argument("of", type=int)
+    p = sub.add_parser("findings")
+    p.add_argument("work")
+    p.add_argument("chapter", help="the chapter number, e.g. 04")
     p = sub.add_parser("check")
     p.add_argument("work")
     p.add_argument("--draft", action="store_true", help="pass on the sourced draft alone, before the book text exists")
     args = parser.parse_args()
     if args.cmd == "slice":
         print("\n".join(slice_sources(args.work, args.index, args.of)))
+        return
+    if args.cmd == "findings":
+        print("\n".join(findings(args.work, args.chapter)))
         return
     if args.cmd == "init":
         result = init(args.slug, args.title, args.source, Path(args.out).expanduser(), args.chapters, args.cover)

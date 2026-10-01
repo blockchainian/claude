@@ -31,13 +31,13 @@ For every URL in `sources.json`:
    as the publication's own reporting.
 4. Is the label right, and is the URL the article itself rather than a search
    page, a tag page, or a copy on another site?
-5. Find every chapter sentence that names this source's label
-   (`grep -n "<label>" md/*.md`). A source no chapter uses is reported.
-6. Privacy: does the page print a claimed legal name or personal details of a
+5. Privacy: does the page print a claimed legal name or personal details of a
    pseudonymous subject?
 
-List every source that fails and every chapter sentence that rests on it, and
-write the failed URLs as a JSON list to `review/<output name>.failed.json`.
+You check the sources, not the chapters: the chapters may still be being
+written while you work, and the fixer of every chapter that names a label
+receives your findings about it. Write every failed URL as a JSON list to
+`review/<output name>.failed.json`.
 
 ## Lens: numbers
 
@@ -83,14 +83,15 @@ row for each item right after you check it, and each finding as you find it,
 never at the end (see "Writing as you go" in the evidence rules).
 
 The file holds one row per item checked, so the coverage is visible, and the
-findings, one per line, each starting with the chapter file it applies to in
-brackets:
+findings, one per line. The numbers and quotes lenses start each finding with
+the chapter file it applies to in brackets; the sources lens starts it with
+the source's label as written in `sources.json`:
 
 `- [04] <severity> | <the sentence> | <what is wrong> | <what the source says, quoted> | <the exact fix>`
+`- [Kotaku 2013] <severity> | <what is wrong> | <what the page says, quoted> | <the exact fix>`
 
 Severity is one of: wrong, unsupported, mislabelled, seller-source,
-conflict-of-interest, privacy, missing. A finding about a source that touches
-several chapters is written once per chapter.
+conflict-of-interest, privacy, missing.
 
 Final message: counts only — items checked, confirmed, findings by severity,
 what you could not check and why — and the five worst findings, one line each.
