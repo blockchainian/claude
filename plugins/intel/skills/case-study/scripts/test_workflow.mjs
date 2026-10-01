@@ -55,18 +55,20 @@ test('the review covers every source and every chapter, and every chapter is fix
   const { calls } = await run(ARGS)
   // readers followed reposts to originals: 130 sources after the merge, not the 117 scouted
   const sourceSlices = calls.filter(c => c.label.startsWith('review:sources-'))
-  assert.equal(sourceSlices.length, 3)
-  sourceSlices.forEach((c, i) => assert.ok(c.prompt.includes(`case_study.py slice "/w" ${i + 1} 3`), c.prompt))
+  assert.equal(sourceSlices.length, 6)
+  sourceSlices.forEach((c, i) => assert.ok(c.prompt.includes(`case_study.py slice "/w" ${i + 1} 6`), c.prompt))
   for (const lens of ['numbers', 'quotes']) {
-    const files = calls.filter(c => c.label.startsWith(`review:${lens}-`)).flatMap(c => c.prompt.match(/md\/\d\d\.md/g))
+    const slices = calls.filter(c => c.label.startsWith(`review:${lens}-`))
+    assert.ok(slices.every(c => c.prompt.match(/md\/\d\d\.md/g).length <= 2), 'at most two chapters per reviewer')
+    const files = slices.flatMap(c => c.prompt.match(/md\/\d\d\.md/g))
     assert.deepEqual(files.sort(), ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11'].map(f => `md/${f}.md`))
   }
   assert.equal(labels(calls, 'fix:').length, 11)
   assert.deepEqual(labels(calls, 'merge:'), ['merge:read', 'merge:fix'])
 })
 
-test('reviewers inherit the session model at high effort and each agent is told its share of the caps', async () => {
+test('reviewers run on Sonnet at high effort and each agent is told its share of the caps', async () => {
   const { calls } = await run(ARGS)
-  assert.ok(calls.filter(c => c.label.startsWith('review:')).every(c => c.model === undefined && c.effort === 'high'))
+  assert.ok(calls.filter(c => c.label.startsWith('review:')).every(c => c.model === 'sonnet' && c.effort === 'high'))
   assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/17 share'))
 })
