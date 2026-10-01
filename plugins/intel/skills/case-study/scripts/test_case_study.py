@@ -97,6 +97,11 @@ def main():
               and "01" not in [c["chapter"] for c in report["numbers_not_in_draft"]])
         check("check fails on unclean book text", report["book_ok"] is False and report["ok"] is False)
 
+        (work / "md" / "06.md").write_text("# Chapter 6\n\nShe had 24.8M subscribers and 1.2B views in 2016.\n\n## Section\n\nBody.\n")
+        (work / "book" / "06.md").write_text("# Chapter 6\n\n2016 年她有 2,480 万订阅、12 亿播放。\n\n## Section\n\nBody.\n")
+        report = cs.check(work)
+        check("a figure restated in another unit of ten is the draft's figure", "06" not in [c["chapter"] for c in report["numbers_not_in_draft"]], str(report["numbers_not_in_draft"]))
+
         (work / "sources.json").write_text("[1, 2]")
         report = cs.check(work)
         check("check rejects a sources.json that is not a url-to-label object", report["draft_ok"] is False and report["sources_valid"] is False)

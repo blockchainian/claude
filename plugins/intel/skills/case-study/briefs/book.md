@@ -18,8 +18,9 @@ know how the research was done.
 ## Rules
 
 1. **No new facts.** Every fact, name, date and figure comes from the draft.
-   Figures are copied as the draft writes them, digit for digit. A figure the
-   draft does not have is not in the book.
+   Figures keep the draft's digits. A figure may be restated in the unit the
+   book's language uses (24.8M as 2,480 万), never rounded or recomputed. A
+   figure the draft does not have is not in the book.
 2. **Nothing needed is lost.** Every method, step, figure, date and name that a
    reader needs to understand or repeat what was done stays. When two
    sentences say the same thing, one goes.
