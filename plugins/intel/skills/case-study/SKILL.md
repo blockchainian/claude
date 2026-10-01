@@ -39,11 +39,15 @@ they are sent the absolute paths of the files below and read them themselves.
 |---|---|---|
 | `references/evidence.md` | every agent | What counts as read, the kinds of claim, who cannot be evidence |
 | `references/tools.md` | every agent | Login-free commands for pages, press, uploads, archives, records |
-| `types/creator.md` | every agent | The gate, source types, what the numbers must establish, the chapters |
-| `briefs/research.md` | researcher | Target, files, order of work, self-check |
-| `briefs/review.md` | reviewers | The three lenses and the findings format |
-| `briefs/fix.md` | researcher, fix round | How each kind of finding is applied |
+| `types/creator.md` | every agent | The gate, source types, scout lanes, what the numbers must establish, the chapters |
+| `briefs/scout.md` | scouts | Finding sources by lane |
+| `briefs/read.md` | readers | Reading a batch of sources into tagged notes |
+| `briefs/numbers.md` | numbers agents | The curve from the archive, the upload record |
+| `briefs/write.md` | draft writers | One chapter of the sourced draft, from the notes |
+| `briefs/review.md` | reviewers | The three lenses, slices, the findings format |
+| `briefs/fix.md` | fixers | Applying the findings to one chapter |
 | `briefs/book.md` | book writer | How the reviewed draft becomes the text the reader gets |
+| `workflows/creator.js` | you | The stages below as a workflow script |
 
 ## Arguments
 
@@ -82,35 +86,48 @@ ask for one name.
    Report what you searched and what you found. If they do and the user has not
    already said to include them, stop and ask.
 
-3. **Research — one agent.** Spawn one general-purpose subagent. Its message
-   gives: the subject; the absolute paths of `briefs/research.md`,
-   `references/evidence.md`, `references/tools.md` and the type file; the work
-   directory; the language; the tool list file if any; the product description
-   if any; starting sources you already know; and request caps when other
-   agents share the machine. It writes the files and returns counts. Run it in
-   the background and end the turn.
+3. **Research, review and fix — the workflow.** Every stage that can run in
+   parallel does, so that each takes about ten minutes instead of an hour:
 
-4. **Review — three independent agents, one lens each.** When the researcher
-   returns, spawn three fresh general-purpose subagents at once — never forks,
-   never the researcher. Each message gives the absolute path of
-   `briefs/review.md`, the evidence and type files, the work directory, the
-   tool list, and one lens: `sources`, `numbers`, or `quotes`. Add the points
-   the researcher itself reported as doubtful, as things to test, not as facts.
-   Each reviewer checks every item, writes `review/<lens>.md`, and returns
-   counts and its five worst findings. Reviewers inherit the session's model.
+   | Stage | Agents | Does |
+   |---|---|---|
+   | Scout | 4, one per lane | Find sources; return URLs only |
+   | Read | one per 8 sources, plus 2 numbers agents | Read into `notes/`, tagged by chapter; the curve comes from `scripts/wayback.py curve` in one batch |
+   | Write | one per chapter; then the introduction and the reasoning chapters | The sourced draft in `md/`, from the notes only |
+   | Review | sources lens per 50 URLs; numbers and quotes lenses per 3 chapters | Findings in `review/`, every item checked |
+   | Fix | one per chapter; then the introduction and the reasoning chapters | Apply the findings to `md/` |
 
-   The review is never sampled and never skipped. A first draft that looked
-   complete has, in practice, carried dozens of findings: sources named but
-   never opened, sellers' and managers' statements written as fact, and archive
-   captures missed that changed a conclusion.
+   Run it with the Workflow tool (this skill asks for it):
+   `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.js`,
+   `args: { subject, work, skill, lang, today, chapters, tools, product, seeds, caps }`
+   — `skill` is this skill's absolute folder, `chapters` is 11 or 12, `tools`
+   is the tool list file, `product` the `--apply-to` text, `seeds` any
+   starting sources you know, `caps` the machine-wide request limits from the
+   tool list in one line (the script gives each agent its share). Empty
+   strings where there is nothing. It runs in the background: end the turn.
 
-5. **Fix — the researcher.** Send the researcher (it still holds the context)
-   the absolute path of `briefs/fix.md` and the worst findings from all three
-   reviews. It applies every finding and writes `review/fix-log.md`.
+   Without the Workflow tool, run the same stages yourself with parallel Agent
+   calls, one message per stage, giving each agent the brief named in the
+   table above and the same values; run `case_study.py merge "<work>"` after
+   the Read stage and after the Fix stage.
 
-6. **Verify the draft yourself.** This step is yours and is not delegated.
-   - Read `review/fix-log.md`. For each rejected finding, open the source and
-     decide who is right.
+   Parallel agents never share a file. Each writes its own notes, source list,
+   gaps, findings and fix log; `case_study.py merge` builds `sources.json`,
+   `gaps.md` and the draft's sources chapter from them. Reviewers are fresh
+   agents on the session's model, never the writers. The review is never
+   sampled and never skipped: a first draft that looked complete has, in
+   practice, carried dozens of findings — sources named but never opened,
+   sellers' and managers' statements written as fact, archive captures missed
+   that changed a conclusion.
+
+   Two stages are expected to take longer, on purpose. Reading takes about
+   fifteen minutes for three hundred sources, because only so many agents run
+   at once; do not cut sources to save time. The book (step 5) is one writer
+   from the first page to the last, because splitting it breaks the reading.
+
+4. **Verify the draft yourself.** This step is yours and is not delegated.
+   - Read the rejected findings in `review/fix-*.md`. For each, open the
+     source and decide who is right.
    - Re-fetch at least two key numbers live — a point on the curve and the
      largest money figure — and compare them with the chapters.
    - Confirm that no source the reviewers failed is still in `sources.json`.
@@ -119,7 +136,7 @@ ask for one name.
      `sources.json` is a `url → label` object, and the counts of sources,
      archive snapshots and distinct sites.
 
-7. **Write the book — one fresh agent.** Spawn one general-purpose subagent
+5. **Write the book — one fresh agent.** Spawn one general-purpose subagent
    that has not seen the research. Its message gives the absolute paths of
    `briefs/book.md` and the type file, the work directory and the language. It
    reads `md/` and writes `book/NN.md`. Then:
@@ -136,13 +153,13 @@ ask for one name.
    - Read the introduction and one middle chapter yourself. Text that reads as
      a report of the research goes back to the writer.
 
-8. **Render.**
+6. **Render.**
 
    ```bash
    "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/pdf_highlights.py" render "<work>" --out "<pdf path>"
    ```
 
-9. **Report and stop.** One short report:
+7. **Report and stop.** One short report:
    - the PDF path and page count;
    - sources, archive snapshots and distinct sites, from the check;
    - findings per lens, and how many were fixed, removed or rejected;
@@ -163,10 +180,7 @@ ask for one name.
 - A product named with `--apply-to` appears only in the reasoning chapter
   written for it. Its terms are givens of the task, stated as such, never
   findings.
-- Agents share one machine: video-site requests and search quotas are per
-  machine, not per agent, so give each agent its caps in its message. Archive
-  pages are fetched only through `scripts/wayback.py`, by one agent at a time:
-  it holds the rate per route, and two batches at once would double it.
-- A layered variant — parallel readers by source type, one agent owning the
-  numbers, writers working only from the readers' notes — is under evaluation.
-  Until it is adopted here, run the flow above.
+- Machine-wide limits (a video site's session, a search quota) do not grow
+  with the number of agents: pass them as `caps` and each agent gets a share.
+  Archive pages are fetched only through `scripts/wayback.py`, by the archive
+  numbers agent and by the one reviewer slice that re-checks the curve.

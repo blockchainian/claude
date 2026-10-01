@@ -1,6 +1,7 @@
 # Evidence rules
 
-Every agent in a case study — researcher, reviewer, fixer — works to these.
+Every agent in a case study — scout, reader, writer, reviewer, fixer — works
+to these.
 
 ## What counts as read
 

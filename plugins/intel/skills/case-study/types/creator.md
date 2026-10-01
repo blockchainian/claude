@@ -34,6 +34,19 @@ introduction and in the money chapter, and their own account of their method sta
 10. Third-party data firms and academic work.
 11. Criticism and exposés.
 
+## Scout lanes
+
+Four scouts search in parallel, one lane each:
+
+| Lane | Source types |
+|---|---|
+| own-words | 1, 2, and the books the subject wrote |
+| press | 4, 5, and the large later profiles |
+| business-and-people | 3, 6, 7, 9 |
+| criticism-and-data | 10, 11, and what the subject does today |
+
+Source type 8 belongs to the numbers agents.
+
 ## What the numbers must establish, from the record
 
 - The follower or subscriber curve: dated points from archived profile pages or
