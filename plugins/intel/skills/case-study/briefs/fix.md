@@ -3,11 +3,12 @@
 Reviewers audited the sourced draft. You apply their findings to one chapter.
 Your message names the work directory, the type file, your chapter file and
 the tool list. The standard is `references/evidence.md` (next to this brief's
-folder).
+folder); the skill folder is the one that holds this brief's folder.
 
-Your findings: `grep -h "^- \[NN\]" <work>/review/*.md` for your chapter
-file's number. The failed sources: every URL in `<work>/review/*.failed.json`;
-find their labels in `sources.json`.
+Your findings: `<skill>/scripts/case_study.py findings <work> NN` for your
+chapter file's number: the lines tagged with it, and the sources-lens lines
+about every label your chapter names. The failed sources: every URL in
+`<work>/review/*.failed.json`; find their labels in `sources.json`.
 
 1. Every sentence resting on a failed source is removed or re-sourced.
    Re-sourced means you open the original now and read the fact there. If the

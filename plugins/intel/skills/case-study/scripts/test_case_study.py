@@ -117,6 +117,12 @@ def main():
         check("merge drops sources a reviewer failed and adds what the fix round read", set(saved) == {"https://a.example/x", "https://b.example/z", "https://e.example/new"}, str(saved))
         parts = [cs.slice_sources(work, n, 2) for n in (1, 2)]
         check("the sources split into slices that cover every url once", sorted(parts[0] + parts[1]) == sorted(saved) and len(parts[0]) == 2 and len(parts[1]) == 1, str(parts))
+        (work / "review" / "numbers-3.md").write_text("| row | checked |\n- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M\n- [04] missing | a | b | c | d\n")
+        (work / "review" / "sources-1.md").write_text("- [A 2020] seller-source | sells a course | | drop\n- [B 2019] mislabelled | a | b | c | d\n")
+        (work / "md" / "03.md").write_text("# Chapter 2\n\nShe had 24.8M subscribers (on record, A 2020).\n\n## Section\n\nBody.\n")
+        found = cs.findings(work, "03")
+        check("findings for a chapter are its own lines plus the sources-lens lines about labels the chapter names",
+              found == ["- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M", "- [A 2020] seller-source | sells a course | | drop"], str(found))
         last = (work / "md" / "12.md").read_text()
         check("merge writes the draft's sources chapter from sources.json", last.startswith("# Sources\n") and "A 2020" in last and "Seller 2021" not in last and cs.has_lead_paragraph(last), last[:200])
 
