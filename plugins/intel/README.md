@@ -40,6 +40,13 @@ download links and checks domain names.
   download counts, and return fast and slow download links without fetching
   the book file.
 
+- **`case-study`** — research one named creator in depth and typeset a sourced
+  case study PDF in `digest`'s book format: starting point, the dated growth
+  record from archive snapshots, methods, money, failures, and what can be
+  copied. One research agent writes the chapters; three independent reviewers
+  audit every source, number and quote; sellers of courses and growth tools
+  are never evidence. One subject per run.
+
 ## Why they live together
 
 `transcribe` and `digest` answer the same question — *what was actually said or written, and
@@ -62,6 +69,8 @@ audio leg and `digest` for the notes.
   point elsewhere).
 - `find-domain-names`: a Namecheap API key with the calling IP whitelisted,
   stored at `~/.config/blockchainian/claude.json` (see the skill's Setup step).
+- `case-study`: everything `digest` needs (it renders with `digest`'s PDF
+  script), plus `curl`; a file of machine-tested tool commands is optional.
 - `download-book`: Node.js 18+, Google Chrome, and `npm install` in the skill's
   `scripts/` dir (Playwright drives a headed Chrome window through the site's
   DDoS-Guard check; headless browsers get a captcha). Optional `ANNA_SECRET_KEY`
@@ -76,6 +85,7 @@ skills/digest/scripts/test_pdf_highlights.py
 skills/translate/scripts/test_translate.py
 node --test skills/find-domain-names/scripts/test_check.mjs
 node --test skills/download-book/scripts/test_site_session.mjs
+python3 skills/case-study/scripts/test_case_study.py
 ```
 
 `test_transcribe.py` covers the batch and live command shapes, the
