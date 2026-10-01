@@ -115,6 +115,8 @@ def main():
         cs.merge(work)
         saved = json.loads((work / "sources.json").read_text())
         check("merge drops sources a reviewer failed and adds what the fix round read", set(saved) == {"https://a.example/x", "https://b.example/z", "https://e.example/new"}, str(saved))
+        parts = [cs.slice_sources(work, n, 2) for n in (1, 2)]
+        check("the sources split into slices that cover every url once", sorted(parts[0] + parts[1]) == sorted(saved) and len(parts[0]) == 2 and len(parts[1]) == 1, str(parts))
         last = (work / "md" / "12.md").read_text()
         check("merge writes the draft's sources chapter from sources.json", last.startswith("# Sources\n") and "A 2020" in last and "Seller 2021" not in last and cs.has_lead_paragraph(last), last[:200])
 
