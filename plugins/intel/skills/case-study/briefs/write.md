@@ -37,6 +37,7 @@ givens of the task, stated as such.
   notes first; press figures second, labelled.
 - A tie between a source and the subject is stated in the sentence that uses
   it.
-- Write only `md/<your file>`.
+- Write only `md/<your file>`, section by section as you go. If it already
+  exists when you start, you were interrupted: read it and continue.
 
 Final message: characters written and the places where the notes were too thin.

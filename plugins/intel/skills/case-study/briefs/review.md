@@ -78,9 +78,14 @@ found, wrong speaker, wrong date, or wrong outlet. Then check:
 
 ## Output
 
-Write `review/<output name>.md` in the work directory: one row per item
-checked, so the coverage is visible, then the findings, one per line, each
-starting with the chapter file it applies to in brackets:
+Write `review/<output name>.md` in the work directory as you go: append the
+row for each item right after you check it, and each finding as you find it,
+never at the end. If the file already exists when you start, you were
+interrupted: read it and continue from the first item it does not cover.
+
+The file holds one row per item checked, so the coverage is visible, and the
+findings, one per line, each starting with the chapter file it applies to in
+brackets:
 
 `- [04] <severity> | <the sentence> | <what is wrong> | <what the source says, quoted> | <the exact fix>`
 

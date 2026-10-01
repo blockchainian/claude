@@ -63,6 +63,10 @@ know how the research was done.
   grouped by kind, each as outlet and year. Nothing about how they were read
   and nothing about what could not be reached.
 
+Write each chapter file as soon as it is done. If `book/` already holds
+chapters when you start, you were interrupted: read them and continue from
+the first missing one.
+
 ## Before finishing
 
 Re-read the whole book once from the first chapter, as its reader. Cut every
