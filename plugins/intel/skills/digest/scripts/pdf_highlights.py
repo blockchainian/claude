@@ -141,10 +141,11 @@ def write_draft(work, meta, ready):
 
 
 def cover_page(meta, bg, fg, bold, tmp):
-    """A one-page cover PDF: the cover name set large, the book's title under it when the two differ."""
+    """A one-page cover PDF: the cover name set large, the rest of the book's title under it."""
     w, h = meta["page_size"]
-    name, title = meta["cover"], meta["title"]
-    sub = f'<div class="sub">{html.escape(title)}</div>' if title != name else ""
+    name = meta["cover"]
+    rest = meta["title"].removeprefix(name).strip(" :：")
+    sub = f'<div class="sub">{html.escape(rest)}</div>' if rest else ""
     hei = 'Baskerville, "PingFang SC", "Heiti SC", "Hiragino Sans GB", sans-serif'
     page, out = tmp / "cover.html", tmp / "cover.pdf"
     page.write_text(

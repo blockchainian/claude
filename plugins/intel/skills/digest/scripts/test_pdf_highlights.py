@@ -144,6 +144,11 @@ def test_render(ph, work, tmp):
     with pdf.open_outline() as o:
         items = [(i.title, pdf.pages.index(pikepdf.Page(i.destination[0]))) for i in o.root]
     check("bookmarks follow the chapters behind the cover", items == [("Jane Doe", 0), ("One: Beginnings", 1), ("Three: Ends", 2)], items)
+    meta["cover"] = "A Small"
+    meta_path.write_text(json.dumps(meta))
+    ph.render(work, opt)
+    cover_text = subprocess.run(["pdftotext", "-l", "1", str(out), "-"], capture_output=True, text=True).stdout
+    check("a title that starts with the name is not repeated under it", cover_text.split() == ["A", "Small", "Book"], cover_text[:200])
     meta.pop("cover")
     meta_path.write_text(json.dumps(meta))
 
