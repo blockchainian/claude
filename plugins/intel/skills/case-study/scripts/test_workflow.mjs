@@ -67,8 +67,11 @@ test('the review covers every source and every chapter, and every chapter is fix
   assert.deepEqual(labels(calls, 'merge:'), ['merge:read', 'merge:fix'])
 })
 
-test('reviewers run on Opus at high effort and each agent is told its share of the caps', async () => {
+test('source and quote reviewers run on Opus, number reviewers on the session model, all at high effort, and each agent is told its share of the caps', async () => {
   const { calls } = await run(ARGS)
-  assert.ok(calls.filter(c => c.label.startsWith('review:')).every(c => c.model === 'opus' && c.effort === 'high'))
+  const reviewers = calls.filter(c => c.label.startsWith('review:'))
+  assert.ok(reviewers.every(c => c.effort === 'high'))
+  assert.ok(reviewers.filter(c => !c.label.startsWith('review:numbers')).every(c => c.model === 'opus'))
+  assert.ok(reviewers.filter(c => c.label.startsWith('review:numbers')).every(c => c.model === undefined))
   assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/17 share'))
 })
