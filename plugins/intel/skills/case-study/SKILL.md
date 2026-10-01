@@ -106,10 +106,9 @@ ask for one name.
    tool list in one line (the script gives each agent its share). Empty
    strings where there is nothing. It runs in the background: end the turn.
 
-   Without the Workflow tool, run the same stages yourself with parallel Agent
-   calls, one message per stage, giving each agent the brief named in the
-   table above and the same values; run `case_study.py merge "<work>"` after
-   the Read stage and after the Fix stage.
+   The stages run only through the Workflow tool: its `agent()` pins each
+   agent's model and effort, which ad-hoc Agent spawns cannot. Never replace
+   the workflow with Agent calls.
 
    Parallel agents never share a file. Each writes its own notes, source list,
    gaps, findings and fix log; `case_study.py merge` builds `sources.json`,
