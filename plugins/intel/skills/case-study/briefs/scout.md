@@ -11,8 +11,7 @@ queries per growth phase, date-bounded searches for press from the time, the
 subject's home country and language, and the leads inside what you find.
 
 Append every source you accept to `notes/scout-<lane>.md` as you go (URL,
-outlet, year, type, one line). If that file already exists when you start, you
-were interrupted: read it, keep what is there, and continue.
+outlet, year, type, one line; see "Writing as you go" in the evidence rules).
 
 For every candidate open just enough to confirm it exists, is about the
 subject, and is the original (not a repost, an aggregator, a search page or a
