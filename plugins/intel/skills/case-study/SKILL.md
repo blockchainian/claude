@@ -114,9 +114,10 @@ ask for one name.
    Parallel agents never share a file. Each writes its own notes, source list,
    gaps, findings and fix log; `case_study.py merge` builds `sources.json`,
    `gaps.md` and the draft's sources chapter from them. Reviewers are fresh
-   agents, never the writers; they run on Sonnet at high effort, because the
-   review is checking against sources, not judgment, and fourteen reviewers
-   on the largest model cost more in ten minutes than the rest of the run. The review is never
+   agents, never the writers; they run on Opus at high effort: a reviewer
+   has to notice what a sentence quietly assumes, which a smaller model
+   misses, and the largest model costs more on fourteen parallel reviewers
+   than the rest of the run. The review is never
    sampled and never skipped: a first draft that looked complete has, in
    practice, carried dozens of findings — sources named but never opened,
    sellers' and managers' statements written as fact, archive captures missed
