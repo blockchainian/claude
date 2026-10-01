@@ -163,9 +163,10 @@ ask for one name.
 - A product named with `--apply-to` appears only in the reasoning chapter
   written for it. Its terms are givens of the task, stated as such, never
   findings.
-- Agents share one machine: archive requests, video-site requests and search
-  quotas are per machine, not per agent. Give each agent its caps in its
-  message, and space archive requests at 60 seconds while several agents run.
+- Agents share one machine: video-site requests and search quotas are per
+  machine, not per agent, so give each agent its caps in its message. Archive
+  pages are fetched only through `scripts/wayback.py`, by one agent at a time:
+  it holds the rate per route, and two batches at once would double it.
 - A layered variant — parallel readers by source type, one agent owning the
   numbers, writers working only from the readers' notes — is under evaluation.
   Until it is adopted here, run the flow above.

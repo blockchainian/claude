@@ -48,10 +48,17 @@ follow.
 
 - List captures:
   `curl -s "https://web.archive.org/cdx?url=<profile url>&output=json&collapse=timestamp:6&fl=timestamp,statuscode"`
-- Read one: `curl -sL "https://web.archive.org/web/<timestamp>/<url>"`, then
-  find the count in the HTML.
-- Leave 20 seconds between requests (60 when other agents share the machine);
-  a burst gets the address throttled for hours.
+- Read captures in one batch, never one `curl` at a time. Put the capture URLs
+  (`https://web.archive.org/web/<timestamp>id_/<url>`) in a file, then:
+  `<this skill>/scripts/wayback.py <work>/raw/archive --from <file>`
+  It saves every page and prints one JSON line per URL (status, file). It keeps
+  to 30 requests a minute per route, drops a route the archive refuses, and
+  stops with an error when every route is refused: report that error, do not
+  retry around it. Routes are the proxies in `WAYBACK_PROXIES` (comma-separated
+  URLs, one per exit IP); without it there is one route, the direct connection.
+- A status of 429 in the output is a capture of a page that answered 429 at
+  the time, not a limit on you. Pick another capture near that date.
+- Then find the count in each saved HTML file.
 - Where the counts are:
   - Old and current YouTube channel pages (`/user/<name>`, `/channel/<id>`)
     carry "N subscribers".
