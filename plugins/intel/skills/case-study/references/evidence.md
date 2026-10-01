@@ -17,7 +17,9 @@ Every agent in a case study — researcher, reviewer, fixer — works to these.
 
 ## The kind of every claim
 
-The reader must be able to tell, in the sentence itself, which kind a claim is:
+In the sourced draft (`md/`), the sentence itself shows which kind a claim is
+and names its source. The book text (`book/`) drops the labels and the source
+names, and carries the same distinction in ordinary wording:
 
 | Kind | What it is |
 |---|---|

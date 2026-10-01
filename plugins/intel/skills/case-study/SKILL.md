@@ -7,8 +7,9 @@ description: >
   and what can be copied. One subject per run; today the subject is a creator
   (an influencer or an account that built its audience by posting). Every
   source is opened and read, every number is checked against the record, and
-  three independent adversarial reviewers audit every source, number and quote
-  before the PDF is made. Use for "/case-study <name or profile URL>", "do a
+  three independent adversarial reviewers audit every source, number and quote.
+  The PDF reads as a short book: a cover with the subject's name, an
+  introduction, numbered chapters, no citations in the text. Use for "/case-study <name or profile URL>", "do a
   case study of <creator>", "how did <creator> grow", "调研一个网红",
   "做一份案例研究", "这个网红是怎么做起来的".
 
@@ -20,8 +21,11 @@ description: >
 # Case study — one subject, researched, reviewed, typeset
 
 A case study answers one question about one subject: how did they get here,
-and which parts of it are on the record. The product is a PDF a reader can act
-on, in which every claim shows what kind of evidence stands behind it.
+and which parts of it are on the record. The work has two layers. The sourced
+draft (`md/`) names the evidence behind every sentence and is what the
+reviewers audit. The book (`book/`) is what the reader gets: a short book with
+a cover, written plainly, complete, with no citations in the text and nothing
+about how the research was done.
 
 Fewer solid claims beat more weak ones. A thin source list, a subject who
 sells their own success story, or a failed review stops the run with a plain
@@ -39,6 +43,7 @@ they are sent the absolute paths of the files below and read them themselves.
 | `briefs/research.md` | researcher | Target, files, order of work, self-check |
 | `briefs/review.md` | reviewers | The three lenses and the findings format |
 | `briefs/fix.md` | researcher, fix round | How each kind of finding is applied |
+| `briefs/book.md` | book writer | How the reviewed draft becomes the text the reader gets |
 
 ## Arguments
 
@@ -63,11 +68,12 @@ ask for one name.
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
    "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case_study.py" init <slug> \
-     --title "<Name>: <how they grew, in the study's language>" \
+     --title "<how <Name> grew, in the study's language>" --cover "<Name>" \
      --source "<profile URL>" --out "<pdf path>" --chapters <11|12>
    ```
 
-   It prints the work directory (`<store>/.work/<slug>/`, the digest store).
+   The cover shows the name large and the title under it. It prints the work
+   directory (`<store>/.work/<slug>/`, the digest store).
    An existing work directory is reused: sources and chapters already there are
    kept.
 
@@ -102,30 +108,41 @@ ask for one name.
    the absolute path of `briefs/fix.md` and the worst findings from all three
    reviews. It applies every finding and writes `review/fix-log.md`.
 
-6. **Verify yourself.** This step is yours and is not delegated.
+6. **Verify the draft yourself.** This step is yours and is not delegated.
    - Read `review/fix-log.md`. For each rejected finding, open the source and
      decide who is right.
    - Re-fetch at least two key numbers live — a point on the curve and the
      largest money figure — and compare them with the chapters.
    - Confirm that no source the reviewers failed is still in `sources.json`.
+   - Run `case_study.py check "<work>" --draft`. It reports missing chapters,
+     chapters with no lead paragraph before their first `##`, whether
+     `sources.json` is a `url → label` object, and the counts of sources,
+     archive snapshots and distinct sites.
+
+7. **Write the book — one fresh agent.** Spawn one general-purpose subagent
+   that has not seen the research. Its message gives the absolute paths of
+   `briefs/book.md` and the type file, the work directory and the language. It
+   reads `md/` and writes `book/NN.md`. Then:
    - Run the check, which must pass before rendering:
 
      ```bash
      "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case_study.py" check "<work>"
      ```
 
-     It reports missing chapters, chapters with no lead paragraph before their
-     first `##` (the typesetting needs one), whether `sources.json` is a
-     `url → label` object, and the counts of sources, archive snapshots and
-     distinct sites.
+     On the book text it reports citations left in parentheses, wording about
+     the research, and figures that are not in the draft. Open each hit: a real
+     one goes back to the writer; a false one (a date in parentheses, a term
+     that belongs to the story) is noted and passed.
+   - Read the introduction and one middle chapter yourself. Text that reads as
+     a report of the research goes back to the writer.
 
-7. **Render.**
+8. **Render.**
 
    ```bash
    "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/pdf_highlights.py" render "<work>" --out "<pdf path>"
    ```
 
-8. **Report and stop.** One short report:
+9. **Report and stop.** One short report:
    - the PDF path and page count;
    - sources, archive snapshots and distinct sites, from the check;
    - findings per lens, and how many were fixed, removed or rejected;

@@ -1,7 +1,9 @@
 # Research brief
 
 You are the research agent for one case study. Your deliverable is a set of
-files in the work directory, written as you go. Your final message is a short
+files in the work directory, written as you go. The chapters you write are the
+sourced draft: reviewers audit it line by line, so it names its source in every
+sentence. The text the reader gets is written from it later, by someone else. Your final message is a short
 coverage summary and nothing else.
 
 The values for this run — subject, subject type file, work directory, language,
@@ -39,7 +41,7 @@ message that sent you here.
   the chapters, and every source named in the chapters is in this file.
 - `gaps.md` — every source you tried and could not read, with the command tried
   and what came back; and every question the record did not answer.
-- `md/01.md` onward — the chapters. First line `# <chapter title>`, then the
+- `md/01.md` onward — the chapters of the sourced draft. First line `# <chapter title>`, then the
   lead paragraph, then `##` sections. Do not edit `chapters.json`.
 
 ## Order of work

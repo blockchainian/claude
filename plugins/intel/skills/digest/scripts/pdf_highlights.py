@@ -10,6 +10,7 @@
 #        pdf_highlights.py render <work dir> [--out <highlights.pdf>] [--bg iterm|#rrggbb] [--fg #rrggbb|iterm] [--font-size 9.25]
 # split writes <work>/chapters.json and one text file per chapter, and prints the JSON. render typesets every
 # chapter whose highlights Markdown exists to <source>-highlights.pdf and writes the store-ready <work>/draft.md.
+# A "cover" name in chapters.json adds a text cover page in front: the name large, the title under it.
 import argparse
 import html
 import importlib.util
@@ -139,6 +140,25 @@ def write_draft(work, meta, ready):
     (work / "draft.md").write_text("\n".join(parts), encoding="utf-8")
 
 
+def cover_page(meta, bg, fg, bold, tmp):
+    """A one-page cover PDF: the cover name set large, the book's title under it when the two differ."""
+    w, h = meta["page_size"]
+    name, title = meta["cover"], meta["title"]
+    sub = f'<div class="sub">{html.escape(title)}</div>' if title != name else ""
+    hei = 'Baskerville, "PingFang SC", "Heiti SC", "Hiragino Sans GB", sans-serif'
+    page, out = tmp / "cover.html", tmp / "cover.pdf"
+    page.write_text(
+        f'<!doctype html><html><head><meta charset="utf-8"><style>'
+        f'@page {{ size: {w}pt {h}pt; margin: 0; }} html, body {{ margin: 0; }}'
+        f'.cover {{ padding: {round(h * 0.34)}pt {round(w * 0.12)}pt 0; text-align: center; font-family: {hei}; }}'
+        f'.name {{ font-size: 34pt; font-weight: 700; letter-spacing: 2pt; line-height: 1.3; color: {bold}; }}'
+        f'.sub {{ margin-top: 22pt; font-size: 11pt; letter-spacing: 3pt; line-height: 1.8; color: {fg}; }}'
+        f'</style></head><body><div class="cover"><div class="name">{html.escape(name)}</div>{sub}</div></body></html>',
+        encoding="utf-8")
+    rd.print_pdf(rd.chrome_binary(), page, out)
+    return out
+
+
 def render(work, opt):
     meta = json.loads((work / "chapters.json").read_text(encoding="utf-8"))
     bg, fg = rd.page_colors(opt)
@@ -169,12 +189,18 @@ def render(work, opt):
         sys.exit(f"markers not found for chapters {missing}; the render is broken")
 
     pdf = pikepdf.open(typeset)
-    opener_pages = set(openers.values())
+    if meta.get("cover"):  # a cover page in front moves every chapter one page back
+        cover = pikepdf.open(cover_page(meta, bg, fg, rd.brighten(fg, opt.bold_factor), tmp))
+        pdf.pages.insert(0, cover.pages[0])
+    shift = 1 if meta.get("cover") else 0
+    opener_pages = {index + shift for index in openers.values()}
     for i, page in enumerate(pdf.pages):
         rd.paint_background(pdf, page, bg, meta["page_size"][1] * 0.082 if i in opener_pages else 0)
     with pdf.open_outline() as outline:
+        if meta.get("cover"):
+            outline.root.append(pikepdf.OutlineItem(meta["cover"], 0))
         for s, title, _ in sections:
-            outline.root.append(pikepdf.OutlineItem(title, openers[f"S{s['id']}"]))
+            outline.root.append(pikepdf.OutlineItem(title, openers[f"S{s['id']}"] + shift))
     pdf.docinfo["/Title"] = meta["title"]
     out = Path(opt.out) if opt.out else default_out(Path(meta["pdf"]), work)
     pdf.save(out)
