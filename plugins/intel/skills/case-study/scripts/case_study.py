@@ -58,6 +58,12 @@ def numbers(text):
     return {m.group().replace(",", "").rstrip(".") for m in NUMBER.finditer(text)}
 
 
+def restated(number, known_values):
+    """True when the figure is a known one in another unit: 24.8M as 2,480 万, 1.2B as 12 亿."""
+    value = float(number)
+    return any(abs(value - k * 10 ** e) <= 1e-9 * max(value, 1) for k in known_values for e in range(-4, 5))
+
+
 def layer(work, folder, ids):
     """(missing ids, ids with no lead paragraph, id -> text) for one layer of chapters."""
     missing, no_lead, texts = [], [], {}
@@ -81,6 +87,7 @@ def check(work):
     missing, no_lead, draft = layer(work, "md", ids)
     book_missing, book_no_lead, book = layer(work, "book", ids)
     known = set().union(*(numbers(text) for text in draft.values())) if draft else set()
+    known_values = [float(n) for n in known]
     citations, process, unknown = [], [], []
     for i, text in book.items():
         terms = [term for term in PROCESS_TERMS if term in text.lower()]
@@ -91,7 +98,7 @@ def check(work):
         cited = [m.group() for m in CITATION.finditer(text) if m.group("word").lower() not in DATE_WORDS]
         if cited:
             citations.append({"chapter": i, "found": cited})
-        extra = sorted(numbers(text) - known)
+        extra = sorted(n for n in numbers(text) - known if not restated(n, known_values))
         if extra:
             unknown.append({"chapter": i, "found": extra})
     try:
