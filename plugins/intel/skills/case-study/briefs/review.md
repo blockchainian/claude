@@ -10,7 +10,7 @@ your lens, and the tool list. Read `references/evidence.md` (next to this
 brief's folder) and the subject type file first: they are the standard the
 study must meet. Tool commands are in `references/tools.md`.
 
-In the work directory: `md/` (the chapters), `sources.json`, `gaps.md`, `raw/`
+In the work directory: `md/` (the chapters of the sourced draft), `sources.json`, `gaps.md`, `raw/`
 (downloads), `notes.md`. The notes are the researcher's own account and prove
 nothing. Proof is the source, opened by you; a verbatim download in `raw/`
 counts as the source.

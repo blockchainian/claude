@@ -10,8 +10,8 @@ a paid community about growing or earning, or a creator-growth tool. Search for
 it and open the subject's own site or link-in-bio. A subject who earns from
 telling their success story is not studied: report what was found and stop,
 unless the user has already said to include them. A subject who sells such a
-product on the side and is included anyway has it stated plainly in chapters 1
-and 8, and their own account of their method stays a claim throughout.
+product on the side and is included anyway has it stated plainly in the
+introduction and in the money chapter, and their own account of their method stays a claim throughout.
 
 ## Source types to cover
 
@@ -58,17 +58,22 @@ a publication's outside-contributor network written with the manager's help.
 ## Chapters
 
 Adjust the titles to the subject; cover all of these. Each chapter opens with a
-lead paragraph, then five or six `##` sections.
+lead paragraph, then five or six `##` sections. The introduction is not
+numbered and its title names the subject ("Introduction: how <Name> grew", in
+the study's language). Numbering starts with the chapter after it. The closing
+sources list is not numbered.
 
-1. Introduction — who this is, and what they built it on
-2. Starting point — what they had before: audience, money, company, job
-3. Timeline and numbers — the curve and the upload record, phase by phase
-4. Content — format, topics, titles and thumbnails or hooks, openings, retention
-5. Production — process, cadence, team, cost
-6. Growth methods — the algorithm, collaborations, cross-platform, clips, paid promotion
-7. Turning points — what changed at each visible acceleration
-8. Money and business — income sources, companies, products
-9. Failures, controversies, and where things stand — which methods still work
-10. What one person can copy — starting from zero, stage by stage (reasoning)
-11. What the named product can copy — its own accounts and its creator program (reasoning; only when a product was given)
-12. Sources — every source, then what could not be reached and why
+| File | Title | Covers |
+|---|---|---|
+| 01 | Introduction: how <Name> grew | Who this is, what they built, and on what |
+| 02 | Chapter 1 — Starting point | What they had before: audience, money, company, job |
+| 03 | Chapter 2 — Timeline and numbers | The curve and the upload record, phase by phase |
+| 04 | Chapter 3 — Content | Format, topics, titles and thumbnails or hooks, openings, retention |
+| 05 | Chapter 4 — Production | Process, cadence, team, cost |
+| 06 | Chapter 5 — Growth methods | The algorithm, collaborations, cross-platform, clips, paid promotion |
+| 07 | Chapter 6 — Turning points | What changed at each visible acceleration |
+| 08 | Chapter 7 — Money and business | Income sources, companies, products |
+| 09 | Chapter 8 — Failures, controversies, and where things stand | Which methods still work |
+| 10 | Chapter 9 — What one person can copy | Starting from zero, stage by stage (reasoning) |
+| 11 | Chapter 10 — What the named product can copy | Its own accounts and its creator program (reasoning; only when a product was given) |
+| last | Sources | The sources, grouped by kind |
