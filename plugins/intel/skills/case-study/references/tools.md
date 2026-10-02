@@ -78,8 +78,6 @@ follow.
 
 ## Records
 
-- US court cases:
-  `curl "https://www.courtlistener.com/api/rest/v4/search/?q=%22<name>%22&type=r"`
 - Securities filings: the regulator's own filing pages, fetched directly.
 - Company registries: the registry itself. Sites that resell registry data are
   not the registry; say what they are.
