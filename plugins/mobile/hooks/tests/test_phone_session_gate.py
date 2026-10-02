@@ -17,7 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 HOOK = HERE.parent / "phone-session-gate"
-CLAIM = HERE.parent.parent / "skills/ios-take-screenshot/scripts/claim_simulator.py"
+CLAIM = HERE.parent.parent / "skills/ios-take-screenshot/scripts/claim-simulator.mjs"
 TOOL = "mcp__plugin_mobile_appium-mcp__appium_session_management"
 PHONE = "00008030-001A2B3C4D5E6F7A"
 SESSION = "3f1c0a52-7d4e-4b0e-9d7a-6c1b2e3d4f50"
@@ -56,7 +56,7 @@ def main() -> int:
             failures.append(f"create without a udid was not denied for it: {d} {why!r}")
 
         d, why = decision(hook("PreToolUse", create(PHONE), tmp))
-        if d != "deny" or "claim_simulator.py" not in why:
+        if d != "deny" or "claim-simulator.mjs" not in why:
             failures.append(f"create on an unclaimed phone was not sent to claim: {d} {why!r}")
 
         subprocess.run([str(CLAIM), PHONE, "--run", "run-a"], check=True,

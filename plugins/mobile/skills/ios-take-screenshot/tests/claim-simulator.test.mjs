@@ -1,4 +1,4 @@
-// ABOUTME: Regression tests for claim-simulator.mjs and capture_slice.sh: one agent per simulator
+// ABOUTME: Regression tests for claim-simulator.mjs and capture-slice.sh: one agent per simulator
 // ABOUTME: or phone, refusals name the holder, and capture needs the claim and never "booted".
 
 import { test, describe } from "node:test";
@@ -27,7 +27,7 @@ function claim(...args) {
 }
 
 function capture(udid, runId) {
-  return run("capture_slice.sh", "--simulator", udid, "--run", runId, "--out", `${tmp}/x.png`);
+  return run("capture-slice.sh", "--simulator", udid, "--run", runId, "--out", `${tmp}/x.png`);
 }
 
 function parse(stdout) {

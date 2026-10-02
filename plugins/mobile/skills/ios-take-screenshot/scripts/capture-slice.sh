@@ -5,7 +5,7 @@
 set -euo pipefail
 
 usage() {
-  echo 'Usage: capture_slice.sh --simulator <udid> --run <RUN_ID> --out <slice.png>' >&2
+  echo 'Usage: capture-slice.sh --simulator <udid> --run <RUN_ID> --out <slice.png>' >&2
   exit 2
 }
 
