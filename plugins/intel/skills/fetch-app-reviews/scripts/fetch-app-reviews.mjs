@@ -7,7 +7,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 //
 // - <appleId>  numeric App Store id, e.g. 6741115427
 // - [appName]  output slug; if omitted it is derived from the app's store name
-// - Reads RESIDENTIAL_PROXY_URL from the env file. Oxylabs' rotating endpoint hands out a
+// - Reads RESIDENTIAL_PROXY_URL from the env file. A rotating proxy endpoint hands out a
 //   new exit IP per CONNECTION, not per request, so a reused undici tunnel pins one IP —
 //   getJson therefore builds and closes a fresh ProxyAgent for every request, which is what
 //   actually rotates the IP and defeats Apple's per-IP throttling.

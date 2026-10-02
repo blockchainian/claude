@@ -55,11 +55,11 @@ test("proxy defaults to null without env, else reads it", () => {
 });
 
 test("proxyFor injects a sticky sessid after the username", () => {
-  process.env.RESIDENTIAL_PROXY_URL = "http://customer-acct-cc-US:pw@pr.oxylabs.io:7777";
+  process.env.RESIDENTIAL_PROXY_URL = "http://customer-acct-cc-US:pw@proxy.example:7777";
   const url = config.proxyFor("a@x.com");
   assert.ok(url.startsWith("http://customer-acct-cc-US-sessid-"));
   assert.ok(url.includes("-sesstime-10"));
-  assert.ok(url.includes("@pr.oxylabs.io:7777"));
+  assert.ok(url.includes("@proxy.example:7777"));
 });
 
 test("proxyFor is deterministic per account", () => {
@@ -68,7 +68,7 @@ test("proxyFor is deterministic per account", () => {
   assert.notEqual(config.proxyFor("a@x.com"), config.proxyFor("b@x.com"));
 });
 
-test("proxyFor leaves a non-oxylabs proxy or an existing sessid untouched", () => {
+test("proxyFor leaves a proxy using another username convention or an existing sessid untouched", () => {
   process.env.RESIDENTIAL_PROXY_URL = "http://user:pw@h:1";
   assert.equal(config.proxyFor("a@x.com"), "http://user:pw@h:1");
   process.env.RESIDENTIAL_PROXY_URL = "http://customer-acct-sessid-x:pw@h:1";

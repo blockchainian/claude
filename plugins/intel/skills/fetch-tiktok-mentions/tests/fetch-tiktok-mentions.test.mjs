@@ -53,9 +53,9 @@ const video = (id, createTime, extra = {}) => ({
 });
 
 test("args split into the slug, repeatable sources, limits and phase switches", () => {
-  const a = parseArgs(["pumpfun", "--hashtag", "pumpfun", "--hashtag=solana", "--user", "@pumpdotfun", "--keyword", "Pump  Fun", "--keyword=pump fun"]);
-  assert.equal(a.slug, "pumpfun");
-  assert.deepEqual(a.sources, { hashtags: ["pumpfun", "solana"], users: ["pumpdotfun"], keywords: ["pump fun"] });
+  const a = parseArgs(["demofun", "--hashtag", "demofun", "--hashtag=exampletag", "--user", "@demodotfun", "--keyword", "Demo  Fun", "--keyword=demo fun"]);
+  assert.equal(a.slug, "demofun");
+  assert.deepEqual(a.sources, { hashtags: ["demofun", "exampletag"], users: ["demodotfun"], keywords: ["demo fun"] });
   assert.equal(a.commentLimit, 1000);
   assert.equal(a.sourceLimit, 1000);
   assert.equal(a.sessions, null); // every ISP slot
@@ -79,18 +79,18 @@ test("args split into the slug, repeatable sources, limits and phase switches", 
 
 test("a source is normalised from a name, a # or @ form, or a tiktok.com url", () => {
   assert.equal(sourceOf("sound", "42"), null); // only hashtags, users and keywords are sources
-  assert.deepEqual(sourceOf("keyword", "  Pump   Fun "), { kind: "keyword", value: "pump fun", label: '"pump fun"' });
+  assert.deepEqual(sourceOf("keyword", "  Demo   Fun "), { kind: "keyword", value: "demo fun", label: '"demo fun"' });
   assert.equal(sourceOf("keyword", "  "), null);
-  assert.deepEqual(sourceOf("hashtag", "#PumpFun"), { kind: "hashtag", value: "pumpfun", label: "#pumpfun" });
-  assert.deepEqual(sourceOf("hashtag", "https://www.tiktok.com/tag/pumpfun?lang=en"), {
+  assert.deepEqual(sourceOf("hashtag", "#DemoFun"), { kind: "hashtag", value: "demofun", label: "#demofun" });
+  assert.deepEqual(sourceOf("hashtag", "https://www.tiktok.com/tag/demofun?lang=en"), {
     kind: "hashtag",
-    value: "pumpfun",
-    label: "#pumpfun",
+    value: "demofun",
+    label: "#demofun",
   });
-  assert.deepEqual(sourceOf("user", "https://www.tiktok.com/@Pump.Fun/video/1"), {
+  assert.deepEqual(sourceOf("user", "https://www.tiktok.com/@Demo.Fun/video/1"), {
     kind: "user",
-    value: "pump.fun",
-    label: "@pump.fun",
+    value: "demo.fun",
+    label: "@demo.fun",
   });
   assert.equal(sourceOf("user", ""), null);
 });
@@ -176,10 +176,10 @@ test("a hashtag is resolved to its id, then paged by cursor to the end", async (
     ],
   });
   const state = {};
-  const result = await collectSource(call, sourceOf("hashtag", "pumpfun"), 1000, state);
+  const result = await collectSource(call, sourceOf("hashtag", "demofun"), 1000, state);
   assert.deepEqual(result, { complete: true, missing: false });
   assert.deepEqual(state.items.map((v) => v.id), ["1", "2", "3"]);
-  assert.deepEqual(calls[0], { path: "challenge/detail/", params: { challengeName: "pumpfun" } });
+  assert.deepEqual(calls[0], { path: "challenge/detail/", params: { challengeName: "demofun" } });
   assert.deepEqual(calls[1].params, { challengeID: "77", count: 30, cursor: 0 });
   assert.deepEqual(calls[2].params, { challengeID: "77", count: 30, cursor: "30" });
 });
@@ -202,17 +202,17 @@ test("a keyword is paged by offset, carrying the first page's search id", async 
     ],
   });
   const state = {};
-  const result = await collectSource(call, sourceOf("keyword", "pump fun"), 1000, state);
+  const result = await collectSource(call, sourceOf("keyword", "demo fun"), 1000, state);
   assert.deepEqual(result, { complete: true, missing: false });
   assert.deepEqual(state.items.map((v) => v.id), ["1", "2", "3"]);
-  assert.deepEqual(calls[0], { path: "search/item/full/", params: { keyword: "pump fun", offset: 0 } });
-  assert.deepEqual(calls[1].params, { keyword: "pump fun", offset: 20, search_id: "LOG1" });
+  assert.deepEqual(calls[0], { path: "search/item/full/", params: { keyword: "demo fun", offset: 0 } });
+  assert.deepEqual(calls[1].params, { keyword: "demo fun", offset: 20, search_id: "LOG1" });
 });
 
 test("a search TikTok refuses is an error, not an empty result", async () => {
   const { call } = fakeApi({ "search/item/full/": [{ status_code: 2483, status_msg: "Please log in" }] });
   await assert.rejects(
-    collectSource(call, sourceOf("keyword", "pump fun"), 1000, {}),
+    collectSource(call, sourceOf("keyword", "demo fun"), 1000, {}),
     (e) => e instanceof AccountRefused && /search refused: 2483 Please log in/.test(e.message),
   );
 });
@@ -496,10 +496,10 @@ test("a source keeps only English videos; a caption of hashtags alone has no lan
 });
 
 test("a hashtag is pulled once per session, a user and a keyword once; a source's pulls merge into one list", () => {
-  const tag = sourceOf("hashtag", "pumpfun");
+  const tag = sourceOf("hashtag", "demofun");
   const user = sourceOf("user", "someone");
-  const pulls = sourcePulls([tag, user, sourceOf("keyword", "pump fun")], 3);
-  assert.deepEqual(pulls.map((p) => p.source.label), ["#pumpfun", "#pumpfun", "#pumpfun", "@someone", '"pump fun"']);
+  const pulls = sourcePulls([tag, user, sourceOf("keyword", "demo fun")], 3);
+  assert.deepEqual(pulls.map((p) => p.source.label), ["#demofun", "#demofun", "#demofun", "@someone", '"demo fun"']);
 
   // Each pull of a hashtag page is a different sample of it.
   pulls[0].state.items = [video("1", 3), video("2", 2)];

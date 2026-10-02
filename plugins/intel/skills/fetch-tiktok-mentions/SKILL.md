@@ -40,12 +40,12 @@ node \
   bandwidth, more only time out.
 - `--no-comments` / `--no-download` skip a phase.
 
-Example:
+Invented example (Demo Fun):
 
 ```
 node \
   "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/scripts/fetch-tiktok-mentions.mjs" \
-  pumpfun --hashtag pumpfun --hashtag pumpdotfun --user pump.fun --keyword "pump fun"
+  demofun --hashtag demofun --hashtag demodotfun --user demo.fun --keyword "demo fun"
 ```
 
 Every run does three things: collects every source (a hashtag through four sessions at once, see below; new videos are
@@ -53,20 +53,17 @@ added, held ones get fresh stats), fetches comments for the videos whose comment
 complete, and downloads the videos without a file. Launch it in the background and reread the
 log. **Rerun the same command until it exits 0.**
 
-Speed (measured 2026-10-01): one session paced at 20 requests/s stayed clean for 4,800 requests;
-from 22/s on TikTok's edge starts answering `Access Denied`, so 20 is the default and ten sessions
-give about 200 requests/s. A refused session (`Access Denied`) stays refused for minutes, so it is
-replaced at once; the IP is fine. An IP can also start getting empty answers (seen only on the
-pool's former German and French IPs, on the comment list); its session is then replaced after a
-one-minute cool-down.
+The default rate is 20 requests/s per anonymous session. Tune `--rate` and `--concurrency`
+for the target sources and proxy pool. A refused session (`Access Denied`) is replaced;
+empty responses trigger a one-minute cool-down before reusing the slot.
 
 What each source gives:
 
 | Source | Depth |
 |---|---|
-| hashtag page | about 150 videos per pull in TikTok's own order (a mix of popular and fresh, not strictly by plays); each pull is a different sample, so four sessions pull it once each and the pulls are merged (measured on #pumpfun from US IPs, videos at 10k+ plays: 42, 52, 56, 58 with one to four pulls, no more with six). The page depends on the IP's country: German and French IPs saw about 85, only a third of them shared with the US ones |
-| user profile | with the account: the whole timeline (@pump.fun: 210 of 210). Without one: a single page, about 35 videos, not the newest ones, because TikTok answers an anonymous viewer's every further page with the first one again (its own web page gets stuck the same way); the timeline is then logged `(incomplete)` |
-| keyword search | TikTok's own relevance order, 150 to 180 results before it ends (measured 2026-10-01: "pump fun" 179, "pumpfun" 148, 114 videos in both); mostly recent months; about half carry the brand's hashtag; median 1.7k plays, a quarter at 10k+. Needs the account |
+| hashtag page | A sample in TikTok's own order, mixing popular and fresh videos. Several sessions pull once each and merge the samples; overlap and coverage depend on the source and IP region. |
+| user profile | With an account: pages through the timeline. Without one: may repeat the first page; the timeline is then logged `(incomplete)`. |
+| keyword search | TikTok's own relevance order. Needs the account; results may overlap hashtag and user sources. |
 
 ## The account
 
@@ -75,7 +72,7 @@ too. Both go through the TikTok account the secrets-manager skill logged in (`lo
 first `active` row of its `tiktok` table. It is opened as the same browser profile it logged in
 with (`<state>/profiles/<username>`, the same device to TikTok), on the ISP slot it logged in
 from, one request at a time at 2 requests/s. That slot also carries an anonymous session; two
-sessions on one IP measured clean.
+sessions share the slot.
 
 - No active account: keywords are not collected (the run says so and exits non-zero), user
   timelines stay one page, everything else runs.
@@ -107,8 +104,9 @@ have no video file. A video TikTok no longer has is logged `gone` and asked for 
 (the refusal is often temporary); it does not make the run exit non-zero.
 
 TikTok hides part of a busy video's comments from an anonymous viewer ("folded" comments): a video
-showing 6,600 comments gave 345 top-level ones before the list ended. What is saved is what the
-web page shows. Link a reply to its parent by `reply_id`, not by position.
+may show more comments than its API returns. In a synthetic example, a displayed count of
+2,000 could yield only 120 visible top-level comments. What is saved is what the web page shows.
+Link a reply to its parent by `reply_id`, not by position.
 
 A video's comments are `complete` once paged to the end or to the limit; they are not fetched
 again, so comments posted later are not picked up. A video TikTok reports 0 comments on is

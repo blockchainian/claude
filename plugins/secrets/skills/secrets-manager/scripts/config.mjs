@@ -71,12 +71,10 @@ export const SMS_COUNTRY_BLACKLIST = [41, 6, 4, 8];
 
 const STICKY_SESSTIME_MIN = 10;
 
-// The residential proxy for one account, pinned to a sticky exit IP. Oxylabs holds one exit IP
-// per `sessid` in the username for `sesstime` minutes; a sessid derived from the account key gives
-// each account its own stable IP for the length of its login, so one OAuth handshake never hops
-// IPs mid-flow and accounts do not share an exit. `rotate` skips the pinning (a rotating exit, for
-// when an account's sticky IP is dead). A non-Oxylabs proxy (username without the `customer-`
-// prefix, or one already carrying a sessid) is returned unchanged.
+// Pin one account to a sticky exit for proxies that take `sessid`/`sesstime` in the username.
+// The supported convention uses a `customer-` prefix; a hash of the account key selects its
+// session for ten minutes. `rotate` returns the base URL. Other username conventions and
+// usernames already carrying a sessid pass through unchanged.
 export function proxyFor(key, { rotate = false } = {}) {
   const base = defaultProxy();
   if (!base) return null;

@@ -27,8 +27,8 @@ test("hashtags are lowercased", () => {
 
 test("domains come from url entities or raw links, dropping t.co", () => {
   assert.deepEqual(
-    domains({ urls: [{ expanded_url: "https://pump.fun/x" }, { expanded_url: "https://t.co/abc" }] }),
-    ["pump.fun"],
+    domains({ urls: [{ expanded_url: "https://demo.fun/x" }, { expanded_url: "https://t.co/abc" }] }),
+    ["demo.fun"],
   );
   assert.deepEqual(domains({ text: "see https://www.dexscreener.com/sol here" }), ["dexscreener.com"]);
 });
