@@ -15,7 +15,7 @@
 // review/<name>.added.json (url -> label). merge turns those into sources.json, gaps.md and the draft's last chapter,
 // and notes/<name>.raw.json (url -> the files its text was saved to) into raw.json. Sources the readers gave the same
 // label get a letter each (Outlet 2025a, Outlet 2025b), in sources.json and in the notes' bullets, so that a label names one source.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -439,4 +439,4 @@ function main(argv) {
   process.exit(passed ? 0 : 1)
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main(process.argv.slice(2))
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) main(process.argv.slice(2))
