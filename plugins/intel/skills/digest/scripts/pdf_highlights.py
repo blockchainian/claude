@@ -10,7 +10,8 @@
 #        pdf_highlights.py render <work dir> [--out <highlights.pdf>] [--bg iterm|#rrggbb] [--fg #rrggbb|iterm] [--font-size 9.25]
 # split writes <work>/chapters.json and one text file per chapter, and prints the JSON. render typesets every
 # chapter whose highlights Markdown exists to <source>-highlights.pdf and writes the store-ready <work>/draft.md.
-# A "cover" name in chapters.json adds a text cover page in front: the name, set large, and nothing else.
+# A "cover" name in chapters.json adds a text cover page in front: the name, set large, and under it the
+# "accounts" (profile URLs), each a link with its platform's logo.
 # A ```chart block in a chapter's Markdown is drawn as a line chart, a bar chart or a table (see charts.py).
 import argparse
 import html
@@ -20,6 +21,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pikepdf
 
@@ -142,18 +144,41 @@ def write_draft(work, meta, ready):
     (work / "draft.md").write_text("\n".join(parts), encoding="utf-8")
 
 
+# Platform marks (Simple Icons, 24x24 viewBox), keyed by the profile URL's host.
+LOGOS = {
+    "youtube.com": "M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z",
+    "x.com": "M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z",
+    "tiktok.com": "M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z",
+}
+LOGOS["twitter.com"] = LOGOS["x.com"]
+LINK_CSS = "a { color: inherit; text-decoration: underline; text-decoration-thickness: 0.4pt; text-underline-offset: 2pt; }"
+
+
+def account_html(url):
+    """One account line for the cover: the platform's logo when known, then the handle, linked to the profile."""
+    parts = urlparse(url)
+    host, first = parts.netloc.removeprefix("www."), parts.path.strip("/").split("/")[0]
+    logo = LOGOS.get(host)
+    handle = (first if first.startswith("@") else "@" + first) if logo else f"{host}/{parts.path.strip('/')}".rstrip("/")
+    mark = f'<svg viewBox="0 0 24 24" width="11pt" height="11pt" fill="currentColor"><path d="{logo}"/></svg>' if logo else ""
+    return f'<a class="account" href="{html.escape(url, quote=True)}">{mark}<span>{html.escape(handle)}</span></a>'
+
+
 def cover_page(meta, bg, fg, bold, tmp):
-    """A one-page cover PDF: the cover name set large, and nothing else."""
+    """A one-page cover PDF: the cover name set large, and under it the subject's accounts as links."""
     w, h = meta["page_size"]
     name = meta["cover"]
+    accounts = "".join(account_html(url) for url in meta.get("accounts", []))
     hei = 'Baskerville, "PingFang SC", "Heiti SC", "Hiragino Sans GB", sans-serif'
     page, out = tmp / "cover.html", tmp / "cover.pdf"
     page.write_text(
         f'<!doctype html><html><head><meta charset="utf-8"><style>'
         f'@page {{ size: {w}pt {h}pt; margin: 0; }} html, body {{ margin: 0; }}'
         f'.cover {{ padding: {round(h * 0.34)}pt {round(w * 0.12)}pt 0; text-align: center; font-family: {hei}; }}'
-        f'.name {{ font-size: 34pt; font-weight: 700; letter-spacing: 2pt; line-height: 1.3; color: {bold}; }}'
-        f'</style></head><body><div class="cover"><div class="name">{html.escape(name)}</div></div></body></html>',
+        f'.name {{ font-size: 34pt; font-weight: 700; letter-spacing: 2pt; line-height: 1.3; color: {bold}; margin-bottom: 26pt; }}'
+        f'.account {{ display: block; margin-top: 9pt; font-size: 11pt; letter-spacing: 0.5pt; color: {fg}; text-decoration: none; }}'
+        f'.account svg {{ vertical-align: -1.5pt; margin-right: 6pt; }}'
+        f'</style></head><body><div class="cover"><div class="name">{html.escape(name)}</div>{accounts}</div></body></html>',
         encoding="utf-8")
     rd.print_pdf(rd.chrome_binary(), page, out)
     return out
@@ -175,7 +200,7 @@ def render(work, opt):
         sys.exit(f"nothing to render: no highlights in {work / 'md'}")
 
     style = rd.css(meta["page_size"], bg, fg, [(s["id"], t, s["kind"]) for s, t, _ in sections],
-                   opt.font_size, rd.brighten(fg, opt.bold_factor)) + ch.CSS
+                   opt.font_size, rd.brighten(fg, opt.bold_factor)) + ch.CSS + LINK_CSS
     tmp = Path(tempfile.mkdtemp(prefix="highlights-"))
     html_path, typeset = tmp / "highlights.html", tmp / "highlights.pdf"
     html_path.write_text(

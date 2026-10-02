@@ -9,7 +9,7 @@ description: >
   source is opened and read, a script matches every figure against the saved
   text of its source, and independent adversarial reviewers audit every source
   and quote and what the study makes of its numbers.
-  The PDF reads as a short book: a cover with the subject's name, an
+  The PDF reads as a short book: a cover with the subject's name and linked accounts, an
   introduction, numbered chapters, no citations in the text. Use for "/case-study <name or profile URL>", "do a
   case study of <creator>", "how did <creator> grow", "调研一个网红",
   "做一份案例研究", "这个网红是怎么做起来的".
@@ -77,11 +77,13 @@ ask for one name.
    bash "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
    "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case_study.py" init <slug> \
      --title "<how <Name> grew, in the study's language>" --cover "<Name>" \
-     --source "<profile URL>" --out "<pdf path>"
+     --source "<profile URL>" --out "<pdf path>" [--account "<profile URL>"]...
    ```
 
-   The cover shows the name and nothing else; the title is the PDF's document
-   title. It prints the work directory (`<store>/.work/<slug>/`, the digest
+   The cover shows the name and, under it, the subject's accounts: each a
+   link with its platform's logo. Without `--account` that is the profile URL;
+   give `--account` once per account when the subject grew on more than one
+   (the account they grew on first). The title is the PDF's document title. It prints the work directory (`<store>/.work/<slug>/`, the digest
    store).
    An existing work directory is reused: sources and chapters already there are
    kept.
@@ -162,7 +164,9 @@ ask for one name.
 
      On the book text it reports citations left in parentheses, wording about
      the research, figures that are not in the draft (chart values included),
-     and paragraphs that recite a run of figures instead of showing a chart. Open each hit: a real
+     paragraphs that recite a run of figures instead of showing a chart,
+     sources the closing list does not link, and links there that are not
+     sources. Open each hit: a real
      one goes back to the writer; a false one (a date in parentheses, a term
      that belongs to the story) is noted and passed.
    - Read the introduction and one middle chapter yourself. Text that reads as

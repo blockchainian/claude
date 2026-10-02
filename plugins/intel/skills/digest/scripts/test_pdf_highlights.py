@@ -157,7 +157,23 @@ def test_render(ph, work, tmp):
     with pdf.open_outline() as o:
         items = [(i.title, pdf.pages.index(pikepdf.Page(i.destination[0]))) for i in o.root]
     check("bookmarks follow the chapters behind the cover", items == [("Jane Doe", 0), ("One: Beginnings", 1), ("Three: Ends", 2)], items)
+    meta["accounts"] = ["https://www.youtube.com/@JaneDoe", "https://x.com/janedoe"]
+    meta_path.write_text(json.dumps(meta))
+    (work / "md" / "04.md").write_text("## Theme\n\n- The Daily: [2017](https://a.example/2017)\n")
+    ph.render(work, opt)
+    pdf = pikepdf.open(out)
+    uris = lambda page: sorted(str(a.A.URI) for a in page.get("/Annots", []) if "/A" in a and "/URI" in a.A)
+    cover_text = subprocess.run(["pdftotext", "-l", "1", str(out), "-"], capture_output=True, text=True).stdout
+    check("the cover lists the subject's accounts by handle under the name", cover_text.split() == ["Jane", "Doe", "@JaneDoe", "@janedoe"], cover_text[:200])
+    check("each account on the cover is a link to it", uris(pdf.pages[0]) == ["https://www.youtube.com/@JaneDoe", "https://x.com/janedoe"], uris(pdf.pages[0]))
+    check("a link in a chapter is a link in the PDF", uris(pdf.pages[2]) == ["https://a.example/2017"], uris(pdf.pages[2]))
+    (work / "md" / "04.md").write_text("## Theme\n\n- The closing point about ends.\n")
+    known = ph.account_html("https://www.tiktok.com/@jane")
+    check("an account on a known platform gets its logo, its handle and its link", "<svg" in known and 'href="https://www.tiktok.com/@jane"' in known and ">@jane<" in known, known[:200])
+    other = ph.account_html("https://blog.example/jane/")
+    check("an account elsewhere is shown by its address, without a logo", "<svg" not in other and ">blog.example/jane<" in other, other)
     meta.pop("cover")
+    meta.pop("accounts")
     meta_path.write_text(json.dumps(meta))
 
     default = ph.default_out(Path(json.loads((work / "chapters.json").read_text())["pdf"]), work)

@@ -7,7 +7,8 @@ message that sent you here names the work directory, the subject type file and
 the language.
 
 Read every file in `md/` before writing. Do not open `notes.md`, `raw/`,
-`review/` or the web: the draft is your only material.
+`review/` or the web: the draft is your only material, and `sources.json`
+(each source's URL and label) is read for the closing sources list only.
 
 ## What the reader gets
 
@@ -141,8 +142,14 @@ The reader does not want to know how the research was done.
   written; a table cell may hold any text. A line chart prints the values
   that fit beside their points: when every exact value matters, use a table.
 - The last file is the sources list: one short sentence, then the sources
-  grouped by kind, each as outlet and year. Nothing about how they were read
-  and nothing about what could not be reached.
+  grouped by kind. Every source in `sources.json` is in it as a link to its
+  URL, copied exactly. An outlet is one line, its articles linked by year:
+  `- New York Times Magazine: [2017](<url>), [2019](<url>)`; two articles of
+  one year are told apart by month or by a word. A video, post or document
+  is linked by its title: `- [<title>](<url>), 2017`. Archive snapshots of
+  one page may be one line that links a few of them, or none. No link that
+  is not in `sources.json`. Nothing about how the sources were read and
+  nothing about what could not be reached.
 
 Write each chapter file as soon as it is done. If `book/` already holds
 chapters when you start, you were interrupted: continue from the first missing
