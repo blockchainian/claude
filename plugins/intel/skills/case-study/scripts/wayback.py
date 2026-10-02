@@ -10,6 +10,7 @@
 # JSON line per capture (date, value, text, url, file): value is the count when it could be read, text is the
 # page's own wording when it is rounded or in another language, and both are null when the page shows no count.
 import argparse
+import gzip
 import json
 import os
 import queue
@@ -91,6 +92,8 @@ def fetch_all(urls, routes, out, per_minute=PER_MINUTE, get=http_get):
                 todo.put((position, url))
                 return
             path = out / (f"{position:03d}-" + re.sub(r"[^A-Za-z0-9]+", "-", url)[-120:].strip("-") + ".html")
+            if body[:2] == b"\x1f\x8b":  # the archive replays some captures as the compressed bytes it stored
+                body = gzip.decompress(body)
             path.write_bytes(body)
             with lock:
                 results[position] = {"url": url, "status": status, "file": str(path), "route": index}
