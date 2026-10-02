@@ -36,7 +36,7 @@ touching anything.
    `toolUseId`, and each child transcript carries its own token usage:
 
    ```
-   ${CLAUDE_PLUGIN_ROOT}/skills/retro/extract.py <session-name>
+   ${CLAUDE_PLUGIN_ROOT}/skills/retro/extract.mjs <session-name>
    ```
 
    It prints the orchestrator's own cost, the spawn ledger (count by
@@ -80,7 +80,7 @@ touching anything.
    was not waste is what makes the ranking credible.
 
 4. **Account for the codex lane.** Codex runs in an external runtime, so its cost
-   is not in the Claude transcript — but `extract.py` recovers it from
+   is not in the Claude transcript — but `extract.mjs` recovers it from
    `~/.codex/sessions`: by the codex thread ids codex-manager returned in the
    transcript (exact), else by originator + worktree + time window
    (correlation — conservative, may miss runs outside this session's window and
@@ -104,7 +104,7 @@ touching anything.
                 fix_destination, fix_id}]}
    ```
 
-   Take the numbers verbatim from `extract.py` (never re-estimate them). `waste_class`
+   Take the numbers verbatim from `extract.mjs` (never re-estimate them). `waste_class`
    is a **stable kebab-case slug** (e.g. `ungroundable-gate`, `monolithic-self-verify`,
    `probe-recipe-trial-error`) — reuse the same slug across sessions so a recurrence
    can be tracked. Give each proposed fix a stable `fix_id`. Confirm the diagnosis
@@ -123,7 +123,7 @@ touching anything.
    {fix_id, waste_class, type: "mechanical-gate"|"judgment"|"memory", applied_at: <commit SHA or memory path>, ref}
    ```
 
-   This is the treatment timeline. `efficacy.py --root ~/.claude/retros` then joins it
+   This is the treatment timeline. `efficacy.mjs --root ~/.claude/retros` then joins it
    to the `retro.json` records and reports whether each fix's `waste_class` recurs in
    later comparable sessions — near-deductive for a mechanical gate (the waste becomes
    structurally impossible), only suggestive for judgment/memory fixes. It presents

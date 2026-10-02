@@ -11,10 +11,10 @@ action, or DOM nodes the page still references after they left the document
 ("detached"). This skill captures two heap snapshots around that action and
 diffs them into a ranked report of the suspects.
 
-Two scripts, both `uv run` (they declare their own deps):
-- `scripts/capture_heap_snapshot.py` — pulls one `.heapsnapshot` from a running
-  Chrome over the DevTools protocol.
-- `scripts/diff_heap_snapshots.py` — diffs two snapshots; reads no browser.
+Two scripts, both plain Node (no npm install; Node builtins only):
+- `scripts/capture-heap-snapshot.mjs` — pulls one `.heapsnapshot` from a running
+  Chrome over the DevTools protocol. Needs Node 22+ (global `WebSocket`).
+- `scripts/diff-heap-snapshots.mjs` — diffs two snapshots; reads no browser.
 
 ## The loop
 
@@ -27,14 +27,14 @@ Two scripts, both `uv run` (they declare their own deps):
 
    A separate `--user-data-dir` keeps it off your normal profile. The capture
    script connects without an `Origin` header, so `--remote-allow-origins` is not
-   needed. Confirm the tab is visible: `capture_heap_snapshot.py --list`.
+   needed. Confirm the tab is visible: `capture-heap-snapshot.mjs --list`.
    That profile carries no logins: if the page under test is behind one, log in
    in that window before taking the baseline snapshot.
 
 2. **Baseline snapshot**, at rest:
 
    ```
-   uv run "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/capture_heap_snapshot.py" \
+   node "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/capture-heap-snapshot.mjs" \
      --url-contains myapp --out leaks/before.heapsnapshot
    ```
 
@@ -48,7 +48,7 @@ Two scripts, both `uv run` (they declare their own deps):
 5. **Diff:**
 
    ```
-   uv run "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/diff_heap_snapshots.py" \
+   node "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/diff-heap-snapshots.mjs" \
      --before leaks/before.heapsnapshot --after leaks/after.heapsnapshot \
      [--top 25] [--min-size-delta 50000]
    ```
@@ -80,4 +80,5 @@ Two scripts, both `uv run` (they declare their own deps):
 ## Requirements
 
 - Google Chrome, started with `--remote-debugging-port` (any recent version).
-- `uv` on PATH; the scripts declare their own dependencies.
+- Node 22+ on PATH (the capture script uses the built-in `WebSocket`; the diff
+  script runs on Node 18.18+). No npm dependencies.

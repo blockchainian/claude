@@ -11,7 +11,7 @@ import test from "node:test";
 import { fakeDaemon, send } from "./helpers/fake-daemon.mjs";
 import { resolveSessionId } from "../plugins/codex/codex-manager/session.mjs";
 
-const manager = path.resolve("plugins/codex/codex-manager/codex-manager.mjs");
+const manager = path.resolve("plugins/codex/codex-manager/manager.mjs");
 const session = "11111111-2222-3333-4444-555555555555";
 
 async function tempHome() {
@@ -55,7 +55,7 @@ test("whoami runs when the script is reached through a symlinked plugin director
   const link = await mkdtemp(path.join(os.tmpdir(), "codex-manager-link-"));
   try {
     await symlink(path.dirname(path.dirname(manager)), path.join(link, "codex"));
-    const viaLink = path.join(link, "codex", "codex-manager", "codex-manager.mjs");
+    const viaLink = path.join(link, "codex", "codex-manager", "manager.mjs");
     const result = await new Promise((resolve) => {
       const child = spawn(process.execPath, [viaLink, "whoami"], { env: { ...process.env, CLAUDE_CODE_SESSION_ID: session }, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";
@@ -168,7 +168,7 @@ class McpChild {
 /** The server codex runs for notify_claude and ask_claude; it gets no Claude session id of its own. */
 class ToolsChild extends McpChild {
   constructor(home, env = {}) {
-    super(home, "unused", { CLAUDE_CODE_SESSION_ID: "", ...env }, "claude-tools");
+    super(home, "unused", { CLAUDE_CODE_SESSION_ID: "", ...env }, "claude");
   }
 
   tool(name, threadId, callId, text) {
@@ -260,7 +260,7 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     assert.equal(start.serviceName, "codex-manager");
     assert.deepEqual(start.config, {
       "sandbox_workspace_write.network_access": true,
-      "mcp_servers.claude": { command: process.execPath, args: [manager, "claude-tools"], env: { CODEX_MANAGER_HOME: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
+      "mcp_servers.claude": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_HOME: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
     });
     assert.equal(start.dynamicTools, undefined);
     assert.deepEqual(JSON.parse(await readFile(path.join(home.home, "threads", "thread-A.json"), "utf8")), { sessionId: session, pid: mcp.child.pid });

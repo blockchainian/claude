@@ -1,4 +1,4 @@
-# ABOUTME: CI for the plugins — the codex-manager node suite, the grok node suite, and the feature hooks and ship scripts.
+# ABOUTME: CI for the plugins — the codex-manager node suite, the marketplace manifest suite, and the feature hooks and ship scripts.
 name: test
 on:
   push:
@@ -13,14 +13,14 @@ jobs:
         with:
           node-version: 22
       - run: npm run test:codex
-  grok:
+  marketplace:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm run test:grok
+      - run: npm run test:marketplace
   feature:
     runs-on: ubuntu-latest
     steps:
