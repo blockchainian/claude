@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # ABOUTME: Checks check-paths.sh and check-overlap.sh output and exit codes against small fixture docs.
 # ABOUTME: Builds a throwaway git repo with known source files so the suite is hermetic; run from anywhere: <plugin>/skills/ship/tests/plan-checkers.test.sh
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

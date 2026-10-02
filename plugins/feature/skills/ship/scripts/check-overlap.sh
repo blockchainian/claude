@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # ABOUTME: Flags files that two workstreams of a plan both list on their `Files:` lines; workstreams
 # ABOUTME: run in parallel, so a shared file is a merge conflict. Usage: check-overlap.sh <plan.md>; exits 1 on overlap.
 doc=$1

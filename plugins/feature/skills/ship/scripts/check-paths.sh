@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # ABOUTME: Flags file paths named in a plan that do not exist in the repo.
 # ABOUTME: Usage: check-paths.sh <doc> [skip-regex]   — run anywhere inside the repo; exits 1 on any miss.
 #
