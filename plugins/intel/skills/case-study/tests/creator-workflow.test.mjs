@@ -37,7 +37,7 @@ async function run(args, slow = []) {
   return { calls, release, result: () => done }
 }
 
-const ARGS = { subject: 'Jane Doe', work: '/w', skill: '/s', lang: 'English', today: '2026-01-01', tools: '', product: 'a product', seeds: '', caps: 'video site: 300 requests' }
+const ARGS = { subject: 'Jane Doe', work: '/w', skill: '/s', lang: 'English', today: '2026-01-01', product: 'a product', seeds: '', caps: 'video site: 300 requests' }
 const labels = (calls, prefix) => calls.filter(c => c.label.startsWith(prefix)).map(c => c.label)
 const ALL = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10']
 

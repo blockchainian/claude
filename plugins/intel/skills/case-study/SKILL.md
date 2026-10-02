@@ -43,7 +43,7 @@ they are sent the absolute paths of the files below and read them themselves.
 | File | Read by | Holds |
 |---|---|---|
 | `references/evidence.md` | every agent | What counts as read, the kinds of claim, who cannot be evidence |
-| `references/tools.md` | every agent | Login-free commands for pages, press, uploads, archives, records |
+| `references/tools.md` | every agent | The commands for pages, search, uploads, archives, records, all through `scripts/gate.mjs` |
 | `types/creator.md` | every agent | The gate, source types, scout lanes, what the numbers must establish, the chapters |
 | `briefs/scout.md` | scouts | Finding sources by lane |
 | `briefs/read.md` | readers | Reading a batch of sources into tagged notes |
@@ -53,6 +53,7 @@ they are sent the absolute paths of the files below and read them themselves.
 | `briefs/fix.md` | fixers | Applying the findings to one chapter |
 | `briefs/book.md` | book writer | How the reviewed draft becomes the text the reader gets |
 | `workflows/creator.mjs` | you | The stages below as a workflow script |
+| `scripts/gate.mjs` | every agent, through the commands in `references/tools.md` | The machine-wide gate: queues, paces and retries every third-party call; needs `ISP_PROXY_URL` (the proxy) and `FETCH_X_POSTS` (the X search script) in the session's environment |
 
 ## Arguments
 
@@ -62,7 +63,6 @@ they are sent the absolute paths of the files below and read them themselves.
 | `--type` | `creator` (default). `brand` is not supported yet: say so and stop. |
 | `--apply-to` | A product whose own accounts and creator program the reasoning chapter also covers, described in a sentence or two without its name. Without it, look for one in the project's memory or instructions; with none found, the chapter covers a person only. |
 | `--out` | The PDF path. Default: `<store>/case-studies/<slug>.pdf`. |
-| `--tools` | A file listing tool commands tested on this machine (logins, paid readers). Agents prefer it over `references/tools.md`. |
 | `--lang` | The language of the study. Default: the language the user is writing in. |
 
 More than one subject, or a request to pick subjects, is outside this skill:
@@ -98,7 +98,7 @@ ask for one name.
 
    | Stage | Agents | Does |
    |---|---|---|
-   | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `scripts/wayback.mjs curve` in one batch |
+   | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `gate.mjs wayback curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `md/`, from the notes only |
    | Review | sources lens per 25 URLs, after the merge and before any chapter is written; per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
@@ -109,8 +109,8 @@ ask for one name.
 
    Run it with the Workflow tool (this skill asks for it):
    `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.mjs`,
-   `args: { subject, work, skill, lang, today, tools, product, seeds, caps, done, fixer }`
-   — `skill` is this skill's absolute folder, `tools` is the tool list file, `product` the `--apply-to` text, `seeds` any
+   `args: { subject, work, skill, lang, today, product, seeds, caps, done, fixer }`
+   — `skill` is this skill's absolute folder, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the
    tool list in one line (the script gives each agent its share). Empty
    strings where there is nothing. It runs in the background: end the turn.
@@ -223,5 +223,5 @@ ask for one name.
   square of its size: two agents with 25 items cost less than one with 50.
 - Machine-wide limits (a video site's session, a search quota) do not grow
   with the number of agents: pass them as `caps` and each agent gets a share.
-  Archive pages are fetched only through `scripts/wayback.mjs`, by the archive
+  Archive pages are fetched only through `gate.mjs wayback`, by the archive
   numbers agent and by the one reviewer slice that re-checks the curve.

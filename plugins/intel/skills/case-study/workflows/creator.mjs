@@ -12,8 +12,8 @@ export const meta = {
   ],
 }
 
-// args: { subject, work, skill, lang, today, tools, product, seeds, caps, done, fixer }
-// skill is the absolute path of the case-study skill folder; tools, product, seeds and
+// args: { subject, work, skill, lang, today, product, seeds, caps, done, fixer }
+// skill is the absolute path of the case-study skill folder; product, seeds and
 // caps may be empty strings. done names the stages whose files are already in the work directory and are not run
 // again: 'read' (the notes and the numbers: the run starts at the draft), 'sources' (the sources lens's findings).
 //
@@ -33,7 +33,7 @@ const READ_DONE = DONE.includes('read')
 const COMMON = `Subject: ${A.subject}. Today is ${A.today}. Language of the study: ${A.lang}.
 Work directory: ${WORK}
 Evidence rules: ${S}/references/evidence.md
-Tools: ${S}/references/tools.md${A.tools ? `; commands tested on this machine, preferred: ${A.tools}` : ''}
+Tools: ${S}/references/tools.md
 Subject type file: ${S}/types/creator.md
 Read-only on every platform: never post, comment, like or follow. Waiting commands run in the foreground with a bounded time.`
 const share = n => A.caps ? `\nMachine caps for this whole stage: ${A.caps}. You are one of ${n} agents in it: use at most a 1/${n} share.` : ''
