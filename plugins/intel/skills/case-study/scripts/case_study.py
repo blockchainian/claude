@@ -33,6 +33,10 @@ PROCESS_TERMS = ["sources.json", "notes.md", "gaps.md", "subagent", "research ag
                  "yt-dlp", "self-reported", "independent source", "独立来源", "核对", "快照", "存档页", "有记录佐证",
                  "本人说的", "当时的报道", "事后报道"]
 NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+CHART = re.compile(r"^```chart[ \t]*\n.*?\n```[ \t]*$", re.S | re.M)  # a figure block the renderer draws
+# A date, whose digits are not figures of a series: 2012 年 5 月 2 日, 8 月 2 日, 2012-05-02, a bare year.
+DATE = re.compile(r"(?:19|20)\d\d\s*年(?:\s*\d+\s*月)?(?:\s*\d+\s*日)?|\d+\s*月(?:\s*\d+\s*日)?|\d+\s*日|(?:19|20)\d\d(?:-\d\d){0,2}")
+SERIES = 5  # a paragraph with this many figures besides its dates recites a series
 
 
 def init(slug, title, source, out, chapters, cover):
@@ -113,6 +117,15 @@ def numbers(text):
     return {m.group().replace(",", "").rstrip(".") for m in NUMBER.finditer(text)}
 
 
+def recited_series(text):
+    """The openings of the paragraphs that recite a run of figures in prose instead of showing a chart or a table."""
+    found = []
+    for paragraph in re.split(r"\n\s*\n", CHART.sub("", text)):
+        if not paragraph.lstrip().startswith("#") and len(NUMBER.findall(DATE.sub("", paragraph))) >= SERIES:
+            found.append(paragraph.strip()[:40])
+    return found
+
+
 def restated(number, known_values):
     """True when the figure is a known one in another unit: 24.8M as 2,480 万, 1.2B as 12 亿."""
     value = float(number)
@@ -143,7 +156,7 @@ def check(work):
     book_missing, book_no_lead, book = layer(work, "book", ids)
     known = set().union(*(numbers(text) for text in draft.values())) if draft else set()
     known_values = [float(n) for n in known]
-    citations, process, unknown = [], [], []
+    citations, process, unknown, series = [], [], [], []
     for i, text in book.items():
         terms = [term for term in PROCESS_TERMS if term in text.lower()]
         if terms and i != ids[-1]:
@@ -156,6 +169,9 @@ def check(work):
         extra = sorted(n for n in numbers(text) - known if not restated(n, known_values))
         if extra:
             unknown.append({"chapter": i, "found": extra})
+        recited = recited_series(text)
+        if recited:
+            series.append({"chapter": i, "found": recited})
     try:
         sources = json.loads((work / "sources.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -165,11 +181,12 @@ def check(work):
     hosts = [urlparse(url).netloc.removeprefix("www.") for url in urls]
     snapshots = sum(host in ARCHIVE_HOSTS for host in hosts)
     draft_ok = valid and not missing and not no_lead
-    book_ok = not (book_missing or book_no_lead or citations or process or unknown)
+    book_ok = not (book_missing or book_no_lead or citations or process or unknown or series)
     return {"ok": draft_ok and book_ok, "draft_ok": draft_ok, "book_ok": book_ok,
             "missing_chapters": missing, "no_lead_paragraph": no_lead, "sources_valid": valid,
             "missing_book_chapters": book_missing, "book_no_lead_paragraph": book_no_lead,
             "citations_in_book": citations, "process_terms_in_book": process, "numbers_not_in_draft": unknown,
+            "series_in_prose": series,
             "sources": len(hosts) - snapshots, "archive_snapshots": snapshots,
             "sites": len({host for host in hosts if host not in ARCHIVE_HOSTS})}
 

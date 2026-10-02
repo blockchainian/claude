@@ -25,7 +25,8 @@ and which parts of it are on the record. The work has two layers. The sourced
 draft (`md/`) names the evidence behind every sentence and is what the
 reviewers audit. The book (`book/`) is what the reader gets: a short book with
 a cover, written plainly, complete, with no citations in the text and nothing
-about how the research was done.
+about how the research was done. Its figures are shown as charts and tables,
+not recited in sentences.
 
 Fewer solid claims beat more weak ones. A thin source list, a subject who
 sells their own success story, or a failed review stops the run with a plain
@@ -153,7 +154,8 @@ ask for one name.
      ```
 
      On the book text it reports citations left in parentheses, wording about
-     the research, and figures that are not in the draft. Open each hit: a real
+     the research, figures that are not in the draft (chart values included),
+     and paragraphs that recite a run of figures instead of showing a chart. Open each hit: a real
      one goes back to the writer; a false one (a date in parentheses, a term
      that belongs to the story) is noted and passed.
    - Read the introduction and one middle chapter yourself. Text that reads as
