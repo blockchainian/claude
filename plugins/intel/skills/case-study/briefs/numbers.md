@@ -15,7 +15,7 @@ You are the only agent that fetches from the archive.
    `scripts/wayback.mjs curve <work>/raw/archive <address>...`
    It lists the monthly captures, fetches them in one batch, and prints one
    line per capture with the count it could read. Do not fetch captures one by
-   one. If it stops with "every route was refused", report that error and
+   one. If it stops with "the archive refused the connection", report that error and
    stop.
 2. Rows with `text` but no `value` show a rounded or foreign-language count:
    read the text. Rows with neither: open the saved file and look; a capture
