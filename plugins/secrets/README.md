@@ -98,6 +98,9 @@ The kit provides:
 - `store`: `openDb`, `getSession`, `saveSession`, `setSessionStatus`, `listAccounts`,
   `sessionsForAccount`, `STATUS_*` and the remaining store exports.
 - `config`: `dbPath`, `statePath`, `defaultProxy`, `proxyFor` and the remaining config exports.
+- `credentials`: `loadCredentials(dir)`, `setAppPassword(dir, email, appPassword)`,
+  `setTotpSecret(dir, email, secret)` — the credential files under `config.credentialsDir(app)`
+  are what `login` reads each run, so a hook that mints an app password writes it back there.
 
 Configure `~/.config/secrets-manager/config.json`:
 

@@ -108,3 +108,10 @@ test('the kit exposes the app-flow engine helpers a byEmail or verify hook needs
   assert.equal(typeof kit.filterState, 'function');
   assert.deepEqual(kit.filterState({ cookies: [{ domain: '.b.test', name: 'k' }, { domain: 'other.test', name: 'k' }], origins: [] }, 'b.test').cookies.length, 1);
 });
+
+test('the kit exposes the credential-file writers so a hook can persist a minted app password', () => {
+  for (const name of ['setAppPassword', 'setTotpSecret', 'loadCredentials']) {
+    assert.equal(typeof kit.credentials[name], 'function', `kit.credentials.${name}`);
+  }
+  assert.equal(typeof kit.config.credentialsDir, 'function');
+});
