@@ -26,7 +26,7 @@ and which parts of it are on the record. The work has two layers. The sourced
 draft (`md/`) names the evidence behind every sentence and is what the
 reviewers audit. The book (`book/`) is what the reader gets: a practical book
 with a cover, distilled from the draft — what the subject did, what was luck,
-what was their own doing, what a reader can copy and what they cannot —
+what was their own doing and what a reader can copy —
 written plainly, with no citations in the text and nothing about how the
 research was done. The draft is the record; the book is what the record
 teaches, and is as long as that takes. Its figures are shown as charts and tables,
@@ -60,7 +60,7 @@ they are sent the absolute paths of the files below and read them themselves.
 |---|---|
 | the subject | A name, a handle, or a profile URL. Exactly one. |
 | `--type` | `creator` (default). `brand` is not supported yet: say so and stop. |
-| `--apply-to` | A product to write the last reasoning chapter for, described in a sentence or two. Without it, look for one in the project's memory or instructions; with none found, that chapter is left out. |
+| `--apply-to` | A product whose own accounts and creator program the reasoning chapter also covers, described in a sentence or two without its name. Without it, look for one in the project's memory or instructions; with none found, the chapter covers a person only. |
 | `--out` | The PDF path. Default: `<store>/case-studies/<slug>.pdf`. |
 | `--tools` | A file listing tool commands tested on this machine (logins, paid readers). Agents prefer it over `references/tools.md`. |
 | `--lang` | The language of the study. Default: the language the user is writing in. |
@@ -71,14 +71,13 @@ ask for one name.
 ## Run
 
 1. **Set up.** Run the digest setup, then scaffold the work directory. The slug
-   is the subject's name in lowercase with hyphens. Use 12 chapters with a
-   product, 11 without.
+   is the subject's name in lowercase with hyphens.
 
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
    "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case_study.py" init <slug> \
      --title "<how <Name> grew, in the study's language>" --cover "<Name>" \
-     --source "<profile URL>" --out "<pdf path>" --chapters <11|12>
+     --source "<profile URL>" --out "<pdf path>"
    ```
 
    The cover shows the name and nothing else; the title is the PDF's document
@@ -99,18 +98,17 @@ ask for one name.
    |---|---|---|
    | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `scripts/wayback.py curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
-   | Write | one per chapter; then the introduction and the reasoning chapters | The sourced draft in `md/`, from the notes only |
+   | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `md/`, from the notes only |
    | Review | sources lens per 25 URLs, from the merge on, alongside the writers; per chapter, as soon as it is written: a script matches its figures against the saved source text, and the quotes lens reviews it; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
-   | Fix | one per chapter, as soon as its two reviews and the sources lens are done; the introduction and the reasoning chapters after the others | Apply the findings to `md/` |
+   | Fix | one per chapter, as soon as its two reviews and the sources lens are done; the introduction and the reasoning chapter after the others | Apply the findings to `md/` |
 
    A chapter runs write → review → fix on its own; the slowest chapter sets
    the time, not the slowest agent of every stage added up.
 
    Run it with the Workflow tool (this skill asks for it):
    `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.js`,
-   `args: { subject, work, skill, lang, today, chapters, tools, product, seeds, caps }`
-   — `skill` is this skill's absolute folder, `chapters` is 11 or 12, `tools`
-   is the tool list file, `product` the `--apply-to` text, `seeds` any
+   `args: { subject, work, skill, lang, today, tools, product, seeds, caps }`
+   — `skill` is this skill's absolute folder, `tools` is the tool list file, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the
    tool list in one line (the script gives each agent its share). Empty
    strings where there is nothing. It runs in the background: end the turn.
@@ -195,9 +193,9 @@ ask for one name.
   them.
 - Report archive snapshots apart from sources. Forty captures of one profile
   page are one source of numbers, not forty sources.
-- A product named with `--apply-to` appears only in the reasoning chapter
-  written for it. Its terms are givens of the task, stated as such, never
-  findings.
+- A product given with `--apply-to` appears only in the reasoning chapter,
+  and never by name: pass its description, not its name, to the workflow. Its
+  terms are givens of the task, stated as such, never findings.
 - An agent that dies mid-stage (an account's usage limit, a crash) loses
   nothing: every brief has the agent write its output file as it goes and,
   when relaunched with the same message, read that file and continue. Relaunch

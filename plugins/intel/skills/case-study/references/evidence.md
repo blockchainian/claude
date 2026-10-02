@@ -107,6 +107,7 @@ not print case numbers or other handles that lead straight to one.
 
 ## Reasoning chapters
 
-The chapters that apply the findings (what a person could copy; what a named
-product could copy) are reasoning. Each opens by saying it is reasoning, not a
-finding, and rests only on what the finding chapters established.
+The chapter that applies the findings (what a person could copy, and what a
+product given with the task could copy) is reasoning. It opens by saying it is
+reasoning, not a finding, and rests only on what the finding chapters
+established. The product is never named, in the draft or in the book.

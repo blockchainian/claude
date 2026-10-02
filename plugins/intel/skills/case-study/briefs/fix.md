@@ -25,7 +25,7 @@ about every label your chapter names. The failed sources: every URL in
 6. A tie between a source and the subject is stated in the sentence where the
    source is used.
 7. Privacy findings come first: the sentence and the source both go.
-8. The introduction and the reasoning chapters are fixed after the others:
+8. The introduction and the reasoning chapter are fixed after the others:
    re-read the fixed chapters first, and rest on nothing they no longer say.
 9. When you are sure a reviewer is wrong, leave the text and record why, with
    the source's wording.
