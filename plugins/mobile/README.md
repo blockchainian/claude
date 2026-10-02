@@ -72,6 +72,7 @@ when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 
 - macOS with Xcode and the iOS Simulator installed
 - `npx` on PATH
+- `uv` on PATH (the Python scripts and the phone-session hook run through it)
 - `ettrace` for the profiling skill: `brew install emergetools/homebrew-tap/ettrace`
 - for `ios-take-screenshot` against a simulator: nothing beyond a booted simulator
 - for `ios-take-screenshot` against a real iPhone: an Apple Developer account,
