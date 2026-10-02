@@ -11,8 +11,8 @@ ships.
 | [render](plugins/render/README.md) | The Render plugin with only the nine skills this desk uses, plus its MCP server, agent, and hook. |
 | [cloudflare](plugins/cloudflare/README.md) | The Cloudflare plugin with only the six skills this desk uses, plus its five MCP servers. |
 | [proxy](plugins/proxy/README.md) | Captures and decodes the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy, scoped to that app's hosts. |
-| [intel](plugins/intel/README.md) | Transcribes audio locally with whisper and turns any long-form source (article, podcast, video) into durable, searchable highlights. |
-| [web](plugins/web/README.md) | Finds web memory leaks by diffing V8 heap snapshots captured from a running Chrome over the DevTools protocol. |
+| [intel](plugins/intel/README.md) | Gathers and distills knowledge from long-form sources: transcribes audio locally with whisper, turns an article, podcast, video or PDF into searchable highlights, translates an English EPUB into a Chinese PDF, finds and downloads books, analyzes App Store reviews, finds brand names with a registrable domain, and researches one creator into a sourced case study. |
+| [web](plugins/web/README.md) | Finds web memory leaks by diffing V8 heap snapshots captured from a running Chrome over the DevTools protocol, and checks a built page against a design reference. |
 
 ## Install
 
@@ -41,8 +41,8 @@ plugins/mobile/                   the iOS plugin
 plugins/render/                   the Render plugin, trimmed to nine skills
 plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
 plugins/proxy/                    the mitmproxy traffic-capture plugin
-plugins/intel/                    the audio-transcription and highlights plugin
-plugins/web/                      the web heap-snapshot leak-finder plugin
+plugins/intel/                    the research plugin: transcribe, digest, translate, case study and more
+plugins/web/                      the web leak-finder and design-check plugin
 tests/                            the marketplace node suite
 ```
 
@@ -51,12 +51,16 @@ compares to decide whether a user is out of date. Bump it in the same commit as
 the change you want to ship — a plugin whose version is unchanged stays cached
 on every machine that already has it, however much its code moved.
 
-## Test
+## Tests
 
 ```
 npm test              # every suite
 npm run test:codex    # codex-manager against a fake app-server daemon
 npm run test:feature  # the feature plugin's hooks, plan checkers, workstream.sh, watch-ci and retro
+npm run test:proxy    # the proxy plugin's capture logic and WireGuard key derivation
+npm run test:intel    # the intel plugin's skills; the render suites need Chrome and uv
+npm run test:web      # the heap-snapshot diff and the design check; needs uv
+npm run test:mobile   # the phone-session hook, the simulator claim, frame diff, stitch and design check; needs uv
 npm run test:marketplace  # the marketplace manifest and shared-engine checks
 npm run validate      # the marketplace and plugin manifests
 ```

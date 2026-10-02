@@ -1,3 +1,5 @@
+// ABOUTME: Tests the marketplace manifest: it lists every plugin in the repository, and the check-design
+// ABOUTME: engine shared by the mobile and web plugins stays byte-identical.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
