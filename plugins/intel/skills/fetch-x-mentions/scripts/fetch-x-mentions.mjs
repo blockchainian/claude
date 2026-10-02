@@ -34,6 +34,7 @@ import { requireEnv, loadEnvFile } from "./env.mjs";
 // count is how many tweets the day holds, oldest the ISO time of its oldest one, refill (only
 // on days that were refilled) how many times. A run fetches the days of its range missing from
 // the file, plus the gap days with --refill.
+import { realpathSync } from "node:fs";
 
 import { appendFile, readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -909,4 +910,4 @@ async function main() {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

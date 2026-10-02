@@ -23,6 +23,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 //   posts.out.json progress: { since, until, tweets: {count, done}, replies: {count, done} }
 //     A stream is `done` once its full page-through finished for this exact window; a rerun
 //     skips done streams and refetches the rest, so an interrupted run resumes by rerunning.
+import { realpathSync } from "node:fs";
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -691,4 +692,4 @@ async function main() {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

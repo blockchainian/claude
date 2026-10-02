@@ -1,4 +1,5 @@
 // Verify vendor X tokens into ct0 pairs in the existing secrets store.
+import { realpathSync } from "node:fs";
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -52,4 +53,4 @@ export async function main(argv) {
   } catch (e) { console.error(e.message); return 1; }
   finally { db?.close(); await dispatcher?.close(); }
 }
-if (process.argv[1] === fileURLToPath(import.meta.url)) process.exitCode=await main(process.argv.slice(2));
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode=await main(process.argv.slice(2));
