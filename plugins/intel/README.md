@@ -89,11 +89,11 @@ audio leg and `digest` for the notes.
 node --test skills/transcribe/tests/*.mjs
 python3 skills/digest/tests/test_fetch_source.py
 node --test skills/digest/tests/*.mjs
-skills/digest/tests/test_pdf_highlights.py
+uv run skills/digest/tests/test_pdf_highlights.py
 node --test skills/translate/tests/*.mjs
-skills/translate/tests/test_render.py
+uv run skills/translate/tests/test_render.py
 node --test skills/find-domain-names/tests/check.test.mjs
-node --test skills/download-book/tests/site-session.test.mjs
+node --test skills/download-book/tests/*.mjs
 node --test skills/case-study/tests/*.mjs
 node --test skills/analyze-appstore-reviews/tests/*.mjs
 ```

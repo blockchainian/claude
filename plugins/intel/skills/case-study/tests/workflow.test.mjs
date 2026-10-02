@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-const source = readFileSync(new URL('../workflows/creator.js', import.meta.url), 'utf8').replace('export const meta', 'const meta')
+const source = readFileSync(new URL('../workflows/creator.mjs', import.meta.url), 'utf8').replace('export const meta', 'const meta')
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 
 // Every stand-in agent finishes on the next tick, except those named in `slow`, which finish when `release` is called:

@@ -80,8 +80,8 @@ for PDFs). Typesetting a highlights PDF also needs Google Chrome.
      instead, because nothing wakes a subagent when a background job exits:
 
      ```bash
-     bash   "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/setup.sh"
-     python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe_audio.py" \
+     bash "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/setup.sh"
+     "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-audio.mjs" \
        "<audio_url>" "<transcript path>"
      ```
 
