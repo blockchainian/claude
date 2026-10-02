@@ -22,3 +22,30 @@ test('a fresh X invocation fails on its first missing key with the config path',
  const result=spawnSync(process.execPath,[fileURLToPath(new URL('../scripts/fetch-x-mentions.mjs',import.meta.url)),'example','query'],{env,encoding:'utf8'});
  assert.equal(result.status,1);assert.match(result.stderr,/X_BEARER is required in .*\.config\/intel\/\.env/);
 });
+
+test('Node env-file parsing handles quotes, inline comments and exported precedence', () => {
+ const dir=mkdtempSync(join(tmpdir(),'intel-dotenv-')), path=join(dir,'.env');
+ const keys=['INTEL_QUOTED','INTEL_SINGLE','INTEL_COMMENT','INTEL_HASH','INTEL_PRECEDENCE'];
+ const saved=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
+ for (const key of keys) delete process.env[key];
+ writeFileSync(path, `# whole-line comment
+INTEL_QUOTED="http://user:pass@proxy.example:8080" # trailing comment
+INTEL_SINGLE='quoted words'
+INTEL_COMMENT=bare # trailing comment
+INTEL_HASH="keep # inside quotes"
+INTEL_PRECEDENCE="file value"
+`);
+ process.env.INTEL_PRECEDENCE='exported';
+ try {
+  loadEnvFile(path);
+  assert.equal(process.env.INTEL_QUOTED,'http://user:pass@proxy.example:8080');
+  assert.equal(process.env.INTEL_SINGLE,'quoted words');
+  assert.equal(process.env.INTEL_COMMENT,'bare');
+  assert.equal(process.env.INTEL_HASH,'keep # inside quotes');
+  assert.equal(process.env.INTEL_PRECEDENCE,'exported');
+ } finally {
+  for (const key of keys) {
+   if (saved[key] === undefined) delete process.env[key]; else process.env[key]=saved[key];
+  }
+ }
+});
