@@ -72,13 +72,14 @@ a publication's outside-contributor network written with the manager's help.
 
 Adjust the titles to the subject; cover all of these. Each chapter opens with a
 lead paragraph, then `##` sections, as many as its material needs. The introduction is not
-numbered and its title names the subject ("Introduction: how <Name> grew", in
-the study's language). Numbering starts with the chapter after it. The closing
+numbered and its title is the statement itself, naming the subject ("How <Name>
+grew", in the study's language), with no label such as "Introduction" and no
+colon before it. Numbering starts with the chapter after it. The closing
 sources list is not numbered.
 
 | File | Title | Covers |
 |---|---|---|
-| 01 | Introduction: how <Name> grew | Who this is, what they built, and on what |
+| 01 | How <Name> grew | Who this is, what they built, and on what |
 | 02 | Chapter 1 — Starting point | What they had before: audience, money, company, job |
 | 03 | Chapter 2 — Timeline and numbers | The phases: one table of the curve and one of the upload cadence, and what marks each phase |
 | 04 | Chapter 3 — Content | Format, topics, titles and thumbnails or hooks, openings, retention |
