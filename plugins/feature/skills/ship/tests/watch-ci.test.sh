@@ -34,13 +34,13 @@ PY
   if [ -n "$out" ]; then report "$1" fail "$out"; else report "$1" pass; fi
 }
 
-FIXTURE=$(mktemp -d)
-trap 'rm -rf "$FIXTURE"' EXIT
+SANDBOX=$(mktemp -d)
+trap 'rm -rf "$SANDBOX"' EXIT
 
 # fake gh: `pr checks <ref> --json name,state,bucket` reports pending for the first two calls,
 # then a terminal state (success or failure, per FAKE_GH_MODE). Every other invocation fails, so
 # the fallback `gh run list`/`gh run view` path is exercised by a separate stub per test.
-FAKE_GH="$FIXTURE/fake-gh.sh"
+FAKE_GH="$SANDBOX/fake-gh.sh"
 cat >"$FAKE_GH" <<'SH'
 #!/bin/bash
 set -u
@@ -76,7 +76,7 @@ run_watch() { # <ref> [out-file] — prints stdout; stderr to $ERR_FILE; sets RC
 
 STATE_DIR=$(mktemp -d)
 MODE=success
-OUT_FILE="$FIXTURE/success.json"
+OUT_FILE="$SANDBOX/success.json"
 run_watch pr-123 "$OUT_FILE"
 [ "$RC" -eq 0 ] && report "pending-then-success exits 0" pass ||
   report "pending-then-success exits 0" fail "rc=$RC $(cat "$ERR_FILE")"
