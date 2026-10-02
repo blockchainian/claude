@@ -67,3 +67,29 @@ test('startup merges adapter traffic blocks and resets them for zero adapters', 
  assert.equal(isBlockedHost('app-actions-eu.alpha.example'),false);
  assert.deepEqual(BLOCKED_WEBSOCKETS,[]);
 });
+
+test('adapter names must equal the final table name and exclude reserved tables', () => {
+ const base = factory(kit)[0];
+ for (const name of ['alpha__beta', '_google', 'Alpha', 'alpha_', 'sqlite_sessions', 'sqlite_sequence', 'google', 'x', 'tiktok']) {
+  assert.throws(() => validateAdapter({...base, name}), /bad adapter name/);
+ }
+ assert.equal(validateAdapter({...base, name: 'alpha_beta'}).name, 'alpha_beta');
+});
+
+test('normalized table collisions cannot overwrite an existing in-memory session', async () => {
+ const db = kit.store.openDb(':memory:');
+ const base = factory(kit)[0];
+ try {
+  const first = validateAdapter({...base, name: 'alpha_beta'});
+  kit.store.saveSession(db, first.name, 'fixture@example.com', [{name:'session', value:'first'}], []);
+  assert.equal(kit.store.toAppSlug('alpha__beta'), first.name); // the reviewed collision
+  assert.throws(() => {
+   const second = validateAdapter({...base, name: 'alpha__beta'});
+   kit.store.saveSession(db, second.name, 'fixture@example.com', [{name:'session', value:'second'}], []);
+  }, /bad adapter name/);
+  assert.equal(kit.store.getSession(db, first.name, 'fixture@example.com').cookies[0].value, 'first');
+  const dir = mkdtempSync(join(tmpdir(), 'collision-')), path = join(dir, 'adapters.mjs');
+  writeFileSync(path, `export default () => ['alpha_beta','alpha__beta'].map(name => ({name, domain:'example.com', startUrl:'https://example.com', entryTexts:['Login'], signIn:async()=>{}, ready:async()=>true}));`);
+  await assert.rejects(loadAdapters({paths:[path]}), /bad adapter name: alpha__beta/);
+ } finally { db.close(); }
+});
