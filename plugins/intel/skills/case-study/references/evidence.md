@@ -105,10 +105,8 @@ not that publication's reporting — name it as a contributor piece.
   `“标题太长，观众消化不了”⟦If you make your video caption too long, it will be too much for people to digest⟧`.
   The words in ⟦ ⟧ are copied letter for letter, an omission inside them
   marked `…`: a script looks them up in the source's saved text, and the
-  reviewer judges the translation against them. Words that are themselves
-  the thing — a video's title, a caption, a hashtag, a slogan — stay as the
-  source has them and are not translated. A quotation left in the source's
-  language carries no ⟦ ⟧. The book never prints ⟦ ⟧.
+  reviewer judges the translation against them. A quotation left in the
+  source's language carries no ⟦ ⟧. The book never prints ⟦ ⟧.
 
 ## Privacy
 

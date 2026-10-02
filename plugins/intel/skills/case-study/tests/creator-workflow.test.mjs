@@ -1,6 +1,6 @@
 // ABOUTME: Runs the creator workflow script against stand-in agents to check its control flow:
 // ABOUTME: scouted sources are de-duplicated and batched, every chapter is written, has its figures matched by a
-// ABOUTME: script, is reviewed, and is fixed as soon as its own reviews and the sources lens are done.
+// ABOUTME: script, is reviewed and is fixed as soon as its own reviews are done; no chapter is written before the sources lens is in.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
@@ -73,17 +73,20 @@ test('the review covers every source and every chapter, one chapter per reviewer
   const quotes = calls.filter(c => c.label.startsWith('review:quotes-'))
   assert.deepEqual(quotes.map(c => c.prompt.match(/md\/\d\d\.md/g)).sort(), ALL.map(f => [`md/${f}.md`]))
   assert.deepEqual(labels(calls, 'fix:').sort(), ALL.map(f => `fix:${f}`))
-  assert.deepEqual(labels(calls, 'merge:'), ['merge:read', 'merge:fix'])
+  assert.deepEqual(labels(calls, 'merge:'), ['merge:read', 'merge:sources', 'merge:fix'])
 })
 
-test('the sources lens starts with the writers; a chapter is fixed when its own reviews and the sources lens are done', async () => {
-  const { calls, release } = await run(ARGS, ['write:05', 'review:sources-2'])
-  assert.ok(labels(calls, 'review:sources-').length === 6 && labels(calls, 'write:').length >= 8, 'sources reviewers run alongside the writers')
-  // the body chapters other than 05 are reviewed at once; the introduction and the reasoning chapter wait for 05 to be written
+test('no chapter is written before the sources lens is in and its failed sources are merged out; a chapter is fixed when its own reviews are done', async () => {
+  const { calls, release } = await run(ARGS, ['review:sources-2', 'write:05'])
+  assert.equal(labels(calls, 'review:sources-').length, 6)
+  assert.deepEqual([...labels(calls, 'write:'), ...labels(calls, 'merge:sources')], [], 'writers wait for every sources reviewer')
+  await release() // sources-2 finishes: the failed sources are merged out, then the body chapters are written
+  assert.ok(calls.findIndex(c => c.label === 'merge:sources') < calls.findIndex(c => c.label === 'write:02'), 'the merge comes before the first writer')
+  // the body chapters other than 05 are reviewed and fixed at once; the introduction and the reasoning chapter wait for 05
   assert.deepEqual(labels(calls, 'review:quotes-').sort(), ['02', '03', '04', '06', '07', '08', '09'].map(f => `review:quotes-${f}`))
   assert.deepEqual(labels(calls, 'write:').filter(l => ['write:01', 'write:10'].includes(l)), [])
-  assert.deepEqual(labels(calls, 'fix:'), [], 'no chapter is fixed before the sources lens is done')
-  await release() // sources-2 and write:05 finish; the stand-ins let the rest run through
+  assert.deepEqual(labels(calls, 'fix:').sort(), ['02', '03', '04', '06', '07', '08', '09'].map(f => `fix:${f}`))
+  await release() // write:05 finishes; the stand-ins let the rest run through
   const fixes = labels(calls, 'fix:')
   assert.equal(fixes.length, 10)
   assert.deepEqual(fixes.slice(-2).sort(), ['fix:01', 'fix:10'], 'the introduction and the reasoning chapter are fixed after the others')
@@ -126,5 +129,6 @@ test('with the sources lens done too, no source is reviewed again and every chap
   assert.deepEqual(labels(calls, 'review:sources-'), [])
   assert.deepEqual(labels(calls, 'review:quotes-').sort(), ALL.map(f => `review:quotes-${f}`))
   assert.deepEqual(labels(calls, 'fix:').sort(), ALL.map(f => `fix:${f}`))
+  assert.deepEqual(labels(calls, 'merge:'), ['merge:read', 'merge:fix'], 'the merge after reading already left the failed sources out')
   assert.deepEqual((await result()).sources, [])
 })

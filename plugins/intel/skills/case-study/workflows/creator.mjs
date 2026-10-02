@@ -7,8 +7,8 @@ export const meta = {
     { title: 'Scout', detail: 'four scouts find sources by lane; the two numbers agents start with them', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
     { title: 'Write', detail: 'one writer per chapter, then the introduction and the reasoning chapter', model: 'sonnet' },
-    { title: 'Review', detail: 'sources lens on Opus from the merge on; per chapter, as each is written: a script matches its figures, the quotes lens (Opus) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
-    { title: 'Fix', detail: 'one fixer per chapter, as soon as its reviews and the sources lens are done', model: 'sonnet' },
+    { title: 'Review', detail: 'sources lens on Opus after the merge, before any chapter is written; per chapter, as each is written: a script matches its figures, the quotes lens (Opus) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
+    { title: 'Fix', detail: 'one fixer per chapter, as soon as its reviews are done', model: 'sonnet' },
   ],
 }
 
@@ -17,10 +17,10 @@ export const meta = {
 // caps may be empty strings. done names the stages whose files are already in the work directory and are not run
 // again: 'read' (the notes and the numbers: the run starts at the draft), 'sources' (the sources lens's findings).
 //
-// Nothing waits for a stage it does not need: the numbers agents start with the scouts, the sources lens starts
-// with the writers, and each chapter runs write → figures matched + quotes review → fix on its own. The only barriers are
-// the merge after reading (writers and the sources lens need sources.json), the body chapters before the
-// introduction and the reasoning chapter (written from them, fixed after them), and the sources lens before any fix.
+// The numbers agents start with the scouts, and each chapter runs write → figures matched + quotes review → fix on
+// its own. The barriers are the merge after reading (the sources lens needs sources.json), the sources lens before
+// any writer (a failed source's notes are not written up, reviewed and then removed), and the body chapters before
+// the introduction and the reasoning chapter (written from them, fixed after them).
 const A = args
 const S = A.skill
 const WORK = A.work
@@ -87,10 +87,12 @@ const RECORD = ['03', '07']
 const matchFigures = file => agent(
   `Run exactly this command and return its output, nothing else:\n${S}/scripts/case-study.mjs figures "${WORK}" ${file}${RECORD.includes(file) ? ' --worklist' : ''}`,
   { label: `figures:${file}`, phase: 'Review', model: 'haiku', effort: 'low', agentType: 'general-purpose' })
-// The sources lens checks the sources themselves, not the chapters: it runs while the chapters are written.
+// The sources lens checks the sources themselves, not the chapters, and runs before them: a merge then takes the
+// sources it failed out of sources.json, and the writers get no notes from them.
 const sliceCount = Math.ceil(sourceCount / 25)
 const sourcesReviewed = DONE.includes('sources') ? Promise.resolve([]) : parallel(Array.from({ length: sliceCount }, (_, i) => () => review('sources', `sources-${i + 1}`,
   `the urls printed by: ${S}/scripts/case-study.mjs slice "${WORK}" ${i + 1} ${sliceCount}`)))
+const sourcesMerged = DONE.includes('sources') ? Promise.resolve() : sourcesReviewed.then(() => merge('merge:sources'))
 
 const write = file => agent(
   `${COMMON}\nYou are a draft writer. Follow ${S}/briefs/write.md. Your chapter file: md/${file}.md (see the chapter table in the type file).${file === '10' && A.product ? `\nThe product for this chapter: ${A.product}` : ''}`,
@@ -98,7 +100,7 @@ const write = file => agent(
 const fix = file => agent(
   `${COMMON}\nYou are a fixer. Follow ${S}/briefs/fix.md. Your chapter file: md/${file}.md (NN = ${file}).`,
   { label: `fix:${file}`, phase: 'Fix', ...SONNET })
-// One chapter's chain: written → figures matched and reviewed → fixed once the sources lens is in.
+// One chapter's chain: written → figures matched and reviewed → fixed.
 const written = {}
 const chain = (file, writeAfter, fixAfter) => {
   written[file] = writeAfter.then(() => write(file))
@@ -110,12 +112,11 @@ const chain = (file, writeAfter, fixAfter) => {
         return RECORD.includes(file) ? review('record', `record-${file}`, `- md/${file}.md\nThe figures a script could not match: review/figures-${file}.md`) : matched
       },
     ])
-    await sourcesReviewed
     await fixAfter
     return { file, reviews, fixed: await fix(file) }
   })
 }
-const bodyChains = FROM_NOTES.map(file => chain(file, Promise.resolve(), Promise.resolve()))
+const bodyChains = FROM_NOTES.map(file => chain(file, sourcesMerged, Promise.resolve()))
 const bodyWritten = Promise.all(FROM_NOTES.map(file => written[file]))
 const bodyFixed = Promise.all(bodyChains)
 const tailChains = FROM_CHAPTERS.map(file => chain(file, bodyWritten, bodyFixed))

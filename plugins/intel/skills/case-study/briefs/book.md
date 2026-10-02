@@ -108,19 +108,10 @@ The reader does not want to know how the research was done.
    "a referral program") or left out; the same holds for the reader's own
    company or project.
 13. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
-14. **One language, never two mixed.** The whole book is in its language.
-   Proper names aside (a person, a company, a product, a platform), words
-   of another language appear in one way only: as a quotation, inside
-   quotation marks, where the reader needs the original wording itself — a
-   video's title, a caption or hashtag to imitate, a slogan. Everything else
-   is said in the book's language: a quote is translated and printed once;
-   no foreign word stands in running text where the book's language has a
-   word for it (not "她的 content 很 relatable"); nothing is printed next to
-   its own translation (not "面包 bread", not "面包（bread）"). A sentence
-   that carries a quotation in another language still reads as a correct
-   sentence of the book's language. In the draft a translated quote is
-   followed by the source's own words in ⟦ ⟧: those are for the reviewers
-   and are never copied.
+14. **The draft's ⟦ ⟧ stay in the draft.** In the draft a translated quote
+   is followed by the source's own words in ⟦ ⟧: those are for the
+   reviewers. The book prints the translation and never the ⟦ ⟧ or the
+   words in them.
 
 ## Shape
 
