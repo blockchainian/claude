@@ -10,6 +10,7 @@
 //        case-study.mjs findings <work dir> <NN>       (the review lines one fixer has still to apply to chapter NN)
 //        case-study.mjs unread <work dir> <batch> <url>...   (per source of a reader's batch: done, saved, or fetch)
 //        case-study.mjs bullets <work dir> <NN>        (the notes' lines for chapter NN, long dated tables thinned)
+//        case-study.mjs codex <work dir> <NN> [--model gpt-6-luna]   (run the fixer prompt saved in review/fix-NN.prompt.txt on a Codex model)
 //        case-study.mjs check <work dir> [--draft]
 // A study has two layers: md/NN.md is the sourced draft the reviewers audit (sources named in every sentence);
 // book/NN.md is the text that is typeset (no citations, no account of the research).
@@ -19,6 +20,7 @@
 // and notes/<name>.raw.tsv (a line of url, tab, file per saved text) and notes/<name>.raw.json (url -> the files its
 // text was saved to) into raw.json. Sources the readers gave the same
 // label get a letter each (Outlet 2025a, Outlet 2025b), in sources.json and in the notes' bullets, so that a label names one source.
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -523,6 +525,41 @@ function layer(work, folder, ids) {
   return { missing, noLead, texts }
 }
 
+// The fixer runs on a Codex model: the fix is a bounded edit under findings a script lists, and the pilot on
+// brooke-monk chapter 04 showed gpt-6-luna applies them as Sonnet does at a fraction of the cost. The prompt is
+// the one creator.mjs gives a fixer, saved to review/fix-NN.prompt.txt by the agent that runs this command.
+// The gate script paces its Google calls through files in ~/.cache/case-study-limits, which the Codex sandbox
+// must be allowed to write.
+export function codexCommand(work, chapter, model) {
+  const prompt = readFileSync(join(work, 'review', `fix-${chapter}.prompt.txt`), 'utf8')
+  const limits = join(homedir(), '.cache', 'case-study-limits')
+  return ['codex', 'exec', '--skip-git-repo-check', '--json', '-m', model, '-c', 'model_reasoning_effort=high',
+    '-c', `sandbox_workspace_write.writable_roots=${JSON.stringify([limits])}`, prompt]
+}
+
+// The last message of a codex exec run and its token usage, from the JSON event stream it printed.
+export function codexResult(events) {
+  let message = ''
+  let usage = null
+  for (const line of events.split('\n')) {
+    if (!line) continue
+    let event
+    try { event = JSON.parse(line) } catch { continue }
+    if (event.type === 'item.completed' && event.item?.type === 'agent_message') message = event.item.text
+    if (event.type === 'turn.completed' && event.usage) usage = event.usage
+  }
+  return { message, usage }
+}
+
+export function codex(work, chapter, model) {
+  const [command, ...args] = codexCommand(work, chapter, model)
+  mkdirSync(join(work, 'review'), { recursive: true })
+  const run = spawnSync(command, args, { cwd: work, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', maxBuffer: 1 << 28 })
+  writeFileSync(join(work, 'review', `fix-${chapter}.codex.jsonl`), run.stdout ?? '', 'utf8')
+  const result = codexResult(run.stdout ?? '')
+  return { ...result, status: run.status, stderr: (run.stderr ?? '').split('\n').filter(l => l && !l.startsWith('Reading additional input')).join('\n') }
+}
+
 export function check(work) {
   // Report what blocks the review (the sourced draft, sources.json) and what blocks rendering (the book text).
   const meta = JSON.parse(read(join(work, 'chapters.json')))
@@ -585,9 +622,10 @@ const OPTIONS = {
   findings: {},
   unread: {},
   bullets: {},
+  codex: { model: { type: 'string', default: 'gpt-6-luna' } },
   check: { draft: { type: 'boolean', default: false } },
 }
-const USAGE = 'usage: case-study.mjs {init,merge,slice,figures,quotes,findings,unread,bullets,check} ...'
+const USAGE = 'usage: case-study.mjs {init,merge,slice,figures,quotes,findings,unread,bullets,codex,check} ...'
 
 function fail(message) {
   console.error(message)
@@ -628,6 +666,12 @@ function main(argv) {
     need(2, 'work, chapter')
     console.log((cmd === 'findings' ? findings : bullets)(positionals[0], positionals[1]).join('\n'))
     return
+  }
+  if (cmd === 'codex') {
+    need(2, 'work, chapter')
+    const result = codex(positionals[0], positionals[1], values.model)
+    console.log(dump(result))
+    process.exit(result.status === 0 ? 0 : 1)
   }
   if (cmd === 'unread') {
     if (positionals.length < 3) fail('case-study.mjs unread: expected work, batch and the batch\'s urls')
