@@ -101,7 +101,7 @@ ask for one name.
    | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `scripts/wayback.mjs curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `md/`, from the notes only |
-   | Review | sources lens per 25 URLs, from the merge on, alongside the writers; per chapter, as soon as it is written: a script matches its figures against the saved source text, and the quotes lens reviews it; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
+   | Review | sources lens per 25 URLs, from the merge on, alongside the writers; per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
    | Fix | one per chapter, as soon as its two reviews and the sources lens are done; the introduction and the reasoning chapter after the others | Apply the findings to `md/` |
 
    A chapter runs write → review → fix on its own; the slowest chapter sets
@@ -125,8 +125,13 @@ ask for one name.
    agents, never the writers. Whether a figure is in its source is a lookup, so a
    script does it (`case-study.mjs figures`): about nine figures in ten match
    the saved text, and only the rest reach an agent — the chapter's fixer, or
-   the record reviewer in the two chapters that argue from the curve. The
-   sources and quotes lenses run on Opus at high effort: they check whether
+   the record reviewer in the two chapters that argue from the curve. Whether
+   a quotation's words are in its source is a lookup too
+   (`case-study.mjs quotes`): the draft keeps the source's own words after
+   every translated quotation, the script finds them and prints the passage
+   around them, and the quotes reviewer judges speaker, meaning and
+   translation from that passage, searching only for what the script did
+   not find. The sources and quotes lenses run on Opus at high effort: they check whether
    something is there. The record lens keeps the session's model: it judges
    what the record supports — whether a growth step is really tied to an
    event, whether a capture list was searched in full — and the largest model

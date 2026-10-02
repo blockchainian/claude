@@ -1,5 +1,5 @@
 // ABOUTME: Tests the case-study work-dir scaffold and the pre-render check.
-// ABOUTME: Covers init (layout, cover, idempotence), check (sourced draft, book text, sources, counts), merge, slice, findings, figures, unread and bullets.
+// ABOUTME: Covers init (layout, cover, idempotence), check (sourced draft, book text, sources, counts), merge, slice, findings, figures, quotes, unread and bullets.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -87,7 +87,7 @@ test('check passes clean book text whose sources list links every source, and re
   write(join(work, 'book', '12.md'), linked)
 
   write(join(work, 'book', '02.md'), '# Chapter 2\n\nShe had 19,936 followers (Outlet 2020).\n\n## Section\n\n过了 100 万（Tubefilter 2022（人物页））。\n')
-  write(join(work, 'book', '03.md'), '# Chapter 3\n\nIn 2016 (she was 19) it grew; the snapshot shows it, per sources.json.\n\n## Section\n\n没有第二个独立来源可以核对。\n')
+  write(join(work, 'book', '03.md'), '# Chapter 3\n\nIn 2016 (she was 19) it grew; the snapshot shows it, per sources.json.\n\n## Section\n\n没有第二个独立来源可以核对。她说“太长了”⟦too long⟧。\n')
   write(join(work, 'book', '05.md'), '# Chapter 5\n\nShe had 21,000 followers in 2016.\n\n## Section\n\nBody.\n')
   write(join(work, 'book', '12.md'), linked + '- Archive 2031\n')
   report = cs.check(work)
@@ -95,7 +95,7 @@ test('check passes clean book text whose sources list links every source, and re
   assert.equal(report.citations_in_book[0].found.length, 2)
   assert.ok(!chapters(report.citations_in_book).includes('03'), 'a plain parenthesis with an age or a date is not a citation')
   assert.deepEqual(chapters(report.process_terms_in_book), ['03'])
-  for (const term of ['snapshot', 'sources.json', '独立来源', '核对']) assert.ok(report.process_terms_in_book[0].found.includes(term), term)
+  for (const term of ['snapshot', 'sources.json', '独立来源', '核对', '⟦']) assert.ok(report.process_terms_in_book[0].found.includes(term), term)
   assert.ok(report.numbers_not_in_draft.some(c => c.chapter === '05' && c.found.join() === '21000'), 'a figure the sourced draft does not have is found')
   assert.ok(!chapters([...report.citations_in_book, ...report.numbers_not_in_draft]).includes('12'), 'the closing sources chapter may list outlets and years')
   assert.ok(!chapters(report.numbers_not_in_draft).includes('01'))
@@ -206,6 +206,37 @@ test('figures matches every figure of a chapter against the saved text of the so
     '[记录: A 2020] 她有 603 条视频。\n')
   report = cs.figures(work, '07')
   assert.deepEqual(report.unmatched, [], 'a label before its sentence belongs to the sentence after it, in a chapter whose paragraphs open with a label')
+})
+
+test('quotes looks up every quotation of a chapter in the saved text of the sources its sentence names', () => {
+  const dir = cs.init('quoted', 'How she grew', 'https://example.com/@q', out, 5, 'Q').work
+  write(join(dir, 'sources.json'), JSON.stringify({ 'https://f.example/a': 'Forbes 2026a', 'https://v.example/b': 'Variety 2021', 'https://i.example/c': 'Insider 2020' }))
+  write(join(dir, 'raw.json'), JSON.stringify({ 'https://f.example/a': ['raw/forbes.html'], 'https://v.example/b': ['raw/variety.vtt'] }))
+  write(join(dir, 'raw', 'forbes.html'), '<p>Asked about captions, Monk said: &quot;Is it long? If you make your video caption <em>too long</em>,\nit will be too much for people to digest on a short platform.&quot; ' +
+    'Her text is “words off the top of my head, always very simplified”. She called the old clips, which she doesn&#39;t watch, so cringey.</p>')
+  write(join(dir, 'raw', 'variety.vtt'), 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nher manager called her a specialist\n\n00:00:03.000 --> 00:00:05.000\nin short-form TikToks back then\n')
+  write(join(dir, 'md', '04.md'), '# Chapter\n\nLead.\n\n## Section\n\n' +
+    '她说“太长吗？标题太长，观众消化不了”⟦Is it long? If you make your video caption too long, it will be too much for people to digest⟧，文案是 "words off the top of my head … very simplified"（自述，Forbes 2026a）。' +
+    '她说旧视频她“doesn’t watch”，经纪人叫她“短视频专家”⟦a specialist in short-form TikToks⟧（Forbes 2026a）。' +
+    '她说“我每天发三条”（Forbes 2026a）。\n\n' +
+    '有人说她 "posts five times a day"（Insider 2020）。\n')
+  const report = cs.quotes(dir, '04')
+  const row = start => report.rows.find(r => r.looked.startsWith(start))
+  assert.equal(report.rows.length, 6)
+  const first = row('Is it long?')
+  assert.ok(first.verdict === 'found' && first.file === 'raw/forbes.html', 'a translated quotation is looked up by the original after it')
+  assert.ok(first.passage.includes('Monk said') && first.passage.includes('on a short platform') && !first.passage.includes('<em>'), 'the passage is the source\'s text around the words, without markup')
+  assert.ok(first.sentence.includes('Forbes 2026a'), 'a full stop inside a quotation does not end the sentence')
+  assert.equal(row('words off').verdict, 'found', 'the pieces around an ellipsis are found in order')
+  assert.equal(row('doesn’t watch').verdict, 'found', 'apostrophes written as entities or curly marks match')
+  const elsewhere = row('a specialist')
+  assert.ok(elsewhere.verdict === 'in another source' && elsewhere.label === 'Variety 2021' && elsewhere.passage.includes('her manager called her'), 'words found only in another source\'s text name that source; captions are read across their cues')
+  assert.equal(row('我每天发三条').verdict, 'not found')
+  assert.equal(row('posts five').verdict, 'no saved text')
+  assert.deepEqual([report.found, report.elsewhere, report.missing, report.unsaved], [3, 1, 1, 1])
+  const file = read(dir, 'review', 'quotations-04.md')
+  assert.ok(file.includes('* found | ') && file.includes('* not found | ') && file.includes('Forbes 2026a: raw/forbes.html'), 'the worklist has a row per quotation and the saved files of every label the chapter names')
+  assert.deepEqual(cs.findings(dir, '04'), [], 'worklist rows are not findings')
 })
 
 test('check rejects a sources.json that is not a url-to-label object', () => {

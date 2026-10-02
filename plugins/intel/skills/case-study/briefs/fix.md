@@ -26,7 +26,9 @@ you are interrupted.
 3. A source never opened is opened now, and the text corrected to what it says,
    or it leaves the text.
 4. A quote not found loses its quotation marks and the claim, or takes the real
-   wording. A wrong speaker, date or outlet is corrected from the source.
+   wording. A translated quote has the source's words after it in ⟦ ⟧ (see
+   "Quotes" in the evidence rules): correct both together. A wrong speaker,
+   date or outlet is corrected from the source.
 5. Numbers: correct what differs, remove what is not found, relabel what is
    mislabelled, print both sides where sources disagree, and recompute what
    was derived from a corrected figure.

@@ -62,8 +62,33 @@ Then judge what the chapter makes of its figures:
 
 ## Lens: quotes
 
-For every quotation and every sentence of the form "X said / wrote / reported":
-open the cited source and find it. Mark it found, distorted (say how), not
+Start with `<skill>/scripts/case-study.mjs quotes <work> NN` for your chapter
+(the skill folder is the one that holds this brief's folder). The script
+looks up every quotation of the chapter in the saved text of the sources its
+sentence names — a translated quotation by the source's own words in ⟦ ⟧
+after it — and writes `review/quotations-NN.md`: per quotation a verdict and
+the passage of the source around the words. Read that file whole, then the
+chapter once. Per row:
+
+- `found`: the words are in the named source. Judge the rest from the
+  passage, without opening the source: who is speaking, whether the sentence
+  bends what was said, whether a translation is faithful to the words in
+  ⟦ ⟧. Open the source only when the passage does not show the speaker or
+  the date.
+- `in another source`: the named source does not have the words and the one
+  shown does. That is a wrong outlet, unless the passage shows it quoting the
+  named one.
+- `not found`, `no saved text`: open the source and look. A translated
+  quotation with no ⟦ ⟧ after it is a finding (mislabelled) even when the
+  translation holds: its fix is the source's words to put there. Marks
+  around words that are nobody's (a term, a heading) are no quotation: say so
+  in the row, with no finding.
+
+A sentence of the form "X said / wrote / reported" with no quotation marks is
+not in that file: search the saved text its last section lists, several
+searches in one command, never one search per turn.
+
+Mark every quotation and every such sentence found, distorted (say how), not
 found, wrong speaker, wrong date, or wrong outlet. Then check:
 
 - when the sentence carries a figure: its kind (a figure from the subject
@@ -71,7 +96,8 @@ found, wrong speaker, wrong date, or wrong outlet. Then check:
   an estimate), its unit, currency and year, and — for a count or an age too
   small for the script that matches figures (under three digits) — the figure
   itself;
-- translated quotes against the original-language source;
+- a title, a caption, a hashtag or a slogan is printed as the source has it,
+  not translated;
 - press presented as reported at the time was published then;
 - claims about method that come only from the subject are labelled
   self-reported;
