@@ -23,7 +23,7 @@ Claude merging behind the plan's check command.
 ```
 
 `blockchainian` is the marketplace declared by this repository, which also
-ships [feature](../feature/README.md) and [grok](../grok/README.md).
+ships [feature](../feature/README.md).
 
 This plugin intentionally shares the `codex` plugin name with the official
 plugin. Installing both is supported — installed-plugin identity is

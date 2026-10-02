@@ -1,14 +1,14 @@
 {
   "name": "blockchainian-claude",
   "private": true,
-  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, grok, mobile, render, cloudflare, proxy, intel, and web plugins.",
+  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, mobile, render, cloudflare, proxy, intel, and web plugins.",
   "type": "module",
   "engines": {
     "node": ">=18.18"
   },
   "scripts": {
-    "test": "npm run test:grok && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web",
-    "test:grok": "node --test tests/commands.test.mjs tests/runtime.test.mjs",
+    "test": "npm run test:marketplace && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web",
+    "test:marketplace": "node --test tests/marketplace.test.mjs",
     "test:codex": "node --test tests/codex-manager.test.mjs",
     "validate": "claude plugin validate --strict .",
     "test:feature": "plugins/feature/hooks/tests/run.sh && plugins/feature/skills/ship/tests/run.sh && plugins/feature/skills/ship/tests/workstream.test.sh && plugins/feature/skills/ship/tests/watch-ci.test.sh && plugins/feature/skills/retro/tests/run.sh",
