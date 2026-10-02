@@ -125,7 +125,8 @@ The reader does not want to know how the research was done.
 ## Shape
 
 - Titles follow the type file: the introduction is not numbered and its title
-  names the subject; numbering starts with the chapter after it; the closing
+  names the subject, with no label such as "Introduction" or "引言" and no colon
+  before it; numbering starts with the chapter after it; the closing
   sources list is not numbered.
 - Each file: `# <title>`, a lead paragraph, then `##` sections. Sections may be
   merged, split, reordered or dropped. Chapters keep their order and file
