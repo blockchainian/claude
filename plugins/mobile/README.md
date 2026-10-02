@@ -81,16 +81,15 @@ when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 ## Tests
 
 ```
-python3 skills/ios-take-screenshot/tests/test_claim_simulator.py
-python3 skills/ios-take-screenshot/tests/test_discover_ios_setup.py
+node --test skills/ios-take-screenshot/tests/*.mjs
 python3 skills/ios-take-screenshot/tests/test_frame_diff.py
 python3 skills/ios-take-screenshot/tests/test_stitch_screens.py
 ```
 
-`test_claim_simulator.py` covers the simulator claim: one run holds a simulator, a
+`claim-simulator.test.mjs` covers the simulator claim: one run holds a simulator, a
 second claim is refused with the holder named, only the holder releases, and capture
 refuses `booted`, an unclaimed simulator, and one held by another run.
-`test_discover_ios_setup.py` covers the simulator report: the pick is named in full, a
+`discover-ios-setup.test.mjs` covers the simulator report: the pick is named in full, a
 shutdown UDID is reported as such, and two booted simulators ask for `--device`.
 
 `test_frame_diff.py` covers the frame comparison: a known scroll offset must be reported as

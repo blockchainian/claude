@@ -42,7 +42,7 @@ if ! $ca_trusted; then
   steps+=("sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \"$CA_PEM\"  # run in a real terminal; needs your password")
 fi
 
-# qrencode is not required — wg_config.py falls back to printing the config as text — but the
+# qrencode is not required — wg-config.mjs falls back to printing the config as text — but the
 # WireGuard QR is the easy path, so recommend it. It does not gate readiness.
 $have_qrencode || steps+=("brew install qrencode  # optional: for the WireGuard QR")
 

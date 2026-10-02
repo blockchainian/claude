@@ -12,13 +12,13 @@ snapshots, and check a built page against a design reference.
 
 ## How it works
 
-Two `uv run` scripts, each declaring its own dependencies:
+Two Node scripts (no npm dependencies; the capture script needs Node 22+ for the built-in `WebSocket`):
 
-- `capture_heap_snapshot.py` connects to a Chrome started with
+- `capture-heap-snapshot.mjs` connects to a Chrome started with
   `--remote-debugging-port`, picks a tab, forces a GC, and streams a
   `HeapProfiler.takeHeapSnapshot` to a `.heapsnapshot` file. It sends no `Origin`
   header, so `--remote-allow-origins` is not required.
-- `diff_heap_snapshots.py` parses two snapshots — no browser — and reports
+- `diff-heap-snapshots.mjs` parses two snapshots — no browser — and reports
   per-constructor count and retained-byte growth, detached DOM nodes, and the
   leak suspects.
 
@@ -46,5 +46,6 @@ both copies together.
 
 ## Requirements
 
-- `uv` on PATH (both skills; the scripts declare their own dependencies)
+- `uv` on PATH (for `check-web-design`; its script declares its own dependencies)
+- Node 22+ for `heap-snapshot-leaks` (no npm install needed)
 - for `heap-snapshot-leaks`: Google Chrome, started with `--remote-debugging-port`

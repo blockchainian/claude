@@ -27,10 +27,10 @@ fi
 
 LOCK="${TMPDIR:-/tmp}/ios-screenshot-lock.$UDID.json"
 if [ ! -f "$LOCK" ]; then
-  echo "simulator $UDID is not claimed; run claim_simulator.py first" >&2
+  echo "simulator $UDID is not claimed; run claim-simulator.mjs first" >&2
   exit 3
 fi
-HOLDER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("run",""))' "$LOCK")"
+HOLDER="$(node -e 'const j = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); console.log(j.run ?? "")' "$LOCK")"
 if [ "$HOLDER" != "$RUN" ]; then
   echo "simulator $UDID is held by run $HOLDER, not $RUN; wait for its release or abort" >&2
   exit 3

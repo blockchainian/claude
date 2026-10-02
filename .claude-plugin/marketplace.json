@@ -4,7 +4,7 @@
     "name": "blockchainian"
   },
   "metadata": {
-    "description": "Claude Code plugin marketplace for blockchainian's plugins: the feature pipeline (ship, verify, handoff, retro), Grok and Codex review/delegation tooling, iOS debugging, profiling, and whole-screen capture on simulator or device, and the Render and Cloudflare plugins carrying only the skills this desk uses."
+    "description": "Claude Code plugin marketplace for blockchainian's plugins: the feature pipeline (ship, verify, handoff, retro), Codex review/delegation tooling, iOS debugging, profiling, and whole-screen capture on simulator or device, and the Render and Cloudflare plugins carrying only the skills this desk uses."
   },
   "plugins": [
     {
@@ -22,14 +22,6 @@
         "name": "blockchainian"
       },
       "source": "./plugins/codex"
-    },
-    {
-      "name": "grok",
-      "description": "Use the local Grok CLI from Claude Code for code review and task delegation.",
-      "author": {
-        "name": "blockchainian"
-      },
-      "source": "./plugins/grok"
     },
     {
       "name": "mobile",

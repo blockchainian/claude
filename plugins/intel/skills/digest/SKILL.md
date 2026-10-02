@@ -276,7 +276,7 @@ take-aways to it.
 ### save (no input) — store the highlights
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.py" save "<draft path>"
+node "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" save "<draft path>"
 ```
 
 Save the draft from the digest run in this session (no draft in the session →
@@ -298,17 +298,17 @@ file. Steps:
    `<stored.md>`. No draft this session → find the item with `search`/`list`.
 2. **See what's already there:**
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.py" takeaway "<stored.md>" --list
+   node "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" takeaway "<stored.md>" --list
    ```
 3. **For each take-away in `<input>`** (strip any leading `1.`/`-`), decide:
    - **Overlaps an existing item** (same point, reworded or extended) → revise
      that item in place, merging the sharper wording:
      ```bash
-     python3 "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.py" takeaway "<stored.md>" --revise <n> "<text>"
+     node "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" takeaway "<stored.md>" --revise <n> "<text>"
      ```
    - **New point** → append it:
      ```bash
-     python3 "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.py" takeaway "<stored.md>" --add "<text>"
+     node "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" takeaway "<stored.md>" --add "<text>"
      ```
 
 Judging overlap is yours — the script only edits the list. `--add`/`--revise`
@@ -318,8 +318,8 @@ call. Multiple `save <input>` calls accumulate into the same section.
 ## search
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.py" search "<query>"
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.py" list
+node "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" search "<query>"
+node "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" list
 ```
 
 The query is a case-insensitive regex over the whole file, frontmatter included,

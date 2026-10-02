@@ -39,7 +39,7 @@ what is present or missing without installing anything.
 ## Batch — a finite file or URL
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe_audio.py" \
+node "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-audio.mjs" \
   "<audio-url-or-file>" "<out.txt>"
 ```
 
@@ -52,7 +52,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe_audio.py" \
 ## Live — an ongoing stream
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe_live.py" \
+node "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-live.mjs" \
   "<stream>" "<out.txt>" [--segment-seconds 30] [--max-minutes N]
 ```
 
@@ -82,5 +82,5 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe_live.py" \
 
 ## Requirements
 
-Apple Silicon. `setup.sh` installs the rest (Homebrew required). The first run
+Apple Silicon and Node.js 18.18+. `setup.sh` installs the rest (Homebrew required). The first run
 without `setup.sh` errors and names the missing tool.

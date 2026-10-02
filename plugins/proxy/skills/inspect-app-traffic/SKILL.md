@@ -56,7 +56,7 @@ toggle the mitmproxy CA on. Without that, TLS interception fails on the phone.
 ## 1. Start a capture
 
 ```bash
-"$SKILL_DIR/scripts/capture.py" start --label myapp --hosts myapp.com
+"$SKILL_DIR/scripts/capture.mjs" start --label myapp --hosts myapp.com
 ```
 
 This brings the hub up on 8080 if it is not already running, and opens a capture. Read its
@@ -87,11 +87,11 @@ If the browser shows `NET::ERR_CERT_AUTHORITY_INVALID` or an HSTS block, the CA 
 ### iPhone app — WireGuard
 
 ```bash
-"$SKILL_DIR/scripts/capture.py" start --label pump --hosts pump.fun --wireguard
-"$SKILL_DIR/scripts/wg_config.py" --qr "$PROXY_DIR/pump-qr.png"
+"$SKILL_DIR/scripts/capture.mjs" start --label pump --hosts pump.fun --wireguard
+"$SKILL_DIR/scripts/wg-config.mjs" --qr "$PROXY_DIR/pump-qr.png"
 ```
 
-`start --wireguard` brings the hub up serving WireGuard too; `wg_config.py` prints the client
+`start --wireguard` brings the hub up serving WireGuard too; `wg-config.mjs` prints the client
 config and writes a QR. Send the QR (see Reporting), have the user import it and toggle the
 tunnel on. The whole phone routes through the Mac while the tunnel is on, so `--hosts` is what
 scopes the read to the app; tell the user to turn the tunnel off when done. If the phone says
@@ -103,7 +103,7 @@ LAN with the router's AP/client isolation **off**, or it cannot reach the Mac.
 After the user enables the proxy and loads the app once:
 
 ```bash
-"$SKILL_DIR/scripts/capture.py" check "$CAP"
+"$SKILL_DIR/scripts/capture.mjs" check "$CAP"
 ```
 
 It cannot read Zero Omega's on/off state, but it sees what reaches the hub. `clientsConnected`
@@ -121,10 +121,10 @@ Claude Chrome extension driving it. Either way, enable Zero Omega first.
 ## 3. Read the capture
 
 ```bash
-"$SKILL_DIR/scripts/capture.py" read "$CAP" --kind flows     # one line per request
-"$SKILL_DIR/scripts/capture.py" read "$CAP" --kind ws        # websocket frames
-"$SKILL_DIR/scripts/capture.py" read "$CAP" --kind hosts     # host tally
-"$SKILL_DIR/scripts/capture.py" read "$CAP" --kind origins   # callers of each host
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind flows     # one line per request
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind ws        # websocket frames
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind hosts     # host tally
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind origins   # callers of each host
 ```
 
 `--kind ws` takes `--wsmax <chars>` to widen frame bodies. For a request or response body,
@@ -147,8 +147,8 @@ flows are written to **both** captures' files (both match it). `--hosts` cannot 
 on the *same* host. Split by **caller** with origins:
 
 ```bash
-"$SKILL_DIR/scripts/capture.py" read "$CAP" --kind origins                       # list callers
-"$SKILL_DIR/scripts/capture.py" read "$CAP" --kind origins --source app-a.example  # one app's calls
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind origins                       # list callers
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind origins --source app-a.example  # one app's calls
 ```
 
 Each web app sends a distinct `Origin`/`Referer`, and some shared auth providers carry a per-app
@@ -157,9 +157,9 @@ id header, so a shared host separates cleanly at read time.
 ## 5. Close a capture, and stop the hub
 
 ```bash
-"$SKILL_DIR/scripts/capture.py" status               # the hub and the open captures
-"$SKILL_DIR/scripts/capture.py" stop "$CAP" --wipe   # close a capture AND delete its file
-"$SKILL_DIR/scripts/capture.py" down --wipe          # stop the hub and delete all capture files
+"$SKILL_DIR/scripts/capture.mjs" status               # the hub and the open captures
+"$SKILL_DIR/scripts/capture.mjs" stop "$CAP" --wipe   # close a capture AND delete its file
+"$SKILL_DIR/scripts/capture.mjs" down --wipe          # stop the hub and delete all capture files
 ```
 
 Capture files hold unredacted tokens and are **not** cleaned automatically. Leave nothing

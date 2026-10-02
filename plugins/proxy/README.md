@@ -23,9 +23,9 @@ tunnel), read the flows, tear it down.
   generated and trusted) and exits 0; otherwise it prints the exact remaining steps.
 - **Readers over the hub file.** `flowlog.py` (one line per request), `wslog.py` (WebSocket
   frames), `hosts.py` (host tally), `origins.py` (callers), each scoped by `since`/`host`.
-- **WireGuard config, no dependencies.** `wg_config.py` derives the client config and a QR
-  from mitmproxy's keys with a pure-Python X25519, needing neither the `cryptography` module
-  nor the `wg` tool.
+- **WireGuard config, no dependencies.** `wg-config.mjs` derives the client config and a QR
+  from mitmproxy's keys with node:crypto X25519, needing neither an npm package nor the
+  `wg` tool.
 
 ## Requirements
 
@@ -36,16 +36,15 @@ tunnel), read the flows, tear it down.
 ## Test
 
 ```
-python3 skills/inspect-app-traffic/tests/test_capture.py
-python3 skills/inspect-app-traffic/tests/test_wg_config.py
+node --test skills/inspect-app-traffic/tests/*.mjs
 ```
 
 Or from the marketplace root: `npm run test:proxy`.
 
-`test_capture.py` covers the pure logic and the hub orchestration without launching mitmdump:
+`capture.test.mjs` covers the pure logic and the hub orchestration without launching mitmdump:
 the host regex matches an app's domains and subdomains but not lookalikes; the port check
 detects a wildcard listener and allows a TIME_WAIT port; and `start`/`stop`/`status`/`down`/
-`check` act on capture records over a faked hub. `test_wg_config.py` pins the pure-Python
+`check` act on capture records over a faked hub. `wg-config.test.mjs` pins the node:crypto
 X25519 derivation against a known mitmproxy key pair and the RFC 7748 vector. The hub
 lifecycle, the fan-out into per-capture files, and the caller scoping are verified in a live
 capture.

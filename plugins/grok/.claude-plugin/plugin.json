@@ -1,8 +1,0 @@
-{
-  "name": "grok",
-  "version": "0.1.2",
-  "description": "Use the local Grok CLI from Claude Code for code review and task delegation.",
-  "author": {
-    "name": "blockchainian"
-  }
-}

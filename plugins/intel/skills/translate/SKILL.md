@@ -18,13 +18,13 @@ The book's sections drive everything: each section (from the EPUB's OPF spine an
 the finished sections are typeset into one book that copies the source's page size, chapter openers, running
 heads, roman/arabic folios and cover image.
 
-extract.py takes an EPUB (`.epub`); it does not read PDFs. If you only have the book as a PDF, get its EPUB with
+extract.mjs takes an EPUB (`.epub`); it does not read PDFs. If you only have the book as a PDF, get its EPUB with
 the download-book skill first.
 
 `${CLAUDE_PLUGIN_ROOT}` below is this plugin's root; this skill lives at `${CLAUDE_PLUGIN_ROOT}/skills/translate`.
 Work lives in `<book dir>/.translate/<slug>/` (hidden, resumable); the deliverable is `<book>-zh.pdf` next to
 the source. When the book's folder is not writable (macOS keeps this process out of some folders, e.g.
-`~/Downloads`), `extract.py` copies the book to `~/Documents/translate/<slug>/` and everything, including the
+`~/Downloads`), `extract.mjs` copies the book to `~/Documents/translate/<slug>/` and everything, including the
 result, lands there; it says so on stderr. Never leave other copies next to the book.
 
 ## Setup (automatic, idempotent)
@@ -33,14 +33,15 @@ result, lands there; it says so on stderr. Never leave other copies next to the 
 bash "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/setup.sh"
 ```
 
-Installs `poppler` (pdftotext) and `uv` when missing; reports whether `codex` is logged in and Chrome
+Installs `poppler` (pdftotext) and `uv` when missing (extract/translate are Node scripts, Node >= 18.18, no npm packages;
+render.py runs under `uv`); reports whether `codex` is logged in and Chrome
 is present. Luna runs on the user's ChatGPT plan through `codex`; when its quota is out, wait or pass
 `--model` to a different codex model.
 
 ## 1. Extract
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.py" <book.epub>
+"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.mjs" <book.epub>
 ```
 
 Extraction walks the EPUB's OPF spine (order) and nav/ncx (titles), keeping each section as a cleaned XHTML
@@ -49,7 +50,7 @@ files fold into the next chapter, the cover comes from the OPF, and the page siz
 468x680pt, a 6.5x9.4in trade book). Add `--keep-images` to carry figures and image equations through.
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.py" <book.epub> --keep-images
+"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.mjs" <book.epub> --keep-images
 ```
 
 Prints one line per section (`id kind title: words`) and the work dir. Kinds: `contents` and `skip` (Cover,
@@ -85,7 +86,7 @@ choice (e.g. a coined term with two accepted renderings); otherwise decide and n
 ## 3. Translate (background, parallel)
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/translate.py" <work> --glossary <work>/glossary.md \
+node "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/translate.mjs" <work> --glossary <work>/glossary.md \
   > <work>/translate.log 2>&1
 ```
 
@@ -161,7 +162,7 @@ re-translating; retranslate the section only if the prose itself is wrong.
 ## Editing after the fact
 
 The translation is plain Markdown in `<work>/md/`: fix a sentence there and rerun step 4 (seconds). Retranslate
-one section with `translate.py <work> --force --only <id>`. A different look (light theme, other margins) is
+one section with `translate.mjs <work> --force --only <id>`. A different look (light theme, other margins) is
 `--bg/--fg` or an edit to `css()` in `render.py`.
 
 ## Notes

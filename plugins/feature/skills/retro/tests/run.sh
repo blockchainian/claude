@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ABOUTME: Runs extract.py against the hermetic fixture session and asserts the join + token math.
+# ABOUTME: Runs extract.mjs against the hermetic fixture session and asserts the join + token math.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-out="$(python3 extract.py --root tests/fixture/projects --codex-root tests/fixture/codex fixture-sess)"
+out="$(./extract.mjs --root tests/fixture/projects --codex-root tests/fixture/codex fixture-sess)"
 fail=0
 expect() { if ! grep -qF "$1" <<<"$out"; then echo "FAIL: expected to find: $1"; fail=1; fi; }
 reject() { if grep -qF "$1" <<<"$out"; then echo "FAIL: should not find: $1"; fail=1; fi; }
@@ -29,8 +29,8 @@ expect "codex TOTAL: 1,600"
 expect "mean joined rollout: 1,600 tok"   # proxy multiplier for un-joinable failed workstreams
 reject "other-thread"                     # different cwd + not a recorded thread id → excluded
 
-# ---- efficacy.py: recurrence analysis over retro.json x fixes.jsonl ----
-eout="$(python3 efficacy.py --root tests/fixture-efficacy)"
+# ---- efficacy.mjs: recurrence analysis over retro.json x fixes.jsonl ----
+eout="$(./efficacy.mjs --root tests/fixture-efficacy)"
 eexpect() { if ! grep -qF "$1" <<<"$eout"; then echo "FAIL (efficacy): expected: $1"; fail=1; fi; }
 eexpect "retros: 3  fixes: 2"
 eexpect "NO RECURRENCE — strong"                 # mechanical gate: waste structurally blocked
@@ -38,4 +38,4 @@ eexpect "NOT EFFECTIVE — recurs at 20.0% → 20.0%"   # judgment fix: waste ca
 eexpect "mechanical-gate: 1/1"
 eexpect "judgment: 0/1"
 
-if [ "$fail" -eq 0 ]; then echo "retro/extract.py + efficacy.py: all assertions passed"; else echo "$out"; echo "$eout"; exit 1; fi
+if [ "$fail" -eq 0 ]; then echo "retro/extract.mjs + efficacy.mjs: all assertions passed"; else echo "$out"; echo "$eout"; exit 1; fi

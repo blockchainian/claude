@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test ../tests/links.test.mjs ../tests/site_session.test.mjs"
+    "test": "node --test ../tests/anna-archive-links.test.mjs ../tests/site-session.test.mjs"
   },
   "dependencies": {
     "playwright": "^1.63.0"

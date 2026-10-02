@@ -28,7 +28,7 @@ claim from the data, drop it.
 ### 1. Ground with deterministic stats (script)
 
 ```
-"${CLAUDE_PLUGIN_ROOT}/skills/analyze-appstore-reviews/scripts/stats.py" \
+node "${CLAUDE_PLUGIN_ROOT}/skills/analyze-appstore-reviews/scripts/stats.mjs" \
   <reviews.json> --dump-dir <scratch>
 ```
 
@@ -117,7 +117,8 @@ Commit, push, and open the doc + charts for the user.
 
 ## Requirements
 
-- `uv` on PATH (both scripts declare their own deps; `render_charts.py` pulls
+- Node.js 18.18+ for `stats.mjs` (no npm dependencies).
+- `uv` on PATH for `render_charts.py` (it declares its own deps and pulls
   matplotlib).
 - A CJK font — the renderer tries Arial Unicode / Hiragino Sans GB / STHeiti.
 - Style sibling for tone and structure: an existing `reception.md`-style analysis if

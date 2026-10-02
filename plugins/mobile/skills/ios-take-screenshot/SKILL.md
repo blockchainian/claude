@@ -69,7 +69,7 @@ one, and to a durable directory for screens worth keeping. With neither, the roo
 `$TMPDIR`, which macOS clears.
 
 Several agents can share that library safely; a phone or a simulator they cannot, so this
-skill provides a lock: `claim_simulator.py` holds one UDID for one `RUN_ID`, and
+skill provides a lock: `claim-simulator.mjs` holds one UDID for one `RUN_ID`, and
 `capture_slice.sh` refuses a simulator nobody has claimed. Neither target refuses a second
 agent on its own. On a phone, WebDriverAgent serves one session, and a second Appium
 session does not fail — it wins, and the first agent's next call fails with "Session does
@@ -136,7 +136,7 @@ body often does nothing, and repeating it wastes turns.
 Discover the session values rather than asking for them or remembering them:
 
 ```bash
-"$SKILL_DIR/scripts/discover_ios_setup.py"
+"$SKILL_DIR/scripts/discover-ios-setup.mjs"
 ```
 
 It reports the connected devices, which provisioning profiles cover them, whether
@@ -160,7 +160,7 @@ Before creating the session, claim the phone for this run, so no other agent ope
 session that ends yours:
 
 ```bash
-"$SKILL_DIR/scripts/claim_simulator.py" "$UDID" --run "$RUN_ID"
+"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
 Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim again, since
@@ -184,7 +184,7 @@ There is no WebDriverAgent, no provisioning profile and no session to create. A 
 simulator is the whole requirement:
 
 ```bash
-"$SKILL_DIR/scripts/discover_ios_setup.py" --target simulator
+"$SKILL_DIR/scripts/discover-ios-setup.mjs" --target simulator
 ```
 
 Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says either that
@@ -198,7 +198,7 @@ every command that needs it, as above.
 Then claim it for this run, so no other agent drives it while you capture:
 
 ```bash
-"$SKILL_DIR/scripts/claim_simulator.py" "$UDID" --run "$RUN_ID"
+"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
 Exit 0 means it is yours. Exit 3 means another run holds it, and the message says which
@@ -225,7 +225,7 @@ screen that never moves. The stitcher refuses an identical pair for exactly this
 For the same reason, do not use `booted` as a stand-in for the UDID. `simctl` resolves it to
 one running simulator without saying which, and simulators routinely hold different builds
 of the same app — on one machine the same app was version 62 on one booted simulator and 64
-on another. `claim_simulator.py` and `capture_slice.sh` refuse it outright.
+on another. `claim-simulator.mjs` and `capture_slice.sh` refuse it outright.
 
 ## 1. Open the App
 
@@ -549,7 +549,7 @@ A run that captures several screens keeps its claim until the last one; releasin
 screens only invites another agent in mid-run:
 
 ```bash
-"$SKILL_DIR/scripts/claim_simulator.py" "$UDID" --run "$RUN_ID" --release
+"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
 ```
 
 The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.

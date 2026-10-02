@@ -71,7 +71,7 @@ audio leg and `digest` for the notes.
 - `digest`: `curl`; `setup.sh` installs `uv` (runs the trafilatura article
   extractor and the PDF scripts), `yt-dlp` (YouTube subtitles) and `poppler`
   (PDFs); a highlights PDF needs Google Chrome.
-- `translate`: `setup.sh` installs `poppler` and `uv`; needs a logged-in
+- `translate`: `setup.sh` installs `poppler` and `uv` (for `render.py`; extract and translate are Node scripts); needs a logged-in
   `codex` CLI (ChatGPT plan, for gpt-6-luna) and Google Chrome (`CHROME=` to
   point elsewhere).
 - `find-domain-names`: a Namecheap API key with the calling IP whitelisted,
@@ -86,16 +86,19 @@ audio leg and `digest` for the notes.
 ## Tests
 
 ```
-python3 skills/transcribe/tests/test_transcribe.py
-python3 skills/digest/tests/test_digest.py
+node --test skills/transcribe/tests/*.mjs
+python3 skills/digest/tests/test_fetch_source.py
+node --test skills/digest/tests/*.mjs
 skills/digest/tests/test_pdf_highlights.py
-skills/translate/tests/test_translate.py
+node --test skills/translate/tests/*.mjs
+skills/translate/tests/test_render.py
 node --test skills/find-domain-names/tests/check.test.mjs
-node --test skills/download-book/tests/site_session.test.mjs
+node --test skills/download-book/tests/site-session.test.mjs
 node --test skills/case-study/tests/*.mjs
+node --test skills/analyze-appstore-reviews/tests/*.mjs
 ```
 
-`test_transcribe.py` covers the batch and live command shapes, the
+`transcribe.test.mjs` covers the batch and live command shapes, the
 chunk-readiness logic, platform resolution, and `setup.sh --check`; when
 `ffmpeg` and a whisper runner are present it also runs a real end-to-end batch
 and live transcription of a generated clip.
