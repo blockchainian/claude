@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --quiet --script
 # ABOUTME: Pre/PostToolUse hook that allows one Appium session per phone, and only after the
 # ABOUTME: capture claim; it records the open session in the claim and clears it on delete.
 """WebDriverAgent serves one session per phone, and a second create does not fail:

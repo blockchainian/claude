@@ -31,7 +31,7 @@ identical designs differ by a few units; chasing zero never converges. The
 3. **Run the diff:**
 
    ```
-   uv run "${CLAUDE_PLUGIN_ROOT}/skills/check-mobile-design/scripts/check_design.py" \
+   "${CLAUDE_PLUGIN_ROOT}/skills/check-mobile-design/scripts/check_design.py" \
      --actual actual.png --desired desired.png --out-dir diff \
      [--hierarchy elements.json] \
      [--mask-top 47 --mask-bottom 34] \

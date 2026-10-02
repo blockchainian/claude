@@ -57,7 +57,7 @@ else
     --json-output "$OUT" >/dev/null
 fi
 
-NAME="$NAME" ALL="$ALL" python3 - "$OUT" <<'PY'
+NAME="$NAME" ALL="$ALL" uv run --quiet --no-project python - "$OUT" <<'PY'
 import json, os, sys
 
 data = json.load(open(sys.argv[1]))
