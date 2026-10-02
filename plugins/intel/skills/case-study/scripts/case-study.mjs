@@ -6,6 +6,7 @@
 //        case-study.mjs merge <work dir>
 //        case-study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
 //        case-study.mjs figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
+//        case-study.mjs quotes <work dir> <NN>         (look up chapter NN's quotations in the saved source text)
 //        case-study.mjs findings <work dir> <NN>       (the review lines one fixer has still to apply to chapter NN)
 //        case-study.mjs unread <work dir> <batch> <url>...   (per source of a reader's batch: done, saved, or fetch)
 //        case-study.mjs bullets <work dir> <NN>        (the notes' lines for chapter NN, long dated tables thinned)
@@ -33,8 +34,8 @@ const LINK = /\]\((https?:\/\/[^)\s]+)\)/g
 const CITATION = /[（(][^（()）]*?(?<word>[A-Za-z一-鿿][\p{L}\p{N}_.&'’-]*)\s+(?:19|20)\d\d(?!\s*年)[^（()）]*[）)（(]/gu
 const DATE_WORDS = new Set(['in', 'since', 'from', 'by', 'until', 'to', 'of', 'late', 'early', 'mid', 'born', 'and', 'january',
   'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'])
-// Wording that describes the research instead of the subject.
-const PROCESS_TERMS = ['sources.json', 'notes.md', 'gaps.md', 'subagent', 'research agent', '调查 agent', 'snapshot',
+// Wording that describes the research instead of the subject, and the draft's mark for a quotation's original words.
+const PROCESS_TERMS = ['⟦', 'sources.json', 'notes.md', 'gaps.md', 'subagent', 'research agent', '调查 agent', 'snapshot',
   'yt-dlp', 'self-reported', 'independent source', '独立来源', '核对', '快照', '存档页', '有记录佐证',
   '本人说的', '当时的报道', '事后报道']
 const NUMBER = /\d[\d,]*(?:\.\d+)?/g
@@ -273,61 +274,96 @@ const LABEL_AFTER_STOP = /([。！？!?])\s*([〔（(\[][^〔〕（）()\[\]]*[�
 const LABEL_FIRST = /^\s*[〔（(\[]/
 const LABEL_LAST = /[。！？!?]\s*[〔（(\[][^〔〕（）()\[\]]*[〕）)\]]\s*$/
 
-export function figures(work, chapter, worklist = false) {
-  // Match every figure in a draft chapter against the saved text of the sources its sentence names, and write
-  // the ones that are not there as findings for the chapter's fixer, or, as a worklist, for a reviewer to judge.
+const MAX_TEXT = 8e6 // a saved file larger than this is a video or a scan, not text to match against
+const OPENS = /[“「⟦]/g
+const CLOSES = /[”」⟧]/g
+const STRAIGHT = /"/g
+const count = (text, re) => (text.match(re) || []).length
+
+function sentencesOf(line) {
+  // A line cut into sentences. A full stop inside a quotation, or inside the original words after one, ends nothing.
+  const out = []
+  let open = ''
+  for (const piece of line.split(/(?<=[。！？!?])|(?<=\.)\s+(?=[A-Z])/)) {
+    open += piece
+    if (count(open, OPENS) > count(open, CLOSES) || count(open, STRAIGHT) % 2) continue
+    out.push(open)
+    open = ''
+  }
+  if (open) out.push(open)
+  return out
+}
+
+function sourced(work, chapter) {
+  // A draft chapter as its sentences, each with the labels of the sources it rests on: the ones it names, else the
+  // ones its paragraph names, else the ones the chapter names (a lead or a summary restates the chapter's own claims);
+  // `named` says the sentence names them itself.
+  // With them: every label, longest first; the labels a text names; and the saved texts of a label's sources.
   const labels = new Map() // label -> urls, in sources.json's order (an object would move a label that looks like an integer first)
   for (const [url, label] of Object.entries(readJson(join(work, 'sources.json'), 'object'))) labels.set(label, [...(labels.get(label) || []), url])
   const saved = readJson(join(work, 'raw.json'), 'object')
-  const texts = {}
-  const isFile = path => existsSync(path) && statSync(path).isFile()
-  const known = label => {
-    // {values, digits} of the figures in everything saved for a label's sources.
-    if (!(label in texts)) {
-      const parts = labels.get(label).flatMap(url => (saved[url] || []).filter(f => isFile(join(work, f))).map(f => read(join(work, f))))
-      const found = amounts(parts.join('\n'))
-      texts[label] = { values: new Set(found.flatMap(f => f.values)), digits: new Set(found.filter(f => f.digits.length >= 4).map(f => f.digits)) }
-    }
-    return texts[label]
-  }
+  const isText = path => existsSync(path) && statSync(path).isFile() && statSync(path).size <= MAX_TEXT
+  const cache = {}
+  const texts = label => (cache[label] ??= labels.get(label).flatMap(url => (saved[url] || []))
+    .filter(file => isText(join(work, file))).map(file => ({ file, text: read(join(work, file)) })))
   const ordered = [...labels.keys()].sort((a, b) => b.length - a.length)
   const named = text => ordered.filter(label => text.includes(label))
+  const body = read(join(work, 'md', `${chapter}.md`))
+  const anywhere = named(body)
+  const paragraphs = paragraphsOf(body)
+  // A label in brackets right after a full stop belongs to the sentence before it in a chapter whose paragraphs
+  // end on a label, and to the sentence after it in a chapter whose paragraphs open with one.
+  const having = re => paragraphs.filter(p => re.test(p)).length
+  const labelsFollow = having(LABEL_LAST) > having(LABEL_FIRST)
+  const sentences = []
+  for (let paragraph of paragraphs) {
+    if (paragraph.trimStart().startsWith('#')) continue
+    if (labelsFollow) paragraph = paragraph.replace(LABEL_AFTER_STOP, (whole, stop, label) => (named(label).length ? label + stop : whole))
+    for (const sentence of lines(paragraph).flatMap(sentencesOf)) {
+      const own = named(sentence)
+      sentences.push({ sentence, cited: [own, named(paragraph), anywhere].find(list => list.length) || [], named: own.length > 0 })
+    }
+  }
+  return { sentences, ordered, anywhere, texts }
+}
+
+export function figures(work, chapter, worklist = false) {
+  // Match every figure in a draft chapter against the saved text of the sources its sentence names, and write
+  // the ones that are not there as findings for the chapter's fixer, or, as a worklist, for a reviewer to judge.
+  const { sentences, ordered, texts } = sourced(work, chapter)
+  const figuresOf = {}
+  const known = label => {
+    // {values, digits} of the figures in everything saved for a label's sources.
+    if (!(label in figuresOf)) {
+      const found = amounts(texts(label).map(saved => saved.text).join('\n'))
+      figuresOf[label] = { values: new Set(found.flatMap(f => f.values)), digits: new Set(found.filter(f => f.digits.length >= 4).map(f => f.digits)) }
+    }
+    return figuresOf[label]
+  }
   let checked = 0
   let small = 0
   const unmatched = []
   const out = []
-  const body = read(join(work, 'md', `${chapter}.md`))
-  const anywhere = named(body) // a paragraph that names no source (a lead, a summary) restates the chapter's own figures
-  const paragraphs = paragraphsOf(body)
-  // A label in brackets right after a full stop belongs to the sentence before it in a chapter whose paragraphs
-  // end on a label, and to the sentence after it in a chapter whose paragraphs open with one.
-  const count = re => paragraphs.filter(p => re.test(p)).length
-  const labelsFollow = count(LABEL_LAST) > count(LABEL_FIRST)
-  for (let paragraph of paragraphs) {
-    if (paragraph.trimStart().startsWith('#')) continue
-    if (labelsFollow) paragraph = paragraph.replace(LABEL_AFTER_STOP, (whole, stop, label) => (named(label).length ? label + stop : whole))
-    for (const sentence of paragraph.split(/(?<=[。！？!?])|(?<=\.)\s+(?=[A-Z])|\n/)) {
-      const cited = [named(sentence), named(paragraph), anywhere].find(list => list.length) || []
-      let bare = sentence
-      for (const label of ordered) bare = bare.replaceAll(label, '')
-      const missing = []
-      for (const { written, values, digits } of amounts(bare.replace(DATE, ''))) {
-        if (Math.max(...values) < 100 && digits.length < 3) {
-          small += 1
-          continue
-        }
-        checked += 1
-        const held = cited.some(label => values.some(v => known(label).values.has(v)) || (digits.length >= 4 && known(label).digits.has(digits)))
-        if (!held) {
-          missing.push(written)
-          unmatched.push({ figure: written, labels: cited, sentence: sentence.trim() })
-        }
+  for (const { sentence, cited } of sentences) {
+    let bare = sentence
+    for (const label of ordered) bare = bare.replaceAll(label, '')
+    const missing = []
+    for (const { written, values, digits } of amounts(bare.replace(DATE, ''))) {
+      if (Math.max(...values) < 100 && digits.length < 3) {
+        small += 1
+        continue
       }
-      if (missing.length) {
-        const where = cited.length ? `not in the saved text of ${cited.join(', ')}` : 'its sentence names no source'
-        out.push(`${worklist ? '*' : `- [${chapter}] unsupported |`} ${sentence.trim().slice(0, 200)} | ${missing.join(', ')}: ${where} | | ` +
-          'open the source and find each figure: correct it, say what it was computed from if it is derived, or remove it')
+      checked += 1
+      const held = cited.some(label => values.some(v => known(label).values.has(v)) || (digits.length >= 4 && known(label).digits.has(digits)))
+      if (!held) {
+        missing.push(written)
+        unmatched.push({ figure: written, labels: cited, sentence: sentence.trim() })
       }
+    }
+    if (missing.length) {
+      const where = cited.length ? `not in the saved text of ${cited.join(', ')}` : 'its sentence names no source'
+      out.push(`${worklist ? '*' : `- [${chapter}] unsupported |`} ${sentence.trim().slice(0, 200)} | ${missing.join(', ')}: ${where} | | ` +
+        'open the source and find each figure: correct it, say what it was computed from if it is derived, or remove it')
     }
   }
   mkdirSync(join(work, 'review'), { recursive: true })
@@ -336,6 +372,100 @@ export function figures(work, chapter, worklist = false) {
     `${checked} checked, ${checked - unmatched.length} matched, ${unmatched.length} not matched, ${small} too small to match (left to the quotes lens).\n\n` +
     out.join('\n') + '\n')
   return { chapter, checked, matched: checked - unmatched.length, small, unmatched }
+}
+
+// A quotation, and the source's own words right after it when the quotation is a translation.
+const QUOTATION = /[“"「]([^“”"「」\n]{2,}?)[”"」](?:\s*⟦([^⟧\n]+)⟧)?/g
+const OMISSION = /…+|\.{3,}|\[[^\]]*\]/
+const LETTER = /[\p{L}\p{N}]/u
+const DISTINCT = 15 // letters: words shorter than this turn up in sources that never said them
+const AROUND = 200 // characters of the source shown on each side of the words found
+
+function plain(text) {
+  // A text's letters and digits in lower case, every run of anything else as one space, apostrophes dropped, markup
+  // and caption timings blanked; `at` holds each kept character's place in the text.
+  const blank = whole => ' '.repeat(whole.length)
+  const clean = text.replace(/<[^>]*>/g, blank).replace(/^.*-->.*$/gm, blank)
+    .replace(/&(?:#39|#x27|apos|rsquo|lsquo|#8217|#8216);/gi, whole => "'".padEnd(whole.length, '\0'))
+    .replace(/&(?:quot|amp|nbsp|ldquo|rdquo|#\d+|#x[0-9a-f]+);/gi, blank)
+  const out = []
+  const at = []
+  for (let i = 0; i < clean.length; i += 1) {
+    const ch = clean[i]
+    if (LETTER.test(ch)) {
+      const lower = ch.toLowerCase()
+      out.push(lower.length === 1 ? lower : ch)
+      at.push(i)
+    } else if (!"'’‘\0".includes(ch) && out.length && out.at(-1) !== ' ') {
+      out.push(' ')
+      at.push(i)
+    }
+  }
+  return { clean, text: out.join(''), at }
+}
+
+function passageOf(words, source) {
+  // The source's text around the words of a quotation, its pieces (the parts between omissions) found in order;
+  // null when a piece is not there.
+  let from = 0
+  let first = -1
+  let last = -1
+  for (const piece of words.split(OMISSION).map(part => plain(part).text.trim()).filter(Boolean)) {
+    const found = source.text.indexOf(piece, from)
+    if (found < 0) return null
+    if (first < 0) first = found
+    from = found + piece.length
+    last = from - 1
+  }
+  if (first < 0) return null
+  return source.clean.slice(Math.max(0, source.at[first] - AROUND), source.at[last] + 1 + AROUND).replace(/[\s\0]+/g, ' ').trim()
+}
+
+export function quotes(work, chapter) {
+  // Look up every quotation of a draft chapter in the saved text of the sources its sentence names, by the original
+  // words after it when it is a translation, and write a reviewer's worklist: per quotation, whether the words are
+  // there and the passage around them, or the other source whose text has them.
+  const { sentences, ordered, anywhere, texts } = sourced(work, chapter)
+  const plains = {}
+  const sources = label => (plains[label] ??= texts(label).map(saved => ({ file: saved.file, ...plain(saved.text) })))
+  const lookUp = (words, labels) => {
+    for (const label of labels) {
+      for (const source of sources(label)) {
+        const passage = passageOf(words, source)
+        if (passage) return { label, file: source.file, passage }
+      }
+    }
+    return null
+  }
+  const rows = []
+  const out = []
+  for (const { sentence, cited, named } of sentences) {
+    const found = [...sentence.matchAll(QUOTATION)]
+    if (!found.length) continue
+    out.push('', `## ${sentence.trim()}`)
+    for (const [, quote, original] of found) {
+      const looked = (original || quote).trim()
+      const row = { quote, looked, labels: cited, sentence: sentence.trim(), verdict: 'not found' }
+      const here = lookUp(looked, cited)
+      const there = here || (plain(looked).text.length >= DISTINCT && lookUp(looked, ordered.filter(label => !cited.includes(label))))
+      if (here) Object.assign(row, { verdict: 'found', ...here })
+      else if (there) Object.assign(row, { verdict: 'in another source', ...there })
+      else if (!cited.some(label => sources(label).length)) row.verdict = 'no saved text'
+      rows.push(row)
+      out.push(`* ${row.verdict} | ${looked} | ${row.file ? `${row.label}, ${row.file}` : named ? cited.join(', ') : 'its sentence names no source'}${row.passage ? ` | ${row.passage}` : ''}`)
+    }
+  }
+  const tally = verdict => rows.filter(row => row.verdict === verdict).length
+  const result = { chapter, quotations: rows.length, found: tally('found'), elsewhere: tally('in another source'), missing: tally('not found'), unsaved: tally('no saved text') }
+  mkdirSync(join(work, 'review'), { recursive: true })
+  write(join(work, 'review', `quotations-${chapter}.md`),
+    `# Quotations in md/${chapter}.md looked up in the saved text of their sources\n\n` +
+    `${result.quotations} quotations: ${result.found} found, ${result.elsewhere} in another source, ${result.missing} not found, ${result.unsaved} with no saved text.\n` +
+    'A row is: verdict | the words looked up | the source and file they are in, or the sources the sentence names | the passage around them.\n' +
+    'Only words inside quotation marks are listed. Reported speech without them is not.\n' +
+    out.join('\n') + '\n\n# The saved text of every source this chapter names\n\n' +
+    anywhere.map(label => `- ${label}: ${sources(label).map(source => source.file).join(', ') || 'none saved'}`).join('\n') + '\n')
+  return { ...result, rows }
 }
 
 export function hasLeadParagraph(text) {
@@ -442,12 +572,13 @@ const OPTIONS = {
   merge: {},
   slice: {},
   figures: { worklist: { type: 'boolean', default: false } },
+  quotes: {},
   findings: {},
   unread: {},
   bullets: {},
   check: { draft: { type: 'boolean', default: false } },
 }
-const USAGE = 'usage: case-study.mjs {init,merge,slice,figures,findings,unread,bullets,check} ...'
+const USAGE = 'usage: case-study.mjs {init,merge,slice,figures,quotes,findings,unread,bullets,check} ...'
 
 function fail(message) {
   console.error(message)
@@ -476,6 +607,12 @@ function main(argv) {
     need(2, 'work, chapter')
     const result = figures(positionals[0], positionals[1], values.worklist)
     console.log(JSON.stringify({ ...result, unmatched: result.unmatched.length }))
+    return
+  }
+  if (cmd === 'quotes') {
+    need(2, 'work, chapter')
+    const { rows, ...result } = quotes(positionals[0], positionals[1])
+    console.log(JSON.stringify(result))
     return
   }
   if (cmd === 'findings' || cmd === 'bullets') {

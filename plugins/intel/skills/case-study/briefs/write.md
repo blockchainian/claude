@@ -57,6 +57,14 @@ are givens of the task, stated as such.
   `sources.json` may be named. The label sits inside its own sentence, in
   brackets before the sentence's final full stop, never after it: a script
   matches each sentence's figures against the sources that sentence names.
+- A quote in a bullet is in the source's wording. Translate it into the
+  study's language and put the bullet's wording right after it in ⟦ ⟧, copied
+  from the bullet, never retyped from memory (see "Quotes" in the evidence
+  rules). A title, a caption, a hashtag or a slogan stays as the source has
+  it, untranslated. Quotation marks are for a source's words only.
+- Outside quotation marks and ⟦ ⟧ the draft is in the study's language:
+  proper names aside, no word of another language in running text where the
+  study's language has one.
 - A method is written out in full: what exactly, how often, with whom, at what
   cost, what changed. Fewer solid claims beat more weak ones.
 - Where the subject's account and the record differ, print both. Where two
