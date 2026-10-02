@@ -8,7 +8,7 @@ test("the marketplace lists every plugin in the repository", async () => {
   const marketplace = JSON.parse(await readFile(".claude-plugin/marketplace.json", "utf8"));
 
   assert.equal(marketplace.name, "blockchainian");
-  assert.deepEqual(marketplace.plugins.map((entry) => entry.name).sort(), ["cloudflare", "codex", "feature", "intel", "mobile", "proxy", "render", "web"]);
+  assert.deepEqual(marketplace.plugins.map((entry) => entry.name).sort(), ["cloudflare", "codex", "feature", "intel", "mobile", "proxy", "render", "secrets", "web"]);
 
   for (const entry of marketplace.plugins) {
     const plugin = JSON.parse(await readFile(`${entry.source}/.claude-plugin/plugin.json`, "utf8"));
