@@ -7,8 +7,16 @@ folder); the skill folder is the one that holds this brief's folder.
 
 Your findings: `<skill>/scripts/case-study.mjs findings <work> NN` for your
 chapter file's number: the lines tagged with it, and the sources-lens lines
-about every label your chapter names. The failed sources: every URL in
-`<work>/review/*.failed.json`; find their labels in `sources.json`.
+about every label your chapter names. Each line starts with the finding's
+name (`F3a9c21`). The command prints only the findings whose name is not yet
+in `review/fix-<NN>.md`: after an interruption, what it prints is what is
+left. The failed sources: every URL in `<work>/review/*.failed.json`; find
+their labels in `sources.json`.
+
+Take the findings one at a time: check it, edit the chapter, append its line
+to `review/fix-<NN>.md`, then take the next. Never check them all first and
+write at the end: a finding with no line is done again from the start when
+you are interrupted.
 
 1. Every sentence resting on a failed source is removed or re-sourced.
    Re-sourced means you open the original now and read the fact there. If the
@@ -35,8 +43,9 @@ add takes a label that is not already a value in `sources.json`.
 
 Edit only `md/<your file>`. Do not edit `sources.json`. Write:
 - `review/fix-<NN>.md` — one line per finding, appended right after you
-  apply it (see "Writing as you go" in the evidence rules): fixed, removed, relabelled,
-  re-sourced (with the new URL), or rejected (with the reason);
+  apply it (see "Writing as you go" in the evidence rules), starting with the
+  finding's name: fixed, removed, relabelled, re-sourced (with the new URL),
+  or rejected (with the reason);
 - `review/fix-<NN>.added.json` — `{"<url>": "<Outlet Year>"}` for every source
   you opened and read in this round and now cite (`{}` when none);
 - `review/fix-<NN>.raw.json` — `{"<url>": ["raw/<file>"]}` for the text you

@@ -8,12 +8,25 @@ directory, your batch name, your URLs, and your share of the machine's caps.
 Read `references/evidence.md` and `references/tools.md` next to this brief's
 folder, and the chapter table in the type file.
 
-For each URL: open it and read it to the end (a long interview or transcript
-too). Save the full text you read under `raw/` (the page, the transcript, the
-PDF's text): a script later matches every figure in the study against these
-files, and a source with no saved text has all its figures sent back for
-checking by hand. Then append to `notes/<batch>.md` (see "Writing
-as you go" in the evidence rules):
+Start with this command, in a call of its own, before any fetch:
+`<skill>/scripts/case-study.mjs unread <work> <batch> <url>...` with your
+URLs (the skill folder is the one that holds this brief's folder). It prints
+one line per source: `fetch` (not opened yet), `saved` with the files its text
+is already in (read those files; do not fetch it again), or `done` (its notes
+are written; skip it).
+
+Take the sources one at a time, each through all three steps before the next
+is opened: an agent that fetches the whole batch first and writes its notes
+last loses all of it when it is interrupted.
+
+1. Open it and save the full text (the page, the transcript, the PDF's text)
+   as a file under `raw/<batch>/`. A script later matches every figure in the
+   study against these files, and a source with no saved text has all its
+   figures sent back for checking by hand.
+2. Append one line to `notes/<batch>.raw.tsv` for each file saved: the URL, a
+   tab, the file's path from the work directory (`raw/<batch>/<file>`).
+3. Read the saved text to the end (a long interview or transcript too) and
+   append the source's section to `notes/<batch>.md`:
 
 ```
 ## <Outlet> — <title> (<date>)
@@ -31,16 +44,16 @@ publisher: <who, how they earn, any tie to the subject>
 - Write methods out in full: what exactly, how often, with whom, at what cost,
   what changed. Keep the original wording for anything specific.
 - A source that turns out to be a seller, a press release, a repost or a wiki
-  gets one line saying so and no bullets. Follow a repost to its original and
-  read that instead.
+  gets its heading, its `url:` line and one line saying so, and no bullets.
+  Follow a repost to its original and read that instead, as a source of its
+  own.
 
 When the batch is done, write:
 - `notes/<batch>.sources.json` — `{"<url>": "<Outlet Year>"}` for every source
   you opened and read (full or partial), and no others;
-- `notes/<batch>.raw.json` — `{"<url>": ["raw/<file>", …]}`: for each of those
-  sources, the files its text was saved to, as paths from the work directory;
 - `notes/<batch>.gaps.md` — one line per source you could not read: the
   command tried and what came back.
 
-Write only these four files and `raw/`. Final message: sources read, partial,
+Write only these four files (the notes, the list of saved files, the sources
+and the gaps) and `raw/<batch>/`. Final message: sources read, partial,
 not reached. Nothing else.
