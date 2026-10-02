@@ -69,7 +69,7 @@ test('the review covers every source and every chapter, one chapter per reviewer
   // readers followed reposts to originals: 130 sources after the merge, not the 117 scouted
   const sourceSlices = calls.filter(c => c.label.startsWith('review:sources-'))
   assert.equal(sourceSlices.length, 6)
-  sourceSlices.forEach((c, i) => assert.ok(c.prompt.includes(`case_study.py slice "/w" ${i + 1} 6`), c.prompt))
+  sourceSlices.forEach((c, i) => assert.ok(c.prompt.includes(`case_study.mjs slice "/w" ${i + 1} 6`), c.prompt))
   const quotes = calls.filter(c => c.label.startsWith('review:quotes-'))
   assert.deepEqual(quotes.map(c => c.prompt.match(/md\/\d\d\.md/g)).sort(), ALL.map(f => [`md/${f}.md`]))
   assert.deepEqual(labels(calls, 'fix:').sort(), ALL.map(f => `fix:${f}`))
@@ -94,7 +94,7 @@ test('a script matches every chapter\'s figures; only the timeline and turning-p
   assert.equal(labels(calls, 'review:numbers-').length, 0)
   const matchers = calls.filter(c => c.label.startsWith('figures:'))
   assert.deepEqual(matchers.map(c => c.label).sort(), ALL.map(f => `figures:${f}`))
-  assert.ok(matchers.every(c => c.model === 'haiku' && c.prompt.includes(`case_study.py figures "/w" ${c.label.slice(8)}`)))
+  assert.ok(matchers.every(c => c.model === 'haiku' && c.prompt.includes(`case_study.mjs figures "/w" ${c.label.slice(8)}`)))
   assert.deepEqual(matchers.filter(c => c.prompt.includes('--worklist')).map(c => c.label).sort(), ['figures:03', 'figures:07'])
   assert.deepEqual(labels(calls, 'review:record-').sort(), ['review:record-03', 'review:record-07'])
   assert.ok(calls.findIndex(c => c.label === 'figures:03') < calls.findIndex(c => c.label === 'review:record-03'), 'the reviewer starts from the script\'s worklist')
