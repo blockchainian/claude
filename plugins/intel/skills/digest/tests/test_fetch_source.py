@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --quiet --script
 # ABOUTME: Tests digest source-fetching (articles, transcripts, PDFs).
 # ABOUTME: Covers main-content extraction, audio/PDF detection and slugs; the store is tested in store.test.mjs.
 
