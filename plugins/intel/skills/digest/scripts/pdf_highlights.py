@@ -10,7 +10,7 @@
 #        pdf_highlights.py render <work dir> [--out <highlights.pdf>] [--bg iterm|#rrggbb] [--fg #rrggbb|iterm] [--font-size 9.25]
 # split writes <work>/chapters.json and one text file per chapter, and prints the JSON. render typesets every
 # chapter whose highlights Markdown exists to <source>-highlights.pdf and writes the store-ready <work>/draft.md.
-# A "cover" name in chapters.json adds a text cover page in front: the name large, the title under it.
+# A "cover" name in chapters.json adds a text cover page in front: the name, set large, and nothing else.
 # A ```chart block in a chapter's Markdown is drawn as a line chart, a bar chart or a table (see charts.py).
 import argparse
 import html
@@ -143,11 +143,9 @@ def write_draft(work, meta, ready):
 
 
 def cover_page(meta, bg, fg, bold, tmp):
-    """A one-page cover PDF: the cover name set large, the rest of the book's title under it."""
+    """A one-page cover PDF: the cover name set large, and nothing else."""
     w, h = meta["page_size"]
     name = meta["cover"]
-    rest = meta["title"].removeprefix(name).strip(" :：")
-    sub = f'<div class="sub">{html.escape(rest)}</div>' if rest else ""
     hei = 'Baskerville, "PingFang SC", "Heiti SC", "Hiragino Sans GB", sans-serif'
     page, out = tmp / "cover.html", tmp / "cover.pdf"
     page.write_text(
@@ -155,8 +153,7 @@ def cover_page(meta, bg, fg, bold, tmp):
         f'@page {{ size: {w}pt {h}pt; margin: 0; }} html, body {{ margin: 0; }}'
         f'.cover {{ padding: {round(h * 0.34)}pt {round(w * 0.12)}pt 0; text-align: center; font-family: {hei}; }}'
         f'.name {{ font-size: 34pt; font-weight: 700; letter-spacing: 2pt; line-height: 1.3; color: {bold}; }}'
-        f'.sub {{ margin-top: 22pt; font-size: 11pt; letter-spacing: 3pt; line-height: 1.8; color: {fg}; }}'
-        f'</style></head><body><div class="cover"><div class="name">{html.escape(name)}</div>{sub}</div></body></html>',
+        f'</style></head><body><div class="cover"><div class="name">{html.escape(name)}</div></div></body></html>',
         encoding="utf-8")
     rd.print_pdf(rd.chrome_binary(), page, out)
     return out
