@@ -71,7 +71,7 @@ a publication's outside-contributor network written with the manager's help.
 ## Chapters
 
 Adjust the titles to the subject; cover all of these. Each chapter opens with a
-lead paragraph, then five or six `##` sections. The introduction is not
+lead paragraph, then `##` sections, as many as its material needs. The introduction is not
 numbered and its title names the subject ("Introduction: how <Name> grew", in
 the study's language). Numbering starts with the chapter after it. The closing
 sources list is not numbered.
@@ -80,7 +80,7 @@ sources list is not numbered.
 |---|---|---|
 | 01 | Introduction: how <Name> grew | Who this is, what they built, and on what |
 | 02 | Chapter 1 — Starting point | What they had before: audience, money, company, job |
-| 03 | Chapter 2 — Timeline and numbers | The curve and the upload record, phase by phase |
+| 03 | Chapter 2 — Timeline and numbers | The phases: one table of the curve and one of the upload cadence, and what marks each phase |
 | 04 | Chapter 3 — Content | Format, topics, titles and thumbnails or hooks, openings, retention |
 | 05 | Chapter 4 — Production | Process, cadence, team, cost |
 | 06 | Chapter 5 — Growth methods | The algorithm, collaborations, cross-platform, clips, paid promotion |

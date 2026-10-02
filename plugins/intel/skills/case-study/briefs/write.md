@@ -15,6 +15,25 @@ Your material is every bullet tagged with your chapter:
 `grep -h "\[cNN\]" <work>/notes/*.md`. Read all of them. Anything not in the
 notes does not go in.
 
+## What goes in
+
+The draft is what the book is written from, and the book is a practical one:
+its reader wants to do what the subject did. Every sentence you write is
+opened and checked against its source by a reviewer, so a sentence the book
+cannot use costs a review and gives the reader nothing. From your bullets,
+write the ones that pass this test: does it help a reader act, or understand
+why something worked or cannot be repeated? That is the methods, what they
+cost and what they brought, the turns and what caused them, what was luck or
+timing, and the few figures that show any of it. What only documents the
+record stays in the notes, where it remains on file: every reading of a
+curve, every year of a company's accounts, each step of a dispute that
+changed nothing, a second source that repeats the first. When you cannot
+tell whether a bullet passes, it goes in.
+
+A series of figures (the curve, the upload cadence, income by year) is one
+table, each row naming its source, with a few sentences on what it shows;
+it is not retold row by row in sentences.
+
 ## The introduction and the reasoning chapter
 
 These are written after the others. Your material is the finished chapters in
@@ -28,8 +47,8 @@ are givens of the task, stated as such.
 
 ## Rules
 
-- First line `# <chapter title>`, then a lead paragraph, then five or six `##`
-  sections.
+- First line `# <chapter title>`, then a lead paragraph, then `##` sections:
+  as many as the chapter's material needs, none to fill a count.
 - Every sentence that carries a claim shows its kind and names its source by
   the label in the bullet, with the year. Only labels that are values in
   `sources.json` may be named. The label sits inside its own sentence, in
