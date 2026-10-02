@@ -36,7 +36,7 @@ touching anything.
    `toolUseId`, and each child transcript carries its own token usage:
 
    ```
-   ${CLAUDE_PLUGIN_ROOT}/skills/retro/extract.mjs <session-name>
+   ${CLAUDE_PLUGIN_ROOT}/skills/retro/scripts/extract.mjs <session-name>
    ```
 
    It prints the orchestrator's own cost, the spawn ledger (count by

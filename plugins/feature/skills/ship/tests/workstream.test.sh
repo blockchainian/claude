@@ -3,7 +3,7 @@
 # ABOUTME: covering the green path, a red post-merge check, a conflict and a dirty session tree.
 set -u
 cd "$(dirname "$0")" || exit 1
-WS=$(cd .. && pwd)/workstream.sh
+WS=$(cd ../scripts && pwd)/workstream.sh
 
 PASS=0
 FAIL=0

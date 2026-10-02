@@ -1,8 +1,8 @@
 #!/bin/sh
 # ABOUTME: Checks check-paths.sh and check-overlap.sh output and exit codes against small fixture docs.
-# ABOUTME: Builds a throwaway git repo with known source files so the suite is hermetic; run from anywhere: <plugin>/skills/ship/tests/run.sh
+# ABOUTME: Builds a throwaway git repo with known source files so the suite is hermetic; run from anywhere: <plugin>/skills/ship/tests/plan-checkers.test.sh
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-check="$here/../check-paths.sh"
+check="$here/../scripts/check-paths.sh"
 fail=0
 expect() { # name expected-output expected-exit actual-output actual-exit
   if [ "$4" = "$2" ] && [ "$5" = "$3" ]; then echo "PASS: $1"; else
@@ -191,7 +191,7 @@ expect "bracketed route paths are checked" "MISSING: src/routes/[missing].tsx" 1
 out=$(cd "$repo" && "$check" "$here/fixture/check-paths/marked-new.md"); rc=$?
 expect "a path marked (new) once is skipped everywhere, ./ prefix included" "" 0 "$out" $rc
 
-overlap="$here/../check-overlap.sh"
+overlap="$here/../scripts/check-overlap.sh"
 
 out=$("$overlap" "$here/fixture/check-overlap/shared-file.md"); rc=$?
 expect "a file on two workstreams' Files: lines is flagged" \
