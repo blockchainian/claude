@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-out="$(./extract.mjs --root tests/fixture/projects --codex-root tests/fixture/codex fixture-sess)"
+out="$(./extract.mjs --root tests/fixture/extract/projects --codex-root tests/fixture/extract/codex fixture-sess)"
 fail=0
 expect() { if ! grep -qF "$1" <<<"$out"; then echo "FAIL: expected to find: $1"; fail=1; fi; }
 reject() { if grep -qF "$1" <<<"$out"; then echo "FAIL: should not find: $1"; fail=1; fi; }
@@ -30,7 +30,7 @@ expect "mean joined rollout: 1,600 tok"   # proxy multiplier for un-joinable fai
 reject "other-thread"                     # different cwd + not a recorded thread id → excluded
 
 # ---- efficacy.mjs: recurrence analysis over retro.json x fixes.jsonl ----
-eout="$(./efficacy.mjs --root tests/fixture-efficacy)"
+eout="$(./efficacy.mjs --root tests/fixture/efficacy)"
 eexpect() { if ! grep -qF "$1" <<<"$eout"; then echo "FAIL (efficacy): expected: $1"; fail=1; fi; }
 eexpect "retros: 3  fixes: 2"
 eexpect "NO RECURRENCE — strong"                 # mechanical gate: waste structurally blocked

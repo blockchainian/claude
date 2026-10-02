@@ -160,44 +160,44 @@ echo "export const B = 1" > "$repo/src/b/index.ts"
 
 git -C "$repo" add -A
 git -C "$repo" commit -q -m "fixture repo"
-out=$(cd "$repo" && "$check" "$here/fixture-plan.md"); rc=$?
+out=$(cd "$repo" && "$check" "$here/fixture/check-paths/missing-path.md"); rc=$?
 expect "missing path reported, exit 1" "MISSING: src/missing.ts" 1 "$out" $rc
 
-out=$(cd "$repo" && "$check" "$here/fixture-plan.md" 'missing'); rc=$?
+out=$(cd "$repo" && "$check" "$here/fixture/check-paths/missing-path.md" 'missing'); rc=$?
 expect "skip regex silences the miss" "" 0 "$out" $rc
 
-out=$(cd "$repo" && "$check" "$here/fixture-clean.md"); rc=$?
+out=$(cd "$repo" && "$check" "$here/fixture/check-paths/all-paths-resolve.md"); rc=$?
 expect "clean doc prints nothing, exit 0" "" 0 "$out" $rc
 
-out=$(cd "$repo" && "$check" "$here/fixture-ambiguous.md"); rc=$?
+out=$(cd "$repo" && "$check" "$here/fixture/check-paths/ambiguous-basename.md"); rc=$?
 case "$out" in "AMBIGUOUS: index.ts ("[0-9]*" matches)") a=ok ;; *) a="$out" ;; esac
 expect "bare basename with many matches is flagged" ok 1 "$a" $rc
 
-out=$(cd "$repo" && "$check" "$here/fixture-ext.md"); rc=$?
+out=$(cd "$repo" && "$check" "$here/fixture/check-paths/config-extension.md"); rc=$?
 expect "toml paths are checked" "MISSING: config/missing.toml" 1 "$out" $rc
 
-out=$(cd / && "$check" "$here/fixture-clean.md" 2>&1); rc=$?
+out=$(cd / && "$check" "$here/fixture/check-paths/all-paths-resolve.md" 2>&1); rc=$?
 expect "refuses to run outside a git repo" "check-paths.sh: not inside a git repo" 2 "$out" $rc
 
-out=$(cd "$repo/sub" && "$check" "$here/fixture-clean.md"); rc=$?
+out=$(cd "$repo/sub" && "$check" "$here/fixture/check-paths/all-paths-resolve.md"); rc=$?
 expect "resolves from the repo root when run in a subdirectory" "" 0 "$out" $rc
 
-out=$(cd "$repo" && "$check" "$here/fixture-range.md"); rc=$?
+out=$(cd "$repo" && "$check" "$here/fixture/check-paths/line-range.md"); rc=$?
 expect "paths with line ranges are checked" "MISSING: src/missing-ranged.ts" 1 "$out" $rc
 
-out=$(cd "$repo" && "$check" "$here/fixture-brackets.md"); rc=$?
+out=$(cd "$repo" && "$check" "$here/fixture/check-paths/bracketed-route.md"); rc=$?
 expect "bracketed route paths are checked" "MISSING: src/routes/[missing].tsx" 1 "$out" $rc
 
-out=$(cd "$repo" && "$check" "$here/fixture-new.md"); rc=$?
+out=$(cd "$repo" && "$check" "$here/fixture/check-paths/marked-new.md"); rc=$?
 expect "a path marked (new) once is skipped everywhere, ./ prefix included" "" 0 "$out" $rc
 
 overlap="$here/../check-overlap.sh"
 
-out=$("$overlap" "$here/fixture-overlap.md"); rc=$?
+out=$("$overlap" "$here/fixture/check-overlap/shared-file.md"); rc=$?
 expect "a file on two workstreams' Files: lines is flagged" \
   "OVERLAP: src/shared/client.ts (home-lanes, token-tabs)" 1 "$out" $rc
 
-out=$("$overlap" "$here/fixture-overlap-clean.md"); rc=$?
+out=$("$overlap" "$here/fixture/check-overlap/disjoint.md"); rc=$?
 expect "disjoint workstreams pass; Files: outside a workstream section is ignored" "" 0 "$out" $rc
 
 exit $fail
