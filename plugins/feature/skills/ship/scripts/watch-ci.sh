@@ -22,7 +22,7 @@ log() { printf '%s\n' "$*" >&2; }
 fetch_checks() {
   local ref=$1 raw
   if raw=$("$GH" pr checks "$ref" --json name,state,bucket 2>/dev/null); then
-    python3 - "$raw" <<'PY'
+    uv run --quiet --no-project python - "$raw" <<'PY'
 import json, sys
 checks = json.loads(sys.argv[1])
 out = [{"name": c["name"], "conclusion": c["state"].lower(), "pending": c["bucket"] == "pending"} for c in checks]
@@ -44,7 +44,7 @@ PY
   [ -n "$run_id" ] && [ "$run_id" != null ] || return 1
 
   raw=$("$GH" run view "$run_id" --json jobs 2>/dev/null) || return 1
-  python3 - "$raw" <<'PY'
+  uv run --quiet --no-project python - "$raw" <<'PY'
 import json, sys
 jobs = json.loads(sys.argv[1])["jobs"]
 out = [
@@ -58,7 +58,7 @@ PY
 # verdict <state> <checks-json> <elapsed> — prints the consolidated verdict JSON and exits 0
 # only for a completed success (memory gate-deploy-chains-on-exit-codes).
 verdict() {
-  python3 - "$REF" "$1" "$2" "$3" <<'PY'
+  uv run --quiet --no-project python - "$REF" "$1" "$2" "$3" <<'PY'
 import json, sys
 ref, state, checks_json, elapsed = sys.argv[1:5]
 checks = json.loads(checks_json)
@@ -78,12 +78,12 @@ PY
 
 # checks_done <checks-json> — exits 0 once every check has concluded (and at least one exists).
 checks_done() {
-  python3 -c 'import json,sys; c=json.loads(sys.argv[1]); sys.exit(0 if c and not any(x["pending"] for x in c) else 1)' "$1"
+  uv run --quiet --no-project python -c 'import json,sys; c=json.loads(sys.argv[1]); sys.exit(0 if c and not any(x["pending"] for x in c) else 1)' "$1"
 }
 
 # checks_progress <checks-json> — one-line "N/M concluded" summary for the progress log.
 checks_progress() {
-  python3 - "$1" <<'PY'
+  uv run --quiet --no-project python - "$1" <<'PY'
 import json, sys
 checks = json.loads(sys.argv[1])
 if not checks:
