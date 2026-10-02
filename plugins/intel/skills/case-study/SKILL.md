@@ -81,8 +81,9 @@ ask for one name.
      --source "<profile URL>" --out "<pdf path>" --chapters <11|12>
    ```
 
-   The cover shows the name large and the title under it. It prints the work
-   directory (`<store>/.work/<slug>/`, the digest store).
+   The cover shows the name and nothing else; the title is the PDF's document
+   title. It prints the work directory (`<store>/.work/<slug>/`, the digest
+   store).
    An existing work directory is reused: sources and chapters already there are
    kept.
 
