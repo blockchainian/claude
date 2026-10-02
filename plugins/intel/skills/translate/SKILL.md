@@ -30,7 +30,7 @@ result, lands there; it says so on stderr. Never leave other copies next to the 
 ## Setup (automatic, idempotent)
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/setup.sh"
+"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/setup.sh"
 ```
 
 Installs `poppler` (pdftotext) and `uv` when missing (extract/translate are Node scripts, Node >= 18.18, no npm packages;
@@ -86,7 +86,7 @@ choice (e.g. a coined term with two accepted renderings); otherwise decide and n
 ## 3. Translate (background, parallel)
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/translate.mjs" <work> --glossary <work>/glossary.md \
+"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/translate.mjs" <work> --glossary <work>/glossary.md \
   > <work>/translate.log 2>&1
 ```
 

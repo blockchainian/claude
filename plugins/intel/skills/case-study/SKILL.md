@@ -74,7 +74,7 @@ ask for one name.
    is the subject's name in lowercase with hyphens.
 
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
+   "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
    "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case-study.mjs" init <slug> \
      --title "<how <Name> grew, in the study's language>" --cover "<Name>" \
      --source "<profile URL>" --out "<pdf path>" [--account "<profile URL>"]...
@@ -109,7 +109,7 @@ ask for one name.
 
    Run it with the Workflow tool (this skill asks for it):
    `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.mjs`,
-   `args: { subject, work, skill, lang, today, tools, product, seeds, caps }`
+   `args: { subject, work, skill, lang, today, tools, product, seeds, caps, done }`
    — `skill` is this skill's absolute folder, `tools` is the tool list file, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the
    tool list in one line (the script gives each agent its share). Empty
@@ -206,6 +206,12 @@ ask for one name.
   with `Workflow({scriptPath, resumeFromRunId})`: finished agents replay from
   the cache, the others run again and pick up where their files stop. Do not
   change the script or the args before resuming, or every agent reruns.
+- A run that cannot be resumed (another session started it) continues from
+  its files: `done: 'read'` starts at the draft, from the notes and numbers
+  already in the work directory; `done: 'read, sources'` also keeps the
+  sources lens's findings in `review/`. To draft again, move `md/` and the
+  rest of `review/` aside first: writers and fixers continue from the files
+  they find, and the merge reads every fixer's added sources.
 - Slices are small on purpose. An agent's context grows with every item it
   checks and is re-read on every step, so the cost of a slice grows with the
   square of its size: two agents with 25 items cost less than one with 50.

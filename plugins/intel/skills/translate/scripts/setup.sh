@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ABOUTME: Idempotent auto-setup for translate: installs only what's missing.
 # ABOUTME: poppler (pdftotext), uv (runs the scripts); reports codex and Chrome.
 

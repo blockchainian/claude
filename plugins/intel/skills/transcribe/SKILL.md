@@ -26,7 +26,7 @@ Run setup once at the start; it installs only what is missing and is a near-inst
 no-op when everything is present, so it is safe to run every time.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/setup.sh"
+"${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/setup.sh"
 ```
 
 It ensures `ffmpeg` (pulls and segments audio), `streamlink` and `yt-dlp`
@@ -39,7 +39,7 @@ what is present or missing without installing anything.
 ## Batch — a finite file or URL
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-audio.mjs" \
+"${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-audio.mjs" \
   "<audio-url-or-file>" "<out.txt>"
 ```
 
@@ -52,7 +52,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-audio.mjs" \
 ## Live — an ongoing stream
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-live.mjs" \
+"${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-live.mjs" \
   "<stream>" "<out.txt>" [--segment-seconds 30] [--max-minutes N]
 ```
 

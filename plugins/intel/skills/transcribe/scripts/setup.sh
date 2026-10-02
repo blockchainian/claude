@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ABOUTME: Idempotent auto-setup for transcribe: installs only what's missing.
 # ABOUTME: ffmpeg + streamlink + yt-dlp + a whisper runner; --check only reports.
 
