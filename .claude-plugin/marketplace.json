@@ -70,6 +70,14 @@
         "name": "blockchainian"
       },
       "source": "./plugins/web"
+    },
+    {
+      "name": "secrets",
+      "description": "Local account credentials, browser sessions and external login adapters.",
+      "author": {
+        "name": "blockchainian"
+      },
+      "source": "./plugins/secrets"
     }
   ]
 }

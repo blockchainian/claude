@@ -11,8 +11,10 @@ ships.
 | [render](plugins/render/README.md) | The Render plugin with only the nine skills this desk uses, plus its MCP server, agent, and hook. |
 | [cloudflare](plugins/cloudflare/README.md) | The Cloudflare plugin with only the six skills this desk uses, plus its five MCP servers. |
 | [proxy](plugins/proxy/README.md) | Captures and decodes the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy, scoped to that app's hosts. |
+| [secrets](plugins/secrets/README.md) | Manages local credentials and browser sessions through external app adapters. |
 | [intel](plugins/intel/README.md) | Gathers and distills knowledge from long-form sources: transcribes audio locally with whisper, turns an article, podcast, video or PDF into searchable highlights, translates an English EPUB into a Chinese PDF, finds and downloads books, analyzes App Store reviews, finds brand names with a registrable domain, and researches one creator into a sourced case study. |
-| [web](plugins/web/README.md) | Finds web memory leaks by diffing V8 heap snapshots captured from a running Chrome over the DevTools protocol, and checks a built page against a design reference. |
+| [web](plugins/secrets/                  the account and session plugin
+plugins/web/README.md) | Finds web memory leaks by diffing V8 heap snapshots captured from a running Chrome over the DevTools protocol, and checks a built page against a design reference. |
 
 ## Install
 
@@ -23,6 +25,7 @@ ships.
 /plugin install render@blockchainian
 /plugin install cloudflare@blockchainian
 /plugin install proxy@blockchainian
+/plugin install secrets@blockchainian
 /plugin install intel@blockchainian
 /plugin install web@blockchainian
 ```
@@ -61,6 +64,7 @@ npm run test:proxy    # the proxy plugin's capture logic and WireGuard key deriv
 npm run test:intel    # the intel plugin's skills; the render suites need Chrome and uv
 npm run test:web      # the heap-snapshot diff and the design check; needs uv
 npm run test:mobile   # the phone-session hook, the simulator claim, frame diff, stitch and design check; needs uv
+npm run test:secrets  # the local secrets engine and adapter contract
 npm run test:marketplace  # the marketplace manifest and shared-engine checks
 npm run validate      # the marketplace and plugin manifests
 ```
