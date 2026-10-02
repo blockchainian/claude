@@ -96,7 +96,9 @@ def merge(work):
     last = work / "md" / f"{meta['chapters'][-1]['id']}.md"
     last.write_text(f"# Sources\n\n{len(sources)} sources, listed in sources.json.\n\n## List\n\n"
                     + "\n".join(f"- {label}" for label in labels) + "\n", encoding="utf-8")
-    return {"sources": len(sources), "failed": len(failed), "gaps": sum(g.count("\n") + 1 for g in gaps if g)}
+    malformed = [str(path.relative_to(work)) for path in sorted((work / "notes").glob("*.json")) + sorted((work / "review").glob("*.added.json"))
+                 + sorted((work / "review").glob("*.raw.json")) if not read_json(path, dict) and path.read_text(encoding="utf-8").strip() not in ("", "{}")]
+    return {"sources": len(sources), "failed": len(failed), "gaps": sum(g.count("\n") + 1 for g in gaps if g), "malformed": malformed}
 
 
 def slice_sources(work, index, of):
