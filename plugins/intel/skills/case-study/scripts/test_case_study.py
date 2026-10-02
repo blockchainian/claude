@@ -149,7 +149,11 @@ def main():
               found == ["- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M", "- [A 2020] seller-source | sells a course | | drop"], str(found))
         (work / "notes" / "read-01.raw.json").write_text(json.dumps({"https://a.example/x": ["raw/a.html"], "https://b.example/z": ["raw/b1.txt"]}))
         (work / "notes" / "numbers-archive.raw.json").write_text(json.dumps({"https://b.example/z": ["raw/b2.txt"]}))
-        cs.merge(work)
+        (work / "notes" / "numbers-uploads.sources.json").write_text(json.dumps([{"url": "https://c.example/y", "kind": "on record"}]))
+        result = cs.merge(work)
+        check("merge names the notes files that are not a url-keyed object: their sources would be dropped unseen",
+              result.get("malformed") == ["notes/numbers-uploads.sources.json"], str(result))
+        (work / "notes" / "numbers-uploads.sources.json").unlink()
         saved_raw = json.loads((work / "raw.json").read_text())
         check("merge gathers where each source's text was saved", {u: sorted(f) for u, f in saved_raw.items()} == {"https://a.example/x": ["raw/a.html"], "https://b.example/z": ["raw/b1.txt", "raw/b2.txt"]}, str(saved_raw))
         (work / "raw" / "a.html").write_text('<p>She passed 1.002.877 subscribers and earned $12 million; <span title="24,8 miljoner">many</span> watched 603 videos.</p>')

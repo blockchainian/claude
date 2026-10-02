@@ -40,11 +40,19 @@ the weeks around each acceleration the press mentions.
 Append to `notes/numbers-<lane>.md` as you go (see "Writing as you go" in
 the evidence rules). Dated tables, one row per line, each row starting
 with the chapter tags it serves (`[c03]`, `[c07]`…) and `[on record]`, and
-ending with the record's URL. `notes/numbers-<lane>.sources.json`,
-`notes/numbers-<lane>.raw.json` (the saved file of every capture and listing
-you cite: `wayback.py` prints it as `file` next to each `url`) and
-`notes/numbers-<lane>.gaps.md` as in the reader brief (a period with no
-captures is a gap only after the full capture list shows none).
+ending with the record's URL. When the lane is done, write three more files;
+a script merges them, and a file in another shape is dropped:
+- `notes/numbers-<lane>.sources.json` — one JSON object,
+  `{"<url>": "<label>"}`, for every record you cite: the URL exactly as the
+  rows print it, the label as the chapters will name it (`Internet Archive
+  2019-10-01 youtube.com/channel/…`, `YouTube video page 2026`);
+- `notes/numbers-<lane>.raw.json` — one JSON object,
+  `{"<url>": ["raw/<file>", …]}`: for each of those URLs, the files its page
+  was saved to, as paths from the work directory (`wayback.py` prints the
+  file as `file` next to each `url`);
+- `notes/numbers-<lane>.gaps.md` — one line per record you could not read
+  (a period with no captures is a gap only after the full capture list shows
+  none).
 
 Final message: points on the curve, first and last date, milestones found,
 gaps. Nothing else.
