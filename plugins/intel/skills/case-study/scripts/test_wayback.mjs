@@ -1,5 +1,5 @@
-// ABOUTME: Tests the batch archive fetcher (saving, per-route rate, leaving a refused route, the all-refused
-// ABOUTME: error), reading a count out of a capture, and the dated curve. A local HTTP server plays the archive.
+// ABOUTME: Tests the batch archive fetcher (saving, the rate, redirects, the refused error), reading a count out
+// ABOUTME: of a capture, and the dated curve. A local HTTP server plays the archive.
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import http from 'node:http'
@@ -62,34 +62,32 @@ test('extract reads the count a capture shows', () => {
   assert.deepEqual(wb.extract('<html>subscribe</html>'), { value: null, text: null }, 'a page with no count gives nothing')
 })
 
-test('fetchAll saves every page in input order at the route\'s rate; a replayed 429 is a result', async () => {
+test('fetchAll saves every page in input order at its rate; a replayed 429 is a result', async () => {
   const urls = [0, 1, 2].map(n => `${base}/page/${n}`).concat(`${base}/replayed429`)
   const start = performance.now()
-  const results = await wb.fetchAll(urls, [null], join(tmp, 'a'), { perMinute: 240 })
+  const results = await wb.fetchAll(urls, null, join(tmp, 'a'), { perMinute: 240 })
   const took = (performance.now() - start) / 1000
   assert.deepEqual(results.map(r => r.url), urls)
   assert.ok(results.slice(0, 3).every(r => readFileSync(r.file, 'utf8') === `body of ${r.url.slice(base.length)}`), 'a page is saved to the output folder')
   assert.ok(results[3].status === 429 && results[3].file, 'a capture of a 429 is a result, not a refusal')
-  assert.ok(took >= 0.75, `one route keeps to its rate: ${took.toFixed(2)}s for 4 requests at 240 a minute`)
+  assert.ok(took >= 0.75, `the batch keeps to its rate: ${took.toFixed(2)}s for 4 requests at 240 a minute`)
 })
 
 test('a redirect is followed, as the archive sends an id_ url to its nearest capture', async () => {
-  const [result] = await wb.fetchAll([`${base}/moved`], [null], join(tmp, 'r'), { perMinute: 6000 })
+  const [result] = await wb.fetchAll([`${base}/moved`], null, join(tmp, 'r'), { perMinute: 6000 })
   assert.equal(result.status, 200)
   assert.equal(readFileSync(result.file, 'utf8'), 'body of /page/0')
 })
 
-test('a refused route is left and the others finish the work', async () => {
-  const urls = [0, 1, 2].map(n => `${base}/page/${n}`)
+test('the proxy given is the one every request goes through', async () => {
   const seen = []
-  const get = (route, url) => {
-    seen.push(route)
-    if (route === 'first') throw new Error('refused')
+  const get = (proxy, url) => {
+    seen.push(proxy)
     return wb.httpGet(null, url)
   }
-  const results = await wb.fetchAll(urls, ['first', 'second'], join(tmp, 'b'), { perMinute: 6000, get })
-  assert.ok(results.length === 3 && results.every(r => r.status === 200 && r.route === 1), JSON.stringify(results))
-  assert.ok(seen.filter(r => r === 'first').length <= wb.WORKERS_PER_ROUTE, 'a refused route is not used again')
+  const results = await wb.fetchAll([0, 1, 2].map(n => `${base}/page/${n}`), 'http://isp.example:8080', join(tmp, 'b'), { perMinute: 6000, get })
+  assert.ok(results.length === 3 && results.every(r => r.status === 200), JSON.stringify(results))
+  assert.deepEqual(seen, Array(3).fill('http://isp.example:8080'))
 })
 
 test('a capture the archive replays compressed is saved as text', async () => {
@@ -98,10 +96,10 @@ test('a capture the archive replays compressed is saved as text', async () => {
   assert.equal(readFileSync(results[0].file, 'utf8'), '1,234 subscribers')
 })
 
-test('a 429 from the archive itself is a refusal, and the error says what is left', async () => {
+test('a 429 from the archive itself is a refusal that stops the batch, and the error says what is left', async () => {
   const urls = [0, 1, 2].map(n => `${base}/page/${n}`).concat(`${base}/throttled`)
-  await assert.rejects(wb.fetchAll(urls, [null], join(tmp, 'c'), { perMinute: 6000 }), error => {
-    assert.ok(error instanceof wb.AllRoutesRefused)
+  await assert.rejects(wb.fetchAll(urls, null, join(tmp, 'c'), { perMinute: 6000 }), error => {
+    assert.ok(error instanceof wb.Refused)
     assert.ok(error.remaining.includes(`${base}/throttled`), JSON.stringify(error.remaining))
     assert.ok(error.message.includes('1 of 4'), error.message)
     return true
@@ -109,7 +107,7 @@ test('a 429 from the archive itself is a refusal, and the error says what is lef
 })
 
 test('curve has one dated row per capture of every address, each naming its capture and its saved file', async () => {
-  const rows = await wb.curve(['example.com/channel-a', 'example.com/channel-b'], [null], join(tmp, 'd'), { perMinute: 6000, archive: base })
+  const rows = await wb.curve(['example.com/channel-a', 'example.com/channel-b'], null, join(tmp, 'd'), { perMinute: 6000, archive: base })
   assert.deepEqual(rows.map(r => [r.date, r.value]), [['2014-01-15', 10490968], ['2015-07-15', 37704014], ['2020-09-15', 105000000]])
   assert.equal(rows[0].url, `${base}/web/20140115000000id_/example.com/channel-a`)
   assert.ok(statSync(rows[0].file).isFile())
