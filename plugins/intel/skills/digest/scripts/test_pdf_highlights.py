@@ -132,6 +132,19 @@ def test_render(ph, work, tmp):
     check("a store-ready draft is written", draft.startswith("---\ntitle: A Small Book\n") and "\nurl: " in draft
           and "## One: Beginnings" in draft and "### Theme" in draft and "## Three: Ends" in draft, draft[:300])
 
+    chart = ("```chart\ntype: line\ntitle: Subscribers by year\ncolumns: Date | Jane | Rival\n2012-07-11 | 1,002,877 | 110,010\n"
+             "2013-07-09 | 10,058,670 | 681,229\n2014-01-09 | 20,010,912 | 1,413,462\n```")
+    table = "```chart\ntype: table\ntitle: Income by year\ncolumns: Year | Estimate\n2015 | $12 million\n2016 | $15 million\n```"
+    (work / "md" / "04.md").write_text(f"## Theme\n\n- The closing point about ends.\n\n{chart}\n\nAfter the chart.\n\n{table}\n")
+    ph.render(work, opt)
+    text = subprocess.run(["pdftotext", "-layout", str(out), "-"], capture_output=True, text=True).stdout
+    # the paragraph after the chart is the chapter's first, so its first letter is set apart as a drop cap
+    check("a chart block is drawn, not printed as text", "Subscribers by year" in text and "20,010,912" in text and "Rival" in text
+          and "```" not in text and "type: line" not in text and "fter the chart." in text, [k for k in ("Subscribers by year", "20,010,912", "Rival", "fter the chart.") if k not in text] + [k for k in ("```", "type: line") if k in text])
+    check("a table block is typeset as a table", "Income by year" in text and "$15 million" in text and "type: table" not in text, text[-400:])
+    (work / "md" / "04.md").write_text("## Theme\n\n- The closing point about ends.\n")
+    ph.render(work, opt)
+
     meta_path = work / "chapters.json"
     meta = json.loads(meta_path.read_text())
     meta["cover"] = "Jane Doe"
@@ -156,7 +169,32 @@ def test_render(ph, work, tmp):
     check("default output sits next to the source", default == tmp / "small-book-highlights.pdf", str(default))
 
 
+def test_charts(charts):
+    line = charts.figures("Before.\n\n```chart\ntype: line\ntitle: Subscribers\n2012 | 1,002,877\n2013 | 10,058,670\n2014 | 20,010,912\n```\n\nAfter.")
+    check("a line chart block becomes one figure with an inline drawing", line.count("<figure") == 1 and "<svg" in line and "<polyline" in line
+          and "Subscribers" in line and "20,010,912" in line and "```" not in line and line.startswith("Before.") and line.endswith("After."), line[:300])
+    bar = charts.figures("```chart\ntype: bar\ntitle: Views in four days\nMontage | 2,520,866\nOrdinary upload | 1,261,237\n```")
+    check("a bar chart block draws one bar per row with its value", bar.count("<rect") == 2 and "Montage" in bar and "2,520,866" in bar, bar[:300])
+    log = charts.figures("```chart\ntype: line\nscale: log\ntitle: T\n2010 | 19\n2012 | 1,002,877\n2019 | 100,020,115\n```")
+    check("a log scale keeps a small first value off the baseline", "<polyline" in log and "19" in log, log[:200])
+    units = charts.figures("```chart\ntype: bar\ntitle: T\nA | 1.11 亿\nB | 5,000 万\nC | 20M\n```")
+    widths = [float(w) for w in __import__("re").findall(r'<rect[^>]* width="([\d.]+)"', units)]
+    check("values with a unit (万, 亿, K, M, B) are drawn to scale and printed as written", "1.11 亿" in units and len(widths) == 3
+          and abs(widths[1] / widths[0] - 50 / 111) < 0.01 and abs(widths[2] / widths[0] - 20 / 111) < 0.01, str(widths))
+    table = charts.figures("```chart\ntype: table\ntitle: Income\ncolumns: Year | Estimate\n2015 | $12 million\n```")
+    check("a table block becomes an HTML table with its header", "<table" in table and "<th>Year</th>" in table and "$12 million" in table, table[:300])
+    for bad, why in [("```chart\ntype: pie\nA | 1\n```", "an unknown type"), ("```chart\ntype: line\ntitle: T\n2012 | many\n2013 | 3\n```", "a value that is not a number"),
+                     ("```chart\ntype: bar\ntitle: T\n```", "no rows")]:
+        try:
+            charts.figures(bad)
+            check(f"a chart block with {why} stops the render", False)
+        except SystemExit as stop:
+            check(f"a chart block with {why} stops the render", "chart" in str(stop), str(stop))
+    check("text without chart blocks is returned unchanged", charts.figures("Plain.\n\n- point\n") == "Plain.\n\n- point\n")
+
+
 def main():
+    test_charts(load("charts"))
     if not shutil.which("pdftotext"):
         print("SKIP: all (pdftotext missing; run setup.sh)")
         return

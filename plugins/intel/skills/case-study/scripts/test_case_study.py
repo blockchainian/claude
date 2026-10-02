@@ -102,6 +102,22 @@ def main():
         report = cs.check(work)
         check("a figure restated in another unit of ten is the draft's figure", "06" not in [c["chapter"] for c in report["numbers_not_in_draft"]], str(report["numbers_not_in_draft"]))
 
+        series = "2012 年 5 月 2 日是 603 个，8 月 2 日 762 个，11 月 2 日 969 个，2013 年 2 月 1 日 1,128 个，每月约 52 到 68 个。"
+        (work / "md" / "07.md").write_text(f"# Chapter 7\n\nLead.\n\n## Section\n\n{series}\n")
+        (work / "book" / "07.md").write_text(f"# Chapter 7\n\nLead.\n\n## Section\n\n{series}\n")
+        report = cs.check(work)
+        check("a paragraph that recites a series of figures is reported: it belongs in a chart", [c["chapter"] for c in report["series_in_prose"]] == ["07"]
+              and report["series_in_prose"][0]["found"][0].startswith("2012 年 5 月 2 日是 603") and report["book_ok"] is False, str(report["series_in_prose"]))
+        chart = "```chart\ntype: line\ntitle: Videos\n2012-05-02 | 603\n2012-08-02 | 762\n2012-11-02 | 969\n2013-02-01 | 1,128\n```"
+        (work / "book" / "07.md").write_text(f"# Chapter 7\n\nLead.\n\n## Section\n\n每月约 52 到 68 个，2013 年 2 月 1 日到 1,128 个。\n\n{chart}\n")
+        report = cs.check(work)
+        check("the same figures in a chart block pass, and are still checked against the draft", report["series_in_prose"] == []
+              and "07" not in [c["chapter"] for c in report["numbers_not_in_draft"]], str(report))
+        (work / "book" / "07.md").write_text(f"# Chapter 7\n\nLead.\n\n{chart.replace('1,128', '1,182')}\n")
+        report = cs.check(work)
+        check("a chart value the draft does not have is reported", {"chapter": "07", "found": ["1182"]} in report["numbers_not_in_draft"], str(report["numbers_not_in_draft"]))
+        (work / "book" / "07.md").write_text("# Chapter 7\n\nLead.\n\n## Section\n\nBody.\n")
+
         (work / "notes" / "read-01.sources.json").write_text(json.dumps({"https://a.example/x": "A 2020", "https://seller.example/s": "Seller 2021"}))
         (work / "notes" / "read-02.sources.json").write_text(json.dumps({"https://b.example/z": "B 2019"}))
         (work / "notes" / "read-01.gaps.md").write_text("- could not reach c.example\n")

@@ -47,9 +47,19 @@ know how the research was done.
    speech, no rhetorical questions, no summaries of what a chapter is about to
    say or has just said. Each chapter reads on from the one before; a fact
    told once is not told again.
-9. **Reasoning chapters say so once**, in their lead paragraph, in plain
+9. **Figures go in charts, never in running text.** Any run of figures a
+   reader would otherwise have to hold in their head is a chart block: three
+   or more dated values of one kind (a curve, uploads per month, income by
+   year) is a line chart; one measure across several things (this video
+   against the others, the subject against a peer) is a bar chart; figures
+   with several attributes, or exact values that must all be readable, are a
+   table. The paragraph beside it says in words what the chart shows — the
+   turn, the gap, the pace — and does not repeat its values. A single figure,
+   or two, stays in the sentence. Every value in a chart is a figure from the
+   draft, digits unchanged (rule 1 holds).
+10. **Reasoning chapters say so once**, in their lead paragraph, in plain
    words, then get on with it.
-10. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
+11. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
 
 ## Shape
 
@@ -59,6 +69,27 @@ know how the research was done.
 - Each file: `# <title>`, a lead paragraph, then `##` sections. Sections may be
   merged, split or reordered when that reads better. Chapters keep their order
   and file names.
+- A chart block stands on its own lines, with a blank line before and after:
+
+  ````
+  ```chart
+  type: line
+  title: Subscribers
+  columns: Date | PewDiePie | A peer channel
+  2013-02-08 | 4,631,292 | 110,010
+  2014-01-23 | 21,105,672 | 1,413,462
+  2016-12-12 | 50,566,204 | 15,608,384
+  ```
+  ````
+
+  `type` is `line`, `bar` or `table`; `title` says what is measured and in
+  what unit. Each row is a label and its values, separated by `|`. A line
+  chart's labels are dates (`2012`, `2012-07`, `2012-07-11`); `scale: log`
+  suits values that grow by orders of magnitude. `columns` names the series
+  when there are two or three, and is the header of a table. A value is
+  digits with an optional unit (`K`, `M`, `B`, `万`, `亿`) and is printed as
+  written; a table cell may hold any text. A line chart prints the values
+  that fit beside their points: when every exact value matters, use a table.
 - The last file is the sources list: one short sentence, then the sources
   grouped by kind, each as outlet and year. Nothing about how they were read
   and nothing about what could not be reached.
@@ -71,7 +102,8 @@ one (re-read only the chapter before it, for continuity).
 
 Re-read the whole book once from the first chapter, as its reader. Cut every
 sentence that talks about the research, repeats an earlier one, or carries no
-information.
+information. A paragraph that still recites figures one after another
+becomes a chart.
 
 Final message: characters per chapter, and anything in the draft you left out
 on purpose, with the reason. No chapter text.

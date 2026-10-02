@@ -11,6 +11,7 @@
 # split writes <work>/chapters.json and one text file per chapter, and prints the JSON. render typesets every
 # chapter whose highlights Markdown exists to <source>-highlights.pdf and writes the store-ready <work>/draft.md.
 # A "cover" name in chapters.json adds a text cover page in front: the name large, the title under it.
+# A ```chart block in a chapter's Markdown is drawn as a line chart, a bar chart or a table (see charts.py).
 import argparse
 import html
 import importlib.util
@@ -34,6 +35,7 @@ def load(path):
 
 fs = load(HERE / "fetch_source.py")
 rd = load(HERE.parent.parent / "translate" / "scripts" / "render.py")  # the book format: css, Chrome print, background
+ch = load(HERE / "charts.py")  # ```chart blocks -> figures
 
 MARKER_RE = re.compile(r"⟦[^⟧]*⟧")  # the invisible page markers a translate-built PDF carries
 # A scanned (image-only) PDF extracts to nothing or a few stray characters, while a real one-page note can be
@@ -169,14 +171,14 @@ def render(work, opt):
         if not md_path.exists():
             continue
         md_text = md_path.read_text(encoding="utf-8")
-        title, body = rd.md_to_html(md_text)
+        title, body = rd.md_to_html(ch.figures(md_text))
         sections.append(({"id": c["id"], "kind": "chapter"}, title or c["title"], body))
         drafts.append((title or c["title"], md_text))
     if not sections:
         sys.exit(f"nothing to render: no highlights in {work / 'md'}")
 
     style = rd.css(meta["page_size"], bg, fg, [(s["id"], t, s["kind"]) for s, t, _ in sections],
-                   opt.font_size, rd.brighten(fg, opt.bold_factor))
+                   opt.font_size, rd.brighten(fg, opt.bold_factor)) + ch.CSS
     tmp = Path(tempfile.mkdtemp(prefix="highlights-"))
     html_path, typeset = tmp / "highlights.html", tmp / "highlights.pdf"
     html_path.write_text(
