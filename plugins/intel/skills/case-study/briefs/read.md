@@ -9,7 +9,10 @@ Read `references/evidence.md` and `references/tools.md` next to this brief's
 folder, and the chapter table in the type file.
 
 For each URL: open it and read it to the end (a long interview or transcript
-too). Save downloads under `raw/`. Then append to `notes/<batch>.md` (see "Writing
+too). Save the full text you read under `raw/` (the page, the transcript, the
+PDF's text): a script later matches every figure in the study against these
+files, and a source with no saved text has all its figures sent back for
+checking by hand. Then append to `notes/<batch>.md` (see "Writing
 as you go" in the evidence rules):
 
 ```
@@ -34,8 +37,10 @@ publisher: <who, how they earn, any tie to the subject>
 When the batch is done, write:
 - `notes/<batch>.sources.json` — `{"<url>": "<Outlet Year>"}` for every source
   you opened and read (full or partial), and no others;
+- `notes/<batch>.raw.json` — `{"<url>": ["raw/<file>", …]}`: for each of those
+  sources, the files its text was saved to, as paths from the work directory;
 - `notes/<batch>.gaps.md` — one line per source you could not read: the
   command tried and what came back.
 
-Write only these three files and `raw/`. Final message: sources read, partial,
+Write only these four files and `raw/`. Final message: sources read, partial,
 not reached. Nothing else.
