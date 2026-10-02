@@ -31,6 +31,7 @@ import { configureBlocklist } from './traffic.mjs';
  */
 export const kit = {
   ...page, page, debug, restriction, emailOtp, store, config,
+  withProfile: async (...args) => (await import('./login.mjs')).withProfile(...args),
   mintAppPassword: async (...args) => (await import('./login.mjs')).mintAppPassword(...args),
 };
 // aliasFor is synchronous and does not need the browser runtime.

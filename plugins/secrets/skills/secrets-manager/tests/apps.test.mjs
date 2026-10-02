@@ -93,3 +93,10 @@ test('normalized table collisions cannot overwrite an existing in-memory session
   await assert.rejects(loadAdapters({paths:[path]}), /bad adapter name: alpha__beta/);
  } finally { db.close(); }
 });
+
+test('fixture email hook uses the real kit reader and profile engine with stubbed mailbox and launcher', async () => {
+ const {spawnSync} = await import('node:child_process');
+ const result = spawnSync(process.execPath, ['--experimental-test-module-mocks', fileURLToPath(new URL('./fixtures/profile-probe.mjs', import.meta.url))], {encoding:'utf8'});
+ assert.equal(result.status, 0, result.stderr);
+ assert.match(result.stdout, /profile and mailbox contract verified/);
+});

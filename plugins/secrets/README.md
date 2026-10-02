@@ -49,7 +49,7 @@ An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files
 
 | Field | Contract |
 |---|---|
-| `name` | Required `[a-z0-9_]+` table and CLI target; `google`, `x` and `tiktok` are reserved. |
+| `name` | Required normalized `[a-z0-9_]+` table and CLI target (must equal `store.toAppSlug(name)`); `google`, `x`, `tiktok` and the `sqlite_` prefix are reserved. |
 | `domain` | Required registrable domain, scopes exports to it and subdomains. |
 | `startUrl` | Required login entry URL. |
 | `entryTexts` | Required nonempty string array of logged-out entry labels. |
@@ -75,7 +75,20 @@ The kit provides:
   `gotoWithRetry(page, url)` (also under `kit.page`).
 - `debug.capture(page, label, tag)`; `restriction.storedTokenLive`, `restriction.tokenLive`.
 - `aliasFor(baseEmail, tag)` (required tag), `mintAppPassword(cred, {name, ...})`
-  (required name), and `emailOtp.waitForCode(...)`.
+  (required name).
+- `withProfile(key, {headed = false, rotate = false, proxyUrl = config.proxyFor(key, {rotate}),
+  blockAssets = true}, fn)` opens a persistent Camoufox browser for a `byEmail` or `verify`
+  hook. It reuses the engine's profile directory, proxy, stored fingerprint, traffic blocking,
+  headed diagnostics and cleanup. Calls `fn(context, page, proxyUrl)`, returns its result,
+  and closes the context in `finally`, including when the callback throws.
+  Resolve proxy URLs explicitly with `kit.config.proxyFor(key, {rotate})` when needed.
+- `emailOtp` exposes the email-otp module's real exports: `extractOtp(text)`,
+  `otpCandidates(text)`, and `readSignupOtp(baseEmail, appPassword, {toAlias = null,
+  sinceEpoch = null, timeoutS = 120, pollS = 5} = {})`. The reader uses the base Gmail
+  inbox and app password (spaces stripped), optionally filters a plus-alias and messages
+  newer than the click (`sinceEpoch` in seconds), then checks Spam after the inbox timeout.
+  Returns `{otp, from, subject, to, folder}`, or the same metadata with
+  `{securityAlert: true, otp: null}` for a Security Alert, or `null` on timeout.
 - `store`: `openDb`, `getSession`, `saveSession`, `setSessionStatus`, `listAccounts`,
   `sessionsForAccount`, `STATUS_*` and the remaining store exports.
 - `config`: `dbPath`, `statePath`, `defaultProxy`, `proxyFor` and the remaining config exports.
