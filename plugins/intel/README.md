@@ -54,6 +54,19 @@ download links and checks domain names.
   charts, bar charts and tables instead of recited in sentences. One subject
   per run.
 
+- **`fetch-x-mentions`** — archive X mentions and verify vendor tokens into stored ct0 pairs.
+- **`fetch-x-posts`** — fetch X search posts with account rotation.
+- **`fetch-x-user-posts`** — archive timelines from usernames or a roster file.
+- **`analyze-x-mentions`** — clean, label and aggregate mention archives.
+- **`analyze-x-user`** — analyze one user's posts and representative quotes.
+- **`analyze-x-users`** — profile groups of users and build a local CRM.
+- **`fetch-tiktok-mentions`** — archive TikTok videos and comments through ISP sessions.
+- **`fetch-app-reviews`** — archive written App Store reviews across storefronts.
+
+Research scripts use `~/.config/intel/.env`; archive paths are relative to the working
+directory, run from the repo root that owns the archive. X/TikTok accounts are logged in
+with the secrets plugin's `secrets-manager login x|tiktok`.
+
 ## Why they live together
 
 `transcribe` and `digest` answer the same question — *what was actually said or written, and
@@ -102,3 +115,7 @@ node --test skills/analyze-appstore-reviews/tests/*.mjs
 chunk-readiness logic, platform resolution, and `setup.sh --check`; when
 `ffmpeg` and a whisper runner are present it also runs a real end-to-end batch
 and live transcription of a generated clip.
+
+Install research dependencies with `npm install --prefix` in fetch-x-mentions/scripts,
+fetch-app-reviews/scripts and fetch-tiktok-mentions/scripts. The X post and timeline
+skills share the X client install. Each SKILL.md gives its full plugin-root command.

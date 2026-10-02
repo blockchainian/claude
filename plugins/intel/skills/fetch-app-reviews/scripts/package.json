@@ -1,0 +1,8 @@
+{
+  "name": "fetch-app-reviews",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "undici": "^7.0.0"
+  }
+}
