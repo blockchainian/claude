@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { gzipSync } from 'node:zlib'
 
-import * as wb from './wayback.mjs'
+import * as wb from '../scripts/wayback.mjs'
 
 const OLD = '<span class="yt-subscription-button-subscriber-count-branded-horizontal" title="10,490,968 subscribers">10,490,968</span>'
 const LOCALIZED = '<span class="yt-subscription-button-subscriber-count-branded-horizontal yt-uix-tooltip" title="37 704 014" aria-label="37 704 014 подписчиков">37</span>'

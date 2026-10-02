@@ -92,9 +92,7 @@ skills/digest/scripts/test_pdf_highlights.py
 skills/translate/scripts/test_translate.py
 node --test skills/find-domain-names/scripts/test_check.mjs
 node --test skills/download-book/scripts/test_site_session.mjs
-node --test skills/case-study/scripts/test_case_study.mjs
-node --test skills/case-study/scripts/test_wayback.mjs
-node --test skills/case-study/scripts/test_workflow.mjs
+node --test skills/case-study/tests/*.mjs
 ```
 
 `test_transcribe.py` covers the batch and live command shapes, the
