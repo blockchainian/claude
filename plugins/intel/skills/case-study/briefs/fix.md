@@ -37,6 +37,8 @@ Edit only `md/<your file>`. Do not edit `sources.json`. Write:
   apply it (see "Writing as you go" in the evidence rules): fixed, removed, relabelled,
   re-sourced (with the new URL), or rejected (with the reason);
 - `review/fix-<NN>.added.json` — `{"<url>": "<Outlet Year>"}` for every source
-  you opened and read in this round and now cite (`{}` when none).
+  you opened and read in this round and now cite (`{}` when none);
+- `review/fix-<NN>.raw.json` — `{"<url>": ["raw/<file>"]}` for the text you
+  saved of each of those.
 
 Final message: counts only, plus what you could not resolve.
