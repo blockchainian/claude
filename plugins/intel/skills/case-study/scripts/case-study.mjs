@@ -28,8 +28,8 @@ import { parseArgs } from 'node:util'
 
 const PAGE_SIZE = [427.92, 660.0] // the book format digest's render typesets
 const ARCHIVE_HOSTS = new Set(['web.archive.org', 'archive.org'])
-// A Markdown link's target.
-const LINK = /\]\((https?:\/\/[^)\s]+)\)/g
+// A Markdown link's target, with or without angle brackets around it.
+const LINK = /\]\(<?(https?:\/\/[^)\s>]+)>?\)/g
 // A parenthesis that names a source: a word, then a year that is not part of a date.
 const CITATION = /[（(][^（()）]*?(?<word>[A-Za-z一-鿿][\p{L}\p{N}_.&'’-]*)\s+(?:19|20)\d\d(?!\s*年)[^（()）]*[）)（(]/gu
 const DATE_WORDS = new Set(['in', 'since', 'from', 'by', 'until', 'to', 'of', 'late', 'early', 'mid', 'born', 'and', 'january',
