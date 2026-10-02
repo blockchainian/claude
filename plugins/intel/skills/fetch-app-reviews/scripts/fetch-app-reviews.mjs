@@ -1,6 +1,7 @@
 import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
 // ABOUTME: Fetches all App Store written reviews for an Apple app across storefronts,
 // ABOUTME: rotating a fresh residential-proxy exit IP per request, resumable per storefront.
+import { realpathSync } from "node:fs";
 //
 // Usage:
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-app-reviews/scripts/fetch-app-reviews.mjs <appleId> [appName]
@@ -19,7 +20,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 //   to a confirmed end (no delta short-circuit); correctness over re-run speed.
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { join } from "node:path";
 let ProxyAgent;
 try { ({ ProxyAgent } = await import("undici")); }
@@ -367,6 +368,6 @@ async function main() {
   );
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   await main();
 }
