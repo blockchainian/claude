@@ -15,8 +15,11 @@ follow.
 ## Press from the time
 
 - A search engine with a date range (`after:YYYY-MM-DD before:YYYY-MM-DD`).
-- GDELT, by date range:
-  `curl "https://api.gdeltproject.org/api/v2/doc/doc?query=%22<name>%22&mode=artlist&maxrecords=50&format=json&startdatetime=YYYYMMDD000000&enddatetime=YYYYMMDD235959"`
+- GDELT, by date range, through the proxy in `ISP_PROXY_URL` (it limits each
+  address to one request every 5 seconds, and a shared address has no quota
+  left; an empty variable means no proxy). It indexes news sites only, from
+  2017 on, and has little on a creator the press has not written about:
+  `curl -x "$ISP_PROXY_URL" "https://api.gdeltproject.org/api/v2/doc/doc?query=%22<name>%22&mode=artlist&maxrecords=50&format=json&startdatetime=YYYYMMDD000000&enddatetime=YYYYMMDD235959"`
 
 ## YouTube
 
