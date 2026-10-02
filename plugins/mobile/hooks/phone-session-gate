@@ -3,7 +3,7 @@
 # ABOUTME: capture claim; it records the open session in the claim and clears it on delete.
 """WebDriverAgent serves one session per phone, and a second create does not fail:
 it wins, and the first agent's next call dies with "Session does not exist". The
-claim file that claim_simulator.py writes per UDID under TMPDIR is the only thing
+claim file that claim-simulator.mjs writes per UDID under TMPDIR is the only thing
 agents in one Claude Code session share, so this gate keys on it.
 
 PreToolUse, action=create: deny unless the capabilities name an appium:udid, a
@@ -81,11 +81,11 @@ def before_create(tool_input: dict) -> None:
     udid = udid_of(tool_input)
     if not udid:
         deny("Pass the phone's UDID as appium:udid in capabilities, so the claim can be "
-             "checked; discover_ios_setup.py prints it in suggestedCapabilities.")
+             "checked; discover-ios-setup.mjs prints it in suggestedCapabilities.")
         return
     held = read(lock_path(udid))
     if held is None:
-        deny(f"{udid} is not claimed. Run claim_simulator.py {udid} --run <RUN_ID> first, "
+        deny(f"{udid} is not claimed. Run claim-simulator.mjs {udid} --run <RUN_ID> first, "
              f"and hold the claim until the capture run is done.")
         return
     session = held.get("session")

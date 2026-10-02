@@ -70,7 +70,7 @@ one, and to a durable directory for screens worth keeping. With neither, the roo
 
 Several agents can share that library safely; a phone or a simulator they cannot, so this
 skill provides a lock: `claim-simulator.mjs` holds one UDID for one `RUN_ID`, and
-`capture_slice.sh` refuses a simulator nobody has claimed. Neither target refuses a second
+`capture-slice.sh` refuses a simulator nobody has claimed. Neither target refuses a second
 agent on its own. On a phone, WebDriverAgent serves one session, and a second Appium
 session does not fail — it wins, and the first agent's next call fails with "Session does
 not exist" mid-run. On a simulator, XcodeBuildMCP retargets its session default to whoever
@@ -225,14 +225,14 @@ screen that never moves. The stitcher refuses an identical pair for exactly this
 For the same reason, do not use `booted` as a stand-in for the UDID. `simctl` resolves it to
 one running simulator without saying which, and simulators routinely hold different builds
 of the same app — on one machine the same app was version 62 on one booted simulator and 64
-on another. `claim-simulator.mjs` and `capture_slice.sh` refuse it outright.
+on another. `claim-simulator.mjs` and `capture-slice.sh` refuse it outright.
 
 ## 1. Open the App
 
 ### Real device
 
 ```bash
-"$SKILL_DIR/scripts/find_ios_app.sh" --device <udid> --name <app name>
+"$SKILL_DIR/scripts/find-ios-app.sh" --device <udid> --name <app name>
 ```
 
 `xcrun devicectl device info apps` lists **only developer-installed apps by default** — an App Store app looks absent. The script passes `--include-all-apps`, which is the whole reason it exists. Do not call `devicectl` directly for this.
@@ -246,7 +246,7 @@ If no Appium session exists yet, create one: `select_device` (`platform=ios`, `i
 ### Simulator
 
 ```bash
-"$SKILL_DIR/scripts/find_ios_app.sh" --simulator "$UDID" --name <app name>
+"$SKILL_DIR/scripts/find-ios-app.sh" --simulator "$UDID" --name <app name>
 ```
 
 `devicectl` cannot see simulators at all, so this reads `simctl listapps` instead. The
@@ -318,7 +318,7 @@ with the wrapper instead, which writes a full-resolution PNG straight into `SLIC
 there is no copy step, and refuses a simulator this run does not hold:
 
 ```bash
-"$SKILL_DIR/scripts/capture_slice.sh" --simulator "$UDID" --run "$RUN_ID" \
+"$SKILL_DIR/scripts/capture-slice.sh" --simulator "$UDID" --run "$RUN_ID" \
   --out "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
@@ -556,7 +556,7 @@ The stitched PNG is the only artifact that survives. Name it for what it shows �
 
 Where a screen's own header and the tab that reaches it disagree — a tab bar reading
 "Account" above a page headed "Portfolio" — name it for the header, which is what the image
-shows. The app slug is the app's display name from `find_ios_app.sh`, lowercased, spaces to
+shows. The app slug is the app's display name from `find-ios-app.sh`, lowercased, spaces to
 hyphens: `MyApp` becomes `myapp`.
 
 ## Reporting

@@ -6,7 +6,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: find_ios_app.sh (--device <udid> | --simulator <udid>) [--name <substring>] [--all]
+Usage: find-ios-app.sh (--device <udid> | --simulator <udid>) [--name <substring>] [--all]
 
   --device      Device UDID (from `xcrun devicectl list devices`, hardwareProperties.udid)
   --simulator   Simulator UDID (from `xcrun simctl list devices`), or "booted"

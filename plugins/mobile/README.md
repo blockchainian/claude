@@ -82,8 +82,8 @@ when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 
 ```
 node --test skills/ios-take-screenshot/tests/*.mjs
-python3 skills/ios-take-screenshot/tests/test_frame_diff.py
-python3 skills/ios-take-screenshot/tests/test_stitch_screens.py
+uv run skills/ios-take-screenshot/tests/test_frame_diff.py
+uv run skills/ios-take-screenshot/tests/test_stitch_screens.py
 ```
 
 `claim-simulator.test.mjs` covers the simulator claim: one run holds a simulator, a
