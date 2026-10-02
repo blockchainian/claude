@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ABOUTME: Lets Claude Code run codex threads on the shared app-server daemon as supervised workers.
-// ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them; `claude-tools` serves codex.
+// ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them; `claude` serves codex.
 
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -9,7 +9,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
-import { runClaudeTools } from "./claude-tools.mjs";
+import { runClaude } from "./claude.mjs";
 import { SessionStore, askTimeoutSeconds, writeSupervisor } from "./inbox.mjs";
 import { resolveSessionId } from "./session.mjs";
 
@@ -20,7 +20,7 @@ const usage = `usage:
   codex-manager.mjs mcp                                   serve Claude's codex tools over stdio
   codex-manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
   codex-manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
-  codex-manager.mjs claude-tools                          serve notify_claude and ask_claude to codex over stdio
+  codex-manager.mjs claude                                serve notify_claude and ask_claude to codex over stdio
   codex-manager.mjs whoami                                print the resolved Claude session id`;
 
 const DEFAULT_DECISIONS = ["accept", "acceptForSession", "decline", "cancel"];
@@ -35,7 +35,7 @@ const FORWARDED_ENV = ["CODEX_MANAGER_HOME", "CODEX_MANAGER_ASK_TIMEOUT"];
 /** How codex launches the server that carries notify_claude and ask_claude, as an mcp_servers entry. */
 function claudeToolsServer() {
   const env = Object.fromEntries(FORWARDED_ENV.filter((name) => process.env[name]).map((name) => [name, process.env[name]]));
-  return { command: process.execPath, args: [scriptPath, "claude-tools"], env, tool_timeout_sec: askTimeoutSeconds() + TOOL_TIMEOUT_MARGIN_SECONDS, default_tools_approval_mode: "approve" };
+  return { command: process.execPath, args: [scriptPath, "claude"], env, tool_timeout_sec: askTimeoutSeconds() + TOOL_TIMEOUT_MARGIN_SECONDS, default_tools_approval_mode: "approve" };
 }
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];
 
@@ -579,7 +579,7 @@ export async function main(argv) {
   if (command === "mcp") return runMcp();
   if (command === "await") return runAwait(options);
   if (command === "pending") return runPending();
-  if (command === "claude-tools") return runClaudeTools(JSON.parse(await readFile(pluginManifestPath, "utf8")).version);
+  if (command === "claude") return runClaude(JSON.parse(await readFile(pluginManifestPath, "utf8")).version);
   if (command === "whoami") {
     process.stdout.write(`${await resolveSessionId()}\n`);
     return 0;
