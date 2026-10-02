@@ -57,7 +57,7 @@ Then judge what the chapter makes of its figures:
 - every place where sources disagree and the chapter prints one side;
 - sums, rates and durations: both ends from the same kind of record;
 - archive points against the saved capture under `raw/archive`, and at least
-  eight re-fetched in one batch with `scripts/wayback.py fetch` (the reviewer
+  eight re-fetched in one batch with `scripts/wayback.mjs fetch` (the reviewer
   of the timeline chapter does this; the other skips it).
 
 ## Lens: quotes

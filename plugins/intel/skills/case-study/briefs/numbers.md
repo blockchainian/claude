@@ -12,7 +12,7 @@ You are the only agent that fetches from the archive.
 
 1. Run the curve for every address the profile has had (old user names,
    channel ids, handles, and the statistics-site page for the account):
-   `scripts/wayback.py curve <work>/raw/archive <address>...`
+   `scripts/wayback.mjs curve <work>/raw/archive <address>...`
    It lists the monthly captures, fetches them in one batch, and prints one
    line per capture with the count it could read. Do not fetch captures one by
    one. If it stops with "every route was refused", report that error and
@@ -48,7 +48,7 @@ a script merges them, and a file in another shape is dropped:
   2019-10-01 youtube.com/channel/…`, `YouTube video page 2026`);
 - `notes/numbers-<lane>.raw.json` — one JSON object,
   `{"<url>": ["raw/<file>", …]}`: for each of those URLs, the files its page
-  was saved to, as paths from the work directory (`wayback.py` prints the
+  was saved to, as paths from the work directory (`wayback.mjs` prints the
   file as `file` next to each `url`);
 - `notes/numbers-<lane>.gaps.md` — one line per record you could not read
   (a period with no captures is a gap only after the full capture list shows

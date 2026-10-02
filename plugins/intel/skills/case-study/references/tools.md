@@ -49,14 +49,14 @@ follow.
 - List captures:
   `curl -s "https://web.archive.org/cdx?url=<profile url>&output=json&collapse=timestamp:6&fl=timestamp,statuscode"`
 - The whole curve in one command, for every address the profile has had:
-  `<this skill>/scripts/wayback.py curve <work>/raw/archive <address>...`
+  `<this skill>/scripts/wayback.mjs curve <work>/raw/archive <address>...`
   It lists the monthly captures, fetches them in one batch, saves every page,
   and prints one JSON line per capture: date, the count it read (`value`), the
   page's own wording when the count is rounded or in another language
   (`text`), the capture URL and the saved file.
 - Other captures in one batch, never one `curl` at a time: put the capture
   URLs (`https://web.archive.org/web/<timestamp>id_/<url>`) in a file, then
-  `<this skill>/scripts/wayback.py fetch <work>/raw/archive --from <file>`.
+  `<this skill>/scripts/wayback.mjs fetch <work>/raw/archive --from <file>`.
 - Both keep to 30 requests a minute per route, drop a route the archive
   refuses, and stop with an error when every route is refused: report that
   error, do not retry around it. Routes are the proxies in `WAYBACK_PROXIES`
