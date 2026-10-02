@@ -1,5 +1,5 @@
 # ABOUTME: hub-side addon that logs, with a timestamp, each proxy client connection and each
-# ABOUTME: request host, so `capture.py check`/`stop` count a capture's traffic from the log.
+# ABOUTME: request host, so `capture.mjs check`/`stop` count a capture's traffic from the log.
 import time
 
 from mitmproxy import http
