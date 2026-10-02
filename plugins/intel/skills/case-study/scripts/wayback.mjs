@@ -4,7 +4,7 @@
 //
 // Usage: wayback.mjs fetch <out dir> <url>... [--from <file with one url per line>]
 //        wayback.mjs curve <out dir> <profile url>...     (every address the profile has had)
-// Requests go through the proxy in the ISP_PROXY_URL environment variable, one URL; the proxy rotates its exit
+// Requests go through the proxy in ISP_PROXY_URL (from the .env file env.mjs finds), one URL; the proxy rotates its exit
 // addresses itself. Without it they go direct, through the HTTPS_PROXY / HTTP_PROXY of the environment when one
 // is set (NO_PROXY is honoured). When the archive or the proxy refuses the connection the run stops with an
 // error. fetch prints one JSON line per url (url, status, file). curve prints one JSON line per capture (date,
@@ -18,6 +18,9 @@ import tls from 'node:tls'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { gunzipSync } from 'node:zlib'
+import { loadEnv } from './env.mjs'
+
+loadEnv()
 
 export const PER_MINUTE = 30 // the archive refuses an address well above this
 export const WORKERS = 3 // a page takes seconds to arrive, so one worker alone cannot reach the rate
