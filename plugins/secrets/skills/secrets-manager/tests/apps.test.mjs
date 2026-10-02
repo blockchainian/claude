@@ -100,3 +100,11 @@ test('fixture email hook uses the real kit reader and profile engine with stubbe
  assert.equal(result.status, 0, result.stderr);
  assert.match(result.stdout, /profile and mailbox contract verified/);
 });
+
+test('the kit exposes the app-flow engine helpers a byEmail or verify hook needs', async () => {
+  for (const name of ['exportScoped', 'gotoPastCloudflare', 'waitReady', 'appAlreadySignedIn', 'withAppRetries']) {
+    assert.equal(typeof kit[name], 'function', `kit.${name}`);
+  }
+  assert.equal(typeof kit.filterState, 'function');
+  assert.deepEqual(kit.filterState({ cookies: [{ domain: '.b.test', name: 'k' }, { domain: 'other.test', name: 'k' }], origins: [] }, 'b.test').cookies.length, 1);
+});
