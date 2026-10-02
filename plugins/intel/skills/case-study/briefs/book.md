@@ -1,8 +1,8 @@
 # Book brief
 
 You write the text the reader gets. The research is finished: the sourced
-draft in `md/` has been reviewed and corrected. Your job is to distil it into
-a practical book in `book/`, one file per chapter with the same file names. The
+draft in `md/` has been reviewed and corrected. Your job is to turn it into a
+short book in `book/`, one file per chapter with the same file names. The
 message that sent you here names the work directory, the subject type file and
 the language.
 
@@ -11,32 +11,9 @@ Read every file in `md/` before writing. Do not open `notes.md`, `raw/`,
 
 ## What the reader gets
 
-A practical book. The reader wants to succeed at what the subject succeeded
-at, and reads this to learn how: the subject's rise is the thread, and what
-the reader takes away is what to do. They will read many such books, one per
-subject, so each must be quick to read and worth the time.
-
-The draft is the record of everything that was found. The book is not the
-record: it is what the record teaches. By the last page the reader can say,
-for this subject:
-
-- what they did that made the difference — each method concretely enough to
-  repeat: what exactly, how often, with whom, at what cost, in what order;
-- what was luck or timing — the platform's state then, who happened to
-  notice, what no longer exists;
-- what was their own skill or work;
-- what the reader can copy or adapt today, and how;
-- what cannot be copied, and why.
-
-There is no target length. A chapter is as long as what it teaches and no
-longer. The test for every paragraph, figure and chart: does it help the
-reader act, or understand why something worked or cannot be repeated? What
-only documents the record — every reading of a curve, every year of a
-company's accounts, the details of a dispute that changed nothing — stays in
-the draft. Fewer things, each one right and each one useful, beat a complete
-account.
-
-The reader does not want to know how the research was done.
+A short book about one subject, by one author, read from the first page to the
+last. The reader wants what happened and how it was done. They do not want to
+know how the research was done.
 
 ## Rules
 
@@ -44,43 +21,33 @@ The reader does not want to know how the research was done.
    Figures keep the draft's digits. A figure may be restated in the unit the
    book's language uses (24.8M as 2,480 万), never rounded or recomputed. A
    figure the draft does not have is not in the book.
-2. **Keep what the reader can use; leave the rest in the draft.** Everything
-   a reader needs to repeat a method or to judge it stays, in full: the
-   steps, the cadence, the people, the cost, the one or two figures that show
-   it worked. History stays as far as it explains a method or a turn. Detail
-   that neither teaches nor explains goes, however well sourced. When two
+2. **Nothing needed is lost.** Every method, step, figure, date and name that a
+   reader needs to understand or repeat what was done stays. When two
    sentences say the same thing, one goes.
-3. **Every method gets a verdict, where it is told.** After a method or a
-   turning point, say in a sentence or two which it was — luck or timing, the
-   subject's own doing, something a reader can copy (and how), or something
-   that cannot be copied (and why). The verdict is the author's judgment and
-   is worded as one; it rests on what the draft establishes and never claims
-   more. Where the record cannot tell luck from method, say that it cannot:
-   an honest "this cannot be told apart" is worth more than a guess.
-4. **No citations in the text.** No outlet names with years in parentheses, no
+3. **No citations in the text.** No outlet names with years in parentheses, no
    "according to" chains, no URLs. Name a publication or a document only when
    it is part of the story (a leaked handbook, a lawsuit, an interview where
    something was first said).
-5. **No account of the research.** Nothing about what was opened, checked,
+4. **No account of the research.** Nothing about what was opened, checked,
    archived, found, not found or could not be confirmed. No evidence labels.
    No mention of sources, reviewers, files or tools.
-6. **Uncertainty is carried by ordinary wording, once, where it matters.**
+5. **Uncertainty is carried by ordinary wording, once, where it matters.**
    Something only the subject has said is written the way a biographer would:
    "he later said…", "by his own account…". An estimate is called an estimate.
    Where the subject's account and the record differ and the difference
    matters, state both in one plain sentence. A claim too weak to state
    plainly is left out.
-7. **Never firmer than the draft.** "Not found in any source" does not become
+6. **Never firmer than the draft.** "Not found in any source" does not become
    "did not happen": write that the public record shows none, or leave it out.
    A report from a single outlet stays one outlet's report. Something the
    draft inferred is not written as something that was seen.
-8. **Accusations keep their wording.** An allegation stays an allegation, with
+7. **Accusations keep their wording.** An allegation stays an allegation, with
    who made it and how it ended.
-9. **Plain, short, direct.** Short sentences. Everyday words. No figures of
+8. **Plain, short, direct.** Short sentences. Everyday words. No figures of
    speech, no rhetorical questions, no summaries of what a chapter is about to
    say or has just said. Each chapter reads on from the one before; a fact
    told once is not told again.
-10. **Figures go in charts, never in running text.** Any run of figures a
+9. **Figures go in charts, never in running text.** Any run of figures a
    reader would otherwise have to hold in their head is a chart block: three
    or more dated values of one kind (a curve, uploads per month, income by
    year) is a line chart; one measure across several things (this video
@@ -94,13 +61,10 @@ The reader does not want to know how the research was done.
    and holds only what the reader needs exactly (the milestones, the yearly
    totals), not every reading the draft has; the same data is not shown
    twice in the book. Every value in a chart is a figure from the
-   draft, digits unchanged (rule 1 holds). A chart earns its place like a
-   paragraph does: it shows something the reader acts on or needs to believe.
-11. **Reasoning chapters say so once**, in their lead paragraph, in plain
-   words, then get on with it. They are the book's point, not an appendix:
-   they gather the verdicts into what to do, stage by stage, and do not
-   retell the chapters.
-12. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
+   draft, digits unchanged (rule 1 holds).
+10. **Reasoning chapters say so once**, in their lead paragraph, in plain
+   words, then get on with it.
+11. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
 
 ## Shape
 
@@ -108,11 +72,8 @@ The reader does not want to know how the research was done.
   names the subject; numbering starts with the chapter after it; the closing
   sources list is not numbered.
 - Each file: `# <title>`, a lead paragraph, then `##` sections. Sections may be
-  merged, split, reordered or dropped. Chapters keep their order and file
-  names; a chapter with little to teach is short.
-- The introduction gives the answer first: who this is, and in a few
-  sentences what made them, what was luck, and what a reader can take from
-  it. The chapters then show it.
+  merged, split or reordered when that reads better. Chapters keep their order
+  and file names.
 - A chart block stands on its own lines, with a blank line before and after:
 
   ````
@@ -144,11 +105,10 @@ one (re-read only the chapter before it, for continuity).
 
 ## Before finishing
 
-Re-read the whole book once from the first chapter, as a reader who wants to
-do what the subject did. Cut every sentence that talks about the research,
-repeats an earlier one, or teaches nothing; cut every section a reader could
-skip without losing a method, a verdict or the reason for one. A paragraph
-that still recites figures one after another becomes a chart, or goes.
+Re-read the whole book once from the first chapter, as its reader. Cut every
+sentence that talks about the research, repeats an earlier one, or carries no
+information. A paragraph that still recites figures one after another
+becomes a chart.
 
 Final message: characters per chapter, and anything in the draft you left out
 on purpose, with the reason. No chapter text.
