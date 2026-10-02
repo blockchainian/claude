@@ -45,7 +45,11 @@ export function validateAdapter(adapter) {
   for (const field of ['name', 'domain', 'startUrl']) {
     if (typeof adapter[field] !== 'string' || !adapter[field]) throw new Error(`adapter ${field} is required`);
   }
-  if (!/^[a-z0-9_]+$/.test(adapter.name) || ['google', 'x', 'tiktok'].includes(adapter.name)) throw new Error(`bad adapter name: ${adapter.name}`);
+  const table = store.toAppSlug(adapter.name);
+  if (!/^[a-z0-9_]+$/.test(adapter.name) || adapter.name !== table ||
+      ['google', 'x', 'tiktok'].includes(table) || table.startsWith('sqlite_')) {
+    throw new Error(`bad adapter name: ${adapter.name}`);
+  }
   if (!Array.isArray(adapter.entryTexts) || !adapter.entryTexts.length || adapter.entryTexts.some(t => typeof t !== 'string' || !t)) throw new Error('adapter entryTexts must be nonempty strings');
   for (const hook of ['signIn', 'ready']) if (typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
   for (const hook of ['signedInUrl', 'byEmail', 'verify']) if (adapter[hook] !== undefined && typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
@@ -75,7 +79,7 @@ export async function loadAdapters({ configPath = config.configJsonPath(), env =
       if (!Array.isArray(entries)) throw new Error('factory must return an array');
       for (const entry of entries) {
         validateAdapter(entry);
-        if (adapters.some(a => a.name === entry.name)) throw new Error(`duplicate adapter name: ${entry.name}`);
+        if (adapters.some(a => store.toAppSlug(a.name) === store.toAppSlug(entry.name))) throw new Error(`duplicate adapter name: ${entry.name}`);
         adapters.push(entry);
       }
     } catch (e) { throw new Error(`${path}: ${e.message}`, { cause: e }); }
