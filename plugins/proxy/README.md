@@ -36,8 +36,8 @@ tunnel), read the flows, tear it down.
 ## Test
 
 ```
-python3 skills/inspect-app-traffic/scripts/test_capture.py
-python3 skills/inspect-app-traffic/scripts/test_wg_config.py
+python3 skills/inspect-app-traffic/tests/test_capture.py
+python3 skills/inspect-app-traffic/tests/test_wg_config.py
 ```
 
 Or from the marketplace root: `npm run test:proxy`.

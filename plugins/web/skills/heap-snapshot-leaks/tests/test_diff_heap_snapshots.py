@@ -18,7 +18,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-SCRIPT = Path(__file__).with_name("diff_heap_snapshots.py")
+SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "diff_heap_snapshots.py"
 NODE_FIELDS = ["type", "name", "id", "self_size", "edge_count", "trace_node_id", "detachedness"]
 NODE_TYPES0 = ["hidden", "array", "string", "object", "code", "closure", "regexp", "number",
                "native", "synthetic", "concatenated string", "sliced string", "symbol", "bigint"]

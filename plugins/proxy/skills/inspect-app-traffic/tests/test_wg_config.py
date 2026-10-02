@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
-    "wg_config", Path(__file__).with_name("wg_config.py"))
+    "wg_config", Path(__file__).resolve().parent.parent / "scripts" / "wg_config.py")
 assert _spec and _spec.loader
 wg = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(wg)
