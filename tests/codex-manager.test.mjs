@@ -11,7 +11,7 @@ import test from "node:test";
 import { fakeDaemon, send } from "./helpers/fake-daemon.mjs";
 import { resolveSessionId } from "../plugins/codex/codex-manager/session.mjs";
 
-const manager = path.resolve("plugins/codex/codex-manager/codex-manager.mjs");
+const manager = path.resolve("plugins/codex/codex-manager/manager.mjs");
 const session = "11111111-2222-3333-4444-555555555555";
 
 async function tempHome() {
@@ -55,7 +55,7 @@ test("whoami runs when the script is reached through a symlinked plugin director
   const link = await mkdtemp(path.join(os.tmpdir(), "codex-manager-link-"));
   try {
     await symlink(path.dirname(path.dirname(manager)), path.join(link, "codex"));
-    const viaLink = path.join(link, "codex", "codex-manager", "codex-manager.mjs");
+    const viaLink = path.join(link, "codex", "codex-manager", "manager.mjs");
     const result = await new Promise((resolve) => {
       const child = spawn(process.execPath, [viaLink, "whoami"], { env: { ...process.env, CLAUDE_CODE_SESSION_ID: session }, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";

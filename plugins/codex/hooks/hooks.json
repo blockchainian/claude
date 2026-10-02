@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-manager/codex-manager.mjs\" pending",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-manager/manager.mjs\" pending",
             "timeout": 5
           }
         ]
