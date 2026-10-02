@@ -9,19 +9,22 @@ Read `references/evidence.md` next to this brief's folder and your chapter's
 row in the type file. You did not read the sources and you do not search the
 web.
 
-## A chapter built from the notes (every chapter between the introduction and the reasoning chapters)
+## A chapter built from the notes (every chapter between the introduction and the reasoning chapter)
 
 Your material is every bullet tagged with your chapter:
 `grep -h "\[cNN\]" <work>/notes/*.md`. Read all of them. Anything not in the
 notes does not go in.
 
-## The introduction and the reasoning chapters
+## The introduction and the reasoning chapter
 
 These are written after the others. Your material is the finished chapters in
 `md/`. The introduction says who this is, what they built and on what, from
-those chapters. A reasoning chapter opens by saying it is reasoning, not a
-finding, and rests only on what the chapters establish; a product's terms are
-givens of the task, stated as such.
+those chapters. The reasoning chapter opens by saying it is reasoning, not a
+finding, and rests only on what the chapters establish. When your message
+gives a product, the same chapter also says what that product's own accounts
+and creator program can take from the subject. The product is never named:
+call it by what it is ("a trading app", "its referral program"). Its terms
+are givens of the task, stated as such.
 
 ## Rules
 

@@ -37,9 +37,9 @@ async function run(args, slow = []) {
   return { calls, release, result: () => done }
 }
 
-const ARGS = { subject: 'Jane Doe', work: '/w', skill: '/s', lang: 'English', today: '2026-01-01', chapters: 12, tools: '', product: 'a product', seeds: '', caps: 'video site: 300 requests' }
+const ARGS = { subject: 'Jane Doe', work: '/w', skill: '/s', lang: 'English', today: '2026-01-01', tools: '', product: 'a product', seeds: '', caps: 'video site: 300 requests' }
 const labels = (calls, prefix) => calls.filter(c => c.label.startsWith(prefix)).map(c => c.label)
-const ALL = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11']
+const ALL = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10']
 
 test('sources found by several scouts are read once, eight to a reader; the numbers agents start with the scouts', async () => {
   const { calls, result } = await run(ARGS)
@@ -50,18 +50,18 @@ test('sources found by several scouts are read once, eight to a reader; the numb
   assert.ok(calls.findIndex(c => c.label === 'numbers:archive') < calls.findIndex(c => c.label === 'read:01'))
 })
 
-test('every chapter but the sources list is written, and the introduction and reasoning chapters come after the others', async () => {
+test('every chapter but the sources list is written, and the introduction and the reasoning chapter come after the others', async () => {
   const { calls } = await run(ARGS)
   const written = labels(calls, 'write:')
   assert.deepEqual([...written].sort(), ALL.map(f => `write:${f}`))
-  assert.deepEqual(written.slice(-3).sort(), ['write:01', 'write:10', 'write:11'])
-  assert.ok(calls.find(c => c.label === 'write:11').prompt.includes('a product'))
+  assert.deepEqual(written.slice(-2).sort(), ['write:01', 'write:10'])
+  assert.ok(calls.find(c => c.label === 'write:10').prompt.includes('a product'))
 })
 
-test('without a product there is no product chapter', async () => {
-  const { calls } = await run({ ...ARGS, chapters: 11, product: '' })
-  assert.ok(!labels(calls, 'write:').includes('write:11'))
-  assert.ok(!labels(calls, 'fix:').includes('fix:11'))
+test('a product adds no chapter: it is given to the writer of the one reasoning chapter, and only when there is one', async () => {
+  const { calls } = await run({ ...ARGS, product: '' })
+  assert.deepEqual(labels(calls, 'write:').sort(), ALL.map(f => `write:${f}`))
+  assert.ok(!calls.find(c => c.label === 'write:10').prompt.includes('product'))
 })
 
 test('the review covers every source and every chapter, one chapter per reviewer, and every chapter is fixed', async () => {
@@ -79,14 +79,14 @@ test('the review covers every source and every chapter, one chapter per reviewer
 test('the sources lens starts with the writers; a chapter is fixed when its own reviews and the sources lens are done', async () => {
   const { calls, release } = await run(ARGS, ['write:05', 'review:sources-2'])
   assert.ok(labels(calls, 'review:sources-').length === 6 && labels(calls, 'write:').length >= 8, 'sources reviewers run alongside the writers')
-  // the body chapters other than 05 are reviewed at once; the introduction and reasoning chapters wait for 05 to be written
+  // the body chapters other than 05 are reviewed at once; the introduction and the reasoning chapter wait for 05 to be written
   assert.deepEqual(labels(calls, 'review:quotes-').sort(), ['02', '03', '04', '06', '07', '08', '09'].map(f => `review:quotes-${f}`))
-  assert.deepEqual(labels(calls, 'write:').filter(l => ['write:01', 'write:10', 'write:11'].includes(l)), [])
+  assert.deepEqual(labels(calls, 'write:').filter(l => ['write:01', 'write:10'].includes(l)), [])
   assert.deepEqual(labels(calls, 'fix:'), [], 'no chapter is fixed before the sources lens is done')
   await release() // sources-2 and write:05 finish; the stand-ins let the rest run through
   const fixes = labels(calls, 'fix:')
-  assert.equal(fixes.length, 11)
-  assert.deepEqual(fixes.slice(-3).sort(), ['fix:01', 'fix:10', 'fix:11'], 'the introduction and reasoning chapters are fixed after the others')
+  assert.equal(fixes.length, 10)
+  assert.deepEqual(fixes.slice(-2).sort(), ['fix:01', 'fix:10'], 'the introduction and the reasoning chapter are fixed after the others')
 })
 
 test('a script matches every chapter\'s figures; only the timeline and turning-point chapters get a record reviewer, who judges the unmatched ones', async () => {

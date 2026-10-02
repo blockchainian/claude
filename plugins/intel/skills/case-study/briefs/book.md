@@ -25,8 +25,7 @@ for this subject:
 - what was luck or timing — the platform's state then, who happened to
   notice, what no longer exists;
 - what was their own skill or work;
-- what the reader can copy or adapt today, and how;
-- what cannot be copied, and why.
+- what the reader can copy or adapt today, and how.
 
 There is no target length. A chapter is as long as what it teaches and no
 longer. The test for every paragraph, figure and chart: does it help the
@@ -52,9 +51,10 @@ The reader does not want to know how the research was done.
    sentences say the same thing, one goes.
 3. **Every method gets a verdict, where it is told.** After a method or a
    turning point, say in a sentence or two which it was — luck or timing, the
-   subject's own doing, something a reader can copy (and how), or something
-   that cannot be copied (and why). The verdict is the author's judgment and
-   is worded as one; it rests on what the draft establishes and never claims
+   subject's own doing, or something a reader can copy (and how). What
+   cannot be repeated is said there, in passing, and nowhere else: the book
+   has no section, list or table of things that cannot be copied. The
+   verdict is the author's judgment and is worded as one; it rests on what the draft establishes and never claims
    more. Where the record cannot tell luck from method, say that it cannot:
    an honest "this cannot be told apart" is worth more than a guess.
 4. **No citations in the text.** No outlet names with years in parentheses, no
@@ -96,11 +96,17 @@ The reader does not want to know how the research was done.
    twice in the book. Every value in a chart is a figure from the
    draft, digits unchanged (rule 1 holds). A chart earns its place like a
    paragraph does: it shows something the reader acts on or needs to believe.
-11. **Reasoning chapters say so once**, in their lead paragraph, in plain
-   words, then get on with it. They are the book's point, not an appendix:
-   they gather the verdicts into what to do, stage by stage, and do not
-   retell the chapters.
-12. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
+11. **The reasoning chapter says so once**, in its lead paragraph, in plain
+   words, then gets on with it. It is the book's point, not an appendix: it
+   gathers the verdicts into what to do, stage by stage, and does not retell
+   the chapters. It is one chapter: where the draft also reasons about a
+   product's accounts or creator program, that is folded into the same
+   stages, as advice to the reader.
+12. **No product is named.** The book is about the subject. A product the
+   draft's reasoning was written for is called what it is ("a trading app",
+   "a referral program") or left out; the same holds for the reader's own
+   company or project.
+13. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
 
 ## Shape
 
@@ -112,7 +118,7 @@ The reader does not want to know how the research was done.
   names; a chapter with little to teach is short.
 - The introduction gives the answer first: who this is, and in a few
   sentences what made them, what was luck, and what a reader can take from
-  it. The chapters then show it.
+  it — not what they cannot. The chapters then show it.
 - A chart block stands on its own lines, with a blank line before and after:
 
   ````
