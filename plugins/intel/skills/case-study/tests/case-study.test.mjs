@@ -108,6 +108,12 @@ test('check passes clean book text whose sources list links every source, and re
   report = cs.check(work)
   assert.ok(!chapters(report.numbers_not_in_draft).includes('06'), 'a figure restated in another unit of ten is the draft\'s figure')
 
+  write(join(work, 'md', '06.md'), '# Chapter 6\n\nThe video has 179,000,000 views and the channel 1.2 billion.\n\n## Section\n\nBody.\n')
+  write(join(work, 'book', '06.md'), '# Chapter 6\n\n那条视频有 1.79 亿次播放，频道有 1,200,000,000 次，另一条有 7.77 亿次。\n\n## Section\n\nBody.\n')
+  report = cs.check(work)
+  assert.deepEqual(report.numbers_not_in_draft.find(c => c.chapter === '06')?.found, ['7.77'],
+    'a figure written out in full is the draft\'s figure in 亿 or in billions, and other digits are not')
+
   const series = '2012 年 5 月 2 日是 603 个，8 月 2 日 762 个，11 月 2 日 969 个，2013 年 2 月 1 日 1,128 个，每月约 52 到 68 个。'
   write(join(work, 'md', '07.md'), `# Chapter 7\n\nLead.\n\n## Section\n\n${series}\n`)
   write(join(work, 'book', '07.md'), `# Chapter 7\n\nLead.\n\n## Section\n\n${series}\n`)

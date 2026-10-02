@@ -42,7 +42,8 @@ The reader does not want to know how the research was done.
 
 1. **No new facts.** Every fact, name, date and figure comes from the draft.
    Figures keep the draft's digits. A figure may be restated in the unit the
-   book's language uses (24.8M as 2,480 万), never rounded or recomputed. A
+   book's language uses (24.8M as 2,480 万, 179,000,000 as 1.79 亿) when no
+   digit is lost, never rounded or recomputed. A
    figure the draft does not have is not in the book.
 2. **Keep what the reader can use; leave the rest in the draft.** Everything
    a reader needs to repeat a method or to judge it stays, in full: the
