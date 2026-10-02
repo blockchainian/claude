@@ -48,10 +48,10 @@ implementers run at once.
 
 Before the plan ships, and after every revision, run these two from inside the repo:
 
-- `${CLAUDE_PLUGIN_ROOT}/skills/ship/check-paths.sh <plan> [skip-regex]` — exits 1 on a
+- `${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/check-paths.sh <plan> [skip-regex]` — exits 1 on a
   `MISSING:` or `AMBIGUOUS:` path; mark files the plan creates `(new)` on their own line so they
   are skipped.
-- `${CLAUDE_PLUGIN_ROOT}/skills/ship/check-overlap.sh <plan>` — exits 1 when two workstreams
+- `${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/check-overlap.sh <plan>` — exits 1 when two workstreams
   list the same file, a merge conflict scheduled in advance.
 
 A plan that fails either goes back to the user with the checker's output; ship never edits the
@@ -64,7 +64,7 @@ any `handoff.md` sits beside it; the review's `review.md`, the triaged `findings
 ## Workstream worktrees
 
 Both lanes work in worktrees so nothing edits the session branch while another lane merges onto
-it. `${CLAUDE_PLUGIN_ROOT}/skills/ship/workstream.sh` owns their lifecycle; never run the git
+it. `${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/workstream.sh` owns their lifecycle; never run the git
 commands by hand:
 
 - `workstream.sh open <id>` — `../.workstream-<id>` on branch `workstream/<id>` from HEAD, with
@@ -220,7 +220,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 8. **Decide production, then write the record.** Production ships only when every finding is
    closed AND the re-run UX checks are green AND every test the plan's workstreams name has run
    and passed; a test that never ran or went red is a finding for the user, never a ship. When
-   the branch has a PR, run `${CLAUDE_PLUGIN_ROOT}/skills/ship/watch-ci.sh <ref> [out-file]`
+   the branch has a PR, run `${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/watch-ci.sh <ref> [out-file]`
    against the fixed head (the branch tip after step 7's push, or the original push when step 6
    found nothing) and read its verdict JSON; gate on the `conclusion` field, never on prose. Merge
    only on `conclusion: success`: a plain `gh pr merge`, never `--admin` — a merge that would need

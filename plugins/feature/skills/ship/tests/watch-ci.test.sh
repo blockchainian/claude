@@ -3,7 +3,7 @@
 # ABOUTME: terminal, asserting the consolidated verdict JSON shape and exit code. No live network.
 set -u
 cd "$(dirname "$0")" || exit 1
-SCRIPTS_DIR=$(cd .. && pwd)
+SCRIPTS_DIR=$(cd ../scripts && pwd)
 
 PASS=0
 FAIL=0

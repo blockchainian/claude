@@ -2,7 +2,7 @@
 
 Ship a feature from a written plan, with Claude orchestrating and never
 implementing. `/feature:ship` reads `plan.md`, opens a worktree per workstream
-(`skills/ship/workstream.sh`), launches the codex lane as one thread per
+(`skills/ship/scripts/workstream.sh`), launches the codex lane as one thread per
 workstream through [codex](../codex/README.md)'s `codex-manager` and the UX lane
 as one `ux-implementer` agent per UX workstream, all at once, checks and
 merges each workstream as it finishes behind the plan's Checks command, deploys
@@ -29,11 +29,11 @@ ship, the plan template and memory.
 | `/feature:ship` | Run a `plan.md` through the codex and UX lanes to a shipped feature |
 | `/feature:handoff` | Write a mid-phase handoff: stopped at, done, next, unverified, do not redo |
 | `/feature:retro` | Run in a fresh session on a finished session: rank the biggest wastes by real token cost, classify each (knowable-fact miss / topology deviation / plan defect), and propose fixes to ship, the plan template and memory |
-| `ship/check-paths.sh` | Flags a path named in the plan that does not exist in the repo; `(new)` files are skipped |
-| `ship/check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the orchestrator runs it beside the path checker |
-| `ship/workstream.sh` | `open <id>` a worktree per workstream, `check <id> <cmd>` in it, `merge <id> <cmd>` onto the session branch behind the same check, `base` for the review |
-| `retro/extract.mjs` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
-| `retro/efficacy.mjs` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
+| `ship/scripts/check-paths.sh` | Flags a path named in the plan that does not exist in the repo; `(new)` files are skipped |
+| `ship/scripts/check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the orchestrator runs it beside the path checker |
+| `ship/scripts/workstream.sh` | `open <id>` a worktree per workstream, `check <id> <cmd>` in it, `merge <id> <cmd>` onto the session branch behind the same check, `base` for the review |
+| `retro/scripts/extract.mjs` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
+| `retro/scripts/efficacy.mjs` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
 
 ## Agents
 
@@ -61,7 +61,7 @@ optional Deploy checks (commands run against each deploy). A CLI tool's plan
 has Checks and nothing else; a web app's names its deploys and probes.
 
 CI-watching needs nothing from the project: the plugin ships its own
-GitHub/`gh`-based poller, `skills/ship/watch-ci.sh <ref> [out-file]`, used by
+GitHub/`gh`-based poller, `skills/ship/scripts/watch-ci.sh <ref> [out-file]`, used by
 the production merge gate (step 8) whenever the branch has a PR.
 
 ## Install
@@ -81,11 +81,11 @@ remove them there; otherwise each fires twice.
 npm run test:feature
 ```
 
-Runs `hooks/tests/run.sh` (every case in `hooks/tests/cases.jsonl` through the
-three hook scripts), `skills/ship/tests/run.sh` (the two plan checkers against
+Runs `hooks/tests/hooks.test.sh` (every case in `hooks/tests/cases.jsonl` through the
+three hook scripts), `skills/ship/tests/plan-checkers.test.sh` (the two plan checkers against
 fixture plans in a throwaway repo), `skills/ship/tests/workstream.test.sh` (open, check,
 merge and base against a throwaway repo), `skills/ship/tests/watch-ci.test.sh` (the CI-watch
-poller against a stubbed `gh`), and `skills/retro/tests/run.sh` (the retro
+poller against a stubbed `gh`), and `skills/retro/tests/retro.test.sh` (the retro
 extractor against a hermetic fixture session).
 
 ## License
