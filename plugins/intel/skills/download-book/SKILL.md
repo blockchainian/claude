@@ -20,7 +20,7 @@ The browser profile persists at `~/.cache/secrets-manager/profiles/download-book
 Run the bundled script with a book title:
 
 ```sh
-node "${CLAUDE_PLUGIN_ROOT}/skills/download-book/scripts/anna-archive-links.mjs" "Pride and Prejudice"
+"${CLAUDE_PLUGIN_ROOT}/skills/download-book/scripts/anna-archive-links.mjs" "Pride and Prejudice"
 ```
 
 The script searches the first EPUB results page, reads download counts embedded in that page (using the metadata endpoint only when a count is missing), selects the highest count, calls the fast download API, and resolves a slow download link. For the slow link it prefers a "slightly faster but with waitlist" server (these download at megabytes per second after a short queue) over the "no waitlist" servers (immediate but throttled to tens of KB/s), polling the waitlist entry until its direct link appears and falling back to a no-waitlist server if the queue does not clear in time. It prints JSON with the selected record and any links found. The script itself does not fetch the book file. A run takes about 90 seconds — the browser check plus the slow server's queue.

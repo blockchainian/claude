@@ -109,3 +109,22 @@ test('source and quote reviewers run on Opus, record reviewers on the session mo
   assert.ok(reviewers.filter(c => c.label.startsWith('review:record')).every(c => c.model === undefined))
   assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/17 share'))
 })
+
+test('with the reading done, the run starts at the draft: no scout, reader or numbers agent, the merge still sizes the sources lens', async () => {
+  const { calls, result } = await run({ ...ARGS, done: 'read' })
+  assert.deepEqual([...labels(calls, 'scout:'), ...labels(calls, 'read:'), ...labels(calls, 'numbers:')], [])
+  assert.equal(calls[0].label, 'merge:read')
+  assert.equal(labels(calls, 'review:sources-').length, 6)
+  assert.deepEqual(labels(calls, 'write:').sort(), ALL.map(f => `write:${f}`))
+  assert.deepEqual(labels(calls, 'review:quotes-').sort(), ALL.map(f => `review:quotes-${f}`))
+  assert.deepEqual(labels(calls, 'fix:').sort(), ALL.map(f => `fix:${f}`))
+  assert.deepEqual((await result()).sources, Array.from({ length: 6 }, (_, i) => `done review:sources-${i + 1}`))
+})
+
+test('with the sources lens done too, no source is reviewed again and every chapter is still reviewed and fixed', async () => {
+  const { calls, result } = await run({ ...ARGS, done: 'read, sources' })
+  assert.deepEqual(labels(calls, 'review:sources-'), [])
+  assert.deepEqual(labels(calls, 'review:quotes-').sort(), ALL.map(f => `review:quotes-${f}`))
+  assert.deepEqual(labels(calls, 'fix:').sort(), ALL.map(f => `fix:${f}`))
+  assert.deepEqual((await result()).sources, [])
+})

@@ -1,3 +1,5 @@
+// ABOUTME: Workflow script for a creator case study: scouts, readers, numbers agents, chapter writers,
+// ABOUTME: adversarial reviewers and fixers, pipelined into one reviewed, sourced draft.
 export const meta = {
   name: 'case-study-creator',
   description: 'Research one creator into a reviewed sourced draft: scouts, parallel readers, numbers, chapter writers, adversarial review and fixes per chapter, pipelined',
@@ -10,9 +12,10 @@ export const meta = {
   ],
 }
 
-// args: { subject, work, skill, lang, today, tools, product, seeds, caps }
+// args: { subject, work, skill, lang, today, tools, product, seeds, caps, done }
 // skill is the absolute path of the case-study skill folder; tools, product, seeds and
-// caps may be empty strings.
+// caps may be empty strings. done names the stages whose files are already in the work directory and are not run
+// again: 'read' (the notes and the numbers: the run starts at the draft), 'sources' (the sources lens's findings).
 //
 // Nothing waits for a stage it does not need: the numbers agents start with the scouts, the sources lens starts
 // with the writers, and each chapter runs write → figures matched + quotes review → fix on its own. The only barriers are
@@ -24,6 +27,8 @@ const WORK = A.work
 const pad = n => String(n).padStart(2, '0')
 const FROM_NOTES = ['02', '03', '04', '05', '06', '07', '08', '09']
 const FROM_CHAPTERS = ['01', '10']
+const DONE = String(A.done || '').split(/[,\s]+/)
+const READ_DONE = DONE.includes('read')
 
 const COMMON = `Subject: ${A.subject}. Today is ${A.today}. Language of the study: ${A.lang}.
 Work directory: ${WORK}
@@ -42,10 +47,10 @@ const FOUND = { type: 'object', required: ['sources'], properties: { sources: { 
   properties: { url: { type: 'string' }, outlet: { type: 'string' }, year: { type: 'string' }, kind: { type: 'string' }, why: { type: 'string' } } } } } }
 // The numbers agents need no scout: the archive and the upload record are the profile's own addresses.
 const READERS_EXPECTED = 15 // for the caps share before the scouts return; readers get their exact count
-const numbersDone = parallel(['archive', 'uploads'].map(lane => () => agent(
+const numbersDone = READ_DONE ? null : parallel(['archive', 'uploads'].map(lane => () => agent(
   `${COMMON}\nYou are a numbers agent. Follow ${S}/briefs/numbers.md. Your lane: ${lane}.${share(READERS_EXPECTED + 2)}`,
   { label: `numbers:${lane}`, phase: 'Scout', ...SONNET })))
-const scouted = (await parallel(LANES.map(lane => () => agent(
+const scouted = READ_DONE ? [] : (await parallel(LANES.map(lane => () => agent(
   `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your lane: ${lane} (see "Scout lanes" in the type file).${share(LANES.length)}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}`,
   { label: `scout:${lane}`, phase: 'Scout', schema: FOUND, ...SONNET })))).filter(Boolean)
 const seen = new Set()
@@ -56,7 +61,7 @@ for (const s of scouted.flatMap(r => r.sources)) {
 }
 const batches = []
 for (let i = 0; i < urls.length; i += 8) batches.push(urls.slice(i, i + 8))
-log(`scouts: ${scouted.length}/${LANES.length} lanes, ${urls.length} distinct sources, ${batches.length} reader batches`)
+if (!READ_DONE) log(`scouts: ${scouted.length}/${LANES.length} lanes, ${urls.length} distinct sources, ${batches.length} reader batches`)
 
 phase('Read')
 const agentsReading = batches.length + 2
@@ -84,7 +89,7 @@ const matchFigures = file => agent(
   { label: `figures:${file}`, phase: 'Review', model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 // The sources lens checks the sources themselves, not the chapters: it runs while the chapters are written.
 const sliceCount = Math.ceil(sourceCount / 25)
-const sourcesReviewed = parallel(Array.from({ length: sliceCount }, (_, i) => () => review('sources', `sources-${i + 1}`,
+const sourcesReviewed = DONE.includes('sources') ? Promise.resolve([]) : parallel(Array.from({ length: sliceCount }, (_, i) => () => review('sources', `sources-${i + 1}`,
   `the urls printed by: ${S}/scripts/case-study.mjs slice "${WORK}" ${i + 1} ${sliceCount}`)))
 
 const write = file => agent(

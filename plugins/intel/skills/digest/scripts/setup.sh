@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ABOUTME: Idempotent auto-setup for digest: installs only what's missing.
 # ABOUTME: uv (article extractor, PDF scripts) + yt-dlp (YouTube subs) + poppler (pdftotext).
 

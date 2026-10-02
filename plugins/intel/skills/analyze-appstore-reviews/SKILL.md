@@ -28,7 +28,7 @@ claim from the data, drop it.
 ### 1. Ground with deterministic stats (script)
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/analyze-appstore-reviews/scripts/stats.mjs" \
+"${CLAUDE_PLUGIN_ROOT}/skills/analyze-appstore-reviews/scripts/stats.mjs" \
   <reviews.json> --dump-dir <scratch>
 ```
 

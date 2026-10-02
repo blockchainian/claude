@@ -78,7 +78,7 @@ Priority is separate and by type: coined outranks metaphor regardless of length.
 ## The checker — `scripts/check.mjs`
 
 ```
-node scripts/check.mjs <name|domain> ...
+"${CLAUDE_PLUGIN_ROOT}/skills/find-domain-names/scripts/check.mjs" <name|domain> ...
 ```
 
 A bare word (`trovy`) expands to `.xyz/.ai/.fun`; a full domain (`trovy.xyz`)
