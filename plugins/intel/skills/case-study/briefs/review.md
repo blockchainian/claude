@@ -79,10 +79,10 @@ chapter once. Per row:
   shown does. That is a wrong outlet, unless the passage shows it quoting the
   named one.
 - `not found`, `no saved text`: open the source and look. A translated
-  quotation with no ⟦ ⟧ after it is a finding (mislabelled) even when the
-  translation holds: its fix is the source's words to put there. Marks
-  around words that are nobody's (a term, a heading) are no quotation: say so
-  in the row, with no finding.
+  quotation with no ⟦ ⟧ after it is checked the same way; when the
+  translation holds, the missing ⟦ ⟧ is no finding. Marks around words that
+  are nobody's (a term, a heading) are no quotation: say so in the row, with
+  no finding.
 
 A sentence of the form "X said / wrote / reported" with no quotation marks is
 not in that file: search the saved text its last section lists, several

@@ -218,13 +218,19 @@ const DATED_ROW = /^(?:\[[^\]]+\]\s*)+((?:19|20)\d\d)-(\d\d)-\d\d\b/
 export function bullets(work, chapter) {
   // The lines of the notes tagged for one chapter, in file order. In the numbers notes each `##` section is headed by
   // its title, and a section's dated rows are thinned to the first of each quarter and the last, with a line saying
-  // how many rows stayed behind in the file.
+  // how many rows stayed behind in the file. The bullets of a source the reviewers failed are left out: no sentence
+  // may rest on it.
   const tag = `[c${chapter}]`
+  const failed = new Set(files(join(work, 'review'), '.failed.json').flatMap(path => readJson(path, 'array')))
   const out = []
   for (const path of files(join(work, 'notes'), '.md')) {
     const name = relative(work, path)
     if (!name.startsWith('notes/numbers-')) {
-      out.push(...lines(read(path)).filter(line => line.includes(tag)))
+      let url = ''
+      for (const line of lines(read(path))) {
+        if (line.startsWith('url:')) url = line.slice(4).trim()
+        if (line.includes(tag) && !failed.has(url)) out.push(line)
+      }
       continue
     }
     for (const section of read(path).split(/^(?=## )/m)) {
