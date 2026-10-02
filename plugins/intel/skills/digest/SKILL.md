@@ -54,7 +54,7 @@ for PDFs). Typesetting a highlights PDF also needs Google Chrome.
 1. **Fetch.**
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/fetch_source.py" "<url>"
+   uv run "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/fetch_source.py" "<url>"
    ```
 
    It prints JSON with `slug`, `transcript` (the text file path), `draft`,

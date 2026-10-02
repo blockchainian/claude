@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --quiet --script
 # ABOUTME: Fetches the readable text of a source URL and writes it as plain text.
 # ABOUTME: Handles articles, transcript pages, YouTube subtitles, PDFs, and audio.
 

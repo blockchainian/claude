@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --quiet --script
 """Regression tests for the phone-session-gate hook.
 
 One Appium session per phone, and only after a claim: a create without a claim

@@ -87,7 +87,7 @@ audio leg and `digest` for the notes.
 
 ```
 node --test skills/transcribe/tests/*.mjs
-python3 skills/digest/tests/test_fetch_source.py
+uv run skills/digest/tests/test_fetch_source.py
 node --test skills/digest/tests/*.mjs
 uv run skills/digest/tests/test_pdf_highlights.py
 node --test skills/translate/tests/*.mjs
