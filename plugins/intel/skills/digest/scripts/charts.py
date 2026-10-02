@@ -160,8 +160,10 @@ def line_chart(settings, rows, block):
     for n, s in enumerate(series):
         points = " ".join(f"{px(x):.1f},{py(v):.1f}" for x, v in zip(xs, s))
         out.append(f'<polyline points="{points}" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="{DASHES[n % 3]}"/>')
-        # the last, the first and the highest value are placed first, then the others where there is room
-        for i in sorted(range(len(s)), key=lambda i: (i != len(s) - 1, i != 0, -s[i])):
+        # a short series prints every value that fits (the last, the first and the highest are placed first);
+        # a long one prints only those three, so the line stays readable
+        order = sorted(range(len(s)), key=lambda i: (i != len(s) - 1, i != 0, -s[i]))
+        for i in order if len(s) <= 8 else [i for i in order if i in (0, len(s) - 1, s.index(max(s)))]:
             anchor = "start" if px(xs[i]) < LEFT + 30 else "end" if px(xs[i]) > W - RIGHT - 30 else "middle"
             placed = label(px(xs[i]), py(s[i]), rows[i][n + 1], anchor)
             if placed:

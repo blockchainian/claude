@@ -55,7 +55,12 @@ know how the research was done.
    with several attributes, or exact values that must all be readable, are a
    table. The paragraph beside it says in words what the chart shows — the
    turn, the gap, the pace — and does not repeat its values. A single figure,
-   or two, stays in the sentence. Every value in a chart is a figure from the
+   or two, stays in the sentence. The point is fewer figures in front of the
+   reader, not the same figures in boxes: a series is drawn once, as a line,
+   and is not also printed as a table; a table has at most about eight rows
+   and holds only what the reader needs exactly (the milestones, the yearly
+   totals), not every reading the draft has; the same data is not shown
+   twice in the book. Every value in a chart is a figure from the
    draft, digits unchanged (rule 1 holds).
 10. **Reasoning chapters say so once**, in their lead paragraph, in plain
    words, then get on with it.
