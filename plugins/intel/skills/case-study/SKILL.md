@@ -24,12 +24,9 @@ description: >
 A case study answers one question about one subject: how did they get here,
 and which parts of it are on the record. The work has two layers. The sourced
 draft (`md/`) names the evidence behind every sentence and is what the
-reviewers audit. The book (`book/`) is what the reader gets: a practical book
-with a cover, distilled from the draft — what the subject did, what was luck,
-what was their own doing, what a reader can copy and what they cannot —
-written plainly, with no citations in the text and nothing about how the
-research was done. The draft is the record; the book is what the record
-teaches, and is as long as that takes. Its figures are shown as charts and tables,
+reviewers audit. The book (`book/`) is what the reader gets: a short book with
+a cover, written plainly, complete, with no citations in the text and nothing
+about how the research was done. Its figures are shown as charts and tables,
 not recited in sentences.
 
 Fewer solid claims beat more weak ones. A thin source list, a subject who
@@ -167,8 +164,7 @@ ask for one name.
      one goes back to the writer; a false one (a date in parentheses, a term
      that belongs to the story) is noted and passed.
    - Read the introduction and one middle chapter yourself. Text that reads as
-     a report of the research, or that documents the record without teaching
-     a reader what to do, goes back to the writer.
+     a report of the research goes back to the writer.
 
 6. **Render.**
 
