@@ -3,6 +3,8 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow", "numpy"]
 # ///
+# ABOUTME: Compares two screenshots: the mean difference, and the offset at which the later frame is found
+# ABOUTME: in the earlier one, so a page that scrolled is told from one that only carries a ticking value.
 """Compare two screenshots: how much they differ, and whether the page scrolled.
 
 The capture loop turns on one question after every scroll — did the page move? —

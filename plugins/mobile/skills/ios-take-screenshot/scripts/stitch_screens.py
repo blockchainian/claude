@@ -3,6 +3,8 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow", "numpy"]
 # ///
+# ABOUTME: Stitches overlapping iOS screen slices into one full-screen PNG: drops the fixed chrome, finds each
+# ABOUTME: overlap, splices so repeated content appears once, and prints a JSON verdict per seam.
 """Stitch overlapping iOS screen slices into one full-screen PNG.
 
 iOS screenshots capture only the visible viewport. Given slices taken while

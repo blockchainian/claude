@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
-# Resolve an installed iOS app's bundle identifier on a device or a simulator.
-# devicectl hides App Store apps unless --include-all-apps is passed, and does
-# not see simulators at all; simulators are listed by simctl instead.
+#!/bin/bash
+# ABOUTME: Resolves an installed iOS app's bundle identifier on a device or a simulator.
+# ABOUTME: devicectl hides App Store apps unless --include-all-apps is passed, and does
+# ABOUTME: not see simulators at all; simulators are listed by simctl instead.
 set -euo pipefail
 
 usage() {

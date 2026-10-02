@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
-# Capture one full-resolution slice from a simulator this run holds into a PNG.
-# Refuses "booted", which simctl resolves to an arbitrary simulator when
-# several are up, and refuses a simulator claimed by another run or by none.
+#!/bin/bash
+# ABOUTME: Captures one full-resolution slice from a simulator this run holds into a PNG.
+# ABOUTME: Refuses "booted", which simctl resolves to an arbitrary simulator when several are up,
+# ABOUTME: and refuses a simulator claimed by another run or by none.
 set -euo pipefail
 
 usage() {
