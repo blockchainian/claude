@@ -49,19 +49,19 @@ follow.
 - List captures:
   `curl -s "https://web.archive.org/cdx?url=<profile url>&output=json&collapse=timestamp:6&fl=timestamp,statuscode"`
 - The whole curve in one command, for every address the profile has had:
-  `<this skill>/scripts/wayback.py curve <work>/raw/archive <address>...`
+  `<this skill>/scripts/wayback.mjs curve <work>/raw/archive <address>...`
   It lists the monthly captures, fetches them in one batch, saves every page,
   and prints one JSON line per capture: date, the count it read (`value`), the
   page's own wording when the count is rounded or in another language
   (`text`), the capture URL and the saved file.
 - Other captures in one batch, never one `curl` at a time: put the capture
   URLs (`https://web.archive.org/web/<timestamp>id_/<url>`) in a file, then
-  `<this skill>/scripts/wayback.py fetch <work>/raw/archive --from <file>`.
-- Both keep to 30 requests a minute per route, drop a route the archive
-  refuses, and stop with an error when every route is refused: report that
-  error, do not retry around it. Routes are the proxies in `WAYBACK_PROXIES`
-  (comma-separated URLs, one per exit IP); without it there is one route, the
-  direct connection. One agent at a time uses the archive.
+  `<this skill>/scripts/wayback.mjs fetch <work>/raw/archive --from <file>`.
+- Both keep to 30 requests a minute and stop with an error when the archive
+  refuses the connection: report that error, do not retry around it. Requests
+  go through the proxy in `ISP_PROXY_URL` (one URL; the proxy rotates its exit
+  addresses itself); without it they go direct. One agent at a time uses the
+  archive.
 - A status of 429 in the output is a capture of a page that answered 429 at
   the time, not a limit on you. Pick another capture near that date.
 - Where the counts are:
