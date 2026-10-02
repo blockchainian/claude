@@ -142,6 +142,11 @@ def amounts(text):
     return found
 
 
+LABEL_AFTER_STOP = re.compile(r"([。！？!?])\s*([〔（(\[][^〔〕（）()\[\]]*[〕）)\]])")
+LABEL_FIRST = re.compile(r"\s*[〔（(\[]")
+LABEL_LAST = re.compile(r"[。！？!?]\s*[〔（(\[][^〔〕（）()\[\]]*[〕）)\]]\s*$")
+
+
 def figures(work, chapter, worklist=False):
     """Match every figure in a draft chapter against the saved text of the sources its sentence names, and write
     the ones that are not there as findings for the chapter's fixer, or, as a worklist, for a reviewer to judge."""
@@ -167,9 +172,15 @@ def figures(work, chapter, worklist=False):
     unmatched, lines = [], []
     body = (work / "md" / f"{chapter}.md").read_text(encoding="utf-8")
     anywhere = named(body)  # a paragraph that names no source (a lead, a summary) restates the chapter's own figures
-    for paragraph in re.split(r"\n\s*\n", body):
+    paragraphs = re.split(r"\n\s*\n", body)
+    # A label in brackets right after a full stop belongs to the sentence before it in a chapter whose paragraphs
+    # end on a label, and to the sentence after it in a chapter whose paragraphs open with one.
+    labels_follow = sum(bool(LABEL_LAST.search(p)) for p in paragraphs) > sum(bool(LABEL_FIRST.match(p)) for p in paragraphs)
+    for paragraph in paragraphs:
         if paragraph.lstrip().startswith("#"):
             continue
+        if labels_follow:
+            paragraph = LABEL_AFTER_STOP.sub(lambda m: m.group(2) + m.group(1) if named(m.group(2)) else m.group(0), paragraph)
         for sentence in re.split(r"(?<=[。！？!?])|(?<=\.)\s+(?=[A-Z])|\n", paragraph):
             cited = named(sentence) or named(paragraph) or anywhere
             bare = sentence

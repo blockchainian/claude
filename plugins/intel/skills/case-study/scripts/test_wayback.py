@@ -103,6 +103,9 @@ def main():
         results = wb.fetch_all(urls[:3], ["first", "second"], tmp / "b", per_minute=6000, get=get)
         check("a refused route is left and the others finish the work", len(results) == 3 and all(r["status"] == 200 and r["route"] == 1 for r in results), str(results))
         check("a refused route is not used again", seen.count("first") <= wb.WORKERS_PER_ROUTE, str(seen))
+        import gzip
+        results = wb.fetch_all(urls[:1], ["only"], tmp / "z", per_minute=6000, get=lambda route, url: (200, gzip.compress(b"1,234 subscribers")))
+        check("a capture the archive replays compressed is saved as text", Path(results[0]["file"]).read_text() == "1,234 subscribers")
 
         try:
             wb.fetch_all(urls[:3] + [f"{base}/throttled"], [None], tmp / "c", per_minute=6000)
