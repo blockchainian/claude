@@ -9,7 +9,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { fakeDaemon, send } from "./helpers/fake-daemon.mjs";
-import { resolveSessionId } from "../plugins/codex/codex-manager/session.mjs";
+import { resolveSessionId } from "../codex-manager/session.mjs";
 
 const manager = path.resolve("plugins/codex/codex-manager/manager.mjs");
 const session = "11111111-2222-3333-4444-555555555555";
