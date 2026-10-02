@@ -39,7 +39,7 @@ clone is the path that stays put across plugin updates:
 ```toml
 [mcp_servers.claude]
 command = "node"
-args = ["/Users/you/.claude/plugins/marketplaces/blockchainian/plugins/codex/codex-manager/codex-manager.mjs", "claude-tools"]
+args = ["/Users/you/.claude/plugins/marketplaces/blockchainian/plugins/codex/codex-manager/codex-manager.mjs", "claude"]
 tool_timeout_sec = 360
 default_tools_approval_mode = "approve"
 ```
@@ -115,7 +115,7 @@ whatever was still held, and the manager withdraws the open questions too.
 
 ## How a tool call finds its Claude session
 
-Codex starts the tools server itself (`codex-manager.mjs claude-tools`), so it
+Codex starts the tools server itself (`codex-manager.mjs claude`), so it
 knows nothing of Claude's session. Codex sends the calling thread's id with
 every MCP tool call (`_meta.threadId`). The manager records, for each thread it
 starts, attaches or adopts, which session supervises it and the manager's pid;

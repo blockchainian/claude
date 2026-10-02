@@ -66,7 +66,7 @@ async function callTool({ name, arguments: args = {}, _meta: meta = {} }, cancel
   return said("Delivered to Claude.");
 }
 
-export async function runClaudeTools(version) {
+export async function runClaude(version) {
   const reply = (id, body) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...body })}\n`);
   const cancelled = new Set();
   const handle = async ({ id, method, params = {} }) => {
@@ -86,10 +86,10 @@ export async function runClaudeTools(version) {
     try {
       message = JSON.parse(line);
     } catch {
-      process.stderr.write(`claude-tools: ignoring invalid JSON: ${line.slice(0, 80)}\n`);
+      process.stderr.write(`claude: ignoring invalid JSON: ${line.slice(0, 80)}\n`);
       continue;
     }
-    const work = handle(message).catch((error) => process.stderr.write(`claude-tools: ${error.stack || error.message}\n`));
+    const work = handle(message).catch((error) => process.stderr.write(`claude: ${error.stack || error.message}\n`));
     inflight.add(work);
     work.finally(() => inflight.delete(work));
   }

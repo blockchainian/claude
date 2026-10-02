@@ -168,7 +168,7 @@ class McpChild {
 /** The server codex runs for notify_claude and ask_claude; it gets no Claude session id of its own. */
 class ToolsChild extends McpChild {
   constructor(home, env = {}) {
-    super(home, "unused", { CLAUDE_CODE_SESSION_ID: "", ...env }, "claude-tools");
+    super(home, "unused", { CLAUDE_CODE_SESSION_ID: "", ...env }, "claude");
   }
 
   tool(name, threadId, callId, text) {
@@ -260,7 +260,7 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     assert.equal(start.serviceName, "codex-manager");
     assert.deepEqual(start.config, {
       "sandbox_workspace_write.network_access": true,
-      "mcp_servers.claude": { command: process.execPath, args: [manager, "claude-tools"], env: { CODEX_MANAGER_HOME: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
+      "mcp_servers.claude": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_HOME: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
     });
     assert.equal(start.dynamicTools, undefined);
     assert.deepEqual(JSON.parse(await readFile(path.join(home.home, "threads", "thread-A.json"), "utf8")), { sessionId: session, pid: mcp.child.pid });
