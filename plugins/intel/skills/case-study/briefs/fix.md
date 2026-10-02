@@ -40,9 +40,23 @@ you are interrupted.
    re-read the fixed chapters first, and rest on nothing they no longer say.
 9. When you are sure a reviewer is wrong, leave the text and record why, with
    the source's wording.
+10. A fix changes only what its finding names. The sentences around it keep
+   their wording and their figures: a figure no finding names has been
+   matched against its source already (`review/figures-<NN>.md`) and is not
+   removed, re-derived or doubted on your own account. A figure the script
+   could not match because it is derived (a rate, a difference, a count of
+   rows) stays, with the figures it was computed from beside it.
 
 Anything new you add meets the same rules as the first draft. A source you
 add takes a label that is not already a value in `sources.json`.
+
+When every finding has its line, run both checks on your chapter and mend
+what they report before you finish:
+`<skill>/scripts/case-study.mjs quotes <work> NN` (a quotation not found:
+its ⟦ ⟧ words are missing or retyped — copy them from the bullet; a sentence
+that names no source — add its label) and
+`<skill>/scripts/case-study.mjs figures <work> NN` (a figure not found that
+is not derived — correct it from the source or remove it).
 
 Edit only `md/<your file>`. Do not edit `sources.json`. Write:
 - `review/fix-<NN>.md` — one line per finding, appended right after you

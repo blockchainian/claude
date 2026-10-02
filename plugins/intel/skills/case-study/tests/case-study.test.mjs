@@ -2,7 +2,7 @@
 // ABOUTME: Covers init (layout, cover, idempotence), check (sourced draft, book text, sources, counts), merge, slice, findings, figures, quotes, unread and bullets.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -332,6 +332,27 @@ test('bullets prints a chapter\'s lines from the notes, with a dated table of th
   write(join(long, 'review', 'sources-1.failed.json'), JSON.stringify(['https://b.example/y']))
   assert.deepEqual(cs.bullets(long, '04'), ['- [c03][c04] [on record] (2020) a fact — A 2020', '- [c04] [self-reported] (2020) a method — A 2020', '- [c04] [on record] (2021) a report — C 2021'],
     'the bullets of a source the reviewers failed are left out')
+})
+
+test('codex runs the fixer prompt of a chapter on a Codex model, in the work directory, and reports its last message and usage', () => {
+  const work = join(tmp, 'codex')
+  for (const dir of ['review', 'md']) mkdirSync(join(work, dir), { recursive: true })
+  write(join(work, 'review', 'fix-04.prompt.txt'), 'You are a fixer. Your chapter file: md/04.md (NN = 04).')
+  const argv = cs.codexCommand(work, '04', 'gpt-6-luna')
+  assert.equal(argv[0], 'codex')
+  assert.ok(argv.includes('exec') && argv.includes('--json') && argv.includes('--skip-git-repo-check'), 'one-shot, machine-readable, outside a repo')
+  assert.deepEqual(argv.slice(argv.indexOf('-m'), argv.indexOf('-m') + 2), ['-m', 'gpt-6-luna'])
+  assert.ok(argv.some(a => a.includes('model_reasoning_effort=high')), 'the fixer reasons at high effort')
+  assert.ok(argv.some(a => a.includes('writable_roots') && a.includes('case-study-limits')), 'the gate script keeps its pacing files outside the work directory')
+  assert.equal(argv.at(-1), 'You are a fixer. Your chapter file: md/04.md (NN = 04).', 'the prompt is the saved one')
+  const events = [
+    { type: 'item.completed', item: { type: 'agent_message', text: 'first' } },
+    { type: 'item.completed', item: { type: 'command_execution', command: 'ls' } },
+    { type: 'item.completed', item: { type: 'agent_message', text: '14 findings: 12 fixed, 2 removed.' } },
+    { type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 7 } },
+  ].map(e => JSON.stringify(e)).join('\n')
+  assert.deepEqual(cs.codexResult(events), { message: '14 findings: 12 fixed, 2 removed.', usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 7 } })
+  assert.deepEqual(cs.codexResult(''), { message: '', usage: null }, 'a run that wrote nothing reports nothing')
 })
 
 test('both scripts run when called through a symlink to their folder, as an installed plugin is', () => {

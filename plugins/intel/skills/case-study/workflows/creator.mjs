@@ -8,11 +8,11 @@ export const meta = {
     { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
     { title: 'Write', detail: 'one writer per chapter, then the introduction and the reasoning chapter', model: 'sonnet' },
     { title: 'Review', detail: 'sources lens on Opus after the merge, before any chapter is written; per chapter, as each is written: a script matches its figures, the quotes lens (Opus) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
-    { title: 'Fix', detail: 'one fixer per chapter, as soon as its reviews are done', model: 'sonnet' },
+    { title: 'Fix', detail: 'one fixer per chapter, as soon as its reviews are done, on gpt-6-luna through codex exec' },
   ],
 }
 
-// args: { subject, work, skill, lang, today, tools, product, seeds, caps, done }
+// args: { subject, work, skill, lang, today, tools, product, seeds, caps, done, fixer }
 // skill is the absolute path of the case-study skill folder; tools, product, seeds and
 // caps may be empty strings. done names the stages whose files are already in the work directory and are not run
 // again: 'read' (the notes and the numbers: the run starts at the draft), 'sources' (the sources lens's findings).
@@ -97,9 +97,17 @@ const sourcesMerged = DONE.includes('sources') ? Promise.resolve() : sourcesRevi
 const write = file => agent(
   `${COMMON}\nYou are a draft writer. Follow ${S}/briefs/write.md. Your chapter file: md/${file}.md (see the chapter table in the type file).${file === '10' && A.product ? `\nThe product for this chapter: ${A.product}` : ''}`,
   { label: `write:${file}`, phase: 'Write', ...SONNET })
-const fix = file => agent(
-  `${COMMON}\nYou are a fixer. Follow ${S}/briefs/fix.md. Your chapter file: md/${file}.md (NN = ${file}).`,
-  { label: `fix:${file}`, phase: 'Fix', ...SONNET })
+// The fixer is a bounded edit under listed findings; a Codex model does it as well as Sonnet for a fraction of the
+// cost (pilot on brooke-monk chapter 04), so it runs there through the script, driven by a Haiku agent that only
+// saves the prompt and runs the command. The brief makes an interrupted fixer resume, so a run cut off by the
+// agent's command timeout is run again. args.fixer names a Claude model (sonnet, opus, haiku) to keep it here.
+const FIXER = A.fixer || 'gpt-6-luna'
+const fixerPrompt = file => `${COMMON}\nYou are a fixer. Follow ${S}/briefs/fix.md. Your chapter file: md/${file}.md (NN = ${file}).`
+const fix = file => ['sonnet', 'opus', 'haiku'].includes(FIXER)
+  ? agent(fixerPrompt(file), { label: `fix:${file}`, phase: 'Fix', ...SONNET, model: FIXER })
+  : agent(
+    `Save the text between the lines of === to ${WORK}/review/fix-${file}.prompt.txt, exactly, with the Write tool. Then run exactly this command with the longest timeout you can give it, and run it again if it times out, until it exits on its own:\n${S}/scripts/case-study.mjs codex "${WORK}" ${file} --model ${FIXER}\nReturn its output, nothing else.\n===\n${fixerPrompt(file)}\n===`,
+    { label: `fix:${file}`, phase: 'Fix', model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 // One chapter's chain: written → figures matched and reviewed → fixed.
 const written = {}
 const chain = (file, writeAfter, fixAfter) => {

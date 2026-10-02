@@ -102,14 +102,14 @@ ask for one name.
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `md/`, from the notes only |
    | Review | sources lens per 25 URLs, after the merge and before any chapter is written; per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
-   | Fix | one per chapter, as soon as its two reviews are done; the introduction and the reasoning chapter after the others | Apply the findings to `md/` |
+   | Fix | one per chapter, as soon as its two reviews are done; the introduction and the reasoning chapter after the others. Runs on gpt-6-luna through `codex exec` (`case-study.mjs codex`), driven by a Haiku agent; `args.fixer: sonnet` keeps it on Claude | Apply the findings to `md/`, then mend what the `quotes` and `figures` scripts still report |
 
    A chapter runs write → review → fix on its own; the slowest chapter sets
    the time, not the slowest agent of every stage added up.
 
    Run it with the Workflow tool (this skill asks for it):
    `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.mjs`,
-   `args: { subject, work, skill, lang, today, tools, product, seeds, caps, done }`
+   `args: { subject, work, skill, lang, today, tools, product, seeds, caps, done, fixer }`
    — `skill` is this skill's absolute folder, `tools` is the tool list file, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the
    tool list in one line (the script gives each agent its share). Empty
