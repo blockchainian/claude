@@ -495,11 +495,14 @@ export function recitedSeries(text) {
   return found
 }
 
+const UNIT_SHIFTS = Array.from({ length: 19 }, (_, i) => i - 9)
+
 export function restated(number, knownValues) {
-  // True when the figure is a known one in another unit: 24.8M as 2,480 万, 1.2B as 12 亿.
+  // True when the figure is a known one in another unit: 24.8M as 2,480 万, 1.2B as 12 亿, 179,000,000 as 1.79 亿.
+  // The largest unit is a billion, so the two differ by at most nine powers of ten.
   const value = Number(number)
   const tolerance = 1e-9 * Math.max(value, 1)
-  return knownValues.some(k => [-4, -3, -2, -1, 0, 1, 2, 3, 4].some(e => Math.abs(value - k * 10 ** e) <= tolerance))
+  return knownValues.some(k => UNIT_SHIFTS.some(e => Math.abs(value - k * 10 ** e) <= tolerance))
 }
 
 function layer(work, folder, ids) {
