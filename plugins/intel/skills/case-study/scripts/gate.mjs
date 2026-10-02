@@ -7,7 +7,7 @@
 //        gate.mjs wayback <args...>       this skill's wayback.mjs, one run at a time
 //        gate.mjs chrome <args...>        opencli <args...>, at most CHROME_SLOTS at once; Google searches paced
 //        gate.mjs yt <args...>            yt-dlp <args...> (Chrome cookies added for YouTube), at most YT_SLOTS at once
-//        gate.mjs fetch-x-posts <args...> the fetch-x-posts script named by FETCH_X_POSTS: X search, one JSON post per line
+//        gate.mjs fetch-x-posts <args...> the fetch-x-posts script named by FETCH_X_POSTS: X search on an account pool, one JSON post per line
 //        gate.mjs gdelt "<url>"           GDELT, one request every 6 seconds machine-wide
 //        gate.mjs stats                   calls and failures per command since the log began
 // State (pace files, slot locks, the log) lives in ~/.cache/case-study-limits, shared with fetch-x-posts. Settings come
