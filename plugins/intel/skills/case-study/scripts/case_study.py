@@ -2,7 +2,7 @@
 # ABOUTME: Scaffolds a case-study work dir in the digest store and checks it before rendering.
 # ABOUTME: init writes chapters.json + sources.json; check verifies the sourced draft, the book text and sources.
 #
-# Usage: case_study.py init <slug> --title <title> --cover <name> --source <url> --out <pdf> [--chapters 12]
+# Usage: case_study.py init <slug> --title <title> --cover <name> --source <url> --out <pdf> [--chapters 11]
 #        case_study.py merge <work dir>
 #        case_study.py slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
 #        case_study.py figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
@@ -289,7 +289,7 @@ def main():
     p.add_argument("--cover", required=True, help="the subject's name, set large on the cover")
     p.add_argument("--source", required=True)
     p.add_argument("--out", required=True)
-    p.add_argument("--chapters", type=int, default=12)
+    p.add_argument("--chapters", type=int, default=11)
     p = sub.add_parser("merge")
     p.add_argument("work")
     p = sub.add_parser("slice")

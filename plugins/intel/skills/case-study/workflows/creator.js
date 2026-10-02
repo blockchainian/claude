@@ -4,27 +4,26 @@ export const meta = {
   phases: [
     { title: 'Scout', detail: 'four scouts find sources by lane; the two numbers agents start with them', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
-    { title: 'Write', detail: 'one writer per chapter, then the introduction and reasoning chapters', model: 'sonnet' },
+    { title: 'Write', detail: 'one writer per chapter, then the introduction and the reasoning chapter', model: 'sonnet' },
     { title: 'Review', detail: 'sources lens on Opus from the merge on; per chapter, as each is written: a script matches its figures, the quotes lens (Opus) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
     { title: 'Fix', detail: 'one fixer per chapter, as soon as its reviews and the sources lens are done', model: 'sonnet' },
   ],
 }
 
-// args: { subject, work, skill, lang, today, chapters, tools, product, seeds, caps }
-// skill is the absolute path of the case-study skill folder; chapters is 11 or 12; tools, product, seeds and
+// args: { subject, work, skill, lang, today, tools, product, seeds, caps }
+// skill is the absolute path of the case-study skill folder; tools, product, seeds and
 // caps may be empty strings.
 //
 // Nothing waits for a stage it does not need: the numbers agents start with the scouts, the sources lens starts
 // with the writers, and each chapter runs write → figures matched + quotes review → fix on its own. The only barriers are
 // the merge after reading (writers and the sources lens need sources.json), the body chapters before the
-// introduction and reasoning chapters (written from them, fixed after them), and the sources lens before any fix.
+// introduction and the reasoning chapter (written from them, fixed after them), and the sources lens before any fix.
 const A = args
 const S = A.skill
 const WORK = A.work
 const pad = n => String(n).padStart(2, '0')
-const REASONING = A.chapters === 12 ? ['10', '11'] : ['10']
 const FROM_NOTES = ['02', '03', '04', '05', '06', '07', '08', '09']
-const FROM_CHAPTERS = ['01', ...REASONING]
+const FROM_CHAPTERS = ['01', '10']
 
 const COMMON = `Subject: ${A.subject}. Today is ${A.today}. Language of the study: ${A.lang}.
 Work directory: ${WORK}
@@ -89,7 +88,7 @@ const sourcesReviewed = parallel(Array.from({ length: sliceCount }, (_, i) => ()
   `the urls printed by: ${S}/scripts/case_study.py slice "${WORK}" ${i + 1} ${sliceCount}`)))
 
 const write = file => agent(
-  `${COMMON}\nYou are a draft writer. Follow ${S}/briefs/write.md. Your chapter file: md/${file}.md (see the chapter table in the type file).${file === '11' ? `\nThe product for this chapter: ${A.product}` : ''}`,
+  `${COMMON}\nYou are a draft writer. Follow ${S}/briefs/write.md. Your chapter file: md/${file}.md (see the chapter table in the type file).${file === '10' && A.product ? `\nThe product for this chapter: ${A.product}` : ''}`,
   { label: `write:${file}`, phase: 'Write', ...SONNET })
 const fix = file => agent(
   `${COMMON}\nYou are a fixer. Follow ${S}/briefs/fix.md. Your chapter file: md/${file}.md (NN = ${file}).`,

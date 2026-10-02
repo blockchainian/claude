@@ -79,8 +79,8 @@ found, wrong speaker, wrong date, or wrong outlet. Then check:
   repost;
 - accusations against named third parties are worded as allegations or
   findings, with the outcome;
-- the reasoning chapters say they are reasoning and present nothing as a
-  finding;
+- the reasoning chapter says it is reasoning, presents nothing as a finding,
+  and does not name the product it was given;
 - every outlet a sentence names is a label in `sources.json`;
 - nothing reads as invented.
 

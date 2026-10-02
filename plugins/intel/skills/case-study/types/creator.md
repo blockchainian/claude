@@ -87,6 +87,5 @@ sources list is not numbered.
 | 07 | Chapter 6 — Turning points | What changed at each visible acceleration |
 | 08 | Chapter 7 — Money and business | Income sources, companies, products |
 | 09 | Chapter 8 — Failures, controversies, and where things stand | Which methods still work |
-| 10 | Chapter 9 — What one person can copy | Starting from zero, stage by stage (reasoning) |
-| 11 | Chapter 10 — What the named product can copy | Its own accounts and its creator program (reasoning; only when a product was given) |
+| 10 | Chapter 9 — What to copy | Starting from zero, stage by stage; when a product was given, also what its own accounts and its creator program can take from the subject, in the same chapter (reasoning) |
 | last | Sources | The sources, grouped by kind |
