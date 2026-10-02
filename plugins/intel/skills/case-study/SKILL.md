@@ -52,7 +52,7 @@ they are sent the absolute paths of the files below and read them themselves.
 | `briefs/review.md` | reviewers | The three lenses, slices, the findings format |
 | `briefs/fix.md` | fixers | Applying the findings to one chapter |
 | `briefs/book.md` | book writer | How the reviewed draft becomes the text the reader gets |
-| `workflows/creator.js` | you | The stages below as a workflow script |
+| `workflows/creator.mjs` | you | The stages below as a workflow script |
 
 ## Arguments
 
@@ -108,7 +108,7 @@ ask for one name.
    the time, not the slowest agent of every stage added up.
 
    Run it with the Workflow tool (this skill asks for it):
-   `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.js`,
+   `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.mjs`,
    `args: { subject, work, skill, lang, today, tools, product, seeds, caps }`
    — `skill` is this skill's absolute folder, `tools` is the tool list file, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the

@@ -216,7 +216,7 @@ def fetch_bytes(url, dest):
 
 def main():
     if len(sys.argv) < 2:
-        raise SystemExit("usage: fetch_transcript.py <url>")
+        raise SystemExit("usage: fetch_source.py <url>")
     url = sys.argv[1]
     slug = slugify(url)
     workdir = WORK / slug
