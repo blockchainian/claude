@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-# ABOUTME: Tests digest source-fetching (articles + transcripts) and the store.
-# ABOUTME: Covers main-content extraction, audio detection, save, and take-aways.
+# ABOUTME: Tests digest source-fetching (articles, transcripts, PDFs).
+# ABOUTME: Covers main-content extraction, audio/PDF detection and slugs; the store is tested in store.test.mjs.
 
 import importlib.util
-import os
 import shutil
 import sys
 import tempfile
@@ -107,50 +106,6 @@ def main():
         check("pdf text extracted", "Hello intel digest PDF" in txt, txt[:80])
     else:
         print("SKIP: pdf extraction (no uv/pdfminer available)")
-
-    # --- store default location + env override ---
-    os.environ.pop("HIGHLIGHTS_DIR", None)
-    store_default = load("store")
-    check("default store is ~/Documents/highlights",
-          store_default.ROOT == Path.home() / "Documents" / "highlights",
-          str(store_default.ROOT))
-
-    # --- store: an article draft (no 'show') saves ---
-    root = Path(tempfile.mkdtemp())
-    os.environ["HIGHLIGHTS_DIR"] = str(root)
-    store = load("store")
-    check("HIGHLIGHTS_DIR overrides the default", store.ROOT == root, str(store.ROOT))
-
-    draft = root / "draft.md"
-    draft.write_text(
-        "---\ntitle: Why X Wins\nurl: https://site.com/posts/why-x-wins\n"
-        "slug: why-x-wins\nsource: Example Blog\ntopics: [x]\n---\n"
-        "# Why X Wins\n\n## Point\n- a point\n", encoding="utf-8")
-    store.cmd_save(str(draft))
-    saved = store.ITEMS / "why-x-wins.md"
-    check("article (no show) saved", saved.is_file(), str(saved))
-    if saved.is_file():
-        meta, _ = store.parse_frontmatter(saved.read_text(encoding="utf-8"))
-        check("save stamped date", bool(meta.get("saved")))
-
-    # a draft with only title+url (no source/show) also saves
-    d2 = root / "d2.md"
-    d2.write_text("---\ntitle: Bare\nurl: https://site.com/bare\nslug: bare\n---\n# Bare\n",
-                  encoding="utf-8")
-    check("bare title+url draft saves", not caught(lambda: store.cmd_save(str(d2))))
-
-    # missing url is still refused
-    d3 = root / "d3.md"
-    d3.write_text("---\ntitle: NoUrl\nslug: nourl\n---\n# NoUrl\n", encoding="utf-8")
-    check("missing url is refused", caught(lambda: store.cmd_save(str(d3))))
-
-    # --- take-aways still work on the stored article ---
-    store.cmd_takeaway(str(saved), "add", None, "keep the thesis, not the timeline")
-    check("take-away added", store.current_takeaways(saved) == ["keep the thesis, not the timeline"],
-          store.current_takeaways(saved))
-    store.cmd_takeaway(str(saved), "revise", 1, "keep the thesis")
-    check("take-away revised", store.current_takeaways(saved) == ["keep the thesis"],
-          store.current_takeaways(saved))
 
     print()
     if fails:
