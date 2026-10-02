@@ -30,7 +30,7 @@ content rather than the device. If the request does not say and both are availab
 ### Every name in this document is a value to paste, not a variable
 
 Each command runs in its own shell, so a variable assigned in one command is empty in the
-next. Where this document writes `$SLICE_DIR`, `$OUT_ROOT`, `$UDID` or `$SKILL_DIR`, it means
+next. Where this document writes `$SLICE_DIR`, `$OUT_ROOT` or `$UDID`, it means
 **the absolute value you were given, typed out in full** — or put the whole capture loop in a
 single command. Getting it wrong fails quietly: an `if [ -z "${SLICE_DIR:-}" ]` guard mints a
 new directory on every command, one slice in each, and the stitch succeeds on that single
@@ -94,7 +94,7 @@ run overwrites an earlier capture of the same screen.
 4. Stitch with `scripts/stitch_screens.py` and read its JSON verdict.
 5. Delete the slices. Keep only the stitched PNG.
 
-`SKILL_DIR` is the absolute path of this loaded skill folder, which you already know. Do not derive it from the target app's `pwd` — installed plugins live outside the app being researched. Keep slices in a run-specific temp dir, never under `SKILL_DIR`.
+Keep slices in a run-specific temp dir, never under the skill folder.
 
 ## Tool Names
 
@@ -136,7 +136,7 @@ body often does nothing, and repeating it wastes turns.
 Discover the session values rather than asking for them or remembering them:
 
 ```bash
-"$SKILL_DIR/scripts/discover-ios-setup.mjs"
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/discover-ios-setup.mjs"
 ```
 
 It reports the connected devices, which provisioning profiles cover them, whether
@@ -160,7 +160,7 @@ Before creating the session, claim the phone for this run, so no other agent ope
 session that ends yours:
 
 ```bash
-"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
 Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim again, since
@@ -184,7 +184,7 @@ There is no WebDriverAgent, no provisioning profile and no session to create. A 
 simulator is the whole requirement:
 
 ```bash
-"$SKILL_DIR/scripts/discover-ios-setup.mjs" --target simulator
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/discover-ios-setup.mjs" --target simulator
 ```
 
 Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says either that
@@ -198,7 +198,7 @@ every command that needs it, as above.
 Then claim it for this run, so no other agent drives it while you capture:
 
 ```bash
-"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
 Exit 0 means it is yours. Exit 3 means another run holds it, and the message says which
@@ -232,7 +232,7 @@ on another. `claim-simulator.mjs` and `capture-slice.sh` refuse it outright.
 ### Real device
 
 ```bash
-"$SKILL_DIR/scripts/find-ios-app.sh" --device <udid> --name <app name>
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/find-ios-app.sh" --device <udid> --name <app name>
 ```
 
 `xcrun devicectl device info apps` lists **only developer-installed apps by default** — an App Store app looks absent. The script passes `--include-all-apps`, which is the whole reason it exists. Do not call `devicectl` directly for this.
@@ -246,7 +246,7 @@ If no Appium session exists yet, create one: `select_device` (`platform=ios`, `i
 ### Simulator
 
 ```bash
-"$SKILL_DIR/scripts/find-ios-app.sh" --simulator "$UDID" --name <app name>
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/find-ios-app.sh" --simulator "$UDID" --name <app name>
 ```
 
 `devicectl` cannot see simulators at all, so this reads `simctl listapps` instead. The
@@ -318,7 +318,7 @@ with the wrapper instead, which writes a full-resolution PNG straight into `SLIC
 there is no copy step, and refuses a simulator this run does not hold:
 
 ```bash
-"$SKILL_DIR/scripts/capture-slice.sh" --simulator "$UDID" --run "$RUN_ID" \
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/capture-slice.sh" --simulator "$UDID" --run "$RUN_ID" \
   --out "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
@@ -406,7 +406,7 @@ to anything.
 Compare two frames with:
 
 ```bash
-"$SKILL_DIR/scripts/frame_diff.py" <before.png> <after.png>
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/frame_diff.py" <before.png> <after.png>
 ```
 
 It prints `mean_abs_diff` on a 0-255 scale, and — more useful — `scrolled_px`, the offset
@@ -483,7 +483,7 @@ The stitcher trusts the order it is given; passing slices out of order produces 
 ## 4. Stitch
 
 ```bash
-"$SKILL_DIR/scripts/stitch_screens.py" \
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/stitch_screens.py" \
   --out "$OUT_ROOT/<app-slug>/<screen-slug>.png" \
   --slices "$SLICE_DIR"/slice-*.png
 ```
@@ -549,7 +549,7 @@ A run that captures several screens keeps its claim until the last one; releasin
 screens only invites another agent in mid-run:
 
 ```bash
-"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
+"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
 ```
 
 The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.

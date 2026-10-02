@@ -1,4 +1,6 @@
 #!/usr/bin/env -S uv run --quiet --script
+# ABOUTME: Regression tests for the phone-session-gate hook: one Appium session per phone, only after
+# ABOUTME: a claim, recorded in the claim on create and cleared on delete.
 """Regression tests for the phone-session-gate hook.
 
 One Appium session per phone, and only after a claim: a create without a claim

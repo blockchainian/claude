@@ -3,6 +3,8 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow", "numpy"]
 # ///
+# ABOUTME: Regression tests for frame_diff.py: a scroll reads as a scroll, a ticking value does not,
+# ABOUTME: and frames of different sizes are refused.
 """Regression tests for frame_diff.py.
 
 The capture loop stops when a scroll stops moving the page, so the one thing

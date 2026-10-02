@@ -3,6 +3,8 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow", "numpy"]
 # ///
+# ABOUTME: Regression tests for stitch_screens.py: synthetic overlapping slices with fixed chrome on both
+# ABOUTME: edges must stitch back into the original page exactly.
 """Regression tests for stitch_screens.py, using synthetic slices.
 
 Builds a tall page, cuts it into overlapping viewport slices with fixed chrome
