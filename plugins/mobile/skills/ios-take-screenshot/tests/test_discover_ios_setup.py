@@ -19,7 +19,7 @@ BOOTED = [
 
 
 def load_module():
-    path = Path(__file__).with_name("discover_ios_setup.py")
+    path = Path(__file__).resolve().parent.parent / "scripts" / "discover_ios_setup.py"
     spec = importlib.util.spec_from_file_location("discover_ios_setup", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

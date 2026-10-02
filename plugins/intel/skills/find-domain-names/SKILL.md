@@ -90,7 +90,7 @@ registry, price shown), or `taken`. Batches of 50 per API call.
 ## Tests
 
 ```
-node --test skills/find-domain-names/scripts/test_check.mjs
+node --test skills/find-domain-names/tests/test_check.mjs
 ```
 
 Covers XML parsing and the four-state classification on a fixed Namecheap

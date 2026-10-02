@@ -26,7 +26,7 @@ OFFSET = 500
 
 
 def run(before: Path, after: Path, chrome: bool = True) -> dict:
-    script = Path(__file__).with_name("frame_diff.py")
+    script = Path(__file__).resolve().parent.parent / "scripts" / "frame_diff.py"
     flags = ["--sticky-top", str(CHROME_TOP), "--sticky-bottom", str(CHROME_BOTTOM)] if chrome else []
     proc = subprocess.run(
         [str(script), str(before), str(after), *flags],
@@ -93,7 +93,7 @@ def main() -> int:
         # common size would compare unrelated screens; refuse instead.
         f = tmp / "f.png"
         Image.fromarray(frame(page, 0)[:, :WIDTH - 20]).save(f)
-        proc = subprocess.run([str(Path(__file__).with_name("frame_diff.py")), str(a), str(f)],
+        proc = subprocess.run([str(Path(__file__).resolve().parent.parent / "scripts" / "frame_diff.py"), str(a), str(f)],
                               capture_output=True, text=True, check=False)
         if proc.returncode == 0 or "size" not in proc.stderr:
             failures.append(f"frames of different sizes were compared: {proc.returncode} {proc.stderr!r}")

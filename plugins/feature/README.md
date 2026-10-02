@@ -83,8 +83,8 @@ npm run test:feature
 
 Runs `hooks/tests/run.sh` (every case in `hooks/tests/cases.jsonl` through the
 three hook scripts), `skills/ship/tests/run.sh` (the two plan checkers against
-fixture plans in a throwaway repo), `skills/ship/workstream.test.sh` (open, check,
-merge and base against a throwaway repo), `skills/ship/watch-ci.test.sh` (the CI-watch
+fixture plans in a throwaway repo), `skills/ship/tests/workstream.test.sh` (open, check,
+merge and base against a throwaway repo), `skills/ship/tests/watch-ci.test.sh` (the CI-watch
 poller against a stubbed `gh`), and `skills/retro/tests/run.sh` (the retro
 extractor against a hermetic fixture session).
 
