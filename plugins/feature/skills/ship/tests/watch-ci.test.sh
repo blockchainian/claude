@@ -21,7 +21,7 @@ report() { # <name> <pass|fail> [detail]
 # assert_json <name> <json> <python-expr over `d`>
 assert_json() {
   local out
-  out=$(python3 - "$2" "$3" <<'PY' 2>&1
+  out=$(uv run --quiet --no-project python - "$2" "$3" <<'PY' 2>&1
 import json, sys
 try:
     d = json.loads(sys.argv[1])

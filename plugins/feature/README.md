@@ -71,8 +71,8 @@ the production merge gate (step 8) whenever the branch has a PR.
 /plugin install feature@blockchainian
 ```
 
-Requires the [codex](../codex/README.md) plugin (its `codex-manager` MCP server) for the codex lane and `jq`
-for the hooks. If the same hooks are also wired in `~/.claude/settings.json`,
+Requires the [codex](../codex/README.md) plugin (its `codex-manager` MCP server) for the codex lane, `jq`
+for the hooks and `uv` for `watch-ci.sh`. If the same hooks are also wired in `~/.claude/settings.json`,
 remove them there; otherwise each fires twice.
 
 ## Tests
