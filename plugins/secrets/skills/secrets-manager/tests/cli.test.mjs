@@ -328,12 +328,13 @@ test("login with no credential files, an unknown target, or --by-email off beta 
   assert.ok(o.errText().includes("alpha has no byEmail hook"));
 });
 
-test("login x and verify x with nothing pending print and return 0", async () => {
+test("login x skips an empty queue and verify x names its intel replacement", async () => {
   const o = io();
   assert.equal(await main(["login", "x"], o), 0);
   assert.ok(o.text().includes("no X accounts need login"));
   assert.equal(await main(["verify", "x"], o), 1);
-  assert.ok(o.errText().includes("unknown adapter x"));
+  assert.ok(o.errText().includes("fetch-x-mentions/scripts/verify-x.mjs"));
+  assert.ok(!o.errText().includes("unknown adapter"));
 });
 
 test("verify alpha with no active accounts returns 0; verify rejects other targets", async () => {
