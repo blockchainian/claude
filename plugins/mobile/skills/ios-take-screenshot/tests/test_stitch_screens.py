@@ -32,7 +32,7 @@ TITLED_VISIBLE = VISIBLE - NAV
 
 
 def load_module():
-    path = Path(__file__).with_name("stitch_screens.py")
+    path = Path(__file__).resolve().parent.parent / "scripts" / "stitch_screens.py"
     spec = importlib.util.spec_from_file_location("stitch_screens", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

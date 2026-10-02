@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseLinks, selectSlowPaths } from './anna_archive_links.mjs';
+import { parseLinks, selectSlowPaths } from '../scripts/anna_archive_links.mjs';
 
 const MD5 = '26f03228f2f3ee0f980ae56f9bd97844';
 const fixture = `<ul class="list-inside mb-4 ml-1">
@@ -33,7 +33,7 @@ test('selectSlowPaths falls back to the first entry when no waitlist labels exis
 
 test('the script runs when invoked through a symlinked directory', () => {
   const dir = mkdtempSync(join(tmpdir(), 'anna-link-'));
-  const scripts = fileURLToPath(new URL('.', import.meta.url));
+  const scripts = fileURLToPath(new URL('../scripts/', import.meta.url));
   symlinkSync(scripts, join(dir, 'scripts'));
   const run = spawnSync(process.execPath, [join(dir, 'scripts', 'anna_archive_links.mjs'), '--help'], { encoding: 'utf8' });
   assert.match(run.stdout + run.stderr, /用法/, 'a symlinked invocation must print the usage line, not exit silently');

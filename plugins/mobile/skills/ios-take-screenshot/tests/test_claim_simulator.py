@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).resolve().parent.parent / "scripts"
 UDID = "00000000-0000-0000-0000-00000000TEST"
 PHONE = "00008030-001A2B3C4D5E6F7A"
 

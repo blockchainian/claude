@@ -19,10 +19,10 @@ test("the marketplace lists every plugin in the repository", async () => {
 
 test("the shared check-design engine stays byte-identical across plugins", async () => {
   const copies = [
-    "plugins/mobile/skills/check-mobile-design/scripts",
-    "plugins/web/skills/check-web-design/scripts",
+    "plugins/mobile/skills/check-mobile-design",
+    "plugins/web/skills/check-web-design",
   ];
-  for (const file of ["check_design.py", "test_check_design.py"]) {
+  for (const file of ["scripts/check_design.py", "tests/test_check_design.py"]) {
     const [a, b] = await Promise.all(copies.map((dir) => readFile(`${dir}/${file}`, "utf8")));
     assert.equal(a, b, `${file} has drifted between the mobile and web copies`);
   }

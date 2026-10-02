@@ -2,7 +2,7 @@
 // ABOUTME: Namecheap domains.check response — no network, real parse logic against a fixture.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCheck, classify } from "./check.mjs";
+import { parseCheck, classify } from "../scripts/check.mjs";
 
 const ok = `<?xml version="1.0" encoding="utf-8"?>
 <ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">

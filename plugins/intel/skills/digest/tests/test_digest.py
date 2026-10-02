@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).resolve().parent.parent / "scripts"
 fails = []
 
 

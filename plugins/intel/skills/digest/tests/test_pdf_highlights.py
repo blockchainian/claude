@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pikepdf
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).resolve().parent.parent / "scripts"
 fails = []
 
 

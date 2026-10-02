@@ -86,12 +86,12 @@ audio leg and `digest` for the notes.
 ## Tests
 
 ```
-python3 skills/transcribe/scripts/test_transcribe.py
-python3 skills/digest/scripts/test_digest.py
-skills/digest/scripts/test_pdf_highlights.py
-skills/translate/scripts/test_translate.py
-node --test skills/find-domain-names/scripts/test_check.mjs
-node --test skills/download-book/scripts/test_site_session.mjs
+python3 skills/transcribe/tests/test_transcribe.py
+python3 skills/digest/tests/test_digest.py
+skills/digest/tests/test_pdf_highlights.py
+skills/translate/tests/test_translate.py
+node --test skills/find-domain-names/tests/test_check.mjs
+node --test skills/download-book/tests/test_site_session.mjs
 node --test skills/case-study/tests/*.mjs
 ```
 
