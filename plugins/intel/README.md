@@ -86,16 +86,17 @@ audio leg and `digest` for the notes.
 ## Tests
 
 ```
-python3 skills/transcribe/tests/test_transcribe.py
+node --test skills/transcribe/tests/*.mjs
 python3 skills/digest/tests/test_digest.py
 skills/digest/tests/test_pdf_highlights.py
 skills/translate/tests/test_translate.py
 node --test skills/find-domain-names/tests/check.test.mjs
 node --test skills/download-book/tests/site-session.test.mjs
 node --test skills/case-study/tests/*.mjs
+node --test skills/analyze-appstore-reviews/tests/*.mjs
 ```
 
-`test_transcribe.py` covers the batch and live command shapes, the
+`transcribe.test.mjs` covers the batch and live command shapes, the
 chunk-readiness logic, platform resolution, and `setup.sh --check`; when
 `ffmpeg` and a whisper runner are present it also runs a real end-to-end batch
 and live transcription of a generated clip.
