@@ -24,19 +24,18 @@ capture's traffic.
 ## Every name here is a value to paste, not a variable
 
 Each Bash call runs in its own shell, so a variable assigned in one command is empty in the
-next. Where this document writes `$CAP`, `$SKILL_DIR` or `$PROXY_DIR`, paste the actual value
+next. Where this document writes `$CAP` or `$PROXY_DIR`, paste the actual value
 — read it out of the JSON a previous command printed and type it in full, or run the whole
 sequence as one command.
 
-`$SKILL_DIR` is the absolute path of this loaded skill folder, which you already know; do not
-derive it from the target app's working directory. All scripts print JSON on stdout — parse
-stdout, act on it. The hub and the per-capture flow files live under `$PROXY_DIR` (default
-`/tmp/proxy`); point it at a durable directory to keep captures across a reboot.
+All scripts print JSON on stdout — parse stdout, act on it. The hub and the per-capture flow
+files live under `$PROXY_DIR` (default `/tmp/proxy`); point it at a durable directory to keep
+captures across a reboot.
 
 ## 0. Setup (skip if already set up)
 
 ```bash
-"$SKILL_DIR/scripts/setup.sh"
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/setup.sh"
 ```
 
 Exit 0 means mitmdump is installed and the CA is generated and trusted in the System keychain
@@ -56,7 +55,7 @@ toggle the mitmproxy CA on. Without that, TLS interception fails on the phone.
 ## 1. Start a capture
 
 ```bash
-"$SKILL_DIR/scripts/capture.mjs" start --label myapp --hosts myapp.com
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" start --label myapp --hosts myapp.com
 ```
 
 This brings the hub up on 8080 if it is not already running, and opens a capture. Read its
@@ -87,8 +86,8 @@ If the browser shows `NET::ERR_CERT_AUTHORITY_INVALID` or an HSTS block, the CA 
 ### iPhone app — WireGuard
 
 ```bash
-"$SKILL_DIR/scripts/capture.mjs" start --label pump --hosts pump.fun --wireguard
-"$SKILL_DIR/scripts/wg-config.mjs" --qr "$PROXY_DIR/pump-qr.png"
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" start --label pump --hosts pump.fun --wireguard
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/wg-config.mjs" --qr "$PROXY_DIR/pump-qr.png"
 ```
 
 `start --wireguard` brings the hub up serving WireGuard too; `wg-config.mjs` prints the client
@@ -103,7 +102,7 @@ LAN with the router's AP/client isolation **off**, or it cannot reach the Mac.
 After the user enables the proxy and loads the app once:
 
 ```bash
-"$SKILL_DIR/scripts/capture.mjs" check "$CAP"
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" check "$CAP"
 ```
 
 It cannot read Zero Omega's on/off state, but it sees what reaches the hub. `clientsConnected`
@@ -121,10 +120,10 @@ Claude Chrome extension driving it. Either way, enable Zero Omega first.
 ## 3. Read the capture
 
 ```bash
-"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind flows     # one line per request
-"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind ws        # websocket frames
-"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind hosts     # host tally
-"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind origins   # callers of each host
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind flows     # one line per request
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind ws        # websocket frames
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind hosts     # host tally
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind origins   # callers of each host
 ```
 
 `--kind ws` takes `--wsmax <chars>` to widen frame bodies. For a request or response body,
@@ -147,8 +146,8 @@ flows are written to **both** captures' files (both match it). `--hosts` cannot 
 on the *same* host. Split by **caller** with origins:
 
 ```bash
-"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind origins                       # list callers
-"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind origins --source app-a.example  # one app's calls
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind origins                       # list callers
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind origins --source app-a.example  # one app's calls
 ```
 
 Each web app sends a distinct `Origin`/`Referer`, and some shared auth providers carry a per-app
@@ -157,9 +156,9 @@ id header, so a shared host separates cleanly at read time.
 ## 5. Close a capture, and stop the hub
 
 ```bash
-"$SKILL_DIR/scripts/capture.mjs" status               # the hub and the open captures
-"$SKILL_DIR/scripts/capture.mjs" stop "$CAP" --wipe   # close a capture AND delete its file
-"$SKILL_DIR/scripts/capture.mjs" down --wipe          # stop the hub and delete all capture files
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" status               # the hub and the open captures
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" stop "$CAP" --wipe   # close a capture AND delete its file
+"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" down --wipe          # stop the hub and delete all capture files
 ```
 
 Capture files hold unredacted tokens and are **not** cleaned automatically. Leave nothing

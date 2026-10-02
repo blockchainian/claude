@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ABOUTME: Detects whether this Mac is ready to capture traffic with mitmproxy, and
 # ABOUTME: prints the exact remaining steps (install, CA generate, CA trust) if not.
 #

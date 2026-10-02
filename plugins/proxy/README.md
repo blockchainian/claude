@@ -33,7 +33,7 @@ tunnel), read the flows, tear it down.
 - `qrencode` for the WireGuard QR (optional; `brew install qrencode`).
 - iPhone captures need the phone on the same LAN with router AP/client isolation off.
 
-## Test
+## Tests
 
 ```
 node --test skills/inspect-app-traffic/tests/*.mjs
