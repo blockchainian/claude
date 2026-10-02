@@ -8,6 +8,7 @@ import * as restriction from './restriction.mjs';
 import * as emailOtp from './email-otp.mjs';
 import * as store from './store.mjs';
 import * as config from './config.mjs';
+import * as credentials from './credentials.mjs';
 import { configureBlocklist } from './traffic.mjs';
 import { filterState } from './state.mjs';
 
@@ -31,7 +32,7 @@ import { filterState } from './state.mjs';
  * @property {string[]} [blockedWebSockets] WebSocket URL wildcards.
  */
 export const kit = {
-  ...page, page, debug, restriction, emailOtp, store, config,
+  ...page, page, debug, restriction, emailOtp, store, config, credentials,
   withProfile: async (...args) => (await import('./login.mjs')).withProfile(...args),
   mintAppPassword: async (...args) => (await import('./login.mjs')).mintAppPassword(...args),
   exportScoped: async (...args) => (await import('./login.mjs')).exportScoped(...args),
