@@ -425,6 +425,7 @@ async function runSms(_db, opts, io) {
 
 async function runVerify(db, opts, io) {
   const [target] = opts.positional;
+  if (target === "x") throw new Error("X verification moved to intel: run fetch-x-mentions/scripts/verify-x.mjs");
   const adapter = getAdapter(target);
   if (!adapter.verify) throw new Error(`${target} has no verify hook`);
   const accounts = pick(store.listAccounts(db).filter(a => store.getSession(db, target, a.email)?.status === store.STATUS_ACTIVE || opts.all), a => a.email, opts);
