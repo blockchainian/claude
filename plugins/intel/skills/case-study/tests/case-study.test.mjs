@@ -79,6 +79,8 @@ test('check passes clean book text whose sources list links every source, and re
   write(join(work, 'book', '12.md'), linked)
   let report = cs.check(work)
   assert.ok(report.book_ok === true && report.ok === true, JSON.stringify(report))
+  write(join(work, 'book', '12.md'), linked.replace('(https://b.example/z)', '(<https://b.example/z>)'))
+  assert.equal(cs.check(work).book_ok, true, 'a link whose address is in angle brackets is a link')
   write(join(work, 'book', '12.md'), linked.replace(', [2021](https://a.example/y)', ', 2021').replace('- B:', '- [Elsewhere](https://d.example/q)\n- B:'))
   report = cs.check(work)
   assert.deepEqual(report.sources_not_linked, ['https://a.example/y'])
