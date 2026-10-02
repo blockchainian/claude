@@ -320,6 +320,10 @@ test('bullets prints a chapter\'s lines from the notes, with a dated table of th
     '- [c03][c04] [on record] (2020) a fact — A 2020'])
   assert.deepEqual(cs.bullets(long, '07'), ['## Curve: profile captures', row('2020-08-02', '10,000,000', '[c03] [c07]'),
     '## Milestones', '[c03] [c07] [on record] 10M | first at/above: 2020-08-02', '[c07] [on record] 15M | first at/above: 2021-05-03'])
+  write(join(long, 'notes', 'read-02.md'), '## B — a seller (2021)\nurl: https://b.example/y\n- [c04] [self-reported] (2021) a claim — B 2021\n## C — press (2021)\nurl: https://c.example/z\n- [c04] [on record] (2021) a report — C 2021\n')
+  write(join(long, 'review', 'sources-1.failed.json'), JSON.stringify(['https://b.example/y']))
+  assert.deepEqual(cs.bullets(long, '04'), ['- [c03][c04] [on record] (2020) a fact — A 2020', '- [c04] [self-reported] (2020) a method — A 2020', '- [c04] [on record] (2021) a report — C 2021'],
+    'the bullets of a source the reviewers failed are left out')
 })
 
 test('both scripts run when called through a symlink to their folder, as an installed plugin is', () => {
