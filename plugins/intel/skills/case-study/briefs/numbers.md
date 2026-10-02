@@ -30,7 +30,7 @@ You are the only agent that fetches from the archive.
 
 ## Lane: uploads
 
-List the account's uploads or posts with the platform tools in the tools file.
+List the account's uploads or posts with the platform commands in the tools reference.
 Write the earliest posts (date, title, views), the count per month in each
 phase, where the cadence or format visibly changed, and what was posted in
 the weeks around each acceleration the press mentions.
