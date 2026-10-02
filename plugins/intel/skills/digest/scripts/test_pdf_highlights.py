@@ -173,6 +173,9 @@ def test_charts(charts):
     line = charts.figures("Before.\n\n```chart\ntype: line\ntitle: Subscribers\n2012 | 1,002,877\n2013 | 10,058,670\n2014 | 20,010,912\n```\n\nAfter.")
     check("a line chart block becomes one figure with an inline drawing", line.count("<figure") == 1 and "<svg" in line and "<polyline" in line
           and "Subscribers" in line and "20,010,912" in line and "```" not in line and line.startswith("Before.") and line.endswith("After."), line[:300])
+    rows = "\n".join(f"{2000 + i} | {(i + 1) * 1111}" for i in range(12))
+    long = charts.figures(f"```chart\ntype: line\ntitle: T\n{rows}\n```")
+    check("a long series prints only its first, last and highest value", long.count("<circle") == 2 and "1111<" in long and "13332<" in long and "5555<" not in long, long[-400:])
     bar = charts.figures("```chart\ntype: bar\ntitle: Views in four days\nMontage | 2,520,866\nOrdinary upload | 1,261,237\n```")
     check("a bar chart block draws one bar per row with its value", bar.count("<rect") == 2 and "Montage" in bar and "2,520,866" in bar, bar[:300])
     log = charts.figures("```chart\ntype: line\nscale: log\ntitle: T\n2010 | 19\n2012 | 1,002,877\n2019 | 100,020,115\n```")
