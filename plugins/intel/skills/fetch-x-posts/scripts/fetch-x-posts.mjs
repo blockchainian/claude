@@ -17,7 +17,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 // in ~/.cache/case-study-limits/fetch-x-posts.sqlite holds, per account, when its next request may start
 // and until when it is paused, plus a log of every request (table `requests`).
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -338,4 +338,4 @@ async function main() {
   process.stdout.write(lines.join(""), () => process.exit(reason ? 1 : 0));
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
