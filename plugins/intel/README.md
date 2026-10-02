@@ -49,7 +49,7 @@ download links and checks domain names.
   independent reviewers who audit every source and quote, and
   a fixer, with no chapter waiting for another; sellers of courses and growth
   tools are never evidence. A separate writer then turns the reviewed
-  draft into a short book: a cover with the subject's name, an introduction,
+  draft into a short book: a cover with the subject's name and linked accounts, an introduction,
   numbered chapters, no citations in the text, and figures shown as line
   charts, bar charts and tables instead of recited in sentences. One subject
   per run.

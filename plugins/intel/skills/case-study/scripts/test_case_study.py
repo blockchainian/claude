@@ -44,6 +44,7 @@ def main():
         check("the typeset chapters are the book text", saved["chapters"][2]["highlights"] == "book/03.md")
         check("chapters.json carries the title and pdf path", saved["title"] == "How Jane Doe grew" and saved["pdf"] == str(out))
         check("chapters.json carries the cover name", saved["cover"] == "Jane Doe")
+        check("the profile URL is the account on the cover when no other is given", saved["accounts"] == ["https://example.com/@jane"], str(saved.get("accounts")))
         check("chapters.json is a chapter-unit book with a page size", saved["unit"] == "chapter" and len(saved["page_size"]) == 2)
 
         (work / "sources.json").write_text(json.dumps({"https://a.example/x": "A 2020"}))
@@ -79,13 +80,20 @@ def main():
         for n in range(1, 13):
             (work / "md" / f"{n:02d}.md").write_text(f"# Chapter {n}\n\nShe had 19,936 followers in 2016 (Outlet 2020).\n\n## Section\n\nBody.\n")
             (work / "book" / f"{n:02d}.md").write_text(f"# Chapter {n}\n\nShe had 19,936 followers in 2016.\n\n## Section\n\nBody.\n")
+        linked = "# Sources\n\nThe list.\n\n## Press\n\n- A: [2020](https://www.a.example/x), [2021](https://a.example/y)\n- B: [2019](https://b.example/z)\n- The profile page as archived, 2020 to 2021\n"
+        (work / "book" / "12.md").write_text(linked)
         report = cs.check(work)
-        check("check passes clean book text", report["book_ok"] is True and report["ok"] is True, str(report))
+        check("check passes clean book text whose sources list links every source; archive snapshots may go unlinked", report["book_ok"] is True and report["ok"] is True, str(report))
+        (work / "book" / "12.md").write_text(linked.replace(", [2021](https://a.example/y)", ", 2021").replace("- B:", "- [Elsewhere](https://d.example/q)\n- B:"))
+        report = cs.check(work)
+        check("check finds a source the book's list does not link, and a link that is not a source", report["sources_not_linked"] == ["https://a.example/y"]
+              and report["links_not_in_sources"] == ["https://d.example/q"] and report["book_ok"] is False, str(report))
+        (work / "book" / "12.md").write_text(linked)
 
         (work / "book" / "02.md").write_text("# Chapter 2\n\nShe had 19,936 followers (Outlet 2020).\n\n## Section\n\n过了 100 万（Tubefilter 2022（人物页））。\n")
         (work / "book" / "03.md").write_text("# Chapter 3\n\nIn 2016 (she was 19) it grew; the snapshot shows it, per sources.json.\n\n## Section\n\n没有第二个独立来源可以核对。\n")
         (work / "book" / "05.md").write_text("# Chapter 5\n\nShe had 21,000 followers in 2016.\n\n## Section\n\nBody.\n")
-        (work / "book" / "12.md").write_text("# Sources\n\nThe list.\n\n## Press\n\n- Outlet 2020\n- Archive 2031\n")
+        (work / "book" / "12.md").write_text(linked + "- Archive 2031\n")
         report = cs.check(work)
         check("check finds source citations left in the book text", [c["chapter"] for c in report["citations_in_book"]] == ["02"]
               and len(report["citations_in_book"][0]["found"]) == 2, str(report["citations_in_book"]))

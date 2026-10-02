@@ -2,7 +2,7 @@
 # ABOUTME: Scaffolds a case-study work dir in the digest store and checks it before rendering.
 # ABOUTME: init writes chapters.json + sources.json; check verifies the sourced draft, the book text and sources.
 #
-# Usage: case_study.py init <slug> --title <title> --cover <name> --source <url> --out <pdf> [--chapters 11]
+# Usage: case_study.py init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
 #        case_study.py merge <work dir>
 #        case_study.py slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
 #        case_study.py figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
@@ -25,6 +25,8 @@ from urllib.parse import urlparse
 ROOT = Path(os.environ.get("HIGHLIGHTS_DIR", Path.home() / "Documents" / "highlights"))
 PAGE_SIZE = [427.92, 660.0]  # the book format digest's render typesets
 ARCHIVE_HOSTS = {"web.archive.org", "archive.org"}
+# A Markdown link's target.
+LINK = re.compile(r"\]\((https?://[^)\s]+)\)")
 # A parenthesis that names a source: a word, then a year that is not part of a date.
 CITATION = re.compile(r"[（(][^（()）]*?(?P<word>[A-Za-z\u4e00-\u9fff][\w.&'’-]*)\s+(?:19|20)\d\d(?!\s*年)[^（()）]*[）)（(]")
 DATE_WORDS = {"in", "since", "from", "by", "until", "to", "of", "late", "early", "mid", "born", "and", "january",
@@ -47,13 +49,13 @@ DATE = re.compile(r"(?:19|20)\d\d\s*年(?:\s*\d+\s*月)?(?:\s*\d+\s*日)?|\d+\s*
 SERIES = 5  # a paragraph with this many figures besides its dates recites a series
 
 
-def init(slug, title, source, out, chapters, cover):
+def init(slug, title, source, out, chapters, cover, accounts=None):
     """Create <store>/.work/<slug>/ with md/, book/, notes/, raw/, review/, chapters.json and an empty sources.json."""
     work = ROOT / ".work" / slug
     for sub in ("md", "book", "notes", "raw", "review"):
         (work / sub).mkdir(parents=True, exist_ok=True)
     ids = [f"{n:02d}" for n in range(1, chapters + 1)]
-    meta = {"title": title, "cover": cover, "slug": slug, "source": source, "pdf": str(out), "work": str(work),
+    meta = {"title": title, "cover": cover, "accounts": accounts or [source], "slug": slug, "source": source, "pdf": str(out), "work": str(work),
             "unit": "chapter", "page_size": PAGE_SIZE,
             "chapters": [{"id": i, "title": i, "pages": [1, 1], "chars": 0,
                           "text": f"text/{i}.txt", "highlights": f"book/{i}.md"} for i in ids]}
@@ -245,12 +247,13 @@ def check(work):
     book_missing, book_no_lead, book = layer(work, "book", ids)
     known = set().union(*(numbers(text) for text in draft.values())) if draft else set()
     known_values = [float(n) for n in known]
-    citations, process, unknown, series = [], [], [], []
+    citations, process, unknown, series, links = [], [], [], [], set()
     for i, text in book.items():
         terms = [term for term in PROCESS_TERMS if term in text.lower()]
         if terms and i != ids[-1]:
             process.append({"chapter": i, "found": terms})
-        if i == ids[-1]:  # the closing sources chapter lists outlets and years
+        if i == ids[-1]:  # the closing sources chapter lists outlets and years, each linked to its source
+            links = set(LINK.findall(text))
             continue
         cited = [m.group() for m in CITATION.finditer(text) if m.group("word").lower() not in DATE_WORDS]
         if cited:
@@ -269,13 +272,16 @@ def check(work):
     urls = list(sources) if isinstance(sources, dict) and valid else []
     hosts = [urlparse(url).netloc.removeprefix("www.") for url in urls]
     snapshots = sum(host in ARCHIVE_HOSTS for host in hosts)
+    listed = ids[-1] in book
+    unlinked = [url for url, host in zip(urls, hosts) if listed and host not in ARCHIVE_HOSTS and url not in links]
+    strangers = sorted(links - set(urls))
     draft_ok = valid and not missing and not no_lead
-    book_ok = not (book_missing or book_no_lead or citations or process or unknown or series)
+    book_ok = not (book_missing or book_no_lead or citations or process or unknown or series or unlinked or strangers)
     return {"ok": draft_ok and book_ok, "draft_ok": draft_ok, "book_ok": book_ok,
             "missing_chapters": missing, "no_lead_paragraph": no_lead, "sources_valid": valid,
             "missing_book_chapters": book_missing, "book_no_lead_paragraph": book_no_lead,
             "citations_in_book": citations, "process_terms_in_book": process, "numbers_not_in_draft": unknown,
-            "series_in_prose": series,
+            "series_in_prose": series, "sources_not_linked": unlinked, "links_not_in_sources": strangers,
             "sources": len(hosts) - snapshots, "archive_snapshots": snapshots,
             "sites": len({host for host in hosts if host not in ARCHIVE_HOSTS})}
 
@@ -288,6 +294,7 @@ def main():
     p.add_argument("--title", required=True)
     p.add_argument("--cover", required=True, help="the subject's name, set large on the cover")
     p.add_argument("--source", required=True)
+    p.add_argument("--account", action="append", help="a profile URL shown on the cover; repeat for several; default: the source")
     p.add_argument("--out", required=True)
     p.add_argument("--chapters", type=int, default=11)
     p = sub.add_parser("merge")
@@ -318,7 +325,7 @@ def main():
         print("\n".join(findings(args.work, args.chapter)))
         return
     if args.cmd == "init":
-        result = init(args.slug, args.title, args.source, Path(args.out).expanduser(), args.chapters, args.cover)
+        result = init(args.slug, args.title, args.source, Path(args.out).expanduser(), args.chapters, args.cover, args.account)
         passed = True
     elif args.cmd == "merge":
         result = merge(args.work)
