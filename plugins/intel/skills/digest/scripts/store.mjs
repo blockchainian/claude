@@ -2,7 +2,7 @@
 // ABOUTME: Central store for source highlights - save, list and search.
 // ABOUTME: One markdown file per item under items/, rebuilt index.md.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -374,7 +374,7 @@ export function main(argv) {
   else fail(USAGE);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
   try {
     main(process.argv.slice(2));
     flush();

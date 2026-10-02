@@ -3,7 +3,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -216,5 +216,12 @@ describe("usage", () => {
       assert.match(res.stderr, /^usage: store\.mjs save <draft\.md> \| search <query> \| list\n/);
       assert.equal(res.stdout, "");
     }
+  });
+
+  test("the script runs when called through a symlink to its folder, as an installed plugin is", () => {
+    const linked = join(mkdtempSync(join(tmpdir(), "store-link-")), "scripts");
+    symlinkSync(join(script, ".."), linked);
+    const res = spawnSync(process.execPath, [join(linked, "store.mjs")], { encoding: "utf-8" });
+    assert.match(res.stderr, /^usage: store\.mjs/);
   });
 });

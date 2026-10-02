@@ -2,7 +2,7 @@
 // ABOUTME: Covers the stats JSON shape and values, Python-compatible rounding, the neg/mid/pos dumps and the CLI.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,6 +120,12 @@ describe("cli", () => {
   test("exits 2 on a missing positional", () => {
     const res = run();
     assert.equal(res.status, 2);
+    assert.match(res.stderr, /the following arguments are required: json/);
+  });
+
+  test("runs when called through a symlink to its folder, as an installed plugin is", () => {
+    symlinkSync(join(script, ".."), join(tmp, "linked-scripts"));
+    const res = spawnSync(process.execPath, [join(tmp, "linked-scripts", "stats.mjs")], { cwd: tmp, encoding: "utf-8" });
     assert.match(res.stderr, /the following arguments are required: json/);
   });
 });

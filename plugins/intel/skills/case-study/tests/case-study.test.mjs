@@ -1,10 +1,12 @@
 // ABOUTME: Tests the case-study work-dir scaffold and the pre-render check.
 // ABOUTME: Covers init (layout, cover, idempotence), check (sourced draft, book text, sources, counts), merge, slice, findings and figures.
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 const tmp = mkdtempSync(join(tmpdir(), 'case-study-'))
 process.env.HIGHLIGHTS_DIR = join(tmp, 'store')
@@ -239,4 +241,13 @@ test('merge gives each of several sources that share a label its own label, in s
   cs.merge(twins)
   const posts = json(twins, 'sources.json')
   assert.deepEqual([posts['https://x.example/00'], posts['https://x.example/26']], ['X post 2025aa', 'X post 2025ba'], 'no label is the start of another')
+})
+
+test('both scripts run when called through a symlink to their folder, as an installed plugin is', () => {
+  const linked = join(tmp, 'linked-scripts')
+  symlinkSync(fileURLToPath(new URL('../scripts', import.meta.url)), linked)
+  for (const name of ['case-study.mjs', 'wayback.mjs']) {
+    const res = spawnSync(process.execPath, [join(linked, name)], { encoding: 'utf8' })
+    assert.match(res.stdout + res.stderr, new RegExp(`usage: ${name}`))
+  }
 })

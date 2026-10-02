@@ -10,7 +10,7 @@
 // error. fetch prints one JSON line per url (url, status, file). curve prints one JSON line per capture (date,
 // value, text, url, file): value is the count when it could be read, text is the page's own wording when it is
 // rounded or in another language, and both are null when the page shows no count.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
 import { join } from 'node:path'
@@ -250,4 +250,4 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main(process.argv.slice(2))
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) main(process.argv.slice(2))
