@@ -3,8 +3,8 @@
 # requires-python = ">=3.10"
 # dependencies = ["pikepdf>=9", "markdown>=3.5", "pillow>=10"]
 # ///
-# ABOUTME: Tests the translate skill: EPUB section derivation, prompt/answer checks, Markdown typesetting,
-# ABOUTME: and (when Chrome is present) a real render of a small generated EPUB with cover and bookmarks.
+# ABOUTME: Tests render.py: Markdown typesetting, LaTeX repair, page CSS, and (when Chrome is present) a real
+# ABOUTME: render of a small generated EPUB with cover and bookmarks. extract/translate are tested in the .mjs files.
 import importlib.util
 import json
 import os
@@ -33,38 +33,6 @@ def check(name, cond, detail=""):
     print(f"{'PASS' if cond else 'FAIL'}: {name}" + (f"  -- {detail}" if not cond and detail else ""))
     if not cond:
         fails.append(name)
-
-
-def test_extract(ex):
-    check("chinese numbers", [ex.chinese_number(n) for n in (1, 10, 11, 20, 24, 105)] == ["一", "十", "十一", "二十", "二十四", "一百零五"])
-    check("parse '1. Title'", ex.parse_title("1. Traction Channels") == (1, "Traction Channels"))
-    check("parse 'Chapter Twelve: X'", ex.parse_title("Chapter Twelve: SEO") == (12, "SEO"))
-    check("parse plain title", ex.parse_title("Preface: Traction Trumps Everything") == (None, "Preface: Traction Trumps Everything"))
-    check("classify cover/contents/skip/chapter/front/back",
-          [ex.classify(t, c, seen) for t, c, seen in
-           [("Cover", None, False), ("Contents", None, False), ("Index", None, True),
-            ("One", 1, False), ("Preface", None, False), ("Acknowledgments", None, True)]]
-          == ["cover", "contents", "skip", "chapter", "front", "back"])
-
-
-def test_translate(tr):
-    meta = {"title": "Traction", "author": "Weinberg"}
-    sec = {"id": "04", "title": "Traction Channels", "label": "第一章", "kind": "chapter", "words": 10, "file": "text/04-x.txt"}
-    prompt = tr.build_prompt(meta, sec, "Hello world.", "traction → 牵引力")
-    check("prompt names book, section and glossary", "Book: Traction by Weinberg" in prompt and "第一章 Traction Channels" in prompt
-          and "traction → 牵引力" in prompt and prompt.rstrip().endswith("Hello world."))
-    check("rules forbid tools and demand the title line", "do not run commands" in tr.RULES and '"# "' in tr.RULES)
-    check("rules tell the model to keep image placeholders", "⟦IMG:" in tr.RULES and "Copy every" in tr.RULES)
-    check("answer without title rejected", tr.check_output("正文而已", 5) is not None)
-    check("short answer rejected", tr.check_output("# 标题\n\n短", 100) is not None)
-    check("good answer accepted", tr.check_output("# 标题\n\n" + "汉" * 200, 100) is None)
-    with tempfile.TemporaryDirectory() as d:
-        home = tr.codex_home(Path(d), "gpt-6-luna", "low", "/x/instructions.md", "priority")
-        cfg = (home / "config.toml").read_text()
-        check("codex config pins model, effort, tier", 'model = "gpt-6-luna"' in cfg and 'model_reasoning_effort = "low"' in cfg
-              and 'service_tier = "priority"' in cfg and "project_doc_max_bytes = 0" in cfg)
-        home = tr.codex_home(Path(d) / "b", "gpt-6-luna", "low", "/x/i.md", "standard")
-        check("standard tier omits service_tier", "service_tier" not in (home / "config.toml").read_text())
 
 
 def test_render_units(rd):
@@ -112,7 +80,7 @@ def test_render_units(rd):
     check("contents row", "⟦TOC⟧" in toc and '<span class="pg">1</span>' in toc)
 
 
-def test_epub_units(ex, rd):
+def test_math_units(rd):
     # Inline/display LaTeX must survive Markdown untouched (its _ and * not eaten), so KaTeX can typeset it.
     _, body = rd.md_to_html("# T\n\n设 \\(x_{1}\\)、\\(L^{2}\\)，且 \\[y = a_{i}\\]。\n")
     check("inline/display LaTeX survives markdown",
@@ -128,119 +96,6 @@ def test_epub_units(ex, rd):
     check("math-only blockquote unwrapped (no <blockquote>)", "<blockquote>" not in bq and "\\[" in bq and "\n>" not in bq, bq)
     _, fw = rd.md_to_html("# T\n\n设 \\(x=1\\）在……\n")
     check("mis-typed full-width close delimiter fixed", "\\(x=1\\)" in fw, fw)
-    # A display equation alone in its block is a block figure; a symbol within a text line is inline.
-    b1 = '<p><img src="e.png"/></p>'
-    b2 = '<p>当 <img src="s.png"/> 时</p>'
-    check("display equation alone in <p> is block", ex._img_inline(b1, b1.find("<img")) is False)
-    check("symbol image within a line is inline", ex._img_inline(b2, b2.find("<img")) is True)
-    # epub_fragment keeps the math/emphasis tags and turns each <img> into an ⟦IMG⟧ placeholder.
-    import tempfile as _t, zipfile
-    with _t.TemporaryDirectory() as d:
-        work = Path(d); (work / "images").mkdir()
-        zp = work / "t.epub"
-        with zipfile.ZipFile(zp, "w") as z:
-            z.writestr("c.xhtml", '<html><body><p><strong>x</strong> is <em>a</em><sub>1</sub> <img src="i.png"/></p></body></html>')
-            z.writestr("i.png", b"\x89PNG\r\n\x1a\n")
-        frag, imgs, n = ex.epub_fragment(zipfile.ZipFile(zp), "c.xhtml", work, True, 0)
-        check("epub_fragment keeps tags and placeholders the image",
-              "<strong>x</strong>" in frag and "<sub>1</sub>" in frag and "⟦IMG:" in frag and len(imgs) == 1 and n == 1, frag)
-    # A per-subsection-file EPUB groups its subsections under the parent chapter (one section, ## sub-headings).
-    with _t.TemporaryDirectory() as d:
-        work = Path(d); epub = work / "b.epub"
-        opf = ('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
-               '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>B</dc:title></metadata>'
-               '<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
-               '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
-               '<item id="c1a" href="c1a.xhtml" media-type="application/xhtml+xml"/>'
-               '<item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/></manifest>'
-               '<spine><itemref idref="c1"/><itemref idref="c1a"/><itemref idref="c2"/></spine></package>')
-        nav = ('<html><body><nav><ol><li><a href="c1.xhtml">1. Intro</a></li>'
-               '<li><a href="c1a.xhtml">1.1. First</a></li><li><a href="c2.xhtml">2. Next</a></li></ol></nav></body></html>')
-        with zipfile.ZipFile(epub, "w") as z:
-            z.writestr("META-INF/container.xml",
-                       '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
-                       '<rootfiles><rootfile full-path="package.opf"/></rootfiles></container>')
-            z.writestr("package.opf", opf)
-            z.writestr("nav.xhtml", nav)
-            z.writestr("c1.xhtml", "<html><body><p>chapter one body</p></body></html>")
-            z.writestr("c1a.xhtml", "<html><body><p>subsection one one body</p></body></html>")
-            z.writestr("c2.xhtml", "<html><body><p>chapter two body</p></body></html>")
-        ex.extract_epub(epub, work, False, [468, 680])
-        m = json.loads((work / "sections.json").read_text())
-        secs = m["sections"]
-        ch1 = work / secs[0]["file"]
-        check("subsection grouped under its chapter (one section per chapter, not per subsection)",
-              len(secs) == 2 and secs[0]["label"] == "第一章" and secs[1]["label"] == "第二章"
-              and "subsection one one body" in ch1.read_text(), [s["outline_title"] for s in secs])
-    # Terminal back-matter (Notes, its untitled continuation, References, Index) after the last chapter is not
-    # translated: it is dropped, not folded into the last chapter as trailing notes. References/Bibliography are
-    # skipped like Notes/Index, and an untitled continuation file after Notes goes with the back-matter.
-    def mk_epub(path, files, spine, nav):  # files: {href: body}; spine: [id...]==hrefs; nav: {href: title}
-        items = "".join(f'<item id="{h}" href="{h}" media-type="application/xhtml+xml"/>' for h in files)
-        opf = ('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
-               '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>B</dc:title></metadata>'
-               f'<manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>{items}</manifest>'
-               '<spine>' + "".join(f'<itemref idref="{h}"/>' for h in spine) + '</spine></package>')
-        lis = "".join(f'<li><a href="{h}">{t}</a></li>' for h, t in nav.items())
-        with zipfile.ZipFile(path, "w") as z:
-            z.writestr("META-INF/container.xml",
-                       '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
-                       '<rootfiles><rootfile full-path="package.opf"/></rootfiles></container>')
-            z.writestr("package.opf", opf)
-            z.writestr("nav.xhtml", f'<html><body><nav><ol>{lis}</ol></nav></body></html>')
-            for h, body in files.items():
-                z.writestr(h, f"<html><body>{body}</body></html>")
-    with _t.TemporaryDirectory() as d:
-        work = Path(d); epub = work / "b.epub"
-        mk_epub(epub,
-                {"c1.xhtml": "<p>chapter one body</p>", "c2.xhtml": "<p>chapter two body</p>",
-                 "notes.xhtml": "<p>NOTE1BODY endnote text</p>", "notescont.xhtml": "<p>NOTESCONT more endnotes</p>",
-                 "refs.xhtml": "<p>REFSENTRY bibliography line</p>", "index.xhtml": "<p>INDEXTERM 12, 40</p>"},
-                ["c1.xhtml", "c2.xhtml", "notes.xhtml", "notescont.xhtml", "refs.xhtml", "index.xhtml"],
-                {"c1.xhtml": "1. Intro", "c2.xhtml": "2. Next", "notes.xhtml": "Notes",
-                 "refs.xhtml": "References", "index.xhtml": "Index"})  # notescont.xhtml has no nav title
-        ex.extract_epub(epub, work, False, [468, 680])
-        secs = json.loads((work / "sections.json").read_text())["sections"]
-        blob = "".join((work / s["file"]).read_text() for s in secs)
-        check("terminal back-matter (notes/refs/index + untitled continuation) dropped after last chapter",
-              len(secs) == 2 and not any(m in blob for m in ("NOTE1BODY", "NOTESCONT", "REFSENTRY", "INDEXTERM")),
-              [(s["label"], s["words"]) for s in secs])
-    with _t.TemporaryDirectory() as d:  # a per-chapter "Notes" BETWEEN chapters must not drop the chapters after it
-        work = Path(d); epub = work / "b.epub"
-        mk_epub(epub,
-                {"c1.xhtml": "<p>chapter one body</p>", "n1.xhtml": "<p>MIDNOTE chapter one endnotes</p>",
-                 "c2.xhtml": "<p>chapter two body survives</p>"},
-                ["c1.xhtml", "n1.xhtml", "c2.xhtml"],
-                {"c1.xhtml": "1. One", "n1.xhtml": "Notes", "c2.xhtml": "2. Two"})
-        ex.extract_epub(epub, work, False, [468, 680])
-        secs = json.loads((work / "sections.json").read_text())["sections"]
-        blob = "".join((work / s["file"]).read_text() for s in secs)
-        check("mid-book Notes between chapters does not latch away later chapters",
-              len(secs) == 2 and "chapter two body survives" in blob and "MIDNOTE" not in blob,
-              [(s["label"], s["words"]) for s in secs])
-    with _t.TemporaryDirectory() as d:  # a Conclusion opens its own section (not folded into the last chapter); its untitled continuation appends to it
-        work = Path(d); epub = work / "b.epub"
-        mk_epub(epub,
-                {"c1.xhtml": "<p>only chapter body</p>", "concl.xhtml": "<p>CONCLUSIONBODY closing argument</p>",
-                 "conclcont.xhtml": "<p>CONCLCONT rest of the conclusion</p>", "index.xhtml": "<p>INDEXTERM 3, 9</p>"},
-                ["c1.xhtml", "concl.xhtml", "conclcont.xhtml", "index.xhtml"],
-                {"c1.xhtml": "1. Only", "concl.xhtml": "Conclusion: The End", "index.xhtml": "Index"})
-        ex.extract_epub(epub, work, False, [468, 680])
-        secs = json.loads((work / "sections.json").read_text())["sections"]
-        by_file = {s["file"]: (work / s["file"]).read_text() for s in secs}
-        concl = next((s for s in secs if s["kind"] == "back"), None)
-        ch1 = next(s for s in secs if s["label"] == "第一章")
-        check("conclusion opens its own back section with its continuation, chapter not bloated",
-              len(secs) == 2 and concl is not None
-              and "CONCLUSIONBODY" in by_file[concl["file"]] and "CONCLCONT" in by_file[concl["file"]]
-              and "CONCLUSIONBODY" not in by_file[ch1["file"]] and "INDEXTERM" not in "".join(by_file.values()),
-              [(s["label"], s["kind"], s["words"]) for s in secs])
-    # A part's first chapter carries the part name as its nav title; the chapter number/title come from headings.
-    check("chapter read from 'CHAPTER n' + title headings",
-          ex.chapter_from_headings(["CHAPTER 3", "Solving Problems by Searching"]) == (3, "Solving Problems By Searching"))
-    check("chapter read from a single 'n Title' heading", ex.chapter_from_headings(["4 Search"]) == (4, "Search"))
-    check("part-title regex matches a roman part, not a word starting with I/V/X",
-          bool(ex.PART_TITLE_RE.match("II Problem Solving")) and not ex.PART_TITLE_RE.match("Introduction"))
 
 
 def make_epub_book(path):
@@ -285,7 +140,7 @@ def test_render_e2e(rd):
         book = Path(d) / "tiny.epub"
         make_epub_book(book)
         work = Path(d) / "work"
-        r = subprocess.run([sys.executable, str(HERE / "extract.py"), str(book), "--work", str(work)], capture_output=True, text=True)
+        r = subprocess.run(["node", str(HERE / "extract.mjs"), str(book), "--work", str(work)], capture_output=True, text=True)
         check("extract runs on generated EPUB", r.returncode == 0, r.stderr[-500:])
         meta = json.loads((work / "sections.json").read_text())
         check("extract finds front, chapter", [s["kind"] for s in meta["sections"]] == ["front", "chapter"], str(meta["sections"]))
@@ -330,24 +185,11 @@ def test_render_e2e(rd):
         check("render fails on an unparseable equation (KaTeX error guard)", guarded)
 
 
-def test_luna_e2e(tr):
-    if not os.environ.get("TRANSLATE_E2E"):
-        print("SKIP: Luna e2e (set TRANSLATE_E2E=1 to spend one gpt-6-luna call)")
-        return
-    md, usage, seconds = tr.run_codex("Book: Test\nSection: Preface (front, 12 words)\n\nSource text:\n\nTraction is a sign that your company is taking off. Nothing else matters.\n",
-                                     "gpt-6-luna", "low", "priority")
-    check("luna returns a titled Chinese translation", tr.check_output(md, 12) is None and "牵引力" in md, md[:200])
-    check("luna usage reported", usage and usage.get("output_tokens", 0) > 0 and seconds >= 0)
-
-
 def main():
-    ex, tr, rd = load("extract"), load("translate"), load("render")
-    test_extract(ex)
-    test_translate(tr)
+    rd = load("render")
     test_render_units(rd)
-    test_epub_units(ex, rd)
+    test_math_units(rd)
     test_render_e2e(rd)
-    test_luna_e2e(tr)
     r = subprocess.run(["bash", str(HERE / "setup.sh"), "--check"], capture_output=True, text=True)
     check("setup.sh --check reports", "present:" in r.stdout, r.stdout + r.stderr)
     print(f"\n{len(fails)} failures" if fails else "\nall passed")

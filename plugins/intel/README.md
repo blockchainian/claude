@@ -71,7 +71,7 @@ audio leg and `digest` for the notes.
 - `digest`: `curl`; `setup.sh` installs `uv` (runs the trafilatura article
   extractor and the PDF scripts), `yt-dlp` (YouTube subtitles) and `poppler`
   (PDFs); a highlights PDF needs Google Chrome.
-- `translate`: `setup.sh` installs `poppler` and `uv`; needs a logged-in
+- `translate`: `setup.sh` installs `poppler` and `uv` (for `render.py`; extract and translate are Node scripts); needs a logged-in
   `codex` CLI (ChatGPT plan, for gpt-6-luna) and Google Chrome (`CHROME=` to
   point elsewhere).
 - `find-domain-names`: a Namecheap API key with the calling IP whitelisted,
@@ -90,7 +90,8 @@ node --test skills/transcribe/tests/*.mjs
 python3 skills/digest/tests/test_fetch_source.py
 node --test skills/digest/tests/*.mjs
 skills/digest/tests/test_pdf_highlights.py
-skills/translate/tests/test_translate.py
+node --test skills/translate/tests/*.mjs
+skills/translate/tests/test_render.py
 node --test skills/find-domain-names/tests/check.test.mjs
 node --test skills/download-book/tests/site-session.test.mjs
 node --test skills/case-study/tests/*.mjs
