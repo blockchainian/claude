@@ -212,3 +212,31 @@ test('check rejects a sources.json that is not a url-to-label object', () => {
   assert.ok(report.draft_ok === false && report.sources_valid === false)
   assert.ok(existsSync(join(work, 'chapters.json')))
 })
+
+test('merge gives each of several sources that share a label its own label, in sources.json and in the notes', () => {
+  const twins = cs.init('label-twins', 'How Twins grew', 'https://example.com/@twins', join(tmp, 'pdf', 'twins.pdf'), 12, 'Twins').work
+  const [first, second, third, alone] = ['https://tube.example/a', 'https://tube.example/b', 'https://tube.example/c', 'https://variety.example/v']
+  write(join(twins, 'notes', 'read-01.sources.json'), JSON.stringify({ [first]: 'Tubefilter 2025', [second]: 'Tubefilter 2025', [alone]: 'Variety 2018' }))
+  write(join(twins, 'notes', 'read-02.sources.json'), JSON.stringify({ [third]: 'Tubefilter 2025' }))
+  write(join(twins, 'notes', 'read-01.md'),
+    `## Tubefilter — Team Water (2025-08-01)\nurl: ${first}\n- [c06] [reported at the time] (2025-08) raised 40M — Tubefilter 2025\n\n` +
+    `## Tubefilter — Netflix deal (2025-08-19)\nurl: ${second}\n- [c08] [reported at the time] (2025-08) a show — Tubefilter 2025\n\n` +
+    `## Variety — Profile (2018)\nurl: ${alone}\n- [c02] [reported later] (2015) joined a company — Variety 2018\n`)
+  const expected = { [first]: 'Tubefilter 2025a', [second]: 'Tubefilter 2025b', [alone]: 'Variety 2018', [third]: 'Tubefilter 2025c' }
+  cs.merge(twins)
+  assert.deepEqual(json(twins, 'sources.json'), expected, 'a label only one source has is kept')
+  const notes = read(twins, 'notes', 'read-01.md')
+  assert.ok(notes.includes('raised 40M — Tubefilter 2025a\n') && notes.includes('a show — Tubefilter 2025b\n') && notes.includes('— Variety 2018\n'),
+    'the bullets under a source name it by its own label')
+  cs.merge(twins)
+  assert.deepEqual(json(twins, 'sources.json'), expected, 'merging again changes nothing')
+  assert.equal(read(twins, 'notes', 'read-01.md'), notes)
+  write(join(twins, 'review', 'sources-1.failed.json'), JSON.stringify([first]))
+  cs.merge(twins)
+  assert.equal(json(twins, 'sources.json')[second], 'Tubefilter 2025b', 'a label does not move when another source with it fails')
+  const many = Object.fromEntries(Array.from({ length: 27 }, (_, n) => [`https://x.example/${pad(n)}`, 'X post 2025']))
+  write(join(twins, 'notes', 'read-03.sources.json'), JSON.stringify(many))
+  cs.merge(twins)
+  const posts = json(twins, 'sources.json')
+  assert.deepEqual([posts['https://x.example/00'], posts['https://x.example/26']], ['X post 2025aa', 'X post 2025ba'], 'no label is the start of another')
+})

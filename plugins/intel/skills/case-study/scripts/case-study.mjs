@@ -13,7 +13,8 @@
 // Agents working in parallel never share a file: each writes its own notes/<name>.sources.json (url -> label) and
 // notes/<name>.gaps.md, reviewers write review/<name>.failed.json (a list of urls), fixers write
 // review/<name>.added.json (url -> label). merge turns those into sources.json, gaps.md and the draft's last chapter,
-// and notes/<name>.raw.json (url -> the files its text was saved to) into raw.json.
+// and notes/<name>.raw.json (url -> the files its text was saved to) into raw.json. Sources the readers gave the same
+// label get a letter each (Outlet 2025a, Outlet 2025b), in sources.json and in the notes' bullets, so that a label names one source.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
@@ -90,15 +91,53 @@ function readJson(path, kind) {
   return (kind === 'array' ? Array.isArray(data) : isObject(data)) ? data : empty
 }
 
+function ownLabels(sources) {
+  // url -> label where every source has a label no other source has: sources that share one get a letter after it
+  // (aa, ab… when more than 26 share it, so that no label is the start of another).
+  const sharing = {}
+  for (const [url, label] of Object.entries(sources)) (sharing[label] ??= []).push(url)
+  const letters = (n, of) => {
+    let width = 1
+    while (26 ** width < of) width += 1
+    let out = ''
+    for (let i = 0; i < width; i += 1, n = Math.floor(n / 26)) out = String.fromCharCode(97 + (n % 26)) + out
+    return out
+  }
+  return Object.fromEntries(Object.entries(sources).map(([url, label]) => {
+    const urls = sharing[label]
+    return [url, urls.length > 1 ? label + letters(urls.indexOf(url), urls.length) : label]
+  }))
+}
+
+function nameInNotes(notes, sources, own) {
+  // In the readers' notes, end each bullet under a source's `url:` line with that source's own label.
+  for (const path of files(notes, '.md')) {
+    let url = ''
+    const text = read(path)
+    const named = lines(text).map(line => {
+      if (line.startsWith('url:')) url = line.slice(4).trim()
+      const shared = `— ${sources[url]}`
+      return line.startsWith('- ') && own[url] !== sources[url] && line.trimEnd().endsWith(shared)
+        ? line.trimEnd().slice(0, -shared.length) + `— ${own[url]}` : line
+    }).join('\n')
+    if (named !== text) write(path, named)
+  }
+}
+
 export function merge(work) {
   // Rebuild sources.json, gaps.md and the draft's sources chapter from the files the parallel agents wrote.
   const meta = JSON.parse(read(join(work, 'chapters.json')))
   const notes = join(work, 'notes')
   const review = join(work, 'review')
   let sources = {}
-  for (const path of [...files(notes, '.sources.json'), ...files(review, '.added.json')]) {
-    for (const [k, v] of Object.entries(readJson(path, 'object'))) if (typeof v === 'string') sources[k] = v
+  const gather = paths => {
+    for (const path of paths) for (const [k, v] of Object.entries(readJson(path, 'object'))) if (typeof v === 'string') sources[k] = v
   }
+  gather(files(notes, '.sources.json'))
+  const own = ownLabels(sources)
+  nameInNotes(notes, sources, own)
+  sources = own
+  gather(files(review, '.added.json'))
   const failed = new Set(files(review, '.failed.json').flatMap(path => readJson(path, 'array')))
   sources = Object.fromEntries(Object.entries(sources).filter(([url]) => !failed.has(url)))
   write(join(work, 'sources.json'), dump(sources))

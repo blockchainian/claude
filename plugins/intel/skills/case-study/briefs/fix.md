@@ -30,7 +30,8 @@ about every label your chapter names. The failed sources: every URL in
 9. When you are sure a reviewer is wrong, leave the text and record why, with
    the source's wording.
 
-Anything new you add meets the same rules as the first draft.
+Anything new you add meets the same rules as the first draft. A source you
+add takes a label that is not already a value in `sources.json`.
 
 Edit only `md/<your file>`. Do not edit `sources.json`. Write:
 - `review/fix-<NN>.md` — one line per finding, appended right after you
