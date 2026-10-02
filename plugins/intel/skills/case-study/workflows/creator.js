@@ -5,7 +5,7 @@ export const meta = {
     { title: 'Scout', detail: 'four scouts find sources by lane; the two numbers agents start with them', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
     { title: 'Write', detail: 'one writer per chapter, then the introduction and reasoning chapters', model: 'sonnet' },
-    { title: 'Review', detail: 'sources lens on Opus from the merge on; numbers (session model) and quotes (Opus) lenses per chapter as each is written' },
+    { title: 'Review', detail: 'sources lens on Opus from the merge on; per chapter, as each is written: a script matches its figures, the quotes lens (Opus) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
     { title: 'Fix', detail: 'one fixer per chapter, as soon as its reviews and the sources lens are done', model: 'sonnet' },
   ],
 }
@@ -15,7 +15,7 @@ export const meta = {
 // caps may be empty strings.
 //
 // Nothing waits for a stage it does not need: the numbers agents start with the scouts, the sources lens starts
-// with the writers, and each chapter runs write → numbers + quotes review → fix on its own. The only barriers are
+// with the writers, and each chapter runs write → figures matched + quotes review → fix on its own. The only barriers are
 // the merge after reading (writers and the sources lens need sources.json), the body chapters before the
 // introduction and reasoning chapters (written from them, fixed after them), and the sources lens before any fix.
 const A = args
@@ -71,11 +71,18 @@ log(`read stage merged: ${mergedRead}`)
 const sourceCount = Number((mergedRead.match(/"sources":\s*(\d+)/) || [])[1]) || urls.length
 
 phase('Write')
-// Sources and quotes are found-or-not checks; the numbers lens judges what the record supports, so it keeps
+// Sources and quotes are found-or-not checks; the record lens judges what the record supports, so it keeps
 // the session model.
 const review = (lens, name, slice) => agent(
   `${COMMON}\nYou are an independent adversarial reviewer. Follow ${S}/briefs/review.md. Your lens: ${lens}. Your output name: ${name}.\nYour slice:\n${slice}`,
-  { label: `review:${name}`, phase: 'Review', effort: 'high', agentType: 'general-purpose', ...(lens === 'numbers' ? {} : { model: 'opus' }) })
+  { label: `review:${name}`, phase: 'Review', effort: 'high', agentType: 'general-purpose', ...(lens === 'record' ? {} : { model: 'opus' }) })
+// Whether a figure is in its source is a lookup: a script does it for every chapter. Its unmatched figures go to
+// the fixer as findings, except in the chapters that argue from the curve (the timeline, the turning points),
+// where a record reviewer judges them first, with the derived figures and what each growth step is credited to.
+const RECORD = ['03', '07']
+const matchFigures = file => agent(
+  `Run exactly this command and return its output, nothing else:\n${S}/scripts/case_study.py figures "${WORK}" ${file}${RECORD.includes(file) ? ' --worklist' : ''}`,
+  { label: `figures:${file}`, phase: 'Review', model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 // The sources lens checks the sources themselves, not the chapters: it runs while the chapters are written.
 const sliceCount = Math.ceil(sourceCount / 25)
 const sourcesReviewed = parallel(Array.from({ length: sliceCount }, (_, i) => () => review('sources', `sources-${i + 1}`,
@@ -87,12 +94,18 @@ const write = file => agent(
 const fix = file => agent(
   `${COMMON}\nYou are a fixer. Follow ${S}/briefs/fix.md. Your chapter file: md/${file}.md (NN = ${file}).`,
   { label: `fix:${file}`, phase: 'Fix', ...SONNET })
-// One chapter's chain: written → reviewed by the numbers and quotes lenses → fixed once the sources lens is in.
+// One chapter's chain: written → figures matched and reviewed → fixed once the sources lens is in.
 const written = {}
 const chain = (file, writeAfter, fixAfter) => {
   written[file] = writeAfter.then(() => write(file))
   return written[file].then(async () => {
-    const reviews = await parallel(['numbers', 'quotes'].map(lens => () => review(lens, `${lens}-${file}`, `- md/${file}.md`)))
+    const reviews = await parallel([
+      () => review('quotes', `quotes-${file}`, `- md/${file}.md`),
+      async () => {
+        const matched = await matchFigures(file)
+        return RECORD.includes(file) ? review('record', `record-${file}`, `- md/${file}.md\nThe figures a script could not match: review/figures-${file}.md`) : matched
+      },
+    ])
     await sourcesReviewed
     await fixAfter
     return { file, reviews, fixed: await fix(file) }

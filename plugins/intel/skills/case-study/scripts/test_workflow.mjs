@@ -1,6 +1,6 @@
 // ABOUTME: Runs the creator workflow script against stand-in agents to check its control flow:
-// ABOUTME: scouted sources are de-duplicated and batched, every chapter is written, reviewed per chapter, and fixed
-// ABOUTME: as soon as its own reviews and the sources lens are done, without waiting for the other chapters.
+// ABOUTME: scouted sources are de-duplicated and batched, every chapter is written, has its figures matched by a
+// ABOUTME: script, is reviewed, and is fixed as soon as its own reviews and the sources lens are done.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
@@ -70,10 +70,8 @@ test('the review covers every source and every chapter, one chapter per reviewer
   const sourceSlices = calls.filter(c => c.label.startsWith('review:sources-'))
   assert.equal(sourceSlices.length, 6)
   sourceSlices.forEach((c, i) => assert.ok(c.prompt.includes(`case_study.py slice "/w" ${i + 1} 6`), c.prompt))
-  for (const lens of ['numbers', 'quotes']) {
-    const slices = calls.filter(c => c.label.startsWith(`review:${lens}-`))
-    assert.deepEqual(slices.map(c => c.prompt.match(/md\/\d\d\.md/g)).sort(), ALL.map(f => [`md/${f}.md`]))
-  }
+  const quotes = calls.filter(c => c.label.startsWith('review:quotes-'))
+  assert.deepEqual(quotes.map(c => c.prompt.match(/md\/\d\d\.md/g)).sort(), ALL.map(f => [`md/${f}.md`]))
   assert.deepEqual(labels(calls, 'fix:').sort(), ALL.map(f => `fix:${f}`))
   assert.deepEqual(labels(calls, 'merge:'), ['merge:read', 'merge:fix'])
 })
@@ -82,7 +80,7 @@ test('the sources lens starts with the writers; a chapter is fixed when its own 
   const { calls, release } = await run(ARGS, ['write:05', 'review:sources-2'])
   assert.ok(labels(calls, 'review:sources-').length === 6 && labels(calls, 'write:').length >= 8, 'sources reviewers run alongside the writers')
   // the body chapters other than 05 are reviewed at once; the introduction and reasoning chapters wait for 05 to be written
-  assert.deepEqual(labels(calls, 'review:numbers-').sort(), ['02', '03', '04', '06', '07', '08', '09'].map(f => `review:numbers-${f}`))
+  assert.deepEqual(labels(calls, 'review:quotes-').sort(), ['02', '03', '04', '06', '07', '08', '09'].map(f => `review:quotes-${f}`))
   assert.deepEqual(labels(calls, 'write:').filter(l => ['write:01', 'write:10', 'write:11'].includes(l)), [])
   assert.deepEqual(labels(calls, 'fix:'), [], 'no chapter is fixed before the sources lens is done')
   await release() // sources-2 and write:05 finish; the stand-ins let the rest run through
@@ -91,11 +89,23 @@ test('the sources lens starts with the writers; a chapter is fixed when its own 
   assert.deepEqual(fixes.slice(-3).sort(), ['fix:01', 'fix:10', 'fix:11'], 'the introduction and reasoning chapters are fixed after the others')
 })
 
-test('source and quote reviewers run on Opus, number reviewers on the session model, all at high effort, and each agent is told its share of the caps', async () => {
+test('a script matches every chapter\'s figures; only the timeline and turning-point chapters get a record reviewer, who judges the unmatched ones', async () => {
+  const { calls } = await run(ARGS, ['review:record-03'])
+  assert.equal(labels(calls, 'review:numbers-').length, 0)
+  const matchers = calls.filter(c => c.label.startsWith('figures:'))
+  assert.deepEqual(matchers.map(c => c.label).sort(), ALL.map(f => `figures:${f}`))
+  assert.ok(matchers.every(c => c.model === 'haiku' && c.prompt.includes(`case_study.py figures "/w" ${c.label.slice(8)}`)))
+  assert.deepEqual(matchers.filter(c => c.prompt.includes('--worklist')).map(c => c.label).sort(), ['figures:03', 'figures:07'])
+  assert.deepEqual(labels(calls, 'review:record-').sort(), ['review:record-03', 'review:record-07'])
+  assert.ok(calls.findIndex(c => c.label === 'figures:03') < calls.findIndex(c => c.label === 'review:record-03'), 'the reviewer starts from the script\'s worklist')
+  assert.ok(!labels(calls, 'fix:').includes('fix:03') && labels(calls, 'fix:').includes('fix:04'), 'chapter 03 is fixed only after its record review')
+})
+
+test('source and quote reviewers run on Opus, record reviewers on the session model, all at high effort, and each agent is told its share of the caps', async () => {
   const { calls } = await run(ARGS)
   const reviewers = calls.filter(c => c.label.startsWith('review:'))
   assert.ok(reviewers.every(c => c.effort === 'high'))
-  assert.ok(reviewers.filter(c => !c.label.startsWith('review:numbers')).every(c => c.model === 'opus'))
-  assert.ok(reviewers.filter(c => c.label.startsWith('review:numbers')).every(c => c.model === undefined))
+  assert.ok(reviewers.filter(c => !c.label.startsWith('review:record')).every(c => c.model === 'opus'))
+  assert.ok(reviewers.filter(c => c.label.startsWith('review:record')).every(c => c.model === undefined))
   assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/17 share'))
 })

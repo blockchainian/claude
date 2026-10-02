@@ -7,7 +7,7 @@ write only your findings file.
 
 The message that sent you here names the work directory, the subject type file,
 your lens, your slice (a list of source URLs for the sources lens; a list of
-chapter files for the numbers and quotes lenses), your output name, and the
+chapter file for the quotes and record lenses), your output name, and the
 tool list. Other reviewers hold the other slices: check every item in yours. Read `references/evidence.md` (next to this
 brief's folder) and the subject type file first: they are the standard the
 study must meet. Tool commands are in `references/tools.md`.
@@ -39,23 +39,26 @@ written while you work, and the fixer of every chapter that names a label
 receives your findings about it. Write every failed URL as a JSON list to
 `review/<output name>.failed.json`.
 
-## Lens: numbers
+## Lens: record
 
-Extract every number in the chapters: followers, views, uploads, money, dates
-of milestones, team sizes, durations, rates. For each, find it in the cited
-source yourself and mark it confirmed, differs (give the source's figure), not
-found, or unreachable. Then check:
+Whether each figure is in its source has been checked by a script, which
+matched every figure in your chapter against the saved text of the sources
+its sentence names. `review/figures-NN.md` lists the ones it could not match:
+figures derived from others, figures in a wording the script does not read,
+and figures that are wrong. Judge each: recompute a derived figure from the
+points it names; open the source for the others. Write a finding for every
+one that does not hold; the rest need no row beyond "confirmed".
 
-- the kind is labelled correctly (a figure from the subject or their staff is
-  self-reported even in a newspaper; an estimate is called an estimate);
-- units, currency and year; sums, rates and durations recomputed;
-- archive points against the saved capture under `raw/archive`, and at least
-  eight re-fetched in one batch with `scripts/wayback.py fetch` (the slice
-  holding the timeline chapter does this; the others skip it);
-- the capture list for every period the study says has no data;
+Then judge what the chapter makes of its figures:
+
 - every growth step credited to an event: do the dated points on both sides
   support it?
-- every place where sources disagree and the chapter prints one side.
+- the capture list for every period the study says has no data;
+- every place where sources disagree and the chapter prints one side;
+- sums, rates and durations: both ends from the same kind of record;
+- archive points against the saved capture under `raw/archive`, and at least
+  eight re-fetched in one batch with `scripts/wayback.py fetch` (the reviewer
+  of the timeline chapter does this; the other skips it).
 
 ## Lens: quotes
 
@@ -63,6 +66,11 @@ For every quotation and every sentence of the form "X said / wrote / reported":
 open the cited source and find it. Mark it found, distorted (say how), not
 found, wrong speaker, wrong date, or wrong outlet. Then check:
 
+- when the sentence carries a figure: its kind (a figure from the subject
+  or their staff is self-reported even in a newspaper; an estimate is called
+  an estimate), its unit, currency and year, and — for a count or an age too
+  small for the script that matches figures (under three digits) — the figure
+  itself;
 - translated quotes against the original-language source;
 - press presented as reported at the time was published then;
 - claims about method that come only from the subject are labelled
@@ -83,7 +91,7 @@ row for each item right after you check it, and each finding as you find it,
 never at the end (see "Writing as you go" in the evidence rules).
 
 The file holds one row per item checked, so the coverage is visible, and the
-findings, one per line. The numbers and quotes lenses start each finding with
+findings, one per line. The quotes and record lenses start each finding with
 the chapter file it applies to in brackets; the sources lens starts it with
 the source's label as written in `sources.json`:
 

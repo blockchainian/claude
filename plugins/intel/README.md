@@ -45,7 +45,8 @@ download links and checks domain names.
   record from archive snapshots, methods, money, failures, and what can be
   copied. A workflow runs everything in parallel — scouts, readers in batches,
   numbers from the archive in one batch, then each chapter on its own: a
-  writer, independent reviewers who audit every source, number and quote, and
+  writer, a script that matches every figure against the saved source text,
+  independent reviewers who audit every source and quote, and
   a fixer, with no chapter waiting for another; sellers of courses and growth
   tools are never evidence. A separate writer then turns the reviewed
   draft into a short book: a cover with the subject's name, an introduction,

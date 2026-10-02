@@ -139,6 +139,42 @@ def main():
         found = cs.findings(work, "03")
         check("findings for a chapter are its own lines plus the sources-lens lines about labels the chapter names",
               found == ["- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M", "- [A 2020] seller-source | sells a course | | drop"], str(found))
+        (work / "notes" / "read-01.raw.json").write_text(json.dumps({"https://a.example/x": ["raw/a.html"], "https://b.example/z": ["raw/b1.txt"]}))
+        (work / "notes" / "numbers-archive.raw.json").write_text(json.dumps({"https://b.example/z": ["raw/b2.txt"]}))
+        cs.merge(work)
+        saved_raw = json.loads((work / "raw.json").read_text())
+        check("merge gathers where each source's text was saved", {u: sorted(f) for u, f in saved_raw.items()} == {"https://a.example/x": ["raw/a.html"], "https://b.example/z": ["raw/b1.txt", "raw/b2.txt"]}, str(saved_raw))
+        (work / "raw" / "a.html").write_text('<p>She passed 1.002.877 subscribers and earned $12 million; <span title="24,8 miljoner">many</span> watched 603 videos.</p>')
+        (work / "raw" / "b1.txt").write_text("The channel showed 29 321 179 subscribers, 11.941 million by another count.\n")
+        (work / "raw" / "b2.txt").write_text("Views that week: 50,566,204. Turnover 7 million kronor.\n")
+        (work / "md" / "05.md").write_text(
+            "# Chapter 4\n\n她一共有 1,002,877 订阅，另一处写 11.941M。\n\n## Section\n\n"
+            "2012 年 7 月 11 日她过了 1,002,877 订阅，收入 1,200 万美元，有 603 条视频（A 2020，当时的报道）。"
+            "B 2019 的页面写 29,321,179 订阅、当周 50,566,204 次观看。"
+            "她 7 天发了 8 条，占 45%（A 2020）。\n\n"
+            "她的公司营业额 720 万克朗，另一篇写 2,480 万人看过（B 2019）。"
+            "同一年她有 31,000 个付费会员。\n\n"
+            "E 2022 写她有 5,555 个订阅。\n")
+        report = cs.figures(work, "05")
+        missed = {(m["figure"], tuple(m["labels"])) for m in report["unmatched"]}
+        check("figures the cited source's saved text holds are matched: other separators, a unit for the same value, a spaced number",
+              not {f for f, _ in missed} & {"1,002,877", "1,200 万", "603", "29,321,179", "50,566,204"}, str(missed))
+        check("a figure that is in another source's text, or in none, is reported with the sources its sentence names",
+              ("720 万", ("B 2019",)) in missed and ("2,480 万", ("B 2019",)) in missed, str(missed))
+        check("a sentence that names no source takes its paragraph's", ("31,000", ("B 2019",)) in missed, str(missed))
+        check("a source with no saved text leaves its figures unmatched", ("5,555", ("E 2022",)) in missed, str(missed))
+        check("a sentence in a paragraph that names no source is matched against every source the chapter names, and a figure "
+              "with three decimals is not read as thousands", not {f for f, _ in missed} & {"1,002,877", "11.941M"}, str(missed))
+        check("dates and small figures are not checked", len(missed) == 4 and report["checked"] == 11 and report["small"] == 3, str(report))
+        lines = (work / "review" / "figures-05.md").read_text().splitlines()
+        check("the unmatched figures are written as findings for the chapter's fixer, one line per sentence",
+              len([l for l in lines if l.startswith("- [05] unsupported | ")]) == 3 and any("720 万" in l and "2,480 万" in l and "B 2019" in l for l in lines), "\n".join(lines))
+        check("the fixer receives them with its other findings", any("5,555" in l for l in cs.findings(work, "05")))
+        cs.figures(work, "05", worklist=True)
+        lines = (work / "review" / "figures-05.md").read_text().splitlines()
+        check("as a reviewer's worklist the unmatched figures are not findings yet", len([l for l in lines if l.startswith("* ")]) == 3
+              and not any("5,555" in l for l in cs.findings(work, "05")), "\n".join(lines))
+        cs.figures(work, "05")
         last = (work / "md" / "12.md").read_text()
         check("merge writes the draft's sources chapter from sources.json", last.startswith("# Sources\n") and "A 2020" in last and "Seller 2021" not in last and cs.has_lead_paragraph(last), last[:200])
 

@@ -6,8 +6,9 @@ description: >
   started with, the dated growth record, the methods, the money, the failures,
   and what can be copied. One subject per run; today the subject is a creator
   (an influencer or an account that built its audience by posting). Every
-  source is opened and read, every number is checked against the record, and
-  three independent adversarial reviewers audit every source, number and quote.
+  source is opened and read, a script matches every figure against the saved
+  text of its source, and independent adversarial reviewers audit every source
+  and quote and what the study makes of its numbers.
   The PDF reads as a short book: a cover with the subject's name, an
   introduction, numbered chapters, no citations in the text. Use for "/case-study <name or profile URL>", "do a
   case study of <creator>", "how did <creator> grow", "调研一个网红",
@@ -95,7 +96,7 @@ ask for one name.
    | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `scripts/wayback.py curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Write | one per chapter; then the introduction and the reasoning chapters | The sourced draft in `md/`, from the notes only |
-   | Review | sources lens per 25 URLs, from the merge on, alongside the writers; numbers and quotes lenses per chapter, as soon as it is written | Findings in `review/`, every item checked |
+   | Review | sources lens per 25 URLs, from the merge on, alongside the writers; per chapter, as soon as it is written: a script matches its figures against the saved source text, and the quotes lens reviews it; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
    | Fix | one per chapter, as soon as its two reviews and the sources lens are done; the introduction and the reasoning chapters after the others | Apply the findings to `md/` |
 
    A chapter runs write → review → fix on its own; the slowest chapter sets
@@ -117,11 +118,15 @@ ask for one name.
    Parallel agents never share a file. Each writes its own notes, source list,
    gaps, findings and fix log; `case_study.py merge` builds `sources.json`,
    `gaps.md` and the draft's sources chapter from them. Reviewers are fresh
-   agents, never the writers. The sources and quotes lenses run on Opus at
-   high effort: they check whether something is there. The numbers lens keeps
-   the session's model: it judges what the record supports — whether a growth
-   step is really tied to an event, whether a capture list was searched in
-   full — and the largest model has caught what others missed there. The review is never
+   agents, never the writers. Whether a figure is in its source is a lookup, so a
+   script does it (`case_study.py figures`): about nine figures in ten match
+   the saved text, and only the rest reach an agent — the chapter's fixer, or
+   the record reviewer in the two chapters that argue from the curve. The
+   sources and quotes lenses run on Opus at high effort: they check whether
+   something is there. The record lens keeps the session's model: it judges
+   what the record supports — whether a growth step is really tied to an
+   event, whether a capture list was searched in full — and the largest model
+   has caught what others missed there. The review is never
    sampled and never skipped: a first draft that looked complete has, in
    practice, carried dozens of findings — sources named but never opened,
    sellers' and managers' statements written as fact, archive captures missed

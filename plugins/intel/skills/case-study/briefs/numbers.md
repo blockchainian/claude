@@ -40,7 +40,9 @@ the weeks around each acceleration the press mentions.
 Append to `notes/numbers-<lane>.md` as you go (see "Writing as you go" in
 the evidence rules). Dated tables, one row per line, each row starting
 with the chapter tags it serves (`[c03]`, `[c07]`…) and `[on record]`, and
-ending with the record's URL. `notes/numbers-<lane>.sources.json` and
+ending with the record's URL. `notes/numbers-<lane>.sources.json`,
+`notes/numbers-<lane>.raw.json` (the saved file of every capture and listing
+you cite: `wayback.py` prints it as `file` next to each `url`) and
 `notes/numbers-<lane>.gaps.md` as in the reader brief (a period with no
 captures is a gap only after the full capture list shows none).
 
