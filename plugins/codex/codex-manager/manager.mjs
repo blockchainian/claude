@@ -17,11 +17,11 @@ const scriptPath = fileURLToPath(import.meta.url);
 const pluginManifestPath = path.resolve(path.dirname(scriptPath), "../.claude-plugin/plugin.json");
 const adversarialStancePath = path.join(path.dirname(scriptPath), "adversarial-review.md");
 const usage = `usage:
-  codex-manager.mjs mcp                                   serve Claude's codex tools over stdio
-  codex-manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
-  codex-manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
-  codex-manager.mjs claude                                serve notify_claude and ask_claude to codex over stdio
-  codex-manager.mjs whoami                                print the resolved Claude session id`;
+  manager.mjs mcp                                   serve Claude's codex tools over stdio
+  manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
+  manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
+  manager.mjs claude                                serve notify_claude and ask_claude to codex over stdio
+  manager.mjs whoami                                print the resolved Claude session id`;
 
 const DEFAULT_DECISIONS = ["accept", "acceptForSession", "decline", "cancel"];
 const APPROVALS = {
