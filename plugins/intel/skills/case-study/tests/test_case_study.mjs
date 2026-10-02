@@ -8,7 +8,7 @@ import { after, before, test } from 'node:test'
 
 const tmp = mkdtempSync(join(tmpdir(), 'case-study-'))
 process.env.HIGHLIGHTS_DIR = join(tmp, 'store')
-const cs = await import('./case_study.mjs')
+const cs = await import('../scripts/case_study.mjs')
 
 const out = join(tmp, 'pdf', 'jane-doe.pdf')
 const read = (...parts) => readFileSync(join(...parts), 'utf8')
