@@ -32,8 +32,8 @@ ship, the plan template and memory.
 | `ship/check-paths.sh` | Flags a path named in the plan that does not exist in the repo; `(new)` files are skipped |
 | `ship/check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the orchestrator runs it beside the path checker |
 | `ship/workstream.sh` | `open <id>` a worktree per workstream, `check <id> <cmd>` in it, `merge <id> <cmd>` onto the session branch behind the same check, `base` for the review |
-| `retro/extract.py` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
-| `retro/efficacy.py` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
+| `retro/extract.mjs` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
+| `retro/efficacy.mjs` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
 
 ## Agents
 

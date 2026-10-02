@@ -7,13 +7,14 @@
     "node": ">=18.18"
   },
   "scripts": {
-    "test": "npm run test:marketplace && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web",
+    "test": "npm run test:marketplace && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web && npm run test:mobile",
     "test:marketplace": "node --test tests/marketplace.test.mjs",
     "test:codex": "node --test tests/codex-manager.test.mjs",
     "validate": "claude plugin validate --strict .",
     "test:feature": "plugins/feature/hooks/tests/run.sh && plugins/feature/skills/ship/tests/run.sh && plugins/feature/skills/ship/tests/workstream.test.sh && plugins/feature/skills/ship/tests/watch-ci.test.sh && plugins/feature/skills/retro/tests/run.sh",
-    "test:proxy": "python3 plugins/proxy/skills/inspect-app-traffic/tests/test_capture.py && python3 plugins/proxy/skills/inspect-app-traffic/tests/test_wg_config.py",
+    "test:proxy": "node --test plugins/proxy/skills/inspect-app-traffic/tests/*.mjs",
     "test:intel": "node --test plugins/intel/skills/transcribe/tests/*.mjs && python3 plugins/intel/skills/digest/tests/test_fetch_source.py && node --test plugins/intel/skills/digest/tests/*.mjs && plugins/intel/skills/translate/tests/test_translate.py && node --test plugins/intel/skills/find-domain-names/tests/check.test.mjs && node --test plugins/intel/skills/case-study/tests/*.mjs && node --test plugins/intel/skills/analyze-appstore-reviews/tests/*.mjs",
-    "test:web": "node --test plugins/web/skills/heap-snapshot-leaks/tests/*.mjs && uv run plugins/web/skills/check-web-design/tests/test_check_design.py"
+    "test:web": "node --test plugins/web/skills/heap-snapshot-leaks/tests/*.mjs && uv run plugins/web/skills/check-web-design/tests/test_check_design.py",
+    "test:mobile": "node --test plugins/mobile/skills/ios-take-screenshot/tests/*.mjs && uv run plugins/mobile/skills/ios-take-screenshot/tests/test_frame_diff.py && uv run plugins/mobile/skills/ios-take-screenshot/tests/test_stitch_screens.py && uv run plugins/mobile/skills/check-mobile-design/tests/test_check_design.py"
   }
 }
