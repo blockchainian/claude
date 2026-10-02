@@ -192,7 +192,7 @@ review --base` (refuses custom instructions, so the plan cannot be the spec);
 a hand-written review prompt with an output schema (a second rubric to keep
 in step with codex's).
 
-## Test
+## Tests
 
 ```
 npm run test:codex
