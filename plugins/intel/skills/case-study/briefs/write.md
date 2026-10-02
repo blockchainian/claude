@@ -13,7 +13,8 @@ web.
 
 Your material is every bullet tagged with your chapter:
 `<skill>/scripts/case-study.mjs bullets <work> NN` (the skill folder is the
-one that holds this brief's folder). Read all of them. Anything not in the
+one that holds this brief's folder). The notes of a source the reviewers
+failed are not among them. Read all of them. Anything not in the
 notes does not go in. A long dated table in the numbers notes is printed with
 one row per quarter and a line naming the file the rest is in: open that file
 only for a day the chapter needs.
@@ -60,11 +61,7 @@ are givens of the task, stated as such.
 - A quote in a bullet is in the source's wording. Translate it into the
   study's language and put the bullet's wording right after it in ⟦ ⟧, copied
   from the bullet, never retyped from memory (see "Quotes" in the evidence
-  rules). A title, a caption, a hashtag or a slogan stays as the source has
-  it, untranslated. Quotation marks are for a source's words only.
-- Outside quotation marks and ⟦ ⟧ the draft is in the study's language:
-  proper names aside, no word of another language in running text where the
-  study's language has one.
+  rules). Quotation marks are for a source's words only.
 - A method is written out in full: what exactly, how often, with whom, at what
   cost, what changed. Fewer solid claims beat more weak ones.
 - Where the subject's account and the record differ, print both. Where two

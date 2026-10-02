@@ -101,8 +101,8 @@ ask for one name.
    | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `scripts/wayback.mjs curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `md/`, from the notes only |
-   | Review | sources lens per 25 URLs, from the merge on, alongside the writers; per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
-   | Fix | one per chapter, as soon as its two reviews and the sources lens are done; the introduction and the reasoning chapter after the others | Apply the findings to `md/` |
+   | Review | sources lens per 25 URLs, after the merge and before any chapter is written; per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
+   | Fix | one per chapter, as soon as its two reviews are done; the introduction and the reasoning chapter after the others | Apply the findings to `md/` |
 
    A chapter runs write → review → fix on its own; the slowest chapter sets
    the time, not the slowest agent of every stage added up.

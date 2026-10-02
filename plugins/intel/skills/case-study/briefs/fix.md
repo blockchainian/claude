@@ -10,8 +10,9 @@ chapter file's number: the lines tagged with it, and the sources-lens lines
 about every label your chapter names. Each line starts with the finding's
 name (`F3a9c21`). The command prints only the findings whose name is not yet
 in `review/fix-<NN>.md`: after an interruption, what it prints is what is
-left. The failed sources: every URL in `<work>/review/*.failed.json`; find
-their labels in `sources.json`.
+left. The failed sources: every URL in `<work>/review/*.failed.json`. They
+left `sources.json` before the chapter was written; their labels are in the
+readers' `notes/*.sources.json`.
 
 Take the findings one at a time: check it, edit the chapter, append its line
 to `review/fix-<NN>.md`, then take the next. Never check them all first and

@@ -34,10 +34,10 @@ For every URL in `sources.json`:
 5. Privacy: does the page print a claimed legal name or personal details of a
    pseudonymous subject?
 
-You check the sources, not the chapters: the chapters may still be being
-written while you work, and the fixer of every chapter that names a label
-receives your findings about it. Write every failed URL as a JSON list to
-`review/<output name>.failed.json`.
+You check the sources, not the chapters: the chapters are written after you
+are done, from the sources you did not fail, and the fixer of every chapter
+that names a label receives your findings about it. Write every failed URL
+as a JSON list to `review/<output name>.failed.json`.
 
 ## Lens: record
 
@@ -96,8 +96,6 @@ found, wrong speaker, wrong date, or wrong outlet. Then check:
   an estimate), its unit, currency and year, and — for a count or an age too
   small for the script that matches figures (under three digits) — the figure
   itself;
-- a title, a caption, a hashtag or a slogan is printed as the source has it,
-  not translated;
 - press presented as reported at the time was published then;
 - claims about method that come only from the subject are labelled
   self-reported;
