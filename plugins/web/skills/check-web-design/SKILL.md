@@ -47,7 +47,7 @@ converges. The `pass` field is the loop's stop condition.
 3. **Run the diff:**
 
    ```
-   uv run "${CLAUDE_PLUGIN_ROOT}/skills/check-web-design/scripts/check_design.py" \
+   "${CLAUDE_PLUGIN_ROOT}/skills/check-web-design/scripts/check_design.py" \
      --actual actual.png --desired desired.png --out-dir diff \
      [--hierarchy elements.json] \
      [--mask-top 0 --mask-bottom 0] \
