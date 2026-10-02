@@ -19,7 +19,7 @@ import unittest
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
-    "capture", Path(__file__).with_name("capture.py"))
+    "capture", Path(__file__).resolve().parent.parent / "scripts" / "capture.py")
 assert _spec and _spec.loader
 capture = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(capture)

@@ -24,7 +24,7 @@ import numpy as np
 from PIL import Image
 
 W, H = 240, 480
-SCRIPT = Path(__file__).with_name("check_design.py")
+SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "check_design.py"
 
 
 def bg(seed: int = 7) -> np.ndarray:

@@ -81,10 +81,10 @@ when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 ## Tests
 
 ```
-python3 skills/ios-take-screenshot/scripts/test_claim_simulator.py
-python3 skills/ios-take-screenshot/scripts/test_discover_ios_setup.py
-python3 skills/ios-take-screenshot/scripts/test_frame_diff.py
-python3 skills/ios-take-screenshot/scripts/test_stitch_screens.py
+python3 skills/ios-take-screenshot/tests/test_claim_simulator.py
+python3 skills/ios-take-screenshot/tests/test_discover_ios_setup.py
+python3 skills/ios-take-screenshot/tests/test_frame_diff.py
+python3 skills/ios-take-screenshot/tests/test_stitch_screens.py
 ```
 
 `test_claim_simulator.py` covers the simulator claim: one run holds a simulator, a

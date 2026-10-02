@@ -2,7 +2,7 @@
 // ABOUTME: a challenge body triggers one navigation and one refetch; other bodies pass through.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionFor, isChallenge } from './site_session.mjs';
+import { sessionFor, isChallenge } from '../scripts/site_session.mjs';
 
 const CHALLENGE_PAGE = '<!doctype html><html><head><title>DDoS-Guard</title></head><body>Checking your browser</body></html>';
 

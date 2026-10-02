@@ -10,7 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).resolve().parent.parent / "scripts"
+sys.path.insert(0, str(HERE))  # the scripts import each other by bare name
 
 fails = []
 
