@@ -82,6 +82,12 @@ The kit provides:
   headed diagnostics and cleanup. Calls `fn(context, page, proxyUrl)`, returns its result,
   and closes the context in `finally`, including when the callback throws.
   Resolve proxy URLs explicitly with `kit.config.proxyFor(key, {rotate})` when needed.
+- The engine's app-flow steps, for a hook that drives a login itself:
+  `gotoPastCloudflare(page, url, {assist = false, timeoutMs = 45000})` (waits out a
+  Cloudflare challenge, assisting when headed), `waitReady(page, adapter, timeoutMs = 40000)`
+  (polls `adapter.ready`), `appAlreadySignedIn(page, adapter, timeoutMs = 12000)`,
+  `withAppRetries(attempts, attempt, {onRetry})`, `exportScoped(db, page, adapter, email)`
+  (saves the session scoped to `adapter.domain`) and the pure `filterState(state, domain)`.
 - `emailOtp` exposes the email-otp module's real exports: `extractOtp(text)`,
   `otpCandidates(text)`, and `readSignupOtp(baseEmail, appPassword, {toAlias = null,
   sinceEpoch = null, timeoutS = 120, pollS = 5} = {})`. The reader uses the base Gmail

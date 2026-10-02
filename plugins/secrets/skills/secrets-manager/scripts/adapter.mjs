@@ -9,6 +9,7 @@ import * as emailOtp from './email-otp.mjs';
 import * as store from './store.mjs';
 import * as config from './config.mjs';
 import { configureBlocklist } from './traffic.mjs';
+import { filterState } from './state.mjs';
 
 /**
  * @typedef {{db: object, cred: object, opts: object, io: object}} ByEmailContext
@@ -33,6 +34,12 @@ export const kit = {
   ...page, page, debug, restriction, emailOtp, store, config,
   withProfile: async (...args) => (await import('./login.mjs')).withProfile(...args),
   mintAppPassword: async (...args) => (await import('./login.mjs')).mintAppPassword(...args),
+  exportScoped: async (...args) => (await import('./login.mjs')).exportScoped(...args),
+  gotoPastCloudflare: async (...args) => (await import('./login.mjs')).gotoPastCloudflare(...args),
+  waitReady: async (...args) => (await import('./login.mjs')).waitReady(...args),
+  appAlreadySignedIn: async (...args) => (await import('./login.mjs')).appAlreadySignedIn(...args),
+  withAppRetries: async (...args) => (await import('./login.mjs')).withAppRetries(...args),
+  filterState: (...args) => filterState(...args),
 };
 // aliasFor is synchronous and does not need the browser runtime.
 kit.aliasFor = (baseEmail, tag) => {

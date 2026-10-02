@@ -16,6 +16,8 @@ import { computeTotp } from "./totp.mjs";
 import { installBlocklist } from "./traffic.mjs";
 import * as windowPlace from "./window-place.mjs";
 import { gotoWithRetry } from "./page-helpers.mjs";
+import { filterState } from "./state.mjs";
+export { filterState };
 export { gotoWithRetry } from "./page-helpers.mjs";
 
 // Google demanded a challenge we cannot script (e.g. add a phone number).
@@ -52,34 +54,7 @@ export function toProxyDict(url) {
   return proxy;
 }
 
-// True if `host` is `base` or a sub-domain of it.
-function within(host, base) {
-  host = host.replace(/^\.+/, "").toLowerCase();
-  base = base.replace(/^\.+/, "").toLowerCase();
-  return host === base || host.endsWith("." + base);
-}
 
-// Split a Playwright storageState down to one app's host. Returns {cookies, local_storage}. A
-// cookie is kept when the app host and the cookie's domain are the same registrable domain —
-// either way round, so both a parent-domain cookie (.example.com) and a subdomain one
-// (api.example.com) count; a localStorage origin is kept when its host is the app domain or
-// below it. `domain` must be the registrable base (e.g. example.com).
-export function filterState(state, domain) {
-  const cookies = (state.cookies ?? []).filter(
-    (c) => within(domain, c.domain ?? "") || within(c.domain ?? "", domain),
-  );
-  const localStorage = [];
-  for (const origin of state.origins ?? []) {
-    let host = "";
-    try {
-      host = new URL(origin.origin ?? "").hostname;
-    } catch {
-      /* not a URL */
-    }
-    if (within(host, domain)) localStorage.push(origin);
-  }
-  return { cookies, local_storage: localStorage };
-}
 
 // --- Browser flow (not unit-tested; tune live with --headed on the first account) ---
 
@@ -1605,7 +1580,7 @@ async function clickRole(surface, names) {
 // Open `url` and wait out Cloudflare's "Performing security verification" interstitial, which a
 // fresh profile hits on the app's first load and which clears by itself within a few seconds; any
 // interaction before it clears finds none of the app's buttons.
-async function gotoPastCloudflare(page, url, { assist = false, timeoutMs = 45000 } = {}) {
+export async function gotoPastCloudflare(page, url, { assist = false, timeoutMs = 45000 } = {}) {
   await gotoWithRetry(page, url);
   let deadline = Date.now() + timeoutMs;
   let asked = false;
@@ -1632,7 +1607,7 @@ async function gotoPastCloudflare(page, url, { assist = false, timeoutMs = 45000
 // Poll until the app's session token has landed, or the timeout elapses. The OAuth handshake
 // finishes asynchronously after the account chooser, so the token appears a few seconds later;
 // capturing before it does stores a useless mid-handshake state.
-async function waitReady(page, adapter, timeoutMs = 40000) {
+export async function waitReady(page, adapter, timeoutMs = 40000) {
   let waited = 0;
   const step = 1000;
   while (waited < timeoutMs) {
@@ -1672,7 +1647,7 @@ export async function appAlreadySignedIn(page, adapter, timeoutMs = 12000) {
   return signedIn();
 }
 
-async function exportScoped(db, page, adapter, email) {
+export async function exportScoped(db, page, adapter, email) {
   const state = await page.context().storageState();
   const scoped = filterState(state, adapter.domain);
   store.saveSession(db, adapter.name, email, scoped.cookies, scoped.local_storage);
