@@ -5,7 +5,7 @@
 import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { isChallenge, openSession } from './site_session.mjs';
+import { isChallenge, openSession } from './site-session.mjs';
 
 const DEFAULT_BASE = 'https://annas-archive.pk';
 const MD5_LINK = /^\/md5\/([0-9a-f]{32})\/?$/;
@@ -195,7 +195,7 @@ async function slowUrl(base, md5, detailHtml, savedSlowHtml) {
 
 function args(argv) {
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('用法：node <anna_archive_links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件]\n会员密钥可通过 ANNA_SECRET_KEY 提供。');
+    console.log('用法：node <anna-archive-links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件]\n会员密钥可通过 ANNA_SECRET_KEY 提供。');
     process.exit(0);
   }
   const options = { baseUrl: DEFAULT_BASE };

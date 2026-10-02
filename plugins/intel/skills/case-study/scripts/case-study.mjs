@@ -2,12 +2,12 @@
 // ABOUTME: Scaffolds a case-study work dir in the digest store and checks it before rendering.
 // ABOUTME: init writes chapters.json + sources.json; check verifies the sourced draft, the book text and sources.
 //
-// Usage: case_study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
-//        case_study.mjs merge <work dir>
-//        case_study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
-//        case_study.mjs figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
-//        case_study.mjs findings <work dir> <NN>       (the review lines one fixer applies to chapter NN)
-//        case_study.mjs check <work dir> [--draft]
+// Usage: case-study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
+//        case-study.mjs merge <work dir>
+//        case-study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
+//        case-study.mjs figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
+//        case-study.mjs findings <work dir> <NN>       (the review lines one fixer applies to chapter NN)
+//        case-study.mjs check <work dir> [--draft]
 // A study has two layers: md/NN.md is the sourced draft the reviewers audit (sources named in every sentence);
 // book/NN.md is the text that is typeset (no citations, no account of the research).
 // Agents working in parallel never share a file: each writes its own notes/<name>.sources.json (url -> label) and
@@ -343,7 +343,7 @@ const OPTIONS = {
   findings: {},
   check: { draft: { type: 'boolean', default: false } },
 }
-const USAGE = 'usage: case_study.mjs {init,merge,slice,figures,findings,check} ...'
+const USAGE = 'usage: case-study.mjs {init,merge,slice,figures,findings,check} ...'
 
 function fail(message) {
   console.error(message)
@@ -357,11 +357,11 @@ function main(argv) {
   try {
     parsed = parseArgs({ args: rest, options: OPTIONS[cmd], allowPositionals: true, strict: true })
   } catch (error) {
-    fail(`${USAGE}\ncase_study.mjs ${cmd}: ${error.message}`)
+    fail(`${USAGE}\ncase-study.mjs ${cmd}: ${error.message}`)
   }
   const { values, positionals } = parsed
   const need = (count, names) => {
-    if (positionals.length !== count) fail(`case_study.mjs ${cmd}: expected ${names}, got ${positionals.length} argument(s)`)
+    if (positionals.length !== count) fail(`case-study.mjs ${cmd}: expected ${names}, got ${positionals.length} argument(s)`)
   }
   if (cmd === 'slice') {
     need(3, 'work, index, of')
@@ -383,7 +383,7 @@ function main(argv) {
   let passed
   if (cmd === 'init') {
     need(1, 'slug')
-    for (const name of ['title', 'cover', 'source', 'out']) if (values[name] === undefined) fail(`case_study.mjs init: --${name} is required`)
+    for (const name of ['title', 'cover', 'source', 'out']) if (values[name] === undefined) fail(`case-study.mjs init: --${name} is required`)
     const out = values.out.replace(/^~(?=$|\/)/, homedir())
     result = init(positionals[0], values.title, values.source, out, Number(values.chapters), values.cover, values.account)
     passed = true

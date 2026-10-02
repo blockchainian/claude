@@ -91,7 +91,7 @@ python3 skills/digest/tests/test_digest.py
 skills/digest/tests/test_pdf_highlights.py
 skills/translate/tests/test_translate.py
 node --test skills/find-domain-names/tests/check.test.mjs
-node --test skills/download-book/tests/site_session.test.mjs
+node --test skills/download-book/tests/site-session.test.mjs
 node --test skills/case-study/tests/*.mjs
 ```
 

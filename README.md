@@ -7,7 +7,6 @@ ships.
 |---|---|
 | [codex](plugins/codex/README.md) | Runs codex worker and review threads on the shared app-server daemon through the `codex-manager` MCP server: start, send, reply, interrupt, list, review, with an inbox that wakes Claude when a thread finishes or asks. |
 | [feature](plugins/feature/README.md) | Ships a written plan: codex workstreams and UX agents in worktrees, merged behind the plan's checks, reviewed by codex, deployed and checked as the plan says; plus handoff and retro. |
-| [grok](plugins/grok/README.md) | Runs the local Grok CLI from Claude Code for read-only reviews and delegated coding tasks. |
 | [mobile](plugins/mobile/README.md) | Builds, runs, profiles, and screenshots iOS apps on a simulator or a connected iPhone. |
 | [render](plugins/render/README.md) | The Render plugin with only the nine skills this desk uses, plus its MCP server, agent, and hook. |
 | [cloudflare](plugins/cloudflare/README.md) | The Cloudflare plugin with only the six skills this desk uses, plus its five MCP servers. |
@@ -20,7 +19,6 @@ ships.
 ```
 /plugin marketplace add blockchainian/claude
 /plugin install codex@blockchainian
-/plugin install grok@blockchainian
 /plugin install mobile@blockchainian
 /plugin install render@blockchainian
 /plugin install cloudflare@blockchainian
@@ -39,14 +37,13 @@ README covers its requirements and usage.
 .claude-plugin/marketplace.json   the catalog, listing every plugin
 plugins/codex/                    the codex-manager plugin
 plugins/feature/                  the ship / handoff / retro plugin
-plugins/grok/                     the grok plugin
 plugins/mobile/                   the iOS plugin
 plugins/render/                   the Render plugin, trimmed to nine skills
 plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
 plugins/proxy/                    the mitmproxy traffic-capture plugin
 plugins/intel/                    the audio-transcription and highlights plugin
 plugins/web/                      the web heap-snapshot leak-finder plugin
-tests/                            the grok and codex-manager node suites
+tests/                            the codex-manager and marketplace node suites
 ```
 
 Every plugin pins a `version` in their `plugin.json`, which is what Claude Code
@@ -60,7 +57,7 @@ on every machine that already has it, however much its code moved.
 npm test              # every suite
 npm run test:codex    # codex-manager against a fake app-server daemon
 npm run test:feature  # the feature plugin's hooks, plan checkers, workstream.sh, watch-ci and retro
-npm run test:grok     # the grok command and runtime suite
+npm run test:marketplace  # the marketplace manifest and shared-engine checks
 npm run validate      # the marketplace and plugin manifests
 ```
 
