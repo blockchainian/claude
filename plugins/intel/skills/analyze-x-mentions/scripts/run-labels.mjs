@@ -37,7 +37,7 @@ export async function runPool(units, { par, maxDepth, runOne, onSplit }) {
   const failed = [];
   let active = 0;
   return new Promise((resolve) => {
-    const pump = () => {
+    const drainQueue = () => {
       if (queue.length === 0 && active === 0) return resolve({ failed });
       while (active < par && queue.length) {
         const u = queue.shift();
@@ -48,11 +48,11 @@ export async function runPool(units, { par, maxDepth, runOne, onSplit }) {
             else failed.push(u);
           }
           active--;
-          pump();
+          drainQueue();
         });
       }
     };
-    pump();
+    drainQueue();
   });
 }
 

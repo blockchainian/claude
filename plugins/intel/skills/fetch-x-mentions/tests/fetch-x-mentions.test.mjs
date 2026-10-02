@@ -26,12 +26,12 @@ import {
 
 test("day window uses explicit UTC instants, not bare dates", () => {
   assert.equal(
-    dayQuery('"pump fun"', "2026-03-10"),
-    '"pump fun" since:2026-03-10_00:00:00_UTC until:2026-03-11_00:00:00_UTC',
+    dayQuery('"demo fun"', "2026-03-10"),
+    '"demo fun" since:2026-03-10_00:00:00_UTC until:2026-03-11_00:00:00_UTC',
   );
   assert.equal(
-    dayQuery('"pump fun"', "2026-03-10", "2026-03-10_13:45:02_UTC"),
-    '"pump fun" since:2026-03-10_00:00:00_UTC until:2026-03-10_13:45:02_UTC',
+    dayQuery('"demo fun"', "2026-03-10", "2026-03-10_13:45:02_UTC"),
+    '"demo fun" since:2026-03-10_00:00:00_UTC until:2026-03-10_13:45:02_UTC',
   );
 });
 

@@ -37,8 +37,7 @@ const BOT_FAKE_MAX_VIEWS = 2000; // ...and still a low absolute reach (spares bi
 const BOT_AUTO_MAX_FOLLOWERS = 3000; // Rule 2: "few followers"
 const BOT_AUTO_TWEETS_PER_FOLLOWER = 8; // lifetime tweets ≥ 8× followers = automated posting
 // A follower-based rule can misfire on a genuinely engaged-with account whose posts in THIS corpus
-// are low-view replies (e.g. @aixbt_agent: 467k followers, 503 distinct repliers, but its pump-reply
-// posts median ~108 views). Real human traction — many distinct accounts @-mentioning it — vetoes
+// are low-view replies. Real human traction — many distinct accounts @-mentioning it — vetoes
 // the follower rules; the view-only base rules (which have their own inbound gate) still apply.
 const BOT_ENGAGED_INBOUND = 30;
 const BOT_ENGAGED_RATIO = 0.2;

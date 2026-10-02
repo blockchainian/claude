@@ -23,17 +23,16 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 //   --rate is how many requests one session starts per second (default 20), --concurrency how
 //   many it may have in flight (default 12, enough to reach the rate at ~0.5 s per request).
 //
-// Example:
+// Invented example:
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/scripts/fetch-tiktok-mentions.mjs \
-//     pumpfun --hashtag pumpfun --hashtag pumpdotfun --user pump.fun
+//     demofun --hashtag demofun --hashtag demodotfun --user demo.fun
 //
 // How a request is made. TikTok's web API rejects a request that is not signed by its own page
 // script (an empty 200). So each session opens tiktok.com in Camoufox, copies the query params of
 // the first API request the page itself sends (device id, region, screen ...), and then calls
 // fetch() inside the page's main world: TikTok's script wraps window.fetch there and signs the
-// request. A session is anonymous and bound to one ISP slot (a fixed IP). Measured 2026-10-01: one
-// session paced at 20 requests/s stays clean (4,800 requests over 4 minutes); from 22/s on
-// TikTok's edge starts answering "Access Denied". So each session paces its requests to the rate.
+// request. A session is anonymous and bound to one ISP slot (a fixed IP). Each session paces requests to the configured rate
+// to limit bursts and throttling.
 // A refusal ("Access Denied", a non-JSON body) is held against the session, not the IP, and stays
 // for minutes: the session is closed and a fresh one on the same slot takes the work over at once.
 // An empty body is the IP being refused for a while: the slot's next session opens after a cool-down.
@@ -83,7 +82,7 @@ const SIGN_KEYS = ["X-Bogus", "X-Gnarly", "X-Dynosaur", "msToken"];
 const COMMENT_PAGE = 20;
 const DEFAULT_SOURCE_LIMIT = 1000;
 const DEFAULT_COMMENT_LIMIT = 1000;
-const DEFAULT_RATE = 20; // requests per second one session starts: the measured clean ceiling
+const DEFAULT_RATE = 20; // default requests per second one session starts
 const DEFAULT_CONCURRENCY = 12; // requests one session may have in flight (~0.5 s each, so 12 reach 20/s)
 // A hashtag page mixes popular videos with fresh ones nobody watched, hence its floor. A search is
 // ranked by relevance and ends after a few hundred results, so all of them are kept.

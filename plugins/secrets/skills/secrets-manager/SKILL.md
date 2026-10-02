@@ -123,7 +123,7 @@ kept (the email pair is optional).
 Rows are keyed by email (google) / username (x, tiktok): re-running is a no-op, an edited file
 re-imports, and a later file never nulls an email/TOTP an earlier one set. An X line that brings
 another `auth_token` for a known account drops that row's ct0 and cookies (a ct0 only works with
-its own session's token), so the next `verify x` derives a fresh pair. `#` comments and blank
+its own session's token), so intel’s `fetch-x-mentions/scripts/verify-x.mjs` derives a fresh pair. `#` comments and blank
 lines are skipped; an undecodable X line is reported and skipped, a bad Google line aborts with
 its file and line number.
 
@@ -235,8 +235,8 @@ ISP_PROXY_COUNT=1                      # TikTok slots
 CAPSOLVER_API_KEY=...        # optional — auto-solves the reCAPTCHA and password-page CAPTCHA
 ```
 
-Each account gets a sticky Oxylabs exit (`sessid` derived from its ID) so one login never hops
-IPs. The browser runs with `geoip` so timezone/locale/WebRTC match the exit. Without a proxy,
+Compatible proxies that take `sessid`/`sesstime` in the username give each account a sticky
+exit (`sessid` derived from its ID) so one login never hops IPs. The browser runs with `geoip` so timezone/locale/WebRTC match the exit. Without a proxy,
 browser commands refuse to run. `CAPSOLVER_API_KEY` is optional: with it, the reCAPTCHA and the
 password-page text CAPTCHA are cleared automatically; without it they fall back to the `--headed`
 human click.
