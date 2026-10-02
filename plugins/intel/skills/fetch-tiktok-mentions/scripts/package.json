@@ -1,0 +1,13 @@
+{
+  "name": "fetch-tiktok-mentions",
+  "private": true,
+  "type": "module",
+  "description": "Skill runtime: Camoufox sessions that page TikTok's web API for a brand's videos and comments",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "camoufox-js": "0.12.0",
+    "playwright-core": "1.60.0"
+  }
+}
