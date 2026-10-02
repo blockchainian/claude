@@ -183,6 +183,19 @@ def main():
         check("as a reviewer's worklist the unmatched figures are not findings yet", len([l for l in lines if l.startswith("* ")]) == 3
               and not any("5,555" in l for l in cs.findings(work, "05")), "\n".join(lines))
         cs.figures(work, "05")
+        (work / "md" / "06.md").write_text(
+            "# Chapter 5\n\n## Section\n\n"
+            "她过了 1,002,877 订阅。〔当时的报道 · A 2020〕当周有 50,566,204 次观看。〔记录 · B 2019〕\n\n"
+            "她有 603 条视频。（A 2020，记录）页面写 29,321,179 订阅。（B 2019）\n\n"
+            "她有 603 条视频。〔记录 · A 2020〕当周有 50,566,204 次观看〔记录 · B 2019〕。\n")
+        report = cs.figures(work, "06")
+        check("a label written after its sentence's full stop belongs to that sentence, in either kind of bracket",
+              not {m["figure"] for m in report["unmatched"]} & {"1,002,877", "603", "29,321,179"} and
+              [m["figure"] for m in report["unmatched"] if m["sentence"].startswith("当周")] == [], str(report["unmatched"]))
+        (work / "md" / "07.md").write_text("# Chapter 6\n\n## Section\n\n开头一句没有数字。[记录: B 2019] 当周有 50,566,204 次观看。[当时的报道: A 2020] 她过了 1,002,877 订阅。\n\n"
+                                           "[记录: A 2020] 她有 603 条视频。\n")
+        report = cs.figures(work, "07")
+        check("a label written before its sentence still belongs to the sentence after it, in a chapter whose paragraphs open with a label", report["unmatched"] == [], str(report["unmatched"]))
         last = (work / "md" / "12.md").read_text()
         check("merge writes the draft's sources chapter from sources.json", last.startswith("# Sources\n") and "A 2020" in last and "Seller 2021" not in last and cs.has_lead_paragraph(last), last[:200])
 

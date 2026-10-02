@@ -32,7 +32,9 @@ are givens of the task, stated as such.
   sections.
 - Every sentence that carries a claim shows its kind and names its source by
   the label in the bullet, with the year. Only labels that are values in
-  `sources.json` may be named.
+  `sources.json` may be named. The label sits inside its own sentence, in
+  brackets before the sentence's final full stop, never after it: a script
+  matches each sentence's figures against the sources that sentence names.
 - A method is written out in full: what exactly, how often, with whom, at what
   cost, what changed. Fewer solid claims beat more weak ones.
 - Where the subject's account and the record differ, print both. Where two
