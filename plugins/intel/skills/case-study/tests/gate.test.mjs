@@ -10,13 +10,14 @@ import { fileURLToPath } from 'node:url'
 
 const state = mkdtempSync(join(tmpdir(), 'gate-'))
 process.env.CASE_STUDY_LIMITS = state
+process.env.ISP_PROXY_URL = '' // the machine's .env must not reach the tests
 const gate = await import('../scripts/gate.mjs')
 after(() => rmSync(state, { recursive: true, force: true }))
 
-test('the proxy exits are the URL\'s port and the nine after it; no URL means no proxy', () => {
-  assert.deepEqual(gate.proxies('http://u:p@isp.example:8001').slice(0, 3), ['http://u:p@isp.example:8001', 'http://u:p@isp.example:8002', 'http://u:p@isp.example:8003'])
+test('the proxy exits are the ten ports after the URL\'s own; no URL means no proxy', () => {
+  assert.deepEqual(gate.proxies('http://u:p@isp.example:8001').slice(0, 3), ['http://u:p@isp.example:8002', 'http://u:p@isp.example:8003', 'http://u:p@isp.example:8004'])
   assert.equal(gate.proxies('http://u:p@isp.example:8001').length, 10)
-  assert.deepEqual(gate.proxies(undefined), [])
+  assert.deepEqual(gate.proxies(), [], 'no proxy set')
   assert.deepEqual(gate.readCommand('https://a.example/p', null).slice(-1), ['https://r.jina.ai/https://a.example/p'])
   assert.ok(gate.readCommand('https://a.example/p', 'http://x:1').includes('-x'))
 })

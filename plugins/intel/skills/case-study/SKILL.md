@@ -53,7 +53,7 @@ they are sent the absolute paths of the files below and read them themselves.
 | `briefs/fix.md` | fixers | Applying the findings to one chapter |
 | `briefs/book.md` | book writer | How the reviewed draft becomes the text the reader gets |
 | `workflows/creator.mjs` | you | The stages below as a workflow script |
-| `scripts/gate.mjs` | every agent, through the commands in `references/tools.md` | The machine-wide gate: queues, paces and retries every third-party call; needs `ISP_PROXY_URL` (the proxy) and `FETCH_X_POSTS` (the X search script) in the session's environment |
+| `scripts/gate.mjs` | every agent, through the commands in `references/tools.md` | The machine-wide gate: queues, paces and retries every third-party call; its settings (`ISP_PROXY_URL`, `FETCH_X_POSTS`) come from a `.env` file, see the end of `references/tools.md` |
 
 ## Arguments
 

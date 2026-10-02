@@ -154,8 +154,12 @@ The account logged in in Chrome is a side account (joinupcomment).
 
 ## The machine's settings
 
-- `ISP_PROXY_URL` names the proxy (one URL; its port is the first of ten
-  exits). Without it the gate reads direct, with one exit's share of the
-  limits.
-- `FETCH_X_POSTS` names the fetch-x-posts script. Without it
-  `$G fetch-x-posts` is unavailable: X search is then a gap.
+The gate and `wayback.mjs` read them from a `.env` file: `scripts/.env` next
+to the scripts, else `~/.cache/secrets-manager/profiles/case-study/.env`.
+Nothing has to be exported in the shell.
+
+- `ISP_PROXY_URL`: the proxy, one URL; the ten ports after its own are the
+  exits. Without it the gate reads direct, with one exit's share of the
+  limits, and `wayback` goes direct.
+- `FETCH_X_POSTS`: the fetch-x-posts script (X search on an account pool).
+  Without it `$G fetch-x-posts` is unavailable: X search is then a gap.
