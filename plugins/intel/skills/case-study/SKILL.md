@@ -201,8 +201,9 @@ ask for one name.
   and never by name: pass its description, not its name, to the workflow. Its
   terms are givens of the task, stated as such, never findings.
 - An agent that dies mid-stage (an account's usage limit, a crash) loses
-  nothing: every brief has the agent write its output file as it goes and,
-  when relaunched with the same message, read that file and continue. Relaunch
+  only the item it was on: every brief has the agent finish one item and
+  write it to its output file before the next, and a script tells a
+  relaunched reader or fixer what is left (`unread`, `findings`). Relaunch
   with `Workflow({scriptPath, resumeFromRunId})`: finished agents replay from
   the cache, the others run again and pick up where their files stop. Do not
   change the script or the args before resuming, or every agent reruns.

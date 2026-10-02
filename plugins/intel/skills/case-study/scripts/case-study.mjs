@@ -6,15 +6,19 @@
 //        case-study.mjs merge <work dir>
 //        case-study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
 //        case-study.mjs figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
-//        case-study.mjs findings <work dir> <NN>       (the review lines one fixer applies to chapter NN)
+//        case-study.mjs findings <work dir> <NN>       (the review lines one fixer has still to apply to chapter NN)
+//        case-study.mjs unread <work dir> <batch> <url>...   (per source of a reader's batch: done, saved, or fetch)
+//        case-study.mjs bullets <work dir> <NN>        (the notes' lines for chapter NN, long dated tables thinned)
 //        case-study.mjs check <work dir> [--draft]
 // A study has two layers: md/NN.md is the sourced draft the reviewers audit (sources named in every sentence);
 // book/NN.md is the text that is typeset (no citations, no account of the research).
 // Agents working in parallel never share a file: each writes its own notes/<name>.sources.json (url -> label) and
 // notes/<name>.gaps.md, reviewers write review/<name>.failed.json (a list of urls), fixers write
 // review/<name>.added.json (url -> label). merge turns those into sources.json, gaps.md and the draft's last chapter,
-// and notes/<name>.raw.json (url -> the files its text was saved to) into raw.json. Sources the readers gave the same
+// and notes/<name>.raw.tsv (a line of url, tab, file per saved text) and notes/<name>.raw.json (url -> the files its
+// text was saved to) into raw.json. Sources the readers gave the same
 // label get a letter each (Outlet 2025a, Outlet 2025b), in sources.json and in the notes' bullets, so that a label names one source.
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
@@ -124,6 +128,26 @@ function nameInNotes(notes, sources, own) {
   }
 }
 
+function savedByReader(path) {
+  // url -> the files its text was saved to, from a reader's list of `url<TAB>file` lines; empty when there is no list.
+  const saved = {}
+  if (!existsSync(path)) return saved
+  for (const line of lines(read(path))) {
+    const [url, file] = line.split('\t').map(part => part.trim())
+    if (url && file) (saved[url] ??= []).push(file)
+  }
+  return saved
+}
+
+export function unread(work, batch, urls) {
+  // What an interrupted reader has left of its batch, one line per source: `done` when the notes have its section,
+  // `saved` with the files when its text was saved but not read into the notes, `fetch` otherwise.
+  const notes = join(work, 'notes', `${batch}.md`)
+  const noted = new Set(existsSync(notes) ? lines(read(notes)).filter(l => l.startsWith('url:')).map(l => l.slice(4).trim()) : [])
+  const saved = savedByReader(join(work, 'notes', `${batch}.raw.tsv`))
+  return urls.map(url => (noted.has(url) ? `done ${url}` : saved[url] ? `saved ${url} ${saved[url].join(' ')}` : `fetch ${url}`))
+}
+
 export function merge(work) {
   // Rebuild sources.json, gaps.md and the draft's sources chapter from the files the parallel agents wrote.
   const meta = JSON.parse(read(join(work, 'chapters.json')))
@@ -142,8 +166,9 @@ export function merge(work) {
   sources = Object.fromEntries(Object.entries(sources).filter(([url]) => !failed.has(url)))
   write(join(work, 'sources.json'), dump(sources))
   const saved = {}
-  for (const path of [...files(notes, '.raw.json'), ...files(review, '.raw.json')]) {
-    for (const [url, list] of Object.entries(readJson(path, 'object'))) {
+  const lists = [...files(notes, '.raw.tsv').map(savedByReader), ...[...files(notes, '.raw.json'), ...files(review, '.raw.json')].map(path => readJson(path, 'object'))]
+  for (const listed of lists) {
+    for (const [url, list] of Object.entries(listed)) {
       saved[url] ??= []
       for (const f of typeof list === 'string' ? [list] : list) if (!saved[url].includes(f)) saved[url].push(f)
     }
@@ -168,15 +193,53 @@ export function sliceSources(work, index, of) {
 }
 
 export function findings(work, chapter) {
-  // The review lines a fixer applies to one chapter: those tagged with its number, and the sources-lens lines
-  // (tagged with a source label) about labels the chapter names.
+  // The review lines a fixer has still to apply to one chapter: those tagged with its number, and the sources-lens
+  // lines (tagged with a source label) about labels the chapter names. Each line carries a name made from its own
+  // text (F and six hex digits), the same on every call; a finding whose name is in the chapter's fix log is left out.
   const text = read(join(work, 'md', `${chapter}.md`))
+  const log = join(work, 'review', `fix-${chapter}.md`)
+  const logged = new Set(existsSync(log) ? read(log).match(/\bF[0-9a-f]{6}\b/g) : [])
   const out = []
   for (const path of files(join(work, 'review'), '.md')) {
     const fromSources = path.split('/').at(-1).startsWith('sources-')
     for (const line of lines(read(path))) {
       const tag = /^- \[([^\]]+)\]/.exec(line)
-      if (tag && (tag[1] === chapter || (fromSources && text.includes(tag[1])))) out.push(line)
+      if (!tag || !(tag[1] === chapter || (fromSources && text.includes(tag[1])))) continue
+      const name = 'F' + createHash('sha1').update(line).digest('hex').slice(0, 6)
+      if (!logged.has(name)) out.push(`- ${name} ${line.slice(2)}`)
+    }
+  }
+  return out
+}
+
+const DATED_ROW = /^(?:\[[^\]]+\]\s*)+((?:19|20)\d\d)-(\d\d)-\d\d\b/
+
+export function bullets(work, chapter) {
+  // The lines of the notes tagged for one chapter, in file order. In the numbers notes each `##` section is headed by
+  // its title, and a section's dated rows are thinned to the first of each quarter and the last, with a line saying
+  // how many rows stayed behind in the file.
+  const tag = `[c${chapter}]`
+  const out = []
+  for (const path of files(join(work, 'notes'), '.md')) {
+    const name = relative(work, path)
+    if (!name.startsWith('notes/numbers-')) {
+      out.push(...lines(read(path)).filter(line => line.includes(tag)))
+      continue
+    }
+    for (const section of read(path).split(/^(?=## )/m)) {
+      const tagged = lines(section).filter(line => line.includes(tag) && !line.startsWith('## '))
+      if (!tagged.length) continue
+      const dated = tagged.filter(line => DATED_ROW.test(line))
+      const quarters = new Set()
+      const kept = new Set(dated.filter(line => {
+        const [, year, month] = DATED_ROW.exec(line)
+        const quarter = `${year}-${Math.ceil(Number(month) / 3)}`
+        return !quarters.has(quarter) && quarters.add(quarter)
+      }))
+      if (dated.length) kept.add(dated.at(-1))
+      if (section.startsWith('## ')) out.push(lines(section)[0])
+      out.push(...tagged.filter(line => !DATED_ROW.test(line) || kept.has(line)))
+      if (dated.length > kept.size) out.push(`(${dated.length - kept.size} more rows of this table are in ${name})`)
     }
   }
   return out
@@ -380,9 +443,11 @@ const OPTIONS = {
   slice: {},
   figures: { worklist: { type: 'boolean', default: false } },
   findings: {},
+  unread: {},
+  bullets: {},
   check: { draft: { type: 'boolean', default: false } },
 }
-const USAGE = 'usage: case-study.mjs {init,merge,slice,figures,findings,check} ...'
+const USAGE = 'usage: case-study.mjs {init,merge,slice,figures,findings,unread,bullets,check} ...'
 
 function fail(message) {
   console.error(message)
@@ -413,9 +478,14 @@ function main(argv) {
     console.log(JSON.stringify({ ...result, unmatched: result.unmatched.length }))
     return
   }
-  if (cmd === 'findings') {
+  if (cmd === 'findings' || cmd === 'bullets') {
     need(2, 'work, chapter')
-    console.log(findings(positionals[0], positionals[1]).join('\n'))
+    console.log((cmd === 'findings' ? findings : bullets)(positionals[0], positionals[1]).join('\n'))
+    return
+  }
+  if (cmd === 'unread') {
+    if (positionals.length < 3) fail('case-study.mjs unread: expected work, batch and the batch\'s urls')
+    console.log(unread(positionals[0], positionals[1], positionals.slice(2)).join('\n'))
     return
   }
   let result

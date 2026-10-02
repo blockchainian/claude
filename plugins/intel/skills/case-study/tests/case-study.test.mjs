@@ -1,5 +1,5 @@
 // ABOUTME: Tests the case-study work-dir scaffold and the pre-render check.
-// ABOUTME: Covers init (layout, cover, idempotence), check (sourced draft, book text, sources, counts), merge, slice, findings and figures.
+// ABOUTME: Covers init (layout, cover, idempotence), check (sourced draft, book text, sources, counts), merge, slice, findings, figures, unread and bullets.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -146,7 +146,7 @@ test('merge builds sources.json, raw.json and gaps.md from every agent\'s files;
   write(join(work, 'review', 'numbers-3.md'), '| row | checked |\n- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M\n- [04] missing | a | b | c | d\n')
   write(join(work, 'review', 'sources-1.md'), '- [A 2020] seller-source | sells a course | | drop\n- [B 2019] mislabelled | a | b | c | d\n')
   write(join(work, 'md', '03.md'), '# Chapter 2\n\nShe had 24.8M subscribers (on record, A 2020).\n\n## Section\n\nBody.\n')
-  assert.deepEqual(cs.findings(work, '03'), ['- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M', '- [A 2020] seller-source | sells a course | | drop'],
+  assert.deepEqual(cs.findings(work, '03').map(l => l.replace(/^- F[0-9a-f]{6} /, '- ')), ['- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M', '- [A 2020] seller-source | sells a course | | drop'],
     'findings for a chapter are its own lines plus the sources-lens lines about labels the chapter names')
 
   write(join(work, 'notes', 'read-01.raw.json'), JSON.stringify({ 'https://a.example/x': ['raw/a.html'], 'https://b.example/z': ['raw/b1.txt'] }))
@@ -241,6 +241,54 @@ test('merge gives each of several sources that share a label its own label, in s
   cs.merge(twins)
   const posts = json(twins, 'sources.json')
   assert.deepEqual([posts['https://x.example/00'], posts['https://x.example/26']], ['X post 2025aa', 'X post 2025ba'], 'no label is the start of another')
+})
+
+test('unread tells an interrupted reader which sources are done, which are saved and which to fetch; merge reads the saved list', () => {
+  const cut = cs.init('cut-reader', 'How Cut grew', 'https://example.com/@cut', join(tmp, 'pdf', 'cut.pdf'), 12, 'Cut').work
+  const [done, saved, never] = ['https://a.example/done', 'https://b.example/saved', 'https://c.example/never']
+  assert.deepEqual(cs.unread(cut, 'read-01', [done, saved, never]), [done, saved, never].map(u => `fetch ${u}`), 'a first run fetches everything')
+  write(join(cut, 'notes', 'read-01.raw.tsv'), `${done}\traw/read-01/a.txt\n${saved}\traw/read-01/b.txt\n${saved}\traw/read-01/b2.txt\n`)
+  write(join(cut, 'notes', 'read-01.md'), `## A — title (2020)\nurl: ${done}\nread: curl, full\n- [c03] [on record] (2020) a fact — A 2020\n`)
+  assert.deepEqual(cs.unread(cut, 'read-01', [done, saved, never]),
+    [`done ${done}`, `saved ${saved} raw/read-01/b.txt raw/read-01/b2.txt`, `fetch ${never}`])
+  write(join(cut, 'notes', 'read-01.sources.json'), JSON.stringify({ [done]: 'A 2020' }))
+  write(join(cut, 'notes', 'numbers-archive.raw.json'), JSON.stringify({ [done]: ['raw/archive/000'] }))
+  cs.merge(cut)
+  assert.deepEqual(json(cut, 'raw.json'), { [done]: ['raw/read-01/a.txt', 'raw/archive/000'], [saved]: ['raw/read-01/b.txt', 'raw/read-01/b2.txt'] })
+})
+
+test('findings gives each finding a name that stays the same, and leaves out the ones the fix log already names', () => {
+  const half = cs.init('half-fixed', 'How Half grew', 'https://example.com/@half', join(tmp, 'pdf', 'half.pdf'), 12, 'Half').work
+  write(join(half, 'md', '04.md'), '# Methods\n\nShe posted daily (self-reported, A 2020).\n')
+  write(join(half, 'review', 'quotes-04.md'), '- [04] wrong | first | a | b | c\n- [04] unsupported | second | a | b | c\n- [05] wrong | other chapter | a | b | c\n')
+  write(join(half, 'review', 'sources-1.md'), '- [A 2020] seller-source | sells a course | | drop\n')
+  const all = cs.findings(half, '04')
+  assert.equal(all.length, 3)
+  const names = all.map(l => /^- (F[0-9a-f]{6}) \[/.exec(l)[1])
+  assert.equal(new Set(names).size, 3)
+  assert.ok(all[0].endsWith('[04] wrong | first | a | b | c'))
+  write(join(half, 'review', 'fix-04.md'), `${names[0]} fixed | first\n${names[2]} removed | the seller's sentence\n`)
+  write(join(half, 'md', '04.md'), '# Methods\n\nShe posted daily (self-reported, A 2020). An edit.\n')
+  assert.deepEqual(cs.findings(half, '04'), [all[1]], 'an edited chapter keeps the names; only the finding with no log line is left')
+})
+
+test('bullets prints a chapter\'s lines from the notes, with a dated table of the numbers notes thinned to a row per quarter', () => {
+  const long = cs.init('long-curve', 'How Long grew', 'https://example.com/@long', join(tmp, 'pdf', 'long.pdf'), 12, 'Long').work
+  const row = (date, n, tags = '[c03]') => `${tags} [on record] ${date} | ${n} followers | https://web.archive.org/web/${date.replaceAll('-', '')}/x`
+  write(join(long, 'notes', 'numbers-archive.md'), ['## Curve: profile captures', '',
+    row('2020-05-07', '6,940,874'), row('2020-05-20', '7,500,000'), row('2020-06-30', '8,800,000'),
+    row('2020-08-01', '9,800,000'), row('2020-08-02', '10,000,000', '[c03] [c07]'), row('2021-01-09', '13,100,000'), row('2021-02-01', '13,500,000'),
+    '', '## Milestones', '', '[c03] [c07] [on record] 10M | first at/above: 2020-08-02', '[c07] [on record] 15M | first at/above: 2021-05-03', ''].join('\n'))
+  write(join(long, 'notes', 'read-01.md'), '## A — title (2020)\nurl: https://a.example/x\n- [c03][c04] [on record] (2020) a fact — A 2020\n- [c04] [self-reported] (2020) a method — A 2020\n')
+  assert.deepEqual(cs.bullets(long, '03'), [
+    '## Curve: profile captures',
+    row('2020-05-07', '6,940,874'), row('2020-08-01', '9,800,000'), row('2021-01-09', '13,100,000'), row('2021-02-01', '13,500,000'),
+    '(3 more rows of this table are in notes/numbers-archive.md)',
+    '## Milestones',
+    '[c03] [c07] [on record] 10M | first at/above: 2020-08-02',
+    '- [c03][c04] [on record] (2020) a fact — A 2020'])
+  assert.deepEqual(cs.bullets(long, '07'), ['## Curve: profile captures', row('2020-08-02', '10,000,000', '[c03] [c07]'),
+    '## Milestones', '[c03] [c07] [on record] 10M | first at/above: 2020-08-02', '[c07] [on record] 15M | first at/above: 2021-05-03'])
 })
 
 test('both scripts run when called through a symlink to their folder, as an installed plugin is', () => {

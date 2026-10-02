@@ -12,8 +12,11 @@ web.
 ## A chapter built from the notes (every chapter between the introduction and the reasoning chapter)
 
 Your material is every bullet tagged with your chapter:
-`grep -h "\[cNN\]" <work>/notes/*.md`. Read all of them. Anything not in the
-notes does not go in.
+`<skill>/scripts/case-study.mjs bullets <work> NN` (the skill folder is the
+one that holds this brief's folder). Read all of them. Anything not in the
+notes does not go in. A long dated table in the numbers notes is printed with
+one row per quarter and a line naming the file the rest is in: open that file
+only for a day the chapter needs.
 
 ## What goes in
 
