@@ -39,7 +39,7 @@ clone is the path that stays put across plugin updates:
 ```toml
 [mcp_servers.claude]
 command = "node"
-args = ["/Users/you/.claude/plugins/marketplaces/blockchainian/plugins/codex/codex-manager/codex-manager.mjs", "claude"]
+args = ["/Users/you/.claude/plugins/marketplaces/blockchainian/plugins/codex/codex-manager/manager.mjs", "claude"]
 tool_timeout_sec = 360
 default_tools_approval_mode = "approve"
 ```
@@ -84,7 +84,7 @@ Every `start`/`send`/`review` result carries an await command. Run it with
 `run_in_background`:
 
 ```
-node <plugin>/codex-manager/codex-manager.mjs await --thread <id> [--timeout <s>]
+node <plugin>/codex-manager/manager.mjs await --thread <id> [--timeout <s>]
 ```
 
 It prints the next unread inbox events as JSON lines and exits 0, which wakes
@@ -115,7 +115,7 @@ whatever was still held, and the manager withdraws the open questions too.
 
 ## How a tool call finds its Claude session
 
-Codex starts the tools server itself (`codex-manager.mjs claude`), so it
+Codex starts the tools server itself (`manager.mjs claude`), so it
 knows nothing of Claude's session. Codex sends the calling thread's id with
 every MCP tool call (`_meta.threadId`). The manager records, for each thread it
 starts, attaches or adopts, which session supervises it and the manager's pid;
