@@ -34,7 +34,7 @@ Two scripts, both plain Node (no npm install; Node builtins only):
 2. **Baseline snapshot**, at rest:
 
    ```
-   node "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/capture-heap-snapshot.mjs" \
+   "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/capture-heap-snapshot.mjs" \
      --url-contains myapp --out leaks/before.heapsnapshot
    ```
 
@@ -48,7 +48,7 @@ Two scripts, both plain Node (no npm install; Node builtins only):
 5. **Diff:**
 
    ```
-   node "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/diff-heap-snapshots.mjs" \
+   "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/diff-heap-snapshots.mjs" \
      --before leaks/before.heapsnapshot --after leaks/after.heapsnapshot \
      [--top 25] [--min-size-delta 50000]
    ```

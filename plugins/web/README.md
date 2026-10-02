@@ -49,3 +49,12 @@ both copies together.
 - `uv` on PATH (for `check-web-design`; its script declares its own dependencies)
 - Node 22+ for `heap-snapshot-leaks` (no npm install needed)
 - for `heap-snapshot-leaks`: Google Chrome, started with `--remote-debugging-port`
+
+## Tests
+
+```
+node --test skills/heap-snapshot-leaks/tests/*.mjs
+uv run skills/check-web-design/tests/test_check_design.py
+```
+
+Or from the marketplace root: `npm run test:web`.
