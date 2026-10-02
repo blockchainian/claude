@@ -33,7 +33,7 @@ Subject type file: ${S}/types/creator.md
 Read-only on every platform: never post, comment, like or follow. Waiting commands run in the foreground with a bounded time.`
 const share = n => A.caps ? `\nMachine caps for this whole stage: ${A.caps}. You are one of ${n} agents in it: use at most a 1/${n} share.` : ''
 const SONNET = { model: 'sonnet', effort: 'high', agentType: 'general-purpose' }
-const merge = label => agent(`Run exactly this command and return its output, nothing else:\n${S}/scripts/case_study.py merge "${WORK}"`,
+const merge = label => agent(`Run exactly this command and return its output, nothing else:\n${S}/scripts/case_study.mjs merge "${WORK}"`,
   { label, model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 
 phase('Scout')
@@ -80,12 +80,12 @@ const review = (lens, name, slice) => agent(
 // where a record reviewer judges them first, with the derived figures and what each growth step is credited to.
 const RECORD = ['03', '07']
 const matchFigures = file => agent(
-  `Run exactly this command and return its output, nothing else:\n${S}/scripts/case_study.py figures "${WORK}" ${file}${RECORD.includes(file) ? ' --worklist' : ''}`,
+  `Run exactly this command and return its output, nothing else:\n${S}/scripts/case_study.mjs figures "${WORK}" ${file}${RECORD.includes(file) ? ' --worklist' : ''}`,
   { label: `figures:${file}`, phase: 'Review', model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 // The sources lens checks the sources themselves, not the chapters: it runs while the chapters are written.
 const sliceCount = Math.ceil(sourceCount / 25)
 const sourcesReviewed = parallel(Array.from({ length: sliceCount }, (_, i) => () => review('sources', `sources-${i + 1}`,
-  `the urls printed by: ${S}/scripts/case_study.py slice "${WORK}" ${i + 1} ${sliceCount}`)))
+  `the urls printed by: ${S}/scripts/case_study.mjs slice "${WORK}" ${i + 1} ${sliceCount}`)))
 
 const write = file => agent(
   `${COMMON}\nYou are a draft writer. Follow ${S}/briefs/write.md. Your chapter file: md/${file}.md (see the chapter table in the type file).${file === '10' && A.product ? `\nThe product for this chapter: ${A.product}` : ''}`,

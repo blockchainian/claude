@@ -75,7 +75,7 @@ ask for one name.
 
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
-   "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case_study.py" init <slug> \
+   "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case_study.mjs" init <slug> \
      --title "<how <Name> grew, in the study's language>" --cover "<Name>" \
      --source "<profile URL>" --out "<pdf path>" [--account "<profile URL>"]...
    ```
@@ -98,7 +98,7 @@ ask for one name.
 
    | Stage | Agents | Does |
    |---|---|---|
-   | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `scripts/wayback.py curve` in one batch |
+   | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `scripts/wayback.mjs curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `md/`, from the notes only |
    | Review | sources lens per 25 URLs, from the merge on, alongside the writers; per chapter, as soon as it is written: a script matches its figures against the saved source text, and the quotes lens reviews it; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
@@ -120,10 +120,10 @@ ask for one name.
    the workflow with Agent calls.
 
    Parallel agents never share a file. Each writes its own notes, source list,
-   gaps, findings and fix log; `case_study.py merge` builds `sources.json`,
+   gaps, findings and fix log; `case_study.mjs merge` builds `sources.json`,
    `gaps.md` and the draft's sources chapter from them. Reviewers are fresh
    agents, never the writers. Whether a figure is in its source is a lookup, so a
-   script does it (`case_study.py figures`): about nine figures in ten match
+   script does it (`case_study.mjs figures`): about nine figures in ten match
    the saved text, and only the rest reach an agent — the chapter's fixer, or
    the record reviewer in the two chapters that argue from the curve. The
    sources and quotes lenses run on Opus at high effort: they check whether
@@ -147,7 +147,7 @@ ask for one name.
    - Re-fetch at least two key numbers live — a point on the curve and the
      largest money figure — and compare them with the chapters.
    - Confirm that no source the reviewers failed is still in `sources.json`.
-   - Run `case_study.py check "<work>" --draft`. It reports missing chapters,
+   - Run `case_study.mjs check "<work>" --draft`. It reports missing chapters,
      chapters with no lead paragraph before their first `##`, whether
      `sources.json` is a `url → label` object, and the counts of sources,
      archive snapshots and distinct sites.
@@ -159,7 +159,7 @@ ask for one name.
    - Run the check, which must pass before rendering:
 
      ```bash
-     "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case_study.py" check "<work>"
+     "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case_study.mjs" check "<work>"
      ```
 
      On the book text it reports citations left in parentheses, wording about
@@ -211,5 +211,5 @@ ask for one name.
   square of its size: two agents with 25 items cost less than one with 50.
 - Machine-wide limits (a video site's session, a search quota) do not grow
   with the number of agents: pass them as `caps` and each agent gets a share.
-  Archive pages are fetched only through `scripts/wayback.py`, by the archive
+  Archive pages are fetched only through `scripts/wayback.mjs`, by the archive
   numbers agent and by the one reviewer slice that re-checks the curve.
