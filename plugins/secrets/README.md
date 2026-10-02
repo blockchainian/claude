@@ -49,7 +49,7 @@ An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files
 
 | Field | Contract |
 |---|---|
-| `name` | Required `[a-z0-9_]+` table and CLI target; built-in table names reserved. |
+| `name` | Required `[a-z0-9_]+` table and CLI target; `google`, `x` and `tiktok` are reserved. |
 | `domain` | Required registrable domain, scopes exports to it and subdomains. |
 | `startUrl` | Required login entry URL. |
 | `entryTexts` | Required nonempty string array of logged-out entry labels. |

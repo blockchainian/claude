@@ -85,10 +85,6 @@ export function filterState(state, domain) {
 
 const IDENTIFIER_SELECTOR = "#identifierId, input[name=identifier], input[type=email]";
 
-// Navigate with a short per-attempt timeout, retrying until a total budget is spent. A single
-// navigation that stalls on a slow residential-proxy exit is abandoned after `attemptMs` and retried,
-// instead of one long timeout failing the whole account with no next step. Throws the last error only
-// if nothing loads within `totalMs`.
 // True if the persistent profile already carries a live Google session.
 // Logged in only when myaccount.google.com serves its own dashboard. A logged-out visit redirects
 // to the marketing page `www.google.com/account/about` (which contains neither "signin" nor

@@ -34,3 +34,36 @@ test('fixture same-tab and popup entry flows use real page helpers', async () =>
  await a.signIn(page); assert.deepEqual(steps,['Login','Continue with Google']);
  steps.length=0; await b.signIn(page); assert.deepEqual(steps,['Sign up','iframe[src*="accounts.google.com/gsi/button"]','Continue with Google']);
 });
+
+test('fixture adapters drive same-tab and popup OAuth and their readiness hooks', async () => {
+ const {oauthSurface}=await import('../scripts/login.mjs');
+ const adapters=factory(kit);
+ for (const adapter of adapters) {
+  let current=adapter.startUrl;
+  const google={url:()=> 'https://accounts.google.com/o/oauth2/auth'};
+  const pages=[];
+  const page={url:()=>current,context:()=>({pages:()=>pages,cookies:async()=>[{name:'auth-access-token'}]}),
+   evaluate:async (_fn,key)=>key==='session:token',
+   getByText:text=>({first:()=>({click:async()=>{
+    if(text==='Continue with Google') {
+     if(adapter.name==='alpha') current=google.url(); else pages.push(google);
+    }
+   }})}),locator:()=>({first:()=>({waitFor:async()=>{}})})};
+  pages.push(page);
+  assert.equal(await adapter.ready(page),true);
+  await adapter.signIn(page);
+  assert.equal(await oauthSurface(page,adapter,'fixture@example.com'),adapter.name==='alpha'?page:google);
+ }
+ assert.throws(()=>kit.aliasFor('base@example.com'),/tag is required/);
+ await assert.rejects(kit.mintAppPassword({},{}),/name is required/);
+});
+
+test('startup merges adapter traffic blocks and resets them for zero adapters', async () => {
+ const {isBlockedHost,BLOCKED_WEBSOCKETS}=await import('../scripts/traffic.mjs');
+ await loadAdapters({paths:[fixture]});
+ assert.equal(isBlockedHost('app-actions-eu.alpha.example'),true);
+ assert.ok(BLOCKED_WEBSOCKETS.includes('wss://data.alpha.example/**'));
+ await loadAdapters({paths:[]});
+ assert.equal(isBlockedHost('app-actions-eu.alpha.example'),false);
+ assert.deepEqual(BLOCKED_WEBSOCKETS,[]);
+});
