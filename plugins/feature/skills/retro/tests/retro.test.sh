@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ABOUTME: Runs extract.mjs against the hermetic fixture session and asserts the join + token math.
 set -euo pipefail
 cd "$(dirname "$0")/.."

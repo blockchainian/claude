@@ -4,7 +4,7 @@
 set -u
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 hooks=${HOOKS_DIR:-$(dirname -- "$here")}
-cases=$here/cases.jsonl
+cases=$here/fixture/cases.jsonl
 
 pass=0
 fail=0

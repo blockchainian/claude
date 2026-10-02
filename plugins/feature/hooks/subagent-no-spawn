@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ABOUTME: SubagentStart hook that tells every spawned subagent it cannot spawn agents itself,
 # ABOUTME: and that background commands never wake it, so it works directly and waits in the foreground.
 cat <<'JSON'

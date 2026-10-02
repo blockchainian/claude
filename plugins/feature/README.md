@@ -75,13 +75,13 @@ Requires the [codex](../codex/README.md) plugin (its `codex-manager` MCP server)
 for the hooks. If the same hooks are also wired in `~/.claude/settings.json`,
 remove them there; otherwise each fires twice.
 
-## Test
+## Tests
 
 ```
 npm run test:feature
 ```
 
-Runs `hooks/tests/hooks.test.sh` (every case in `hooks/tests/cases.jsonl` through the
+Runs `hooks/tests/hooks.test.sh` (every case in `hooks/tests/fixture/cases.jsonl` through the
 three hook scripts), `skills/ship/tests/plan-checkers.test.sh` (the two plan checkers against
 fixture plans in a throwaway repo), `skills/ship/tests/workstream.test.sh` (open, check,
 merge and base against a throwaway repo), `skills/ship/tests/watch-ci.test.sh` (the CI-watch
