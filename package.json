@@ -9,7 +9,7 @@
   "scripts": {
     "test": "npm run test:marketplace && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web && npm run test:mobile",
     "test:marketplace": "node --test tests/marketplace.test.mjs",
-    "test:codex": "node --test tests/codex-manager.test.mjs",
+    "test:codex": "node --test plugins/codex/tests/*.mjs",
     "validate": "claude plugin validate --strict .",
     "test:feature": "plugins/feature/hooks/tests/hooks.test.sh && plugins/feature/skills/ship/tests/plan-checkers.test.sh && plugins/feature/skills/ship/tests/workstream.test.sh && plugins/feature/skills/ship/tests/watch-ci.test.sh && plugins/feature/skills/retro/tests/retro.test.sh",
     "test:proxy": "node --test plugins/proxy/skills/inspect-app-traffic/tests/*.mjs",

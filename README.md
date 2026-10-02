@@ -43,7 +43,7 @@ plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
 plugins/proxy/                    the mitmproxy traffic-capture plugin
 plugins/intel/                    the audio-transcription and highlights plugin
 plugins/web/                      the web heap-snapshot leak-finder plugin
-tests/                            the codex-manager and marketplace node suites
+tests/                            the marketplace node suite
 ```
 
 Every plugin pins a `version` in their `plugin.json`, which is what Claude Code
