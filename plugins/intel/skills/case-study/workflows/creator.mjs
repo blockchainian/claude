@@ -45,14 +45,14 @@ const merge = label => agent(`Run exactly this command and return its output, no
   { label, model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 
 phase('Scout')
-const LANES = ['own-words', 'press', 'business-and-people', 'criticism-and-data']
+const LANES = ['own-words', 'press', 'business-and-people', 'analysts-and-critics']
 const FOUND = { type: 'object', required: ['sources'], properties: { sources: { type: 'array', items: { type: 'object', required: ['url', 'outlet'],
   properties: { url: { type: 'string' }, outlet: { type: 'string' }, year: { type: 'string' }, kind: { type: 'string' }, why: { type: 'string' } } } } } }
 // The numbers agents need no scout: the archive and the upload record are the profile's own addresses.
 const READERS_EXPECTED = 15 // for the caps share before the scouts return; readers get their exact count
-const numbersDone = READ_DONE ? null : parallel(['archive', 'uploads'].map(lane => () => agent(
+const numbersDone = READ_DONE ? null : parallel(['follower-numbers', 'posting-numbers'].map(lane => () => agent(
   `${COMMON}\nYou are a numbers agent. Follow ${S}/briefs/numbers.md. Your lane: ${lane}.${share(READERS_EXPECTED + 2)}`,
-  { label: `numbers:${lane}`, phase: 'Scout', ...SONNET })))
+  { label: `scout:${lane}`, phase: 'Scout', ...SONNET })))
 // With the scouting done, the list to read comes in as args.sources (the output of `case-study.mjs sources <work>`):
 // a script cannot be read from here, and an agent relaying 366 entries dropped 65 of them.
 const known = () => {

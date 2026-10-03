@@ -47,8 +47,9 @@ test('sources found by several scouts are read once, eight to a reader; the numb
   assert.equal((await result()).scouted, 4 * 29 + 1)
   assert.equal(labels(calls, 'read:').length, Math.ceil(117 / 8))
   assert.equal(calls.filter(c => c.prompt.includes('https://shared.example/a/')).filter(c => c.label.startsWith('read:')).length, 1)
-  assert.deepEqual(labels(calls, 'numbers:'), ['numbers:archive', 'numbers:uploads'])
-  assert.ok(calls.findIndex(c => c.label === 'numbers:archive') < calls.findIndex(c => c.label === 'read:01'))
+  assert.deepEqual(labels(calls, 'scout:').filter(l => l.endsWith('-numbers')), ['scout:follower-numbers', 'scout:posting-numbers'])
+  assert.ok(labels(calls, 'scout:').includes('scout:analysts-and-critics'))
+  assert.ok(calls.findIndex(c => c.label === 'scout:follower-numbers') < calls.findIndex(c => c.label === 'read:01'))
 })
 
 test('every chapter but the sources list is written, and the introduction and the reasoning chapter come after the others', async () => {
@@ -126,18 +127,17 @@ test('source and quote reviewers run on Opus, record reviewers on the session mo
 test('with the scouting done, the known sources are read again, eight to a reader, and the numbers agents still run', async () => {
   const KNOWN = Array.from({ length: 20 }, (_, i) => ({ url: `https://known.example/${i}`, outlet: 'Known' }))
   const { calls, result } = await run({ ...ARGS, done: 'scout', sources: KNOWN })
-  assert.deepEqual(labels(calls, 'scout:'), [])
+  assert.deepEqual(labels(calls, 'scout:'), ['scout:follower-numbers', 'scout:posting-numbers'], 'only the numbers agents run in the scout stage')
   assert.equal(calls.filter(c => c.label.startsWith('sources:')).length, 0, 'no agent relays the list: an agent drops entries')
   await assert.rejects(async () => (await run({ ...ARGS, done: 'scout' })).result(), /sources/, 'the list is required')
   assert.equal(labels(calls, 'read:').length, Math.ceil(20 / 8))
   assert.ok(calls.find(c => c.label === 'read:03').prompt.includes('https://known.example/19 (Known)'))
-  assert.deepEqual(labels(calls, 'numbers:'), ['numbers:archive', 'numbers:uploads'])
   assert.equal((await result()).scouted, 20)
 })
 
 test('with the reading done, the run starts at the draft: no scout, reader or numbers agent, the merge still sizes the sources lens', async () => {
   const { calls, result } = await run({ ...ARGS, done: 'read' })
-  assert.deepEqual([...labels(calls, 'scout:'), ...labels(calls, 'read:'), ...labels(calls, 'numbers:')], [])
+  assert.deepEqual([...labels(calls, 'scout:'), ...labels(calls, 'read:')], [])
   assert.equal(calls[0].label, 'merge:read')
   assert.equal(labels(calls, 'review:sources-').length, 6)
   assert.deepEqual(labels(calls, 'write:').sort(), ALL.map(f => `write:${f}`))

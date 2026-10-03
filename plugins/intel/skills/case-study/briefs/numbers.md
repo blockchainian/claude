@@ -2,11 +2,13 @@
 
 You build the dated record for a case study from platform records, not from
 anyone's telling. Your message names the subject, the type file, the work
-directory, your lane (`archive` or `uploads`), and your share of the caps.
+directory, your lane (`follower-numbers` or `posting-numbers`), and your share of the caps.
 Read `references/evidence.md` ("Numbers"), `references/tools.md`, and "What
 the numbers must establish" in the type file.
 
-## Lane: archive
+## Lane: follower-numbers
+
+Your notes are named `numbers-followers`.
 
 You are the only agent that fetches from the archive.
 
@@ -28,7 +30,9 @@ You are the only agent that fetches from the archive.
 4. Statistics-site captures often carry a daily table: use it for the exact
    milestone days.
 
-## Lane: uploads
+## Lane: posting-numbers
+
+Your notes are named `numbers-posting`.
 
 List the account's uploads or posts with the platform commands in the tools reference.
 Write the earliest posts (date, title, views), the count per month in each
@@ -37,20 +41,20 @@ the weeks around each acceleration the press mentions.
 
 ## Output, both lanes
 
-Append to `notes/numbers-<lane>.md` as you go (see "Writing as you go" in
+Append to `notes/<name>.md` as you go, `<name>` being your lane's notes name (see "Writing as you go" in
 the evidence rules). Dated tables, one row per line, each row starting
 with the chapter tags it serves (`[c03]`, `[c07]`…) and `[on record]`, and
 ending with the record's URL. When the lane is done, write three more files;
 a script merges them, and a file in another shape is dropped:
-- `notes/numbers-<lane>.sources.json` — one JSON object,
+- `notes/<name>.sources.json` — one JSON object,
   `{"<url>": "<label>"}`, for every record you cite: the URL exactly as the
   rows print it, the label as the chapters will name it (`Internet Archive
   2019-10-01 youtube.com/channel/…`, `YouTube video page 2026`);
-- `notes/numbers-<lane>.raw.json` — one JSON object,
+- `notes/<name>.raw.json` — one JSON object,
   `{"<url>": ["raw/<file>", …]}`: for each of those URLs, the files its page
   was saved to, as paths from the work directory (`wayback.mjs` prints the
   file as `file` next to each `url`);
-- `notes/numbers-<lane>.gaps.md` — one line per record you could not read
+- `notes/<name>.gaps.md` — one line per record you could not read
   (a period with no captures is a gap only after the full capture list shows
   none).
 

@@ -43,7 +43,7 @@ Four scouts search in parallel, one lane each:
 | own-words | 1, 2, and the books the subject wrote. Interviews and podcasts: the video search, with every name the subject goes by |
 | press | 4, 5, and the large later profiles. Starts with both news commands over every name the subject goes by, from the first growth year to today |
 | business-and-people | 3, 6, 7, 9 |
-| criticism-and-data | 10, 11, and what the subject does today |
+| analysts-and-critics | 10, 11, and what the subject does today |
 
 Source type 8 belongs to the numbers agents.
 
