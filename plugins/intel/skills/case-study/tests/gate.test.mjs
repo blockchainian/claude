@@ -204,6 +204,39 @@ test('ytsearch keeps the videos whose title, channel or description names the su
   assert.throws(() => gate.ytsearch('q', ['n'], { call: () => ({ status: 1, stdout: '', stderr: 'ERROR: Sign in to confirm' }) }), /Sign in/)
 })
 
+test('ytvideos shares the videos out over the routes, drops a route YouTube refuses and names the videos no route could read', async () => {
+  const asked = []
+  const call = async (route, ids) => {
+    asked.push([route, ids])
+    if (route === 'http://refused') return []
+    return ids.filter(id => id !== 'private').map(id => ({ id, upload_date: '20150827', view_count: 7, title: `video ${id}` }))
+  }
+  const ids = ['a', 'b', 'private', 'c', 'd', 'e', 'f']
+  const { videos, missing } = await gate.ytvideos(ids, { routes: [null, 'http://refused'], batch: 2, workers: 1, call })
+  assert.deepEqual(videos.map(v => v.id), ['a', 'b', 'c', 'd', 'e', 'f'], 'in the order asked')
+  assert.deepEqual(missing, ['private'])
+  assert.equal(asked.filter(([route]) => route === 'http://refused').length, 1, 'a route that read nothing of a batch is not used again')
+  assert.equal(asked.filter(([route, batch]) => route === null && batch.includes('private')).length, 2, 'a video one route could not read is asked for once more')
+  assert.ok(asked.every(([, batch]) => batch.length <= 2))
+  const none = await gate.ytvideos(ids, { routes: ['http://refused'], batch: 2, workers: 2, call })
+  assert.deepEqual([none.videos, none.missing], [[], ids], 'refused on every route, every video is missing')
+})
+
+test('ytuploads lists the channel\'s tabs and gives every upload its exact date, oldest first', async () => {
+  const listed = []
+  const list = args => {
+    listed.push(args.at(-1))
+    return { status: 0, stdout: { videos: 'new\nold\n', shorts: 'short\ngone\n', streams: '' }[args.at(-1).split('/').at(-1)] }
+  }
+  const read = async ids => ({ missing: ['gone'], videos: ids.filter(id => id !== 'gone').map(id => ({ id, upload_date: { new: '20260919', old: '20120220', short: '20200101' }[id], timestamp: { new: 3, old: 1, short: 2 }[id], view_count: 5, duration: 60, title: id })) })
+  const { uploads, missing } = await gate.ytuploads('https://www.youtube.com/@x/', { list, read })
+  assert.deepEqual(listed, ['videos', 'shorts', 'streams'].map(tab => `https://www.youtube.com/@x/${tab}`))
+  assert.deepEqual(uploads.map(u => [u.id, u.kind, u.date]), [['old', 'videos', '2012-02-20'], ['short', 'shorts', '2020-01-01'], ['new', 'videos', '2026-09-19']])
+  assert.deepEqual(uploads[0], { id: 'old', kind: 'videos', date: '2012-02-20', timestamp: 1, views: 5, duration: 60, title: 'old', url: 'https://www.youtube.com/watch?v=old' })
+  assert.deepEqual(missing, ['gone'])
+  await assert.rejects(gate.ytuploads('https://www.youtube.com/@nobody', { list: () => ({ status: 1, stdout: '' }), read }), /no uploads listed/)
+})
+
 test('stats counts the log by command and status', () => {
   gate.log('read', 'jina', 'https://a.example', state)
   gate.log('read', 'jina', 'https://b.example', state)

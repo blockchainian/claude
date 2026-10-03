@@ -62,11 +62,16 @@ The gate adds the Chrome login itself: never add `--cookies-from-browser`.
   video per line: `id`, `url`, `channel`, `title`. Only the videos whose
   title, channel or description holds one of the names are listed: YouTube
   fills a search up with videos that have nothing to do with it.
-- Upload record (dates and plays):
-  `$G yt --flat-playlist --extractor-args "youtubetab:approximate_date" --print "%(upload_date)s %(view_count)s %(title)s" "https://www.youtube.com/@<channel>/videos"`
-  (`-I -20:` for the earliest twenty). The dates in this listing are
-  approximate and mostly placeholders: do not build per-year counts on them.
-  Read a video's own page for its exact upload date.
+- Upload record, every upload of a channel in one command:
+  `$G ytuploads "https://www.youtube.com/@<channel>" > <work>/raw/uploads/uploads.jsonl`
+  One JSON upload per line, oldest first: `id`, `kind` (`videos`, `shorts`
+  or `streams`), `date` (the exact upload day, from the video's own page),
+  `timestamp`, `views` (today's total), `duration` (seconds), `title`, `url`.
+  - It reads every video's page, many at once and without the login: about
+    1,000 uploads in 4 minutes. Run it once and work from the file; do not
+    read video pages one by one for their dates.
+  - The pages it could not read (private or removed videos) are named on
+    stderr: a gap.
 - Not `opencli youtube transcript`: it is broken.
 - The login is shared by the whole machine: download subtitles for the
   interviews you will read, never loop over a channel. "Sign in to confirm"
@@ -154,9 +159,10 @@ The account logged in in Chrome is a side account (joinupcomment).
   - Chosen captures in one batch: put the capture URLs
     (`https://web.archive.org/web/<timestamp>id_/<url>`) in a file, then
     `$G wayback fetch <work>/raw/archive --from <file>`.
-  - Both keep to 30 requests a minute per exit and stop with an error when the
-    archive refuses every exit: report that error as it is, do not retry
-    around it or go direct.
+  - Both keep to 30 requests a minute in all (the archive counts the exits
+    together: 240 captures take 8 minutes) and stop with an error when the
+    archive refuses the connection: report that error as it is, do not retry
+    around it or go direct. Give `curve` every address in one call.
   - A status of 429 in the output is a capture of a page that answered 429 at
     the time, not a limit on you. Pick another capture near that date.
 - Before writing that a period has no archive data, list the captures for every

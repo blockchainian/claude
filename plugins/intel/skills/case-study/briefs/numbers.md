@@ -34,7 +34,9 @@ You are the only agent that fetches from the archive.
 
 Your notes are named `numbers-posting`.
 
-List the account's uploads or posts with the platform commands in the tools reference.
+List the account's uploads or posts with the platform commands in the tools reference:
+one command lists a whole account with its exact dates, so run it once, save
+its output under `raw/`, and count from that file.
 Write the earliest posts (date, title, views), the count per month in each
 phase, where the cadence or format visibly changed, and what was posted in
 the weeks around each acceleration the press mentions.
