@@ -230,10 +230,16 @@ test('quotes looks up every quotation of a chapter in the saved text of the sour
     '她说“太长吗？标题太长，观众消化不了”⟦Is it long? If you make your video caption too long, it will be too much for people to digest⟧，文案是 "words off the top of my head … very simplified"（自述，Forbes 2026a）。' +
     '她说旧视频她“doesn’t watch”，经纪人叫她“短视频专家”⟦a specialist in short-form TikToks⟧（Forbes 2026a）。' +
     '她说“我每天发三条”（Forbes 2026a）。\n\n' +
-    '有人说她 "posts five times a day"（Insider 2020）。\n')
+    '有人说她 "posts five times a day"（Insider 2020）。\n\n' +
+    '她说那些旧视频很尴尬⟦so cringey⟧（自述，Forbes 2026a）。她 2019 年搬到洛杉矶（Variety 2021）。没有来源的一句。\n')
+  write(join(dir, 'notes', 'read-01.md'), '## Forbes — A profile (with photos) (2026-03-01)\nurl: https://f.example/a\n- [c04] [self-reported] (2026) "so cringey" — Forbes 2026a\n\n' +
+    '## Variety — Undated piece\nurl: https://v.example/b\n')
   const report = cs.quotes(dir, '04')
   const row = start => report.rows.find(r => r.looked.startsWith(start))
-  assert.equal(report.rows.length, 6)
+  assert.equal(report.rows.length, 7)
+  const reported = row('so cringey')
+  assert.ok(reported.verdict === 'found' && reported.quote === '' && reported.passage.includes('old clips'), 'reported speech is looked up by the source\'s words in ⟦ ⟧ after it')
+  assert.deepEqual(report.wordless.map(w => w.sentence), ['她 2019 年搬到洛杉矶（Variety 2021）。'], 'a sentence that names a source and carries none of its words is left to the reviewer')
   const first = row('Is it long?')
   assert.ok(first.verdict === 'found' && first.file === 'raw/forbes.html', 'a translated quotation is looked up by the original after it')
   assert.ok(first.passage.includes('Monk said') && first.passage.includes('on a short platform') && !first.passage.includes('<em>'), 'the passage is the source\'s text around the words, without markup')
@@ -244,9 +250,11 @@ test('quotes looks up every quotation of a chapter in the saved text of the sour
   assert.ok(elsewhere.verdict === 'in another source' && elsewhere.label === 'Variety 2021' && elsewhere.passage.includes('her manager called her'), 'words found only in another source\'s text name that source; captions are read across their cues')
   assert.equal(row('我每天发三条').verdict, 'not found')
   assert.equal(row('posts five').verdict, 'no saved text')
-  assert.deepEqual([report.found, report.elsewhere, report.missing, report.unsaved], [3, 1, 1, 1])
+  assert.deepEqual([report.found, report.elsewhere, report.missing, report.unsaved], [4, 1, 1, 1])
   const file = read(dir, 'review', 'quotations-04.md')
-  assert.ok(file.includes('* found | ') && file.includes('* not found | ') && file.includes('Forbes 2026a: raw/forbes.html'), 'the worklist has a row per quotation and the saved files of every label the chapter names')
+  assert.ok(file.includes('* found | ') && file.includes('* not found | '), 'the worklist has a row per quotation')
+  assert.ok(file.includes('- Forbes 2026a (2026-03-01): raw/forbes.html') && file.includes('- Variety 2021: raw/variety.vtt'), 'every label the chapter names is listed with its saved files, and with the date in its notes heading when it has one')
+  assert.ok(file.includes('\n- 她 2019 年搬到洛杉矶（Variety 2021）。 | Variety 2021\n') && !file.includes('- 没有来源的一句'), 'the sentences with no words to look up are listed with the sources they name')
   assert.deepEqual(cs.findings(dir, '04'), [], 'worklist rows are not findings')
 })
 

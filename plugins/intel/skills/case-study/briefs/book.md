@@ -109,10 +109,10 @@ The reader does not want to know how the research was done.
    "a referral program") or left out; the same holds for the reader's own
    company or project.
 13. **Privacy rules of the draft hold.** Nothing the draft withheld is added.
-14. **The draft's ⟦ ⟧ stay in the draft.** In the draft a translated quote
-   is followed by the source's own words in ⟦ ⟧: those are for the
-   reviewers. The book prints the translation and never the ⟦ ⟧ or the
-   words in them.
+14. **The draft's ⟦ ⟧ stay in the draft.** In the draft a translated quote,
+   and a sentence that reports what a source said, is followed by the
+   source's own words in ⟦ ⟧: those are for the reviewers. The book prints
+   the translation or the sentence and never the ⟦ ⟧ or the words in them.
 
 ## Shape
 

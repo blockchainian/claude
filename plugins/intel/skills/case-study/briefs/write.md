@@ -62,6 +62,13 @@ are givens of the task, stated as such.
   study's language and put the bullet's wording right after it in ⟦ ⟧, copied
   from the bullet, never retyped from memory (see "Quotes" in the evidence
   rules). Quotation marks are for a source's words only.
+- What a source said, wrote or reported, told without quotation marks, is
+  followed the same way by the words the bullet has in quotation marks for
+  it, in ⟦ ⟧, copied from the bullet:
+  `他说早年每四个视频就有一个没发⟦one out of every four videos we filmed just never got uploaded⟧`.
+  A script looks them up and shows the reviewer the passage; a sentence
+  without them is searched for by hand. When the bullet quotes no words for
+  it, the sentence carries no ⟦ ⟧.
 - A method is written out in full: what exactly, how often, with whom, at what
   cost, what changed. Fewer solid claims beat more weak ones.
 - Where the subject's account and the record differ, print both. Where two
