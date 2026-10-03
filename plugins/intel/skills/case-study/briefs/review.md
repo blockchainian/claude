@@ -72,7 +72,7 @@ of those with a verdict and the passage of the source around the words; the
 sentences that name a source and carry none of its words; every source the
 chapter names, with its date and its saved files. Read that file whole, then
 the chapter once. What a passage or the list of sources shows is judged from
-them: no source is opened and nothing is searched for it.
+them, with no search and no source opened.
 
 Per row:
 
