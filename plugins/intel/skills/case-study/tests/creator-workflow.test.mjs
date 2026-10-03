@@ -10,7 +10,8 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 
 // Every stand-in agent finishes on the next tick, except those named in `slow`, which finish when `release` is called:
 // the order of `calls` then shows which agents waited for which.
-async function run(args, slow = []) {
+// `returns` gives the text an agent of a given label finishes with.
+async function run(args, slow = [], returns = {}) {
   const calls = []
   const releases = []
   const agent = (prompt, opts) => {
@@ -23,6 +24,7 @@ async function run(args, slow = []) {
           ...Array.from({ length: 29 }, (_, i) => ({ url: `https://${lane}.example/${i}`, outlet: lane, year: '2020' }))] }
       }
       if (opts.label === 'merge:read') return '{"sources": 130, "failed": 0, "gaps": 4}'
+      if (opts.label in returns) return returns[opts.label]
       return `done ${opts.label}`
     }
     if (slow.includes(opts.label)) return new Promise(resolve => releases.push(() => resolve(finish())))
@@ -115,11 +117,27 @@ test('a script matches every chapter\'s figures; only the timeline and turning-p
   assert.ok(!labels(calls, 'fix:').includes('fix:03') && labels(calls, 'fix:').includes('fix:04'), 'chapter 03 is fixed only after its record review')
 })
 
-test('source and quote reviewers run on Opus, record reviewers on the session model, all at high effort, and each agent is told its share of the caps', async () => {
+test('a script looks up every chapter\'s quotations first; a chapter it cuts into parts gets a quotes reviewer per part, and is fixed after all of them', async () => {
+  const { calls, release } = await run(ARGS, ['review:quotes-04-2'], { 'quotations:04': '{"chapter":"04","quotations":190,"found":180,"parts":3}' })
+  const lookUps = calls.filter(c => c.label.startsWith('quotations:'))
+  assert.deepEqual(lookUps.map(c => c.label).sort(), ALL.map(f => `quotations:${f}`))
+  assert.ok(lookUps.every(c => c.model === 'haiku' && c.phase === 'Review' && c.prompt.includes(`case-study.mjs quotes "/w" ${c.label.slice(11)}`)))
+  const four = calls.filter(c => c.label.startsWith('review:quotes-04'))
+  assert.deepEqual(four.map(c => c.label), ['review:quotes-04-1', 'review:quotes-04-2', 'review:quotes-04-3'])
+  four.forEach((c, i) => assert.ok(c.prompt.includes(`Your output name: quotes-04-${i + 1}.`) && c.prompt.includes(`review/quotations-04-${i + 1}.md (part ${i + 1} of 3)`), c.prompt))
+  const whole = calls.find(c => c.label === 'review:quotes-05')
+  assert.ok(whole.prompt.includes('review/quotations-05.md') && !whole.prompt.includes('part'), 'a chapter left whole has one reviewer, on the whole worklist')
+  assert.ok(calls.findIndex(c => c.label === 'quotations:05') < calls.findIndex(c => c.label === 'review:quotes-05'), 'the reviewer starts from the script\'s worklist')
+  assert.ok(!labels(calls, 'fix:').includes('fix:04') && labels(calls, 'fix:').includes('fix:05'), 'chapter 04 is fixed only after every part is reviewed')
+  await release()
+  assert.ok(labels(calls, 'fix:').includes('fix:04'))
+})
+
+test('source and quote reviewers run on Opus 4.8, record reviewers on the session model, all at high effort, and each agent is told its share of the caps', async () => {
   const { calls } = await run(ARGS)
   const reviewers = calls.filter(c => c.label.startsWith('review:'))
   assert.ok(reviewers.every(c => c.effort === 'high'))
-  assert.ok(reviewers.filter(c => !c.label.startsWith('review:record')).every(c => c.model === 'opus'))
+  assert.ok(reviewers.filter(c => !c.label.startsWith('review:record')).every(c => c.model === 'claude-opus-4-8'))
   assert.ok(reviewers.filter(c => c.label.startsWith('review:record')).every(c => c.model === undefined))
   assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/17 share'))
 })

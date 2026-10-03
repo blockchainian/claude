@@ -6,9 +6,9 @@ export const meta = {
   phases: [
     { title: 'Scout', detail: 'four scouts find sources by lane; the two numbers agents start with them', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
-    { title: 'Check sources', detail: 'sources lens on Opus, 25 sources per reviewer, after the merge and before any chapter is written', model: 'opus' },
+    { title: 'Check sources', detail: 'sources lens on Opus 4.8, 25 sources per reviewer, after the merge and before any chapter is written', model: 'claude-opus-4-8' },
     { title: 'Write', detail: 'one writer per chapter, then the introduction and the reasoning chapter', model: 'sonnet' },
-    { title: 'Review', detail: 'per chapter, as each is written: a script matches its figures, the quotes lens (Opus) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
+    { title: 'Review', detail: 'per chapter, as each is written: a script matches its figures and looks up its quotations, the quotes lens (Opus 4.8) reviews it, a long chapter in parts by several reviewers at once, and the record lens (session model) judges the timeline and turning-point chapters' },
     { title: 'Fix', detail: 'one fixer per chapter, as soon as its reviews are done, on gpt-6-luna through codex exec' },
   ],
 }
@@ -88,7 +88,7 @@ phase('Check sources')
 // the session model.
 const review = (lens, name, slice) => agent(
   `${COMMON}\nYou are an independent adversarial reviewer. Follow ${S}/briefs/review.md. Your lens: ${lens}. Your output name: ${name}.\nYour slice:\n${slice}`,
-  { label: `review:${name}`, phase: lens === 'sources' ? 'Check sources' : 'Review', effort: 'high', agentType: 'general-purpose', ...(lens === 'record' ? {} : { model: 'opus' }) })
+  { label: `review:${name}`, phase: lens === 'sources' ? 'Check sources' : 'Review', effort: 'high', agentType: 'general-purpose', ...(lens === 'record' ? {} : { model: 'claude-opus-4-8' }) })
 // Whether a figure is in its source is a lookup: a script does it for every chapter. Its unmatched figures go to
 // the fixer as findings, except in the chapters that argue from the curve (the timeline, the turning points),
 // where a record reviewer judges them first, with the derived figures and what each growth step is credited to.
@@ -96,6 +96,17 @@ const RECORD = ['03', '07']
 const matchFigures = file => agent(
   `Run exactly this command and return its output, nothing else:\n${S}/scripts/case-study.mjs figures "${WORK}" ${file}${RECORD.includes(file) ? ' --worklist' : ''}`,
   { label: `figures:${file}`, phase: 'Review', model: 'haiku', effort: 'low', agentType: 'general-purpose' })
+// The quotes lens starts from a script's worklist of the chapter's quotations. The script cuts a long chapter's
+// worklist into parts, one per reviewer, and its output says how many.
+const lookUpQuotations = file => agent(
+  `Run exactly this command and return its output, nothing else:\n${S}/scripts/case-study.mjs quotes "${WORK}" ${file}`,
+  { label: `quotations:${file}`, phase: 'Review', model: 'haiku', effort: 'low', agentType: 'general-purpose' })
+const reviewQuotes = async file => {
+  const parts = Number((String(await lookUpQuotations(file)).match(/"parts":\s*(\d+)/) || [])[1]) || 1
+  if (parts === 1) return review('quotes', `quotes-${file}`, `- drafts/${file}.md\nThe script has been run. Your worklist: review/quotations-${file}.md`)
+  return parallel(Array.from({ length: parts }, (_, i) => () => review('quotes', `quotes-${file}-${i + 1}`,
+    `- drafts/${file}.md\nThe script has been run. Your worklist: review/quotations-${file}-${i + 1}.md (part ${i + 1} of ${parts})`)))
+}
 // The sources lens checks the sources themselves, not the chapters, and runs before them: a merge then takes the
 // sources it failed out of sources.json, and the writers get no notes from them.
 const sliceCount = Math.ceil(sourceCount / 25)
@@ -118,13 +129,13 @@ const fix = file => ['sonnet', 'opus', 'haiku'].includes(FIXER)
   : agent(
     `Save the text between the lines of === to ${WORK}/review/fix-${file}.prompt.txt, exactly, with the Write tool. Then run exactly this command with the longest timeout you can give it, and run it again if it times out, until it exits on its own:\n${S}/scripts/case-study.mjs codex "${WORK}" ${file} --model ${FIXER}\nReturn its output, nothing else.\n===\n${fixerPrompt(file)}\n===`,
     { label: `fix:${file}`, phase: 'Fix', model: 'haiku', effort: 'low', agentType: 'general-purpose' })
-// One chapter's chain: written → figures matched and reviewed → fixed.
+// One chapter's chain: written → figures matched, quotations looked up, and reviewed → fixed.
 const written = {}
 const chain = (file, writeAfter, fixAfter) => {
   written[file] = writeAfter.then(() => write(file))
   return written[file].then(async () => {
     const reviews = await parallel([
-      () => review('quotes', `quotes-${file}`, `- drafts/${file}.md`),
+      () => reviewQuotes(file),
       async () => {
         const matched = await matchFigures(file)
         return RECORD.includes(file) ? review('record', `record-${file}`, `- drafts/${file}.md\nThe figures a script could not match: review/figures-${file}.md`) : matched
