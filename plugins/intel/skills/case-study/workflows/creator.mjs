@@ -121,13 +121,13 @@ const write = file => agent(
 // The fixer is a bounded edit under listed findings; a Codex model does it as well as Sonnet for a fraction of the
 // cost (pilot on brooke-monk chapter 04), so it runs there through the script, driven by a Haiku agent that only
 // saves the prompt and runs the command. The brief makes an interrupted fixer resume, so a run cut off by the
-// agent's command timeout is run again. args.fixer names a Claude model (sonnet, opus, haiku) to keep it here.
+// agent's command timeout, or one that stopped with findings left, is run again. args.fixer names a Claude model (sonnet, opus, haiku) to keep it here.
 const FIXER = A.fixer || 'gpt-6-luna'
 const fixerPrompt = file => `${COMMON}\nYou are a fixer. Follow ${S}/briefs/fix.md. Your chapter file: drafts/${file}.md (NN = ${file}).`
 const fix = file => ['sonnet', 'opus', 'haiku'].includes(FIXER)
   ? agent(fixerPrompt(file), { label: `fix:${file}`, phase: 'Fix', ...SONNET, model: FIXER })
   : agent(
-    `Save the text between the lines of === to ${WORK}/review/fix-${file}.prompt.txt, exactly, with the Write tool. Then run exactly this command with the longest timeout you can give it, and run it again if it times out, until it exits on its own:\n${S}/scripts/case-study.mjs codex "${WORK}" ${file} --model ${FIXER}\nReturn its output, nothing else.\n===\n${fixerPrompt(file)}\n===`,
+    `Save the text between the lines of === to ${WORK}/review/fix-${file}.prompt.txt, exactly, with the Write tool. Then run exactly this command with the longest timeout you can give it:\n${S}/scripts/case-study.mjs codex "${WORK}" ${file} --model ${FIXER}\nIts output ends with "remaining": the findings of the chapter the fixer has not reached. Run the command again when it times out or when "remaining" is above 0, four runs at most. Return the last run's output, nothing else.\n===\n${fixerPrompt(file)}\n===`,
     { label: `fix:${file}`, phase: 'Fix', model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 // One chapter's chain: written → figures matched, quotations looked up, and reviewed → fixed.
 const written = {}

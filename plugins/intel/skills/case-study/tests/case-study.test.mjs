@@ -359,6 +359,38 @@ test('findings gives each finding a name that stays the same, and leaves out the
   assert.deepEqual(cs.findings(half, '04'), [all[1]], 'an edited chapter keeps the names; only the finding with no log line is left')
 })
 
+test('check reports the findings no fixer has applied, chapter by chapter, and the draft does not pass until every one has its log line', () => {
+  const left = cs.init('left-unfixed', 'How Left grew', 'https://example.com/@left', join(tmp, 'pdf', 'left.pdf'), 12, 'Left').work
+  for (let n = 1; n <= 12; n++) write(join(left, 'drafts', `${pad(n)}.md`), `# Chapter ${n}\n\nLead paragraph (A 2020).\n\n## Section\n\nBody.\n`)
+  write(join(left, 'sources.json'), JSON.stringify({ 'https://a.example/x': 'A 2020' }))
+  assert.deepEqual(cs.check(left).findings_unapplied, {})
+  write(join(left, 'review', 'record-07.md'), '- [07] missing | first | a | b | c\n- [07] wrong | second | a | b | c\n')
+  write(join(left, 'review', 'sources-1.md'), '- [A 2020] seller-source | sells a course | | drop\n')
+  let report = cs.check(left)
+  assert.equal(report.findings_unapplied['07'], 3)
+  assert.equal(report.findings_unapplied['01'], 1, 'a sources-lens line counts in every chapter that names the label')
+  assert.ok(!('12' in report.findings_unapplied), 'the closing sources list has no fixer')
+  assert.equal(report.draft_ok, false)
+  for (let n = 1; n <= 11; n++) {
+    write(join(left, 'review', `fix-${pad(n)}.md`), cs.findings(left, pad(n)).map(l => `${l.slice(2, 9)} fixed`).join('\n') + '\n')
+  }
+  report = cs.check(left)
+  assert.deepEqual(report.findings_unapplied, {})
+  assert.equal(report.draft_ok, true)
+})
+
+test('codex reports how many findings of the chapter are still without a log line after the run', () => {
+  const work = join(tmp, 'codex-left')
+  for (const dir of ['review', 'drafts']) mkdirSync(join(work, dir), { recursive: true })
+  write(join(work, 'review', 'fix-04.prompt.txt'), 'You are a fixer.')
+  write(join(work, 'drafts', '04.md'), '# Methods\n\nLead.\n')
+  write(join(work, 'review', 'quotes-04.md'), '- [04] wrong | first | a | b | c\n- [04] unsupported | second | a | b | c\n')
+  const [first] = cs.findings(work, '04')
+  // a fixer that logs one finding and stops
+  const stopsEarly = () => { write(join(work, 'review', 'fix-04.md'), `${first.slice(2, 9)} fixed\n`); return { status: 0, stdout: '', stderr: '' } }
+  assert.equal(cs.codex(work, '04', 'gpt-6-luna', stopsEarly).remaining, 1)
+})
+
 test('bullets prints a chapter\'s lines from the notes, with a dated table of the numbers notes thinned to a row per quarter', () => {
   const long = cs.init('long-curve', 'How Long grew', 'https://example.com/@long', join(tmp, 'pdf', 'long.pdf'), 12, 'Long').work
   const row = (date, n, tags = '[c03]') => `${tags} [on record] ${date} | ${n} followers | https://web.archive.org/web/${date.replaceAll('-', '')}/x`
