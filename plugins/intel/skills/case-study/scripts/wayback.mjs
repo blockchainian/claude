@@ -28,8 +28,8 @@ loadEnv()
 // in a minute.
 export const PER_MINUTE = 30
 // Through the residential proxy. Measured 2026-10: the archive answered no 429 at 120 or at 240 a minute; the proxy
-// itself takes about 100 connections a minute and refuses the ones above that.
-export const RESIDENTIAL_PER_MINUTE = 90
+// itself refuses some connections at any rate tried (18 of 118 at 90 a minute), and those are asked again.
+export const RESIDENTIAL_PER_MINUTE = 100
 export const RETRIES = 8 // times a request that failed is asked again, each after a longer wait
 const PER_WORKER = 10 // requests a minute one worker carries: a page takes seconds to arrive
 const ARCHIVE = 'https://web.archive.org'
