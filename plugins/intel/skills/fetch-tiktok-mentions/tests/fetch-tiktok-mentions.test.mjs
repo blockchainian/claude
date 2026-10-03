@@ -64,6 +64,9 @@ test("args split into the slug, repeatable sources, limits and phase switches", 
   assert.deepEqual(a.minPlays, { hashtag: 10000, user: 0, keyword: 0 });
   assert.equal(a.comments, true);
   assert.equal(a.download, true);
+  assert.equal(a.dir, "docs/intel/tiktok/demofun");
+  assert.equal(parseArgs(["demofun", "--user", "demo", "--out", "/work/raw/tiktok"]).dir, "/work/raw/tiktok");
+  assert.equal(parseArgs(["demofun", "--out=elsewhere"]).dir, "elsewhere");
 
   const b = parseArgs(["x", "--comment-limit", "40", "--source-limit=60", "--sessions", "1", "--no-comments", "--no-download"]);
   assert.deepEqual([b.commentLimit, b.sourceLimit, b.sessions, b.comments, b.download], [40, 60, 1, false, false]);
