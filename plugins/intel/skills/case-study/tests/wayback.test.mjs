@@ -90,18 +90,35 @@ test('the proxy given is the one every request goes through', async () => {
   assert.deepEqual(seen, Array(3).fill('http://isp.example:8080'))
 })
 
+test('a request whose connection fails is asked again; one that keeps failing stops the batch', async () => {
+  const failures = new Map()
+  const flaky = async (proxy, url) => {
+    failures.set(url, (failures.get(url) || 0) + 1)
+    if (failures.get(url) <= 2) throw new Error('connect ECONNREFUSED')
+    return { status: 200, body: Buffer.from(url) }
+  }
+  const urls = [0, 1, 2].map(n => `${base}/page/${n}`)
+  const results = await wb.fetchAll(urls, null, join(tmp, 'e'), { perMinute: 6000, get: flaky, retryWait: 1 })
+  assert.deepEqual(results.map(r => r.status), [200, 200, 200])
+  assert.deepEqual([...failures.values()], [3, 3, 3], 'each was asked again until it answered')
+  let asked = 0
+  const dead = async () => { asked++; throw new Error('connect ECONNREFUSED') }
+  await assert.rejects(wb.fetchAll(urls.slice(0, 1), null, join(tmp, 'f'), { perMinute: 6000, get: dead, retryWait: 1 }), error => error instanceof wb.Refused)
+  assert.equal(asked, 1 + wb.RETRIES)
+})
+
 test('a capture the archive replays compressed is saved as text', async () => {
   const get = async () => ({ status: 200, body: gzipSync(Buffer.from('1,234 subscribers')) })
   const results = await wb.fetchAll([`${base}/page/0`], ['only'], join(tmp, 'z'), { perMinute: 6000, get })
   assert.equal(readFileSync(results[0].file, 'utf8'), '1,234 subscribers')
 })
 
-test('a 429 from the archive itself is a refusal that stops the batch, and the error says what is left', async () => {
+test('a 429 the archive itself keeps answering is a refusal that stops the batch, and the error says what is left', async () => {
   const urls = [0, 1, 2].map(n => `${base}/page/${n}`).concat(`${base}/throttled`)
-  await assert.rejects(wb.fetchAll(urls, null, join(tmp, 'c'), { perMinute: 6000 }), error => {
+  await assert.rejects(wb.fetchAll(urls, null, join(tmp, 'c'), { perMinute: 6000, retryWait: 1 }), error => {
     assert.ok(error instanceof wb.Refused)
     assert.ok(error.remaining.includes(`${base}/throttled`), JSON.stringify(error.remaining))
-    assert.ok(error.message.includes('1 of 4'), error.message)
+    assert.ok(error.message.includes('1 of 4') && error.message.includes('the archive answered 429'), error.message)
     return true
   })
 })
