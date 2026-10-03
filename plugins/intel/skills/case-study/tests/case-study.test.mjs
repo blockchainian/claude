@@ -219,6 +219,29 @@ test('figures matches every figure of a chapter against the saved text of the so
   assert.deepEqual(report.unmatched, [], 'a label before its sentence belongs to the sentence after it, in a chapter whose paragraphs open with a label')
 })
 
+test('quotes finds words the source has in order with a few others between them, and says so', () => {
+  const dir = cs.init('apart', 'How she grew', 'https://example.com/@a', out, 5, 'A').work
+  write(join(dir, 'sources.json'), JSON.stringify({ 'https://p.example/a': 'Podcast 2024', 'https://n.example/b': 'News 2025' }))
+  write(join(dir, 'raw.json'), JSON.stringify({ 'https://p.example/a': ['raw/podcast.txt'], 'https://n.example/b': ['raw/news.txt'] }))
+  write(join(dir, 'raw', 'podcast.txt'), 'so yeah you should get it where you know you have a a years pay in the bank 0:11:10 so if you have a couple duds\n' +
+    'I like to stop early. We talked about cooking for a long while and then about nothing at all. A series gets old.\n')
+  write(join(dir, 'raw', 'news.txt'), 'The company [has come under scrutiny](https://n.example/earlier-story-about-it) in crypto circles before.\n')
+  write(join(dir, 'drafts', '04.md'), '# Chapter\n\nLead.\n\n## Section\n\n' +
+    '他说“账上要留一年的工资”⟦you should get it where you have a year\'s pay in the bank so if you have a couple duds⟧（自述，Podcast 2024）。' +
+    '他说要早停⟦I like to stop early a series gets old⟧（自述，Podcast 2024）。' +
+    '报道说它在加密圈受过质疑⟦has come under scrutiny in crypto circles⟧（News 2025）。\n')
+  const report = cs.quotes(dir, '04')
+  const row = start => report.rows.find(r => r.looked.startsWith(start))
+  const apart = row('you should get it')
+  assert.ok(apart.verdict === 'found' && apart.apart && apart.passage.includes('where you know you have a a years pay'), 'filler words and a timestamp between the words do not hide them')
+  assert.equal(row('I like to stop early').verdict, 'not found', 'words a whole sentence apart are not the words quoted')
+  const linked = row('has come under')
+  assert.ok(linked.verdict === 'found' && !linked.apart, 'the address of a link inside the words is not text')
+  assert.equal(report.found, 2)
+  const file = read(dir, 'review', 'quotations-04.md')
+  assert.ok(file.includes('* found, with other words between | you should get it') && file.includes('* found | has come under'), 'the row says when the words are not next to each other')
+})
+
 test('quotes looks up every quotation of a chapter in the saved text of the sources its sentence names', () => {
   const dir = cs.init('quoted', 'How she grew', 'https://example.com/@q', out, 5, 'Q').work
   write(join(dir, 'sources.json'), JSON.stringify({ 'https://f.example/a': 'Forbes 2026a', 'https://v.example/b': 'Variety 2021', 'https://i.example/c': 'Insider 2020' }))
