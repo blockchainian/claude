@@ -23,7 +23,6 @@ async function run(args, slow = []) {
           ...Array.from({ length: 29 }, (_, i) => ({ url: `https://${lane}.example/${i}`, outlet: lane, year: '2020' }))] }
       }
       if (opts.label === 'merge:read') return '{"sources": 130, "failed": 0, "gaps": 4}'
-      if (opts.label === 'sources:known') return { sources: Array.from({ length: 20 }, (_, i) => ({ url: `https://known.example/${i}`, outlet: 'Known' })) }
       return `done ${opts.label}`
     }
     if (slow.includes(opts.label)) return new Promise(resolve => releases.push(() => resolve(finish())))
@@ -32,6 +31,7 @@ async function run(args, slow = []) {
   const parallel = thunks => Promise.all(thunks.map(t => t()))
   const body = new AsyncFunction('agent', 'parallel', 'pipeline', 'phase', 'log', 'args', source)
   const done = body(agent, parallel, null, () => {}, () => {}, args)
+  done.catch(() => {}) // a script that refuses its args rejects here; the test reads it through result()
   const settle = () => new Promise(resolve => setTimeout(resolve, 20))
   await settle()
   const release = async () => { releases.splice(0).forEach(r => r()); await settle() }
@@ -115,9 +115,11 @@ test('source and quote reviewers run on Opus, record reviewers on the session mo
 })
 
 test('with the scouting done, the known sources are read again, eight to a reader, and the numbers agents still run', async () => {
-  const { calls, result } = await run({ ...ARGS, done: 'scout' })
+  const KNOWN = Array.from({ length: 20 }, (_, i) => ({ url: `https://known.example/${i}`, outlet: 'Known' }))
+  const { calls, result } = await run({ ...ARGS, done: 'scout', sources: KNOWN })
   assert.deepEqual(labels(calls, 'scout:'), [])
-  assert.ok(calls.find(c => c.label === 'sources:known').prompt.includes('case-study.mjs sources "/w"'))
+  assert.equal(calls.filter(c => c.label.startsWith('sources:')).length, 0, 'no agent relays the list: an agent drops entries')
+  await assert.rejects(async () => (await run({ ...ARGS, done: 'scout' })).result(), /sources/, 'the list is required')
   assert.equal(labels(calls, 'read:').length, Math.ceil(20 / 8))
   assert.ok(calls.find(c => c.label === 'read:03').prompt.includes('https://known.example/19 (Known)'))
   assert.deepEqual(labels(calls, 'numbers:'), ['numbers:archive', 'numbers:uploads'])

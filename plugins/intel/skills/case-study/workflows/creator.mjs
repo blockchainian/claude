@@ -12,11 +12,11 @@ export const meta = {
   ],
 }
 
-// args: { subject, work, skill, lang, today, product, seeds, caps, done, fixer }
+// args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer }
 // skill is the absolute path of the case-study skill folder; product, seeds and
 // caps may be empty strings. done names the stages whose files are already in the work directory and are not run
-// again: 'scout' (sources.json: its sources are read again, without scouting), 'read' (the notes and the numbers: the run
-// starts at the draft), 'sources' (the sources lens's findings).
+// again: 'scout' (the sources are known: args.sources, the output of `case-study.mjs sources <work>`, is read again
+// without scouting), 'read' (the notes and the numbers: the run starts at the draft), 'sources' (the sources lens's findings).
 //
 // The numbers agents start with the scouts, and each chapter runs write → figures matched + quotes review → fix on
 // its own. The barriers are the merge after reading (the sources lens needs sources.json), the sources lens before
@@ -52,10 +52,13 @@ const READERS_EXPECTED = 15 // for the caps share before the scouts return; read
 const numbersDone = READ_DONE ? null : parallel(['archive', 'uploads'].map(lane => () => agent(
   `${COMMON}\nYou are a numbers agent. Follow ${S}/briefs/numbers.md. Your lane: ${lane}.${share(READERS_EXPECTED + 2)}`,
   { label: `numbers:${lane}`, phase: 'Scout', ...SONNET })))
-// With the scouting done, the one list to read is sources.json, printed by a script.
-const known = () => agent(`Run exactly this command and return its output, nothing else:\n${S}/scripts/case-study.mjs sources "${WORK}"`,
-  { label: 'sources:known', phase: 'Scout', schema: FOUND, model: 'haiku', effort: 'low', agentType: 'general-purpose' })
-const scouted = READ_DONE ? [] : SCOUT_DONE ? [await known()].filter(Boolean) : (await parallel(LANES.map(lane => () => agent(
+// With the scouting done, the list to read comes in as args.sources (the output of `case-study.mjs sources <work>`):
+// a script cannot be read from here, and an agent relaying 366 entries dropped 65 of them.
+const known = () => {
+  if (!Array.isArray(A.sources) || !A.sources.length) throw new Error("done 'scout' needs args.sources: the output of case-study.mjs sources <work>")
+  return [{ sources: A.sources }]
+}
+const scouted = READ_DONE ? [] : SCOUT_DONE ? known() : (await parallel(LANES.map(lane => () => agent(
   `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your lane: ${lane} (see "Scout lanes" in the type file).${share(LANES.length)}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}`,
   { label: `scout:${lane}`, phase: 'Scout', schema: FOUND, ...SONNET })))).filter(Boolean)
 const seen = new Set()
