@@ -208,6 +208,7 @@ async function reachPasswordPage(page, cred, { assist = false, timeoutS = 20 } =
   let recaptchaTries = 0; // cap the paid CapSolver attempts so a page that never clears can't re-solve forever
   while (Date.now() < deadline) {
     if (await hasPasswordField(page)) return;
+    await ensureEnglish(page); // the identifier hop can drop `hl`; "Verify it" below is matched in English
     // Fresh, low-trust accounts hit a reCAPTCHA at challenge/recaptcha before the password field.
     // CapSolver clears it automatically when a key is set; otherwise a headed run lets the person
     // click it and we wait for the password field, and a headless run with no solver escalates.
@@ -1816,7 +1817,9 @@ export function aliasFor(baseEmail, tag) {
   return `${local.split("+", 1)[0]}+${tag}@${domain}`;
 }
 
-const APPPASSWORDS_URL = "https://myaccount.google.com/apppasswords";
+// Opened with `hl=en`: myaccount and the re-auth challenge it bounces through otherwise render in the
+// account's own language, and every label matched on those pages is English.
+export const APPPASSWORDS_URL = "https://myaccount.google.com/apppasswords?hl=en";
 // The generated code is four groups of four lowercase letters (`abcd efgh ijkl mnop`).
 const APP_PW_RE = /\b[a-z]{4} [a-z]{4} [a-z]{4} [a-z]{4}\b/;
 
@@ -1901,6 +1904,7 @@ export async function mintAppPassword(cred, { name, headed = false, rotate = fal
       return null;
     }
     await page.waitForTimeout(1500);
+    await ensureEnglish(page); // the re-auth's followup hop can drop `hl`
     const handle = await page.evaluateHandle(
       () => [...document.querySelectorAll("input[type=text]")].find((e) => e.offsetParent !== null) || null,
     );
@@ -1933,7 +1937,7 @@ export async function mintAppPassword(cred, { name, headed = false, rotate = fal
   });
 }
 
-const TWOSV_URL = "https://myaccount.google.com/signinoptions/twosv";
+export const TWOSV_URL = "https://myaccount.google.com/signinoptions/twosv?hl=en";
 
 // Add a Google Authenticator app to an already-signed-in account and return its base32 secret.
 // Opens the account's profile, clears the sensitive-settings re-auth, reveals the text setup key,
@@ -1949,6 +1953,7 @@ export async function enrollAuthenticator(cred, { headed = false, rotate = false
       await debug.capture(page, cred.email, "twofactor-reauth-failed");
       return null;
     }
+    await ensureEnglish(page); // the re-auth's followup hop can drop `hl`
     const addAuth = page.getByText(/Add authenticator app/i).first();
     if (!(await addAuth.isVisible({ timeout: 8000 }).catch(() => false))) {
       await debug.capture(page, cred.email, "twofactor-no-add-authenticator");
@@ -2005,6 +2010,7 @@ export async function turnOnTwoStep(cred, { headed = false, rotate = false } = {
       await debug.capture(page, cred.email, "twofactor-reauth-failed");
       return false;
     }
+    await ensureEnglish(page); // the re-auth's followup hop can drop `hl`
     await page.waitForTimeout(2000);
     const isOn = async () =>
       /2-Step Verification is on|Turn off/i.test((await page.evaluate(() => document.body.innerText)).replace(/\s+/g, " "));

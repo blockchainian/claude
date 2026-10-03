@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } fro
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { toProxyDict, filterState, extractAppPassword, submitPassword, aliasFor, parseSetupKey, onSettingsPage, nationalNumber, DIAL_CODES, COUNTRY_NAMES, isMyAccountUrl, isOnboardingUrl, isSignedInUrl, forceEnglishUrl, ensureEnglish, waitForHuman, pollForState, submitRecaptcha, visibleRecaptchaAnchor, waitGridChanged, waitTilesSwapped, classifyGoogleNode, shouldHoldOpenForDebug, gotoWithRetry, signInGoogle, appAlreadySignedIn, oauthSurface, withAppRetries, isTransientAppError, loadOrCreateFingerprint, Restricted, Expired, NeedsHuman } from "../scripts/login.mjs";
+import { APPPASSWORDS_URL, TWOSV_URL, toProxyDict, filterState, extractAppPassword, submitPassword, aliasFor, parseSetupKey, onSettingsPage, nationalNumber, DIAL_CODES, COUNTRY_NAMES, isMyAccountUrl, isOnboardingUrl, isSignedInUrl, forceEnglishUrl, ensureEnglish, waitForHuman, pollForState, submitRecaptcha, visibleRecaptchaAnchor, waitGridChanged, waitTilesSwapped, classifyGoogleNode, shouldHoldOpenForDebug, gotoWithRetry, signInGoogle, appAlreadySignedIn, oauthSurface, withAppRetries, isTransientAppError, loadOrCreateFingerprint, Restricted, Expired, NeedsHuman } from "../scripts/login.mjs";
 
 // classifyGoogleNode maps (url, visible-input inventory) to the graph node the loop dispatches on.
 // A hidden input (visible:false) never decides the node — the phone challenge ships a hidden
@@ -918,4 +918,15 @@ test("waitForHuman gives up once its window has passed", async (t) => {
   const resumed = await waitForHuman(surface, { email: "someone@example.com" }, { timeoutMs: 3000, done: async () => false });
   assert.equal(resumed, false);
   assert.ok(clock >= 3000 && clock < 3100, `waited ${clock}ms`);
+});
+
+test("the account settings pages are opened in English", () => {
+  // myaccount.google.com and the re-auth challenge it bounces through render in the account's own
+  // language unless `hl=en` is on the URL; every label matched on those pages is English.
+  for (const url of [APPPASSWORDS_URL, TWOSV_URL]) {
+    assert.equal(new URL(url).searchParams.get("hl"), "en", url);
+    assert.equal(new URL(url).hostname, "myaccount.google.com");
+  }
+  assert.equal(onSettingsPage(APPPASSWORDS_URL, "apppasswords"), true);
+  assert.equal(onSettingsPage(TWOSV_URL, "twosv"), true);
 });
