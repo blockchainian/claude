@@ -156,7 +156,8 @@ The account logged in in Chrome is a side account (joinupcomment).
 
 The gate and `wayback.mjs` read them from a `.env` file: `scripts/.env` next
 to the scripts, else `~/.cache/secrets-manager/profiles/case-study/.env`.
-Nothing has to be exported in the shell.
+Nothing has to be exported in the shell. A value that starts with `~/` is
+under the home directory.
 
 - `ISP_PROXY_URL`: the proxy, one URL; the ten ports after its own are the
   exits. Without it the gate reads direct, with one exit's share of the

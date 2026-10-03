@@ -7,13 +7,14 @@ import { fileURLToPath } from 'node:url'
 
 export const ENV_FILES = [join(dirname(fileURLToPath(import.meta.url)), '.env'), join(homedir(), '.cache', 'secrets-manager', 'profiles', 'case-study', '.env')]
 
-// KEY=value lines; quotes around the value are dropped; a variable already in the environment wins.
+// KEY=value lines; quotes around the value are dropped; a value that starts with ~/ is under the home directory;
+// a variable already in the environment wins.
 export function parseEnv(text) {
   const values = {}
   for (const line of text.split('\n')) {
     const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/)
     if (!m || line.trim().startsWith('#')) continue
-    values[m[1]] = m[2].replace(/^(["'])(.*)\1$/, '$2')
+    values[m[1]] = m[2].replace(/^(["'])(.*)\1$/, '$2').replace(/^~(?=\/)/, homedir())
   }
   return values
 }
