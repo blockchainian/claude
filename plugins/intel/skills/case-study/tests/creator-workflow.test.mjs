@@ -77,6 +77,15 @@ test('the review covers every source and every chapter, one chapter per reviewer
   assert.deepEqual(labels(calls, 'merge:'), ['merge:read', 'merge:sources', 'merge:fix'])
 })
 
+test('the phases are listed in the order they start: the sources lens has its own phase, between reading and writing', async () => {
+  const { calls } = await run(ARGS)
+  const listed = [...source.matchAll(/\{ title: '([^']+)'/g)].map(m => m[1])
+  const started = [...new Set(calls.map(c => c.phase).filter(Boolean))]
+  assert.deepEqual(started, listed)
+  assert.deepEqual(listed.slice(1, 4), ['Read', 'Check sources', 'Write'])
+  assert.deepEqual([...new Set(calls.filter(c => c.label.startsWith('review:sources-')).map(c => c.phase))], ['Check sources'])
+})
+
 test('no chapter is written before the sources lens is in and its failed sources are merged out; a chapter is fixed when its own reviews are done', async () => {
   const { calls, release } = await run(ARGS, ['review:sources-2', 'write:05'])
   assert.equal(labels(calls, 'review:sources-').length, 6)

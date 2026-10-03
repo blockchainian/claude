@@ -6,8 +6,9 @@ export const meta = {
   phases: [
     { title: 'Scout', detail: 'four scouts find sources by lane; the two numbers agents start with them', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
+    { title: 'Check sources', detail: 'sources lens on Opus, 25 sources per reviewer, after the merge and before any chapter is written', model: 'opus' },
     { title: 'Write', detail: 'one writer per chapter, then the introduction and the reasoning chapter', model: 'sonnet' },
-    { title: 'Review', detail: 'sources lens on Opus after the merge, before any chapter is written; per chapter, as each is written: a script matches its figures, the quotes lens (Opus) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
+    { title: 'Review', detail: 'per chapter, as each is written: a script matches its figures, the quotes lens (Opus) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
     { title: 'Fix', detail: 'one fixer per chapter, as soon as its reviews are done, on gpt-6-luna through codex exec' },
   ],
 }
@@ -82,12 +83,12 @@ log(`read stage merged: ${mergedRead}`)
 // readers follow reposts to originals, so the sources to review are counted after the merge
 const sourceCount = Number((mergedRead.match(/"sources":\s*(\d+)/) || [])[1]) || urls.length
 
-phase('Write')
+phase('Check sources')
 // Sources and quotes are found-or-not checks; the record lens judges what the record supports, so it keeps
 // the session model.
 const review = (lens, name, slice) => agent(
   `${COMMON}\nYou are an independent adversarial reviewer. Follow ${S}/briefs/review.md. Your lens: ${lens}. Your output name: ${name}.\nYour slice:\n${slice}`,
-  { label: `review:${name}`, phase: 'Review', effort: 'high', agentType: 'general-purpose', ...(lens === 'record' ? {} : { model: 'opus' }) })
+  { label: `review:${name}`, phase: lens === 'sources' ? 'Check sources' : 'Review', effort: 'high', agentType: 'general-purpose', ...(lens === 'record' ? {} : { model: 'opus' }) })
 // Whether a figure is in its source is a lookup: a script does it for every chapter. Its unmatched figures go to
 // the fixer as findings, except in the chapters that argue from the curve (the timeline, the turning points),
 // where a record reviewer judges them first, with the derived figures and what each growth step is credited to.
@@ -102,6 +103,7 @@ const sourcesReviewed = DONE.includes('sources') ? Promise.resolve([]) : paralle
   `the urls printed by: ${S}/scripts/case-study.mjs slice "${WORK}" ${i + 1} ${sliceCount}`)))
 const sourcesMerged = DONE.includes('sources') ? Promise.resolve() : sourcesReviewed.then(() => merge('merge:sources'))
 
+phase('Write')
 const write = file => agent(
   `${COMMON}\nYou are a draft writer. Follow ${S}/briefs/write.md. Your chapter file: drafts/${file}.md (see the chapter table in the type file).${file === '10' && A.product ? `\nThe product for this chapter: ${A.product}` : ''}`,
   { label: `write:${file}`, phase: 'Write', ...SONNET })
