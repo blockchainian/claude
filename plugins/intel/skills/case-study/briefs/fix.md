@@ -1,9 +1,13 @@
 # Fix brief
 
-Reviewers audited the sourced draft. You apply their findings to one chapter.
+Reviewers audited the chapters. You apply their findings to one chapter.
 Your message names the work directory, the type file, your chapter file and
 the tool list. The standard is `references/evidence.md` (next to this brief's
 folder); the skill folder is the one that holds this brief's folder.
+
+The chapter is the text the reader gets, with source marks a script removes
+before printing. A fix leaves it reading as that text: what you write
+follows "The text" and "The source marks" in `briefs/write.md`.
 
 Your findings: `<skill>/scripts/case-study.mjs findings <work> NN` for your
 chapter file's number: the lines tagged with it, and the sources-lens lines
@@ -11,8 +15,8 @@ about every label your chapter names. Each line starts with the finding's
 name (`F3a9c21`). The command prints only the findings whose name is not yet
 in `review/fix-<NN>.md`: after an interruption, what it prints is what is
 left. The failed sources: every URL in `<work>/review/*.failed.json`. They
-left `sources.json` before the chapter was written; their labels are in the
-readers' `notes/*.sources.json`.
+have left `sources.json`; their labels are in the readers'
+`notes/*.sources.json`.
 
 Take the findings one at a time: check it, edit the chapter, append its line
 to `review/fix-<NN>.md`, then take the next. Never check them all first and
@@ -39,26 +43,25 @@ unresolved with what refused, and take the next.
 6. A tie between a source and the subject is stated in the sentence where the
    source is used.
 7. Privacy findings come first: the sentence and the source both go.
-8. The introduction and the reasoning chapter are fixed after the others:
-   re-read the fixed chapters first, and rest on nothing they no longer say.
-9. When you are sure a reviewer is wrong, leave the text and record why, with
+8. When you are sure a reviewer is wrong, leave the text and record why, with
    the source's wording.
-10. A fix changes only what its finding names. The sentences around it keep
+9. A fix changes only what its finding names. The sentences around it keep
    their wording and their figures: a figure no finding names has been
    matched against its source already (`review/figures-<NN>.md`) and is not
    removed, re-derived or doubted on your own account. A figure the script
    could not match because it is derived (a rate, a difference, a count of
    rows) stays, with the figures it was computed from beside it.
 
-Anything new you add meets the same rules as the first draft. A source you
-add takes a label that is not already a value in `sources.json`.
+Anything new you add meets the rules the chapter was written under. A source
+you add takes a label that is not already a value in `sources.json`.
 
 When every finding has its line, run both checks on your chapter and mend
 what they report before you finish:
 `<skill>/scripts/case-study.mjs quotes <work> NN` (a quotation or the words
 after reported speech not found: the ⟦ ⟧ words are missing or retyped — copy
 them from the bullet; a sentence
-that names no source — add its label) and
+that carries a claim and names no source — add its label; a verdict names
+none) and
 `<skill>/scripts/case-study.mjs figures <work> NN` (a figure not found that
 is not derived — correct it from the source or remove it).
 

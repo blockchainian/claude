@@ -1,5 +1,5 @@
 // ABOUTME: Tests the case-study work-dir scaffold and the pre-render check.
-// ABOUTME: Covers init (layout, cover, idempotence), check (sourced draft, book text, sources, counts), merge, slice, findings, figures, quotes, unread and bullets.
+// ABOUTME: Covers init (layout, cover, idempotence), check (chapters, book text, sources, counts), merge, cited, slice, book, findings, figures, quotes, unread and bullets.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -45,7 +45,8 @@ test('init scaffolds the work dir under the store and keeps an existing sources.
 
 test('check reports the missing chapters, the lead paragraphs and the source counts of the sourced draft', () => {
   let report = cs.check(work)
-  assert.equal(report.missing_chapters.length, 12)
+  assert.equal(report.missing_chapters.length, 10)
+  assert.ok(!report.missing_chapters.includes('01') && !report.missing_chapters.includes('11'), 'the introduction and the reasoning chapter are written into the book only')
   assert.ok(report.draft_ok === false && report.ok === false)
 
   for (let n = 1; n <= 12; n++) write(join(work, 'drafts', `${pad(n)}.md`), `# Chapter ${n}\n\nLead paragraph.\n\n## Section\n\nBody.\n`)
@@ -76,9 +77,14 @@ test('check passes clean book text whose sources list links every source, and re
     write(join(work, 'drafts', `${pad(n)}.md`), `# Chapter ${n}\n\nShe had 19,936 followers in 2016 (Outlet 2020).\n\n## Section\n\nBody.\n`)
     write(join(work, 'book', `${pad(n)}.md`), `# Chapter ${n}\n\nShe had 19,936 followers in 2016.\n\n## Section\n\nBody.\n`)
   }
+  write(join(work, 'drafts', '02.md'), '# Chapter 2\n\nShe had 19,936 followers in 2016 (A 2020). She said so twice (A 2021; B 2019).\n\n## Section\n\nBody.\n')
+  write(join(work, 'sources.json'), JSON.stringify({ ...json(work, 'sources.json'), 'https://u.example/unused': 'Unused 2018' }))
   write(join(work, 'book', '12.md'), linked)
   let report = cs.check(work)
   assert.ok(report.book_ok === true && report.ok === true, JSON.stringify(report))
+  assert.equal(report.sources_cited, 3, 'a source no chapter names is counted apart and need not be in the closing list')
+  write(join(work, 'book', '12.md'), linked.replace('The list.\n\n', ''))
+  assert.equal(cs.check(work).book_ok, true, 'the closing list needs no lead paragraph')
   write(join(work, 'book', '12.md'), linked.replace('(https://b.example/z)', '(<https://b.example/z>)'))
   assert.equal(cs.check(work).book_ok, true, 'a link whose address is in angle brackets is a link')
   write(join(work, 'book', '12.md'), linked.replace(', [2021](https://a.example/y)', ', 2021').replace('- B:', '- [Elsewhere](https://d.example/q)\n- B:'))
@@ -151,8 +157,10 @@ test('merge builds sources.json, raw.json and gaps.md from every agent\'s files;
   assert.deepEqual(cs.listSources(work), { sources: [
     { url: 'https://a.example/x', outlet: 'A 2020' }, { url: 'https://b.example/z', outlet: 'B 2019' }, { url: 'https://e.example/new', outlet: 'E 2022' }] },
   'sources lists sources.json in the shape the scouts return')
-  assert.deepEqual([...parts[0], ...parts[1]].sort(), Object.keys(saved).sort(), 'the slices cover every url once')
-  assert.ok(parts[0].length === 2 && parts[1].length === 1)
+  assert.deepEqual(cs.cited(work), { 'https://a.example/x': 'A 2020', 'https://b.example/z': 'B 2019' },
+    'cited is the sources a chapter names; the draft\'s closing list, which names every source, does not count')
+  assert.deepEqual([...parts[0], ...parts[1]].sort(), ['https://a.example/x', 'https://b.example/z'], 'the slices cover every cited url once')
+  assert.ok(parts[0].length === 1 && parts[1].length === 1)
 
   write(join(work, 'review', 'numbers-3.md'), '| row | checked |\n- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M\n- [04] missing | a | b | c | d\n')
   write(join(work, 'review', 'sources-1.md'), '- [A 2020] seller-source | sells a course | | drop\n- [B 2019] mislabelled | a | b | c | d\n')
@@ -354,7 +362,7 @@ test('check reports the findings no fixer has applied, chapter by chapter, and t
   write(join(left, 'review', 'sources-1.md'), '- [A 2020] seller-source | sells a course | | drop\n')
   let report = cs.check(left)
   assert.equal(report.findings_unapplied['07'], 3)
-  assert.equal(report.findings_unapplied['01'], 1, 'a sources-lens line counts in every chapter that names the label')
+  assert.equal(report.findings_unapplied['02'], 1, 'a sources-lens line counts in every chapter that names the label')
   assert.ok(!('12' in report.findings_unapplied), 'the closing sources list has no fixer')
   assert.equal(report.draft_ok, false)
   for (let n = 1; n <= 11; n++) {
@@ -363,6 +371,52 @@ test('check reports the findings no fixer has applied, chapter by chapter, and t
   report = cs.check(left)
   assert.deepEqual(report.findings_unapplied, {})
   assert.equal(report.draft_ok, true)
+})
+
+test('book strips the source marks from the fixed chapters and lists the sources they name; the two chapters written into the book are left alone', () => {
+  const dir = cs.init('stripped', 'How Stripped grew', 'https://example.com/@stripped', join(tmp, 'pdf', 'stripped.pdf'), 12, 'Stripped').work
+  write(join(dir, 'sources.json'), JSON.stringify({
+    'https://a.example/x': 'A 2020', 'https://a.example/y': 'A 2021', 'https://b.example/z': 'B 2019', 'https://u.example/n': 'Unused 2018',
+    'https://web.archive.org/web/20200101000000/https://c.example/p': 'Internet Archive 2020-01-01 c.example/p',
+    'https://d.example/handbook.pdf': 'Production handbook (leaked)' }))
+  const chart = '```chart\ntype: line\ntitle: 订阅数（万）\n2012-05-02 | 603\n```'
+  for (let n = 2; n <= 10; n++) write(join(dir, 'drafts', `${pad(n)}.md`), `# Chapter ${n}\n\nLead paragraph.\n\n## Section\n\nBody.\n`)
+  write(join(dir, 'drafts', '12.md'), '# Sources\n\n6 sources.\n\n## List\n\n- Unused 2018 (u.example)\n')
+  write(join(dir, 'drafts', '03.md'), '# 第二章 — 方法\n\n她每天发一条（A 2020，自述）。这是她自己的做法，可以照做。\n\n## 标题\n\n' +
+    '她说“标题太长，观众消化不了”⟦too long to digest⟧（B 2019，自述，主持人卖课）。2016 年（她 19 岁）订阅过了 1,002,877。〔记录 · Internet Archive 2020-01-01 c.example/p〕\n\n' +
+    `${chart}\n\n这条线在 2012 年陡起来 [A 2021]。手册写得更细（Production handbook (leaked)，内部文件）。B 2019 的主持人卖课。She posted daily (self-reported, A 2020).\n`)
+  write(join(dir, 'book', '01.md'), '# How Stripped grew\n\nThe introduction.\n')
+  const made = cs.book(dir, '来源')
+  assert.deepEqual(made.chapters, ['02', '03', '04', '05', '06', '07', '08', '09', '10'])
+  assert.equal(made.sources, 5)
+  assert.equal(read(dir, 'book', '03.md'), '# 第二章 — 方法\n\n她每天发一条。这是她自己的做法，可以照做。\n\n## 标题\n\n' +
+    `她说“标题太长，观众消化不了”。2016 年（她 19 岁）订阅过了 1,002,877。\n\n${chart}\n\n这条线在 2012 年陡起来。手册写得更细。B 2019 的主持人卖课。She posted daily.\n`,
+  'a bracket that names a source goes with everything in it, also when the label has brackets of its own; the words in ⟦ ⟧ go; a date in brackets, a chart and a label outside brackets stay')
+  assert.equal(read(dir, 'book', '01.md'), '# How Stripped grew\n\nThe introduction.\n', 'a chapter with no draft is not written over')
+  const list = read(dir, 'book', '12.md')
+  assert.ok(list.startsWith('# 来源\n'))
+  assert.ok(list.includes('- A: [2020](<https://a.example/x>), [2021](<https://a.example/y>)\n'), 'an outlet is one line, its articles linked by year')
+  assert.ok(list.includes('- Internet Archive: [2020-01-01 c.example/p](<https://web.archive.org/web/20200101000000/https://c.example/p>)\n'))
+  assert.ok(list.includes('- [Production handbook (leaked)](<https://d.example/handbook.pdf>)\n'), 'a label with no year is linked whole')
+  assert.ok(!list.includes('u.example'), 'a source no chapter names is not listed')
+  write(join(dir, 'book', '11.md'), '# What to copy\n\nReasoning.\n')
+  const report = cs.check(dir)
+  assert.ok(report.ok === true && report.missing_chapters.length === 0, JSON.stringify(report))
+  const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../scripts/case-study.mjs', import.meta.url)), 'cited', dir], { encoding: 'utf8' })
+  assert.deepEqual(JSON.parse(cli.stdout), { cited: 5 })
+})
+
+test('figures matches a chart\'s values against the sources the paragraph after it names', () => {
+  const dir = cs.init('charted', 'How Charted grew', 'https://example.com/@charted', join(tmp, 'pdf', 'charted.pdf'), 12, 'Charted').work
+  write(join(dir, 'sources.json'), JSON.stringify({ 'https://a.example/x': 'A 2020', 'https://b.example/z': 'B 2019' }))
+  write(join(dir, 'raw.json'), JSON.stringify({ 'https://a.example/x': ['raw/a.txt'], 'https://b.example/z': ['raw/b.txt'] }))
+  write(join(dir, 'raw', 'a.txt'), 'She had 603 videos, then 762.\n')
+  write(join(dir, 'raw', 'b.txt'), 'A count of 969 videos.\n')
+  write(join(dir, 'drafts', '03.md'), '# Chapter 2\n\nLead (B 2019).\n\n## Section\n\n' +
+    '```chart\ntype: line\ntitle: Videos\n2012-05-02 | 603\n2012-08-02 | 762\n2012-11-02 | 969\n```\n\nThe count rose every quarter (A 2020, on record).\n')
+  const report = cs.figures(dir, '03')
+  assert.deepEqual(report.unmatched.map(m => `${m.figure}|${m.labels.join(',')}`), ['969|A 2020'],
+    'a chart row names no source: its values are looked up in the sources of the paragraph that follows the chart, not in every source of the chapter')
 })
 
 test('codex reports how many findings of the chapter are still without a log line after the run', () => {
