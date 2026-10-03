@@ -160,10 +160,11 @@ The account logged in in Chrome is a side account (joinupcomment).
   - Chosen captures in one batch: put the capture URLs
     (`https://web.archive.org/web/<timestamp>id_/<url>`) in a file, then
     `$G wayback fetch <work>/raw/archive --from <file>`.
-  - Both keep to 30 requests a minute in all (the archive counts the exits
-    together: 240 captures take 8 minutes) and stop with an error when the
-    archive refuses the connection: report that error as it is, do not retry
-    around it or go direct. Give `curve` every address in one call.
+  - Both go through the residential proxy at 90 requests a minute (240
+    captures take 3 minutes), ask again for a request that failed, and
+    stop with an error when it keeps failing:
+    report that error as it is, do not retry around it or go direct. Give
+    `curve` every address in one call.
   - A status of 429 in the output is a capture of a page that answered 429 at
     the time, not a limit on you. Pick another capture near that date.
 - Before writing that a period has no archive data, list the captures for every
@@ -191,7 +192,11 @@ under the home directory.
 
 - `ISP_PROXY_URL`: the proxy, one URL; the ten ports after its own are the
   exits. Without it the gate reads direct, with one exit's share of the
-  limits, and `wayback` goes direct.
+  limits.
+- `RESIDENTIAL_PROXY_URL`: the rotating residential proxy `wayback` reads the
+  archive through, one URL. Without it `wayback` goes through
+  `ISP_PROXY_URL` at 30 requests a minute (the archive counts its exits
+  together), and without both it goes direct.
 - `FETCH_X_POSTS`: the fetch-x-posts script (X search on an account pool).
   Without it `$G fetch-x-posts` is unavailable: X search is then a gap.
 - `GDELT_BQ_PROJECT`: the Google Cloud project `$G gdelt` runs its BigQuery
