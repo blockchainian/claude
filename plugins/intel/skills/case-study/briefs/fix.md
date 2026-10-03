@@ -17,7 +17,9 @@ readers' `notes/*.sources.json`.
 Take the findings one at a time: check it, edit the chapter, append its line
 to `review/fix-<NN>.md`, then take the next. Never check them all first and
 write at the end: a finding with no line is done again from the start when
-you are interrupted.
+you are interrupted. A tool that refuses (the archive answers 429, a page
+will not open) stops that tool, not your chapter: record the finding as
+unresolved with what refused, and take the next.
 
 1. Every sentence resting on a failed source is removed or re-sourced.
    Re-sourced means you open the original now and read the fact there. If the

@@ -108,8 +108,13 @@ ask for one name.
    A chapter runs write → review → fix on its own; the slowest chapter sets
    the time, not the slowest agent of every stage added up.
 
-   Run it with the Workflow tool (this skill asks for it):
-   `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.mjs`,
+   Run it with the Workflow tool (this skill asks for it). The tool reads a
+   script only from the session's working directory or scratchpad, and a
+   script that changes under a running workflow makes a resume run every
+   agent again: copy `${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.mjs`
+   into your scratchpad directory first, and launch and resume from that copy,
+   never from a repository checkout.
+   `scriptPath: <scratchpad>/creator.mjs`,
    `args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer }`
    — `skill` is this skill's absolute folder, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the
@@ -153,7 +158,12 @@ ask for one name.
    - Re-fetch at least two key numbers live — a point on the curve and the
      largest money figure — and compare them with the chapters.
    - Confirm that no source the reviewers failed is still in `sources.json`.
-   - Run `case-study.mjs check "<work>" --draft`. It reports missing chapters,
+   - Run `case-study.mjs check "<work>" --draft`. It reports the findings no
+     fixer applied, per chapter (`findings_unapplied`: a fixer that stopped
+     early still ends its agent without an error; run
+     `case-study.mjs codex "<work>" NN` for each chapter named until it prints
+     `"remaining": 0`, the introduction and the reasoning chapter last, then
+     `case-study.mjs merge "<work>"`), missing chapters,
      chapters with no lead paragraph before their first `##`, whether
      `sources.json` is a `url → label` object, and the counts of sources,
      archive snapshots and distinct sites.
@@ -210,9 +220,14 @@ ask for one name.
   only the item it was on: every brief has the agent finish one item and
   write it to its output file before the next, and a script tells a
   relaunched reader or fixer what is left (`unread`, `findings`). Relaunch
-  with `Workflow({scriptPath, resumeFromRunId})`: finished agents replay from
-  the cache, the others run again and pick up where their files stop. Do not
-  change the script or the args before resuming, or every agent reruns.
+  with `Workflow({scriptPath, resumeFromRunId})`, from the same scratchpad
+  copy: finished agents replay from the cache, the others run again and pick
+  up where their files stop. An agent replays only when its own prompt is
+  unchanged: a changed script, or a changed arg that every prompt carries
+  (`subject`, `work`, `skill`, `lang`, `today`), reruns every agent; a changed
+  `product` reruns only the reasoning chapter's writer, so change it only
+  before that chapter is written: its review and fix would replay from the
+  cache.
 - A run that cannot be resumed (another session started it) continues from
   its files: `done: 'scout'` skips the scouts and reads the known sources
   again, into fresh notes; pass them as `sources`, the `sources` array printed

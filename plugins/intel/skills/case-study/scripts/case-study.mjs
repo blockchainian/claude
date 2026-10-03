@@ -636,13 +636,15 @@ export function codexResult(events) {
   return { message, usage }
 }
 
-export function codex(work, chapter, model) {
+// A fixer can stop with findings it never reached (a refused tool, a cut-off turn) and still exit 0: `remaining`
+// counts the findings of the chapter that have no line in its fix log after the run.
+export function codex(work, chapter, model, spawn = spawnSync) {
   const [command, ...args] = codexCommand(work, chapter, model)
   mkdirSync(join(work, 'review'), { recursive: true })
-  const run = spawnSync(command, args, { cwd: work, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', maxBuffer: 1 << 28 })
+  const run = spawn(command, args, { cwd: work, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', maxBuffer: 1 << 28 })
   writeFileSync(join(work, 'review', `fix-${chapter}.codex.jsonl`), run.stdout ?? '', 'utf8')
   const result = codexResult(run.stdout ?? '')
-  return { ...result, status: run.status, stderr: (run.stderr ?? '').split('\n').filter(l => l && !l.startsWith('Reading additional input')).join('\n') }
+  return { ...result, remaining: findings(work, chapter).length, status: run.status, stderr: (run.stderr ?? '').split('\n').filter(l => l && !l.startsWith('Reading additional input')).join('\n') }
 }
 
 export function check(work) {
@@ -686,10 +688,16 @@ export function check(work) {
   const listed = book.has(ids.at(-1))
   const unlinked = urls.filter((url, n) => listed && !ARCHIVE_HOSTS.has(hosts[n]) && !links.has(url))
   const strangers = sorted([...links].filter(link => !urls.includes(link)))
-  const draftOk = valid && !missing.length && !noLead.length
+  // The closing sources list has no fixer; a chapter not written yet has no findings to apply.
+  const unapplied = {}
+  for (const id of ids.slice(0, -1)) {
+    const left = draft.has(id) ? findings(work, id).length : 0
+    if (left) unapplied[id] = left
+  }
+  const draftOk = valid && !missing.length && !noLead.length && !Object.keys(unapplied).length
   const bookOk = !(bookMissing.length || bookNoLead.length || citations.length || process_.length || unknown.length || series.length || unlinked.length || strangers.length)
   return { ok: draftOk && bookOk, draft_ok: draftOk, book_ok: bookOk,
-    missing_chapters: missing, no_lead_paragraph: noLead, sources_valid: valid,
+    missing_chapters: missing, no_lead_paragraph: noLead, sources_valid: valid, findings_unapplied: unapplied,
     missing_book_chapters: bookMissing, book_no_lead_paragraph: bookNoLead,
     citations_in_book: citations, process_terms_in_book: process_, numbers_not_in_draft: unknown,
     series_in_prose: series, sources_not_linked: unlinked, links_not_in_sources: strangers,
@@ -762,7 +770,7 @@ function main(argv) {
     need(2, 'work, chapter')
     const result = codex(positionals[0], positionals[1], values.model)
     console.log(dump(result))
-    process.exit(result.status === 0 ? 0 : 1)
+    process.exit(result.status === 0 && result.remaining === 0 ? 0 : 1)
   }
   if (cmd === 'unread') {
     if (positionals.length < 3) fail('case-study.mjs unread: expected work, batch and the batch\'s urls')

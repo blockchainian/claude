@@ -172,3 +172,11 @@ test('with the sources lens done too, no source is reviewed again and every chap
   assert.deepEqual(labels(calls, 'merge:'), ['merge:read', 'merge:fix'], 'the merge after reading already left the failed sources out')
   assert.deepEqual((await result()).sources, [])
 })
+
+test('a Codex fixer is run again while findings of its chapter remain, four runs at most', async () => {
+  const { calls } = await run(ARGS)
+  const fixer = calls.find(c => c.label === 'fix:07')
+  assert.match(fixer.prompt, /case-study\.mjs codex "\/w" 07 --model gpt-6-luna/)
+  assert.match(fixer.prompt, /"remaining"/)
+  assert.match(fixer.prompt, /four runs/)
+})
