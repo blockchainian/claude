@@ -457,13 +457,17 @@ def report_katex_errors(errs):
 
 
 def title_slug(title):
-    """The book's title as a filename slug: lowercase, every run of non-alphanumerics becomes a single dash."""
-    return re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-") or "book"
+    """The book's main title as a filename slug: the part before a ':'/'：' subtitle, lowercased, every run of
+    non-alphanumerics turned into a single dash. Returns '' when the title has no Latin letters/digits (e.g. an
+    already-Chinese title), so the caller can fall back to the work dir name."""
+    main = re.split(r"[:：]", title or "", 1)[0]
+    return re.sub(r"[^a-z0-9]+", "-", main.lower()).strip("-")
 
 
 def default_out(meta, work):
-    """<title-slug>.pdf in the user's ~/Documents, or next to the work dir when Documents is not writable."""
-    name = title_slug(meta.get("title")) + ".pdf"
+    """<title-slug>.pdf in the user's ~/Documents, or next to the work dir when Documents is not writable.
+    An already-Chinese or empty title falls back to the work dir's slug name."""
+    name = (title_slug(meta.get("title")) or work.name) + ".pdf"
     docs = Path.home() / "Documents"
     try:
         docs.mkdir(parents=True, exist_ok=True)
