@@ -44,8 +44,8 @@ they are sent the absolute paths of the files below and read them themselves.
 |---|---|---|
 | `references/evidence.md` | every agent | What counts as read, the kinds of claim, who cannot be evidence |
 | `references/tools.md` | every agent | The commands for pages, search, uploads, archives, records, all through `scripts/gate.mjs` |
-| `types/creator.md` | every agent | The gate, source types, scout lanes, what the numbers must establish, the chapters |
-| `briefs/scout.md` | scouts | Finding sources by lane |
+| `types/creator.md` | every agent | The gate, source types, scout leads, what the numbers must establish, the chapters |
+| `briefs/scout.md` | scouts | Finding sources for one lead |
 | `briefs/read.md` | readers | Reading a batch of sources into tagged notes |
 | `briefs/numbers.md` | numbers agents | The curve from the archive, the upload record |
 | `briefs/write.md` | draft writers | One chapter of the sourced draft, from the notes |
@@ -98,8 +98,8 @@ ask for one name.
 
    | Stage | Agents | Does |
    |---|---|---|
-   | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `gate.mjs wayback curve` in one batch |
-   | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
+   | Scout | 13 to start, one per lead of the type file, each a few minutes long; the leads they return get scouts of their own, up to 24 in all; the 2 numbers agents start with them | Find sources; return URLs and leads only. A scout claims a URL before opening it (`case-study.mjs claim`), so no two scouts open the same one. The curve comes from `gate.mjs wayback curve` in one batch |
+   | Read | one per 8 sources, started as soon as the scouts have returned 8 that no reader has | Read into `notes/`, tagged by chapter |
    | Check sources | sources lens per 25 URLs, after the merge and before any chapter is written | Findings in `review/`; a merge takes the failed sources out of `sources.json` |
    | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `drafts/`, from the notes only |
    | Review | per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
@@ -215,7 +215,9 @@ ask for one name.
   change the script or the args before resuming, or every agent reruns.
 - A run that cannot be resumed (another session started it) continues from
   its files: `done: 'scout'` skips the scouts and reads the known sources
-  again, into fresh notes; pass them as `sources`, the `sources` array printed
+  again, into fresh notes (to scout again from nothing instead, move
+  `claims/` and `notes/scout-*.md` aside first: a scout skips what another
+  scout's name has claimed); pass them as `sources`, the `sources` array printed
   by `case-study.mjs sources "<work>"` (an agent relaying the list drops
   entries). A source whose text any earlier agent saved is read from disk,
   not fetched; `done: 'read'` starts at the draft, from the notes and numbers

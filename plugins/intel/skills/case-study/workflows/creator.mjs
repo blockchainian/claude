@@ -2,10 +2,10 @@
 // ABOUTME: adversarial reviewers and fixers, pipelined into one reviewed, sourced draft.
 export const meta = {
   name: 'case-study-creator',
-  description: 'Research one creator into a reviewed sourced draft: scouts, parallel readers, numbers, chapter writers, adversarial review and fixes per chapter, pipelined',
+  description: 'Research one creator into a reviewed sourced draft: scouts that follow each other\'s leads, parallel readers, numbers, chapter writers, adversarial review and fixes per chapter, pipelined',
   phases: [
-    { title: 'Scout', detail: 'four scouts find sources by lane; the two numbers agents start with them', model: 'sonnet' },
-    { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
+    { title: 'Scout', detail: 'one scout per lead, a few minutes each; the leads they return get scouts of their own, up to 24; the two numbers agents start with them', model: 'sonnet' },
+    { title: 'Read', detail: 'readers in batches of 8 sources, started as the scouts return', model: 'sonnet' },
     { title: 'Check sources', detail: 'sources lens on Opus, 25 sources per reviewer, after the merge and before any chapter is written', model: 'opus' },
     { title: 'Write', detail: 'one writer per chapter, then the introduction and the reasoning chapter', model: 'sonnet' },
     { title: 'Review', detail: 'per chapter, as each is written: a script matches its figures, the quotes lens (Opus) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
@@ -19,8 +19,8 @@ export const meta = {
 // again: 'scout' (the sources are known: args.sources, the output of `case-study.mjs sources <work>`, is read again
 // without scouting), 'read' (the notes and the numbers: the run starts at the draft), 'sources' (the sources lens's findings).
 //
-// The numbers agents start with the scouts, and each chapter runs write → figures matched + quotes review → fix on
-// its own. The barriers are the merge after reading (the sources lens needs sources.json), the sources lens before
+// The numbers agents start with the scouts, readers start on a scout's sources when it returns, and each chapter
+// runs write → figures matched + quotes review → fix on its own. The barriers are the merge after reading (the sources lens needs sources.json), the sources lens before
 // any writer (a failed source's notes are not written up, reviewed and then removed), and the body chapters before
 // the introduction and the reasoning chapter (written from them, fixed after them).
 const A = args
@@ -45,38 +45,86 @@ const merge = label => agent(`Run exactly this command and return its output, no
   { label, model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 
 phase('Scout')
-const LANES = ['own-words', 'press', 'business-and-people', 'criticism-and-data']
-const FOUND = { type: 'object', required: ['sources'], properties: { sources: { type: 'array', items: { type: 'object', required: ['url', 'outlet'],
-  properties: { url: { type: 'string' }, outlet: { type: 'string' }, year: { type: 'string' }, kind: { type: 'string' }, why: { type: 'string' } } } } } }
+// A scout is a few minutes of work: one lead, a few searches, a dozen sources at most. The search is as wide as
+// before because there are many scouts and because each returns the leads it did not follow, which get scouts of
+// their own. The seed leads are the rows of "Scout leads" in the type file.
+const SEEDS = ['interviews', 'own-posts', 'documents', 'press-at-the-time', 'press-home', 'trade-press', 'later-profiles', 'books-and-films', 'people', 'filings', 'data-and-research', 'criticism', 'today']
+const MAX_SCOUTS = 24
+const LEADS_EACH = 3
+const FOUND = { type: 'object', required: ['sources'], properties: {
+  sources: { type: 'array', items: { type: 'object', required: ['url', 'outlet'],
+    properties: { url: { type: 'string' }, outlet: { type: 'string' }, year: { type: 'string' }, kind: { type: 'string' }, why: { type: 'string' } } } },
+  leads: { type: 'array', items: { type: 'string' } } } }
+// With the scouting done, the list to read comes in as args.sources (the output of `case-study.mjs sources <work>`):
+// a script cannot be read from here, and an agent relaying 366 entries dropped 65 of them.
+if (SCOUT_DONE && !READ_DONE && !(Array.isArray(A.sources) && A.sources.length)) throw new Error("done 'scout' needs args.sources: the output of case-study.mjs sources <work>")
+// Readers start before the scouts are done, so their number is a guess unless the sources are known.
+const READERS_EXPECTED = SCOUT_DONE && !READ_DONE ? Math.ceil(A.sources.length / 8) : 24
 // The numbers agents need no scout: the archive and the upload record are the profile's own addresses.
-const READERS_EXPECTED = 15 // for the caps share before the scouts return; readers get their exact count
 const numbersDone = READ_DONE ? null : parallel(['archive', 'uploads'].map(lane => () => agent(
   `${COMMON}\nYou are a numbers agent. Follow ${S}/briefs/numbers.md. Your lane: ${lane}.${share(READERS_EXPECTED + 2)}`,
   { label: `numbers:${lane}`, phase: 'Scout', ...SONNET })))
-// With the scouting done, the list to read comes in as args.sources (the output of `case-study.mjs sources <work>`):
-// a script cannot be read from here, and an agent relaying 366 entries dropped 65 of them.
-const known = () => {
-  if (!Array.isArray(A.sources) || !A.sources.length) throw new Error("done 'scout' needs args.sources: the output of case-study.mjs sources <work>")
-  return [{ sources: A.sources }]
-}
-const scouted = READ_DONE ? [] : SCOUT_DONE ? known() : (await parallel(LANES.map(lane => () => agent(
-  `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your lane: ${lane} (see "Scout lanes" in the type file).${share(LANES.length)}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}`,
-  { label: `scout:${lane}`, phase: 'Scout', schema: FOUND, ...SONNET })))).filter(Boolean)
+
+// Sources go to a reader eight at a time, as soon as there are eight no reader has: no reader waits for the
+// slowest scout. Two scouts can list one source under two spellings of its address; it is read once.
 const seen = new Set()
 const urls = []
-for (const s of scouted.flatMap(r => r.sources)) {
-  const key = s.url.split('#')[0].replace(/[?&]utm_[^&]*/g, '').replace(/\/$/, '')
-  if (!seen.has(key)) { seen.add(key); urls.push(s) }
+const unread = []
+const readers = []
+const read = batch => {
+  const name = `read-${pad(readers.length + 1)}`
+  readers.push(agent(
+    `${COMMON}\nYou are a reader. Follow ${S}/briefs/read.md. Your batch name: ${name}.${share(READERS_EXPECTED + 2)}\nYour sources:\n${batch.map(s => `- ${s.url} (${s.outlet}${s.year ? ' ' + s.year : ''}) ${s.why || ''}`).join('\n')}`,
+    { label: name.replace('-', ':'), phase: 'Read', ...SONNET }))
 }
-const batches = []
-for (let i = 0; i < urls.length; i += 8) batches.push(urls.slice(i, i + 8))
-if (!READ_DONE) log(SCOUT_DONE ? `known sources: ${urls.length}, ${batches.length} reader batches` : `scouts: ${scouted.length}/${LANES.length} lanes, ${urls.length} distinct sources, ${batches.length} reader batches`)
+const found = sources => {
+  for (const s of sources) {
+    const key = s.url.split('#')[0].replace(/[?&]utm_[^&]*/g, '').replace(/\/$/, '')
+    if (seen.has(key)) continue
+    seen.add(key)
+    urls.push(s)
+    unread.push(s)
+  }
+  while (unread.length >= 8) read(unread.splice(0, 8))
+}
+
+// A lead is searched once: two scouts that name it in the same words get one scout. Past the limit a lead is
+// not followed, and the run reports it.
+const leadKey = lead => lead.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+const given = new Map(SEEDS.map(seed => [seed, seed]))
+const leadsDropped = []
+let scouts = 0
+const scout = (name, lead) => {
+  const others = [...given.values()].filter(other => other !== lead)
+  return agent(
+    `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your scout name: ${name}. Your lead: ${lead}${SEEDS.includes(lead) ? ' (see "Scout leads" in the type file)' : ''}.${share(MAX_SCOUTS)}` +
+    `\nClaim a source before you open it: ${S}/scripts/case-study.mjs claim "${WORK}" ${name} <url>...` +
+    `\nLeads other scouts have, which are not yours to search or to return: ${others.join('; ')}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}`,
+    { label: `scout:${name}`, phase: 'Scout', schema: FOUND, ...SONNET }).then(result => {
+    if (!result) return
+    found(result.sources)
+    const followers = []
+    for (const next of (result.leads || []).slice(0, LEADS_EACH)) {
+      if (given.has(leadKey(next))) continue
+      if (scouts >= MAX_SCOUTS) { leadsDropped.push(next); continue }
+      given.set(leadKey(next), next)
+      scouts += 1
+      followers.push({ name: `lead-${pad(scouts - SEEDS.length)}`, lead: next })
+    }
+    return parallel(followers.map(f => () => scout(f.name, f.lead)))
+  })
+}
+if (SCOUT_DONE && !READ_DONE) found(A.sources)
+else if (!READ_DONE) {
+  scouts = SEEDS.length
+  await parallel(SEEDS.map(seed => () => scout(seed, seed)))
+}
+if (unread.length) read(unread.splice(0))
+if (!READ_DONE) log(SCOUT_DONE ? `known sources: ${urls.length}, ${readers.length} reader batches`
+  : `scouts: ${scouts}, ${urls.length} distinct sources, ${readers.length} reader batches${leadsDropped.length ? `; ${leadsDropped.length} leads not followed (limit of ${MAX_SCOUTS} scouts): ${leadsDropped.join('; ')}` : ''}`)
 
 phase('Read')
-const agentsReading = batches.length + 2
-await parallel(batches.map((batch, i) => () => agent(
-  `${COMMON}\nYou are a reader. Follow ${S}/briefs/read.md. Your batch name: read-${pad(i + 1)}.${share(agentsReading)}\nYour sources:\n${batch.map(s => `- ${s.url} (${s.outlet}${s.year ? ' ' + s.year : ''}) ${s.why || ''}`).join('\n')}`,
-  { label: `read:${pad(i + 1)}`, phase: 'Read', ...SONNET })))
+await Promise.all(readers)
 await numbersDone
 const mergedRead = String(await merge('merge:read'))
 log(`read stage merged: ${mergedRead}`)
@@ -141,4 +189,4 @@ const tailChains = FROM_CHAPTERS.map(file => chain(file, bodyWritten, bodyFixed)
 const chapters = await Promise.all([...bodyChains, ...tailChains])
 const merged = await merge('merge:fix')
 
-return { scouted: urls.length, batches: batches.length, sources: (await sourcesReviewed).filter(Boolean), chapters, merged }
+return { scouted: urls.length, scouts, leadsDropped, batches: readers.length, sources: (await sourcesReviewed).filter(Boolean), chapters, merged }

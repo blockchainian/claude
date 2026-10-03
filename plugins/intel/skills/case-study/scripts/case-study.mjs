@@ -5,6 +5,7 @@
 // Usage: case-study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
 //        case-study.mjs merge <work dir>
 //        case-study.mjs sources <work dir>   (the sources already in sources.json, as a scout would list them)
+//        case-study.mjs claim <work dir> <scout> <url>...   (per url: yours, or taken and by which scout)
 //        case-study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
 //        case-study.mjs figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
 //        case-study.mjs quotes <work dir> <NN>         (look up chapter NN's quotations in the saved source text)
@@ -194,6 +195,26 @@ export function merge(work) {
     .filter(path => Object.keys(readJson(path, 'object')).length === 0 && !['', '{}'].includes(read(path).trim()))
     .map(path => relative(work, path))
   return { sources: Object.keys(sources).length, failed: failed.size, gaps: gaps.reduce((n, g) => n + g.split('\n').length, 0), malformed }
+}
+
+export function claim(work, scout, urls) {
+  // Give each source to the first scout that asks for it, one line per url: `yours`, or `taken` and by which scout.
+  // A claim is a file named after the address without its fragment, its utm parameters and its last slash, made
+  // only if it is not there: two scouts asking at once cannot both get it. A scout keeps what it claimed before.
+  const dir = join(work, 'claims')
+  mkdirSync(dir, { recursive: true })
+  return urls.map(url => {
+    const key = url.split('#')[0].replace(/[?&]utm_[^&]*/g, '').replace(/\/$/, '')
+    const path = join(dir, createHash('sha1').update(key).digest('hex'))
+    try {
+      writeFileSync(path, scout, { encoding: 'utf8', flag: 'wx' })
+      return `yours ${url}`
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+    }
+    const by = read(path)
+    return by === scout ? `yours ${url}` : `taken ${url} ${by}`
+  })
 }
 
 export function sliceSources(work, index, of) {
@@ -631,6 +652,7 @@ const OPTIONS = {
     out: { type: 'string' }, chapters: { type: 'string', default: '11' } },
   merge: {},
   slice: {},
+  claim: {},
   sources: {},
   figures: { worklist: { type: 'boolean', default: false } },
   quotes: {},
@@ -640,7 +662,7 @@ const OPTIONS = {
   codex: { model: { type: 'string', default: 'gpt-6-luna' } },
   check: { draft: { type: 'boolean', default: false } },
 }
-const USAGE = 'usage: case-study.mjs {init,merge,slice,sources,figures,quotes,findings,unread,bullets,codex,check} ...'
+const USAGE = 'usage: case-study.mjs {init,merge,slice,claim,sources,figures,quotes,findings,unread,bullets,codex,check} ...'
 
 function fail(message) {
   console.error(message)
@@ -663,6 +685,11 @@ function main(argv) {
   if (cmd === 'slice') {
     need(3, 'work, index, of')
     console.log(sliceSources(positionals[0], Number(positionals[1]), Number(positionals[2])).join('\n'))
+    return
+  }
+  if (cmd === 'claim') {
+    if (positionals.length < 3) fail('case-study.mjs claim: expected work, the scout\'s name and the urls')
+    console.log(claim(positionals[0], positionals[1], positionals.slice(2)).join('\n'))
     return
   }
   if (cmd === 'sources') {
