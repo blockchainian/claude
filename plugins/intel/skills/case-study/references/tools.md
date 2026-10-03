@@ -172,8 +172,8 @@ The account logged in in Chrome is a side account (joinupcomment).
   SEC's full-text search endpoint is blocked: do not use it.
 - Company registries: the registry itself. Sites that resell registry data are
   not the registry; say what they are.
-- Books: the `download-book` skill of this plugin, or
-  `$G chrome zlibrary search "<title>"`; a PDF is read with `pdftotext`.
+- Books: the `download-book` skill of this plugin; a PDF is read with
+  `pdftotext`.
 
 ## The machine's settings
 
