@@ -131,8 +131,9 @@ ask for one name.
    the workflow with Agent calls.
 
    Parallel agents never share a file. Each writes its own notes, source list,
-   gaps, findings and fix log; `case-study.mjs merge` builds `sources.json`
-   and `gaps.md` from them. Reviewers are fresh
+   gaps, findings and fix log; `case-study.mjs merge` builds `sources.json`,
+   `gaps.md` and the list of every source read (the last file in `drafts/`)
+   from them. Reviewers are fresh
    agents, never the writers. Whether a figure is in its source is a lookup, so a
    script does it (`case-study.mjs figures`): about nine figures in ten match
    the saved text, and only the rest reach an agent — the chapter's fixer, or
