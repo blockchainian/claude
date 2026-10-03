@@ -135,10 +135,10 @@ export function classifyGoogleNode(url, inputs = []) {
   if (typeof url === "string" && (url.includes("challenge/iap/qrcode") || url.includes("challenge/ipp/qrcode")))
     return "restricted";
   // /signin/rejected is Google refusing the sign-in ("Couldn't sign you in — Google couldn't verify
-  // this account belongs to you"). A person may still finish it through Account Recovery, so it needs
-  // a human, not a retry. Recognize it by URL so the loop stops and hands the page over instead of
-  // re-filling the email on the page it bounces back to.
-  if (typeof url === "string" && url.includes("signin/rejected")) return "escalated";
+  // this account belongs to you"). Its only exit is Account Recovery, which asks for the recovery
+  // email or phone we do not hold, so it is a dead end. Recognize it by URL so the loop stops instead
+  // of re-filling the email on the page it bounces back to.
+  if (typeof url === "string" && url.includes("signin/rejected")) return "restricted";
   // challenge/selection ("Verify it's you — choose how you want to sign in") lists recovery methods
   // and ships a hidden-but-visible Passwd input, so it must be claimed by URL before the input-shape
   // checks read it as the password step and spin re-submitting the password.
@@ -850,18 +850,12 @@ async function driveGoogleChallenges(surface, cred, { assist = false, done, time
         await surface.goto("https://myaccount.google.com/", { waitUntil: "domcontentloaded" }).catch(() => {});
         break;
       case "restricted":
-        // Terminal dead end: the account is banned (disabled speedbump) or Google demands a factor
-        // we cannot supply (confirm the existing recovery number). No point waiting for a human or
-        // retrying — capture it and stop so the caller can mark it restricted.
+        // Terminal dead end: the account is banned (disabled speedbump), the sign-in is rejected
+        // (only Account Recovery remains) or Google demands a factor we cannot supply (confirm the
+        // existing recovery number). No point waiting for a human or retrying — capture it and stop
+        // so the caller can mark it restricted.
         await debug.capture(surface, cred.email, "google-restricted");
         throw new Restricted(`${cred.email}: Google restricted this account at ${safeUrl(surface)}`);
-      case "escalated":
-        // Google refused the sign-in and can't confirm the account is ours ("Couldn't sign you in").
-        // A person may still finish it through Account Recovery, so escalate: NeedsHuman leaves the
-        // window open and never drives the page, so the loop stops here and the human takes over
-        // (finish Recovery by hand, or close the window to give up — the account stays escalated).
-        await debug.capture(surface, cred.email, "google-signin-rejected");
-        throw new NeedsHuman(`${cred.email}: Google couldn't verify the account is ours (sign-in rejected) — a person can finish Account Recovery by hand at ${safeUrl(surface)}`);
       case "authenticator":
         // Google's security-key OTP page. We hold no key, but the account's authenticator is reachable
         // via "Try another way"; switch to it and let the totp node fill the code next tick. With no

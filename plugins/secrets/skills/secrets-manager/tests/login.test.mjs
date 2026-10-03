@@ -303,16 +303,16 @@ test("classifyGoogleNode reads the verify-method chooser (challenge/selection) a
   );
 });
 
-test("classifyGoogleNode reads Google's sign-in rejection as escalated", () => {
+test("classifyGoogleNode reads Google's sign-in rejection as restricted", () => {
   // /signin/rejected is Google refusing this sign-in ("Couldn't sign you in — couldn't verify this
-  // account belongs to you"). A person may still finish Account Recovery by hand, so it needs a human,
-  // not an automated retry, and must be caught by URL even though it bounces back to the email page.
+  // account belongs to you"). Its only exit is Account Recovery, which needs the recovery email or
+  // phone we do not hold, so it is a dead end, and it must be caught by URL even though it bounces
+  // back to the email page.
   assert.equal(
     classifyGoogleNode("https://accounts.google.com/v3/signin/rejected?TL=x&rrk=7", []),
-    "escalated",
+    "restricted",
   );
 });
-
 test("classifyGoogleNode reads the QR-scan device check (iap/qrcode) as restricted", () => {
   // challenge/iap/qrcode asks to scan a QR code with a real phone to prove the device is human — a
   // dead end for automation. Its URL contains challenge/iap, so it must be caught before anything
