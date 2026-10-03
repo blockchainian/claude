@@ -143,28 +143,13 @@ function savedByReader(path) {
   return saved
 }
 
-function savedText(work) {
-  // url -> the files its text was saved to, from every agent's list: notes/*.raw.tsv, notes/*.raw.json, review/*.raw.json.
-  const notes = join(work, 'notes')
-  const review = join(work, 'review')
-  const lists = [...files(notes, '.raw.tsv').map(savedByReader), ...[...files(notes, '.raw.json'), ...files(review, '.raw.json')].map(path => readJson(path, 'object'))]
-  const saved = {}
-  for (const listed of lists) {
-    for (const [url, list] of Object.entries(listed)) {
-      saved[url] ??= []
-      for (const file of typeof list === 'string' ? [list] : Array.isArray(list) ? list : []) if (typeof file === 'string' && !saved[url].includes(file)) saved[url].push(file)
-    }
-  }
-  return saved
-}
-
 export function unread(work, batch, urls) {
   // What an interrupted reader has left of its batch, one line per source: `done` when the notes have its section,
-  // `saved` with the files when its text was saved (by this reader or any earlier agent) but not read into the notes, `fetch` otherwise.
+  // `saved` with the files when its text was saved but not read into the notes, `fetch` otherwise.
   const notes = join(work, 'notes', `${batch}.md`)
   const noted = new Set(existsSync(notes) ? lines(read(notes)).filter(l => l.startsWith('url:')).map(l => l.slice(4).trim()) : [])
-  const saved = savedText(work)
-  return urls.map(url => (noted.has(url) ? `done ${url}` : saved[url]?.length ? `saved ${url} ${saved[url].join(' ')}` : `fetch ${url}`))
+  const saved = savedByReader(join(work, 'notes', `${batch}.raw.tsv`))
+  return urls.map(url => (noted.has(url) ? `done ${url}` : saved[url] ? `saved ${url} ${saved[url].join(' ')}` : `fetch ${url}`))
 }
 
 export function merge(work) {
@@ -184,7 +169,15 @@ export function merge(work) {
   const failed = new Set(files(review, '.failed.json').flatMap(path => readJson(path, 'array')))
   sources = Object.fromEntries(Object.entries(sources).filter(([url]) => !failed.has(url)))
   write(join(work, 'sources.json'), dump(sources))
-  write(join(work, 'raw.json'), dump(savedText(work)))
+  const saved = {}
+  const lists = [...files(notes, '.raw.tsv').map(savedByReader), ...[...files(notes, '.raw.json'), ...files(review, '.raw.json')].map(path => readJson(path, 'object'))]
+  for (const listed of lists) {
+    for (const [url, list] of Object.entries(listed)) {
+      saved[url] ??= []
+      for (const f of typeof list === 'string' ? [list] : list) if (!saved[url].includes(f)) saved[url].push(f)
+    }
+  }
+  write(join(work, 'raw.json'), dump(saved))
   const gaps = files(notes, '.gaps.md').map(path => read(path).trim()).filter(Boolean)
   write(join(work, 'gaps.md'), gaps.join('\n') + '\n')
   const labels = sorted(new Set(Object.entries(sources).map(([url, label]) => `${label} (${host(url)})`)))

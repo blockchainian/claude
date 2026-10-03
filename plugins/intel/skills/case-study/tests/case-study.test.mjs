@@ -293,12 +293,10 @@ test('unread tells an interrupted reader which sources are done, which are saved
   write(join(cut, 'notes', 'read-01.md'), `## A — title (2020)\nurl: ${done}\nread: curl, full\n- [c03] [on record] (2020) a fact — A 2020\n`)
   assert.deepEqual(cs.unread(cut, 'read-01', [done, saved, never]),
     [`done ${done}`, `saved ${saved} raw/read-01/b.txt raw/read-01/b2.txt`, `fetch ${never}`])
-  write(join(cut, 'notes', 'legacy.raw.tsv'), `${never}\traw/old/c.txt\n`)
-  assert.equal(cs.unread(cut, 'read-01', [never])[0], `saved ${never} raw/old/c.txt`, 'text saved by any earlier list counts as saved')
   write(join(cut, 'notes', 'read-01.sources.json'), JSON.stringify({ [done]: 'A 2020' }))
   write(join(cut, 'notes', 'numbers-archive.raw.json'), JSON.stringify({ [done]: ['raw/archive/000'] }))
   cs.merge(cut)
-  assert.deepEqual(json(cut, 'raw.json'), { [done]: ['raw/read-01/a.txt', 'raw/archive/000'], [saved]: ['raw/read-01/b.txt', 'raw/read-01/b2.txt'], [never]: ['raw/old/c.txt'] })
+  assert.deepEqual(json(cut, 'raw.json'), { [done]: ['raw/read-01/a.txt', 'raw/archive/000'], [saved]: ['raw/read-01/b.txt', 'raw/read-01/b2.txt'] })
 })
 
 test('findings gives each finding a name that stays the same, and leaves out the ones the fix log already names', () => {
