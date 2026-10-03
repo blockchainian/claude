@@ -6,20 +6,21 @@ item — no sampling. Do not edit the chapters, `sources.json`, or the notes;
 write only your findings file.
 
 The message that sent you here names the work directory, the subject type file,
-your lens, your slice (a list of source URLs for the sources lens; a list of
+your lens, your slice (a list of source URLs for the sources lens; a
 chapter file for the quotes and record lenses), your output name, and the
 tool list. Other reviewers hold the other slices: check every item in yours. Read `references/evidence.md` (next to this
 brief's folder) and the subject type file first: they are the standard the
 study must meet. Tool commands are in `references/tools.md`.
 
-In the work directory: `drafts/` (the chapters of the sourced draft),
+In the work directory: `drafts/` (the chapters: the book's text, with a
+bracket in every sentence that names its source and the kind of its claim),
 `sources.json`, `gaps.md`, `raw/` (downloads), `notes/`. The notes are the
 readers' own account and prove nothing. Proof is the source, opened by you; a
 verbatim download in `raw/` counts as the source.
 
 ## Lens: sources
 
-For every URL in `sources.json`:
+Your slice holds sources the chapters name. For every URL in it:
 
 1. Open it. Record whether it is readable in full, in part, or not at all.
 2. Who published it, and how do they earn? Check the site itself. Fail it when
@@ -34,9 +35,9 @@ For every URL in `sources.json`:
 5. Privacy: does the page print a claimed legal name or personal details of a
    pseudonymous subject?
 
-You check the sources, not the chapters: the chapters are written after you
-are done, from the sources you did not fail, and the fixer of every chapter
-that names a label receives your findings about it. Write every failed URL
+You check the sources, not the chapters: the fixer of every chapter that
+names a label receives your findings about it, and removes or re-sources
+what rested on a source you fail. Write every failed URL
 as a JSON list to `review/<output name>.failed.json`.
 
 ## Lens: record
@@ -117,8 +118,6 @@ found, wrong speaker, wrong date, or wrong outlet. Then check:
   repost;
 - accusations against named third parties are worded as allegations or
   findings, with the outcome;
-- the reasoning chapter says it is reasoning, presents nothing as a finding,
-  and does not name the product it was given;
 - every outlet a sentence names is a label in `sources.json`;
 - nothing reads as invented.
 

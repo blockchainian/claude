@@ -1,20 +1,24 @@
 #!/usr/bin/env node
 // ABOUTME: Scaffolds a case-study work dir under ~/Documents/case-studies and checks it before rendering.
-// ABOUTME: init writes chapters.json + sources.json; check verifies the sourced draft, the book text and sources.
+// ABOUTME: init writes chapters.json + sources.json; book strips the chapters' source marks; check verifies the chapters, the book text and sources.
 //
 // Usage: case-study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
 //        case-study.mjs merge <work dir>
 //        case-study.mjs sources <work dir>   (the sources already in sources.json, as a scout would list them)
-//        case-study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
+//        case-study.mjs cited <work dir>               (how many sources the chapters name)
+//        case-study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice of the cited sources, one per line)
 //        case-study.mjs figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
 //        case-study.mjs quotes <work dir> <NN>         (look up chapter NN's quotations and reported words in the saved source text)
 //        case-study.mjs findings <work dir> <NN>       (the review lines one fixer has still to apply to chapter NN)
 //        case-study.mjs unread <work dir> <batch> <url>...   (per source of a reader's batch: done, saved, or fetch)
 //        case-study.mjs bullets <work dir> <NN>        (the notes' lines for chapter NN, long dated tables thinned)
 //        case-study.mjs codex <work dir> <NN> [--model gpt-6-luna]   (run the fixer prompt saved in review/fix-NN.prompt.txt on a Codex model)
+//        case-study.mjs book <work dir> [--sources-title <title>]   (book/ from the chapters: the marks stripped, the cited sources listed)
 //        case-study.mjs check <work dir> [--draft]
-// A study has two layers: drafts/NN.md is the sourced draft the reviewers audit (sources named in every sentence);
-// book/NN.md is the text that is typeset (no citations, no account of the research).
+// A chapter is written once, as the text the reader gets. drafts/NN.md is that text with the marks the reviewers and
+// the scripts need (a source's label in brackets in every sentence, a source's own words in ⟦ ⟧); book/NN.md is
+// the same text without them, which is typeset. The introduction and the reasoning chapter are written from the
+// other chapters, into book/ only.
 // Agents working in parallel never share a file: each writes its own notes/<name>.sources.json (url -> label) and
 // notes/<name>.gaps.md, reviewers write review/<name>.failed.json (a list of urls), fixers write
 // review/<name>.added.json (url -> label). merge turns those into sources.json, gaps.md and the draft's last chapter,
@@ -189,9 +193,17 @@ export function merge(work) {
   return { sources: Object.keys(sources).length, failed: failed.size, gaps: gaps.reduce((n, g) => n + g.split('\n').length, 0), malformed }
 }
 
+const chapterIds = work => JSON.parse(read(join(work, 'chapters.json'))).chapters.map(chapter => chapter.id)
+
+export function cited(work) {
+  // url -> label of the sources a chapter names. The draft's closing list names every source and does not count.
+  const text = chapterIds(work).slice(0, -1).map(id => join(work, 'drafts', `${id}.md`)).filter(path => existsSync(path)).map(read).join('\n')
+  return Object.fromEntries(Object.entries(readJson(join(work, 'sources.json'), 'object')).filter(([, label]) => typeof label === 'string' && text.includes(label)))
+}
+
 export function sliceSources(work, index, of) {
-  // Slice number index (from 1) of the source urls, sorted, cut into `of` near-equal parts.
-  const urls = sorted(Object.keys(readJson(join(work, 'sources.json'), 'object')))
+  // Slice number index (from 1) of the urls of the cited sources, sorted, cut into `of` near-equal parts.
+  const urls = sorted(Object.keys(cited(work)))
   const size = Math.ceil(urls.length / of)
   return urls.slice((index - 1) * size, index * size)
 }
@@ -310,8 +322,9 @@ function sentencesOf(line) {
 }
 
 function sourced(work, chapter) {
-  // A draft chapter as its sentences, each with the labels of the sources it rests on: the ones it names, else the
-  // ones its paragraph names, else the ones the chapter names (a lead or a summary restates the chapter's own claims);
+  // A chapter as its sentences, each with the labels of the sources it rests on: the ones it names, else the
+  // ones its paragraph names (for a chart, the paragraph after it), else the ones the chapter names (a lead or a
+  // summary restates the chapter's own claims);
   // `named` says the sentence names them itself.
   // With them: every label, longest first; the labels a text names; the saved texts of a label's sources; and
   // a label's urls.
@@ -332,12 +345,14 @@ function sourced(work, chapter) {
   const having = re => paragraphs.filter(p => re.test(p)).length
   const labelsFollow = having(LABEL_LAST) > having(LABEL_FIRST)
   const sentences = []
-  for (let paragraph of paragraphs) {
+  for (let [n, paragraph] of paragraphs.entries()) {
     if (paragraph.trimStart().startsWith('#')) continue
     if (labelsFollow) paragraph = paragraph.replace(LABEL_AFTER_STOP, (whole, stop, label) => (named(label).length ? label + stop : whole))
+    // A chart's rows name no source: the paragraph after the chart does.
+    const around = paragraph.trimStart().startsWith('```chart') ? named(paragraphs[n + 1] || '') : named(paragraph)
     for (const sentence of lines(paragraph).flatMap(sentencesOf)) {
       const own = named(sentence)
-      sentences.push({ sentence, cited: [own, named(paragraph), anywhere].find(list => list.length) || [], named: own.length > 0 })
+      sentences.push({ sentence, cited: [own, around, anywhere].find(list => list.length) || [], named: own.length > 0 })
     }
   }
   return { sentences, ordered, anywhere, texts, urls: label => labels.get(label) }
@@ -621,12 +636,49 @@ export function codex(work, chapter, model, spawn = spawnSync) {
   return { ...result, remaining: findings(work, chapter).length, status: run.status, stderr: (run.stderr ?? '').split('\n').filter(l => l && !l.startsWith('Reading additional input')).join('\n') }
 }
 
+const BRACKETED = /[ \t]*[〔（(\[][^〔〕（）()\[\]]*[〕）)\]]/g
+const ORIGINAL_WORDS = /[ \t]*⟦[^⟧\n]*⟧/g
+const YEAR = /(?<![\p{L}\p{N}])(?:19|20)\d\d/u
+
+export function book(work, sourcesTitle = 'Sources') {
+  // Write book/ from the chapters: each chapter without its marks (a bracket that names a source goes with all it
+  // holds, and so do the source's words in ⟦ ⟧; a chart block is left as written), and the closing list of the
+  // sources the chapters name, an outlet a line with its articles linked by year. A chapter with no draft (the
+  // introduction, the reasoning chapter) is left as it is in book/.
+  const ids = chapterIds(work)
+  // A label may hold brackets of its own: each label stands as a mark while the brackets around it are looked for.
+  const labels = [...new Set(Object.values(readJson(join(work, 'sources.json'), 'object')))].sort((a, b) => b.length - a.length)
+  const mark = n => `\u0000${n}\u0001`
+  const marked = text => labels.reduce((out, label, n) => out.replaceAll(label, mark(n)), text)
+  const unmarked = text => text.replace(/\u0000(\d+)\u0001/g, (_, n) => labels[Number(n)])
+  const strip = text => text.split(/(^```chart[ \t]*\n[\s\S]*?\n```[ \t]*$)/m)
+    .map((part, n) => (n % 2 ? part : unmarked(marked(part.replace(ORIGINAL_WORDS, '')).replace(BRACKETED, group => (group.includes('\u0000') ? '' : group))))).join('')
+  mkdirSync(join(work, 'book'), { recursive: true })
+  const chapters = ids.slice(0, -1).filter(id => existsSync(join(work, 'drafts', `${id}.md`)))
+  for (const id of chapters) write(join(work, 'book', `${id}.md`), strip(read(join(work, 'drafts', `${id}.md`))))
+  const outlets = new Map() // outlet -> its links, in label order
+  const named = cited(work)
+  for (const [url, label] of Object.entries(named).sort(([, a], [, b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const year = label.search(YEAR)
+    const outlet = year > 0 ? label.slice(0, year).trim() : ''
+    const link = `[${year > 0 ? label.slice(year) : label}](<${url}>)`
+    if (outlet) outlets.set(outlet, [...(outlets.get(outlet) || []), link])
+    else outlets.set(label, [link])
+  }
+  const list = [...outlets].map(([outlet, links]) => (links.length === 1 && links[0].startsWith(`[${outlet}]`) ? `- ${links[0]}` : `- ${outlet}: ${links.join(', ')}`))
+  write(join(work, 'book', `${ids.at(-1)}.md`), `# ${sourcesTitle}\n\n${list.join('\n')}\n`)
+  return { chapters, sources: Object.keys(named).length }
+}
+
 export function check(work) {
-  // Report what blocks the review (the sourced draft, sources.json) and what blocks rendering (the book text).
-  const meta = JSON.parse(read(join(work, 'chapters.json')))
-  const ids = meta.chapters.map(chapter => chapter.id)
-  const { missing, noLead, texts: draft } = layer(work, 'drafts', ids)
-  const { missing: bookMissing, noLead: bookNoLead, texts: book } = layer(work, 'book', ids)
+  // Report what blocks the review (the chapters, sources.json) and what blocks rendering (the book text).
+  const ids = chapterIds(work)
+  // The introduction and the reasoning chapter are written from the other chapters, into book/ only.
+  const bookOnly = [ids[0], ids.at(-2)]
+  const { missing: absent, noLead, texts: draft } = layer(work, 'drafts', ids)
+  const missing = absent.filter(id => !bookOnly.includes(id))
+  const { missing: bookMissing, noLead: bookNoLeads, texts: book } = layer(work, 'book', ids)
+  const bookNoLead = bookNoLeads.filter(id => id !== ids.at(-1)) // the closing list is a list
   const known = new Set([...draft.values()].flatMap(text => [...numbers(text)]))
   const knownValues = [...known].map(Number)
   const citations = []
@@ -660,7 +712,8 @@ export function check(work) {
   const hosts = urls.map(host)
   const snapshots = hosts.filter(h => ARCHIVE_HOSTS.has(h)).length
   const listed = book.has(ids.at(-1))
-  const unlinked = urls.filter((url, n) => listed && !ARCHIVE_HOSTS.has(hosts[n]) && !links.has(url))
+  const named = valid ? Object.keys(cited(work)) : []
+  const unlinked = named.filter(url => listed && !ARCHIVE_HOSTS.has(host(url)) && !links.has(url))
   const strangers = sorted([...links].filter(link => !urls.includes(link)))
   // The closing sources list has no fixer; a chapter not written yet has no findings to apply.
   const unapplied = {}
@@ -675,7 +728,7 @@ export function check(work) {
     missing_book_chapters: bookMissing, book_no_lead_paragraph: bookNoLead,
     citations_in_book: citations, process_terms_in_book: process_, numbers_not_in_draft: unknown,
     series_in_prose: series, sources_not_linked: unlinked, links_not_in_sources: strangers,
-    sources: hosts.length - snapshots, archive_snapshots: snapshots,
+    sources: hosts.length - snapshots, archive_snapshots: snapshots, sources_cited: named.length,
     sites: new Set(hosts.filter(h => !ARCHIVE_HOSTS.has(h))).size }
 }
 
@@ -683,7 +736,9 @@ const OPTIONS = {
   init: { title: { type: 'string' }, cover: { type: 'string' }, source: { type: 'string' }, account: { type: 'string', multiple: true },
     out: { type: 'string' }, chapters: { type: 'string', default: '11' } },
   merge: {},
+  cited: {},
   slice: {},
+  book: { 'sources-title': { type: 'string', default: 'Sources' } },
   sources: {},
   figures: { worklist: { type: 'boolean', default: false } },
   quotes: {},
@@ -693,7 +748,7 @@ const OPTIONS = {
   codex: { model: { type: 'string', default: 'gpt-6-luna' } },
   check: { draft: { type: 'boolean', default: false } },
 }
-const USAGE = 'usage: case-study.mjs {init,merge,slice,sources,figures,quotes,findings,unread,bullets,codex,check} ...'
+const USAGE = 'usage: case-study.mjs {init,merge,cited,slice,sources,figures,quotes,findings,unread,bullets,codex,book,check} ...'
 
 function fail(message) {
   console.error(message)
@@ -712,6 +767,16 @@ function main(argv) {
   const { values, positionals } = parsed
   const need = (count, names) => {
     if (positionals.length !== count) fail(`case-study.mjs ${cmd}: expected ${names}, got ${positionals.length} argument(s)`)
+  }
+  if (cmd === 'cited') {
+    need(1, 'work')
+    console.log(JSON.stringify({ cited: Object.keys(cited(positionals[0])).length }))
+    return
+  }
+  if (cmd === 'book') {
+    need(1, 'work')
+    console.log(JSON.stringify(book(positionals[0], values['sources-title'])))
+    return
   }
   if (cmd === 'slice') {
     need(3, 'work, index, of')

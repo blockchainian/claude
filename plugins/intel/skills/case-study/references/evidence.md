@@ -40,9 +40,10 @@ to these.
 
 ## The kind of every claim
 
-In the sourced draft (`drafts/`), the sentence itself shows which kind a claim is
-and names its source. The book text (`book/`) drops the labels and the source
-names, and carries the same distinction in ordinary wording:
+In a chapter (`drafts/`), a bracket in the sentence names its source and says
+which kind the claim is. The book text (`book/`) is the chapter without the
+brackets, so the sentence carries the same distinction in ordinary wording
+too:
 
 | Kind | What it is |
 |---|---|
@@ -100,14 +101,14 @@ not that publication's reporting — name it as a contributor piece.
   from the stated speaker, on the stated date, in the stated outlet.
 - Quotation marks hold a source's words and nothing else: none around a term,
   a heading or a phrase of your own.
-- In the sourced draft, a quotation translated into the study's language is
+- In a chapter, a quotation translated into the study's language is
   followed at once by the source's own words in ⟦ ⟧:
   `“标题太长，观众消化不了”⟦If you make your video caption too long, it will be too much for people to digest⟧`.
   The words in ⟦ ⟧ are copied letter for letter, an omission inside them
   marked `…`: a script looks them up in the source's saved text, and the
   reviewer judges the translation against them. A quotation left in the
   source's language carries no ⟦ ⟧. The book never prints ⟦ ⟧.
-- In the sourced draft, what a source said, wrote or reported, told without
+- In a chapter, what a source said, wrote or reported, told without
   quotation marks, is followed by the source's own words for it in ⟦ ⟧ when
   the notes quote them:
   `他说早年每四个视频就有一个没发⟦one out of every four videos we filmed just never got uploaded⟧`.
@@ -125,4 +126,4 @@ not print case numbers or other handles that lead straight to one.
 The chapter that applies the findings (what a person could copy, and what a
 product given with the task could copy) is reasoning. It opens by saying it is
 reasoning, not a finding, and rests only on what the finding chapters
-established. The product is never named, in the draft or in the book.
+established. The product is never named.
