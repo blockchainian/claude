@@ -45,7 +45,7 @@ const OUTPUT_MAX = 512e6 // bytes of one BigQuery answer; a Node string holds 53
 const GNEWS_GAP = 0.3 // seconds between two Google News requests machine-wide
 const YT_RESULTS = 20 // videos asked of one YouTube search, before the name filter
 const YT_BATCH = 8 // video pages one yt-dlp run reads
-const YT_ROUTE_RUNS = 2 // yt-dlp runs at once on one route, when reading video pages without the login
+const YT_ROUTE_RUNS = 3 // yt-dlp runs at once on one route, when reading video pages without the login
 const YT_TABS = ['videos', 'shorts', 'streams']
 
 const sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.ceil(ms)))
@@ -423,10 +423,10 @@ function ytPages(route, ids) {
 
 // The exact upload date and the plays of every video in `ids`, from the videos' own pages: { videos (in the order
 // asked), missing (the ids no route could read) }. The pages are read without the login, so the shared session is not
-// spent on them: the ids are shared out over the routes (direct and every exit), `workers` yt-dlp runs at once on
-// each. YouTube asks some exits to sign in: a route that reads nothing of a batch is not used again and its videos go
+// spent on them: the ids are shared out over the routes (the exits; direct only when there is no proxy, since that
+// is the address the login is used from), `workers` yt-dlp runs at once on each. YouTube asks some exits to sign in: a route that reads nothing of a batch is not used again and its videos go
 // to the others. A video one route could not read among others it could is asked for once more, then it is missing.
-export async function ytvideos(ids, { routes = [null, ...proxies()], batch = YT_BATCH, workers = YT_ROUTE_RUNS, call = ytPages } = {}) {
+export async function ytvideos(ids, { routes = proxies().length ? proxies() : [null], batch = YT_BATCH, workers = YT_ROUTE_RUNS, call = ytPages } = {}) {
   const todo = [...ids]
   const found = new Map()
   const failed = new Map()
@@ -545,6 +545,7 @@ function main(argv) {
   } else if (command === 'ytuploads') {
     ytuploads(args[0] || '').then(({ uploads, missing }) => {
       for (const upload of uploads) console.log(JSON.stringify(upload))
+      if (!uploads.length) { console.error('ytuploads: YouTube refused every route (it asks to sign in): no video page was read'); log('ytuploads', 'BLOCKED', args[0]); process.exit(1) }
       if (missing.length) console.error(`ytuploads: ${missing.length} of ${uploads.length + missing.length} video pages could not be read: ${missing.join(' ')}`)
       log('ytuploads', missing.length ? 'PARTIAL' : 'ok', args[0])
     }, error => {
