@@ -213,6 +213,9 @@ ask for one name.
   with `Workflow({scriptPath, resumeFromRunId})`: finished agents replay from
   the cache, the others run again and pick up where their files stop. Do not
   change the script or the args before resuming, or every agent reruns.
+  Which sources a reader gets depends on the order the scouts returned in, so
+  a run cut off while reading does not replay its readers: continue it with
+  `done: 'scout'` (next rule) instead.
 - A run that cannot be resumed (another session started it) continues from
   its files: `done: 'scout'` skips the scouts and reads the known sources
   again, into fresh notes (to scout again from nothing instead, move
