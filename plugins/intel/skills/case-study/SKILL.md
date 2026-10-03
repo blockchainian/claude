@@ -100,8 +100,9 @@ ask for one name.
    |---|---|---|
    | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `gate.mjs wayback curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
+   | Check sources | sources lens per 25 URLs, after the merge and before any chapter is written | Findings in `review/`; a merge takes the failed sources out of `sources.json` |
    | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `drafts/`, from the notes only |
-   | Review | sources lens per 25 URLs, after the merge and before any chapter is written; per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
+   | Review | per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
    | Fix | one per chapter, as soon as its two reviews are done; the introduction and the reasoning chapter after the others. Runs on gpt-6-luna through `codex exec` (`case-study.mjs codex`), driven by a Haiku agent; `args.fixer: sonnet` keeps it on Claude | Apply the findings to `drafts/`, then mend what the `quotes` and `figures` scripts still report |
 
    A chapter runs write → review → fix on its own; the slowest chapter sets
