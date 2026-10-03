@@ -9,6 +9,7 @@
 //        gate.mjs yt <args...>            yt-dlp <args...> (Chrome cookies added for YouTube), at most YT_SLOTS at once
 //        gate.mjs fetch-x-posts <args...> the fetch-x-posts script named by FETCH_X_POSTS: X search on an account pool, one JSON post per line
 //        gate.mjs ytsearch "<query>" "<name>"...   YouTube search, only the videos whose title, channel or description has one of the names
+//        gate.mjs ytuploads <channel url>          every upload of a YouTube channel with its exact date and plays, one JSON video per line, oldest first
 //        gate.mjs gdelt "<name>"... [<from> <to>]  news articles GDELT found the names in (BigQuery), up to 100 names, dates YYYY-MM-DD
 //        gate.mjs gnews "<name>" [<from> <to>]    Google News articles for the name, asked for week by week
 //        gate.mjs stats                   calls and failures per command since the log began
@@ -18,7 +19,7 @@
 // from the .env file env.mjs finds: ISP_PROXY_URL (one URL; the ten ports after its own are the exits; without it every
 // request goes direct), FETCH_X_POSTS (the fetch-x-posts script) and GDELT_BQ_PROJECT (the Google Cloud project the
 // BigQuery queries run in).
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -43,6 +44,9 @@ const GDELT_MAX_BYTES = 120e9
 const OUTPUT_MAX = 512e6 // bytes of one BigQuery answer; a Node string holds 537 MB
 const GNEWS_GAP = 0.3 // seconds between two Google News requests machine-wide
 const YT_RESULTS = 20 // videos asked of one YouTube search, before the name filter
+const YT_BATCH = 8 // video pages one yt-dlp run reads
+const YT_ROUTE_RUNS = 2 // yt-dlp runs at once on one route, when reading video pages without the login
+const YT_TABS = ['videos', 'shorts', 'streams']
 
 const sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.ceil(ms)))
 const now = () => Date.now() / 1000
@@ -404,6 +408,74 @@ export function ytsearch(query, names, { count = YT_RESULTS, call = yt } = {}) {
     .map(v => ({ id: v.id, url: `https://www.youtube.com/watch?v=${v.id}`, channel: v.channel, title: v.title }))
 }
 
+// What the pages of the videos `ids` show, read by one yt-dlp run without the login, through `route` (an exit, or
+// null for direct): { id, upload_date, timestamp, view_count, duration, title } for each video it could read.
+function ytPages(route, ids) {
+  return new Promise(resolve => {
+    const child = spawn('yt-dlp', [...(route ? ['--proxy', route] : []), '--skip-download', '--no-warnings', '--ignore-errors',
+      '--print', '%(.{id,upload_date,timestamp,view_count,duration,title})j', ...ids.map(id => `https://www.youtube.com/watch?v=${id}`)], { stdio: ['ignore', 'pipe', 'ignore'] })
+    let out = ''
+    child.stdout.on('data', chunk => { out += chunk })
+    child.on('error', () => resolve([]))
+    child.on('close', () => resolve(out.split('\n').filter(Boolean).flatMap(line => { try { return [JSON.parse(line)] } catch { return [] } })))
+  })
+}
+
+// The exact upload date and the plays of every video in `ids`, from the videos' own pages: { videos (in the order
+// asked), missing (the ids no route could read) }. The pages are read without the login, so the shared session is not
+// spent on them: the ids are shared out over the routes (direct and every exit), `workers` yt-dlp runs at once on
+// each. YouTube asks some exits to sign in: a route that reads nothing of a batch is not used again and its videos go
+// to the others. A video one route could not read among others it could is asked for once more, then it is missing.
+export async function ytvideos(ids, { routes = [null, ...proxies()], batch = YT_BATCH, workers = YT_ROUTE_RUNS, call = ytPages } = {}) {
+  const todo = [...ids]
+  const found = new Map()
+  const failed = new Map()
+  const refused = new Set()
+  let reading = 0
+  const work = async route => {
+    while (!refused.has(route)) {
+      if (!todo.length) {
+        if (!reading) return
+        await new Promise(resolve => setTimeout(resolve, 100)) // a batch another run is reading may come back
+        continue
+      }
+      const asked = todo.splice(0, batch)
+      reading++
+      const videos = await call(route, asked)
+      reading--
+      for (const video of videos) found.set(video.id, video)
+      const unread = asked.filter(id => !found.has(id))
+      if (!videos.length) {
+        refused.add(route)
+        todo.push(...unread)
+      } else {
+        for (const id of unread) {
+          failed.set(id, (failed.get(id) || 0) + 1)
+          if (failed.get(id) < 2) todo.push(id)
+        }
+      }
+    }
+  }
+  await Promise.all(routes.flatMap(route => Array.from({ length: workers }, () => work(route))))
+  return { videos: ids.filter(id => found.has(id)).map(id => found.get(id)), missing: ids.filter(id => !found.has(id)) }
+}
+
+// Every upload of a YouTube channel, oldest first: { id, kind (videos, shorts or streams), date (YYYY-MM-DD, exact),
+// timestamp, views, duration, title, url }, and the ids whose pages could not be read. The channel's tabs list the
+// ids (their dates are approximate); the exact dates come from the videos' own pages.
+export async function ytuploads(channel, { list = yt, read = ytvideos } = {}) {
+  const kinds = new Map()
+  for (const tab of YT_TABS) {
+    const r = list(['--flat-playlist', '--print', '%(id)s', `${channel.replace(/\/+$/, '')}/${tab}`])
+    for (const id of (r.stdout || '').split('\n').filter(Boolean)) if (!kinds.has(id)) kinds.set(id, tab) // a channel without the tab lists nothing
+  }
+  if (!kinds.size) throw Error(`no uploads listed for ${channel}: give the channel's address, https://www.youtube.com/@<channel>`)
+  const { videos, missing } = await read([...kinds.keys()])
+  const uploads = videos.map(v => ({ id: v.id, kind: kinds.get(v.id), date: v.upload_date ? v.upload_date.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3') : null,
+    timestamp: v.timestamp ?? null, views: v.view_count ?? null, duration: v.duration ?? null, title: v.title, url: `https://www.youtube.com/watch?v=${v.id}` }))
+  return { uploads: uploads.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)), missing }
+}
+
 export function stats(state = STATE) {
   const counts = {}
   let lines = []
@@ -470,6 +542,16 @@ function main(argv) {
       console.error(`${command}: ${error.message}`)
       process.exit(1)
     }
+  } else if (command === 'ytuploads') {
+    ytuploads(args[0] || '').then(({ uploads, missing }) => {
+      for (const upload of uploads) console.log(JSON.stringify(upload))
+      if (missing.length) console.error(`ytuploads: ${missing.length} of ${uploads.length + missing.length} video pages could not be read: ${missing.join(' ')}`)
+      log('ytuploads', missing.length ? 'PARTIAL' : 'ok', args[0])
+    }, error => {
+      log('ytuploads', 'FAILED', args[0] || '')
+      console.error(`ytuploads: ${error.message}`)
+      process.exit(1)
+    })
   } else if (command === 'stats') {
     console.log(JSON.stringify(stats()))
   } else {

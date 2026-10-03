@@ -22,7 +22,10 @@ import { loadEnv } from './env.mjs'
 
 loadEnv()
 
-export const PER_MINUTE = 30 // the archive refuses an address well above this
+// For the whole batch, not for each exit: the archive counts the proxy's exits together. Measured 2026-10: 60 a
+// minute spread evenly over the ten exits had 19 of 120 requests answered 429, and one exit alone was refused after 20
+// in a minute.
+export const PER_MINUTE = 30
 export const WORKERS = 3 // a page takes seconds to arrive, so one worker alone cannot reach the rate
 const ARCHIVE = 'https://web.archive.org'
 const TIMEOUT = 60_000
