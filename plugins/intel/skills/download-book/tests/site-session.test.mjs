@@ -1,8 +1,8 @@
-// ABOUTME: Tests the session wrapper's challenge handling against a fake page — no network:
-// ABOUTME: a challenge body triggers one navigation and one refetch; other bodies pass through.
+// ABOUTME: Tests the session wrapper's challenge handling against a fake page, and how runs share one Chrome — no network:
+// ABOUTME: a run attaches to the Chrome that is up or starts it once; the Chrome is kept until no run has had a tab for a while.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionFor, isChallenge } from '../scripts/site-session.mjs';
+import { attach, sessionFor, isChallenge, untilIdle } from '../scripts/site-session.mjs';
 
 const CHALLENGE_PAGE = '<!doctype html><html><head><title>DDoS-Guard</title></head><body>Checking your browser</body></html>';
 
@@ -49,4 +49,42 @@ test('a challenge that survives the navigation is returned as is', async () => {
 test('a body over 3 MB is rejected', async () => {
   const page = fakePage(['x'.repeat(3_000_001)]);
   await assert.rejects(sessionFor(page).get('https://example.test/x'), /3 MB/);
+});
+
+test('a run attaches to the Chrome that is up, without starting another', async () => {
+  let started = 0;
+  const browser = await attach({ port: () => '9001', connect: async port => ({ port }), start: () => started++, wait: async () => {} });
+  assert.deepEqual(browser, { port: '9001' });
+  assert.equal(started, 0);
+});
+
+test('with no Chrome up (no port, or a port nothing answers on) a run starts one, once, and attaches when it is up', async () => {
+  let started = 0;
+  let waits = 0;
+  const ports = [null, '9001', '9001', '9002'];
+  const asked = [];
+  const browser = await attach({
+    port: () => ports.shift(),
+    connect: async port => { asked.push(port); if (port !== '9002') throw new Error('ECONNREFUSED'); return { port }; },
+    start: () => started++,
+    wait: async () => { waits++; },
+  });
+  assert.deepEqual(browser, { port: '9002' });
+  assert.deepEqual(asked, ['9001', '9001', '9002'], 'no connection is tried without a port');
+  assert.equal(started, 1);
+  assert.equal(waits, 3);
+});
+
+test('a Chrome that never comes up is an error, not a hang', async () => {
+  let waits = 0;
+  await assert.rejects(attach({ port: () => null, connect: async () => { throw new Error('unreachable'); }, start: () => {}, wait: async () => { waits++; }, tries: 5 }), /Chrome/);
+  assert.equal(waits, 5);
+});
+
+test('the shared Chrome is kept until no run has had a tab open for the idle time', async () => {
+  let now = 0;
+  const open = [1, 2, 1, 2, 1, 1]; // tabs at each look: the Chrome's own first tab, plus the runs'
+  const looks = [];
+  await untilIdle(() => { looks.push(now); return open.shift() ?? 1; }, { idle: 20, every: 10, now: () => now, wait: async ms => { now += ms; } });
+  assert.deepEqual(looks, [0, 10, 20, 30, 40, 50], 'a run had a tab at 10 and at 30; none for the idle time at 50');
 });

@@ -13,7 +13,7 @@ The site sits behind DDoS-Guard, which serves a captcha to headless browsers and
 npm install --prefix "${CLAUDE_PLUGIN_ROOT}/skills/download-book/scripts"
 ```
 
-The browser profile persists at `~/.cache/secrets-manager/profiles/download-book`. A Chrome window opens for the run and closes when the script finishes; do not use it meanwhile.
+The browser profile persists at `~/.cache/secrets-manager/profiles/download-book`. One Chrome window serves every run: the first run opens it, each run works in a tab of its own and closes that tab when it finishes, and the window closes by itself a minute after the last tab. Several books can be looked up at once, one run per book; do not use the window meanwhile.
 
 ## Run
 
