@@ -157,7 +157,6 @@ The account logged in in Chrome is a side account (joinupcomment).
 
 ## Records, filings and books
 
-- Lawsuits: `curl "https://www.courtlistener.com/api/rest/v4/search/?q=%22<name>%22&type=r"`.
 - Securities filings: the regulator's own filing pages, fetched directly. The
   SEC's full-text search endpoint is blocked: do not use it.
 - Company registries: the registry itself. Sites that resell registry data are
