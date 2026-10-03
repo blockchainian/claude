@@ -11,7 +11,7 @@ import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
 import { runClaude } from "./claude.mjs";
 import { SessionStore, askTimeoutSeconds, writeSupervisor } from "./inbox.mjs";
-import { resolveSessionId } from "./session.mjs";
+import { parentProcesses, recordedSessionId, resolveSessionId } from "./session.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const pluginManifestPath = path.resolve(path.dirname(scriptPath), "../.claude-plugin/plugin.json");
@@ -529,6 +529,7 @@ async function runMcp() {
   const store = new SessionStore(sessionId);
   const manager = new Manager(store, daemonSocketPath(process.env.CODEX_MANAGER_DAEMON_SOCKET), plugin.version);
   log(`session ${sessionId}, state in ${store.dir}`);
+  const parents = parentProcesses();
   if (store.readState().threads.length) manager.connect().catch((error) => log(`adoption deferred: ${error.message}`));
 
   const reply = (id, body) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...body })}\n`);
@@ -541,6 +542,9 @@ async function runMcp() {
       const tool = TOOLS.find((candidate) => candidate.name === params.name);
       if (!tool) return reply(id, { error: { code: -32602, message: `unknown tool: ${params.name}` } });
       try {
+        // This process keeps the session id it started with; the await command and the Stop hook use the current one.
+        const current = await recordedSessionId({ parents });
+        if (current && current !== sessionId) store.alias(current);
         const result = await manager[tool.name](params.arguments ?? {});
         const attention = manager.attention();
         return reply(id, { result: { content: [{ type: "text", text: JSON.stringify(attention ? { ...result, attention } : result, null, 2) }] } });

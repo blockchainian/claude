@@ -6,8 +6,8 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-export function defaultSessionsDir() {
-  return path.join(os.homedir(), ".claude", "sessions");
+export function defaultSessionsDir(env = process.env) {
+  return env.CODEX_MANAGER_SESSIONS_DIR || path.join(os.homedir(), ".claude", "sessions");
 }
 
 /** Parent chain of this process, nearest first, as `{pid, comm}` rows. */
@@ -29,11 +29,11 @@ export function parentProcesses(pid = process.pid) {
 }
 
 /**
- * The session file is keyed by the pid Claude Code registered, which may be a shell wrapper
- * rather than a process named claude, so every ancestor is tried in order.
+ * The session id in the parent claude process's session file, which Claude Code rewrites when /clear
+ * gives the session another id. The file is keyed by the pid Claude Code registered, which may be a
+ * shell wrapper rather than a process named claude, so every ancestor is tried in order.
  */
-export async function resolveSessionId({ env = process.env, sessionsDir = defaultSessionsDir(), parents } = {}) {
-  if (env.CLAUDE_CODE_SESSION_ID) return env.CLAUDE_CODE_SESSION_ID;
+export async function recordedSessionId({ sessionsDir = defaultSessionsDir(), parents } = {}) {
   for (const { pid } of parents ?? parentProcesses()) {
     try {
       const record = JSON.parse(await readFile(path.join(sessionsDir, `${pid}.json`), "utf8"));
@@ -42,5 +42,12 @@ export async function resolveSessionId({ env = process.env, sessionsDir = defaul
       // not this ancestor
     }
   }
+  return undefined;
+}
+
+export async function resolveSessionId({ env = process.env, sessionsDir = defaultSessionsDir(env), parents } = {}) {
+  if (env.CLAUDE_CODE_SESSION_ID) return env.CLAUDE_CODE_SESSION_ID;
+  const recorded = await recordedSessionId({ sessionsDir, parents });
+  if (recorded) return recorded;
   throw new Error("cannot determine the Claude session: set CLAUDE_CODE_SESSION_ID or run under Claude Code");
 }

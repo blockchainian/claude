@@ -1,7 +1,7 @@
 // ABOUTME: Per-session storage for codex-manager: state.json, one inbox per codex thread, reader-owned
 // ABOUTME: cursors so events reach Claude exactly once, and the questions codex is waiting on.
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -51,6 +51,15 @@ export class SessionStore {
 
   exists() {
     return existsSync(this.dir);
+  }
+
+  /** Lets another session id name this store, so a session that /clear gave a new id keeps reading the same inboxes. */
+  alias(sessionId) {
+    const link = path.join(path.dirname(this.dir), sessionId);
+    if (existsSync(path.join(link, "state.json"))) return;
+    rmSync(link, { recursive: true, force: true });
+    mkdirSync(this.dir, { recursive: true });
+    symlinkSync(this.dir, link);
   }
 
   inboxPath(threadId) {

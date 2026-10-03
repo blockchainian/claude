@@ -155,7 +155,11 @@ daemon replays any request that was still waiting for an answer.
 
 The session id comes from `CLAUDE_CODE_SESSION_ID` when set, else from the
 first ancestor process that has a record in `~/.claude/sessions/` (Claude
-Code registers the pid it was launched as, which may be a shell wrapper). Because `claude
+Code registers the pid it was launched as, which may be a shell wrapper).
+`/clear` gives the session another id while the MCP server keeps running with
+the one it started with; on each tool call the server reads the id in that
+record and, when it differs, links `<current-id>/` to its own directory, so the
+await command and the Stop hook read the same inboxes. Because `claude
 --resume` keeps the id, a resumed session reconnects to its threads: the MCP
 server `thread/resume`s each recorded thread (which subscribes it to that
 thread's notifications and replays any pending approval) and backfills a
