@@ -7,7 +7,7 @@
 //        case-study.mjs sources <work dir>   (the sources already in sources.json, as a scout would list them)
 //        case-study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
 //        case-study.mjs figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
-//        case-study.mjs quotes <work dir> <NN>         (look up chapter NN's quotations in the saved source text)
+//        case-study.mjs quotes <work dir> <NN>         (look up chapter NN's quotations and reported words in the saved source text)
 //        case-study.mjs findings <work dir> <NN>       (the review lines one fixer has still to apply to chapter NN)
 //        case-study.mjs unread <work dir> <batch> <url>...   (per source of a reader's batch: done, saved, or fetch)
 //        case-study.mjs bullets <work dir> <NN>        (the notes' lines for chapter NN, long dated tables thinned)
@@ -313,7 +313,8 @@ function sourced(work, chapter) {
   // A draft chapter as its sentences, each with the labels of the sources it rests on: the ones it names, else the
   // ones its paragraph names, else the ones the chapter names (a lead or a summary restates the chapter's own claims);
   // `named` says the sentence names them itself.
-  // With them: every label, longest first; the labels a text names; and the saved texts of a label's sources.
+  // With them: every label, longest first; the labels a text names; the saved texts of a label's sources; and
+  // a label's urls.
   const labels = new Map() // label -> urls, in sources.json's order (an object would move a label that looks like an integer first)
   for (const [url, label] of Object.entries(readJson(join(work, 'sources.json'), 'object'))) labels.set(label, [...(labels.get(label) || []), url])
   const saved = readJson(join(work, 'raw.json'), 'object')
@@ -339,7 +340,7 @@ function sourced(work, chapter) {
       sentences.push({ sentence, cited: [own, named(paragraph), anywhere].find(list => list.length) || [], named: own.length > 0 })
     }
   }
-  return { sentences, ordered, anywhere, texts }
+  return { sentences, ordered, anywhere, texts, urls: label => labels.get(label) }
 }
 
 export function figures(work, chapter, worklist = false) {
@@ -389,8 +390,9 @@ export function figures(work, chapter, worklist = false) {
   return { chapter, checked, matched: checked - unmatched.length, small, unmatched }
 }
 
-// A quotation, and the source's own words right after it when the quotation is a translation.
-const QUOTATION = /[“"「]([^“”"「」\n]{2,}?)[”"」](?:\s*⟦([^⟧\n]+)⟧)?/g
+// A quotation, and the source's own words right after it when the quotation is a translation; or the source's own
+// words alone, after reported speech.
+const QUOTATION = /[“"「]([^“”"「」\n]{2,}?)[”"」](?:\s*⟦([^⟧\n]+)⟧)?|⟦([^⟧\n]+)⟧/g
 const OMISSION = /…+|\.{3,}|\[[^\]]*\]/
 const LETTER = /[\p{L}\p{N}]/u
 const DISTINCT = 15 // letters: words shorter than this turn up in sources that never said them
@@ -436,11 +438,28 @@ function passageOf(words, source) {
   return source.clean.slice(Math.max(0, source.at[first] - AROUND), source.at[last] + 1 + AROUND).replace(/[\s\0]+/g, ' ').trim()
 }
 
+const DATED_HEADING = /[（(]([^()（）]*(?:19|20)\d\d[^()（）]*)[)）]\s*$/
+
+function datesOf(work) {
+  // url -> the date a source's notes heading ends with (`## <Outlet> — <title> (<date>)`, its `url:` line under it).
+  const dates = {}
+  for (const path of files(join(work, 'notes'), '.md')) {
+    let date = ''
+    for (const line of lines(read(path))) {
+      if (line.startsWith('## ')) date = (DATED_HEADING.exec(line) || [])[1] || ''
+      else if (line.startsWith('url:') && date) dates[line.slice(4).trim()] = date
+    }
+  }
+  return dates
+}
+
 export function quotes(work, chapter) {
   // Look up every quotation of a draft chapter in the saved text of the sources its sentence names, by the original
-  // words after it when it is a translation, and write a reviewer's worklist: per quotation, whether the words are
-  // there and the passage around them, or the other source whose text has them.
-  const { sentences, ordered, anywhere, texts } = sourced(work, chapter)
+  // words after it when it is a translation, and the source's words after reported speech the same way, and write
+  // a reviewer's worklist: per quotation, whether the words are there and the passage around them, or the other
+  // source whose text has them; then the sentences that name a source and carry none of its words; then every
+  // source the chapter names, with its date and saved files.
+  const { sentences, ordered, anywhere, texts, urls } = sourced(work, chapter)
   const plains = {}
   const sources = label => (plains[label] ??= texts(label).map(saved => ({ file: saved.file, ...plain(saved.text) })))
   const lookUp = (words, labels) => {
@@ -453,13 +472,17 @@ export function quotes(work, chapter) {
     return null
   }
   const rows = []
+  const wordless = []
   const out = []
   for (const { sentence, cited, named } of sentences) {
     const found = [...sentence.matchAll(QUOTATION)]
-    if (!found.length) continue
+    if (!found.length) {
+      if (named) wordless.push({ sentence: sentence.trim(), labels: cited })
+      continue
+    }
     out.push('', `## ${sentence.trim()}`)
-    for (const [, quote, original] of found) {
-      const looked = (original || quote).trim()
+    for (const [, quote = '', original, reported] of found) {
+      const looked = (reported || original || quote).trim()
       const row = { quote, looked, labels: cited, sentence: sentence.trim(), verdict: 'not found' }
       const here = lookUp(looked, cited)
       const there = here || (plain(looked).text.length >= DISTINCT && lookUp(looked, ordered.filter(label => !cited.includes(label))))
@@ -471,16 +494,22 @@ export function quotes(work, chapter) {
     }
   }
   const tally = verdict => rows.filter(row => row.verdict === verdict).length
+  const dates = datesOf(work)
   const result = { chapter, quotations: rows.length, found: tally('found'), elsewhere: tally('in another source'), missing: tally('not found'), unsaved: tally('no saved text') }
   mkdirSync(join(work, 'review'), { recursive: true })
   write(join(work, 'review', `quotations-${chapter}.md`),
     `# Quotations in drafts/${chapter}.md looked up in the saved text of their sources\n\n` +
     `${result.quotations} quotations: ${result.found} found, ${result.elsewhere} in another source, ${result.missing} not found, ${result.unsaved} with no saved text.\n` +
     'A row is: verdict | the words looked up | the source and file they are in, or the sources the sentence names | the passage around them.\n' +
-    'Only words inside quotation marks are listed. Reported speech without them is not.\n' +
-    out.join('\n') + '\n\n# The saved text of every source this chapter names\n\n' +
-    anywhere.map(label => `- ${label}: ${sources(label).map(source => source.file).join(', ') || 'none saved'}`).join('\n') + '\n')
-  return { ...result, rows }
+    'The words looked up are a quotation, the source\'s words in ⟦ ⟧ after a translated one, or the source\'s words in ⟦ ⟧ after reported speech.\n' +
+    out.join('\n') + '\n\n# Sentences that name a source and carry none of its words\n\n' +
+    wordless.map(({ sentence, labels }) => `- ${sentence} | ${labels.join(', ')}`).join('\n') +
+    '\n\n# Every source this chapter names: its date in the notes, and its saved text\n\n' +
+    anywhere.map(label => {
+      const dated = [...new Set(urls(label).map(url => dates[url]).filter(Boolean))].join(', ')
+      return `- ${label}${dated ? ` (${dated})` : ''}: ${sources(label).map(source => source.file).join(', ') || 'none saved'}`
+    }).join('\n') + '\n')
+  return { ...result, rows, wordless }
 }
 
 export function hasLeadParagraph(text) {
@@ -671,8 +700,8 @@ function main(argv) {
   }
   if (cmd === 'quotes') {
     need(2, 'work, chapter')
-    const { rows, ...result } = quotes(positionals[0], positionals[1])
-    console.log(JSON.stringify(result))
+    const { rows, wordless, ...result } = quotes(positionals[0], positionals[1])
+    console.log(JSON.stringify({ ...result, wordless: wordless.length }))
     return
   }
   if (cmd === 'findings' || cmd === 'bullets') {

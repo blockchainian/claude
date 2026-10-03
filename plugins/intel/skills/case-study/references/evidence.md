@@ -107,6 +107,12 @@ not that publication's reporting — name it as a contributor piece.
   marked `…`: a script looks them up in the source's saved text, and the
   reviewer judges the translation against them. A quotation left in the
   source's language carries no ⟦ ⟧. The book never prints ⟦ ⟧.
+- In the sourced draft, what a source said, wrote or reported, told without
+  quotation marks, is followed by the source's own words for it in ⟦ ⟧ when
+  the notes quote them:
+  `他说早年每四个视频就有一个没发⟦one out of every four videos we filmed just never got uploaded⟧`.
+  The script looks them up the same way, and the reviewer judges the
+  sentence against the passage around them.
 
 ## Privacy
 

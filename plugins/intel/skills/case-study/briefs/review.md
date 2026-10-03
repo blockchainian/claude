@@ -64,17 +64,23 @@ Then judge what the chapter makes of its figures:
 
 Start with `<skill>/scripts/case-study.mjs quotes <work> NN` for your chapter
 (the skill folder is the one that holds this brief's folder). The script
-looks up every quotation of the chapter in the saved text of the sources its
-sentence names — a translated quotation by the source's own words in ⟦ ⟧
-after it — and writes `review/quotations-NN.md`: per quotation a verdict and
-the passage of the source around the words. Read that file whole, then the
-chapter once. Per row:
+looks up, in the saved text of the sources each sentence names, every
+quotation of the chapter — a translated one by the source's own words in
+⟦ ⟧ after it — and the source's words in ⟦ ⟧ after reported speech. It
+writes `review/quotations-NN.md` in three parts: per sentence, a row for each
+of those with a verdict and the passage of the source around the words; the
+sentences that name a source and carry none of its words; every source the
+chapter names, with its date and its saved files. Read that file whole, then
+the chapter once. What a passage or the list of sources shows is judged from
+them: no source is opened and nothing is searched for it.
+
+Per row:
 
 - `found`: the words are in the named source. Judge the rest from the
   passage, without opening the source: who is speaking, whether the sentence
-  bends what was said, whether a translation is faithful to the words in
-  ⟦ ⟧. Open the source only when the passage does not show the speaker or
-  the date.
+  bends what was said, whether a translation or a report of it is faithful
+  to the words in ⟦ ⟧. The source's date is in the last part of the file.
+  Open the source only when the passage does not show the speaker.
 - `in another source`: the named source does not have the words and the one
   shown does. That is a wrong outlet, unless the passage shows it quoting the
   named one.
@@ -84,9 +90,11 @@ chapter once. Per row:
   are nobody's (a term, a heading) are no quotation: say so in the row, with
   no finding.
 
-A sentence of the form "X said / wrote / reported" with no quotation marks is
-not in that file: search the saved text its last section lists, several
-searches in one command, never one search per turn.
+The sentences of the second part have no words the script could look up.
+Those that say what a source said, wrote or reported are checked by hand:
+search the saved text the last part lists, every search for one source in
+one command, never one search per turn. A sentence there whose only claim is
+a figure of three digits or more needs no search (see the figures below).
 
 Mark every quotation and every such sentence found, distorted (say how), not
 found, wrong speaker, wrong date, or wrong outlet. Then check:
@@ -95,7 +103,9 @@ found, wrong speaker, wrong date, or wrong outlet. Then check:
   or their staff is self-reported even in a newspaper; an estimate is called
   an estimate), its unit, currency and year, and — for a count or an age too
   small for the script that matches figures (under three digits) — the figure
-  itself;
+  itself. A figure of three digits or more is not searched for: a script has
+  matched every one against its source, and what it could not match is
+  already a finding;
 - press presented as reported at the time was published then;
 - claims about method that come only from the subject are labelled
   self-reported;

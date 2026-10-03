@@ -27,8 +27,9 @@ you are interrupted.
 3. A source never opened is opened now, and the text corrected to what it says,
    or it leaves the text.
 4. A quote not found loses its quotation marks and the claim, or takes the real
-   wording. A translated quote has the source's words after it in ⟦ ⟧ (see
-   "Quotes" in the evidence rules): correct both together. A wrong speaker,
+   wording. A translated quote, and reported speech, have the source's words
+   after them in ⟦ ⟧ (see "Quotes" in the evidence rules): correct both
+   together. A wrong speaker,
    date or outlet is corrected from the source.
 5. Numbers: correct what differs, remove what is not found, relabel what is
    mislabelled, print both sides where sources disagree, and recompute what
@@ -52,8 +53,9 @@ add takes a label that is not already a value in `sources.json`.
 
 When every finding has its line, run both checks on your chapter and mend
 what they report before you finish:
-`<skill>/scripts/case-study.mjs quotes <work> NN` (a quotation not found:
-its ⟦ ⟧ words are missing or retyped — copy them from the bullet; a sentence
+`<skill>/scripts/case-study.mjs quotes <work> NN` (a quotation or the words
+after reported speech not found: the ⟦ ⟧ words are missing or retyped — copy
+them from the bullet; a sentence
 that names no source — add its label) and
 `<skill>/scripts/case-study.mjs figures <work> NN` (a figure not found that
 is not derived — correct it from the source or remove it).
