@@ -201,6 +201,7 @@ function daemonScript() {
       }
       if (message.method === "turn/interrupt") reply({});
       if (message.method === "review/start") reply({ turn: { id: "turn-review", status: "inProgress" }, reviewThreadId: message.params.threadId });
+      if (message.method === "thread/unsubscribe") reply({ status: "unsubscribed" });
       if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId } });
       if (message.method === "thread/turns/list") reply({ data: script.resumeTurns ?? [{ id: "turn-old", status: "completed", items: script.resumeItems ?? [{ type: "agentMessage", text: "done while you were away" }] }] });
       if (message.method === "thread/list") {
@@ -240,7 +241,7 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     const init = await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
     assert.equal(init.result.serverInfo.name, "codex-manager");
     const tools = await mcp.request("tools/list", {});
-    assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["start", "attach", "send", "reply", "interrupt", "list", "review"]);
+    assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["start", "attach", "send", "reply", "interrupt", "list", "detach", "review"]);
 
     const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", name: "fix-bug" });
     assert.equal(started.isError, false, started.text);
@@ -1177,6 +1178,89 @@ test("requests the daemon sends for an attached session are left to the client i
   } finally {
     // A failure before the restart would leave the first manager running and the test runner waiting on it.
     if (!restarted) await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("detach unsubscribes a finished thread, refuses a running one, and send picks the thread up again", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const { mcp, socket } = await startedThread(home, daemon, script);
+  try {
+    const running = await mcp.call("detach", { threadId: "thread-A" });
+    assert.equal(running.isError, true);
+    assert.match(running.text, /still running/);
+    assert.equal(script.messages.some((message) => message.method === "thread/unsubscribe"), false);
+
+    send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-1", status: "completed" } } });
+    await waitFor(() => inboxLines(path.join(home.dir, "thread-A.jsonl")).length === 1);
+    const detached = await mcp.call("detach", { threadId: "thread-A" });
+    assert.equal(detached.isError, false, detached.text);
+    assert.deepEqual(detached.json, { threadId: "thread-A", detached: true, status: "unsubscribed" });
+    assert.deepEqual(script.messages.at(-1).method, "thread/unsubscribe");
+    assert.deepEqual(script.messages.at(-1).params, { threadId: "thread-A" });
+    const listed = await mcp.call("list", {});
+    assert.equal(listed.json.threads[0].detached, true);
+    assert.equal(listed.json.threads[0].unread, 1);
+
+    const unknown = await mcp.call("detach", { threadId: "nope" });
+    assert.equal(unknown.isError, true);
+    assert.match(unknown.text, /unknown thread/);
+
+    script.threads = [{ id: "thread-A", name: null, cwd: "/repo", status: { type: "notLoaded" } }];
+    const reattached = await mcp.call("attach", { thread: "thread-A" });
+    assert.equal(reattached.isError, false, reattached.text);
+    assert.equal(reattached.json.attached, false);
+    assert.deepEqual(script.messages.slice(-2).map((message) => message.method), ["thread/resume", "thread/turns/list"]);
+    assert.equal((await mcp.call("list", {})).json.threads[0].detached, undefined);
+    await mcp.call("detach", { threadId: "thread-A" });
+
+    const sent = await mcp.call("send", { threadId: "thread-A", prompt: "one more thing" });
+    assert.equal(sent.isError, false, sent.text);
+    assert.deepEqual(script.messages.slice(-3).map((message) => message.method), ["thread/resume", "thread/turns/list", "turn/start"]);
+    const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
+    assert.equal(state.threads[0].detached, undefined);
+    assert.equal(state.threads[0].lastStatus, "inProgress");
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("a detached thread is not subscribed to again when the server starts or reconnects", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  await mkdir(home.dir, { recursive: true });
+  await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 1, threads: [
+    { id: "thread-done", name: "done", cwd: "/tmp", turnId: "turn-old", lastStatus: "completed", detached: true },
+    { id: "thread-live", name: "live", cwd: "/tmp", turnId: "turn-old", lastStatus: "completed" }
+  ] }));
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = await mcpChild(home, daemon);
+  try {
+    await mcp.call("list", {});
+    const resumed = () => script.messages.filter((message) => message.method === "thread/resume").map((message) => message.params.threadId);
+    assert.deepEqual(resumed(), ["thread-live"]);
+    const [socket] = script.sockets;
+    socket.destroy();
+    await waitFor(() => resumed().length === 2, { timeout: 8000 });
+    assert.deepEqual(resumed(), ["thread-live", "thread-live"]);
+
+    // With nothing left to listen to, a starting server leaves the daemon alone.
+    await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 2, threads: [{ id: "thread-done", name: "done", cwd: "/tmp", turnId: "turn-old", lastStatus: "completed", detached: true }] }));
+    const before = script.messages.length;
+    const idle = await mcpChild(home, daemon);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(script.messages.length, before);
+    } finally {
+      await idle.close();
+    }
+  } finally {
+    await mcp.close();
     await daemon.close();
     await home.close();
   }
