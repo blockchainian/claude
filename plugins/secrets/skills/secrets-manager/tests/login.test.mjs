@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } fro
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { APPPASSWORDS_URL, TWOSV_URL, toProxyDict, filterState, extractAppPassword, submitPassword, aliasFor, parseSetupKey, onSettingsPage, nationalNumber, DIAL_CODES, COUNTRY_NAMES, isMyAccountUrl, isOnboardingUrl, isSignedInUrl, forceEnglishUrl, ensureEnglish, waitForHuman, pollForState, submitRecaptcha, visibleRecaptchaAnchor, waitGridChanged, waitTilesSwapped, classifyGoogleNode, shouldHoldOpenForDebug, gotoWithRetry, signInGoogle, appAlreadySignedIn, oauthSurface, withAppRetries, isTransientAppError, loadOrCreateFingerprint, Restricted, Expired, NeedsHuman } from "../scripts/login.mjs";
+import { APPPASSWORDS_URL, TWOSV_URL, toProxyDict, filterState, extractAppPassword, submitPassword, submitIdentifier, aliasFor, parseSetupKey, onSettingsPage, nationalNumber, DIAL_CODES, COUNTRY_NAMES, isMyAccountUrl, isOnboardingUrl, isSignedInUrl, forceEnglishUrl, ensureEnglish, waitForHuman, pollForState, submitRecaptcha, visibleRecaptchaAnchor, waitGridChanged, waitTilesSwapped, classifyGoogleNode, shouldHoldOpenForDebug, gotoWithRetry, signInGoogle, appAlreadySignedIn, oauthSurface, withAppRetries, isTransientAppError, loadOrCreateFingerprint, Restricted, Expired, NeedsHuman } from "../scripts/login.mjs";
 
 // classifyGoogleNode maps (url, visible-input inventory) to the graph node the loop dispatches on.
 // A hidden input (visible:false) never decides the node — the phone challenge ships a hidden
@@ -470,15 +470,21 @@ test("toProxyDict decodes percent-encoded credentials", () => {
 
 // --- submitPassword against a stub page ---------------------------------------
 
-function stubField(value) {
+function stubField(value, { submitsOnEnter = true } = {}) {
   const field = {
     value,
     filled: null,
+    entered: false,
     inputValue: async () => field.value,
     fill: async (v) => {
       field.filled = v;
       field.value = v;
     },
+    press: async (key) => {
+      if (key === "Enter") field.entered = true;
+    },
+    // Enter navigates away, so the field is no longer visible; a page that ignores Enter keeps it.
+    isVisible: async () => !(submitsOnEnter && field.entered),
   };
   return field;
 }
@@ -486,6 +492,7 @@ function stubField(value) {
 function stubSurface(field) {
   const surface = {
     nextClicked: false,
+    waitForTimeout: async () => {},
     waitForSelector: async () => {
       if (field === null) throw new Error("no such field");
       return field;
@@ -503,11 +510,22 @@ function stubSurface(field) {
   return surface;
 }
 
-test("submitPassword fills an empty field and clicks Next", async () => {
+test("submitPassword fills an empty field and submits it with Enter", async () => {
+  // Enter is the one submit that carries no label: Google's Next button has no stable id and its
+  // text follows the page language.
   const field = stubField("");
   const surface = stubSurface(field);
   assert.equal(await submitPassword(surface, "hunter2"), true);
   assert.equal(field.filled, "hunter2");
+  assert.equal(field.entered, true);
+  assert.equal(surface.nextClicked, false);
+});
+
+test("submitPassword falls back to the Next button when Enter leaves the field on screen", async () => {
+  const field = stubField("", { submitsOnEnter: false });
+  const surface = stubSurface(field);
+  assert.equal(await submitPassword(surface, "hunter2"), true);
+  assert.equal(field.entered, true);
   assert.equal(surface.nextClicked, true);
 });
 
@@ -516,7 +534,7 @@ test("submitPassword leaves a correct autofill alone but still submits", async (
   const surface = stubSurface(field);
   assert.equal(await submitPassword(surface, "hunter2"), true);
   assert.equal(field.filled, null);
-  assert.equal(surface.nextClicked, true);
+  assert.equal(field.entered, true);
 });
 
 test("submitPassword refills a differing autofill", async () => {
@@ -524,6 +542,15 @@ test("submitPassword refills a differing autofill", async () => {
   const surface = stubSurface(field);
   assert.equal(await submitPassword(surface, "hunter2"), true);
   assert.equal(field.filled, "hunter2");
+});
+
+test("submitIdentifier submits the email with Enter", async () => {
+  const field = stubField("");
+  const surface = stubSurface(field);
+  assert.equal(await submitIdentifier(surface, "user@example.com"), true);
+  assert.equal(field.filled, "user@example.com");
+  assert.equal(field.entered, true);
+  assert.equal(surface.nextClicked, false);
 });
 
 test("submitPassword returns false without a password field", async () => {
