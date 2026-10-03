@@ -6,8 +6,8 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/scripts/fetch-tiktok-mentions.mjs \
 //     <slug> [--hashtag <name>]... [--user <handle>]... [--keyword <words>]... \
 //     [--hashtag-min-plays <n>] \
-//     [--source-limit <n>] [--comment-limit <n>] [--sessions <n>] [--rate <n>] [--concurrency <n>] [--no-comments] [--no-download]
-//   <slug> names the output dir docs/intel/tiktok/<slug>/. The sources are remembered in
+//     [--source-limit <n>] [--comment-limit <n>] [--sessions <n>] [--rate <n>] [--concurrency <n>] [--out <dir>] [--no-comments] [--no-download]
+//   <slug> names the output dir docs/intel/tiktok/<slug>/ (from the repo root); --out names another one. The sources are remembered in
 //   videos.out.json, so a rerun needs only the slug; sources given again are added to the saved ones.
 //   --hashtag-min-plays drops a hashtag page's videos below that many plays (default 10000); a
 //   user's videos and a keyword's results have no floor. Videos with a non-English caption are
@@ -50,7 +50,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 //   ISP_PROXY_COUNT  how many slots the pool has (default 1).
 //   SECRETS_MANAGER_STATE_PATH  where the secrets-manager store and profiles are (default ~/.config/secrets-manager).
 //
-// Output under docs/intel/tiktok/<slug>/:
+// Output under docs/intel/tiktok/<slug>/, or the --out directory:
 //   videos.jsonl          one video per line, TikTok's full item plus a `sources` array of the
 //                         hashtag / user pages and keyword searches that surfaced it; deduplicated
 //                         by id, newest first.
@@ -177,12 +177,13 @@ export function parseArgs(argv) {
     else if (is(a, "--rate")) out.rate = posInt(value(a, it), "--rate");
     else if (is(a, "--concurrency")) out.concurrency = posInt(value(a, it), "--concurrency");
     else if (is(a, "--hashtag-min-plays")) out.minPlays.hashtag = count(value(a, it), "--hashtag-min-plays");
+    else if (is(a, "--out")) out.dir = value(a, it);
     else if (a === "--no-comments") out.comments = false;
     else if (a === "--no-download") out.download = false;
     else if (a.startsWith("--")) throw new Error(`Unknown option ${a}`);
     else positional.push(a);
   }
-  return { slug: positional[0], sources, ...out };
+  return { slug: positional[0], sources, dir: join("docs", "intel", "tiktok", positional[0] ?? ""), ...out };
 }
 
 // The query params of a request the page itself sent, without its signatures, or null when the
@@ -683,7 +684,7 @@ const ispCount = () => Math.max(1, Number(process.env.ISP_PROXY_COUNT) || 1);
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const dir = join("docs", "intel", "tiktok", args.slug ?? ""); // run from the repo root
+  const dir = args.dir;
   const progressPath = join(dir, "videos.out.json");
   const videosPath = join(dir, "videos.jsonl");
   const progress = args.slug ? openProgress(await loadJson(progressPath, null), args.sources, args.commentLimit) : null;
@@ -698,7 +699,7 @@ async function main() {
         "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/scripts/fetch-tiktok-mentions.mjs <slug> " +
         "[--hashtag <name>]... [--user <handle>]... [--keyword <words>]... " +
         "[--hashtag-min-plays <n>] " +
-        "[--source-limit <n>] [--comment-limit <n>] [--sessions <n>] [--concurrency <n>] [--no-comments] [--no-download]",
+        "[--source-limit <n>] [--comment-limit <n>] [--sessions <n>] [--concurrency <n>] [--out <dir>] [--no-comments] [--no-download]",
     );
     process.exit(1);
   }

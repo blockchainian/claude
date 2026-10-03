@@ -111,11 +111,22 @@ The account logged in in Chrome is a side account (joinupcomment).
 
 ## TikTok and Instagram
 
-- Video list with dates and plays:
-  `$G yt --flat-playlist --print "%(upload_date)s %(view_count)s %(title)s" "https://www.tiktok.com/@<account>"`
-  Captions in this listing are cut at 70 characters, so a count of posts
-  carrying a tag or a mention is a floor. Plays are today's cumulative totals,
-  and deleted or private videos are absent.
+- An account's videos, every one with its date, full caption and counts
+  (plays, likes, comments, shares), through the fetch-tiktok-mentions skill
+  next to this one (it paces itself; it is not called through the gate):
+  `node <this skill>/../fetch-tiktok-mentions/scripts/fetch-tiktok-mentions.mjs <account> --user <account> --out <work>/raw/tiktok --no-comments --no-download`
+  It writes `<work>/raw/tiktok/videos.jsonl`, one video per line, newest
+  first (`createTime`, `desc`, `stats`), and continues when run again: rerun
+  it until it exits 0.
+  - Only videos with an English caption are kept. Deleted or private videos
+    are absent, and plays are today's cumulative totals.
+  - `(incomplete)` after the account in its last lines means the timeline
+    was not read to the end: it stopped at 1,000 videos (give
+    `--source-limit <n>` for more), or the TikTok account it reads through
+    is logged out. What is still missing is a gap, with the date of the
+    oldest video it reached.
+  - "Cannot find package": run
+    `npm install --prefix <this skill>/../fetch-tiktok-mentions/scripts` once.
 - `opencli tiktok` and `opencli instagram` are not logged in: Instagram data
   comes from the press and the archive only.
 

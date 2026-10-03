@@ -17,10 +17,11 @@ node \
   "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/scripts/fetch-tiktok-mentions.mjs" \
   <slug> [--hashtag <name>]... [--user <handle>]... [--keyword <words>]... \
   [--hashtag-min-plays <n>] \
-  [--source-limit <n>] [--comment-limit <n>] [--sessions <n>] [--rate <n>] [--concurrency <n>] [--no-comments] [--no-download]
+  [--source-limit <n>] [--comment-limit <n>] [--sessions <n>] [--rate <n>] [--concurrency <n>] [--out <dir>] [--no-comments] [--no-download]
 ```
 
-- `slug` names the output dir `docs/intel/tiktok/<slug>/`.
+- `slug` names the output dir `docs/intel/tiktok/<slug>/`. `--out <dir>` writes to that directory
+  instead (the run then need not start from the repo root).
 - `--hashtag` and `--user` are repeatable; a name, `#tag` / `@handle`, or the tiktok.com url all work.
   The sources are saved, so a rerun needs only the slug; sources given later are added.
 - `--keyword` is repeatable too: the words of one TikTok video search (quote several words). The
@@ -84,7 +85,7 @@ sessions share the slot.
 
 ## Output
 
-Under `docs/intel/tiktok/<slug>/`:
+Under `docs/intel/tiktok/<slug>/`, or the `--out` directory:
 
 - `videos.jsonl`: one video per line, TikTok's full item (`id, desc, createTime, author, stats,
   challenges, music, textExtra, video, ...`) plus `sources`, the pages that surfaced it
