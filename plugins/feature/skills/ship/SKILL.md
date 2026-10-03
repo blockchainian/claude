@@ -16,7 +16,7 @@ not implement, and it does not drive UI. Every hour it spends editing the branch
 backend lane cannot merge onto it, and every UI step it drives by hand is a step a UX check would
 have answered in one background call.
 
-This skill is tuned for Opus 4.8 medium (`/model claude-opus-4-8`, `/effort medium`) in a fresh
+This skill is tuned for Opus 5.5 medium (`/model claude-opus-5-5`, `/effort medium`) in a fresh
 session that reads `plan.md`; if the session differs, say so in one line and continue. A phase
 boundary is a task boundary, and the planning turn's stale tool output would cost reads without
 helping. Within the phase, never `/clear` for size. Effort is set once at session start. If one problem needs more, tell the user to raise
