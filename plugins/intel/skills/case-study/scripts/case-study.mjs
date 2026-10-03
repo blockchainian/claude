@@ -397,12 +397,13 @@ const OMISSION = /…+|\.{3,}|\[[^\]]*\]/
 const LETTER = /[\p{L}\p{N}]/u
 const DISTINCT = 15 // letters: words shorter than this turn up in sources that never said them
 const AROUND = 200 // characters of the source shown on each side of the words found
+const BETWEEN = 4 // words a source may have between two of the words looked up: a filler, a caption's timing
 
 function plain(text) {
-  // A text's letters and digits in lower case, every run of anything else as one space, apostrophes dropped, markup
-  // and caption timings blanked; `at` holds each kept character's place in the text.
+  // A text's letters and digits in lower case, every run of anything else as one space, apostrophes dropped, markup,
+  // link addresses and caption timings blanked; `at` holds each kept character's place in the text.
   const blank = whole => ' '.repeat(whole.length)
-  const clean = text.replace(/<[^>]*>/g, blank).replace(/^.*-->.*$/gm, blank)
+  const clean = text.replace(/<[^>]*>/g, blank).replace(/^.*-->.*$/gm, blank).replace(/(?<=\])\([^()\s]*\)/g, blank)
     .replace(/&(?:#39|#x27|apos|rsquo|lsquo|#8217|#8216);/gi, whole => "'".padEnd(whole.length, '\0'))
     .replace(/&(?:quot|amp|nbsp|ldquo|rdquo|#\d+|#x[0-9a-f]+);/gi, blank)
   const out = []
@@ -421,17 +422,37 @@ function plain(text) {
   return { clean, text: out.join(''), at }
 }
 
-function passageOf(words, source) {
+function spanApart(piece, source, from) {
+  // Where a piece's words stand in the source in order, with at most BETWEEN other words between two of them:
+  // [start, end) in the source's plain text, or null.
+  source.words ??= [...source.text.matchAll(/\S+/g)].map(found => ({ word: found[0], at: found.index }))
+  const wanted = piece.split(' ')
+  const { words } = source
+  for (let start = words.findIndex(w => w.at >= from); start >= 0 && start < words.length; start += 1) {
+    if (words[start].word !== wanted[0]) continue
+    let here = start
+    const whole = wanted.slice(1).every(word => {
+      const next = words.slice(here + 1, here + 2 + BETWEEN).findIndex(w => w.word === word)
+      here += next + 1
+      return next >= 0
+    })
+    if (whole) return [words[start].at, words[here].at + words[here].word.length]
+  }
+  return null
+}
+
+function passageOf(words, source, apart = false) {
   // The source's text around the words of a quotation, its pieces (the parts between omissions) found in order;
-  // null when a piece is not there.
+  // null when a piece is not there. With `apart`, a piece's words may have a few others between them.
   let from = 0
   let first = -1
   let last = -1
   for (const piece of words.split(OMISSION).map(part => plain(part).text.trim()).filter(Boolean)) {
-    const found = source.text.indexOf(piece, from)
-    if (found < 0) return null
-    if (first < 0) first = found
-    from = found + piece.length
+    const at = source.text.indexOf(piece, from)
+    const span = at >= 0 ? [at, at + piece.length] : apart && spanApart(piece, source, from)
+    if (!span) return null
+    if (first < 0) first = span[0]
+    from = span[1]
     last = from - 1
   }
   if (first < 0) return null
@@ -462,11 +483,11 @@ export function quotes(work, chapter) {
   const { sentences, ordered, anywhere, texts, urls } = sourced(work, chapter)
   const plains = {}
   const sources = label => (plains[label] ??= texts(label).map(saved => ({ file: saved.file, ...plain(saved.text) })))
-  const lookUp = (words, labels) => {
+  const lookUp = (words, labels, apart = false) => {
     for (const label of labels) {
       for (const source of sources(label)) {
-        const passage = passageOf(words, source)
-        if (passage) return { label, file: source.file, passage }
+        const passage = passageOf(words, source, apart)
+        if (passage) return { label, file: source.file, passage, apart }
       }
     }
     return null
@@ -484,13 +505,14 @@ export function quotes(work, chapter) {
     for (const [, quote = '', original, reported] of found) {
       const looked = (reported || original || quote).trim()
       const row = { quote, looked, labels: cited, sentence: sentence.trim(), verdict: 'not found' }
-      const here = lookUp(looked, cited)
-      const there = here || (plain(looked).text.length >= DISTINCT && lookUp(looked, ordered.filter(label => !cited.includes(label))))
+      const distinct = plain(looked).text.length >= DISTINCT
+      const here = lookUp(looked, cited) || (distinct && lookUp(looked, cited, true))
+      const there = here || (distinct && lookUp(looked, ordered.filter(label => !cited.includes(label))))
       if (here) Object.assign(row, { verdict: 'found', ...here })
       else if (there) Object.assign(row, { verdict: 'in another source', ...there })
       else if (!cited.some(label => sources(label).length)) row.verdict = 'no saved text'
       rows.push(row)
-      out.push(`* ${row.verdict} | ${looked} | ${row.file ? `${row.label}, ${row.file}` : named ? cited.join(', ') : 'its sentence names no source'}${row.passage ? ` | ${row.passage}` : ''}`)
+      out.push(`* ${row.verdict}${row.apart ? ', with other words between' : ''} | ${looked} | ${row.file ? `${row.label}, ${row.file}` : named ? cited.join(', ') : 'its sentence names no source'}${row.passage ? ` | ${row.passage}` : ''}`)
     }
   }
   const tally = verdict => rows.filter(row => row.verdict === verdict).length
@@ -501,6 +523,7 @@ export function quotes(work, chapter) {
     `# Quotations in drafts/${chapter}.md looked up in the saved text of their sources\n\n` +
     `${result.quotations} quotations: ${result.found} found, ${result.elsewhere} in another source, ${result.missing} not found, ${result.unsaved} with no saved text.\n` +
     'A row is: verdict | the words looked up | the source and file they are in, or the sources the sentence names | the passage around them.\n' +
+    `"with other words between": the source has the words in this order with up to ${BETWEEN} others between two of them.\n` +
     'The words looked up are a quotation, the source\'s words in ⟦ ⟧ after a translated one, or the source\'s words in ⟦ ⟧ after reported speech.\n' +
     out.join('\n') + '\n\n# Sentences that name a source and carry none of its words\n\n' +
     wordless.map(({ sentence, labels }) => `- ${sentence} | ${labels.join(', ')}`).join('\n') +

@@ -81,6 +81,10 @@ Per row:
   bends what was said, whether a translation or a report of it is faithful
   to the words in ⟦ ⟧. The source's date is in the last part of the file.
   Open the source only when the passage does not show the speaker.
+- `found, with other words between`: the source has the words in that order
+  with a few others between them (a filler, a caption's timing). Judged from
+  the passage like `found`; a finding only when the words left out change
+  what was said.
 - `in another source`: the named source does not have the words and the one
   shown does. That is a wrong outlet, unless the passage shows it quoting the
   named one.
