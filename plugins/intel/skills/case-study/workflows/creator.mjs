@@ -4,7 +4,7 @@ export const meta = {
   name: 'case-study-creator',
   description: 'Research one creator into a reviewed sourced draft: scouts that follow each other\'s leads, parallel readers, numbers, chapter writers, adversarial review and fixes per chapter, pipelined',
   phases: [
-    { title: 'Scout', detail: 'one scout per lead, a few minutes each; the leads they return get scouts of their own, up to 24; the two numbers agents start with them', model: 'sonnet' },
+    { title: 'Scout', detail: 'one scout per lead, a few minutes each; every lead they return gets a scout of its own, until none returns a lead; the two numbers agents start with them', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources, started as the scouts return', model: 'sonnet' },
     { title: 'Check sources', detail: 'sources lens on Opus, 25 sources per reviewer, after the merge and before any chapter is written', model: 'opus' },
     { title: 'Write', detail: 'one writer per chapter, then the introduction and the reasoning chapter', model: 'sonnet' },
@@ -13,7 +13,7 @@ export const meta = {
   ],
 }
 
-// args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer }
+// args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer, maxScouts }
 // skill is the absolute path of the case-study skill folder; product, seeds and
 // caps may be empty strings. done names the stages whose files are already in the work directory and are not run
 // again: 'scout' (the sources are known: args.sources, the output of `case-study.mjs sources <work>`, is read again
@@ -45,12 +45,13 @@ const merge = label => agent(`Run exactly this command and return its output, no
   { label, model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 
 phase('Scout')
-// A scout is a few minutes of work: one lead, a few searches, a dozen sources at most. The search is as wide as
-// before because there are many scouts and because each returns the leads it did not follow, which get scouts of
-// their own. The seed leads are the rows of "Scout leads" in the type file.
+// A scout is a few minutes of work: one lead, a few searches, a dozen sources at most. Nothing is searched less
+// for it: a scout returns what its lead still holds and every other lead it saw, each gets a scout of its own,
+// and the scouting ends when no scout returns a lead. The seed leads are the rows of "Scout leads" in the type file.
 const SEEDS = ['interviews', 'own-posts', 'documents', 'press-at-the-time', 'press-home', 'trade-press', 'later-profiles', 'books-and-films', 'people', 'filings', 'data-and-research', 'criticism', 'today']
-const MAX_SCOUTS = 24
-const LEADS_EACH = 3
+const SCOUTS_EXPECTED = 24 // for the caps share: how many there will be is not known when the first ones start
+// A guard against a search that never ends, far above what a subject needs; args.maxScouts sets another.
+const MAX_SCOUTS = A.maxScouts || 150
 const FOUND = { type: 'object', required: ['sources'], properties: {
   sources: { type: 'array', items: { type: 'object', required: ['url', 'outlet'],
     properties: { url: { type: 'string' }, outlet: { type: 'string' }, year: { type: 'string' }, kind: { type: 'string' }, why: { type: 'string' } } } },
@@ -78,6 +79,7 @@ const read = batch => {
     { label: name.replace('-', ':'), phase: 'Read', ...SONNET }))
 }
 const found = sources => {
+  const before = urls.length
   for (const s of sources) {
     const key = s.url.split('#')[0].replace(/[?&]utm_[^&]*/g, '').replace(/\/$/, '')
     if (seen.has(key)) continue
@@ -86,26 +88,30 @@ const found = sources => {
     unread.push(s)
   }
   while (unread.length >= 8) read(unread.splice(0, 8))
+  return urls.length - before
 }
 
-// A lead is searched once: two scouts that name it in the same words get one scout. Past the limit a lead is
-// not followed, and the run reports it.
+// A lead is searched once: two scouts that name it in the same words get one scout. A branch ends where a scout
+// found no source that was new: its leads are not followed. The run reports those, and the leads the guard left.
 const leadKey = lead => lead.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const given = new Map(SEEDS.map(seed => [seed, seed]))
 const leadsDropped = []
+const leadsDry = []
 let scouts = 0
 const scout = (name, lead) => {
   const others = [...given.values()].filter(other => other !== lead)
   return agent(
-    `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your scout name: ${name}. Your lead: ${lead}${SEEDS.includes(lead) ? ' (see "Scout leads" in the type file)' : ''}.${share(MAX_SCOUTS)}` +
+    `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your scout name: ${name}. Your lead: ${lead}${SEEDS.includes(lead) ? ' (see "Scout leads" in the type file)' : ''}.${share(SCOUTS_EXPECTED)}` +
     `\nClaim a source before you open it: ${S}/scripts/case-study.mjs claim "${WORK}" ${name} <url>...` +
     `\nLeads other scouts have, which are not yours to search or to return: ${others.join('; ')}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}`,
     { label: `scout:${name}`, phase: 'Scout', schema: FOUND, ...SONNET }).then(result => {
     if (!result) return
-    found(result.sources)
+    const fresh = found(result.sources)
+    const dry = fresh === 0 && !SEEDS.includes(lead)
     const followers = []
-    for (const next of (result.leads || []).slice(0, LEADS_EACH)) {
+    for (const next of result.leads || []) {
       if (given.has(leadKey(next))) continue
+      if (dry) { leadsDry.push(next); continue }
       if (scouts >= MAX_SCOUTS) { leadsDropped.push(next); continue }
       given.set(leadKey(next), next)
       scouts += 1
@@ -121,7 +127,7 @@ else if (!READ_DONE) {
 }
 if (unread.length) read(unread.splice(0))
 if (!READ_DONE) log(SCOUT_DONE ? `known sources: ${urls.length}, ${readers.length} reader batches`
-  : `scouts: ${scouts}, ${urls.length} distinct sources, ${readers.length} reader batches${leadsDropped.length ? `; ${leadsDropped.length} leads not followed (limit of ${MAX_SCOUTS} scouts): ${leadsDropped.join('; ')}` : ''}`)
+  : `scouts: ${scouts}, ${urls.length} distinct sources, ${readers.length} reader batches${leadsDry.length ? `; ${leadsDry.length} leads of scouts that found nothing new, not followed: ${leadsDry.join('; ')}` : ''}${leadsDropped.length ? `; STOPPED AT THE GUARD of ${MAX_SCOUTS} scouts, ${leadsDropped.length} leads not followed: ${leadsDropped.join('; ')}` : ''}`)
 
 phase('Read')
 await Promise.all(readers)
@@ -189,4 +195,4 @@ const tailChains = FROM_CHAPTERS.map(file => chain(file, bodyWritten, bodyFixed)
 const chapters = await Promise.all([...bodyChains, ...tailChains])
 const merged = await merge('merge:fix')
 
-return { scouted: urls.length, scouts, leadsDropped, batches: readers.length, sources: (await sourcesReviewed).filter(Boolean), chapters, merged }
+return { scouted: urls.length, scouts, leadsDry, leadsDropped, batches: readers.length, sources: (await sourcesReviewed).filter(Boolean), chapters, merged }
