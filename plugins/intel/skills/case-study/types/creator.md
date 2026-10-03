@@ -21,8 +21,8 @@ introduction and in the money chapter, and their own account of their method sta
    they work. For a subject whose platform is text, their posts are the primary
    material: read the posts themselves, not summaries of them.
 3. Leaked or internal documents: production handbooks, onboarding documents.
-4. Press from the time of each growth phase, found with date-bounded searches,
-   kept apart from later profiles. Include press in the subject's home country
+4. Press from the time of each growth phase, found with the two news commands
+   over the years of that phase, kept apart from later profiles. Include press in the subject's home country
    and language.
 5. Creator-industry trade press.
 6. Books, biographies and documentaries about the subject.
@@ -40,8 +40,8 @@ Four scouts search in parallel, one lane each:
 
 | Lane | Source types |
 |---|---|
-| own-words | 1, 2, and the books the subject wrote |
-| press | 4, 5, and the large later profiles |
+| own-words | 1, 2, and the books the subject wrote. Interviews and podcasts: the video search, with every name the subject goes by |
+| press | 4, 5, and the large later profiles. Starts with both news commands over every name the subject goes by, from the first growth year to today |
 | business-and-people | 3, 6, 7, 9 |
 | criticism-and-data | 10, 11, and what the subject does today |
 

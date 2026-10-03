@@ -7,8 +7,12 @@ subject, the type file, your lane, the work directory and the tool list.
 Read `references/evidence.md` ("Who cannot be evidence") and
 `references/tools.md` next to this brief's folder, and the type file's source
 types. Then search your lane only, as widely as the tools allow: several
-queries per growth phase, date-bounded searches for press from the time, the
-subject's home country and language, and the leads inside what you find.
+queries per growth phase, the subject's home country and language, and the
+leads inside what you find. Press from the time comes from the two news
+commands in the tool list, asked by name and by year: run both for every name
+the subject goes by before any other press search, save the output under
+`raw/`, and pick what to open from it. Videos are searched with the video
+search command, with those names.
 
 Append every source you accept to `notes/scout-<lane>.md` as you go (URL,
 outlet, year, type, one line; see "Writing as you go" in the evidence rules).
