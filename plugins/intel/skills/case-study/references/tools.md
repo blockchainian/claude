@@ -19,8 +19,8 @@ calls and failures per command.
   Not for news: news is the two news commands below.
 - Google News by date range: `$G gnews "<name>" 2023-01-01 2023-12-31`
   (without dates: 2017 to today), the name without quotes. One JSON article
-  per line, oldest first: `url` (Google's own link to the article, which
-  `$G read` opens), `domain`, `date`, `title`.
+  per line, oldest first: `url` (the article's own address), `domain`,
+  `date`, `title`.
 - World news by date range, GDELT (news sites only, little on a creator the
   press has not written about):
   `$G gdelt "<name>" "<another name>" 2023-01-01 2023-12-31` (up to 100
