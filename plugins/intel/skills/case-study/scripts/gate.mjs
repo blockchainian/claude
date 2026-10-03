@@ -325,28 +325,48 @@ export function gdelt(names, from, to, { data = DATA, state = STATE, project = p
 
 const xmlText = s => (s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&')
 
-// The Google News articles for `name` between two days, oldest first: { url, domain, date, title }; url is Google's
-// own link to the article. One search answers with a part of what it has, and a narrower one with more of it, so every
+// The article's own address behind one of Google News's links: Google's page for the link carries a signature, and its
+// batchexecute answers with the address for that signature. A link Google gives neither for is returned as it is.
+function articleAddress(link, call) {
+  const id = (link.match(/^https:\/\/news\.google\.com\/(?:rss\/)?(?:articles|read)\/([\w-]+)/) || [])[1]
+  if (!id) return link
+  const page = call(`https://news.google.com/rss/articles/${id}`)
+  if (page.status !== 200) throw Error(`Google News answered ${page.status} for the address of an article`)
+  const [signature, time] = ['sg', 'ts'].map(k => (page.body.match(new RegExp(`data-n-a-${k}="([^"]+)"`)) || [])[1])
+  if (!signature || !time) return link
+  const answer = call('https://news.google.com/_/DotsSplashUi/data/batchexecute', JSON.stringify([[['Fbv4je',
+    `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${time},"${signature}"]`]]]))
+  if (answer.status !== 200) throw Error(`Google News answered ${answer.status} for the address of an article`)
+  try {
+    return JSON.parse(JSON.parse(answer.body.split('\n').find(line => line.startsWith('[['))).find(part => part[1] === 'Fbv4je')[2])[1] || link
+  } catch { return link }
+}
+
+// The Google News articles for `name` between two days, oldest first: { url, domain, date, title }; url is the
+// article's own address, not Google's link to it. One search answers with a part of what it has, and a narrower one with more of it, so every
 // week (Monday to Sunday) is asked for on its own; a week is held once it was asked for, the running one once it ended.
 export function gnews(name, from, to, { data = DATA, state = STATE, now = new Date(), gap = GNEWS_GAP,
-  call = url => { const r = run('curl', ['-s', '-m', '30', '-w', '\n%{http_code}', url]); const cut = (r.stdout || '').lastIndexOf('\n'); return { status: Number(r.stdout.slice(cut + 1)), body: r.stdout.slice(0, cut) } } } = {}) {
+  call = (url, form) => { const r = run('curl', ['-sL', '-m', '30', '-w', '\n%{http_code}', ...(form ? ['--data-urlencode', `f.req=${form}`] : []), url]); const cut = (r.stdout || '').lastIndexOf('\n'); return { status: Number(r.stdout.slice(cut + 1)), body: r.stdout.slice(0, cut) } } } = {}) {
   const [start, end, yesterday] = dayRange(from, to, GDELT_START, now)
   mkdirSync(state, { recursive: true })
   return withLock(join(state, 'gnews.lock'), () => {
     const a = archive('gnews', name, data)
     const mondays = new Set()
+    const ask = (...request) => { if (gap) paced('gnews', gap, state); return call(...request) }
+    const addresses = new Map()
+    const address = link => addresses.get(link) || addresses.set(link, articleAddress(link, ask)).get(link)
     for (const [x, y] of missingDays(a.covered, start, end)) {
       for (let d = addDays(x, -((new Date(`${x}T00:00:00Z`).getUTCDay() + 6) % 7)); d <= y; d = addDays(d, 7)) mondays.add(d)
     }
     for (const monday of [...mondays].sort()) {
-      if (gap) paced('gnews', gap, state)
       const query = `${String(name).trim()} after:${monday} before:${addDays(monday, 7)}`
-      const r = call(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`)
+      const r = ask(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`)
       if (r.status !== 200) throw Error(`Google News answered ${r.status} for the week of ${monday}; the weeks before it are kept`)
       const found = [...r.body.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(([, item]) => {
         const field = tag => xmlText((item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)) || [])[1])
         const published = new Date(field('pubDate'))
-        return { url: field('link'), domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? monday : day(published), title: field('title') }
+        const link = field('link')
+        return { url: link && address(link), domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? monday : day(published), title: field('title') }
       }).filter(article => article.url)
       const sunday = addDays(monday, 6)
       a.add(found, monday, sunday > yesterday ? yesterday : sunday)

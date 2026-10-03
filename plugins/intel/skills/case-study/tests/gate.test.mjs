@@ -141,7 +141,7 @@ test('gdelt reads the running day again every time, keeps the years done before 
   rmSync(data, { recursive: true, force: true })
 })
 
-test('gnews asks Google News for each week it lacks, keeps the articles, and stops at the first refusal', () => {
+test('gnews asks Google News for each week it lacks, keeps the articles under their own addresses, and stops at the first refusal', () => {
   const data = mkdtempSync(join(tmpdir(), 'data-'))
   const item = (title, link, date, source) => `<item><title>${title}</title><link>${link}</link><pubDate>${date}</pubDate><source url="https://www.${source}">X</source></item>`
   const weeks = {
@@ -149,19 +149,38 @@ test('gnews asks Google News for each week it lacks, keeps the articles, and sto
     '2025-06-09': item('Second - B', 'https://news.google.com/rss/articles/two', 'Wed, 11 Jun 2025 07:00:00 GMT', 'b.example') + item('Again - A', 'https://news.google.com/rss/articles/one', 'Tue, 03 Jun 2025 07:00:00 GMT', 'a.example'),
   }
   const asked = []
-  const call = url => { const week = decodeURIComponent(url).match(/after:([\d-]+) before:([\d-]+)/); asked.push(`${week[1]} ${week[2]}`); return { status: 200, body: `<rss>${weeks[week[1]] || ''}</rss>` } }
+  const resolved = []
+  // Google's page for a link carries a signature, and its batchexecute answers with the article's address for it
+  const call = (url, form) => {
+    const link = url.match(/rss\/articles\/(\w+)$/)
+    if (link) return { status: 200, body: link[1] === 'bare' ? '<c-wiz></c-wiz>' : `<c-wiz><div jscontroller="x" data-n-a-sg="sig-${link[1]}" data-n-a-ts="17"></div></c-wiz>` }
+    if (url.endsWith('/batchexecute')) {
+      const [, id, ts, sg] = JSON.parse(form)[0][0][1].match(/"(\w+)",(\d+),"sig-(\w+)"\]$/)
+      assert.deepEqual([ts, sg], ['17', id])
+      resolved.push(id)
+      return { status: 200, body: `)]}'\n\n${JSON.stringify([['wrb.fr', 'Fbv4je', JSON.stringify(['garturlres', `https://${id}.example/story?a=1&b=2`, 1])], ['di', 11]])}\n` }
+    }
+    const week = decodeURIComponent(url).match(/after:([\d-]+) before:([\d-]+)/); asked.push(`${week[1]} ${week[2]}`); return { status: 200, body: `<rss>${weeks[week[1]] || ''}</rss>` }
+  }
   const options = { data, state, call, now: new Date('2026-10-03T12:00:00Z'), gap: 0 }
   assert.deepEqual(gate.gnews('Kobeissi Letter', '2025-06-04', '2025-06-12', options), [
-    { url: 'https://news.google.com/rss/articles/two', domain: 'b.example', date: '2025-06-11', title: 'Second - B' },
+    { url: 'https://two.example/story?a=1&b=2', domain: 'b.example', date: '2025-06-11', title: 'Second - B' },
   ], 'only the days asked for')
   assert.deepEqual(asked, ['2025-06-02 2025-06-09', '2025-06-09 2025-06-16'], 'whole weeks, Monday to Monday')
   assert.deepEqual(gate.gnews('kobeissi letter', '2025-06-02', '2025-06-15', options).map(a => a.title), ['Stocks & bonds - A', 'Second - B'], 'one article per link, oldest first')
   assert.equal(asked.length, 2, 'weeks already held are not asked for again')
+  assert.deepEqual(resolved, ['one', 'two'], 'a link is resolved once')
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')), { name: 'kobeissi letter', covered: [['2025-06-02', '2025-06-15']], count: 2 })
   let n = 0
   const refusing = { ...options, call: url => { asked.push('x'); return n++ ? { status: 429, body: '' } : { status: 200, body: '<rss></rss>' } } }
   assert.throws(() => gate.gnews('Kobeissi Letter', '2025-06-02', '2025-07-06', refusing), /429/)
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')).covered, [['2025-06-02', '2025-06-22']], 'the week read before the refusal is kept')
+  weeks['2025-06-23'] = item('No signature - C', 'https://news.google.com/rss/articles/bare?oc=5', 'Tue, 24 Jun 2025 07:00:00 GMT', 'c.example')
+  assert.deepEqual(gate.gnews('Kobeissi Letter', '2025-06-23', '2025-06-29', options).map(a => a.url), ['https://news.google.com/rss/articles/bare?oc=5'], 'a link Google gives no address for stays as it is')
+  weeks['2025-06-30'] = item('Third - D', 'https://news.google.com/rss/articles/three', 'Tue, 01 Jul 2025 07:00:00 GMT', 'd.example')
+  const unresolved = { ...options, call: (url, form) => url.includes('/rss/articles/') ? { status: 429, body: '' } : call(url, form) }
+  assert.throws(() => gate.gnews('Kobeissi Letter', '2025-06-30', '2025-07-06', unresolved), /429/)
+  assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')).covered, [['2025-06-02', '2025-06-29']], 'a week whose links were not resolved is asked for again')
   rmSync(data, { recursive: true, force: true })
 })
 
