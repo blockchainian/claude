@@ -279,6 +279,20 @@ test('quotes looks up every quotation of a chapter in the saved text of the sour
   assert.ok(file.includes('- Forbes 2026a (2026-03-01): raw/forbes.html') && file.includes('- Variety 2021: raw/variety.vtt'), 'every label the chapter names is listed with its saved files, and with the date in its notes heading when it has one')
   assert.ok(file.includes('\n- 她 2019 年搬到洛杉矶（Variety 2021）。 | Variety 2021\n') && !file.includes('- 没有来源的一句'), 'the sentences with no words to look up are listed with the sources they name')
   assert.deepEqual(cs.findings(dir, '04'), [], 'worklist rows are not findings')
+  assert.ok(report.parts === 1 && !existsSync(join(dir, 'review', 'quotations-04-1.md')), 'a chapter one reviewer can take is not cut')
+
+  const cut = cs.quotes(dir, '04', 3)
+  assert.equal(cut.parts, 3, 'eight items at three to a reviewer are three parts')
+  const parts = [1, 2, 3].map(n => read(dir, 'review', `quotations-04-${n}.md`))
+  assert.ok(parts.every((part, i) => part.startsWith(`# Quotations in drafts/04.md looked up in the saved text of their sources: part ${i + 1} of 3\n`)))
+  for (const words of ['Is it long?', 'words off the top', 'doesn’t watch', 'a specialist in', '我每天发三条', 'posts five', 'so cringey', '她 2019 年搬到洛杉矶']) {
+    assert.equal(parts.filter(part => part.includes(`| ${words}`) || part.includes(`- ${words}`)).length, 1, `${words} is in one part only`)
+  }
+  assert.ok(parts[0].includes('* found | Is it long?') && parts[0].includes('* found | doesn’t watch'), 'the parts follow the chapter\'s order, and a sentence\'s rows stay together')
+  assert.ok(parts[0].includes('- Forbes 2026a (2026-03-01)') && !parts[0].includes('- Insider 2020'), 'a part lists the sources its own sentences name')
+  assert.equal(read(dir, 'review', 'quotations-04.md'), file, 'the whole chapter\'s worklist is written as before')
+  cs.quotes(dir, '04')
+  assert.ok(!existsSync(join(dir, 'review', 'quotations-04-1.md')), 'the parts of an earlier run do not outlive it')
 })
 
 test('check rejects a sources.json that is not a url-to-label object', () => {
