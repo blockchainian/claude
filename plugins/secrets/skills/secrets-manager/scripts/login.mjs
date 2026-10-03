@@ -233,8 +233,9 @@ async function reachPasswordPage(page, cred, { assist = false, timeoutS = 20 } =
       if (await hasPasswordField(page)) return;
       continue;
     }
-    if (await tryFill(page, IDENTIFIER_SELECTOR, cred.email)) {
-      await clickNext(page);
+    const identifierField = await tryFill(page, IDENTIFIER_SELECTOR, cred.email);
+    if (identifierField) {
+      await submitField(page, identifierField);
       await page.waitForTimeout(2000);
       continue;
     }
@@ -916,9 +917,10 @@ async function driveGoogleChallenges(surface, cred, { assist = false, done, time
         // for a fresh code rather than re-submitting the same one; a truly stale secret surfaces as the
         // wrong-code banner (handled above) instead of spinning here.
         const code = computeTotp(cred.totp_secret);
-        if (code !== lastTotp && (await tryFill(surface, "input[name=totpPin]", code))) {
+        const totpField = code !== lastTotp ? await tryFill(surface, "input[name=totpPin]", code) : null;
+        if (totpField) {
           lastTotp = code;
-          await clickNext(surface);
+          await submitField(surface, totpField);
         } else {
           progressed = false;
         }
@@ -1258,17 +1260,17 @@ async function enterPhoneCode(page, code) {
   return true;
 }
 
-// Fill the first VISIBLE matching field if it is empty; return whether we filled it. Uses
+// Fill the first VISIBLE matching field if it is empty; return the field, or null when nothing was filled. Uses
 // waitForSelector(state: visible) rather than .first() — Google renders a hidden decoy input
 // before the real one, and .first() grabs the decoy.
 async function tryFill(surface, selector, value, timeout = 2500) {
   try {
     const el = await surface.waitForSelector(selector, { state: "visible", timeout });
-    if (!el || (await el.inputValue())) return false;
+    if (!el || (await el.inputValue())) return null;
     await el.fill(value);
-    return true;
+    return el;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -1332,6 +1334,20 @@ async function hasWrongCredential(surface) {
 // and the page would never advance. Here we (re)fill only when the value differs from the
 // credential, then always click Next. Returns whether a visible password field was found (i.e. we
 // were on the password step).
+// Submit a filled Google field with Enter, the one submit that carries no label: Google's Next
+// button has no stable id and its text follows the page language. When the page ignores Enter (the
+// field is still on screen a moment later) fall back to the labelled button.
+async function submitField(surface, el) {
+  try {
+    await el.press("Enter");
+    await surface.waitForTimeout(800);
+    if (!(await el.isVisible())) return;
+  } catch {
+    /* the field left the page with the navigation, or has no keyboard: try the button */
+  }
+  await clickNext(surface);
+}
+
 export async function submitPassword(surface, password) {
   let el;
   try {
@@ -1345,7 +1361,7 @@ export async function submitPassword(surface, password) {
   } catch {
     return false;
   }
-  await clickNext(surface);
+  await submitField(surface, el);
   return true;
 }
 
@@ -1366,7 +1382,7 @@ export async function submitIdentifier(surface, email) {
   } catch {
     return false;
   }
-  await clickNext(surface);
+  await submitField(surface, el);
   return true;
 }
 
