@@ -95,14 +95,14 @@ const sourcesReviewed = DONE.includes('sources') ? Promise.resolve([]) : paralle
 const sourcesMerged = DONE.includes('sources') ? Promise.resolve() : sourcesReviewed.then(() => merge('merge:sources'))
 
 const write = file => agent(
-  `${COMMON}\nYou are a draft writer. Follow ${S}/briefs/write.md. Your chapter file: md/${file}.md (see the chapter table in the type file).${file === '10' && A.product ? `\nThe product for this chapter: ${A.product}` : ''}`,
+  `${COMMON}\nYou are a draft writer. Follow ${S}/briefs/write.md. Your chapter file: drafts/${file}.md (see the chapter table in the type file).${file === '10' && A.product ? `\nThe product for this chapter: ${A.product}` : ''}`,
   { label: `write:${file}`, phase: 'Write', ...SONNET })
 // The fixer is a bounded edit under listed findings; a Codex model does it as well as Sonnet for a fraction of the
 // cost (pilot on brooke-monk chapter 04), so it runs there through the script, driven by a Haiku agent that only
 // saves the prompt and runs the command. The brief makes an interrupted fixer resume, so a run cut off by the
 // agent's command timeout is run again. args.fixer names a Claude model (sonnet, opus, haiku) to keep it here.
 const FIXER = A.fixer || 'gpt-6-luna'
-const fixerPrompt = file => `${COMMON}\nYou are a fixer. Follow ${S}/briefs/fix.md. Your chapter file: md/${file}.md (NN = ${file}).`
+const fixerPrompt = file => `${COMMON}\nYou are a fixer. Follow ${S}/briefs/fix.md. Your chapter file: drafts/${file}.md (NN = ${file}).`
 const fix = file => ['sonnet', 'opus', 'haiku'].includes(FIXER)
   ? agent(fixerPrompt(file), { label: `fix:${file}`, phase: 'Fix', ...SONNET, model: FIXER })
   : agent(
@@ -114,10 +114,10 @@ const chain = (file, writeAfter, fixAfter) => {
   written[file] = writeAfter.then(() => write(file))
   return written[file].then(async () => {
     const reviews = await parallel([
-      () => review('quotes', `quotes-${file}`, `- md/${file}.md`),
+      () => review('quotes', `quotes-${file}`, `- drafts/${file}.md`),
       async () => {
         const matched = await matchFigures(file)
-        return RECORD.includes(file) ? review('record', `record-${file}`, `- md/${file}.md\nThe figures a script could not match: review/figures-${file}.md`) : matched
+        return RECORD.includes(file) ? review('record', `record-${file}`, `- drafts/${file}.md\nThe figures a script could not match: review/figures-${file}.md`) : matched
       },
     ])
     await fixAfter

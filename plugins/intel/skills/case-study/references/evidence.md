@@ -40,7 +40,7 @@ to these.
 
 ## The kind of every claim
 
-In the sourced draft (`md/`), the sentence itself shows which kind a claim is
+In the sourced draft (`drafts/`), the sentence itself shows which kind a claim is
 and names its source. The book text (`book/`) drops the labels and the source
 names, and carries the same distinction in ordinary wording:
 

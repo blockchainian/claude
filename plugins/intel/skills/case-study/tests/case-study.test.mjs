@@ -9,7 +9,7 @@ import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const tmp = mkdtempSync(join(tmpdir(), 'case-study-'))
-process.env.HIGHLIGHTS_DIR = join(tmp, 'store')
+process.env.CASE_STUDIES_DIR = join(tmp, 'store')
 const cs = await import('../scripts/case-study.mjs')
 
 const out = join(tmp, 'pdf', 'jane-doe.pdf')
@@ -26,8 +26,8 @@ before(() => {
 after(() => rmSync(tmp, { recursive: true, force: true }))
 
 test('init scaffolds the work dir under the store and keeps an existing sources.json', () => {
-  assert.equal(work, join(tmp, 'store', '.work', 'jane-doe'))
-  assert.ok(['md', 'book', 'notes', 'raw', 'review'].every(d => statSync(join(work, d)).isDirectory()))
+  assert.equal(work, join(tmp, 'store', 'jane-doe'))
+  assert.ok(['drafts', 'book', 'notes', 'raw', 'review'].every(d => statSync(join(work, d)).isDirectory()))
   assert.deepEqual(json(work, 'sources.json'), {})
   const saved = json(work, 'chapters.json')
   assert.deepEqual(saved.chapters.map(c => c.id), Array.from({ length: 12 }, (_, n) => pad(n + 1)))
@@ -48,8 +48,8 @@ test('check reports the missing chapters, the lead paragraphs and the source cou
   assert.equal(report.missing_chapters.length, 12)
   assert.ok(report.draft_ok === false && report.ok === false)
 
-  for (let n = 1; n <= 12; n++) write(join(work, 'md', `${pad(n)}.md`), `# Chapter ${n}\n\nLead paragraph.\n\n## Section\n\nBody.\n`)
-  write(join(work, 'md', '04.md'), '# Chapter 4\n\n## Section first\n\nBody.\n')
+  for (let n = 1; n <= 12; n++) write(join(work, 'drafts', `${pad(n)}.md`), `# Chapter ${n}\n\nLead paragraph.\n\n## Section\n\nBody.\n`)
+  write(join(work, 'drafts', '04.md'), '# Chapter 4\n\n## Section first\n\nBody.\n')
   write(join(work, 'sources.json'), JSON.stringify({
     'https://www.a.example/x': 'A 2020',
     'https://a.example/y': 'A 2021',
@@ -63,7 +63,7 @@ test('check reports the missing chapters, the lead paragraphs and the source cou
   assert.equal(report.sites, 2, 'distinct sites, without www and without the archive')
   assert.equal(report.draft_ok, false)
 
-  write(join(work, 'md', '04.md'), '# Chapter 4\n\nLead.\n\n## Section\n\nBody.\n')
+  write(join(work, 'drafts', '04.md'), '# Chapter 4\n\nLead.\n\n## Section\n\nBody.\n')
   report = cs.check(work)
   assert.equal(report.draft_ok, true)
   assert.ok(report.missing_book_chapters.length === 12 && report.book_ok === false, 'the book text is missing until it is written')
@@ -73,7 +73,7 @@ const linked = '# Sources\n\nThe list.\n\n## Press\n\n- A: [2020](https://www.a.
 
 test('check passes clean book text whose sources list links every source, and reports what is wrong with it', () => {
   for (let n = 1; n <= 12; n++) {
-    write(join(work, 'md', `${pad(n)}.md`), `# Chapter ${n}\n\nShe had 19,936 followers in 2016 (Outlet 2020).\n\n## Section\n\nBody.\n`)
+    write(join(work, 'drafts', `${pad(n)}.md`), `# Chapter ${n}\n\nShe had 19,936 followers in 2016 (Outlet 2020).\n\n## Section\n\nBody.\n`)
     write(join(work, 'book', `${pad(n)}.md`), `# Chapter ${n}\n\nShe had 19,936 followers in 2016.\n\n## Section\n\nBody.\n`)
   }
   write(join(work, 'book', '12.md'), linked)
@@ -103,19 +103,19 @@ test('check passes clean book text whose sources list links every source, and re
   assert.ok(!chapters(report.numbers_not_in_draft).includes('01'))
   assert.ok(report.book_ok === false && report.ok === false)
 
-  write(join(work, 'md', '06.md'), '# Chapter 6\n\nShe had 24.8M subscribers and 1.2B views in 2016.\n\n## Section\n\nBody.\n')
+  write(join(work, 'drafts', '06.md'), '# Chapter 6\n\nShe had 24.8M subscribers and 1.2B views in 2016.\n\n## Section\n\nBody.\n')
   write(join(work, 'book', '06.md'), '# Chapter 6\n\n2016 年她有 2,480 万订阅、12 亿播放。\n\n## Section\n\nBody.\n')
   report = cs.check(work)
   assert.ok(!chapters(report.numbers_not_in_draft).includes('06'), 'a figure restated in another unit of ten is the draft\'s figure')
 
-  write(join(work, 'md', '06.md'), '# Chapter 6\n\nThe video has 179,000,000 views and the channel 1.2 billion.\n\n## Section\n\nBody.\n')
+  write(join(work, 'drafts', '06.md'), '# Chapter 6\n\nThe video has 179,000,000 views and the channel 1.2 billion.\n\n## Section\n\nBody.\n')
   write(join(work, 'book', '06.md'), '# Chapter 6\n\n那条视频有 1.79 亿次播放，频道有 1,200,000,000 次，另一条有 7.77 亿次。\n\n## Section\n\nBody.\n')
   report = cs.check(work)
   assert.deepEqual(report.numbers_not_in_draft.find(c => c.chapter === '06')?.found, ['7.77'],
     'a figure written out in full is the draft\'s figure in 亿 or in billions, and other digits are not')
 
   const series = '2012 年 5 月 2 日是 603 个，8 月 2 日 762 个，11 月 2 日 969 个，2013 年 2 月 1 日 1,128 个，每月约 52 到 68 个。'
-  write(join(work, 'md', '07.md'), `# Chapter 7\n\nLead.\n\n## Section\n\n${series}\n`)
+  write(join(work, 'drafts', '07.md'), `# Chapter 7\n\nLead.\n\n## Section\n\n${series}\n`)
   write(join(work, 'book', '07.md'), `# Chapter 7\n\nLead.\n\n## Section\n\n${series}\n`)
   report = cs.check(work)
   assert.deepEqual(chapters(report.series_in_prose), ['07'], 'a paragraph that recites a series of figures belongs in a chart')
@@ -153,7 +153,7 @@ test('merge builds sources.json, raw.json and gaps.md from every agent\'s files;
 
   write(join(work, 'review', 'numbers-3.md'), '| row | checked |\n- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M\n- [04] missing | a | b | c | d\n')
   write(join(work, 'review', 'sources-1.md'), '- [A 2020] seller-source | sells a course | | drop\n- [B 2019] mislabelled | a | b | c | d\n')
-  write(join(work, 'md', '03.md'), '# Chapter 2\n\nShe had 24.8M subscribers (on record, A 2020).\n\n## Section\n\nBody.\n')
+  write(join(work, 'drafts', '03.md'), '# Chapter 2\n\nShe had 24.8M subscribers (on record, A 2020).\n\n## Section\n\nBody.\n')
   assert.deepEqual(cs.findings(work, '03').map(l => l.replace(/^- F[0-9a-f]{6} /, '- ')), ['- [03] wrong | 24.8M | source says 24.6M | 24.6M | print 24.6M', '- [A 2020] seller-source | sells a course | | drop'],
     'findings for a chapter are its own lines plus the sources-lens lines about labels the chapter names')
 
@@ -166,7 +166,7 @@ test('merge builds sources.json, raw.json and gaps.md from every agent\'s files;
   const raw = json(work, 'raw.json')
   assert.deepEqual(Object.fromEntries(Object.entries(raw).map(([u, f]) => [u, [...f].sort()])),
     { 'https://a.example/x': ['raw/a.html'], 'https://b.example/z': ['raw/b1.txt', 'raw/b2.txt'] }, 'merge gathers where each source\'s text was saved')
-  const last = read(work, 'md', '12.md')
+  const last = read(work, 'drafts', '12.md')
   assert.ok(last.startsWith('# Sources\n') && last.includes('A 2020') && !last.includes('Seller 2021') && cs.hasLeadParagraph(last), 'merge writes the draft\'s sources chapter')
 })
 
@@ -174,7 +174,7 @@ test('figures matches every figure of a chapter against the saved text of the so
   write(join(work, 'raw', 'a.html'), '<p>She passed 1.002.877 subscribers and earned $12 million; <span title="24,8 miljoner">many</span> watched 603 videos.</p>')
   write(join(work, 'raw', 'b1.txt'), 'The channel showed 29 321 179 subscribers, 11.941 million by another count.\n')
   write(join(work, 'raw', 'b2.txt'), 'Views that week: 50,566,204. Turnover 7 million kronor.\n')
-  write(join(work, 'md', '05.md'),
+  write(join(work, 'drafts', '05.md'),
     '# Chapter 4\n\n她一共有 1,002,877 订阅，另一处写 11.941M。\n\n## Section\n\n' +
     '2012 年 7 月 11 日她过了 1,002,877 订阅，收入 1,200 万美元，有 603 条视频（A 2020，当时的报道）。' +
     'B 2019 的页面写 29,321,179 订阅、当周 50,566,204 次观看。' +
@@ -200,7 +200,7 @@ test('figures matches every figure of a chapter against the saved text of the so
   assert.ok(!cs.findings(work, '05').some(l => l.includes('5,555')))
   cs.figures(work, '05')
 
-  write(join(work, 'md', '06.md'),
+  write(join(work, 'drafts', '06.md'),
     '# Chapter 5\n\n## Section\n\n' +
     '她过了 1,002,877 订阅。〔当时的报道 · A 2020〕当周有 50,566,204 次观看。〔记录 · B 2019〕\n\n' +
     '她有 603 条视频。（A 2020，记录）页面写 29,321,179 订阅。（B 2019）\n\n' +
@@ -210,7 +210,7 @@ test('figures matches every figure of a chapter against the saved text of the so
   assert.ok(!['1,002,877', '603', '29,321,179'].some(f => after.has(f)), 'a label after its sentence\'s full stop belongs to that sentence, in either kind of bracket')
   assert.deepEqual(report.unmatched.filter(m => m.sentence.startsWith('当周')), [])
 
-  write(join(work, 'md', '07.md'), '# Chapter 6\n\n## Section\n\n开头一句没有数字。[记录: B 2019] 当周有 50,566,204 次观看。[当时的报道: A 2020] 她过了 1,002,877 订阅。\n\n' +
+  write(join(work, 'drafts', '07.md'), '# Chapter 6\n\n## Section\n\n开头一句没有数字。[记录: B 2019] 当周有 50,566,204 次观看。[当时的报道: A 2020] 她过了 1,002,877 订阅。\n\n' +
     '[记录: A 2020] 她有 603 条视频。\n')
   report = cs.figures(work, '07')
   assert.deepEqual(report.unmatched, [], 'a label before its sentence belongs to the sentence after it, in a chapter whose paragraphs open with a label')
@@ -223,7 +223,7 @@ test('quotes looks up every quotation of a chapter in the saved text of the sour
   write(join(dir, 'raw', 'forbes.html'), '<p>Asked about captions, Monk said: &quot;Is it long? If you make your video caption <em>too long</em>,\nit will be too much for people to digest on a short platform.&quot; ' +
     'Her text is “words off the top of my head, always very simplified”. She called the old clips, which she doesn&#39;t watch, so cringey.</p>')
   write(join(dir, 'raw', 'variety.vtt'), 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nher manager called her a specialist\n\n00:00:03.000 --> 00:00:05.000\nin short-form TikToks back then\n')
-  write(join(dir, 'md', '04.md'), '# Chapter\n\nLead.\n\n## Section\n\n' +
+  write(join(dir, 'drafts', '04.md'), '# Chapter\n\nLead.\n\n## Section\n\n' +
     '她说“太长吗？标题太长，观众消化不了”⟦Is it long? If you make your video caption too long, it will be too much for people to digest⟧，文案是 "words off the top of my head … very simplified"（自述，Forbes 2026a）。' +
     '她说旧视频她“doesn’t watch”，经纪人叫她“短视频专家”⟦a specialist in short-form TikToks⟧（Forbes 2026a）。' +
     '她说“我每天发三条”（Forbes 2026a）。\n\n' +
@@ -298,7 +298,7 @@ test('unread tells an interrupted reader which sources are done, which are saved
 
 test('findings gives each finding a name that stays the same, and leaves out the ones the fix log already names', () => {
   const half = cs.init('half-fixed', 'How Half grew', 'https://example.com/@half', join(tmp, 'pdf', 'half.pdf'), 12, 'Half').work
-  write(join(half, 'md', '04.md'), '# Methods\n\nShe posted daily (self-reported, A 2020).\n')
+  write(join(half, 'drafts', '04.md'), '# Methods\n\nShe posted daily (self-reported, A 2020).\n')
   write(join(half, 'review', 'quotes-04.md'), '- [04] wrong | first | a | b | c\n- [04] unsupported | second | a | b | c\n- [05] wrong | other chapter | a | b | c\n')
   write(join(half, 'review', 'sources-1.md'), '- [A 2020] seller-source | sells a course | | drop\n')
   const all = cs.findings(half, '04')
@@ -307,7 +307,7 @@ test('findings gives each finding a name that stays the same, and leaves out the
   assert.equal(new Set(names).size, 3)
   assert.ok(all[0].endsWith('[04] wrong | first | a | b | c'))
   write(join(half, 'review', 'fix-04.md'), `${names[0]} fixed | first\n${names[2]} removed | the seller's sentence\n`)
-  write(join(half, 'md', '04.md'), '# Methods\n\nShe posted daily (self-reported, A 2020). An edit.\n')
+  write(join(half, 'drafts', '04.md'), '# Methods\n\nShe posted daily (self-reported, A 2020). An edit.\n')
   assert.deepEqual(cs.findings(half, '04'), [all[1]], 'an edited chapter keeps the names; only the finding with no log line is left')
 })
 
@@ -336,15 +336,15 @@ test('bullets prints a chapter\'s lines from the notes, with a dated table of th
 
 test('codex runs the fixer prompt of a chapter on a Codex model, in the work directory, and reports its last message and usage', () => {
   const work = join(tmp, 'codex')
-  for (const dir of ['review', 'md']) mkdirSync(join(work, dir), { recursive: true })
-  write(join(work, 'review', 'fix-04.prompt.txt'), 'You are a fixer. Your chapter file: md/04.md (NN = 04).')
+  for (const dir of ['review', 'drafts']) mkdirSync(join(work, dir), { recursive: true })
+  write(join(work, 'review', 'fix-04.prompt.txt'), 'You are a fixer. Your chapter file: drafts/04.md (NN = 04).')
   const argv = cs.codexCommand(work, '04', 'gpt-6-luna')
   assert.equal(argv[0], 'codex')
   assert.ok(argv.includes('exec') && argv.includes('--json') && argv.includes('--skip-git-repo-check'), 'one-shot, machine-readable, outside a repo')
   assert.deepEqual(argv.slice(argv.indexOf('-m'), argv.indexOf('-m') + 2), ['-m', 'gpt-6-luna'])
   assert.ok(argv.some(a => a.includes('model_reasoning_effort=high')), 'the fixer reasons at high effort')
   assert.ok(argv.some(a => a.includes('writable_roots') && a.includes('case-study-limits')), 'the gate script keeps its pacing files outside the work directory')
-  assert.equal(argv.at(-1), 'You are a fixer. Your chapter file: md/04.md (NN = 04).', 'the prompt is the saved one')
+  assert.equal(argv.at(-1), 'You are a fixer. Your chapter file: drafts/04.md (NN = 04).', 'the prompt is the saved one')
   const events = [
     { type: 'item.completed', item: { type: 'agent_message', text: 'first' } },
     { type: 'item.completed', item: { type: 'command_execution', command: 'ls' } },

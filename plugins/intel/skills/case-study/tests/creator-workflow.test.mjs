@@ -71,7 +71,7 @@ test('the review covers every source and every chapter, one chapter per reviewer
   assert.equal(sourceSlices.length, 6)
   sourceSlices.forEach((c, i) => assert.ok(c.prompt.includes(`case-study.mjs slice "/w" ${i + 1} 6`), c.prompt))
   const quotes = calls.filter(c => c.label.startsWith('review:quotes-'))
-  assert.deepEqual(quotes.map(c => c.prompt.match(/md\/\d\d\.md/g)).sort(), ALL.map(f => [`md/${f}.md`]))
+  assert.deepEqual(quotes.map(c => c.prompt.match(/drafts\/\d\d\.md/g)).sort(), ALL.map(f => [`drafts/${f}.md`]))
   assert.deepEqual(labels(calls, 'fix:').sort(), ALL.map(f => `fix:${f}`))
   assert.deepEqual(labels(calls, 'merge:'), ['merge:read', 'merge:sources', 'merge:fix'])
 })

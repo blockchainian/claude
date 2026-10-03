@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ABOUTME: Scaffolds a case-study work dir in the digest store and checks it before rendering.
+// ABOUTME: Scaffolds a case-study work dir under ~/Documents/case-studies and checks it before rendering.
 // ABOUTME: init writes chapters.json + sources.json; check verifies the sourced draft, the book text and sources.
 //
 // Usage: case-study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
@@ -12,7 +12,7 @@
 //        case-study.mjs bullets <work dir> <NN>        (the notes' lines for chapter NN, long dated tables thinned)
 //        case-study.mjs codex <work dir> <NN> [--model gpt-6-luna]   (run the fixer prompt saved in review/fix-NN.prompt.txt on a Codex model)
 //        case-study.mjs check <work dir> [--draft]
-// A study has two layers: md/NN.md is the sourced draft the reviewers audit (sources named in every sentence);
+// A study has two layers: drafts/NN.md is the sourced draft the reviewers audit (sources named in every sentence);
 // book/NN.md is the text that is typeset (no citations, no account of the research).
 // Agents working in parallel never share a file: each writes its own notes/<name>.sources.json (url -> label) and
 // notes/<name>.gaps.md, reviewers write review/<name>.failed.json (a list of urls), fixers write
@@ -52,7 +52,7 @@ const CHART = /^```chart[ \t]*\n[\s\S]*?\n```[ \t]*$/gm // a figure block the re
 const DATE = /(?:19|20)\d\d\s*年(?:\s*\d+\s*月)?(?:\s*\d+\s*日)?|\d+\s*月(?:\s*\d+\s*日)?|\d+\s*日|(?:19|20)\d\d(?:-\d\d){0,2}/g
 const SERIES = 5 // a paragraph with this many figures besides its dates recites a series
 
-const root = () => process.env.HIGHLIGHTS_DIR || join(homedir(), 'Documents', 'highlights')
+const root = () => process.env.CASE_STUDIES_DIR || join(homedir(), 'Documents', 'case-studies')
 const read = path => readFileSync(path, 'utf8')
 const write = (path, text) => writeFileSync(path, text, 'utf8')
 const dump = value => JSON.stringify(value, null, 2)
@@ -71,9 +71,9 @@ const lines = text => text.split(/\r?\n/)
 const paragraphsOf = text => text.split(/\n\s*\n/)
 
 export function init(slug, title, source, out, chapters, cover, accounts = null) {
-  // Create <store>/.work/<slug>/ with md/, book/, notes/, raw/, review/, chapters.json and an empty sources.json.
-  const work = join(root(), '.work', slug)
-  for (const sub of ['md', 'book', 'notes', 'raw', 'review']) mkdirSync(join(work, sub), { recursive: true })
+  // Create <root>/<slug>/ with drafts/, book/, notes/, raw/, review/, chapters.json and an empty sources.json.
+  const work = join(root(), slug)
+  for (const sub of ['drafts', 'book', 'notes', 'raw', 'review']) mkdirSync(join(work, sub), { recursive: true })
   const ids = Array.from({ length: chapters }, (_, n) => pad(n + 1))
   const meta = { title, cover, accounts: accounts && accounts.length ? accounts : [source], slug, source, pdf: String(out), work,
     unit: 'chapter', page_size: PAGE_SIZE,
@@ -180,7 +180,7 @@ export function merge(work) {
   const gaps = files(notes, '.gaps.md').map(path => read(path).trim()).filter(Boolean)
   write(join(work, 'gaps.md'), gaps.join('\n') + '\n')
   const labels = sorted(new Set(Object.entries(sources).map(([url, label]) => `${label} (${host(url)})`)))
-  const last = join(work, 'md', `${meta.chapters.at(-1).id}.md`)
+  const last = join(work, 'drafts', `${meta.chapters.at(-1).id}.md`)
   write(last, `# Sources\n\n${Object.keys(sources).length} sources, listed in sources.json.\n\n## List\n\n` + labels.map(l => `- ${l}`).join('\n') + '\n')
   const malformed = [...files(notes, '.json'), ...files(review, '.added.json'), ...files(review, '.raw.json')]
     .filter(path => Object.keys(readJson(path, 'object')).length === 0 && !['', '{}'].includes(read(path).trim()))
@@ -199,7 +199,7 @@ export function findings(work, chapter) {
   // The review lines a fixer has still to apply to one chapter: those tagged with its number, and the sources-lens
   // lines (tagged with a source label) about labels the chapter names. Each line carries a name made from its own
   // text (F and six hex digits), the same on every call; a finding whose name is in the chapter's fix log is left out.
-  const text = read(join(work, 'md', `${chapter}.md`))
+  const text = read(join(work, 'drafts', `${chapter}.md`))
   const log = join(work, 'review', `fix-${chapter}.md`)
   const logged = new Set(existsSync(log) ? read(log).match(/\bF[0-9a-f]{6}\b/g) : [])
   const out = []
@@ -316,7 +316,7 @@ function sourced(work, chapter) {
     .filter(file => isText(join(work, file))).map(file => ({ file, text: read(join(work, file)) })))
   const ordered = [...labels.keys()].sort((a, b) => b.length - a.length)
   const named = text => ordered.filter(label => text.includes(label))
-  const body = read(join(work, 'md', `${chapter}.md`))
+  const body = read(join(work, 'drafts', `${chapter}.md`))
   const anywhere = named(body)
   const paragraphs = paragraphsOf(body)
   // A label in brackets right after a full stop belongs to the sentence before it in a chapter whose paragraphs
@@ -376,7 +376,7 @@ export function figures(work, chapter, worklist = false) {
   }
   mkdirSync(join(work, 'review'), { recursive: true })
   write(join(work, 'review', `figures-${chapter}.md`),
-    `# Figures in md/${chapter}.md matched against the saved text of their sources\n\n` +
+    `# Figures in drafts/${chapter}.md matched against the saved text of their sources\n\n` +
     `${checked} checked, ${checked - unmatched.length} matched, ${unmatched.length} not matched, ${small} too small to match (left to the quotes lens).\n\n` +
     out.join('\n') + '\n')
   return { chapter, checked, matched: checked - unmatched.length, small, unmatched }
@@ -467,7 +467,7 @@ export function quotes(work, chapter) {
   const result = { chapter, quotations: rows.length, found: tally('found'), elsewhere: tally('in another source'), missing: tally('not found'), unsaved: tally('no saved text') }
   mkdirSync(join(work, 'review'), { recursive: true })
   write(join(work, 'review', `quotations-${chapter}.md`),
-    `# Quotations in md/${chapter}.md looked up in the saved text of their sources\n\n` +
+    `# Quotations in drafts/${chapter}.md looked up in the saved text of their sources\n\n` +
     `${result.quotations} quotations: ${result.found} found, ${result.elsewhere} in another source, ${result.missing} not found, ${result.unsaved} with no saved text.\n` +
     'A row is: verdict | the words looked up | the source and file they are in, or the sources the sentence names | the passage around them.\n' +
     'Only words inside quotation marks are listed. Reported speech without them is not.\n' +
@@ -564,7 +564,7 @@ export function check(work) {
   // Report what blocks the review (the sourced draft, sources.json) and what blocks rendering (the book text).
   const meta = JSON.parse(read(join(work, 'chapters.json')))
   const ids = meta.chapters.map(chapter => chapter.id)
-  const { missing, noLead, texts: draft } = layer(work, 'md', ids)
+  const { missing, noLead, texts: draft } = layer(work, 'drafts', ids)
   const { missing: bookMissing, noLead: bookNoLead, texts: book } = layer(work, 'book', ids)
   const known = new Set([...draft.values()].flatMap(text => [...numbers(text)]))
   const knownValues = [...known].map(Number)

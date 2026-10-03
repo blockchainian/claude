@@ -41,7 +41,7 @@ it is not retold row by row in sentences.
 ## The introduction and the reasoning chapter
 
 These are written after the others. Your material is the finished chapters in
-`md/`. The introduction says who this is, what they built and on what, from
+`drafts/`. The introduction says who this is, what they built and on what, from
 those chapters. The reasoning chapter opens by saying it is reasoning, not a
 finding, and rests only on what the chapters establish. When your message
 gives a product, the same chapter also says what that product's own accounts
@@ -69,7 +69,7 @@ are givens of the task, stated as such.
   notes first; press figures second, labelled.
 - A tie between a source and the subject is stated in the sentence that uses
   it.
-- Write only `md/<your file>`, appending section by section as you go (see
+- Write only `drafts/<your file>`, appending section by section as you go (see
   "Writing as you go" in the evidence rules).
 
 Final message: characters written and the places where the notes were too thin.
