@@ -231,7 +231,7 @@ class Manager {
   }
 
   scheduleReconnect() {
-    if (!this.state().threads.length) return;
+    if (!this.listening()) return;
     const delay = RECONNECT_DELAYS_MS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)];
     this.reconnectAttempt += 1;
     setTimeout(() => {
@@ -253,9 +253,22 @@ class Manager {
     return turns.data?.[0];
   }
 
-  /** Re-subscribes to every recorded thread and backfills turns that ended while disconnected. */
+  /** Subscribes to a detached thread again, which also loads it when the daemon has unloaded it. */
+  async listenAgain(client, threadId) {
+    if (!this.thread(threadId).detached) return;
+    await this.subscribe(client, threadId);
+    this.updateThread(threadId, { detached: undefined });
+  }
+
+  /** Whether any recorded thread is still listened to; detached ones need no daemon connection. */
+  listening() {
+    return this.state().threads.some((thread) => !thread.detached);
+  }
+
+  /** Re-subscribes to every recorded thread Claude still listens to and backfills turns that ended while disconnected. */
   async adopt(client) {
     for (const thread of this.state().threads) {
+      if (thread.detached) continue;
       this.supervise(thread.id);
       let latest;
       try {
@@ -446,7 +459,7 @@ class Manager {
         throw error;
       }
       if (latest && this.thread(found.id).turnId === null) this.updateThread(found.id, { turnId: latest.id, lastStatus: latest.status });
-    }
+    } else await this.listenAgain(client, found.id);
     const { name, cwd, lastStatus, attached } = this.thread(found.id);
     return { threadId: found.id, name, cwd, attached: Boolean(attached), lastStatus, await: awaitCommand(found.id), note: "Give it a prompt with send, then run the await command with run_in_background; it exits when codex finishes a turn. Approvals and questions stay with the client the session runs in." };
   }
@@ -461,6 +474,7 @@ class Manager {
     if (!threadId || !prompt) throw new Error("threadId and prompt are required");
     this.thread(threadId);
     const client = await this.connect();
+    await this.listenAgain(client, threadId);
     const before = this.thread(threadId).turnId;
     const turn = await this.startTurn(client, threadId, prompt);
     const steered = turn.id === before;
@@ -496,6 +510,16 @@ class Manager {
     return { threadId, turnId: thread.turnId, interrupted: true };
   }
 
+  /** Stops listening to a thread whose work is done, so the daemon unloads it once nobody else is subscribed. */
+  async detach({ threadId }) {
+    if (!threadId) throw new Error("threadId is required");
+    if (this.thread(threadId).lastStatus === "inProgress") throw new Error(`thread ${threadId} is still running a turn; wait for it or interrupt it first`);
+    const client = await this.connect();
+    const { status } = await client.request("thread/unsubscribe", { threadId });
+    this.updateThread(threadId, { detached: true });
+    return { threadId, detached: true, status };
+  }
+
   async list() {
     if (!this.client) await this.connect().catch((error) => log(`not connected: ${error.message}`));
     const threads = this.state().threads.map((thread) => ({ ...thread, waiting: this.waiting(thread), unread: this.store.unreadCount(thread.id), await: awaitCommand(thread.id) }));
@@ -520,6 +544,7 @@ const TOOLS = [
   { name: "reply", description: "Answer a codex thread that is waiting: the text becomes the result of its ask_claude call, or, for an approval request, one of the decisions its inbox event listed. callId is needed only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "list", description: "List the codex threads this session started or attached, their last turn status, what each is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: {} } },
+  { name: "detach", description: "Stop listening to a codex thread once its work is completely finished and you will not prompt it again. The daemon then unloads it, so it leaves the Ready list of `codex agents`. The session is kept, and a later send picks it up again. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "review", description: "Run codex's built-in review mode over the commits since a base sha in a read-only thread and save the rendered review (priority-tagged findings and an overall verdict) to a file; stance adversarial makes it a challenge review. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, decisions: { type: "string", description: "Path of the file listing the rules decided while the changes were built, relative to cwd or absolute." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." }, stance: { type: "string", enum: ["adversarial"], description: "adversarial: the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. Omit for the plain review." }, focus: { type: "string", description: "What the reviewer should weigh most, in a phrase." } }, required: ["cwd", "base", "out"] } }
 ];
 
@@ -530,7 +555,7 @@ async function runMcp() {
   const manager = new Manager(store, daemonSocketPath(process.env.CODEX_MANAGER_DAEMON_SOCKET), plugin.version);
   log(`session ${sessionId}, state in ${store.dir}`);
   const parents = parentProcesses();
-  if (store.readState().threads.length) manager.connect().catch((error) => log(`adoption deferred: ${error.message}`));
+  if (manager.listening()) manager.connect().catch((error) => log(`adoption deferred: ${error.message}`));
 
   const reply = (id, body) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...body })}\n`);
   const handle = async (message) => {
