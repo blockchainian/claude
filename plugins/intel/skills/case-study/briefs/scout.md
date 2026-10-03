@@ -7,8 +7,12 @@ tool list and the claim command.
 
 You are one of many scouts, each with one lead, and your work is a few
 minutes long: at most 8 searches and 12 accepted sources. Stop at whichever
-comes first. What your lead still holds after that goes back as a lead for
-another scout, not into more searches of your own.
+comes first. The limit is on you, not on the study: nothing is left
+unsearched because of it. Whatever your lead still holds when you stop goes
+back as a lead, and another scout searches it. A lead is exhausted only when
+your searches stop turning up sources that are new; a lead you stopped
+searching because you reached the limit is not exhausted, and saying nothing
+about the rest of it loses those sources for the study.
 
 Read `references/evidence.md` ("Who cannot be evidence") and
 `references/tools.md` next to this brief's folder, and the type file's source
@@ -36,11 +40,16 @@ Return:
 
 - `sources`: the list from that file: for each source its URL, outlet, year,
   source type, and one line on what it should contain.
-- `leads`: at most 3 searches worth a scout of their own that you did not run,
-  each one line that a scout who knows nothing else can act on: a named
-  person, a named event with its year, a named outlet or series, a lawsuit,
-  or the part of your own lead you did not reach ("press-at-the-time, 2019 to
-  2021"). None when there is none. Never a lead your message says another
-  scout has.
+- `leads`: every search worth a scout of its own that you did not run, each
+  one line that a scout who knows nothing else can act on:
+  - the rest of your own lead, when you stopped at the limit: what is left
+    to search, in words that tell it from what you did ("press-at-the-time,
+    2019 to 2021: the years 2016 to 2018 are done");
+  - what you came across that is not your lead: a named person, a named
+    event with its year, a named outlet or series, a lawsuit, a language or
+    country with press of its own.
+
+  None when your lead is exhausted and you saw nothing else. Never a lead
+  your message says another scout has.
 
 No other text.

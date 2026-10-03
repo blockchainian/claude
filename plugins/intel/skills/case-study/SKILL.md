@@ -98,7 +98,7 @@ ask for one name.
 
    | Stage | Agents | Does |
    |---|---|---|
-   | Scout | 13 to start, one per lead of the type file, each a few minutes long; the leads they return get scouts of their own, up to 24 in all; the 2 numbers agents start with them | Find sources; return URLs and leads only. A scout claims a URL before opening it (`case-study.mjs claim`), so no two scouts open the same one. The curve comes from `gate.mjs wayback curve` in one batch |
+   | Scout | 13 to start, one per lead of the type file, each a few minutes long (at most 8 searches and 12 sources); a scout returns what its lead still holds and every other lead it saw, each gets a scout of its own, and scouting ends when no scout returns a lead; the 2 numbers agents start with them | Find sources; return URLs and leads only. The limit is on one scout, never on the study: the run's log names every lead that was not followed (a scout that found no new source ends its branch; `maxScouts`, 150 unless given, guards against a search that never ends), and a lead left by the guard is a gap to report. A scout claims a URL before opening it (`case-study.mjs claim`), so no two scouts open the same one. The curve comes from `gate.mjs wayback curve` in one batch |
    | Read | one per 8 sources, started as soon as the scouts have returned 8 that no reader has | Read into `notes/`, tagged by chapter |
    | Check sources | sources lens per 25 URLs, after the merge and before any chapter is written | Findings in `review/`; a merge takes the failed sources out of `sources.json` |
    | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `drafts/`, from the notes only |
@@ -110,7 +110,7 @@ ask for one name.
 
    Run it with the Workflow tool (this skill asks for it):
    `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.mjs`,
-   `args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer }`
+   `args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer, maxScouts }`
    — `skill` is this skill's absolute folder, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the
    tool list in one line (the script gives each agent its share). Empty
