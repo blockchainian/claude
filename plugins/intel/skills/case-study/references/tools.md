@@ -160,7 +160,7 @@ The account logged in in Chrome is a side account (joinupcomment).
   - Chosen captures in one batch: put the capture URLs
     (`https://web.archive.org/web/<timestamp>id_/<url>`) in a file, then
     `$G wayback fetch <work>/raw/archive --from <file>`.
-  - Both go through the residential proxy at 90 requests a minute (240
+  - Both go through the residential proxy at 100 requests a minute (240
     captures take 3 minutes), ask again for a request that failed, and
     stop with an error when it keeps failing:
     report that error as it is, do not retry around it or go direct. Give
