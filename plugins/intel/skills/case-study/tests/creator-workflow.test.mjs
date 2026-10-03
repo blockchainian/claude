@@ -23,6 +23,7 @@ async function run(args, slow = []) {
           ...Array.from({ length: 29 }, (_, i) => ({ url: `https://${lane}.example/${i}`, outlet: lane, year: '2020' }))] }
       }
       if (opts.label === 'merge:read') return '{"sources": 130, "failed": 0, "gaps": 4}'
+      if (opts.label === 'sources:known') return { sources: Array.from({ length: 20 }, (_, i) => ({ url: `https://known.example/${i}`, outlet: 'Known' })) }
       return `done ${opts.label}`
     }
     if (slow.includes(opts.label)) return new Promise(resolve => releases.push(() => resolve(finish())))
@@ -111,6 +112,16 @@ test('source and quote reviewers run on Opus, record reviewers on the session mo
   assert.ok(reviewers.filter(c => !c.label.startsWith('review:record')).every(c => c.model === 'opus'))
   assert.ok(reviewers.filter(c => c.label.startsWith('review:record')).every(c => c.model === undefined))
   assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/17 share'))
+})
+
+test('with the scouting done, the known sources are read again, eight to a reader, and the numbers agents still run', async () => {
+  const { calls, result } = await run({ ...ARGS, done: 'scout' })
+  assert.deepEqual(labels(calls, 'scout:'), [])
+  assert.ok(calls.find(c => c.label === 'sources:known').prompt.includes('case-study.mjs sources "/w"'))
+  assert.equal(labels(calls, 'read:').length, Math.ceil(20 / 8))
+  assert.ok(calls.find(c => c.label === 'read:03').prompt.includes('https://known.example/19 (Known)'))
+  assert.deepEqual(labels(calls, 'numbers:'), ['numbers:archive', 'numbers:uploads'])
+  assert.equal((await result()).scouted, 20)
 })
 
 test('with the reading done, the run starts at the draft: no scout, reader or numbers agent, the merge still sizes the sources lens', async () => {

@@ -148,6 +148,9 @@ test('merge builds sources.json, raw.json and gaps.md from every agent\'s files;
   saved = json(work, 'sources.json')
   assert.deepEqual(Object.keys(saved).sort(), ['https://a.example/x', 'https://b.example/z', 'https://e.example/new'], 'merge drops failed sources and adds what the fix round read')
   const parts = [1, 2].map(n => cs.sliceSources(work, n, 2))
+  assert.deepEqual(cs.listSources(work), { sources: [
+    { url: 'https://a.example/x', outlet: 'A 2020' }, { url: 'https://b.example/z', outlet: 'B 2019' }, { url: 'https://e.example/new', outlet: 'E 2022' }] },
+  'sources lists sources.json in the shape the scouts return')
   assert.deepEqual([...parts[0], ...parts[1]].sort(), Object.keys(saved).sort(), 'the slices cover every url once')
   assert.ok(parts[0].length === 2 && parts[1].length === 1)
 
