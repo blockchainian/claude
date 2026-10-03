@@ -28,9 +28,8 @@ calls and failures per command.
     Kobeissi Letter", not a handle or a common word), and each other spelling
     in its own call.
   - There is no title and no cap: a year of a known name is hundreds of
-    lines. Save the output to a file, count the domains, and open first the
-    articles with 2 or more `mentions` (the name comes up more than in
-    passing).
+    lines. Save the output to a file and count the domains before opening
+    any. `mentions` is how many times the name was found in the article.
   - Ask for the years the subject was active, not for everything: every year
     of a name is read from BigQuery once and kept, and the month's free
     allowance is about twenty years of names.
