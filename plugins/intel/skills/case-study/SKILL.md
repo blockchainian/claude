@@ -44,8 +44,8 @@ they are sent the absolute paths of the files below and read them themselves.
 |---|---|---|
 | `references/evidence.md` | every agent | What counts as read, the kinds of claim, who cannot be evidence |
 | `references/tools.md` | every agent | The commands for pages, search, uploads, archives, records, all through `scripts/gate.mjs` |
-| `types/creator.md` | every agent | The gate, source types, scout leads, what the numbers must establish, the chapters |
-| `briefs/scout.md` | scouts | Finding sources for one lead |
+| `types/creator.md` | every agent | The gate, source types, scout lanes, what the numbers must establish, the chapters |
+| `briefs/scout.md` | scouts | Finding sources by lane |
 | `briefs/read.md` | readers | Reading a batch of sources into tagged notes |
 | `briefs/numbers.md` | numbers agents | The curve from the archive, the upload record |
 | `briefs/write.md` | draft writers | One chapter of the sourced draft, from the notes |
@@ -98,8 +98,8 @@ ask for one name.
 
    | Stage | Agents | Does |
    |---|---|---|
-   | Scout | 13 to start, one per lead of the type file, each a few minutes long (at most 8 searches and 12 sources); a scout returns what its lead still holds and every other lead it saw, each gets a scout of its own, and scouting ends when no scout returns a lead; the 2 numbers agents start with them | Find sources; return URLs and leads only. The limit is on one scout, never on the study: the run's log names every lead that was not followed (a scout that found no new source ends its branch; `maxScouts`, 150 unless given, guards against a search that never ends), and a lead left by the guard is a gap to report. A scout claims a URL before opening it (`case-study.mjs claim`), so no two scouts open the same one. The curve comes from `gate.mjs wayback curve` in one batch |
-   | Read | one per 8 sources, started as soon as the scouts have returned 8 that no reader has | Read into `notes/`, tagged by chapter |
+   | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `gate.mjs wayback curve` in one batch |
+   | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Check sources | sources lens per 25 URLs, after the merge and before any chapter is written | Findings in `review/`; a merge takes the failed sources out of `sources.json` |
    | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `drafts/`, from the notes only |
    | Review | per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
@@ -110,7 +110,7 @@ ask for one name.
 
    Run it with the Workflow tool (this skill asks for it):
    `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.mjs`,
-   `args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer, maxScouts }`
+   `args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer }`
    — `skill` is this skill's absolute folder, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the
    tool list in one line (the script gives each agent its share). Empty
@@ -213,14 +213,9 @@ ask for one name.
   with `Workflow({scriptPath, resumeFromRunId})`: finished agents replay from
   the cache, the others run again and pick up where their files stop. Do not
   change the script or the args before resuming, or every agent reruns.
-  Which sources a reader gets depends on the order the scouts returned in, so
-  a run cut off while reading does not replay its readers: continue it with
-  `done: 'scout'` (next rule) instead.
 - A run that cannot be resumed (another session started it) continues from
   its files: `done: 'scout'` skips the scouts and reads the known sources
-  again, into fresh notes (to scout again from nothing instead, move
-  `claims/` and `notes/scout-*.md` aside first: a scout skips what another
-  scout's name has claimed); pass them as `sources`, the `sources` array printed
+  again, into fresh notes; pass them as `sources`, the `sources` array printed
   by `case-study.mjs sources "<work>"` (an agent relaying the list drops
   entries). A source whose text any earlier agent saved is read from disk,
   not fetched; `done: 'read'` starts at the draft, from the notes and numbers
