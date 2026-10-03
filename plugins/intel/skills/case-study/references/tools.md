@@ -16,23 +16,25 @@ calls and failures per command.
 
 - Exa, with the engines behind it when Exa is out of credits:
   `$G search "<query>" 8` (the second argument is the number of results).
+  Not for news: news is the two news commands below.
 - Google by date (press from the time):
   `$G chrome google search "<query> after:2017-01-01 before:2017-03-01" -f yaml`.
-- Google News: `$G chrome google news "<query>" -f yaml`.
+- Google News by date range: `$G gnews "<name>" 2023-01-01 2023-12-31`
+  (without dates: 2017 to today), the name without quotes. One JSON article
+  per line, oldest first: `url` (Google's own link to the article, which
+  `$G read` opens), `domain`, `date`, `title`.
 - World news by date range, GDELT (news sites only, little on a creator the
-  press has not written about): `$G gdelt "<name>" 2023-01-01 2023-12-31`
-  (without dates: 2017 to today). One JSON article per line, oldest first:
-  `url`, `domain`, `date` (the day GDELT collected it) and `mentions`.
+  press has not written about):
+  `$G gdelt "<name>" "<another name>" 2023-01-01 2023-12-31` (up to 100
+  names; without dates: 2017 to today). One JSON article per line, each name
+  oldest first: `name`, `url`, `domain`, `date` (the day GDELT collected it),
+  `mentions` (how many times the name was found in the article).
   - It finds the articles in whose text GDELT recognised the name, not every
-    article with the words: give a proper name as the press writes it ("The
-    Kobeissi Letter", not a handle or a common word), and each other spelling
-    in its own call.
-  - There is no title and no cap: a year of a known name is hundreds of
-    lines. Save the output to a file and count the domains before opening
-    any. `mentions` is how many times the name was found in the article.
-  - Ask for the years the subject was active, not for everything: every year
-    of a name is read from BigQuery once and kept, and the month's free
-    allowance is about twenty years of names.
+    article with the words, and there is no title.
+- Both news commands have no cap: a year of a known name is hundreds of
+  lines. Save the output to a file and count the domains before opening any.
+  What they fetched is kept under `~/.local/share/case-study/`, a folder per
+  name, so asking again for days already held costs nothing.
 - Reddit: `$G chrome reddit search "<query>" -f yaml`, `$G chrome reddit read <post id>`.
 
 ## Reading a page
@@ -58,8 +60,10 @@ The gate adds the Chrome login itself: never add `--cookies-from-browser`.
 
 - Subtitles of one video:
   `$G yt --write-sub --write-auto-sub --sub-lang en --skip-download -o "<work>/raw/<batch>/%(id)s" "<URL>"`
-- Search videos:
-  `$G yt --flat-playlist --print "%(id)s %(channel)s | %(title)s" "ytsearch10:<query>"`
+- Search videos: `$G ytsearch "<query>" "<name>" "<another name>"`. One JSON
+  video per line: `id`, `url`, `channel`, `title`. Only the videos whose
+  title, channel or description holds one of the names are listed: YouTube
+  fills a search up with videos that have nothing to do with it.
 - Upload record (dates and plays):
   `$G yt --flat-playlist --extractor-args "youtubetab:approximate_date" --print "%(upload_date)s %(view_count)s %(title)s" "https://www.youtube.com/@<channel>/videos"`
   (`-I -20:` for the earliest twenty). The dates in this listing are

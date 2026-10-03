@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ABOUTME: Machine-wide gate for the fetch commands of case-study runs: every agent of every workflow calls the
-// ABOUTME: shared services (Jina, Exa, Wayback, Chrome, yt-dlp, GDELT, X) through it, so limits are kept across runs.
+// ABOUTME: shared services (Jina, Exa, Wayback, Chrome, yt-dlp, GDELT, Google News, X) through it, so limits are kept across runs.
 //
 // Usage: gate.mjs read <url>              page text: Jina reader over the proxy exits, then Exa fetch, then Chrome
 //        gate.mjs search "<query>" [n]    Exa web search, then DuckDuckGo and Yahoo when Exa is out of credits
@@ -8,8 +8,12 @@
 //        gate.mjs chrome <args...>        opencli <args...>, at most CHROME_SLOTS at once; Google searches paced
 //        gate.mjs yt <args...>            yt-dlp <args...> (Chrome cookies added for YouTube), at most YT_SLOTS at once
 //        gate.mjs fetch-x-posts <args...> the fetch-x-posts script named by FETCH_X_POSTS: X search on an account pool, one JSON post per line
-//        gate.mjs gdelt "<name>" [<from> <to>]  news articles GDELT found the name in (BigQuery), dates YYYY-MM-DD, one JSON article per line
+//        gate.mjs ytsearch "<query>" "<name>"...   YouTube search, only the videos whose title, channel or description has one of the names
+//        gate.mjs gdelt "<name>"... [<from> <to>]  news articles GDELT found the names in (BigQuery), up to 100 names, dates YYYY-MM-DD
+//        gate.mjs gnews "<name>" [<from> <to>]    Google News articles for the name, asked for week by week
 //        gate.mjs stats                   calls and failures per command since the log began
+// gdelt and gnews print one JSON article per line, oldest first, and keep what they fetched in
+// ~/.local/share/case-study/<gdelt|gnews>/<name>/: articles.jsonl and, beside it, articles.out.json with the days held.
 // State (pace files, slot locks, the log) lives in ~/.cache/case-study-limits, shared with fetch-x-posts. Settings come
 // from the .env file env.mjs finds: ISP_PROXY_URL (one URL; the ten ports after its own are the exits; without it every
 // request goes direct), FETCH_X_POSTS (the fetch-x-posts script) and GDELT_BQ_PROJECT (the Google Cloud project the
@@ -24,6 +28,7 @@ import { loadEnv } from './env.mjs'
 loadEnv()
 
 export const STATE = process.env.CASE_STUDY_LIMITS || join(homedir(), '.cache', 'case-study-limits')
+export const DATA = process.env.CASE_STUDY_DATA || join(homedir(), '.local', 'share', 'case-study')
 const HERE = dirname(fileURLToPath(import.meta.url))
 const WAYBACK = join(HERE, 'wayback.mjs')
 const JINA_GAP = 3.5 // seconds between requests on one exit: Jina allows 20 a minute per IP without a key
@@ -31,9 +36,13 @@ const CHROME_SLOTS = 6
 const YT_SLOTS = 3
 const YT_GAP = 2 // seconds between YouTube requests machine-wide: the logged-in session is shared by every run
 const EXITS = 10
-const GDELT_START = 2017 // the first year asked for when no range is given
-// The most one GDELT query may read. Measured 2026-10: 52 GB for one year, 488 GB for 2017 to today; the free tier is 1 TiB a month.
-const GDELT_MAX_BYTES = 700e9
+const GDELT_START = '2017-01-01' // the first day asked for when no range is given
+const GDELT_NAMES = 100 // the most names one call may ask for
+// The most one GDELT query (a year at most) may read. Measured 2026-10: 52 GB for one year of names.
+const GDELT_MAX_BYTES = 120e9
+const OUTPUT_MAX = 512e6 // bytes of one BigQuery answer; a Node string holds 537 MB
+const GNEWS_GAP = 0.3 // seconds between two Google News requests machine-wide
+const YT_RESULTS = 20 // videos asked of one YouTube search, before the name filter
 
 const sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.ceil(ms)))
 const now = () => Date.now() / 1000
@@ -196,50 +205,183 @@ export function read(url) {
   return [best, fetched, r.stdout || ''].sort((a, b) => b.length - a.length)[0]
 }
 
-// The bq call that lists the articles of the years fromYear..toYear in whose names GDELT found `name`.
-export function gdeltCommand(name, fromYear, toYear, project) {
-  const sql = `SELECT DocumentIdentifier AS url, CAST(DATE AS STRING) AS seen, SourceCommonName AS domain,
-  DIV(LENGTH(LOWER(AllNames)) - LENGTH(REPLACE(LOWER(AllNames), @name, '')), LENGTH(@name)) AS mentions
-FROM \`gdelt-bq.gdeltv2.gkg_partitioned\`
-WHERE _PARTITIONTIME >= @from AND _PARTITIONTIME < @to AND STRPOS(LOWER(AllNames), @name) > 0`
-  return ['--quiet', '--headless', `--project_id=${project}`, '--format=json', 'query', '--use_legacy_sql=false', '--max_rows=1000000',
-    `--maximum_bytes_billed=${GDELT_MAX_BYTES}`, `--parameter=name:STRING:${name}`,
-    `--parameter=from:TIMESTAMP:${fromYear}-01-01 00:00:00`, `--parameter=to:TIMESTAMP:${toYear + 1}-01-01 00:00:00`, sql]
+const day = date => date.toISOString().slice(0, 10)
+const addDays = (date, n) => day(new Date(Date.parse(`${date}T00:00:00Z`) + n * 864e5))
+
+// The parts of from..to (days, both included) that the ranges in `covered` do not hold.
+export function missingDays(covered, from, to) {
+  const gaps = []
+  let next = from
+  for (const [a, b] of covered) {
+    if (b < next) continue
+    if (a > to) break
+    if (a > next) gaps.push([next, addDays(a, -1)])
+    next = addDays(b, 1)
+  }
+  if (next <= to) gaps.push([next, to])
+  return gaps
 }
 
-// The articles GDELT found `name` in between two dates, oldest first: { url, domain, date, mentions }. GDELT lists the
-// names it found in an article's text (not the text itself), and the date is the day it collected the article. A scan
-// costs the same for one name as for a year of everything, so each year of a name is asked for once and kept in the
-// state folder: a past year for good, the running year for a day.
-export function gdelt(name, from, to, { state = STATE, project = process.env.GDELT_BQ_PROJECT, now = new Date(), call = args => run('bq', args) } = {}) {
+// `covered` with from..to added; ranges that touch are joined.
+export function coverDays(covered, from, to) {
+  const merged = []
+  for (const [a, b] of [...covered, [from, to]].sort((x, y) => x[0] < y[0] ? -1 : 1)) {
+    const last = merged.at(-1)
+    if (last && a <= addDays(last[1], 1)) { if (b > last[1]) last[1] = b } else merged.push([a, b])
+  }
+  return merged
+}
+
+function writeWhole(path, text) {
+  writeFileSync(`${path}.part`, text)
+  renameSync(`${path}.part`, path)
+}
+
+// The articles kept for one name of one source: <data>/<source>/<name>/articles.jsonl, one per line, oldest first, one
+// per url, and articles.out.json beside it with the days already fetched. The .out.json is what decides what to fetch.
+function archive(source, name, data) {
   const key = String(name || '').toLowerCase().split(/\s+/).filter(Boolean).join(' ')
-  if (!key || key.includes('://')) throw Error('give the name to look for, not a URL: gate.mjs gdelt "<name>" [<from> <to>]')
-  from ||= `${GDELT_START}-01-01`
-  to ||= now.toISOString().slice(0, 10)
+  if (!key || key.includes('://')) throw Error('give the name to look for, not a URL')
+  const folder = join(data, source, key.replace(/[\s/\\]+/g, '-'))
+  const file = join(folder, 'articles.jsonl')
+  const progress = join(folder, 'articles.out.json')
+  let covered = []
+  let articles = []
+  if (existsSync(progress)) {
+    const held = JSON.parse(readFileSync(progress, 'utf8'))
+    if (held.name !== key) throw Error(`${folder} holds another name: ${held.name}`)
+    covered = held.covered
+    articles = readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+  }
+  return {
+    key,
+    get covered() { return covered },
+    between: (from, to) => articles.filter(a => a.date >= from && a.date <= to),
+    // adds the articles (the first one kept per url) and the days from..to, and writes both files
+    add(found, from, to) {
+      const byUrl = new Map(articles.map(a => [a.url, a]))
+      for (const a of found) if (!byUrl.has(a.url) || a.date < byUrl.get(a.url).date) byUrl.set(a.url, a)
+      articles = [...byUrl.values()].sort((x, y) => x.date < y.date ? -1 : x.date > y.date ? 1 : 0)
+      if (from <= to) covered = coverDays(covered, from, to)
+      mkdirSync(folder, { recursive: true })
+      writeWhole(file, articles.map(a => JSON.stringify(a) + '\n').join(''))
+      writeWhole(progress, JSON.stringify({ name: key, covered, count: articles.length }))
+    },
+  }
+}
+
+// from..to as given or by default, the end never after today; throws on anything that is not a day.
+function dayRange(from, to, start, now) {
+  const today = day(now)
+  from ||= start
+  to = !to || to > today ? today : to
   if (![from, to].every(d => /^\d{4}-\d{2}-\d{2}$/.test(d)) || from > to) throw Error('dates are YYYY-MM-DD, <from> before <to>')
+  return [from, to, addDays(today, -1)]
+}
+
+// The bq call that lists, for each of `names`, the articles of the days from..to in whose names GDELT found it.
+export function gdeltCommand(names, from, to, project) {
+  const sql = `SELECT name, DocumentIdentifier AS url, CAST(DATE AS STRING) AS seen, SourceCommonName AS domain,
+  DIV(LENGTH(LOWER(AllNames)) - LENGTH(REPLACE(LOWER(AllNames), name, '')), LENGTH(name)) AS mentions
+FROM \`gdelt-bq.gdeltv2.gkg_partitioned\` JOIN UNNEST(@names) AS name ON STRPOS(LOWER(AllNames), name) > 0
+WHERE _PARTITIONTIME >= @from AND _PARTITIONTIME < @to`
+  return ['--quiet', '--headless', `--project_id=${project}`, '--format=json', 'query', '--use_legacy_sql=false', '--max_rows=10000000',
+    `--maximum_bytes_billed=${GDELT_MAX_BYTES}`, `--parameter=names:ARRAY<STRING>:${JSON.stringify(names)}`,
+    `--parameter=from:TIMESTAMP:${from} 00:00:00`, `--parameter=to:TIMESTAMP:${addDays(to, 1)} 00:00:00`, sql]
+}
+
+// The articles GDELT found each of `names` in between two days, per name oldest first: { name, url, domain, date,
+// mentions }. GDELT lists the names it recognised in an article's text (not the text itself); the date is the day it
+// collected the article. A query costs what the days it reads cost, whatever the number of names, so only the days a
+// name lacks are read, a year at a time, with every name that lacks them in the same query. A day is held once it has
+// ended: today is read again each time.
+export function gdelt(names, from, to, { data = DATA, state = STATE, project = process.env.GDELT_BQ_PROJECT, now = new Date(), call = args => run('bq', args, { maxBuffer: OUTPUT_MAX }) } = {}) {
+  if (!names.length) throw Error('give the name to look for: gate.mjs gdelt "<name>"... [<from> <to>]')
+  if (names.length > GDELT_NAMES) throw Error(`at most ${GDELT_NAMES} names in one call`)
+  const [start, end, yesterday] = dayRange(from, to, GDELT_START, now)
   if (!project) throw Error('GDELT_BQ_PROJECT (the Google Cloud project the BigQuery queries run in) is not set in the .env file')
-  const folder = join(state, 'gdelt', encodeURIComponent(key))
-  mkdirSync(folder, { recursive: true })
-  const years = []
-  for (let y = Number(from.slice(0, 4)); y <= Math.min(Number(to.slice(0, 4)), now.getUTCFullYear()); y++) years.push(y)
-  const kept = year => { try { return JSON.parse(readFileSync(join(folder, `${year}.json`), 'utf8')) } catch { return null } }
-  // a year asked for after it ended is complete; one asked for while it ran is good for a day
-  const usable = year => { const k = kept(year); return k && (k.asked.slice(0, 4) > String(year) || now - new Date(k.asked) < 86400e3) }
-  return withLock(join(folder, 'lock'), () => {
-    const missing = years.filter(y => !usable(y))
-    if (missing.length) {
-      const r = call(gdeltCommand(key, missing[0], missing.at(-1), project))
+  mkdirSync(state, { recursive: true })
+  return withLock(join(state, 'gdelt.lock'), () => {
+    const kept = [...new Map(names.map(name => archive('gdelt', name, data)).map(a => [a.key, a])).values()]
+    for (let year = Number(start.slice(0, 4)); year <= Number(end.slice(0, 4)); year++) {
+      const inYear = ([a, b]) => [a < `${year}-01-01` ? `${year}-01-01` : a, b > `${year}-12-31` ? `${year}-12-31` : b]
+      const lacking = kept.map(a => ({ a, gaps: missingDays(a.covered, start, end).map(inYear).filter(([x, y]) => x <= y) })).filter(l => l.gaps.length)
+      if (!lacking.length) continue
+      const first = lacking.map(l => l.gaps[0][0]).sort()[0]
+      const last = lacking.map(l => l.gaps.at(-1)[1]).sort().at(-1)
+      const r = call(gdeltCommand(lacking.map(l => l.a.key), first, last, project))
       let rows
       try { rows = r.status === 0 ? JSON.parse(r.stdout.trim() || '[]') : null } catch { rows = null }
+      if (r.error?.code === 'ENOBUFS') throw Error(`the answer for ${year} is over ${OUTPUT_MAX / 1e6} MB: ask for fewer names or fewer days (${lacking.map(l => l.a.key).join(', ')})`)
       if (!rows) throw Error(((r.stdout || '') + (r.stderr || '') || r.error?.message || 'bq failed').trim().split('\n').at(-1).slice(0, 300))
-      for (let y = missing[0]; y <= missing.at(-1); y++) {
-        const articles = rows.filter(row => row.seen.startsWith(String(y))).map(row => ({ url: row.url, domain: row.domain, date: `${row.seen.slice(0, 4)}-${row.seen.slice(4, 6)}-${row.seen.slice(6, 8)}`, mentions: Number(row.mentions) }))
-        writeFileSync(join(folder, `${y}.json.part`), JSON.stringify({ asked: now.toISOString(), articles }))
-        renameSync(join(folder, `${y}.json.part`), join(folder, `${y}.json`))
+      for (const { a } of lacking) {
+        const found = rows.filter(row => row.name === a.key).map(row => ({ url: row.url, domain: row.domain, date: `${row.seen.slice(0, 4)}-${row.seen.slice(4, 6)}-${row.seen.slice(6, 8)}`, mentions: Number(row.mentions) }))
+        a.add(found, first, last > yesterday ? yesterday : last)
       }
     }
-    return years.flatMap(y => kept(y).articles).filter(a => a.date >= from && a.date <= to).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
+    return kept.flatMap(a => a.between(start, end).map(article => ({ name: a.key, ...article })))
   })
+}
+
+const xmlText = s => (s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&')
+
+// The Google News articles for `name` between two days, oldest first: { url, domain, date, title }; url is Google's
+// own link to the article. One search answers with a part of what it has, and a narrower one with more of it, so every
+// week (Monday to Sunday) is asked for on its own; a week is held once it was asked for, the running one once it ended.
+export function gnews(name, from, to, { data = DATA, state = STATE, now = new Date(), gap = GNEWS_GAP,
+  call = url => { const r = run('curl', ['-s', '-m', '30', '-w', '\n%{http_code}', url]); const cut = (r.stdout || '').lastIndexOf('\n'); return { status: Number(r.stdout.slice(cut + 1)), body: r.stdout.slice(0, cut) } } } = {}) {
+  const [start, end, yesterday] = dayRange(from, to, GDELT_START, now)
+  mkdirSync(state, { recursive: true })
+  return withLock(join(state, 'gnews.lock'), () => {
+    const a = archive('gnews', name, data)
+    const mondays = new Set()
+    for (const [x, y] of missingDays(a.covered, start, end)) {
+      for (let d = addDays(x, -((new Date(`${x}T00:00:00Z`).getUTCDay() + 6) % 7)); d <= y; d = addDays(d, 7)) mondays.add(d)
+    }
+    for (const monday of [...mondays].sort()) {
+      if (gap) paced('gnews', gap, state)
+      const query = `${String(name).trim()} after:${monday} before:${addDays(monday, 7)}`
+      const r = call(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`)
+      if (r.status !== 200) throw Error(`Google News answered ${r.status} for the week of ${monday}; the weeks before it are kept`)
+      const found = [...r.body.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(([, item]) => {
+        const field = tag => xmlText((item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)) || [])[1])
+        const published = new Date(field('pubDate'))
+        return { url: field('link'), domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? monday : day(published), title: field('title') }
+      }).filter(article => article.url)
+      const sunday = addDays(monday, 6)
+      a.add(found, monday, sunday > yesterday ? yesterday : sunday)
+    }
+    return a.between(start, end)
+  })
+}
+
+// yt-dlp through the YouTube limits: one of YT_SLOTS, paced, logged in; refused, the same request through an exit.
+function yt(args) {
+  const youtube = args.some(a => a.includes('youtube.com') || a.includes('youtu.be') || a.startsWith('ytsearch'))
+  return slot('yt', YT_SLOTS, () => {
+    if (youtube) paced('youtube', YT_GAP)
+    let r = run('yt-dlp', [...(youtube ? ['--cookies-from-browser', 'chrome'] : []), ...args])
+    let status = r.status === 0 ? 'ok' : 'FAILED'
+    if (youtube && (r.stderr || '').includes('Sign in to confirm') && proxies().length) {
+      // the logged-in session is being refused: the same request without login, through an exit
+      r = run('yt-dlp', ['--proxy', proxies()[Math.floor(Math.random() * EXITS)], ...args])
+      status = r.status === 0 ? 'ok-proxy' : 'BLOCKED'
+    }
+    return { ...r, gateStatus: status }
+  })
+}
+
+// The videos of a YouTube search that name the subject: { id, url, channel, title }. YouTube fills a search up with
+// videos that have nothing to do with it, so a video is kept only when its title, its channel or the piece of its
+// description the search shows holds one of `names`.
+export function ytsearch(query, names, { count = YT_RESULTS, call = yt } = {}) {
+  if (!query || !names.length) throw Error('give the search and at least one name the videos must hold: gate.mjs ytsearch "<query>" "<name>"...')
+  const r = call(['--flat-playlist', '--print', '%(.{id,channel,title,description})j', `ytsearch${count}:${query}`])
+  if (r.status !== 0) throw Error((r.stderr || 'yt-dlp failed').trim().split('\n').at(-1).slice(0, 300))
+  const wanted = names.map(name => name.toLowerCase())
+  return (r.stdout || '').split('\n').filter(Boolean).map(line => JSON.parse(line))
+    .filter(v => wanted.some(name => `${v.title}\n${v.channel}\n${v.description || ''}`.toLowerCase().includes(name)))
+    .map(v => ({ id: v.id, url: `https://www.youtube.com/watch?v=${v.id}`, channel: v.channel, title: v.title }))
 }
 
 export function stats(state = STATE) {
@@ -282,18 +424,7 @@ function main(argv) {
     log('chrome', code === 0 ? 'ok' : 'FAILED', args.slice(0, 3).join(' '))
     process.exit(code)
   } else if (command === 'yt') {
-    const youtube = args.some(a => a.includes('youtube.com') || a.includes('youtu.be') || a.startsWith('ytsearch'))
-    const r = slot('yt', YT_SLOTS, () => {
-      if (youtube) paced('youtube', YT_GAP)
-      let r = run('yt-dlp', [...(youtube ? ['--cookies-from-browser', 'chrome'] : []), ...args])
-      let status = r.status === 0 ? 'ok' : 'FAILED'
-      if (youtube && (r.stderr || '').includes('Sign in to confirm') && proxies().length) {
-        // the logged-in session is being refused: the same request without login, through an exit
-        r = run('yt-dlp', ['--proxy', proxies()[Math.floor(Math.random() * EXITS)], ...args])
-        status = r.status === 0 ? 'ok-proxy' : 'BLOCKED'
-      }
-      return { ...r, gateStatus: status }
-    })
+    const r = yt(args)
     process.stdout.write(r.stdout || '')
     process.stderr.write(r.stderr || '')
     log('yt', r.gateStatus, args.at(-1) || '')
@@ -304,13 +435,19 @@ function main(argv) {
     const code = passthrough('node', [script, ...args])
     log('fetch-x-posts', code === 0 ? 'ok' : 'FAILED', args[0] || '')
     process.exit(code)
-  } else if (command === 'gdelt') {
+  } else if (['gdelt', 'gnews', 'ytsearch'].includes(command)) {
+    const isDay = arg => /^\d{4}-\d{2}(-\d{2})?$/.test(arg)
+    const names = args.filter(arg => !isDay(arg))
+    const [from, to] = args.filter(isDay)
     try {
-      for (const article of gdelt(args[0], args[1], args[2])) console.log(JSON.stringify(article))
-      log('gdelt', 'ok', args.join(' '))
+      const found = command === 'gdelt' ? gdelt(names, from, to)
+        : command === 'gnews' ? gnews(names[0], from, to)
+          : ytsearch(names[0], names.slice(1))
+      for (const line of found) console.log(JSON.stringify(line))
+      log(command, 'ok', args.join(' '))
     } catch (error) {
-      log('gdelt', 'FAILED', args.join(' '))
-      console.error(`gdelt: ${error.message}`)
+      log(command, 'FAILED', args.join(' '))
+      console.error(`${command}: ${error.message}`)
       process.exit(1)
     }
   } else if (command === 'stats') {

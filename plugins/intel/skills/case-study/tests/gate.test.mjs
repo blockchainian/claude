@@ -1,8 +1,8 @@
-// ABOUTME: Tests the machine-wide gate's limits: proxy exits, pacing, slots, the Exa credit window, the kept GDELT years and the log stats.
+// ABOUTME: Tests the machine-wide gate's limits: proxy exits, pacing, slots, the Exa credit window, the kept GDELT and Google News articles, the YouTube filter and the log stats.
 // ABOUTME: Everything runs against a temporary state directory; no service is called.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
@@ -61,50 +61,128 @@ test('exa retries on 429, stops asking for ten minutes after a 402, and otherwis
   assert.equal(calls, 1)
 })
 
-test('gdelt asks BigQuery once for the years it lacks, keeps them, and answers a date range from what it kept', () => {
-  const calls = []
-  const call = args => {
+// A bq stand-in: answers every call with the rows of the year it was asked for.
+function bigquery(rowsByYear, calls) {
+  return args => {
     calls.push(args)
-    return { status: 0, stderr: '', stdout: JSON.stringify([
-      { url: 'https://a.example/late', seen: '20231129194500', domain: 'a.example', mentions: '3' },
-      { url: 'https://b.example/early', seen: '20220105000000', domain: 'b.example', mentions: '1' },
-    ]) }
+    const year = args.find(a => a.startsWith('--parameter=from:')).slice(-19, -15)
+    const names = JSON.parse(args.find(a => a.startsWith('--parameter=names:')).split(':').slice(2).join(':'))
+    return { status: 0, stderr: '', stdout: JSON.stringify((rowsByYear[year] || []).filter(r => names.includes(r.name))) }
   }
-  const options = { state, call, project: 'p', now: new Date('2026-10-03T12:00:00Z') }
-  assert.deepEqual(gate.gdelt('Kobeissi Letter', '2022-01-01', '2023-12-31', options), [
-    { url: 'https://b.example/early', domain: 'b.example', date: '2022-01-05', mentions: 1 },
-    { url: 'https://a.example/late', domain: 'a.example', date: '2023-11-29', mentions: 3 },
-  ])
-  const args = calls[0]
-  assert.ok(args.includes('--project_id=p') && args.includes('--parameter=name:STRING:kobeissi letter'), 'the name is a parameter, lowercased')
-  assert.ok(args.includes('--parameter=from:TIMESTAMP:2022-01-01 00:00:00') && args.includes('--parameter=to:TIMESTAMP:2024-01-01 00:00:00'), 'whole years are asked for')
-  assert.ok(args.some(a => a.startsWith('--maximum_bytes_billed=')))
-  assert.match(args.at(-1), /gkg_partitioned[\s\S]*_PARTITIONTIME >= @from[\s\S]*AllNames/)
-  assert.deepEqual(gate.gdelt('kobeissi  LETTER', '2023-06-01', '2023-12-31', options).map(r => r.url), ['https://a.example/late'], 'the same name in another spelling, a range inside a kept year')
-  assert.deepEqual(gate.gdelt('Kobeissi Letter', '2022-02-01', '2022-12-31', options), [], 'a kept year with nothing in the range')
-  assert.equal(calls.length, 1, 'kept years are not asked for again')
-  gate.gdelt('Kobeissi Letter', '2021-01-01', '2023-12-31', options)
-  assert.ok(calls[1].includes('--parameter=from:TIMESTAMP:2021-01-01 00:00:00') && calls[1].includes('--parameter=to:TIMESTAMP:2022-01-01 00:00:00'), 'only the missing year')
+}
+const parameter = (args, name) => args.find(a => a.startsWith(`--parameter=${name}:`)).split(':').slice(2).join(':')
+
+test('missingDays and coverDays keep the days already held as merged ranges', () => {
+  assert.deepEqual(gate.missingDays([], '2023-01-01', '2023-01-31'), [['2023-01-01', '2023-01-31']])
+  assert.deepEqual(gate.missingDays([['2023-01-10', '2023-01-20']], '2023-01-01', '2023-01-31'), [['2023-01-01', '2023-01-09'], ['2023-01-21', '2023-01-31']])
+  assert.deepEqual(gate.missingDays([['2022-01-01', '2023-12-31']], '2023-06-01', '2023-06-30'), [])
+  assert.deepEqual(gate.coverDays([['2023-01-01', '2023-01-09']], '2023-01-10', '2023-01-20'), [['2023-01-01', '2023-01-20']], 'adjacent ranges join')
+  assert.deepEqual(gate.coverDays([['2023-03-01', '2023-03-09']], '2023-01-01', '2023-01-20'), [['2023-01-01', '2023-01-20'], ['2023-03-01', '2023-03-09']])
 })
 
-test('gdelt asks again for the running year after a day, and says why BigQuery failed', () => {
-  let calls = 0
-  const call = () => { calls++; return { status: 0, stderr: '', stdout: '[]' } }
-  const day1 = { state, call, project: 'p', now: new Date('2026-10-03T12:00:00Z') }
-  gate.gdelt('someone new', '2026-01-01', '2026-10-03', day1)
-  gate.gdelt('someone new', '2026-01-01', '2026-10-03', { ...day1, now: new Date('2026-10-03T20:00:00Z') })
-  assert.equal(calls, 1, 'the same day')
-  gate.gdelt('someone new', '2026-01-01', '2026-10-05', { ...day1, now: new Date('2026-10-05T12:00:00Z') })
-  assert.equal(calls, 2, 'two days later the running year is asked for again')
-  gate.gdelt('someone new', '2026-01-01', '2026-12-31', { ...day1, now: new Date('2027-02-01T12:00:00Z') })
-  assert.equal(calls, 3, 'a year kept before it ended is asked for once more')
-  gate.gdelt('someone new', '2026-01-01', '2026-12-31', { ...day1, now: new Date('2027-06-01T12:00:00Z') })
-  assert.equal(calls, 3, 'a year kept after it ended stays')
-  const failing = { state, project: 'p', now: day1.now, call: () => ({ status: 1, stdout: 'Quota exceeded: Your project exceeded quota for free query bytes scanned', stderr: '' }) }
-  assert.throws(() => gate.gdelt('nobody', '2025-01-01', '2025-12-31', failing), /Quota exceeded/)
-  assert.throws(() => gate.gdelt('nobody', '2025-01-01', '2025-12-31', { ...failing, project: '' }), /GDELT_BQ_PROJECT/)
-  assert.throws(() => gate.gdelt('https://api.gdeltproject.org/api/v2/doc/doc?query=x', undefined, undefined, failing), /name/)
-  assert.throws(() => gate.gdelt('nobody', '2025', '2025-12-31', failing), /YYYY-MM-DD/)
+test('gdelt reads from BigQuery only the days a name lacks, a year at a time, and keeps each name\'s articles in its own folder', () => {
+  const data = mkdtempSync(join(tmpdir(), 'data-'))
+  const calls = []
+  const call = bigquery({
+    2022: [{ name: 'kobeissi letter', url: 'https://b.example/early', seen: '20220105000000', domain: 'b.example', mentions: '1' }],
+    2023: [{ name: 'kobeissi letter', url: 'https://a.example/late', seen: '20231129194500', domain: 'a.example', mentions: '3' },
+      { name: 'kobeissi letter', url: 'https://a.example/late', seen: '20231130000000', domain: 'a.example', mentions: '3' },
+      { name: 'adam kobeissi', url: 'https://c.example/adam', seen: '20230301000000', domain: 'c.example', mentions: '2' }],
+    2024: [{ name: 'kobeissi letter', url: 'https://d.example/next', seen: '20240210000000', domain: 'd.example', mentions: '1' }],
+  }, calls)
+  const options = { data, state, call, project: 'p', now: new Date('2026-10-03T12:00:00Z') }
+  assert.deepEqual(gate.gdelt(['Kobeissi Letter', 'Adam  KOBEISSI'], '2022-01-01', '2023-12-31', options), [
+    { name: 'kobeissi letter', url: 'https://b.example/early', domain: 'b.example', date: '2022-01-05', mentions: 1 },
+    { name: 'kobeissi letter', url: 'https://a.example/late', domain: 'a.example', date: '2023-11-29', mentions: 3 },
+    { name: 'adam kobeissi', url: 'https://c.example/adam', domain: 'c.example', date: '2023-03-01', mentions: 2 },
+  ], 'one article per url, the earliest day it was seen')
+  assert.equal(calls.length, 2, 'one query per year')
+  assert.ok(calls[0].includes('--project_id=p') && calls[0].some(a => a.startsWith('--maximum_bytes_billed=')))
+  assert.equal(parameter(calls[0], 'names'), '["kobeissi letter","adam kobeissi"]', 'every name in one query, lowercased')
+  assert.deepEqual([parameter(calls[0], 'from'), parameter(calls[0], 'to')], ['2022-01-01 00:00:00', '2023-01-01 00:00:00'])
+  assert.match(calls[0].at(-1), /gkg_partitioned[\s\S]*UNNEST\(@names\)[\s\S]*AllNames[\s\S]*_PARTITIONTIME >= @from/)
+  const folder = join(data, 'gdelt', 'kobeissi-letter')
+  assert.deepEqual(JSON.parse(readFileSync(join(folder, 'articles.out.json'), 'utf8')), { name: 'kobeissi letter', covered: [['2022-01-01', '2023-12-31']], count: 2 })
+  assert.deepEqual(readFileSync(join(folder, 'articles.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l).url), ['https://b.example/early', 'https://a.example/late'], 'oldest first')
+
+  assert.deepEqual(gate.gdelt(['kobeissi letter'], '2023-06-01', '2023-12-31', options).map(a => a.url), ['https://a.example/late'])
+  assert.equal(calls.length, 2, 'days already held are not read again')
+  assert.deepEqual(gate.gdelt(['Kobeissi Letter', 'Someone Else'], '2023-06-01', '2024-03-31', options).map(a => a.url), ['https://a.example/late', 'https://d.example/next'])
+  assert.equal(calls.length, 4)
+  assert.equal(parameter(calls[2], 'names'), '["someone else"]', 'a held year is read for the new name only')
+  assert.deepEqual([parameter(calls[2], 'from'), parameter(calls[2], 'to')], ['2023-06-01 00:00:00', '2024-01-01 00:00:00'])
+  assert.equal(parameter(calls[3], 'names'), '["kobeissi letter","someone else"]')
+  assert.deepEqual([parameter(calls[3], 'from'), parameter(calls[3], 'to')], ['2024-01-01 00:00:00', '2024-04-01 00:00:00'], 'only the days asked for')
+  assert.deepEqual(JSON.parse(readFileSync(join(folder, 'articles.out.json'), 'utf8')).covered, [['2022-01-01', '2024-03-31']])
+  rmSync(data, { recursive: true, force: true })
+})
+
+test('gdelt reads the running day again every time, keeps the years done before a failure, and refuses what it cannot run', () => {
+  const data = mkdtempSync(join(tmpdir(), 'data-'))
+  const calls = []
+  const options = { data, state, call: bigquery({}, calls), project: 'p', now: new Date('2026-10-03T12:00:00Z') }
+  gate.gdelt(['someone new'], '2026-09-01', undefined, options)
+  assert.deepEqual([parameter(calls[0], 'from'), parameter(calls[0], 'to')], ['2026-09-01 00:00:00', '2026-10-04 00:00:00'], 'no end date means today')
+  assert.deepEqual(JSON.parse(readFileSync(join(data, 'gdelt', 'someone-new', 'articles.out.json'), 'utf8')).covered, [['2026-09-01', '2026-10-02']], 'a day counts once it has ended')
+  gate.gdelt(['someone new'], '2026-09-01', '2026-10-03', options)
+  assert.deepEqual([parameter(calls[1], 'from'), parameter(calls[1], 'to')], ['2026-10-03 00:00:00', '2026-10-04 00:00:00'])
+  gate.gdelt(['someone new'], '2026-09-01', '2026-10-02', options)
+  assert.equal(calls.length, 2)
+
+  let asked = 0
+  const failing = { ...options, call: args => asked++ ? { status: 1, stdout: 'Quota exceeded: Your project exceeded quota for free query bytes scanned', stderr: '' } : { status: 0, stdout: '[]', stderr: '' } }
+  assert.throws(() => gate.gdelt(['nobody'], '2024-01-01', '2025-12-31', failing), /Quota exceeded/)
+  assert.deepEqual(JSON.parse(readFileSync(join(data, 'gdelt', 'nobody', 'articles.out.json'), 'utf8')).covered, [['2024-01-01', '2024-12-31']], 'the year read before the failure is kept')
+  assert.throws(() => gate.gdelt(['nobody'], '2025-01-01', '2025-12-31', { ...options, project: '' }), /GDELT_BQ_PROJECT/)
+  assert.throws(() => gate.gdelt(['https://api.gdeltproject.org/api/v2/doc/doc?query=x'], undefined, undefined, options), /name/)
+  assert.throws(() => gate.gdelt([], '2025-01-01', '2025-12-31', options), /name/)
+  assert.throws(() => gate.gdelt(Array.from({ length: 101 }, (_, i) => `name ${i}`), '2025-01-01', '2025-12-31', options), /100/)
+  assert.throws(() => gate.gdelt(['nobody'], '2025', '2025-12-31', options), /YYYY-MM-DD/)
+  rmSync(data, { recursive: true, force: true })
+})
+
+test('gnews asks Google News for each week it lacks, keeps the articles, and stops at the first refusal', () => {
+  const data = mkdtempSync(join(tmpdir(), 'data-'))
+  const item = (title, link, date, source) => `<item><title>${title}</title><link>${link}</link><pubDate>${date}</pubDate><source url="https://www.${source}">X</source></item>`
+  const weeks = {
+    '2025-06-02': item('Stocks &amp; bonds - A', 'https://news.google.com/rss/articles/one', 'Tue, 03 Jun 2025 07:00:00 GMT', 'a.example'),
+    '2025-06-09': item('Second - B', 'https://news.google.com/rss/articles/two', 'Wed, 11 Jun 2025 07:00:00 GMT', 'b.example') + item('Again - A', 'https://news.google.com/rss/articles/one', 'Tue, 03 Jun 2025 07:00:00 GMT', 'a.example'),
+  }
+  const asked = []
+  const call = url => { const week = decodeURIComponent(url).match(/after:([\d-]+) before:([\d-]+)/); asked.push(`${week[1]} ${week[2]}`); return { status: 200, body: `<rss>${weeks[week[1]] || ''}</rss>` } }
+  const options = { data, state, call, now: new Date('2026-10-03T12:00:00Z'), gap: 0 }
+  assert.deepEqual(gate.gnews('Kobeissi Letter', '2025-06-04', '2025-06-12', options), [
+    { url: 'https://news.google.com/rss/articles/two', domain: 'b.example', date: '2025-06-11', title: 'Second - B' },
+  ], 'only the days asked for')
+  assert.deepEqual(asked, ['2025-06-02 2025-06-09', '2025-06-09 2025-06-16'], 'whole weeks, Monday to Monday')
+  assert.deepEqual(gate.gnews('kobeissi letter', '2025-06-02', '2025-06-15', options).map(a => a.title), ['Stocks & bonds - A', 'Second - B'], 'one article per link, oldest first')
+  assert.equal(asked.length, 2, 'weeks already held are not asked for again')
+  assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')), { name: 'kobeissi letter', covered: [['2025-06-02', '2025-06-15']], count: 2 })
+  let n = 0
+  const refusing = { ...options, call: url => { asked.push('x'); return n++ ? { status: 429, body: '' } : { status: 200, body: '<rss></rss>' } } }
+  assert.throws(() => gate.gnews('Kobeissi Letter', '2025-06-02', '2025-07-06', refusing), /429/)
+  assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')).covered, [['2025-06-02', '2025-06-22']], 'the week read before the refusal is kept')
+  rmSync(data, { recursive: true, force: true })
+})
+
+test('ytsearch keeps the videos whose title, channel or description names the subject', () => {
+  const video = (id, channel, title, description) => JSON.stringify({ id, channel, title, description })
+  const stdout = [
+    video('aaaaaaaaaaa', 'Fox Business', 'Recession is the only way down', 'Adam KOBEISSI joins the show'),
+    video('bbbbbbbbbbb', 'Real Vision', 'Five Common Mistakes Investors Make', 'An expert view'),
+    video('ccccccccccc', 'The Kobeissi Letter', 'Weekly outlook', null),
+    video('ddddddddddd', 'Thoughtful Money', 'Adam Kobeissi: what comes next', ''),
+  ].join('\n')
+  let args
+  const found = gate.ytsearch('Adam Kobeissi interview', ['Adam Kobeissi', 'Kobeissi Letter'], { count: 15, call: a => { args = a; return { status: 0, stdout, stderr: '' } } })
+  assert.deepEqual(found, [
+    { id: 'aaaaaaaaaaa', url: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', channel: 'Fox Business', title: 'Recession is the only way down' },
+    { id: 'ccccccccccc', url: 'https://www.youtube.com/watch?v=ccccccccccc', channel: 'The Kobeissi Letter', title: 'Weekly outlook' },
+    { id: 'ddddddddddd', url: 'https://www.youtube.com/watch?v=ddddddddddd', channel: 'Thoughtful Money', title: 'Adam Kobeissi: what comes next' },
+  ])
+  assert.equal(args.at(-1), 'ytsearch15:Adam Kobeissi interview')
+  assert.throws(() => gate.ytsearch('Adam Kobeissi interview', [], {}), /name/)
+  assert.throws(() => gate.ytsearch('q', ['n'], { call: () => ({ status: 1, stdout: '', stderr: 'ERROR: Sign in to confirm' }) }), /Sign in/)
 })
 
 test('stats counts the log by command and status', () => {
