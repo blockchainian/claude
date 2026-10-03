@@ -67,11 +67,12 @@ The gate adds the Chrome login itself: never add `--cookies-from-browser`.
   One JSON upload per line, oldest first: `id`, `kind` (`videos`, `shorts`
   or `streams`), `date` (the exact upload day, from the video's own page),
   `timestamp`, `views` (today's total), `duration` (seconds), `title`, `url`.
-  - It reads every video's page, many at once and without the login: about
-    1,000 uploads in 4 minutes. Run it once and work from the file; do not
+  - It reads every video's page, many at once, through the proxy's exits and
+    without the login: about 1,000 uploads in 3 minutes. Run it once and work from the file; do not
     read video pages one by one for their dates.
   - The pages it could not read (private or removed videos) are named on
-    stderr: a gap.
+    stderr: a gap. "YouTube refused every route" means no page was read:
+    write it into the gaps and do not fall back to reading pages one by one.
 - Not `opencli youtube transcript`: it is broken.
 - The login is shared by the whole machine: download subtitles for the
   interviews you will read, never loop over a channel. "Sign in to confirm"
