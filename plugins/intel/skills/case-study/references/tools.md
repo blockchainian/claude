@@ -17,8 +17,6 @@ calls and failures per command.
 - Exa, with the engines behind it when Exa is out of credits:
   `$G search "<query>" 8` (the second argument is the number of results).
   Not for news: news is the two news commands below.
-- Google by date (press from the time):
-  `$G chrome google search "<query> after:2017-01-01 before:2017-03-01" -f yaml`.
 - Google News by date range: `$G gnews "<name>" 2023-01-01 2023-12-31`
   (without dates: 2017 to today), the name without quotes. One JSON article
   per line, oldest first: `url` (Google's own link to the article, which
