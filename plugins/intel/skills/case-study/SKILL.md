@@ -109,7 +109,7 @@ ask for one name.
 
    Run it with the Workflow tool (this skill asks for it):
    `scriptPath: ${CLAUDE_PLUGIN_ROOT}/skills/case-study/workflows/creator.mjs`,
-   `args: { subject, work, skill, lang, today, product, seeds, caps, done, fixer }`
+   `args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer }`
    — `skill` is this skill's absolute folder, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the
    tool list in one line (the script gives each agent its share). Empty
@@ -213,9 +213,11 @@ ask for one name.
   the cache, the others run again and pick up where their files stop. Do not
   change the script or the args before resuming, or every agent reruns.
 - A run that cannot be resumed (another session started it) continues from
-  its files: `done: 'scout'` skips the scouts and reads the sources already
-  in `sources.json` again (fresh notes, fetched again unless a reader's saved
-  list is there); `done: 'read'` starts at the draft, from the notes and numbers
+  its files: `done: 'scout'` skips the scouts and reads the known sources
+  again, into fresh notes; pass them as `sources`, the `sources` array printed
+  by `case-study.mjs sources "<work>"` (an agent relaying the list drops
+  entries). A source whose text any earlier agent saved is read from disk,
+  not fetched; `done: 'read'` starts at the draft, from the notes and numbers
   already in the work directory; `done: 'read, sources'` also keeps the
   sources lens's findings in `review/`. To draft again, move `drafts/` and the
   rest of `review/` aside first: writers and fixers continue from the files
