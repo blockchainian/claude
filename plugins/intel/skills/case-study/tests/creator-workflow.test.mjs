@@ -1,15 +1,11 @@
 // ABOUTME: Runs the creator workflow script against stand-in agents to check its control flow:
-// ABOUTME: scouts follow each other's leads, their sources are de-duplicated and read as they come in, every chapter is written, has its figures matched by a
+// ABOUTME: scouted sources are de-duplicated and batched, every chapter is written, has its figures matched by a
 // ABOUTME: script, is reviewed and is fixed as soon as its own reviews are done; no chapter is written before the sources lens is in.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const source = readFileSync(new URL('../workflows/creator.mjs', import.meta.url), 'utf8').replace('export const meta', 'const meta')
-const SEEDS = JSON.parse(source.match(/const SEEDS = (\[[^\]]+\])/)[1].replaceAll("'", '"'))
-// 13 seeds, a scout for each seed's own lead, one for the lead they share (which finds nothing new) and one for a lead's lead
-const SCOUTS = 13 + 13 + 1 + 1
-const SCOUTED = (SCOUTS - 1) * 9 + 1
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 
 // Every stand-in agent finishes on the next tick, except those named in `slow`, which finish when `release` is called:
@@ -21,14 +17,10 @@ async function run(args, slow = []) {
     calls.push({ prompt, ...opts })
     const finish = () => {
       if (opts.label.startsWith('scout:')) {
-        const name = opts.label.slice(6)
-        // 10 sources per scout, one shared by every scout; a seed scout names two leads, one of them named by every seed.
-        // The scout of the shared lead finds nothing new and names a lead; the scout of the first seed's own lead names one too.
-        const shared = { url: 'https://shared.example/a/', outlet: 'Shared' }
-        if (prompt.includes('Your lead: The 2019 lawsuit.')) return { sources: [shared], leads: ['the lawsuit\'s appeal'] }
-        const first = prompt.includes(`Your lead: the people around ${SEEDS[0]}.`)
-        return { sources: [shared, ...Array.from({ length: 9 }, (_, i) => ({ url: `https://${name}.example/${i}`, outlet: name, year: '2020' }))],
-          leads: first ? ['her first editor'] : name.startsWith('lead-') ? [] : [`the people around ${name}`, 'The 2019 lawsuit'] }
+        const lane = opts.label.slice(6)
+        // 30 sources per lane, one shared by every lane
+        return { sources: [{ url: 'https://shared.example/a/', outlet: 'Shared' },
+          ...Array.from({ length: 29 }, (_, i) => ({ url: `https://${lane}.example/${i}`, outlet: lane, year: '2020' }))] }
       }
       if (opts.label === 'merge:read') return '{"sources": 130, "failed": 0, "gaps": 4}'
       return `done ${opts.label}`
@@ -52,56 +44,11 @@ const ALL = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10']
 
 test('sources found by several scouts are read once, eight to a reader; the numbers agents start with the scouts', async () => {
   const { calls, result } = await run(ARGS)
-  assert.equal((await result()).scouted, SCOUTED)
-  assert.equal(labels(calls, 'read:').length, Math.ceil(SCOUTED / 8))
+  assert.equal((await result()).scouted, 4 * 29 + 1)
+  assert.equal(labels(calls, 'read:').length, Math.ceil(117 / 8))
   assert.equal(calls.filter(c => c.prompt.includes('https://shared.example/a/')).filter(c => c.label.startsWith('read:')).length, 1)
   assert.deepEqual(labels(calls, 'numbers:'), ['numbers:archive', 'numbers:uploads'])
   assert.ok(calls.findIndex(c => c.label === 'numbers:archive') < calls.findIndex(c => c.label === 'read:01'))
-})
-
-test('every seed lead has its scout, is in the type file, and is told its name and the claim command', async () => {
-  const { calls } = await run(ARGS)
-  const type = readFileSync(new URL('../types/creator.md', import.meta.url), 'utf8')
-  assert.equal(SEEDS.length, 13)
-  for (const seed of SEEDS) {
-    assert.ok(type.includes(`| ${seed} |`), `${seed} is in the type file's table`)
-    const scout = calls.find(c => c.label === `scout:${seed}`)
-    assert.ok(scout.prompt.includes(`Your scout name: ${seed}.`) && scout.prompt.includes(`/s/scripts/case-study.mjs claim "/w" ${seed} `), scout.prompt)
-  }
-})
-
-test('every lead a scout returns gets its own scout, once, and so do the leads of that scout: no lead is left for want of scouts', async () => {
-  const { calls, result } = await run(ARGS)
-  const scouts = calls.filter(c => c.label.startsWith('scout:'))
-  assert.equal(scouts.length, SCOUTS)
-  const followers = scouts.filter(c => c.label.startsWith('scout:lead-'))
-  assert.deepEqual(followers.map(c => c.label), Array.from({ length: SCOUTS - 13 }, (_, i) => `scout:lead-${String(i + 1).padStart(2, '0')}`))
-  assert.equal(followers.filter(c => c.prompt.includes('Your lead: The 2019 lawsuit.')).length, 1, 'a lead named by every seed is searched once')
-  assert.ok(followers[0].prompt.includes(`Your lead: the people around ${SEEDS[0]}.`))
-  assert.ok(followers.at(-1).prompt.includes('Your lead: her first editor.'), 'a lead\'s own lead is followed')
-  assert.ok(followers.at(-1).prompt.includes('The 2019 lawsuit'), 'a scout is told the leads other scouts have')
-  const { leadsDry, leadsDropped } = await result()
-  assert.deepEqual(leadsDry, ['the lawsuit\'s appeal'], 'a branch ends where a scout found no source that was new')
-  assert.deepEqual(leadsDropped, [])
-})
-
-test('the limit on scouts is a guard against a search that never ends: the leads it leaves are reported', async () => {
-  const { calls, result } = await run({ ...ARGS, maxScouts: 24 })
-  assert.equal(labels(calls, 'scout:').length, 24)
-  assert.deepEqual((await result()).leadsDropped, [...SEEDS.slice(-3).map(seed => `the people around ${seed}`), 'her first editor'])
-  assert.equal((await run(ARGS)).calls.find(c => c.label === 'scout:interviews').prompt.includes('1/24 share'), true)
-})
-
-test('readers start on what a scout found as soon as it returns; only the merge waits for every scout', async () => {
-  const { calls, release, result } = await run(ARGS, ['scout:press-at-the-time'])
-  const early = labels(calls, 'read:').length
-  assert.ok(early >= 20, `${early} readers started while a scout was still searching`)
-  assert.ok(!calls.some(c => c.label === 'read:01' && c.prompt.includes('press-at-the-time.example')))
-  assert.deepEqual(labels(calls, 'merge:'), [], 'the merge waits for the last scout and its readers')
-  await release()
-  assert.equal(labels(calls, 'read:').length, Math.ceil(SCOUTED / 8))
-  assert.ok(labels(calls, 'merge:').includes('merge:read'))
-  assert.equal((await result()).scouted, SCOUTED)
 })
 
 test('every chapter but the sources list is written, and the introduction and the reasoning chapter come after the others', async () => {
@@ -120,7 +67,7 @@ test('a product adds no chapter: it is given to the writer of the one reasoning 
 
 test('the review covers every source and every chapter, one chapter per reviewer, and every chapter is fixed', async () => {
   const { calls } = await run(ARGS)
-  // readers followed reposts to originals: 130 sources after the merge, whatever the scouts listed
+  // readers followed reposts to originals: 130 sources after the merge, not the 117 scouted
   const sourceSlices = calls.filter(c => c.label.startsWith('review:sources-'))
   assert.equal(sourceSlices.length, 6)
   sourceSlices.forEach((c, i) => assert.ok(c.prompt.includes(`case-study.mjs slice "/w" ${i + 1} 6`), c.prompt))
@@ -173,8 +120,7 @@ test('source and quote reviewers run on Opus, record reviewers on the session mo
   assert.ok(reviewers.every(c => c.effort === 'high'))
   assert.ok(reviewers.filter(c => !c.label.startsWith('review:record')).every(c => c.model === 'opus'))
   assert.ok(reviewers.filter(c => c.label.startsWith('review:record')).every(c => c.model === undefined))
-  assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/26 share'), 'readers and the numbers agents share a stage')
-  assert.ok(calls.find(c => c.label === 'scout:interviews').prompt.includes('1/24 share'))
+  assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/17 share'))
 })
 
 test('with the scouting done, the known sources are read again, eight to a reader, and the numbers agents still run', async () => {
@@ -186,7 +132,6 @@ test('with the scouting done, the known sources are read again, eight to a reade
   assert.equal(labels(calls, 'read:').length, Math.ceil(20 / 8))
   assert.ok(calls.find(c => c.label === 'read:03').prompt.includes('https://known.example/19 (Known)'))
   assert.deepEqual(labels(calls, 'numbers:'), ['numbers:archive', 'numbers:uploads'])
-  assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/5 share'), 'with the sources known, so is the number of readers')
   assert.equal((await result()).scouted, 20)
 })
 

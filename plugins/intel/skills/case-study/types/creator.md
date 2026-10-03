@@ -34,26 +34,16 @@ introduction and in the money chapter, and their own account of their method sta
 10. Third-party data firms and academic work.
 11. Criticism and exposés.
 
-## Scout leads
+## Scout lanes
 
-A scout searches one lead for a few minutes. The first scouts start together,
-one per row; the leads they return get scouts of their own.
+Four scouts search in parallel, one lane each:
 
-| Lead | Search for |
+| Lane | Source types |
 |---|---|
-| interviews | Type 1 |
-| own-posts | Type 2, and the books the subject wrote |
-| documents | Type 3 |
-| press-at-the-time | Type 4 in the language the subject posts in, with date-bounded searches year by year |
-| press-home | Type 4 in the subject's home country and its language |
-| trade-press | Type 5 |
-| later-profiles | The large profiles written after the growth |
-| books-and-films | Type 6 |
-| people | Type 7 |
-| filings | Type 9 |
-| data-and-research | Type 10 |
-| criticism | Type 11 |
-| today | What the subject does today |
+| own-words | 1, 2, and the books the subject wrote |
+| press | 4, 5, and the large later profiles |
+| business-and-people | 3, 6, 7, 9 |
+| criticism-and-data | 10, 11, and what the subject does today |
 
 Source type 8 belongs to the numbers agents.
 

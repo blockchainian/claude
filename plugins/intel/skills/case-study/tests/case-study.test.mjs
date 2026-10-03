@@ -1,5 +1,5 @@
 // ABOUTME: Tests the case-study work-dir scaffold and the pre-render check.
-// ABOUTME: Covers init (layout, cover, idempotence), check (sourced draft, book text, sources, counts), merge, slice, claim, findings, figures, quotes, unread and bullets.
+// ABOUTME: Covers init (layout, cover, idempotence), check (sourced draft, book text, sources, counts), merge, slice, findings, figures, quotes, unread and bullets.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -367,14 +367,4 @@ test('both scripts run when called through a symlink to their folder, as an inst
     const res = spawnSync(process.execPath, [join(linked, name)], { encoding: 'utf8' })
     assert.match(res.stdout + res.stderr, new RegExp(`usage: ${name}`))
   }
-})
-
-test('claim gives a source to the first scout that asks for it, under every spelling of its url', () => {
-  const url = 'https://press.example/story'
-  assert.deepEqual(cs.claim(work, 'press-home', [url, 'https://press.example/other']), [`yours ${url}`, 'yours https://press.example/other'])
-  for (const spelling of [url + '/', url + '#top', url + '?utm_source=x'])
-    assert.deepEqual(cs.claim(work, 'people', [spelling]), [`taken ${spelling} press-home`])
-  assert.deepEqual(cs.claim(work, 'press-home', [url]), [`yours ${url}`], 'a scout that was interrupted keeps what it claimed')
-  const run = spawnSync(process.execPath, [fileURLToPath(new URL('../scripts/case-study.mjs', import.meta.url)), 'claim', work, 'people', url, 'https://new.example/x'], { encoding: 'utf8' })
-  assert.equal(run.stdout, `taken ${url} press-home\nyours https://new.example/x\n`)
 })
