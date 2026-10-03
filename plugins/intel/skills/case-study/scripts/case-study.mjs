@@ -4,6 +4,7 @@
 //
 // Usage: case-study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
 //        case-study.mjs merge <work dir>
+//        case-study.mjs sources <work dir>   (the sources already in sources.json, as a scout would list them)
 //        case-study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
 //        case-study.mjs figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
 //        case-study.mjs quotes <work dir> <NN>         (look up chapter NN's quotations in the saved source text)
@@ -193,6 +194,12 @@ export function sliceSources(work, index, of) {
   const urls = sorted(Object.keys(readJson(join(work, 'sources.json'), 'object')))
   const size = Math.ceil(urls.length / of)
   return urls.slice((index - 1) * size, index * size)
+}
+
+export function listSources(work) {
+  // The sources already in sources.json, in the shape the scouts return, for a run that reads them again without scouting.
+  const sources = readJson(join(work, 'sources.json'), 'object')
+  return { sources: sorted(Object.keys(sources)).map(url => ({ url, outlet: sources[url] })) }
 }
 
 export function findings(work, chapter) {
@@ -617,6 +624,7 @@ const OPTIONS = {
     out: { type: 'string' }, chapters: { type: 'string', default: '11' } },
   merge: {},
   slice: {},
+  sources: {},
   figures: { worklist: { type: 'boolean', default: false } },
   quotes: {},
   findings: {},
@@ -625,7 +633,7 @@ const OPTIONS = {
   codex: { model: { type: 'string', default: 'gpt-6-luna' } },
   check: { draft: { type: 'boolean', default: false } },
 }
-const USAGE = 'usage: case-study.mjs {init,merge,slice,figures,quotes,findings,unread,bullets,codex,check} ...'
+const USAGE = 'usage: case-study.mjs {init,merge,slice,sources,figures,quotes,findings,unread,bullets,codex,check} ...'
 
 function fail(message) {
   console.error(message)
@@ -648,6 +656,11 @@ function main(argv) {
   if (cmd === 'slice') {
     need(3, 'work, index, of')
     console.log(sliceSources(positionals[0], Number(positionals[1]), Number(positionals[2])).join('\n'))
+    return
+  }
+  if (cmd === 'sources') {
+    need(1, 'work')
+    console.log(JSON.stringify(listSources(positionals[0])))
     return
   }
   if (cmd === 'figures') {

@@ -213,7 +213,9 @@ ask for one name.
   the cache, the others run again and pick up where their files stop. Do not
   change the script or the args before resuming, or every agent reruns.
 - A run that cannot be resumed (another session started it) continues from
-  its files: `done: 'read'` starts at the draft, from the notes and numbers
+  its files: `done: 'scout'` skips the scouts and reads the sources already
+  in `sources.json` again (fresh notes, fetched again unless a reader's saved
+  list is there); `done: 'read'` starts at the draft, from the notes and numbers
   already in the work directory; `done: 'read, sources'` also keeps the
   sources lens's findings in `review/`. To draft again, move `drafts/` and the
   rest of `review/` aside first: writers and fixers continue from the files

@@ -15,7 +15,8 @@ export const meta = {
 // args: { subject, work, skill, lang, today, product, seeds, caps, done, fixer }
 // skill is the absolute path of the case-study skill folder; product, seeds and
 // caps may be empty strings. done names the stages whose files are already in the work directory and are not run
-// again: 'read' (the notes and the numbers: the run starts at the draft), 'sources' (the sources lens's findings).
+// again: 'scout' (sources.json: its sources are read again, without scouting), 'read' (the notes and the numbers: the run
+// starts at the draft), 'sources' (the sources lens's findings).
 //
 // The numbers agents start with the scouts, and each chapter runs write → figures matched + quotes review → fix on
 // its own. The barriers are the merge after reading (the sources lens needs sources.json), the sources lens before
@@ -29,6 +30,7 @@ const FROM_NOTES = ['02', '03', '04', '05', '06', '07', '08', '09']
 const FROM_CHAPTERS = ['01', '10']
 const DONE = String(A.done || '').split(/[,\s]+/)
 const READ_DONE = DONE.includes('read')
+const SCOUT_DONE = READ_DONE || DONE.includes('scout')
 
 const COMMON = `Subject: ${A.subject}. Today is ${A.today}. Language of the study: ${A.lang}.
 Work directory: ${WORK}
@@ -50,7 +52,10 @@ const READERS_EXPECTED = 15 // for the caps share before the scouts return; read
 const numbersDone = READ_DONE ? null : parallel(['archive', 'uploads'].map(lane => () => agent(
   `${COMMON}\nYou are a numbers agent. Follow ${S}/briefs/numbers.md. Your lane: ${lane}.${share(READERS_EXPECTED + 2)}`,
   { label: `numbers:${lane}`, phase: 'Scout', ...SONNET })))
-const scouted = READ_DONE ? [] : (await parallel(LANES.map(lane => () => agent(
+// With the scouting done, the one list to read is sources.json, printed by a script.
+const known = () => agent(`Run exactly this command and return its output, nothing else:\n${S}/scripts/case-study.mjs sources "${WORK}"`,
+  { label: 'sources:known', phase: 'Scout', schema: FOUND, model: 'haiku', effort: 'low', agentType: 'general-purpose' })
+const scouted = READ_DONE ? [] : SCOUT_DONE ? [await known()].filter(Boolean) : (await parallel(LANES.map(lane => () => agent(
   `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your lane: ${lane} (see "Scout lanes" in the type file).${share(LANES.length)}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}`,
   { label: `scout:${lane}`, phase: 'Scout', schema: FOUND, ...SONNET })))).filter(Boolean)
 const seen = new Set()
@@ -61,7 +66,7 @@ for (const s of scouted.flatMap(r => r.sources)) {
 }
 const batches = []
 for (let i = 0; i < urls.length; i += 8) batches.push(urls.slice(i, i + 8))
-if (!READ_DONE) log(`scouts: ${scouted.length}/${LANES.length} lanes, ${urls.length} distinct sources, ${batches.length} reader batches`)
+if (!READ_DONE) log(SCOUT_DONE ? `known sources: ${urls.length}, ${batches.length} reader batches` : `scouts: ${scouted.length}/${LANES.length} lanes, ${urls.length} distinct sources, ${batches.length} reader batches`)
 
 phase('Read')
 const agentsReading = batches.length + 2
