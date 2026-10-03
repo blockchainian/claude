@@ -41,11 +41,15 @@ def test_render_units(rd):
         check("iterm colors are hex", bg.startswith("#") and len(bg) == 7 and fg.startswith("#") and len(fg) == 7, f"{bg} {fg}")
     check("title_slug: lowercase, dashes, no language suffix",
           rd.title_slug("The Art of Doing Science and Engineering") == "the-art-of-doing-science-and-engineering")
-    check("title_slug: collapses punctuation runs and trims",
-          rd.title_slug("Mining of Massive Datasets: 2nd Ed.!") == "mining-of-massive-datasets-2nd-ed")
-    check("title_slug: empty title falls back", rd.title_slug("") == "book")
+    check("title_slug: drops the subtitle after a colon",
+          rd.title_slug("Addiction by Design: Machine Gambling in Las Vegas") == "addiction-by-design")
+    check("title_slug: handles a full-width colon",
+          rd.title_slug("书名：副标题") == "")
+    check("title_slug: a non-Latin title slugs empty (caller falls back)", rd.title_slug("量子力学") == "")
     check("default_out: <title-slug>.pdf, no -zh suffix",
           rd.default_out({"title": "Zero to One"}, Path("/tmp/x/work")).name == "zero-to-one.pdf")
+    check("default_out: non-Latin title falls back to the work dir slug",
+          rd.default_out({"title": "量子力学"}, Path("/tmp/x/quantum-mechanics")).name == "quantum-mechanics.pdf")
     title, body = rd.md_to_html("# 章名\n\n第一段 *强调*。\n\n> 引文\n\n## 小标题\n\n第二段。\n")
     check("markdown title split off", title == "章名" and "<h1" not in body)
     check("markdown body html", "<em>强调</em>" in body and "<blockquote>" in body and "<h2>小标题</h2>" in body)

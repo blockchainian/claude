@@ -23,9 +23,11 @@ the download-book skill first.
 
 `${CLAUDE_PLUGIN_ROOT}` below is this plugin's root; this skill lives at `${CLAUDE_PLUGIN_ROOT}/skills/translate`.
 Work lives in `<book dir>/.translate/<slug>/` (hidden, resumable); the deliverable is
-`<title-slug>.pdf` in the user's `~/Documents` — the title lowercased with every run of non-alphanumerics
-turned into one dash, e.g. `the-art-of-doing-science-and-engineering.pdf` (no language suffix). (When
-`~/Documents` is not writable, it falls back next to the work dir.) When the book's own folder is not writable
+`<title-slug>.pdf` in the user's `~/Documents` — the book's main title (the part before a `:`/`：` subtitle)
+lowercased with every run of non-alphanumerics turned into one dash, e.g. `Addiction by Design: Machine
+Gambling in Las Vegas` → `addiction-by-design.pdf` (no language suffix); an already-Chinese title falls back to
+the work dir's slug. (When `~/Documents` is not writable, it falls back next to the work dir.) When the book's
+own folder is not writable
 (macOS keeps this process out of some folders, e.g. `~/Downloads`), `extract.mjs` copies the book to
 `~/Documents/translate/<slug>/`; it says so on stderr. Never leave other copies next to the book.
 
