@@ -213,7 +213,7 @@ def main():
         print("SKIP: all (pdftotext missing; run setup.sh)")
         return
     tmp = Path(tempfile.mkdtemp()).resolve()
-    os.environ["HIGHLIGHTS_DIR"] = str(tmp / "store")
+    os.environ["DIGESTS_DIR"] = str(tmp / "store")
     ph = load("pdf_highlights")
     work = test_split(ph, tmp)
     test_render(ph, work, tmp)

@@ -1,5 +1,5 @@
 // ABOUTME: Tests the highlights store CLI: save, list, search and take-aways against a scratch
-// ABOUTME: HIGHLIGHTS_DIR, plus the default location and the frontmatter parser.
+// ABOUTME: DIGESTS_DIR, plus the default location and the frontmatter parser.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -15,7 +15,7 @@ function makeStore() {
   const root = mkdtempSync(join(tmpdir(), "store-test-"));
   const run = (...args) => {
     const res = spawnSync(process.execPath, [script, ...args], {
-      env: { ...process.env, HIGHLIGHTS_DIR: root },
+      env: { ...process.env, DIGESTS_DIR: root },
       encoding: "utf-8",
     });
     return { code: res.status, stdout: res.stdout, stderr: res.stderr };
@@ -43,12 +43,12 @@ topics: [x]
 `;
 
 describe("store location", () => {
-  test("defaults to ~/Documents/highlights", () => {
-    assert.equal(resolveRoot({}), join(homedir(), "Documents", "highlights"));
+  test("defaults to ~/Documents/digests", () => {
+    assert.equal(resolveRoot({}), join(homedir(), "Documents", "digests"));
   });
 
-  test("HIGHLIGHTS_DIR overrides the default", () => {
-    assert.equal(resolveRoot({ HIGHLIGHTS_DIR: "/tmp/elsewhere/" }), "/tmp/elsewhere");
+  test("DIGESTS_DIR overrides the default", () => {
+    assert.equal(resolveRoot({ DIGESTS_DIR: "/tmp/elsewhere/" }), "/tmp/elsewhere");
   });
 });
 

@@ -1,12 +1,12 @@
 # Book brief
 
 You write the text the reader gets. The research is finished: the sourced
-draft in `md/` has been reviewed and corrected. Your job is to distil it into
+draft in `drafts/` has been reviewed and corrected. Your job is to distil it into
 a practical book in `book/`, one file per chapter with the same file names. The
 message that sent you here names the work directory, the subject type file and
 the language.
 
-Read every file in `md/` before writing. Do not open `notes.md`, `raw/`,
+Read every file in `drafts/` before writing. Do not open `notes.md`, `raw/`,
 `review/` or the web: the draft is your only material, and `sources.json`
 (each source's URL and label) is read for the closing sources list only.
 

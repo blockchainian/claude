@@ -23,7 +23,7 @@ description: >
 
 A case study answers one question about one subject: how did they get here,
 and which parts of it are on the record. The work has two layers. The sourced
-draft (`md/`) names the evidence behind every sentence and is what the
+draft (`drafts/`) names the evidence behind every sentence and is what the
 reviewers audit. The book (`book/`) is what the reader gets: a practical book
 with a cover, distilled from the draft — what the subject did, what was luck,
 what was their own doing and what a reader can copy —
@@ -62,7 +62,7 @@ they are sent the absolute paths of the files below and read them themselves.
 | the subject | A name, a handle, or a profile URL. Exactly one. |
 | `--type` | `creator` (default). `brand` is not supported yet: say so and stop. |
 | `--apply-to` | A product whose own accounts and creator program the reasoning chapter also covers, described in a sentence or two without its name. Without it, look for one in the project's memory or instructions; with none found, the chapter covers a person only. |
-| `--out` | The PDF path. Default: `<store>/case-studies/<slug>.pdf`. |
+| `--out` | The PDF path. Required. |
 | `--lang` | The language of the study. Default: the language the user is writing in. |
 
 More than one subject, or a request to pick subjects, is outside this skill:
@@ -83,8 +83,8 @@ ask for one name.
    The cover shows the name and, under it, the subject's accounts: each a
    link with its platform's logo. Without `--account` that is the profile URL;
    give `--account` once per account when the subject grew on more than one
-   (the account they grew on first). The title is the PDF's document title. It prints the work directory (`<store>/.work/<slug>/`, the digest
-   store).
+   (the account they grew on first). The title is the PDF's document title. It prints the work directory (`~/Documents/case-studies/<slug>/`; override
+   the root with `CASE_STUDIES_DIR`).
    An existing work directory is reused: sources and chapters already there are
    kept.
 
@@ -100,9 +100,9 @@ ask for one name.
    |---|---|---|
    | Scout | 4, one per lane; the 2 numbers agents start with them | Find sources; return URLs only. The curve comes from `gate.mjs wayback curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
-   | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `md/`, from the notes only |
+   | Write | one per chapter; then the introduction and the reasoning chapter | The sourced draft in `drafts/`, from the notes only |
    | Review | sources lens per 25 URLs, after the merge and before any chapter is written; per chapter, as soon as it is written: a script matches its figures against the saved source text and looks up its quotations there, and the quotes lens reviews it from what the script found; the record lens reviews the timeline and turning-point chapters | Findings in `review/`, every item checked |
-   | Fix | one per chapter, as soon as its two reviews are done; the introduction and the reasoning chapter after the others. Runs on gpt-6-luna through `codex exec` (`case-study.mjs codex`), driven by a Haiku agent; `args.fixer: sonnet` keeps it on Claude | Apply the findings to `md/`, then mend what the `quotes` and `figures` scripts still report |
+   | Fix | one per chapter, as soon as its two reviews are done; the introduction and the reasoning chapter after the others. Runs on gpt-6-luna through `codex exec` (`case-study.mjs codex`), driven by a Haiku agent; `args.fixer: sonnet` keeps it on Claude | Apply the findings to `drafts/`, then mend what the `quotes` and `figures` scripts still report |
 
    A chapter runs write → review → fix on its own; the slowest chapter sets
    the time, not the slowest agent of every stage added up.
@@ -160,7 +160,7 @@ ask for one name.
 5. **Write the book — one fresh agent.** Spawn one general-purpose subagent
    that has not seen the research. Its message gives the absolute paths of
    `briefs/book.md` and the type file, the work directory and the language. It
-   reads `md/` and writes `book/NN.md`. Then:
+   reads `drafts/` and writes `book/NN.md`. Then:
    - Run the check, which must pass before rendering:
 
      ```bash
@@ -215,7 +215,7 @@ ask for one name.
 - A run that cannot be resumed (another session started it) continues from
   its files: `done: 'read'` starts at the draft, from the notes and numbers
   already in the work directory; `done: 'read, sources'` also keeps the
-  sources lens's findings in `review/`. To draft again, move `md/` and the
+  sources lens's findings in `review/`. To draft again, move `drafts/` and the
   rest of `review/` aside first: writers and fixers continue from the files
   they find, and the merge reads every fixer's added sources.
 - Slices are small on purpose. An agent's context grows with every item it

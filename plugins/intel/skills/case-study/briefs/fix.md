@@ -58,7 +58,7 @@ that names no source — add its label) and
 `<skill>/scripts/case-study.mjs figures <work> NN` (a figure not found that
 is not derived — correct it from the source or remove it).
 
-Edit only `md/<your file>`. Do not edit `sources.json`. Write:
+Edit only `drafts/<your file>`. Do not edit `sources.json`. Write:
 - `review/fix-<NN>.md` — one line per finding, appended right after you
   apply it (see "Writing as you go" in the evidence rules), starting with the
   finding's name: fixed, removed, relabelled, re-sourced (with the new URL),

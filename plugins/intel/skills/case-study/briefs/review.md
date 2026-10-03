@@ -12,7 +12,7 @@ tool list. Other reviewers hold the other slices: check every item in yours. Rea
 brief's folder) and the subject type file first: they are the standard the
 study must meet. Tool commands are in `references/tools.md`.
 
-In the work directory: `md/` (the chapters of the sourced draft),
+In the work directory: `drafts/` (the chapters of the sourced draft),
 `sources.json`, `gaps.md`, `raw/` (downloads), `notes/`. The notes are the
 readers' own account and prove nothing. Proof is the source, opened by you; a
 verbatim download in `raw/` counts as the source.

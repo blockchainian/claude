@@ -28,8 +28,8 @@ draft — that is the default. Two keywords instead select a store command.
 | `save` take-aways (text) | Append them to the item's `## Take-aways` |
 | `search` query (regex ok) | Search everything saved |
 
-The store is `~/Documents/highlights/` (override with
-`HIGHLIGHTS_DIR`). Items live in `items/<slug>.md`, listed in
+The store is `~/Documents/digests/` (override with
+`DIGESTS_DIR`). Items live in `items/<slug>.md`, listed in
 `index.md`. Drafts stage in `.work/<slug>/` until saved. (The store holds
 articles, episodes, videos and papers alike.)
 

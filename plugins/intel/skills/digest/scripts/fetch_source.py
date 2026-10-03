@@ -16,8 +16,8 @@ from urllib.parse import urljoin, urlparse
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126 Safari/537.36")
 
-ROOT = Path(os.environ.get("HIGHLIGHTS_DIR",
-                           Path.home() / "Documents" / "highlights"))
+ROOT = Path(os.environ.get("DIGESTS_DIR",
+                           Path.home() / "Documents" / "digests"))
 WORK = ROOT / ".work"
 
 # Path segments that name no particular episode, so cannot identify one.
