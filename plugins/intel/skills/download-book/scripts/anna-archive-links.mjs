@@ -118,7 +118,7 @@ async function metric(base, md5) {
 }
 
 async function fastUrl(base, md5) {
-  const query = new URLSearchParams({ md5, key: process.env.ANNA_SECRET_KEY ?? '' });
+  const query = new URLSearchParams({ md5, key: process.env.ANNA_ARCHIVE_SECRET_KEY ?? '' });
   const { status, body } = await get(`${base}/dyn/api/fast_download.json?${query}`, false);
   let data;
   try { data = JSON.parse(body); }
@@ -195,7 +195,7 @@ async function slowUrl(base, md5, detailHtml, savedSlowHtml) {
 
 function args(argv) {
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('用法：node <anna-archive-links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件]\n会员密钥可通过 ANNA_SECRET_KEY 提供。');
+    console.log('用法：node <anna-archive-links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件]\n会员密钥可通过 ANNA_ARCHIVE_SECRET_KEY 提供。');
     process.exit(0);
   }
   const options = { baseUrl: DEFAULT_BASE };

@@ -6,9 +6,10 @@
 # ABOUTME: Typesets the translated Markdown sections into a PDF in the source book's format (page size, colors,
 # ABOUTME: running heads, folios, contents page) with headless Chrome, then adds the original cover and bookmarks.
 #
-# Usage: render.py <work dir> [--out <book-zh.pdf>] [--only 04] [--title <中文书名>] [--bg iterm|#rrggbb --fg #6e7f7a|iterm] [--font-size 9.25]
-# Without --only: the whole book (cover + 目录 + every translated section) to --out (default <book>-zh.pdf next
-# to the source). With --only: one section to <work>/pdf/<id>-<slug>.pdf for a quick look, no cover or contents.
+# Usage: render.py <work dir> [--out <book.pdf>] [--only 04] [--title <中文书名>] [--bg iterm|#rrggbb --fg #6e7f7a|iterm] [--font-size 9.25]
+# Without --only: the whole book (cover + 目录 + every translated section) to --out (default
+# <title-slug>.pdf in ~/Documents). With --only: one section to <work>/pdf/<id>-<slug>.pdf for a quick look,
+# no cover or contents.
 import argparse
 import html
 import json
@@ -370,7 +371,6 @@ def print_pdf(chrome, html_path, pdf_path):
 
 def render(work, opt):
     meta = json.loads((work / "sections.json").read_text())
-    book = Path(meta["book"]) if meta.get("book") else None
     sections = [s for s in meta["sections"] if s.get("file")]
     if opt.only:
         sections = [s for s in sections if s["id"] == opt.only] or sys.exit(f"no section {opt.only}")
@@ -438,7 +438,7 @@ def render(work, opt):
     n_front = len(page_texts(front_pdf)) - 1
     pages = {**{k: v for k, v in front_pages.items()}, **{k: v + n_front for k, v in body_pages.items()}}
 
-    out = Path(opt.out) if opt.out else default_out(Path(meta.get("source") or book), work)
+    out = Path(opt.out) if opt.out else default_out(meta, work)
     cover_pdf = build_cover(meta, work, bg, chrome, tmp)
     assemble(cover_pdf, [front_pdf] + ([body_pdf] if body_pdf else []), out, ready, pages, meta, title, bg,
              top_margin=meta["page_size"][1] * 0.082, row_height=opt.font_size * 1.8)
@@ -456,15 +456,22 @@ def report_katex_errors(errs):
     sys.exit(f"{len(errs)} equation(s) failed to render (red raw LaTeX source) in {where}; fix the LaTeX and re-render")
 
 
-def default_out(source, work):
-    """<source>-zh.pdf next to the original, or next to the work dir when the original's folder is not writable."""
-    target = source.with_name(source.stem + "-zh.pdf")
+def title_slug(title):
+    """The book's title as a filename slug: lowercase, every run of non-alphanumerics becomes a single dash."""
+    return re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-") or "book"
+
+
+def default_out(meta, work):
+    """<title-slug>.pdf in the user's ~/Documents, or next to the work dir when Documents is not writable."""
+    name = title_slug(meta.get("title")) + ".pdf"
+    docs = Path.home() / "Documents"
     try:
-        target.parent.joinpath(".translate-write-test").touch()
-        target.parent.joinpath(".translate-write-test").unlink()
-        return target
+        docs.mkdir(parents=True, exist_ok=True)
+        docs.joinpath(".translate-write-test").touch()
+        docs.joinpath(".translate-write-test").unlink()
+        return docs / name
     except (PermissionError, OSError):
-        return work.parent / target.name
+        return work.parent / name
 
 
 def build_cover(meta, work, bg, chrome, tmp):

@@ -39,6 +39,13 @@ def test_render_units(rd):
     if (Path.home() / "Library/Preferences/com.googlecode.iterm2.plist").exists():
         bg, fg = rd.iterm_colors()
         check("iterm colors are hex", bg.startswith("#") and len(bg) == 7 and fg.startswith("#") and len(fg) == 7, f"{bg} {fg}")
+    check("title_slug: lowercase, dashes, no language suffix",
+          rd.title_slug("The Art of Doing Science and Engineering") == "the-art-of-doing-science-and-engineering")
+    check("title_slug: collapses punctuation runs and trims",
+          rd.title_slug("Mining of Massive Datasets: 2nd Ed.!") == "mining-of-massive-datasets-2nd-ed")
+    check("title_slug: empty title falls back", rd.title_slug("") == "book")
+    check("default_out: <title-slug>.pdf, no -zh suffix",
+          rd.default_out({"title": "Zero to One"}, Path("/tmp/x/work")).name == "zero-to-one.pdf")
     title, body = rd.md_to_html("# 章名\n\n第一段 *强调*。\n\n> 引文\n\n## 小标题\n\n第二段。\n")
     check("markdown title split off", title == "章名" and "<h1" not in body)
     check("markdown body html", "<em>强调</em>" in body and "<blockquote>" in body and "<h2>小标题</h2>" in body)
