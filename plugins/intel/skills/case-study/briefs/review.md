@@ -62,21 +62,16 @@ Then judge what the chapter makes of its figures:
 
 ## Lens: quotes
 
-Your message names your worklist, written by
-`<skill>/scripts/case-study.mjs quotes <work> NN` (the skill folder is the
-one that holds this brief's folder; run the command yourself only when the
-message names no worklist). The script
+Start with `<skill>/scripts/case-study.mjs quotes <work> NN` for your chapter
+(the skill folder is the one that holds this brief's folder). The script
 looks up, in the saved text of the sources each sentence names, every
 quotation of the chapter — a translated one by the source's own words in
 ⟦ ⟧ after it — and the source's words in ⟦ ⟧ after reported speech. It
-writes the worklist in three parts: per sentence, a row for each
+writes `review/quotations-NN.md` in three parts: per sentence, a row for each
 of those with a verdict and the passage of the source around the words; the
 sentences that name a source and carry none of its words; every source the
 chapter names, with its date and its saved files. Read that file whole, then
-the chapter once. A long chapter is cut between several reviewers: a
-worklist named "part i of n" holds your sentences only, and they are all you
-check; the checks below that are about the chapter as a whole are made by
-the reviewer of part 1. What a passage or the list of sources shows is judged from
+the chapter once. What a passage or the list of sources shows is judged from
 them, with no search and no source opened.
 
 Per row:

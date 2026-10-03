@@ -7,7 +7,7 @@
 //        case-study.mjs sources <work dir>   (the sources already in sources.json, as a scout would list them)
 //        case-study.mjs slice <work dir> <n> <of>      (the urls of one reviewer's slice, one per line)
 //        case-study.mjs figures <work dir> <NN> [--worklist]   (match chapter NN's figures against the saved source text)
-//        case-study.mjs quotes <work dir> <NN>         (look up chapter NN's quotations and reported words in the saved source text; a long chapter is also cut into parts)
+//        case-study.mjs quotes <work dir> <NN>         (look up chapter NN's quotations and reported words in the saved source text)
 //        case-study.mjs findings <work dir> <NN>       (the review lines one fixer has still to apply to chapter NN)
 //        case-study.mjs unread <work dir> <batch> <url>...   (per source of a reader's batch: done, saved, or fetch)
 //        case-study.mjs bullets <work dir> <NN>        (the notes' lines for chapter NN, long dated tables thinned)
@@ -23,7 +23,7 @@
 // label get a letter each (Outlet 2025a, Outlet 2025b), in sources.json and in the notes' bullets, so that a label names one source.
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -398,7 +398,6 @@ const LETTER = /[\p{L}\p{N}]/u
 const DISTINCT = 15 // letters: words shorter than this turn up in sources that never said them
 const AROUND = 200 // characters of the source shown on each side of the words found
 const BETWEEN = 4 // words a source may have between two of the words looked up: a filler, a caption's timing
-const PER_REVIEWER = 80 // quotations and sentences to check by hand that one quotes reviewer takes
 
 function plain(text) {
   // A text's letters and digits in lower case, every run of anything else as one space, apostrophes dropped, markup,
@@ -475,13 +474,12 @@ function datesOf(work) {
   return dates
 }
 
-export function quotes(work, chapter, per = PER_REVIEWER) {
+export function quotes(work, chapter) {
   // Look up every quotation of a draft chapter in the saved text of the sources its sentence names, by the original
   // words after it when it is a translation, and the source's words after reported speech the same way, and write
   // a reviewer's worklist: per quotation, whether the words are there and the passage around them, or the other
   // source whose text has them; then the sentences that name a source and carry none of its words; then every
-  // source the chapter names, with its date and saved files. A chapter with more than `per` items is also cut, in
-  // its own order, into a worklist per reviewer (quotations-NN-1.md, ...).
+  // source the chapter names, with its date and saved files.
   const { sentences, ordered, anywhere, texts, urls } = sourced(work, chapter)
   const plains = {}
   const sources = label => (plains[label] ??= texts(label).map(saved => ({ file: saved.file, ...plain(saved.text) })))
@@ -494,15 +492,16 @@ export function quotes(work, chapter, per = PER_REVIEWER) {
     }
     return null
   }
-  const entries = [] // per sentence with something to check: its rows, none when it has no words to look up
+  const rows = []
+  const wordless = []
+  const out = []
   for (const { sentence, cited, named } of sentences) {
     const found = [...sentence.matchAll(QUOTATION)]
     if (!found.length) {
-      if (named) entries.push({ sentence: sentence.trim(), labels: cited, rows: [] })
+      if (named) wordless.push({ sentence: sentence.trim(), labels: cited })
       continue
     }
-    const entry = { sentence: sentence.trim(), labels: cited, rows: [] }
-    entries.push(entry)
+    out.push('', `## ${sentence.trim()}`)
     for (const [, quote = '', original, reported] of found) {
       const looked = (reported || original || quote).trim()
       const row = { quote, looked, labels: cited, sentence: sentence.trim(), verdict: 'not found' }
@@ -512,53 +511,28 @@ export function quotes(work, chapter, per = PER_REVIEWER) {
       if (here) Object.assign(row, { verdict: 'found', ...here })
       else if (there) Object.assign(row, { verdict: 'in another source', ...there })
       else if (!cited.some(label => sources(label).length)) row.verdict = 'no saved text'
-      entry.rows.push(row)
-      entry.where = named ? cited.join(', ') : 'its sentence names no source'
+      rows.push(row)
+      out.push(`* ${row.verdict}${row.apart ? ', with other words between' : ''} | ${looked} | ${row.file ? `${row.label}, ${row.file}` : named ? cited.join(', ') : 'its sentence names no source'}${row.passage ? ` | ${row.passage}` : ''}`)
     }
   }
+  const tally = verdict => rows.filter(row => row.verdict === verdict).length
   const dates = datesOf(work)
-  const worklist = (listed, part, labels) => {
-    // The worklist of some of the chapter's sentences, and the sources among `labels` they rest on.
-    const rows = listed.flatMap(entry => entry.rows)
-    const tally = verdict => rows.filter(row => row.verdict === verdict).length
-    const counts = { quotations: rows.length, found: tally('found'), elsewhere: tally('in another source'), missing: tally('not found'), unsaved: tally('no saved text') }
-    const text = `# Quotations in drafts/${chapter}.md looked up in the saved text of their sources${part}\n\n` +
-      `${counts.quotations} quotations: ${counts.found} found, ${counts.elsewhere} in another source, ${counts.missing} not found, ${counts.unsaved} with no saved text.\n` +
-      'A row is: verdict | the words looked up | the source and file they are in, or the sources the sentence names | the passage around them.\n' +
-      `"with other words between": the source has the words in this order with up to ${BETWEEN} others between two of them.\n` +
-      'The words looked up are a quotation, the source\'s words in ⟦ ⟧ after a translated one, or the source\'s words in ⟦ ⟧ after reported speech.\n' +
-      listed.filter(entry => entry.rows.length).flatMap(entry => ['', `## ${entry.sentence}`, ...entry.rows.map(row =>
-        `* ${row.verdict}${row.apart ? ', with other words between' : ''} | ${row.looked} | ${row.file ? `${row.label}, ${row.file}` : entry.where}${row.passage ? ` | ${row.passage}` : ''}`)]).join('\n') +
-      '\n\n# Sentences that name a source and carry none of its words\n\n' +
-      listed.filter(entry => !entry.rows.length).map(({ sentence, labels }) => `- ${sentence} | ${labels.join(', ')}`).join('\n') +
-      '\n\n# Every source these sentences name: its date in the notes, and its saved text\n\n' +
-      labels.map(label => {
-        const dated = [...new Set(urls(label).map(url => dates[url]).filter(Boolean))].join(', ')
-        return `- ${label}${dated ? ` (${dated})` : ''}: ${sources(label).map(source => source.file).join(', ') || 'none saved'}`
-      }).join('\n') + '\n'
-    return { counts, rows, text }
-  }
-  // The chapter in its own order, cut where the items so far reach the next reviewer's share; a sentence's rows stay together.
-  const items = entry => entry.rows.length || 1
-  const total = entries.reduce((sum, entry) => sum + items(entry), 0)
-  const share = total / Math.ceil(total / per)
-  const cuts = [[]]
-  let seen = 0
-  for (const entry of entries) {
-    cuts.at(-1).push(entry)
-    seen += items(entry)
-    if (seen >= share * cuts.length && seen < total) cuts.push([])
-  }
-  const review = join(work, 'review')
-  mkdirSync(review, { recursive: true })
-  for (const path of files(review, '.md')) if (new RegExp(`/quotations-${chapter}-\\d+\\.md$`).test(path)) rmSync(path)
-  const whole = worklist(entries, '', anywhere)
-  write(join(review, `quotations-${chapter}.md`), whole.text)
-  if (cuts.length > 1) {
-    cuts.forEach((cut, i) => write(join(review, `quotations-${chapter}-${i + 1}.md`),
-      worklist(cut, `: part ${i + 1} of ${cuts.length}`, anywhere.filter(label => cut.some(entry => entry.labels.includes(label)))).text))
-  }
-  return { chapter, ...whole.counts, parts: cuts.length, rows: whole.rows, wordless: entries.filter(entry => !entry.rows.length).map(({ sentence, labels }) => ({ sentence, labels })) }
+  const result = { chapter, quotations: rows.length, found: tally('found'), elsewhere: tally('in another source'), missing: tally('not found'), unsaved: tally('no saved text') }
+  mkdirSync(join(work, 'review'), { recursive: true })
+  write(join(work, 'review', `quotations-${chapter}.md`),
+    `# Quotations in drafts/${chapter}.md looked up in the saved text of their sources\n\n` +
+    `${result.quotations} quotations: ${result.found} found, ${result.elsewhere} in another source, ${result.missing} not found, ${result.unsaved} with no saved text.\n` +
+    'A row is: verdict | the words looked up | the source and file they are in, or the sources the sentence names | the passage around them.\n' +
+    `"with other words between": the source has the words in this order with up to ${BETWEEN} others between two of them.\n` +
+    'The words looked up are a quotation, the source\'s words in ⟦ ⟧ after a translated one, or the source\'s words in ⟦ ⟧ after reported speech.\n' +
+    out.join('\n') + '\n\n# Sentences that name a source and carry none of its words\n\n' +
+    wordless.map(({ sentence, labels }) => `- ${sentence} | ${labels.join(', ')}`).join('\n') +
+    '\n\n# Every source this chapter names: its date in the notes, and its saved text\n\n' +
+    anywhere.map(label => {
+      const dated = [...new Set(urls(label).map(url => dates[url]).filter(Boolean))].join(', ')
+      return `- ${label}${dated ? ` (${dated})` : ''}: ${sources(label).map(source => source.file).join(', ') || 'none saved'}`
+    }).join('\n') + '\n')
+  return { ...result, rows, wordless }
 }
 
 export function hasLeadParagraph(text) {
