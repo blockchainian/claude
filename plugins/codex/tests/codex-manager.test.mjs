@@ -120,7 +120,7 @@ test("pending stays silent without state and blocks once on unread events", asyn
 class McpChild {
   constructor(home, socketPath, env = {}, command = "mcp") {
     this.child = spawn(process.execPath, [manager, command], {
-      env: { ...process.env, CLAUDE_CODE_SESSION_ID: session, CODEX_MANAGER_HOME: home, CODEX_MANAGER_DAEMON_SOCKET: socketPath, ...env },
+      env: { ...process.env, CLAUDE_CODE_SESSION_ID: session, CODEX_MANAGER_HOME: home, CODEX_MANAGER_SESSIONS_DIR: path.join(home, "sessions"), CODEX_MANAGER_DAEMON_SOCKET: socketPath, ...env },
       stdio: ["pipe", "pipe", "pipe"]
     });
     this.stderr = "";
@@ -593,6 +593,39 @@ test("pending blocks once for an unanswered ask and not again while the stop hoo
     const second = await run(["pending"], { env, stdin: JSON.stringify({ session_id: session, stop_hook_active: true }) });
     assert.equal(second.stdout, "");
   } finally {
+    await home.close();
+  }
+});
+
+test("after /clear gives Claude a new session id, await and pending still read the running server's events", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  const cleared = "99999999-8888-7777-6666-555555555555";
+  try {
+    await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
+    const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug" });
+    assert.equal(started.isError, false, started.text);
+
+    // Claude Code rewrites its session record on /clear; the server's own environment keeps the id it started with.
+    await mkdir(path.join(home.home, "sessions"), { recursive: true });
+    await writeFile(path.join(home.home, "sessions", `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: cleared }));
+    const listed = await mcp.call("list", {});
+    assert.equal(listed.isError, false, listed.text);
+
+    const env = { CODEX_MANAGER_HOME: home.home, CLAUDE_CODE_SESSION_ID: cleared };
+    await appendFile(path.join(home.dir, "thread-A.jsonl"), '{"kind":"completed","status":"completed"}\n');
+    const awaited = await run(["await", "--thread", "thread-A", "--timeout", "3"], { env });
+    assert.equal(awaited.code, 0, awaited.stderr);
+    assert.match(awaited.stdout, /"kind":"completed"/);
+
+    await appendFile(path.join(home.dir, "thread-A.jsonl"), '{"kind":"notify","text":"second"}\n');
+    const stopped = await run(["pending"], { env, stdin: JSON.stringify({ session_id: cleared, stop_hook_active: false }) });
+    assert.match(JSON.parse(stopped.stdout).reason, /second/);
+  } finally {
+    await mcp.close();
+    await daemon.close();
     await home.close();
   }
 });
