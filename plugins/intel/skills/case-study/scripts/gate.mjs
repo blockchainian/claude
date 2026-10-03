@@ -8,13 +8,14 @@
 //        gate.mjs chrome <args...>        opencli <args...>, at most CHROME_SLOTS at once; Google searches paced
 //        gate.mjs yt <args...>            yt-dlp <args...> (Chrome cookies added for YouTube), at most YT_SLOTS at once
 //        gate.mjs fetch-x-posts <args...> the fetch-x-posts script named by FETCH_X_POSTS: X search on an account pool, one JSON post per line
-//        gate.mjs gdelt "<url>"           GDELT, one request every 6 seconds machine-wide
+//        gate.mjs gdelt "<name>" [<from> <to>]  news articles GDELT found the name in (BigQuery), dates YYYY-MM-DD, one JSON article per line
 //        gate.mjs stats                   calls and failures per command since the log began
 // State (pace files, slot locks, the log) lives in ~/.cache/case-study-limits, shared with fetch-x-posts. Settings come
 // from the .env file env.mjs finds: ISP_PROXY_URL (one URL; the ten ports after its own are the exits; without it every
-// request goes direct) and FETCH_X_POSTS (the fetch-x-posts script).
+// request goes direct), FETCH_X_POSTS (the fetch-x-posts script) and GDELT_BQ_PROJECT (the Google Cloud project the
+// BigQuery queries run in).
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,6 +31,9 @@ const CHROME_SLOTS = 6
 const YT_SLOTS = 3
 const YT_GAP = 2 // seconds between YouTube requests machine-wide: the logged-in session is shared by every run
 const EXITS = 10
+const GDELT_START = 2017 // the first year asked for when no range is given
+// The most one GDELT query may read. Measured 2026-10: 52 GB for one year, 488 GB for 2017 to today; the free tier is 1 TiB a month.
+const GDELT_MAX_BYTES = 700e9
 
 const sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.ceil(ms)))
 const now = () => Date.now() / 1000
@@ -192,6 +196,52 @@ export function read(url) {
   return [best, fetched, r.stdout || ''].sort((a, b) => b.length - a.length)[0]
 }
 
+// The bq call that lists the articles of the years fromYear..toYear in whose names GDELT found `name`.
+export function gdeltCommand(name, fromYear, toYear, project) {
+  const sql = `SELECT DocumentIdentifier AS url, CAST(DATE AS STRING) AS seen, SourceCommonName AS domain,
+  DIV(LENGTH(LOWER(AllNames)) - LENGTH(REPLACE(LOWER(AllNames), @name, '')), LENGTH(@name)) AS mentions
+FROM \`gdelt-bq.gdeltv2.gkg_partitioned\`
+WHERE _PARTITIONTIME >= @from AND _PARTITIONTIME < @to AND STRPOS(LOWER(AllNames), @name) > 0`
+  return ['--quiet', '--headless', `--project_id=${project}`, '--format=json', 'query', '--use_legacy_sql=false', '--max_rows=1000000',
+    `--maximum_bytes_billed=${GDELT_MAX_BYTES}`, `--parameter=name:STRING:${name}`,
+    `--parameter=from:TIMESTAMP:${fromYear}-01-01 00:00:00`, `--parameter=to:TIMESTAMP:${toYear + 1}-01-01 00:00:00`, sql]
+}
+
+// The articles GDELT found `name` in between two dates, oldest first: { url, domain, date, mentions }. GDELT lists the
+// names it found in an article's text (not the text itself), and the date is the day it collected the article. A scan
+// costs the same for one name as for a year of everything, so each year of a name is asked for once and kept in the
+// state folder: a past year for good, the running year for a day.
+export function gdelt(name, from, to, { state = STATE, project = process.env.GDELT_BQ_PROJECT, now = new Date(), call = args => run('bq', args) } = {}) {
+  const key = String(name || '').toLowerCase().split(/\s+/).filter(Boolean).join(' ')
+  if (!key || key.includes('://')) throw Error('give the name to look for, not a URL: gate.mjs gdelt "<name>" [<from> <to>]')
+  from ||= `${GDELT_START}-01-01`
+  to ||= now.toISOString().slice(0, 10)
+  if (![from, to].every(d => /^\d{4}-\d{2}-\d{2}$/.test(d)) || from > to) throw Error('dates are YYYY-MM-DD, <from> before <to>')
+  if (!project) throw Error('GDELT_BQ_PROJECT (the Google Cloud project the BigQuery queries run in) is not set in the .env file')
+  const folder = join(state, 'gdelt', encodeURIComponent(key))
+  mkdirSync(folder, { recursive: true })
+  const years = []
+  for (let y = Number(from.slice(0, 4)); y <= Math.min(Number(to.slice(0, 4)), now.getUTCFullYear()); y++) years.push(y)
+  const kept = year => { try { return JSON.parse(readFileSync(join(folder, `${year}.json`), 'utf8')) } catch { return null } }
+  // a year asked for after it ended is complete; one asked for while it ran is good for a day
+  const usable = year => { const k = kept(year); return k && (k.asked.slice(0, 4) > String(year) || now - new Date(k.asked) < 86400e3) }
+  return withLock(join(folder, 'lock'), () => {
+    const missing = years.filter(y => !usable(y))
+    if (missing.length) {
+      const r = call(gdeltCommand(key, missing[0], missing.at(-1), project))
+      let rows
+      try { rows = r.status === 0 ? JSON.parse(r.stdout.trim() || '[]') : null } catch { rows = null }
+      if (!rows) throw Error(((r.stdout || '') + (r.stderr || '') || r.error?.message || 'bq failed').trim().split('\n').at(-1).slice(0, 300))
+      for (let y = missing[0]; y <= missing.at(-1); y++) {
+        const articles = rows.filter(row => row.seen.startsWith(String(y))).map(row => ({ url: row.url, domain: row.domain, date: `${row.seen.slice(0, 4)}-${row.seen.slice(4, 6)}-${row.seen.slice(6, 8)}`, mentions: Number(row.mentions) }))
+        writeFileSync(join(folder, `${y}.json.part`), JSON.stringify({ asked: now.toISOString(), articles }))
+        renameSync(join(folder, `${y}.json.part`), join(folder, `${y}.json`))
+      }
+    }
+    return years.flatMap(y => kept(y).articles).filter(a => a.date >= from && a.date <= to).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
+  })
+}
+
 export function stats(state = STATE) {
   const counts = {}
   let lines = []
@@ -255,21 +305,14 @@ function main(argv) {
     log('fetch-x-posts', code === 0 ? 'ok' : 'FAILED', args[0] || '')
     process.exit(code)
   } else if (command === 'gdelt') {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      paced('gdelt', 6)
-      const r = run('curl', ['-s', '-m', '40', '-w', '\n%{http_code}', args[0]])
-      const cut = r.stdout.lastIndexOf('\n')
-      const code = r.stdout.slice(cut + 1).trim()
-      if (code === '200') {
-        log('gdelt', 'ok', args[0])
-        console.log(r.stdout.slice(0, cut))
-        return
-      }
-      if (code !== '429') { console.error(`gdelt: HTTP ${code}`); process.exit(1) }
+    try {
+      for (const article of gdelt(args[0], args[1], args[2])) console.log(JSON.stringify(article))
+      log('gdelt', 'ok', args.join(' '))
+    } catch (error) {
+      log('gdelt', 'FAILED', args.join(' '))
+      console.error(`gdelt: ${error.message}`)
+      process.exit(1)
     }
-    log('gdelt', 'FAILED', args[0])
-    console.error('gdelt: still 429 after 4 paced tries')
-    process.exit(1)
   } else if (command === 'stats') {
     console.log(JSON.stringify(stats()))
   } else {

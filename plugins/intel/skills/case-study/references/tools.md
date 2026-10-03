@@ -19,9 +19,21 @@ calls and failures per command.
 - Google by date (press from the time):
   `$G chrome google search "<query> after:2017-01-01 before:2017-03-01" -f yaml`.
 - Google News: `$G chrome google news "<query>" -f yaml`.
-- World news by date range, GDELT (news sites only, from 2017 on, little on a
-  creator the press has not written about):
-  `$G gdelt "https://api.gdeltproject.org/api/v2/doc/doc?query=%22<name>%22&mode=artlist&maxrecords=50&format=json&startdatetime=YYYYMMDD000000&enddatetime=YYYYMMDD235959"`
+- World news by date range, GDELT (news sites only, little on a creator the
+  press has not written about): `$G gdelt "<name>" 2023-01-01 2023-12-31`
+  (without dates: 2017 to today). One JSON article per line, oldest first:
+  `url`, `domain`, `date` (the day GDELT collected it) and `mentions`.
+  - It finds the articles in whose text GDELT recognised the name, not every
+    article with the words: give a proper name as the press writes it ("The
+    Kobeissi Letter", not a handle or a common word), and each other spelling
+    in its own call.
+  - There is no title and no cap: a year of a known name is hundreds of
+    lines. Save the output to a file, count the domains, and open first the
+    articles with 2 or more `mentions` (the name comes up more than in
+    passing).
+  - Ask for the years the subject was active, not for everything: every year
+    of a name is read from BigQuery once and kept, and the month's free
+    allowance is about twenty years of names.
 - Reddit: `$G chrome reddit search "<query>" -f yaml`, `$G chrome reddit read <post id>`.
 
 ## Reading a page
@@ -164,3 +176,7 @@ under the home directory.
   limits, and `wayback` goes direct.
 - `FETCH_X_POSTS`: the fetch-x-posts script (X search on an account pool).
   Without it `$G fetch-x-posts` is unavailable: X search is then a gap.
+- `GDELT_BQ_PROJECT`: the Google Cloud project `$G gdelt` runs its BigQuery
+  queries in, with the `bq` command logged in (`gcloud auth login`). Without
+  it, or once the project's free 1 TiB of queries for the month is used,
+  `$G gdelt` fails: GDELT is then a gap.
