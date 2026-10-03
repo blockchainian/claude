@@ -701,7 +701,7 @@ function main(argv) {
   if (cmd === 'quotes') {
     need(2, 'work, chapter')
     const { rows, wordless, ...result } = quotes(positionals[0], positionals[1])
-    console.log(JSON.stringify({ ...result, wordless: wordless.length }))
+    console.log(JSON.stringify(result))
     return
   }
   if (cmd === 'findings' || cmd === 'bullets') {
