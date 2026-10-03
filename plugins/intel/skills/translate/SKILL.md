@@ -22,10 +22,12 @@ extract.mjs takes an EPUB (`.epub`); it does not read PDFs. If you only have the
 the download-book skill first.
 
 `${CLAUDE_PLUGIN_ROOT}` below is this plugin's root; this skill lives at `${CLAUDE_PLUGIN_ROOT}/skills/translate`.
-Work lives in `<book dir>/.translate/<slug>/` (hidden, resumable); the deliverable is `<book>-zh.pdf` next to
-the source. When the book's folder is not writable (macOS keeps this process out of some folders, e.g.
-`~/Downloads`), `extract.mjs` copies the book to `~/Documents/translate/<slug>/` and everything, including the
-result, lands there; it says so on stderr. Never leave other copies next to the book.
+Work lives in `<book dir>/.translate/<slug>/` (hidden, resumable); the deliverable is
+`<title-slug>.pdf` in the user's `~/Documents` — the title lowercased with every run of non-alphanumerics
+turned into one dash, e.g. `the-art-of-doing-science-and-engineering.pdf` (no language suffix). (When
+`~/Documents` is not writable, it falls back next to the work dir.) When the book's own folder is not writable
+(macOS keeps this process out of some folders, e.g. `~/Downloads`), `extract.mjs` copies the book to
+`~/Documents/translate/<slug>/`; it says so on stderr. Never leave other copies next to the book.
 
 ## Setup (automatic, idempotent)
 
@@ -114,7 +116,7 @@ is assembled.
 "${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/render.py" <work> --title "<中文书名>"
 ```
 
-Writes `<book>-zh.pdf`: the cover (the EPUB's cover image rendered full-bleed), a
+Writes `<title-slug>.pdf` in `~/Documents`: the cover (the EPUB's cover image rendered full-bleed), a
 目录 with folios, then every translated section. Page size is the one set at extract (`--page-size`). Colors
 default to a dark reading page: the background follows the iTerm2
 default profile's dark-mode background when iTerm2 is installed (else near-black), the text is `#6e7f7a`, a

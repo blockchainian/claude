@@ -39,6 +39,6 @@ The waitlist server usually downloads at megabytes per second, so a `slow.url` f
 
 To turn the downloaded EPUB into a Chinese PDF, pass it to the `translate` skill, which reads the EPUB directly.
 
-If the browser check still fails (the script reports 未通过浏览器验证, usually a captcha), save the search results and selected detail page as HTML from your own browser, then pass `--search-html` and `--detail-html`. Pass `--slow-html` for a saved slow download page when its live entry is blocked. The saved slow page must refer to the selected MD5 record. `ANNA_SECRET_KEY` optionally supplies a member key for the fast API; do not print its value. Calling that API with a valid key may use the member's quota.
+If the browser check still fails (the script reports 未通过浏览器验证, usually a captcha), save the search results and selected detail page as HTML from your own browser, then pass `--search-html` and `--detail-html`. Pass `--slow-html` for a saved slow download page when its live entry is blocked. The saved slow page must refer to the selected MD5 record. `ANNA_ARCHIVE_SECRET_KEY` optionally supplies a member key for the fast API; do not print its value. Calling that API with a valid key may use the member's quota.
 
 Report missing or blocked links as unavailable. Do not infer a direct file URL from an error page; only download the file URL the script actually returned.
