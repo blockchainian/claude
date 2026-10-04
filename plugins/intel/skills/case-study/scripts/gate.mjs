@@ -40,7 +40,7 @@ const EXITS = 10
 const GDELT_START = '2017-01-01' // the first day asked for when no range is given
 const GDELT_NAMES = 100 // the most names one call may ask for
 // The most one GDELT query (a year at most) may read. Measured 2026-10: 52 GB for one year of names.
-const GDELT_MAX_BYTES = 120e9
+const GDELT_MAX_BYTES = 100e9
 const OUTPUT_MAX = 512e6 // bytes of one BigQuery answer; a Node string holds 537 MB
 // Google News requests one gnews call has in flight at once. Measured 2026-10: 1000 link pages 100 at once in 16 s, none refused.
 const GNEWS_WIDTH = 100
