@@ -109,7 +109,7 @@ test('gdelt reads from BigQuery only the days a name lacks, a year at a time, an
     { name: 'adam kobeissi', url: 'https://c.example/adam', domain: 'c.example', date: '2023-03-01', mentions: 2 },
   ], 'one article per url, the earliest day it was seen')
   assert.equal(calls.length, 2, 'one query per year')
-  assert.ok(calls[0].includes('--project_id=p') && calls[0].some(a => a.startsWith('--maximum_bytes_billed=')))
+  assert.ok(calls[0].includes('--project_id=p') && calls[0].some(a => a === '--maximum_bytes_billed=100000000000'))
   assert.equal(parameter(calls[0], 'names'), '["kobeissi letter","adam kobeissi"]', 'every name in one query, lowercased')
   assert.deepEqual([parameter(calls[0], 'from'), parameter(calls[0], 'to')], ['2022-01-01 00:00:00', '2023-01-01 00:00:00'])
   assert.match(calls[0].at(-1), /gkg_partitioned[\s\S]*UNNEST\(@names\)[\s\S]*AllNames[\s\S]*_PARTITIONTIME >= @from/)
