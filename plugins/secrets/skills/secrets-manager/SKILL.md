@@ -151,9 +151,9 @@ its file and line number.
   checked against tiktok.com first: really signed in, it is stored as is; ended on TikTok's side,
   it signs in again. A new device gets "Verify it's really you" after the password: the script
   picks the Email method and asks for the emailed 6-digit code on the terminal (its subject is
-  "NNNNNN is your 6-digit code"), then types it in. A 6-digit code typed into the headed window
-  is submitted automatically. The code can also be typed into the
-  `--headed` window; not entered either way within 5 minutes, the row is marked `escalated`. Log
+  "NNNNNN is your 6-digit code"), then types it in. The code can also be typed into the
+  `--headed` window, which submits it once all 6 digits are in; not entered either way within
+  5 minutes, the row is marked `escalated`. Log
   TikTok accounts in one at a time: the prompts of several would share one terminal. The mailbox itself is never opened by the script.
 - **app --by-email** — dispatch to the adapter's `byEmail({db, cred, opts, io})` hook.
   A missing hook fails explicitly. The adapter owns alias login/signup and optional password minting.

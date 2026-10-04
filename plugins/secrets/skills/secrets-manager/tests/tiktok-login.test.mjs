@@ -92,3 +92,19 @@ test("a terminal code is typed and submitted without resubmitting it from the di
   });
   assert.deepEqual(clicks, ["credentials", { name: "Verify", code: "123456" }]);
 });
+
+test("sign-in keeps polling when the code dialog closes before its value is read", async () => {
+  const { context, page, clicks } = codeDialog(["", "", ""]);
+  const reads = [];
+  page.locator().first().inputValue = async (options) => {
+    reads.push(options);
+    throw new Error("Code dialog closed");
+  };
+  const cookies = await signInTiktok(context, page, "bob1", "password", Date.now() + 10000, {
+    readCode: () => new Promise(() => {}),
+  });
+  assert.deepEqual(cookies, [cookie("sessionid", ".tiktok.com")]);
+  assert.equal(reads.length, 2);
+  for (const options of reads) assert.ok(options.timeout > 0 && options.timeout <= 1500);
+  assert.deepEqual(clicks, ["credentials"]);
+});
