@@ -42,8 +42,9 @@ const GDELT_NAMES = 100 // the most names one call may ask for
 // The most one GDELT query (a year at most) may read. Measured 2026-10: 52 GB for one year of names.
 const GDELT_MAX_BYTES = 120e9
 const OUTPUT_MAX = 512e6 // bytes of one BigQuery answer; a Node string holds 537 MB
-const GNEWS_GAP = 0.1 // seconds between two Google News requests machine-wide: ten a second, spread over the ISP exits
-const GNEWS_MONTHS = EXITS // months one gnews call reads at once
+// Google News requests one gnews call has in flight at once. Measured 2026-10: 1000 link pages 100 at once in 16 s, none refused.
+const GNEWS_WIDTH = 100
+const GNEWS_BATCH = 1000 // links one batchexecute resolves; measured 2026-10: 1000 in one request, all resolved, 2 s
 const YT_RESULTS = 20 // videos asked of one YouTube search, before the name filter
 const YT_BATCH = 8 // video pages one yt-dlp run reads
 const YT_ROUTE_RUNS = 3 // yt-dlp runs at once on one route, when reading video pages without the login
@@ -384,64 +385,90 @@ export async function gnewsRequest(url, form, { exits = proxies(), residential =
 
 const xmlText = s => (s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&')
 
-// The article's own address behind one of Google News's links: Google's page for the link carries a signature, and its
-// batchexecute answers with the address for that signature. A link Google gives neither for is returned as it is.
-async function articleAddress(link, call) {
+// What Google's batchexecute needs to answer with the article's own address behind one of Google News's links: the
+// link's id, and the signature and time Google's page for the link carries. null for a link Google gives neither for.
+async function linkSignature(link, call) {
   const id = (link.match(/^https:\/\/news\.google\.com\/(?:rss\/)?(?:articles|read)\/([\w-]+)/) || [])[1]
-  if (!id) return link
+  if (!id) return null
   const page = await call(`https://news.google.com/rss/articles/${id}`)
   if (page.status !== 200) throw Error(`Google News answered ${page.status} for the address of an article`)
   const [signature, time] = ['sg', 'ts'].map(k => (page.body.match(new RegExp(`data-n-a-${k}="([^"]+)"`)) || [])[1])
-  if (!signature || !time) return link
-  const answer = await call('https://news.google.com/_/DotsSplashUi/data/batchexecute', JSON.stringify([[['Fbv4je',
-    `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${time},"${signature}"]`]]]))
-  if (answer.status !== 200) throw Error(`Google News answered ${answer.status} for the address of an article`)
-  try {
-    return JSON.parse(JSON.parse(answer.body.split('\n').find(line => line.startsWith('[['))).find(part => part[1] === 'Fbv4je')[2])[1] || link
-  } catch { return link }
+  return signature && time ? { id, signature, time } : null
+}
+
+// The article addresses for signed links, all asked for in one batchexecute: Map link -> address. Google answers in any
+// order, each answer tagged with its request's tag; a link it gives no address for is left out.
+async function resolveLinks(signed, call) {
+  const answer = await call('https://news.google.com/_/DotsSplashUi/data/batchexecute', JSON.stringify([signed.map(({ id, time, signature }, i) => ['Fbv4je',
+    `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${time},"${signature}"]`, null, String(i)])]))
+  if (answer.status !== 200) throw Error(`Google News answered ${answer.status} for the addresses of ${signed.length} articles`)
+  const addresses = new Map()
+  for (const line of answer.body.split('\n').filter(line => line.startsWith('[['))) {
+    for (const part of JSON.parse(line)) {
+      if (part[1] !== 'Fbv4je' || !signed[Number(part[6])]) continue
+      try { const url = JSON.parse(part[2])[1]; if (url) addresses.set(signed[Number(part[6])].link, url) } catch {}
+    }
+  }
+  return addresses
+}
+
+// Runs fn on every item, `width` at once; the first error stops the items not yet started and is returned.
+async function pool(items, width, fn) {
+  let next = 0
+  let failure
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => {
+    while (next < items.length && !failure) {
+      try { await fn(items[next++]) } catch (error) { failure ??= error }
+    }
+  }))
+  return failure
 }
 
 // The Google News articles for `name` between two days, oldest first: { url, domain, date, title }; url is the
 // article's own address, not Google's link to it. One search answers with a part of what it has, and a narrower one with more of it, so every
-// calendar month is asked for on its own; a month is held once it was asked for and its links resolved, the
-// running one once it ended. `workers` months are read at once, each one request at a time; the first refusal stops the
-// months not yet started, and the months read are kept. The lock is per name: runs asking for other names go on.
-export async function gnews(name, from, to, { data = DATA, state = STATE, now = new Date(), gap = GNEWS_GAP,
-  call = gnewsRequest, workers = GNEWS_MONTHS } = {}) {
+// calendar month is asked for on its own. All months are searched first, then every link's page is read for its
+// signature, then the links are resolved `batch` to a request; `workers` requests are in flight at once in each step.
+// A month is held once it was searched and all its links resolved, the running one once it ended; the first refusal
+// stops the requests not yet started, and the months done are kept. The lock is per name: runs asking for other names go on.
+export async function gnews(name, from, to, { data = DATA, state = STATE, now = new Date(),
+  call = gnewsRequest, workers = GNEWS_WIDTH, batch = GNEWS_BATCH } = {}) {
   const [start, end, yesterday] = dayRange(from, to, GDELT_START, now)
   mkdirSync(state, { recursive: true })
   return withLockAsync(join(state, `gnews-${nameFolder(nameKey(name))}.lock`), async () => {
     const a = archive('gnews', name, data)
     const months = new Set()
-    const ask = async (...request) => { if (gap) await pacedAsync('gnews', gap, state); return call(...request) }
-    const addresses = new Map()
-    const address = link => addresses.get(link) || addresses.set(link, articleAddress(link, ask)).get(link)
     for (const [x, y] of missingDays(a.covered, start, end)) {
       for (let d = `${x.slice(0, 7)}-01`; d <= y; d = nextMonth(d)) months.add(d)
     }
-    const readMonth = async first => {
+    const items = new Map() // month -> its articles, with Google's link
+    let refusal = await pool([...months].sort(), workers, async first => {
       const query = `${String(name).trim()} after:${first} before:${nextMonth(first)}`
-      const r = await ask(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`)
-      if (r.status !== 200) throw Error(`Google News answered ${r.status} for the month of ${first.slice(0, 7)}; the months read are kept`)
-      const found = []
-      for (const [, item] of r.body.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+      const r = await call(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`)
+      if (r.status !== 200) throw Error(`Google News answered ${r.status} for the month of ${first.slice(0, 7)}; the months done are kept`)
+      items.set(first, [...r.body.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(([, item]) => {
         const field = tag => xmlText((item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)) || [])[1])
         const published = new Date(field('pubDate'))
-        const link = field('link')
-        const url = link && await address(link)
-        if (url) found.push({ url, domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? first : day(published), title: field('title') })
-      }
+        return { link: field('link'), domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? first : day(published), title: field('title') }
+      }).filter(article => article.link))
+    })
+    const links = [...new Set([...items.values()].flat().map(article => article.link))]
+    const addresses = new Map() // link -> the article's own address, or the link itself when Google gives none
+    const signed = []
+    refusal ??= await pool(links, workers, async link => {
+      const signature = await linkSignature(link, call)
+      if (signature) signed.push({ link, ...signature })
+      else addresses.set(link, link)
+    })
+    const batches = Array.from({ length: Math.ceil(signed.length / batch) }, (_, i) => signed.slice(i * batch, (i + 1) * batch))
+    refusal ??= await pool(batches, workers, async some => {
+      const resolved = await resolveLinks(some, call)
+      for (const { link } of some) addresses.set(link, resolved.get(link) || link)
+    })
+    for (const [first, articles] of items) {
+      if (!articles.every(article => addresses.has(article.link))) continue
       const last = addDays(nextMonth(first), -1)
-      a.add(found, first, last > yesterday ? yesterday : last)
+      a.add(articles.map(({ link, ...article }) => ({ url: addresses.get(link), ...article })), first, last > yesterday ? yesterday : last)
     }
-    const queue = [...months].sort()
-    let refusal
-    const work = async () => {
-      while (queue.length && !refusal) {
-        try { await readMonth(queue.shift()) } catch (error) { refusal ??= error }
-      }
-    }
-    await Promise.all(Array.from({ length: workers }, work))
     if (refusal) throw refusal
     return a.between(start, end)
   })
