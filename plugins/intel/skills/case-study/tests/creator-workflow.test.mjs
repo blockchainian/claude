@@ -53,6 +53,21 @@ test('sources found by several scouts are read once, eight to a reader; the numb
   assert.ok(calls.findIndex(c => c.label === 'scout:follower-numbers') < calls.findIndex(c => c.label === 'read:01'))
 })
 
+test('the news lists are fetched once, for every name, before the scouts start; the numbers agents do not wait for them', async () => {
+  const { calls, release } = await run({ ...ARGS, names: 'Jane Doe, JaneDoeVlogs', since: '2015' }, ['news'])
+  const news = calls.find(c => c.label === 'news')
+  assert.match(news.prompt, /case-study\.mjs news "\/w" --since 2015 "Jane Doe" "JaneDoeVlogs"$/)
+  assert.deepEqual(labels(calls, 'scout:'), ['scout:follower-numbers', 'scout:posting-numbers'], 'no scout starts before the news lists are in')
+  await release()
+  assert.equal(labels(calls, 'news').length, 1)
+  for (const scout of calls.filter(c => c.label.startsWith('scout:') && !c.label.endsWith('-numbers'))) assert.match(scout.prompt, /raw\/news\//)
+})
+
+test('without other names or a first year, the news lists are fetched for the subject from the commands\' own first day', async () => {
+  const { calls } = await run(ARGS)
+  assert.match(calls.find(c => c.label === 'news').prompt, /case-study\.mjs news "\/w" "Jane Doe"$/)
+})
+
 test('the chapters from the notes are written at once; one agent writes the introduction and the reasoning chapter into the book, last', async () => {
   const { calls } = await run(ARGS)
   assert.deepEqual(labels(calls, 'write:').sort(), BODY.map(f => `write:${f}`))

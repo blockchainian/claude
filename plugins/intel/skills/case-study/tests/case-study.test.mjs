@@ -483,3 +483,28 @@ test('both scripts run when called through a symlink to their folder, as an inst
     assert.match(res.stdout + res.stderr, new RegExp(`usage: ${name}`))
   }
 })
+
+test('news fetches Google News for each name and GDELT for all of them at once, into raw/news/, and reports the lines or the failure of each', async () => {
+  const work = mkdtempSync(join(tmpdir(), 'news-'))
+  const asked = []
+  let open = 0
+  let most = 0
+  const run = async args => {
+    asked.push(args); open++; most = Math.max(most, open)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    open--
+    if (args[1] === 'JaneDoeVlogs') return { status: 1, stdout: '', stderr: 'starting\ngnews: Google News answered 429\n' }
+    return { status: 0, stdout: '{"url":"https://a.example/"}\n{"url":"https://b.example/"}\n', stderr: '' }
+  }
+  assert.deepEqual(await cs.news(work, '2015', ['Jane Doe', 'JaneDoeVlogs'], run), {
+    'gnews-jane-doe.jsonl': 2,
+    'gnews-janedoevlogs.jsonl': 'FAILED: gnews: Google News answered 429',
+    'gdelt.jsonl': 2,
+  })
+  assert.deepEqual(asked, [['gnews', 'Jane Doe', '2015-01-01'], ['gnews', 'JaneDoeVlogs', '2015-01-01'], ['gdelt', 'Jane Doe', 'JaneDoeVlogs', '2015-01-01']])
+  assert.equal(most, 3, 'all at once')
+  assert.equal(readFileSync(join(work, 'raw', 'news', 'gdelt.jsonl'), 'utf8').split('\n').filter(Boolean).length, 2)
+  await cs.news(work, '', ['Jane Doe'], run)
+  assert.deepEqual(asked.at(-1), ['gdelt', 'Jane Doe'], 'without a first year, the commands\' own first day')
+  rmSync(work, { recursive: true, force: true })
+})
