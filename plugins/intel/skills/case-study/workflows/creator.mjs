@@ -43,6 +43,14 @@ const SONNET = { model: 'sonnet', effort: 'high', agentType: 'general-purpose' }
 const runs = (command, label, phaseName) => agent(`Run exactly this command and return its output, nothing else:\n${S}/scripts/case-study.mjs ${command}`,
   { label, phase: phaseName, model: 'haiku', effort: 'low', agentType: 'general-purpose' })
 const merge = label => runs(`merge "${WORK}"`, label)
+// An agent that died (its account's limit, a crash) returns nothing: it is asked once more, to pick up from the files
+// it left. One that dies twice stops the run, named, before anything is built on the part it lost.
+const settled = (prompt, opts) => agent(prompt, opts).then(done => done ?? agent(`${prompt}\nA first attempt at this stopped before it finished: pick up from the files it left.`, { ...opts, label: `${opts.label}:again` }))
+const allSettled = (results, names, stage) => {
+  const lost = results.map((done, i) => (done == null ? names[i] : null)).filter(Boolean)
+  if (lost.length) throw Error(`${stage}: ${lost.join(', ')} stopped twice; relaunch the run from its files (see "Rules for the orchestrator")`)
+  return results
+}
 
 phase('Scout')
 // One scout per source type (see "Scout lanes" in the type file): a scout with one kind of source to find needs few turns.
@@ -60,9 +68,9 @@ const known = () => {
   if (!Array.isArray(A.sources) || !A.sources.length) throw new Error("done 'scout' needs args.sources: the output of case-study.mjs sources <work>")
   return [{ sources: A.sources }]
 }
-const scouted = READ_DONE ? [] : SCOUT_DONE ? known() : (await parallel(LANES.map(lane => () => agent(
+const scouted = READ_DONE ? [] : SCOUT_DONE ? known() : allSettled(await parallel(LANES.map(lane => () => settled(
   `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your lane: ${lane} (see "Scout lanes" in the type file).${A.since ? ` First year of growth: ${A.since}.` : ''}${share(LANES.length)}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}\nThe news lists are fetched: ${WORK}/raw/news/ (gnews-<name>.jsonl for each name, gdelt.jsonl), one JSON article per line.`,
-  { label: `scout:${lane}`, phase: 'Scout', schema: FOUND, ...SONNET })))).filter(Boolean)
+  { label: `scout:${lane}`, phase: 'Scout', schema: FOUND, ...SONNET }))), LANES.map(lane => `scout ${lane}`), 'Scout')
 const seen = new Set()
 const urls = []
 for (const s of scouted.flatMap(r => r.sources)) {
@@ -75,9 +83,9 @@ if (!READ_DONE) log(SCOUT_DONE ? `known sources: ${urls.length}, ${batches.lengt
 
 phase('Read')
 const agentsReading = batches.length + 2
-await parallel(batches.map((batch, i) => () => agent(
+allSettled(await parallel(batches.map((batch, i) => () => settled(
   `${COMMON}\nYou are a reader. Follow ${S}/briefs/read.md. Your batch name: read-${pad(i + 1)}.${share(agentsReading)}\nYour sources:\n${batch.map(s => `- ${s.url} (${s.outlet}${s.year ? ' ' + s.year : ''}) ${s.why || ''}`).join('\n')}`,
-  { label: `read:${pad(i + 1)}`, phase: 'Read', ...SONNET })))
+  { label: `read:${pad(i + 1)}`, phase: 'Read', ...SONNET }))), batches.map((_, i) => `read-${pad(i + 1)}`), 'Read')
 await numbersDone
 const mergedRead = String(await merge('merge:read'))
 log(`read stage merged: ${mergedRead}`)
@@ -85,9 +93,9 @@ log(`read stage merged: ${mergedRead}`)
 phase('Write')
 // A writer's chapter is the text the reader gets. Eight at once on the session's model have run into the plan's quota.
 const WRITER = { model: 'claude-opus-4-8', effort: 'high', agentType: 'general-purpose' }
-await Promise.all(FROM_NOTES.map(file => agent(
+allSettled(await Promise.all(FROM_NOTES.map(file => settled(
   `${COMMON}\nYou are a chapter writer. Follow ${S}/briefs/write.md. Your chapter file: drafts/${file}.md (see the chapter table in the type file).`,
-  { label: `write:${file}`, phase: 'Write', ...WRITER })))
+  { label: `write:${file}`, phase: 'Write', ...WRITER }))), FROM_NOTES.map(file => `drafts/${file}.md`), 'Write')
 
 phase('Book')
 // The introduction and the reasoning chapter rest on the other chapters and are written once, straight into the
