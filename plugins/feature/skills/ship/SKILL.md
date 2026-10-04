@@ -32,8 +32,8 @@ reads it by section, so three sections are required and the rest are read when p
   thread receives, so it must be enough to build the workstream without the rest of the file.
 - **Dependencies** — the order between workstreams, if any, and the wire contract the UX lane codes
   against. Ship wires these into the task board as `addBlockedBy`.
-- **Checks** — one command per line, run in order and stopping at the first red: in every
-  worktree before merge and in the session tree after.
+- **Checks** — one command per line, run in order and stopping at the first red: by each lane
+  before finishing and once in the session tree after each merged batch.
 
 Optional, each read by the step that names it: **UX workstreams** (`### <id>` blocks with a
 `Surfaces:` and a `Files:` line; without this section there is no UX lane), **Deploy** (a
@@ -72,9 +72,9 @@ commands by hand:
   The first open records HEAD as the run's base. `<id>` is the plan's `### <id>`.
 - `workstream.sh check <id> "<cmd>"...` — runs the plan's Checks, one argument per line, in
   that worktree, in order, and exits with the first red.
-- `workstream.sh merge <id> "<cmd>"...` — merges the branch onto the session branch (`--no-ff`),
-  runs Checks in the session tree, restores the branch and keeps the worktree when one is red,
-  removes the worktree and branch when all are green, and prints the base. A conflict
+- `workstream.sh merge <id> ["<cmd>"...]` — merges the branch onto the session branch (`--no-ff`),
+  removes the worktree and branch, and prints the base. With commands, runs them in the session
+  tree first, restoring the branch and keeping the worktree when one is red. A conflict
   aborts the merge and names the files; send them to the workstream's owner to resolve in its
   worktree, then merge again.
 - `workstream.sh base [--clear]` — the recorded base, for the review; cleared at phase end.
@@ -118,7 +118,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    the task board (see **Task board**) before any fan-out, so the rest of the run is visible.
 
 2. **Launch the codex lane — one thread per workstream.** For EVERY codex workstream in the plan
-   whose Dependencies are already merged (none, at the start),
+   whose Dependencies are already merged and their batch's Checks green (none, at the start),
    in one message: `workstream.sh open <id>`, then codex-manager `start` with `cwd` the printed
    path, `name` the id, and a prompt that is the workstream block verbatim plus the plan's
    Dependencies and Checks, and the standing instructions in
@@ -132,26 +132,28 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    which of them belong in the plan. Copy any untracked env
    file a module needs into the worktree before starting the thread. A workstream that the plan's
    Dependencies put after another one is opened and started the same way, in the message where
-   that one merges: `open` branches from the merged HEAD, so its worktree already carries what it
-   depends on and its Checks can pass alone.
+   that dependency's batch passes Checks: `open` branches from the merged HEAD, so its worktree
+   already carries what it depends on and its Checks can pass alone.
 
 3. **Launch the UX lane, in parallel — one implementer per UX workstream.** In the same message,
    `workstream.sh open <id>` for EVERY UX workstream and spawn a `ux-implementer` agent per
    workstream with the Agent tool, giving each its worktree path, its workstream block, the wire
-   contract quoted as a real response body, and the UX checks for its surfaces. They start now,
-   not after codex and not after each other. Each agent commits after every coherent step and
-   returns flat JSON: `status` is `done`, `blocked` or `needs-backend`.
+   contract quoted as a real response body, the plan's Checks to run before finishing, and the
+   UX checks for its surfaces. They start now, not after codex and not after each other. Each
+   agent commits after every coherent step and returns flat JSON: `status` is `done`, `blocked`
+   or `needs-backend`.
 
-   **When a workstream finishes**, either lane: run `workstream.sh check <id>` with the plan's
-   Checks. Red goes
-   back to the owner with the failing output — codex-manager `send` for a codex thread,
-   `SendMessage` for a UX agent — at most twice (Hard rules); a third red is a finding for the
-   user. Green: `workstream.sh merge <id>` with the same Checks. A red post-merge check means the merged
-   result breaks what each side passed alone: send the output to the owner, who fixes in the kept
-   worktree, and merge again. Merge in the plan's Dependencies order; a workstream whose dependency
-   is not merged yet waits. When the last workstream is merged, push the session branch and open
-   the PR (`gh pr create`) or let the push update it. Merging a lane branch is integration, not
-   editing.
+   **When a workstream finishes**, either lane: merge it straight away with `workstream.sh merge
+   <id>` and no commands; do not repeat its lane Checks with `workstream.sh check`. Merge all
+   workstreams that finished together as one batch, in the plan's Dependencies order; a workstream
+   whose dependency is not merged yet waits. Run the plan's Checks once in the session tree after
+   that batch, without waiting for still-running lanes.
+   Red: identify the merged lane that caused it, `workstream.sh open fix-<id>`, and send its owner
+   the new path and failing output — codex-manager `send` or `SendMessage` — to fix and run Checks
+   there. Merge the fix without commands and re-run Checks in the session tree, at most twice
+   (Hard rules); a third red is a finding for the user. Green: open dependent workstreams as in
+   step 2. When the last batch is green, push the session branch and open the PR (`gh pr create`)
+   or let the push update it. Merging a lane branch is integration, not editing.
 
 4. **Review, then deploy and check staging.** Start when the last workstream is merged and pushed.
 
@@ -173,8 +175,9 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    and read the verdict JSON. Failures go back to the UX agent that owns the surface by
    SendMessage — it is idle, not dead, and keeps its context — after `workstream.sh open
    fix-<id>`, since its own worktree went with the merge; the message names the new path, and the
-   fix is checked and merged as in step 3, then staging redeployed when the plan deploys. The
-   agent never saw your probe run, so the message carries the failing assertion as the verdict JSON
+   owner runs Checks before finishing and the fix merges in a batch as in step 3, then staging is
+   redeployed when the plan deploys. The agent never saw your probe run, so the message carries
+   the failing assertion as the verdict JSON
    states it (expected against actual) and the paths of the verdict JSON and any screenshot — never
    just "the probe failed". A failure still red after its rounds here (the cap is in Hard rules)
    becomes a finding in step 6. No UX checks in the plan means this step is skipped.
@@ -209,11 +212,11 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    b. codex-manager `start` in the codex worktree with the `codex` findings, the path of
       `decisions.md` and the same standing instructions as step 2, and append what it decides
       to that file as in step 2; spawn `ux-autofixer` with the `ux` findings, its worktree path and
-      the UX checks for its surfaces. A finding touching `.claude/**` or `CLAUDE.md` comes back
-      for the user.
-   c. There is no re-review: as each lane completes, `workstream.sh check` then `merge` it as in
-      step 3 and push; if the plan deploys to staging, redeploy it and re-run its Deploy checks;
-      re-run only the UX checks for surfaces the fixes touched.
+      the plan's Checks to run before finishing and the UX checks for its surfaces. A finding
+      touching `.claude/**` or `CLAUDE.md` comes back for the user.
+   c. There is no re-review: merge completed lanes without commands, then run Checks once per
+      merged batch as in step 3 and push only on green; if the plan deploys to staging, redeploy
+      it and re-run its Deploy checks; re-run only the UX checks for surfaces the fixes touched.
    d. Post one PR comment summarising the findings and their dispositions; that comment is the
       review's record. Without a PR, the summary goes into your final message.
 
@@ -261,9 +264,9 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 - **Agents are idle, not dead.** Send findings back by message and keep their context. Drop one only
   when its work is done or it has idled past the one-hour cache TTL, then spawn fresh with a short
   brief.
-- **Loops are capped.** A red workstream check goes back to its owner at most twice; the third
-  red is a finding for the user. A UX-check failure gets at most three fix rounds: two with the
-  owning UX agent in step 5, then step 7's round. A review finding gets step 7's one round and no
+- **Loops are capped.** A red batch Check goes back to the responsible lane's owner at most
+  twice; the third red is a finding for the user. A UX-check failure gets at most three fix rounds:
+  two with the owning UX agent in step 5, then step 7's round. A review finding gets step 7's one round and no
   re-review; the re-run of the UX checks on the surfaces the fixes touched is the second gate. A
   finding that survives its last round goes to the user. Review priorities are unranked input;
   verify a finding before acting on it.

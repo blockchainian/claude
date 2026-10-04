@@ -4,8 +4,8 @@ Ship a feature from a written plan, with Claude orchestrating and never
 implementing. `/feature:ship` reads `plan.md`, opens a worktree per workstream
 (`skills/ship/scripts/workstream.sh`), launches the codex lane as one thread per
 workstream through [codex](../codex/README.md)'s `codex-manager` and the UX lane
-as one `ux-implementer` agent per UX workstream, all at once, checks and
-merges each workstream as it finishes behind the plan's Checks command, deploys
+as one `ux-implementer` agent per UX workstream, all at once, merges each
+workstream as it finishes and runs the plan's Checks once per merged batch, deploys
 and runs the checks the plan names, runs codex's review mode once per plan and
 triages it into `findings.json`, fixes in two lanes with no re-review, re-runs
 the touched UX checks, and decides production only when every finding is
@@ -31,7 +31,7 @@ ship, the plan template and memory.
 | `/feature:retro` | Run in a fresh session on a finished session: rank the biggest wastes by real token cost, classify each (knowable-fact miss / topology deviation / plan defect), and propose fixes to ship, the plan template and memory |
 | `ship/scripts/check-paths.sh` | Flags a path named in the plan that does not exist in the repo; `(new)` files are skipped |
 | `ship/scripts/check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the orchestrator runs it beside the path checker |
-| `ship/scripts/workstream.sh` | `open <id>` a worktree per workstream, `check <id> <cmd>` in it, `merge <id> <cmd>` onto the session branch behind the same check, `base` for the review |
+| `ship/scripts/workstream.sh` | `open <id>` a worktree per workstream, `check <id> <cmd>` in it, `merge <id> [<cmd>...]` onto the session branch with optional checks, `base` for the review |
 | `retro/scripts/extract.mjs` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
 | `retro/scripts/efficacy.mjs` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
 
@@ -54,7 +54,7 @@ ship, the plan template and memory.
 ## What the plan carries
 
 Everything ship needs to know about the project is in the plan, so a repo
-needs no contract file: the Checks command (before merge), an optional Deploy
+needs no contract file: the Checks commands (in each lane and after each merged batch), an optional Deploy
 section (`staging:` and `production:` commands printing JSON with the deployed
 `sha`), optional UX checks (probe commands that print a verdict JSON), and
 optional Deploy checks (commands run against each deploy). A CLI tool's plan

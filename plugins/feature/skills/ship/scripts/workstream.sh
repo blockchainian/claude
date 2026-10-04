@@ -1,16 +1,17 @@
 #!/bin/bash
 # ABOUTME: Runs one workstream's worktree lifecycle for the ship skill: open a worktree, run its
-# ABOUTME: check there, merge it onto the session branch behind the same check, and report the base.
+# ABOUTME: check there, merge it onto the session branch with optional checks, and report the base.
 set -u
 
-usage="usage: workstream.sh open <id> | check <id> <cmd>... | merge <id> <cmd>... | base [--clear]
+usage="usage: workstream.sh open <id> | check <id> <cmd>... | merge <id> [<cmd>...] | base [--clear]
 
   open  <id>        add ../.workstream-<id> on branch workstream/<id> from HEAD, copy node_modules,
                     record the base (HEAD before the first open) and print the worktree path
   check <id> <cmd>  run each <cmd> in order in the workstream's worktree; exit with the first red
-  merge <id> <cmd>  merge workstream/<id> onto the session branch (--no-ff), run each <cmd> in the
-                    session tree, restore the branch if one is red, remove the worktree and branch
-                    if all are green, and print the base
+  merge <id> [<cmd>...]  merge workstream/<id> onto the session branch (--no-ff); without commands,
+                    remove the worktree and branch and print the base; with commands, run each in
+                    the session tree, restore the branch and keep the worktree if one is red,
+                    otherwise remove the worktree and branch and print the base
   base [--clear]    print the recorded base (HEAD when none is recorded); --clear forgets it"
 
 die() { printf 'workstream.sh: %s\n' "$*" >&2; exit "${2:-1}"; }
@@ -65,7 +66,7 @@ check() {
 
 merge() {
   local id=$1 dir branch conflicted; shift
-  [ -n "$id" ] && [ $# -gt 0 ] || die "merge needs a workstream id and at least one command" 2
+  [ -n "$id" ] || die "merge needs a workstream id" 2
   dir=$(worktree_of "$id"); branch=$(branch_of "$id")
   git -C "$ROOT" rev-parse -q --verify "refs/heads/$branch" >/dev/null || die "no branch $branch; open the workstream first"
   [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ] || die "the session tree has uncommitted changes; commit or stash them before merging"
