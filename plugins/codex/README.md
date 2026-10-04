@@ -81,6 +81,16 @@ reach Claude, because they do not travel through the daemon's requests.
 
 ## Getting woken
 
+The MCP initialize response supplies concise lifecycle instructions even before
+tools are loaded: start a thread, run its await command in the background,
+answer asks with `reply` after checking `list` for `waiting` (an await can
+deliver an already answered ask). A thread is finished only when its turn
+completed (not failed, interrupted or waiting on an ask), its result has been
+checked and accepted, and no further message is planned. Blocked threads and
+results still being checked are not finished. Once finished, `detach` in the
+same turn; a later `send` re-attaches it, so early detachment is safe. Before
+ending a multi-thread run, `list` and detach every finished thread.
+
 Every `start`/`send`/`review` result carries an await command. Run it with
 `run_in_background`:
 

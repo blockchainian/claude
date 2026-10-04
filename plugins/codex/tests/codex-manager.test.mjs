@@ -232,6 +232,27 @@ function waitFor(predicate, { timeout = 5000 } = {}) {
   });
 }
 
+test("mcp initialize provides thread lifecycle instructions before tools are loaded", async () => {
+  const home = await tempHome();
+  try {
+    const response = await run(["mcp"], {
+      env: { CODEX_MANAGER_HOME: home.home },
+      stdin: `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })}\n`
+    });
+    assert.equal(response.code, 0, response.stderr);
+    const { result } = JSON.parse(response.stdout);
+    assert.equal(typeof result.instructions, "string");
+    assert.match(result.instructions, /start.*await.*background/);
+    assert.match(result.instructions, /reply.*already answered.*list.*waiting/);
+    assert.match(result.instructions, /finished only.*turn completed.*not failed, interrupted.*waiting on an ask.*checked and accepted.*no further message/);
+    assert.match(result.instructions, /Blocked threads.*results still being checked.*not finished/);
+    assert.match(result.instructions, /detach.*same turn.*send re-attaches.*safe/);
+    assert.match(result.instructions, /Before ending a multi-thread run, list.*detach every finished thread/);
+  } finally {
+    await home.close();
+  }
+});
+
 test("mcp starts a thread that reaches Claude's tools over MCP, and relays completion into the inbox", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();

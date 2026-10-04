@@ -537,6 +537,12 @@ function reviewInstructions(base, plan, decisions, stance, focus) {
   return `Review the code changes since commit ${base}. Run \`git diff ${base}\` to inspect the changes.${spec}${decided}${adversarial}${focused}${close}Provide prioritized, actionable findings.`;
 }
 
+const INSTRUCTIONS = `Use start to create a thread, then run the returned await command in the background (run_in_background).
+Answer asks with reply; await can return an ask already answered, so check list for waiting requests first.
+A thread is finished only when its turn completed (not failed, interrupted or waiting on an ask), you have checked and accepted its result, and you plan no further message. Blocked threads and results still being checked are not finished.
+Once finished, detach it in the same turn; send re-attaches it, so detaching an accepted thread early is safe.
+Before ending a multi-thread run, list the threads and detach every finished thread.`;
+
 const TOOLS = [
   { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task. Returns the thread id and the await command to run in the background.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute working directory for the worker." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation." }, name: { type: "string", description: "Short human-readable thread name." } }, required: ["cwd", "prompt"] } },
   { name: "attach", description: "Take over a codex session that is already running elsewhere, found by its thread id or exact name, so send, interrupt and the await command work on it. Its approvals stay with the client it runs in.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
@@ -560,7 +566,7 @@ async function runMcp() {
   const reply = (id, body) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...body })}\n`);
   const handle = async (message) => {
     const { id, method, params = {} } = message;
-    if (method === "initialize") return reply(id, { result: { protocolVersion: params.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "codex-manager", version: plugin.version } } });
+    if (method === "initialize") return reply(id, { result: { protocolVersion: params.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "codex-manager", version: plugin.version }, instructions: INSTRUCTIONS } });
     if (method === "ping") return reply(id, { result: {} });
     if (method === "tools/list") return reply(id, { result: { tools: TOOLS } });
     if (method === "tools/call") {
