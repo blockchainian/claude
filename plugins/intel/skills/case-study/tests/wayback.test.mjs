@@ -18,17 +18,19 @@ const MODERN_LOCALIZED = '"c4TabbedHeaderRenderer":{"title":"X","subscriberCount
 const CAPTURES = { 2014: OLD, 2015: LOCALIZED, 2020: MODERN }
 
 // /page/<n> is a capture; /replayed429 is a capture of a 429; /throttled is the archive refusing the caller;
-// /moved sends the caller on to /page/0 the way the archive sends an id_ url to its nearest capture.
+// /web/...channel-flaky is refused once, then given; /moved sends the caller on to /page/0 the way the archive sends an id_ url to its nearest capture.
+const refusedOnce = new Set() // the captures of channel-flaky are refused the first time each is asked for
 const server = http.createServer((req, res) => {
   if (req.url.startsWith('/cdx/search/cdx')) {
     const rows = [['timestamp', 'statuscode'], ['20140115000000', '200'], ['20150715000000', '200'], ['20200915000000', '200']]
     if (req.url.includes('channel-throttled')) { res.writeHead(429); res.end('Too Many Requests'); return }
     if (req.url.includes('channel-broken')) { res.writeHead(503); res.end('<html>Service Unavailable</html>'); return }
     res.writeHead(200)
-    res.end(JSON.stringify(req.url.includes('channel-a') ? rows : []))
+    res.end(JSON.stringify(req.url.includes('channel-a') || req.url.includes('channel-flaky') ? rows : []))
     return
   }
   if (req.url.startsWith('/web/')) {
+    if (req.url.includes('channel-flaky') && !refusedOnce.has(req.url)) { refusedOnce.add(req.url); res.writeHead(429); res.end('Too Many Requests'); return }
     res.writeHead(200, { 'x-archive-orig-date': 'then' })
     res.end(CAPTURES[req.url.slice(5, 9)])
     return
@@ -181,6 +183,28 @@ test('a 429 from the archive pauses every request of the batch, not only the one
   assert.equal(results.length, 6)
   const during = starts.filter(t => t > throttledAt && t < throttledAt + 280)
   assert.equal(during.length, 0, `requests started during the pause: ${during.map(t => Math.round(t - throttledAt)).join(', ')} ms after the 429`)
+})
+
+test('through a proxy that gives every request a new address, a 429 is asked again at once and pauses nothing', async () => {
+  const starts = []
+  let throttledAt = null
+  const get = async (proxy, url) => {
+    starts.push(performance.now())
+    if (throttledAt === null) { throttledAt = performance.now(); throw new wb.Throttled(url) }
+    return { status: 200, body: Buffer.from(url) }
+  }
+  const urls = Array.from({ length: 6 }, (_, n) => `${base}/page/${n}`)
+  const results = await wb.fetchAll(urls, null, join(tmp, 'r'), { perMinute: 6000, get, retryWait: 5000, rotating: true })
+  assert.deepEqual(results.map(r => r.url), urls, 'the refused one is read on its second asking')
+  assert.ok(starts.at(-1) - throttledAt < 1000, `the last request started ${Math.round(starts.at(-1) - throttledAt)} ms after the 429`)
+})
+
+test('curve asks again at once for a capture the archive refused, without pausing the others', async () => {
+  const started = performance.now()
+  const { rows, missing } = await wb.curve(['example.com/channel-flaky'], null, join(tmp, 'rc'), { perMinute: 6000, archive: base, retryWait: 5000 })
+  assert.deepEqual(missing, [])
+  assert.equal(rows.length, 3)
+  assert.ok(performance.now() - started < 3000, `took ${Math.round(performance.now() - started)} ms`)
 })
 
 test('the partial results of a refused batch come with the refusal', async () => {
