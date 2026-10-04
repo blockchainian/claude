@@ -282,7 +282,8 @@ export function findings(work, chapter) {
   return out
 }
 
-const DATED_ROW = /^(?:\[[^\]]+\]\s*)+((?:19|20)\d\d)-(\d\d)-\d\d\b/
+// A row of a dated table: its tags, then its date, with a bullet before or a bar after the tags as agents write them
+const DATED_ROW = /^(?:-\s*)?(?:\[[^\]]+\]\s*)+(?:\|\s*)?((?:19|20)\d\d)-(\d\d)-\d\d\b/
 
 export function bullets(work, chapter) {
   // The lines of the notes tagged for one chapter, in file order. In the numbers notes each `##` section is headed by
