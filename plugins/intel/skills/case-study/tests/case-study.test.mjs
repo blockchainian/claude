@@ -506,6 +506,8 @@ test('news fetches Google News for each name and GDELT for all of them at once, 
   assert.equal(readFileSync(join(work, 'raw', 'news', 'gdelt.jsonl'), 'utf8').split('\n').filter(Boolean).length, 2)
   await cs.news(work, '', ['Jane Doe'], run)
   assert.deepEqual(asked.at(-1), ['gdelt', 'Jane Doe'], 'without a first year, the commands\' own first day')
+  const lists = await cs.news(work, '2015', ['张三', 'Иван Петров'], run)
+  assert.deepEqual(Object.keys(lists).filter(f => f.startsWith('gnews-')), ['gnews-张三.jsonl', 'gnews-иван-петров.jsonl'], 'a name in another script keeps its own file')
   const quotaUsedUp = async args => args[0] === 'gdelt' ? { status: 3, stdout: '{"url":"https://held.example/"}\n', stderr: 'gdelt: the free BigQuery quota of the month is used up\n' } : run(args)
   assert.deepEqual(await cs.news(work, '2015', ['Jane Doe'], quotaUsedUp), {
     'gnews-jane-doe.jsonl': 2,
