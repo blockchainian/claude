@@ -7,7 +7,7 @@ is paid for dozens of times. Pull in only what you need:
 
 - A chapter: `grep -n` for the sentences that name your source or hold the
   figure or quote you are checking, not the whole file. Read a whole chapter
-  only when your task is to write or fix it.
+  only when your task is to write it.
 - A page or transcript: search it for the passage you need (`grep -n -C 3`
   on the saved file, or the fetch tool's `| grep` / `| head -c 6000`), not the
   full text. Save the full text under `raw/` once and search that file.
@@ -22,7 +22,7 @@ produce the whole file again each time. When your output file already exists
 at start, you were interrupted: read that one file, nothing else extra, and
 continue from the first item it does not cover.
 
-Every agent in a case study — scout, reader, writer, reviewer, fixer — works
+Every agent in a case study — scout, reader, numbers agent, writer — works
 to these.
 
 ## What counts as read
@@ -101,19 +101,6 @@ not that publication's reporting — name it as a contributor piece.
   from the stated speaker, on the stated date, in the stated outlet.
 - Quotation marks hold a source's words and nothing else: none around a term,
   a heading or a phrase of your own.
-- In a chapter, a quotation translated into the study's language is
-  followed at once by the source's own words in ⟦ ⟧:
-  `“标题太长，观众消化不了”⟦If you make your video caption too long, it will be too much for people to digest⟧`.
-  The words in ⟦ ⟧ are copied letter for letter, an omission inside them
-  marked `…`: a script looks them up in the source's saved text, and the
-  reviewer judges the translation against them. A quotation left in the
-  source's language carries no ⟦ ⟧. The book never prints ⟦ ⟧.
-- In a chapter, what a source said, wrote or reported, told without
-  quotation marks, is followed by the source's own words for it in ⟦ ⟧ when
-  the notes quote them:
-  `他说早年每四个视频就有一个没发⟦one out of every four videos we filmed just never got uploaded⟧`.
-  The script looks them up the same way, and the reviewer judges the
-  sentence against the passage around them.
 
 ## Privacy
 

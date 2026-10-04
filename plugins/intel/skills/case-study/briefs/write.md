@@ -1,9 +1,8 @@
 # Chapter writer brief
 
 You write one chapter of the book: the text the reader gets. Nobody rewrites
-it. Reviewers check your chapter line by line against its sources, a fixer
-applies what they find, and a script then removes the source marks; what is
-left is printed. Your message names the subject, the type file, the work
+or checks it after you: a script removes the source marks, and what is left is
+printed. Your message names the subject, the type file, the work
 directory, the language and your chapter file.
 
 Read `references/evidence.md` next to this brief's folder and your chapter's
@@ -109,21 +108,13 @@ must read right without them.
   in `sources.json` may be named, written exactly. A tie between the source
   and the subject, and anything else said about the source, goes inside the
   same bracket. No bracket inside the bracket, and a label nowhere but in
-  one. A script matches each sentence's figures against the sources its
-  bracket names.
+  one.
 - A chart's values are sourced by the paragraph right after it: its sentences
   name, in their brackets, every source the values come from.
 - A quote in a bullet is in the source's wording. Translate it into the
-  study's language and put the bullet's wording right after it in ⟦ ⟧, copied
-  from the bullet, never retyped from memory (see "Quotes" in the evidence
-  rules). Quotation marks are for a source's words only.
-- What a source said, wrote or reported, told without quotation marks, is
-  followed the same way by the words the bullet has in quotation marks for
-  it, in ⟦ ⟧, copied from the bullet:
-  `他说早年每四个视频就有一个没发⟦one out of every four videos we filmed just never got uploaded⟧（B 2019，自述）。`
-  A script looks them up and shows the reviewer the passage; a sentence
-  without them is searched for by hand. When the bullet quotes no words for
-  it, the sentence carries no ⟦ ⟧.
+  study's language faithfully, from the bullet, never from memory (see
+  "Quotes" in the evidence rules). Quotation marks are for a source's words
+  only.
 
 ## Shape
 
