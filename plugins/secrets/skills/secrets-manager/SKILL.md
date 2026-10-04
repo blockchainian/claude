@@ -149,8 +149,9 @@ its file and line number.
   status `active`; a session is only to be used from that slot (`--rotate-proxy` does not apply).
   Default: rows with no session or an `expired` one. A profile that still holds a session is
   checked against tiktok.com first: really signed in, it is stored as is; ended on TikTok's side,
-  it signs in again. A login button still disabled after the form is filled marks the row
-  `escalated`. An account TikTok reports as banned/suspended at login is marked `restricted`.
+  it signs in again. A login button still disabled after the form is filled triggers one retry
+  with a fresh browser profile, keeping the old profile as a backup; disabled again, the row is
+  marked `escalated`. An account TikTok reports as banned/suspended at login is marked `restricted`.
   A new device gets "Verify it's really you" after the password: the script
   picks the Email method and asks for the emailed 6-digit code on the terminal (its subject is
   "NNNNNN is your 6-digit code"), then types it in. The code can also be typed into the
