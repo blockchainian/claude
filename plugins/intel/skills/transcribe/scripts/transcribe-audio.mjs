@@ -56,8 +56,10 @@ export function whisperPrefix() {
 }
 
 export function buildCmd(prefix, audio, outDir) {
+  // Each 30 s window is decoded on its own: fed the previous window's text, one misheard line repeats until the
+  // speech changes (198 times over 3 minutes of a podcast, measured 2026-10).
   return [...prefix, String(audio), "--model", MODEL, "--output-dir", String(outDir),
-    "--output-format", "txt", "--verbose", "False"];
+    "--output-format", "txt", "--verbose", "False", "--condition-on-previous-text", "False"];
 }
 
 /** Path(urlparse(src).path).suffix: the extension of the URL's path part. */
