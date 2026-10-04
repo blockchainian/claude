@@ -154,11 +154,13 @@ Every post on X — a search, an account's own posts, a thread — comes from
   - Chosen captures in one batch: put the capture URLs
     (`https://web.archive.org/web/<timestamp>id_/<url>`) in a file, then
     `$G wayback fetch <work>/raw/archive --from <file>`.
-  - Both go through the residential proxy at 100 requests a minute (240
-    captures take 3 minutes), ask again for a request that failed, and
-    stop with an error when it keeps failing:
-    report that error as it is, do not retry around it or go direct. Give
-    `curve` every address in one call.
+  - Captures go through the residential proxy at 100 requests a minute (240
+    captures take 3 minutes); the capture lists go through the ISP proxy at
+    30 a minute. A request that failed is asked again; a 429 from the archive
+    pauses the whole batch. What keeps failing is named in the error, and
+    `curve` still prints the rows it got first: report what is missing as it
+    is, do not retry around it or go direct. Give `curve` every address in
+    one call.
   - A status of 429 in the output is a capture of a page that answered 429 at
     the time, not a limit on you. Pick another capture near that date.
 - Before writing that a period has no archive data, list the captures for every

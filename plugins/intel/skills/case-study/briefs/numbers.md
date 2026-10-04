@@ -14,11 +14,13 @@ You are the only agent that fetches from the archive.
 
 1. Run the curve for every address the profile has had (old user names,
    channel ids, handles, and the statistics-site page for the account):
-   `scripts/wayback.mjs curve <work>/raw/archive <address>...`
+   `$G wayback curve <work>/raw/archive <address>...` (the gate, as the tool
+   list says: one archive run on the machine at a time).
    It lists the monthly captures, fetches them in one batch, and prints one
    line per capture with the count it could read. Do not fetch captures one by
-   one. If it stops with "the archive refused the connection", report that error and
-   stop.
+   one. When the archive did not give some lists or captures, it still prints
+   the rows it got, then exits non-zero naming what is missing: work from the
+   rows, and write what is missing into the gaps as it is.
 2. Rows with `text` but no `value` show a rounded or foreign-language count:
    read the text. Rows with neither: open the saved file and look; a capture
    that is a redirect or an error page is dropped.
