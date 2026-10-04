@@ -27,7 +27,7 @@ import { filterState } from './state.mjs';
  * @property {number} [attempts] Default 1.
  * @property {(ctx: ByEmailContext) => Promise<ByEmailResult>} [byEmail]
  * @property {(ctx: VerifyContext) => Promise<'active'|'restricted'|'expired'>} [verify]
- * @property {{envVar: string, token: (session: object) => string|null}} [exportEnv]
+ * @property {(session: object) => Record<string, string>|null} [credentials]
  * @property {string[]} [blockedHosts] Host wildcards.
  * @property {string[]} [blockedWebSockets] WebSocket URL wildcards.
  */
@@ -61,9 +61,8 @@ export function validateAdapter(adapter) {
   }
   if (!Array.isArray(adapter.entryTexts) || !adapter.entryTexts.length || adapter.entryTexts.some(t => typeof t !== 'string' || !t)) throw new Error('adapter entryTexts must be nonempty strings');
   for (const hook of ['signIn', 'ready']) if (typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
-  for (const hook of ['signedInUrl', 'byEmail', 'verify']) if (adapter[hook] !== undefined && typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
+  for (const hook of ['signedInUrl', 'byEmail', 'verify', 'credentials']) if (adapter[hook] !== undefined && typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
   if (adapter.attempts !== undefined && (!Number.isInteger(adapter.attempts) || adapter.attempts < 1)) throw new Error('adapter attempts must be a positive integer');
-  if (adapter.exportEnv !== undefined && (!adapter.exportEnv || !/^[A-Z_][A-Z0-9_]*$/.test(adapter.exportEnv.envVar) || typeof adapter.exportEnv.token !== 'function')) throw new Error('adapter exportEnv needs envVar and token function');
   for (const field of ['blockedHosts', 'blockedWebSockets']) if (adapter[field] !== undefined && (!Array.isArray(adapter[field]) || adapter[field].some(t => typeof t !== 'string' || !t))) throw new Error(`adapter ${field} must be strings`);
   return adapter;
 }

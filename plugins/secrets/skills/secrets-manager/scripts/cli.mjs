@@ -1,7 +1,6 @@
 // Command-line entry for the local secrets store and external adapters.
-import { readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { loadAdapters } from "./adapter.mjs";
@@ -92,12 +91,12 @@ function listCredentialFiles(app) {
 }
 
 function pick(items, key, opts) {
-  let out = opts.only.length ? items.filter((it) => opts.only.includes(key(it))) : items;
+  let out = opts.select.length ? items.filter((it) => opts.select.includes(key(it))) : items;
   if (opts.limit) out = out.slice(0, opts.limit);
   return out;
 }
 
-// Google credential lines, upserted into the google table, narrowed by --only/--limit.
+// Google credential lines, upserted into the google table, narrowed by --select/--limit.
 function googleAccounts(db, opts) {
   const creds = loadCredentials(config.credentialsDir("google"));
   for (const cred of creds) store.upsertAccount(db, cred.email, cred.password, cred.totp_secret, cred.app_password);
@@ -218,7 +217,7 @@ async function loginOneGoogleBacked(db, target, adapters, login, opts, io, cred)
 // Log every pending row of a username-keyed table in: `pending` lists the rows (all of them with
 // force), `loadLogin` lazily imports the browser flow that logs one row in and returns its outcome.
 async function loginByUsername(db, opts, io, { table, pending, loadLogin }) {
-  const rows = pick(pending(db, { force: opts.all || opts.only.length > 0 }), (r) => r.username, opts);
+  const rows = pick(pending(db, { force: opts.all || opts.select.length > 0 }), (r) => r.username, opts);
   if (rows.length === 0) {
     io.log(`no ${USERNAME_TABLES[table].label} accounts need login`);
     return 0;
@@ -444,27 +443,18 @@ async function runVerify(db, opts, io) {
   return results.some(Boolean) ? 1 : 0;
 }
 
-// --- export-env --------------------------------------------------------------
+// --- export ------------------------------------------------------------------
 
-function runExportEnv(db, opts, io) {
+function runExport(db, opts, io) {
   const [app] = opts.positional;
   const adapter = getAdapter(app);
-  if (!adapter.exportEnv) throw new Error(`${app} has no exportEnv hook`);
-  const rows = [];
-  const found = [];
+  if (!adapter.credentials) throw new Error(`${app} has no credentials hook`);
   for (const account of pick(store.listAccounts(db), (a) => a.email, opts)) {
     const session = store.getSession(db, app, account.email);
     if (!session || session.status !== store.STATUS_ACTIVE) continue;
-    const token = adapter.exportEnv.token(session);
-    rows.push([account.email, Boolean(token)]);
-    if (token) found.push(token);
-  }
-  for (const [email, present] of rows) io.log(`${email}\t${present ? "present" : "missing"}`);
-  io.log(`${found.length}/${rows.length} active ${app} sessions carry a refresh token`);
-  if (opts.out) {
-    const out = opts.out.startsWith("~") ? join(homedir(), opts.out.slice(1)) : opts.out;
-    writeFileSync(out, `${adapter.exportEnv.envVar}=${found.join(",")}\n`);
-    io.log(`wrote ${found.length} token(s) to ${opts.out}`);
+    const fields = adapter.credentials(session);
+    if (fields === null) io.error(`${account.email}\tmissing`);
+    else io.log(JSON.stringify({ app, email: account.email, ...fields }));
   }
   return 0;
 }
@@ -533,8 +523,7 @@ const OPTIONS = {
   limit: { type: "string" },
   "max-price": { type: "string" },
   "mint-app-password": { type: "boolean" },
-  only: { type: "string", multiple: true },
-  out: { type: "string" },
+  select: { type: "string", multiple: true },
   "rotate-proxy": { type: "boolean" },
   yes: { type: "boolean" },
 };
@@ -546,7 +535,7 @@ const COMMANDS = {
   verify: { run: runVerify, positional: [1, 1] },
   "setup-2fa": { run: runSetup2fa, positional: [0, 0] },
   sms: { run: runSms, positional: [1, 1] },
-  "export-env": { run: runExportEnv, positional: [1, 1] },
+  export: { run: runExport, positional: [1, 1] },
   get: { run: runGet, positional: [2, 2] },
   "set-status": { run: runSetStatus, positional: [3, 3] },
   list: { run: runList, positional: [0, 0] },
@@ -554,12 +543,12 @@ const COMMANDS = {
 
 const USAGE = `Usage: secrets-manager <command> [options]
   import <google|x|tiktok> [file...]
-  login <google|x|tiktok|app> [--only ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
-  login <app> --by-email [--mint-app-password] [--only EMAIL]... [--headed]
-  verify <app> [--only ID]... [--all] [--concurrency N] [--headed]
-  setup-2fa [--only EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
+  login <google|x|tiktok|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
+  login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
+  verify <app> [--select ID]... [--all] [--concurrency N] [--headed]
+  setup-2fa [--select EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
-  export-env <app> [--only EMAIL]... [--out FILE]
+  export <app> [--select EMAIL]...
   get <app> <id>
   set-status <app> <id> <active|expired|restricted|escalated>
   list [--json]`;
@@ -576,7 +565,7 @@ export function parseCli(argv) {
     opts: {
       ...values,
       positional: positionals,
-      only: values.only ?? [],
+      select: values.select ?? [],
       limit: values.limit === undefined ? undefined : Number(values.limit),
       concurrency: values.concurrency === undefined ? 1 : Number(values.concurrency),
     },

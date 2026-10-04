@@ -2,7 +2,7 @@
 
 Local plaintext account credentials and browser sessions, outside the repository. The
 `secrets-manager` skill imports Google, X and TikTok credentials, drives Camoufox logins,
-and lets external adapters define app login, verification and token exports.
+and lets external adapters define app login, verification and credential exports.
 
 ## Setup
 
@@ -31,15 +31,20 @@ TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
 | `verify <app>` | Probe and persist session status. |
 | `setup-2fa` | Enroll Google TOTP, turn on 2-Step, mint an app password. |
 | `sms <balance\|prices\|number>` | Manage verification SMS. |
-| `export-env <app> [--out FILE]` | Report token presence; optionally write tokens. |
+| `export <app> [--select EMAIL]...` | Print active-session credentials as JSONL. |
 | `get <app> <id>` | Read a stored session. |
 | `set-status <app> <id> <status>` | Set session status. |
 | `list [--json]` | List accounts and all stored app tables. |
 | `validate <adapters.mjs>...` | Load modules with the real kit and print validated names. |
 
-Account commands accept repeatable `--only`, `--all`, `--limit`, `--concurrency`,
+Account commands accept repeatable `--select`, `--all`, `--limit`, `--concurrency`,
 `--headed`, and `--rotate-proxy` as described in the skill.
 X token verification lives in intel's `fetch-x-mentions/scripts/verify-x.mjs`.
+
+`export` prints one JSON line per selected active session:
+`{"app":"<app>","email":"<email>",...fields}`. Credential values are printed in clear.
+A null hook result prints `<email>\tmissing` to stderr; stdout contains only JSONL for jq.
+An adapter without the hook fails with `<app> has no credentials hook`.
 
 ## Adapter interface
 
@@ -59,7 +64,7 @@ An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files
 | `attempts` | Optional positive retry count, default 1. |
 | `byEmail(ctx)` | Optional password signup/login through a Gmail plus-alias. |
 | `verify(ctx)` | Optional hook returning `active`, `restricted` or `expired`. |
-| `exportEnv` | Optional `{envVar, token(session)}`; token returns string or null. |
+| `credentials(session)` | Optional `(session) => Record<string, string> \| null`; returns usable credential fields. |
 | `blockedHosts` | Optional host wildcard strings merged at startup. |
 | `blockedWebSockets` | Optional WebSocket URL wildcards merged at startup. |
 
