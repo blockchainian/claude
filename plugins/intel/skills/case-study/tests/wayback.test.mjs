@@ -69,6 +69,14 @@ test('extract reads the count a capture shows', () => {
     { value: 47000000, text: '47M subscribers' }, 'the page header of 2024 on, not a count before it')
   assert.deepEqual(wb.extract('<div class="py-1"><p class="m-0 text-[0.75em] font-medium capitalize pr-[50px]">subscribers</p><p class="text-[1.25em] font-extralight pr-[50px]">36.8M</p></div>'),
     { value: 36800000, text: '36.8M' }, 'Social Blade\'s layout of 2025 on')
+  // TikTok, X and Social Blade's TikTok pages, as in the khaby-lame captures
+  assert.equal(wb.extract('"roomId":""},"stats":{"followerCount":64500000,"followingCount":47}').value, 64500000, 'a TikTok profile\'s own stats')
+  assert.equal(wb.extract('"authorStats":{"followerCount":125800000,"heart":1}').value, 125800000, 'a TikTok profile\'s author stats')
+  assert.equal(wb.extract('"stats":{"khaby.lame":{"followerCount":161900000}}').value, 161900000, 'TikTok stats keyed by the user')
+  assert.equal(wb.extract('{"@type":"InteractionCounter","name": "Follows", "userInteractionCount": 342701}').value, 342701, 'an X page\'s JSON-LD before 2022')
+  assert.equal(wb.extract('<span class="YouTubeUserTopLight">Followers</span><br>\n\t\t\t<span style="font-weight: bold;">78,200,000</span>').value, 78200000, 'Social Blade\'s layout before 2025')
+  assert.deepEqual(wb.extract('<p class="m-0 capitalize pr-[50px]">followers</p><p class="text-[1.25em] pr-[50px]">162.1M</p>'),
+    { value: 162100000, text: '162.1M' }, 'Social Blade\'s TikTok layout of 2025 on')
 })
 
 test('fetchAll saves every page in input order at its rate; a replayed 429 is a result', async () => {
