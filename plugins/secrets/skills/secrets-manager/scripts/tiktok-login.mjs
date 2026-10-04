@@ -17,6 +17,8 @@ const HOME_URL = "https://www.tiktok.com/explore";
 const USER_SELECTOR = "input[name='username']";
 const PASS_SELECTOR = "input[type='password']";
 const SUBMIT_SELECTOR = "button[data-e2e='login-button']";
+const BANNED_HEADING = "Your account was banned";
+const SUSPENDED_ERROR = "Your account is currently suspended";
 
 // "Verify it's really you": TikTok asks a new device for a code it mails to the account's address.
 // The dialog offers the Email method, then a code field.
@@ -27,6 +29,7 @@ const CODE_SUBMIT_LABELS = ["Next", "Verify", "Continue", "Submit"];
 const SESSION_COOKIE = "sessionid";
 
 export class TiktokLoginError extends Error {}
+export class TiktokBannedError extends TiktokLoginError {}
 
 // The tiktok.com cookies of a signed-in browser, or null while it is not signed in.
 export function sessionCookies(cookies) {
@@ -126,6 +129,12 @@ export async function signInTiktok(context, page, username, password, deadlineMs
           break;
         }
         submitted = result;
+      } else if (
+        (await page.getByText(BANNED_HEADING, { exact: true }).first().isVisible().catch(() => false)) ||
+        (await page.getByText(SUSPENDED_ERROR, { exact: true }).first().isVisible().catch(() => false))
+      ) {
+        await debug.capture(page, username, "tiktok-login-banned");
+        throw new TiktokBannedError(`${username}: TikTok reports this account as banned or suspended`);
       } else if (code) {
         submittedCodes.add(code);
         await submitEmailCode(page, code).catch(() => {});
@@ -179,6 +188,10 @@ export async function loginTiktokAccount(db, row, { headed = false, timeoutS = 3
       try {
         cookies = await signInTiktok(context, page, username, row.password, Date.now() + timeoutS * 1000);
       } catch (e) {
+        if (e instanceof TiktokBannedError) {
+          store.setTiktokStatus(db, username, store.STATUS_RESTRICTED);
+          return "restricted";
+        }
         if (!(e instanceof TiktokLoginError)) throw e;
         store.setTiktokStatus(db, username, store.STATUS_ESCALATED);
         return "needs-human";
