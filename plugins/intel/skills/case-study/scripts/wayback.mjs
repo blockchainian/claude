@@ -53,14 +53,16 @@ const FULL = /^\d{1,3}(?:[.,\s ]\d{3})+/ // a whole count with thousands separa
 const ROUNDED = /^([\d.]+)([KMB])(?: subscribers)?$/
 
 export class Refused extends Error {
-  // The archive (or the proxy) turned the caller away before the batch finished.
-  constructor(remaining, total, cause) {
+  // The archive (or the proxy) turned the caller away before the batch finished; results holds, in input order, the
+  // result of every url that was fetched (undefined for the others).
+  constructor(remaining, total, cause, results = []) {
     super(`the archive refused the connection; ${remaining.length} of ${total} urls not fetched${cause ? ` (${cause})` : ''}`)
     this.remaining = remaining
+    this.results = results
   }
 }
 
-class Throttled extends Error {
+export class Throttled extends Error {
   // The archive itself answered 429.
 }
 
@@ -168,6 +170,7 @@ export async function fetchAll(urls, proxy, out, { perMinute = PER_MINUTE, get =
   let cause = ''
   const failures = {} // how many requests failed, by reason
   let nextStart = 0
+  let pausedUntil = 0 // a 429 from the archive pauses every worker: it counts the caller, not the url
   const now = () => performance.now()
   const work = async () => {
     while (!refused && results.size < urls.length) {
@@ -176,10 +179,11 @@ export async function fetchAll(urls, proxy, out, { perMinute = PER_MINUTE, get =
         await sleep(200)
         continue
       }
-      // space the requests evenly
-      const start = Math.max(now(), nextStart)
+      // space the requests evenly, after any pause
+      const start = Math.max(now(), nextStart, pausedUntil)
       nextStart = start + 60_000 / perMinute
       await sleep(Math.max(0, start - now()))
+      while (pausedUntil > now()) await sleep(pausedUntil - now()) // a 429 came while this one waited
       let status
       let body
       try {
@@ -194,7 +198,8 @@ export async function fetchAll(urls, proxy, out, { perMinute = PER_MINUTE, get =
           cause = reason
           return
         }
-        await sleep(retryWait * item.failures)
+        if (error instanceof Throttled) pausedUntil = Math.max(pausedUntil, now() + retryWait * 2 ** (item.failures - 1))
+        else await sleep(retryWait * item.failures)
         continue
       }
       const name = `${String(item.position).padStart(3, '0')}-` + item.url.replace(/[^A-Za-z0-9]+/g, '-').slice(-120).replace(/^-+|-+$/g, '') + '.html'
@@ -207,7 +212,9 @@ export async function fetchAll(urls, proxy, out, { perMinute = PER_MINUTE, get =
   }
   await Promise.all(Array.from({ length: Math.ceil(perMinute / PER_WORKER) }, work))
   if (Object.keys(failures).length) console.error(`asked again: ${Object.entries(failures).map(([reason, count]) => `${count} × ${reason}`).join(', ')}`)
-  if (results.size < urls.length) throw new Refused(urls.filter((_, position) => !results.has(position)), urls.length, cause)
+  if (results.size < urls.length) {
+    throw new Refused(urls.filter((_, position) => !results.has(position)), urls.length, cause, urls.map((_, position) => results.get(position)))
+  }
   return urls.map((_, position) => results.get(position))
 }
 
@@ -227,23 +234,41 @@ export function extract(page) {
   return { value, text }
 }
 
-export async function curve(addresses, proxy, out, { perMinute = PER_MINUTE, archive = ARCHIVE, listProxy = proxy, listPerMinute = perMinute } = {}) {
-  // One row per monthly capture of every address, oldest first, with the count each capture shows. The capture
-  // lists are asked through listProxy: the archive answers 429 to a list asked from a residential address.
+// A batch's results, the fetched ones only when the archive refused part of it, and the urls it did not give.
+async function fetchWhatItGives(urls, proxy, out, options) {
+  try {
+    return { results: await fetchAll(urls, proxy, out, options), missing: [] }
+  } catch (error) {
+    if (!(error instanceof Refused)) throw error
+    return { results: error.results, missing: error.remaining }
+  }
+}
+
+export async function curve(addresses, proxy, out, { perMinute = PER_MINUTE, archive = ARCHIVE, listProxy = proxy, listPerMinute = perMinute, retryWait } = {}) {
+  // { rows, missing }: one row per monthly capture of every address, oldest first, with the count each capture shows,
+  // and the capture lists and captures the archive did not give, which cost none of the others. The capture lists are
+  // asked through listProxy: the archive answers 429 to a list asked from a residential address.
   const listings = addresses.map(address => `${archive}/cdx/search/cdx?url=${address}&output=json&fl=timestamp,statuscode&filter=statuscode:200&collapse=timestamp:6`)
   const captures = []
-  const listed = await fetchAll(listings, listProxy, join(out, 'lists'), { perMinute: listPerMinute })
+  const lists = await fetchWhatItGives(listings, listProxy, join(out, 'lists'), { perMinute: listPerMinute, retryWait })
+  const missing = [...lists.missing]
   addresses.forEach((address, n) => {
-    const rows = JSON.parse(readFileSync(listed[n].file, 'utf8') || '[]')
+    const list = lists.results[n]
+    if (!list) return
+    let rows
+    try { rows = list.status === 200 ? JSON.parse(readFileSync(list.file, 'utf8') || '[]') : null } catch { rows = null }
+    if (!rows) { missing.push(list.url); return } // an error page instead of a list
     captures.push(...rows.slice(1).map(([stamp]) => `${archive}/web/${stamp}id_/${address}`))
   })
+  const pages = await fetchWhatItGives(captures, proxy, out, { perMinute, retryWait })
+  missing.push(...pages.missing)
   const rows = []
-  for (const page of await fetchAll(captures, proxy, out, { perMinute })) {
+  for (const page of pages.results.filter(Boolean)) {
     const stamp = /\/web\/(\d{8})/.exec(page.url)[1]
     const found = page.status === 200 ? extract(readFileSync(page.file, 'utf8')) : { value: null, text: null }
     rows.push({ date: `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6)}`, ...found, url: page.url, file: page.file })
   }
-  return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  return { rows: rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)), missing }
 }
 
 // The proxy and rate for the captures, and for the capture lists, which go through the ISP proxy at its own rate: the
@@ -279,7 +304,14 @@ async function main(argv) {
   try {
     let results
     if (cmd === 'curve') {
-      results = await curve(items, proxy, out, { perMinute, listProxy, listPerMinute })
+      const { rows, missing } = await curve(items, proxy, out, { perMinute, listProxy, listPerMinute })
+      for (const row of rows) console.log(JSON.stringify(row))
+      if (missing.length) {
+        console.error(`error: the archive did not give ${missing.length} of the lists and captures; the rows above are what it gave`)
+        console.error(missing.join('\n'))
+        process.exit(1)
+      }
+      return
     } else {
       const urls = [...items, ...(parsed.values.from ? readFileSync(parsed.values.from, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(Boolean) : [])]
       results = await fetchAll(urls, proxy, out, { perMinute })

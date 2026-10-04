@@ -22,6 +22,8 @@ const CAPTURES = { 2014: OLD, 2015: LOCALIZED, 2020: MODERN }
 const server = http.createServer((req, res) => {
   if (req.url.startsWith('/cdx/search/cdx')) {
     const rows = [['timestamp', 'statuscode'], ['20140115000000', '200'], ['20150715000000', '200'], ['20200915000000', '200']]
+    if (req.url.includes('channel-throttled')) { res.writeHead(429); res.end('Too Many Requests'); return }
+    if (req.url.includes('channel-broken')) { res.writeHead(503); res.end('<html>Service Unavailable</html>'); return }
     res.writeHead(200)
     res.end(JSON.stringify(req.url.includes('channel-a') ? rows : []))
     return
@@ -131,7 +133,8 @@ test('a 429 the archive itself keeps answering is a refusal that stops the batch
 })
 
 test('curve has one dated row per capture of every address, each naming its capture and its saved file', async () => {
-  const rows = await wb.curve(['example.com/channel-a', 'example.com/channel-b'], null, join(tmp, 'd'), { perMinute: 6000, archive: base })
+  const { rows, missing } = await wb.curve(['example.com/channel-a', 'example.com/channel-b'], null, join(tmp, 'd'), { perMinute: 6000, archive: base })
+  assert.deepEqual(missing, [])
   assert.deepEqual(rows.map(r => [r.date, r.value]), [['2014-01-15', 10490968], ['2015-07-15', 37704014], ['2020-09-15', 105000000]])
   assert.equal(rows[0].url, `${base}/web/20140115000000id_/example.com/channel-a`)
   assert.ok(statSync(rows[0].file).isFile())
@@ -143,4 +146,38 @@ test('the capture lists go through the ISP proxy at its own rate, the captures t
   assert.deepEqual(wb.routes('', 'http://isp.example:2'),
     { proxy: 'http://isp.example:2', perMinute: wb.PER_MINUTE, listProxy: 'http://isp.example:2', listPerMinute: wb.PER_MINUTE })
   assert.deepEqual(wb.routes('', null), { proxy: null, perMinute: wb.PER_MINUTE, listProxy: null, listPerMinute: wb.PER_MINUTE })
+})
+
+test('a list the archive refuses or cannot give does not cost the rows of the others: they are kept, and what is missing is named', async () => {
+  const { rows, missing } = await wb.curve(['example.com/channel-a', 'example.com/channel-throttled', 'example.com/channel-broken'], null, join(tmp, 'p'),
+    { perMinute: 6000, archive: base, retryWait: 1 })
+  assert.deepEqual(rows.map(r => r.date), ['2014-01-15', '2015-07-15', '2020-09-15'])
+  assert.deepEqual(missing.map(m => m.replace(base, '')).sort(), [
+    '/cdx/search/cdx?url=example.com/channel-broken&output=json&fl=timestamp,statuscode&filter=statuscode:200&collapse=timestamp:6',
+    '/cdx/search/cdx?url=example.com/channel-throttled&output=json&fl=timestamp,statuscode&filter=statuscode:200&collapse=timestamp:6',
+  ])
+})
+
+test('a 429 from the archive pauses every request of the batch, not only the one refused', async () => {
+  const starts = []
+  let throttledAt = null
+  const get = async (proxy, url) => {
+    starts.push(performance.now())
+    if (throttledAt === null) { throttledAt = performance.now(); throw new wb.Throttled(url) }
+    return { status: 200, body: Buffer.from(url) }
+  }
+  const urls = Array.from({ length: 6 }, (_, n) => `${base}/page/${n}`)
+  const results = await wb.fetchAll(urls, null, join(tmp, 'g'), { perMinute: 6000, get, retryWait: 300 })
+  assert.equal(results.length, 6)
+  const during = starts.filter(t => t > throttledAt && t < throttledAt + 280)
+  assert.equal(during.length, 0, `requests started during the pause: ${during.map(t => Math.round(t - throttledAt)).join(', ')} ms after the 429`)
+})
+
+test('the partial results of a refused batch come with the refusal', async () => {
+  const get = async (proxy, url) => { if (url.endsWith('/1')) throw new Error('connect ECONNREFUSED'); return { status: 200, body: Buffer.from(url) } }
+  await assert.rejects(wb.fetchAll([0, 1].map(n => `${base}/page/${n}`), null, join(tmp, 'h'), { perMinute: 6000, get, retryWait: 1 }), error => {
+    assert.ok(error instanceof wb.Refused)
+    assert.deepEqual(error.results.map(r => r && r.url), [`${base}/page/0`, undefined])
+    return true
+  })
 })
