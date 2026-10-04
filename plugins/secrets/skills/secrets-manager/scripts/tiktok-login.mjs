@@ -80,6 +80,7 @@ async function clickVisible(locator) {
   return locator.click({ timeout: 4000 }).then(() => true, () => false);
 }
 
+// Click the first visible submit button in the code dialog.
 async function clickCodeSubmit(page) {
   for (const name of CODE_SUBMIT_LABELS) {
     if (await clickVisible(page.getByRole("button", { name, exact: true }).last())) return;
@@ -121,7 +122,7 @@ export async function signInTiktok(context, page, username, password, deadlineMs
           codeAsked = true;
           readCode(username, ended.signal).then((answer) => (code = answer));
         }
-        const value = await page.locator(CODE_SELECTOR).first().inputValue();
+        const value = await page.locator(CODE_SELECTOR).first().inputValue({ timeout: 1000 }).catch(() => "");
         if (!code && /^\d{6}$/.test(value) && !submittedCodes.has(value)) {
           submittedCodes.add(value);
           await clickCodeSubmit(page);
