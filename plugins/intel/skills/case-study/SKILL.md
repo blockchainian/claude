@@ -58,7 +58,7 @@ they are sent the absolute paths of the files below and read them themselves.
 |---|---|
 | the subject | A name, a handle, or a profile URL. Exactly one. |
 | `--type` | `creator` (default). `brand` is not supported yet: say so and stop. |
-| `--apply-to` | A product whose own accounts and creator program the reasoning chapter also covers, described in a sentence or two without its name. Without it, look for one in the project's memory or instructions; with none found, the chapter covers a person only. |
+| `--apply-to` | A product whose own accounts and creator program the reasoning chapter also covers, described in a sentence or two without its name. Without it, the text in `~/.cache/secrets-manager/profiles/case-study/apply-to.txt`; with no such file, the chapter covers a person only. |
 | `--out` | The PDF path. Required. |
 | `--lang` | The language of the study. Default: the language the user is writing in. |
 
