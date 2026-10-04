@@ -155,7 +155,8 @@ test('curve has one dated row per capture of every address, each naming its capt
 
 test('the capture lists go through the ISP proxy at its own rate, the captures through the residential proxy at the residential rate', () => {
   assert.deepEqual(wb.routes('http://home.example:1', 'http://isp.example:2'),
-    { proxy: 'http://home.example:1', perMinute: wb.RESIDENTIAL_PER_MINUTE, listProxy: 'http://isp.example:2', listPerMinute: wb.PER_MINUTE })
+    { proxy: 'http://home.example:1', perMinute: wb.RESIDENTIAL_PER_MINUTE, listProxy: 'http://isp.example:2', listPerMinute: wb.LIST_PER_MINUTE })
+  assert.equal(wb.LIST_PER_MINUTE, 100)
 })
 
 test('without the residential proxy there is no route for the captures', () => {

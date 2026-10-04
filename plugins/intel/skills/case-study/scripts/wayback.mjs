@@ -23,10 +23,8 @@ import { loadEnv } from './env.mjs'
 
 loadEnv()
 
-// For the whole batch, not for each exit: the archive counts the ISP proxy's exits together. Measured 2026-10: 60 a
-// minute spread evenly over the ten exits had 19 of 120 requests answered 429, and one exit alone was refused after 20
-// in a minute.
-export const PER_MINUTE = 30
+// The capture lists, through the ISP proxy, for the whole batch.
+export const LIST_PER_MINUTE = 100
 // Through the residential proxy. Measured 2026-10 with exits worldwide: 0 of 40 captures answered 429 at 10 at once;
 // the proxy itself refuses some connections at any rate tried (18 of 118 at 90 a minute), and those are asked again.
 export const RESIDENTIAL_PER_MINUTE = 100
@@ -165,7 +163,7 @@ export async function httpGet(proxy, url) {
   return { status: response.status, body: response.body }
 }
 
-export async function fetchAll(urls, proxy, out, { perMinute = PER_MINUTE, get = httpGet, retryWait = 1000, rotating = false } = {}) {
+export async function fetchAll(urls, proxy, out, { perMinute = LIST_PER_MINUTE, get = httpGet, retryWait = 1000, rotating = false } = {}) {
   // Fetch every url, save each body under out, and return one result per url in input order. rotating: the proxy gives
   // every request another address, so a 429, which the archive answers to one network, is asked again at once.
   mkdirSync(out, { recursive: true })
@@ -250,7 +248,7 @@ async function fetchWhatItGives(urls, proxy, out, options) {
   }
 }
 
-export async function curve(addresses, proxy, out, { perMinute = PER_MINUTE, archive = ARCHIVE, listProxy = proxy, listPerMinute = perMinute, retryWait } = {}) {
+export async function curve(addresses, proxy, out, { perMinute = LIST_PER_MINUTE, archive = ARCHIVE, listProxy = proxy, listPerMinute = perMinute, retryWait } = {}) {
   // { rows, missing }: one row per monthly capture of every address, oldest first, with the count each capture shows,
   // and the capture lists and captures the archive did not give, which cost none of the others. The capture lists are
   // asked through listProxy: the archive answers 429 to a list asked from a residential address.
@@ -282,7 +280,7 @@ export async function curve(addresses, proxy, out, { perMinute = PER_MINUTE, arc
 // captures go only through the residential proxy: from one address the archive answers 429 to nearly every one.
 export function routes(residential, isp) {
   if (!residential) throw new Error('RESIDENTIAL_PROXY_URL is not set: the archive captures are read only through the residential proxy')
-  return { proxy: residential, perMinute: RESIDENTIAL_PER_MINUTE, listProxy: isp, listPerMinute: PER_MINUTE }
+  return { proxy: residential, perMinute: RESIDENTIAL_PER_MINUTE, listProxy: isp, listPerMinute: LIST_PER_MINUTE }
 }
 
 const USAGE = 'usage: wayback.mjs {fetch,curve} <out dir> ...'

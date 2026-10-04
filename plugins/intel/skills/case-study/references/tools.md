@@ -156,8 +156,9 @@ Every post on X — a search, an account's own posts, a thread — comes from
     `$G wayback fetch <work>/raw/archive --from <file>`.
   - Captures go through the residential proxy at 100 requests a minute (240
     captures take 3 minutes); the capture lists go through the ISP proxy at
-    30 a minute. A request that failed is asked again; a 429 from the archive
-    pauses the whole batch. What keeps failing is named in the error, and
+    100 a minute. A request that failed is asked again: a capture at once,
+    through another address; a list after a pause of the whole batch. What
+    keeps failing is named in the error, and
     `curve` still prints the rows it got first: report what is missing as it
     is, do not retry around it or go direct. Give `curve` every address in
     one call.
