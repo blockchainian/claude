@@ -44,10 +44,10 @@ export function loginProxy(env, slot = null) {
   return { slot, url: ispProxyAt(env.ISP_PROXY_URL, slot) };
 }
 
-// TikTok renders fields before its script takes them over, so early input can be wiped or not
-// registered. Fill empty fields and retry our unchanged values at most three times while disabled,
-// keeping the page from jumping indefinitely so a person can take over. Preserve human edits.
-async function submitCredentials(page, username, password, state) {
+// TikTok can wipe input typed before its script takes over, so fill only empty fields and preserve
+// existing values. Allow one poll after filling; a still-disabled login button means TikTok will
+// not take this account's login here, so return "disabled" for a person to decide what to do.
+async function submitCredentials(page, username, password) {
   try {
     let userValue = await page.inputValue(USER_SELECTOR, { timeout: 1000 });
     let passValue = await page.inputValue(PASS_SELECTOR, { timeout: 1000 });
@@ -58,12 +58,7 @@ async function submitCredentials(page, username, password, state) {
     passValue = await page.inputValue(PASS_SELECTOR, { timeout: 1000 });
     if (!userValue || !passValue) return false;
     if (!(await page.isEnabled(SUBMIT_SELECTOR))) {
-      if (!filledEmpty && userValue === username && passValue === password && state.refills < 3) {
-        state.refills++;
-        await page.fill(USER_SELECTOR, username, { timeout: 4000 });
-        await page.fill(PASS_SELECTOR, password, { timeout: 4000 });
-      }
-      return false;
+      return filledEmpty ? false : "disabled";
     }
     await page.click(SUBMIT_SELECTOR, { timeout: 4000 });
     return true;
@@ -116,7 +111,7 @@ export async function signInTiktok(context, page, username, password, deadlineMs
   await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" });
   const ended = new AbortController();
   let submitted = false;
-  const credentialState = { refills: 0 };
+  let failure = `no ${SESSION_COOKIE} cookie after login (challenge unresolved?)`;
   let codeAsked = false;
   let code = null;
   const submittedCodes = new Set();
@@ -125,7 +120,12 @@ export async function signInTiktok(context, page, username, password, deadlineMs
       const cookies = sessionCookies(await context.cookies());
       if (cookies) return cookies;
       if (!submitted) {
-        submitted = await submitCredentials(page, username, password, credentialState);
+        const result = await submitCredentials(page, username, password);
+        if (result === "disabled") {
+          failure = "disabled login button after the form was filled";
+          break;
+        }
+        submitted = result;
       } else if (code) {
         submittedCodes.add(code);
         await submitEmailCode(page, code).catch(() => {});
@@ -149,7 +149,7 @@ export async function signInTiktok(context, page, username, password, deadlineMs
     ended.abort();
   }
   await debug.capture(page, username, "tiktok-login-no-session");
-  throw new TiktokLoginError(`${username}: no ${SESSION_COOKIE} cookie after login (challenge unresolved?)`);
+  throw new TiktokLoginError(`${username}: ${failure}`);
 }
 
 // Whether tiktok.com itself treats this browser as signed in: its page data names the user. A
