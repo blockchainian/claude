@@ -6,10 +6,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { PassThrough } from "node:stream";
 
 import { sessionCookies, loginProxy, promptEmailCode, signInTiktok, TiktokLoginError } from "../scripts/tiktok-login.mjs";
+import * as tiktok from "../scripts/tiktok-login.mjs";
 
 let previousStatePath;
 beforeEach(() => {
@@ -74,6 +76,7 @@ function codeDialog(values) {
     isEnabled: async () => true,
     click: async () => clicks.push("credentials"),
     locator: () => ({ first: () => codeField }),
+    getByText: () => ({ first: () => ({ isVisible: async () => false }) }),
     keyboard: { type: async (value) => { values[poll] = value; } },
     getByRole: (role, { name }) => ({ last: () => ({
       isVisible: async () => name === "Verify",
@@ -86,6 +89,60 @@ function codeDialog(values) {
   };
   return { context, page, clicks };
 }
+
+for (const message of ["Your account was banned", "Your account is currently suspended"]) {
+  test(`visible "${message}" after submitting ends sign-in as banned without further clicks`, async () => {
+    const fake = codeDialog(["", "", "", ""]);
+    fake.page.getByText = (text, options) => {
+      assert.deepEqual(options, { exact: true });
+      return { first: () => ({
+        isVisible: async () => text === message && fake.clicks.includes("credentials"),
+        click: async () => { throw new Error("Ban dialogs must not be clicked"); },
+      }) };
+    };
+    let captured = false;
+    fake.page.screenshot = async ({ path }) => {
+      assert.match(path, /tiktok-login-banned/);
+      captured = true;
+    };
+    await assert.rejects(signInWithFake(fake), (error) => {
+      assert.ok(error instanceof tiktok.TiktokBannedError);
+      assert.ok(captured);
+      return true;
+    });
+    assert.deepEqual(fake.clicks, ["credentials"]);
+  });
+}
+
+test("loginTiktokAccount maps ban errors to restricted and keeps escalation unchanged", () => {
+  const scripts = new URL("../scripts/", import.meta.url);
+  const result = spawnSync(process.execPath, ["--experimental-test-module-mocks", "--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    import { mock } from "node:test";
+    let failure;
+    mock.module(${JSON.stringify(new URL("login.mjs", scripts).href)}, {
+      namedExports: { withProfile: async (username, options, run) => run(
+        { cookies: async () => [] }, { goto: async () => { throw failure; } }
+      ) },
+    });
+    const tiktok = await import(${JSON.stringify(new URL("tiktok-login.mjs", scripts).href)});
+    const store = await import(${JSON.stringify(new URL("store.mjs", scripts).href)});
+    process.env.ISP_PROXY_URL = "http://isp.example:8000";
+    const db = store.openDb(":memory:");
+    try {
+      store.upsertTiktok(db, { username: "bob1", password: "pw" });
+      for (const [error, outcome, status] of [
+        [new tiktok.TiktokBannedError("banned"), "restricted", store.STATUS_RESTRICTED],
+        [new tiktok.TiktokLoginError("unresolved"), "needs-human", store.STATUS_ESCALATED],
+      ]) {
+        failure = error;
+        assert.equal(await tiktok.loginTiktokAccount(db, store.getTiktok(db, "bob1")), outcome);
+        assert.equal(store.getTiktok(db, "bob1").status, status);
+      }
+    } finally { db.close(); }
+  `], { encoding: "utf8", timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
 
 function credentialForm({ values = ["", ""], enabled = false, wipe = false, unreadable = false, polls = wipe ? 2 : 4 } = {}) {
   const fake = codeDialog(Array(polls).fill(""));
