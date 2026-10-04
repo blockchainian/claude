@@ -38,16 +38,19 @@ const REDIRECTS = 10
 const EXACT = [ // patterns whose first group is the full count, digits with any locale's separators
   /subscriber-count[^>]*title="([\d][\d,.\s ]*)/,
   /"followers_count":(\d+)/,
+  /"(?:stats|authorStats)":\{(?:"[^"]+":\{)?"followerCount":(\d+)/, // a TikTok profile's own stats, first on the page
+  /"name":\s*"Follows",\s*"userInteractionCount":\s*(\d+)/, // an X profile's JSON-LD, before 2022
+  /YouTubeUserTopLight">(?:Followers|Subscribers)<\/span><br>\s*<span[^>]*>([\d,]+)</, // Social Blade before 2025
   /title="([\d][\d,.\s ]*) Followers"/,
   /([\d][\d,]{4,}) subscribers/,
 ]
 // The channel's own count, rounded or in words, where the page shows it; other channels listed on the page have counts
 // too. In order: the script-rendered channel header (its accessibility label comes first from 2021), the page header
-// YouTube uses from 2024, and Social Blade's statistics page from 2025.
+// YouTube uses from 2024, and Social Blade's statistics page from 2025 (YouTube and TikTok).
 const HEADERS = [
   /"c4TabbedHeaderRenderer"[\s\S]*?"subscriberCountText":\{(?:"accessibility":\{"accessibilityData":\{"label":"[^"]*"\}\},)?(?:"simpleText":"|"runs":\[\{"text":")([^"]+)"/,
   /"pageHeaderRenderer"[\s\S]*?"content":"([^"]*\bsubscribers)"/,
-  />subscribers<\/p><p[^>]*>([\d.,]+[KMB]?)<\/p>/,
+  />(?:subscribers|followers)<\/p><p[^>]*>([\d.,]+[KMB]?)<\/p>/,
 ]
 const FULL = /^\d{1,3}(?:[.,\s ]\d{3})+/ // a whole count with thousands separators
 const ROUNDED = /^([\d.]+)([KMB])(?: subscribers)?$/
