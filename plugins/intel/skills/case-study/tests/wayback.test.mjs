@@ -2,7 +2,10 @@
 // ABOUTME: of a capture, and the dated curve. A local HTTP server plays the archive.
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
 import http from 'node:http'
+import https from 'node:https'
+import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -214,4 +217,45 @@ test('the partial results of a refused batch come with the refusal', async () =>
     assert.deepEqual(error.results.map(r => r && r.url), [`${base}/page/0`, undefined])
     return true
   })
+})
+
+test('an https request through the proxy goes through its tunnel, not straight to the host, and names the host as it is', async () => {
+  // A local TLS server stands for the archive under a name only the proxy can resolve: a request that skipped the
+  // tunnel would not find it. The archive builds its redirects from the Host it is sent, so a wrong port there breaks them. The check runs in a child, which trusts the server's certificate from its start.
+  const dir = mkdtempSync(join(tmpdir(), 'tunnel-'))
+  const made = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=archive.invalid',
+    '-addext', 'subjectAltName=DNS:archive.invalid', '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem')], { stdio: 'ignore' })
+  assert.equal(made.status, 0, 'openssl could not make a certificate')
+  const target = https.createServer({ key: readFileSync(join(dir, 'key.pem')), cert: readFileSync(join(dir, 'cert.pem')) }, (req, res) => res.end(`seen ${req.headers.host} ${req.url}`))
+  await new Promise(resolve => target.listen(0, '127.0.0.1', resolve))
+  const port = target.address().port
+  const tunnels = []
+  const proxy = http.createServer()
+  proxy.on('connect', (req, client) => {
+    tunnels.push(req.url)
+    const upstream = net.connect(port, '127.0.0.1', () => {
+      client.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+      upstream.pipe(client)
+      client.pipe(upstream)
+    })
+    upstream.on('error', () => client.destroy())
+    client.on('error', () => upstream.destroy())
+  })
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve))
+  const script = `import { httpGet } from ${JSON.stringify(new URL('../scripts/wayback.mjs', import.meta.url).href)}
+const r = await httpGet('http://127.0.0.1:${proxy.address().port}', 'https://archive.invalid/web/x')
+console.log(r.status, Buffer.from(r.body).toString())`
+  const child = await new Promise(resolve => {
+    const p = spawn(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, NODE_EXTRA_CA_CERTS: join(dir, 'cert.pem') } })
+    let out = ''
+    let err = ''
+    p.stdout.on('data', d => { out += d })
+    p.stderr.on('data', d => { err += d })
+    p.on('close', code => resolve({ code, out, err }))
+  })
+  proxy.close()
+  target.close()
+  rmSync(dir, { recursive: true, force: true })
+  assert.equal(child.out.trim(), '200 seen archive.invalid /web/x', child.err)
+  assert.deepEqual(tunnels, ['archive.invalid:443'])
 })
