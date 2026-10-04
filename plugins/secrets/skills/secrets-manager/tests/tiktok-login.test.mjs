@@ -73,11 +73,13 @@ function codeDialog(values) {
   return { context, page, clicks };
 }
 
-function credentialForm({ values = ["", ""], enabled = false, wipe = false, unreadable = false } = {}) {
-  const fake = codeDialog(["", "", "", ""]);
+function credentialForm({ values = ["", ""], enabled = false, wipe = false, unreadable = false, polls = wipe ? 2 : 4 } = {}) {
+  const fake = codeDialog(Array(polls).fill(""));
+  let poll = 0;
   const selectors = ["input[name='username']", "input[type='password']"];
   const fields = new Map(selectors.map((selector, i) => [selector, values[i]]));
   const fills = [];
+  const fillPolls = [];
   const reads = [];
   fake.page.inputValue = async (selector, options) => {
     reads.push(options);
@@ -86,6 +88,7 @@ function credentialForm({ values = ["", ""], enabled = false, wipe = false, unre
   };
   fake.page.fill = async (selector, value) => {
     fills.push({ selector, value });
+    fillPolls.push(poll);
     fields.set(selector, value);
   };
   fake.page.isEnabled = async () => enabled;
@@ -96,8 +99,9 @@ function credentialForm({ values = ["", ""], enabled = false, wipe = false, unre
       wipe = false;
     }
     await wait(ms);
+    if (ms === 1500) poll++;
   };
-  return { ...fake, fills, reads };
+  return { ...fake, fills, fillPolls, reads };
 }
 
 async function signInWithFake({ context, page }) {
@@ -111,11 +115,21 @@ const credentialFills = [
   { selector: "input[type='password']", value: "password" },
 ];
 
-test("a disabled login button leaves filled credentials alone across polls", async () => {
-  const fake = credentialForm();
+test("a disabled login button permits only three credential refills across many polls", async () => {
+  const fake = credentialForm({ polls: 10 });
   await signInWithFake(fake);
-  assert.deepEqual(fake.fills, credentialFills);
+  assert.deepEqual(fake.fills, Array(4).fill(credentialFills).flat());
+  assert.deepEqual(fake.fillPolls, [0, 0, 1, 1, 2, 2, 3, 3]);
   assert.deepEqual(fake.clicks, []);
+});
+
+test("a disabled login button never refills credentials containing a human edit", async () => {
+  for (const values of [["edited-user", "password"], ["bob1", "edited-password"]]) {
+    const fake = credentialForm({ values, polls: 10 });
+    await signInWithFake(fake);
+    assert.deepEqual(fake.fills, []);
+    assert.deepEqual(fake.clicks, []);
+  }
 });
 
 test("credentials wiped to empty after the first fill are filled again", async () => {
