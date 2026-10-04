@@ -23,7 +23,8 @@ source types in the type file. Then:
    | interviews | `$G ytsearch`, `$G chrome apple-podcasts search` |
    | own-explainers | `$G fetch-x-posts "from:<handle> <words>" --top --limit 100`, for every account of the subject on X |
    | press-at-the-time | Picks from the news lists in `<work>/raw/news/` (count the domains and the years with one command first); they hold US English Google News, so it also runs `$G search` in the subject's home language and other large languages |
-   | criticism | `$G chrome reddit search`, `$G fetch-x-posts` |
+   | people | `$G ytsearch` |
+   | criticism | `$G ytsearch`, `$G chrome reddit search`, `$G fetch-x-posts` |
 
 2. Pick from the results in one look: the original pages about the subject,
    from many sites. Leave out search pages, wikis, aggregators, sellers of
