@@ -155,14 +155,18 @@ test('gnews asks Google News for each month it lacks, keeps the articles under t
     const link = url.match(/rss\/articles\/(\w+)$/)
     if (link) return { status: 200, body: link[1] === 'bare' ? '<c-wiz></c-wiz>' : `<c-wiz><div jscontroller="x" data-n-a-sg="sig-${link[1]}" data-n-a-ts="17"></div></c-wiz>` }
     if (url.endsWith('/batchexecute')) {
-      const [, id, ts, sg] = JSON.parse(form)[0][0][1].match(/"(\w+)",(\d+),"sig-(\w+)"\]$/)
-      assert.deepEqual([ts, sg], ['17', id])
-      resolved.push(id)
-      return { status: 200, body: `)]}'\n\n${JSON.stringify([['wrb.fr', 'Fbv4je', JSON.stringify(['garturlres', `https://${id}.example/story?a=1&b=2`, 1])], ['di', 11]])}\n` }
+      // the answers come back in any order, each tagged with its request's tag
+      const answers = JSON.parse(form)[0].map(([, request, , tag]) => {
+        const [, id, ts, sg] = request.match(/"(\w+)",(\d+),"sig-(\w+)"\]$/)
+        assert.deepEqual([ts, sg], ['17', id])
+        resolved.push(id)
+        return ['wrb.fr', 'Fbv4je', JSON.stringify(['garturlres', `https://${id}.example/story?a=1&b=2`, 1]), null, null, null, tag]
+      })
+      return { status: 200, body: `)]}'\n\n${JSON.stringify([...answers.reverse(), ['di', 11]])}\n` }
     }
     const month = decodeURIComponent(url).match(/after:([\d-]+) before:([\d-]+)/); asked.push(`${month[1]} ${month[2]}`); return { status: 200, body: `<rss>${months[month[1]] || ''}</rss>` }
   }
-  const options = { data, state, call, now: new Date('2026-10-03T12:00:00Z'), gap: 0 }
+  const options = { data, state, call, now: new Date('2026-10-03T12:00:00Z') }
   assert.deepEqual((await gate.gnews('Kobeissi Letter', '2025-06-04', '2025-06-12', options)), [
     { url: 'https://two.example/story?a=1&b=2', domain: 'b.example', date: '2025-06-11', title: 'Second - B' },
   ], 'only the days asked for')
@@ -208,21 +212,28 @@ test('a Google News request goes compressed through an ISP exit, and through the
   assert.deepEqual([asked.length, asked[0].includes('-x')], [1, false], 'without a proxy, one direct request')
 })
 
-test('gnews asks for several months at once and resolves their links while other months are asked for', async () => {
+test('gnews asks for several months and link pages at once, and resolves many links in one request', async () => {
   const data = mkdtempSync(join(tmpdir(), 'data-'))
   let open = 0
   let most = 0
-  const call = async url => {
+  let batches = 0
+  const call = async (url, form) => {
     open++; most = Math.max(most, open)
     await new Promise(resolve => setTimeout(resolve, 20))
     open--
-    if (url.includes('/rss/articles/')) return { status: 200, body: '<c-wiz></c-wiz>' }
+    const link = url.match(/rss\/articles\/(\w+)$/)
+    if (link) return { status: 200, body: `<div data-n-a-sg="s" data-n-a-ts="1"></div>` }
+    if (url.endsWith('/batchexecute')) {
+      batches++
+      return { status: 200, body: JSON.stringify(JSON.parse(form)[0].map(([, request, , tag]) => ['wrb.fr', 'Fbv4je', JSON.stringify(['garturlres', `https://${request.match(/"(m\d+)"/)[1]}.example/`, 1]), null, null, null, tag])) }
+    }
     const first = decodeURIComponent(url).match(/after:([\d-]+)/)[1]
     return { status: 200, body: `<rss><item><title>T</title><link>https://news.google.com/rss/articles/m${first.replace(/-/g, '')}</link><pubDate>${first}</pubDate></item></rss>` }
   }
-  const found = await gate.gnews('Many Months', '2025-01-01', '2025-12-31', { data, state, call, now: new Date('2026-10-03T12:00:00Z'), gap: 0, workers: 4 })
-  assert.equal(found.length, 12, 'one article for each of the twelve months')
+  const found = await gate.gnews('Many Months', '2025-01-01', '2025-12-31', { data, state, call, now: new Date('2026-10-03T12:00:00Z'), workers: 4, batch: 5 })
+  assert.deepEqual(found.map(a => a.url), Array.from({ length: 12 }, (_, i) => `https://m2025${String(i + 1).padStart(2, '0')}01.example/`), 'each month\'s article under its own address')
   assert.equal(most, 4, 'four requests in flight at once')
+  assert.equal(batches, 3, 'twelve links resolved five to a request')
   rmSync(data, { recursive: true, force: true })
 })
 
