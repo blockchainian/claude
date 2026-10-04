@@ -1,6 +1,6 @@
 # Book brief: the introduction and the reasoning chapter
 
-The chapters of the book are written, reviewed and corrected. You write the
+The chapters of the book are written. You write the
 two that rest on them: the introduction, and the reasoning chapter that says
 what to copy. Your message names the work directory, the subject type file,
 the language, your two files in `book/`, and the product for the reasoning
