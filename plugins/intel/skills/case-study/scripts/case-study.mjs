@@ -175,9 +175,14 @@ export async function news(work, since, names, run = runGate) {
   return Object.fromEntries(await Promise.all(jobs.map(async ([file, args]) => {
     const { status, stdout, stderr } = await run(args)
     writeFileSync(join(dir, file), stdout)
-    return [file, status === 0 ? stdout.split('\n').filter(Boolean).length : `FAILED: ${stderr.trim().split('\n').at(-1)}`]
+    const why = stderr.trim().split('\n').at(-1)
+    // gate.mjs exits 3 when GDELT's free quota of the month is used up: GDELT is then a gap, as the tool list says
+    return [file, status === 0 ? stdout.split('\n').filter(Boolean).length : status === 3 ? `GAP: ${why}` : `FAILED: ${why}`]
   })))
 }
+
+// Whether a list the news command fetched failed; a gap (GDELT out of quota) is not a failure.
+export const newsFailed = result => Object.values(result).some(v => String(v).startsWith('FAILED'))
 
 export function unread(work, batch, urls) {
   // What an interrupted reader has left of its batch, one line per source: `done` when the notes have its section,
@@ -806,7 +811,7 @@ function main(argv) {
     news(positionals[0], values.since, positionals.slice(1)).then(result => {
       console.log(JSON.stringify(result))
       // A list that failed fails the command: the scouts are not to start on part of the news
-      if (Object.values(result).some(v => typeof v === 'string')) process.exit(1)
+      if (newsFailed(result)) process.exit(1)
     }, error => fail(`case-study.mjs news: ${error.message}`))
     return
   }

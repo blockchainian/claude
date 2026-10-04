@@ -506,6 +506,13 @@ test('news fetches Google News for each name and GDELT for all of them at once, 
   assert.equal(readFileSync(join(work, 'raw', 'news', 'gdelt.jsonl'), 'utf8').split('\n').filter(Boolean).length, 2)
   await cs.news(work, '', ['Jane Doe'], run)
   assert.deepEqual(asked.at(-1), ['gdelt', 'Jane Doe'], 'without a first year, the commands\' own first day')
+  const quotaUsedUp = async args => args[0] === 'gdelt' ? { status: 3, stdout: '', stderr: 'gdelt: the free BigQuery quota of the month is used up\n' } : run(args)
+  assert.deepEqual(await cs.news(work, '2015', ['Jane Doe'], quotaUsedUp), {
+    'gnews-jane-doe.jsonl': 2,
+    'gdelt.jsonl': 'GAP: gdelt: the free BigQuery quota of the month is used up',
+  }, 'GDELT out of quota is a gap, not a failed list')
+  assert.equal(cs.newsFailed({ 'gdelt.jsonl': 'GAP: x', 'gnews-a.jsonl': 3 }), false)
+  assert.equal(cs.newsFailed({ 'gdelt.jsonl': 2, 'gnews-a.jsonl': 'FAILED: x' }), true)
   asked.length = 0
   await assert.rejects(() => cs.news(work, '2015', ['Jane Doe', 'Jane Doe, YouTube https://www.youtube.com/@janedoe'], run), /not a name/)
   assert.equal(asked.length, 0, 'a list of names with a URL or a description in it asks for nothing')
