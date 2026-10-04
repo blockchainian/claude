@@ -8,10 +8,10 @@ Read `references/evidence.md` ("Who cannot be evidence") and
 `references/tools.md` next to this brief's folder, and the type file's source
 types. Then search your lane only, as widely as the tools allow: several
 queries per growth phase, the subject's home country and language, and the
-leads inside what you find. Press from the time comes from the two news
-commands in the tool list, asked by name and by year: run both for every name
-the subject goes by before any other press search, save the output under
-`raw/`, and pick what to open from it. Videos are searched with the video
+leads inside what you find. Press from the time comes from the news lists,
+fetched once for every name the subject goes by before the scouts start: your
+message names their folder. Pick what to open from them; never run the two news
+commands yourself. Videos are searched with the video
 search command, with those names.
 
 Append every source you accept to `notes/scout-<lane>.md` as you go (URL,

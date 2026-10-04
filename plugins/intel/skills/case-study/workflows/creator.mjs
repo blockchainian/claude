@@ -4,7 +4,7 @@ export const meta = {
   name: 'case-study-creator',
   description: 'Research one creator into a reviewed book: scouts, parallel readers, numbers, a writer per chapter, adversarial review and fixes per chapter, then the introduction and the reasoning chapter',
   phases: [
-    { title: 'Scout', detail: 'four scouts find sources by lane; the two numbers agents start with them', model: 'sonnet' },
+    { title: 'Scout', detail: 'the news lists are fetched once, then four scouts find sources by lane; the two numbers agents start at once', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
     { title: 'Write', detail: 'one writer per chapter, as soon as the reading is merged: the text the reader gets, with its source marks', model: 'claude-opus-4-8' },
     { title: 'Review', detail: 'per chapter, as each is written: a script matches its figures, the quotes lens (Opus 4.8) reviews it, and the record lens (session model) judges the timeline and turning-point chapters' },
@@ -14,9 +14,10 @@ export const meta = {
   ],
 }
 
-// args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer }
+// args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, fixer, names, since }
 // skill is the absolute path of the case-study skill folder; product, seeds and
-// caps may be empty strings. done names the stages whose files are already in the work directory and are not run
+// caps may be empty strings. names lists the subject's other names, comma-separated, and since the first year of their
+// growth (YYYY): the news lists are fetched for them; both may be empty. done names the stages whose files are already in the work directory and are not run
 // again: 'scout' (the sources are known: args.sources, the output of `case-study.mjs sources <work>`, is read again
 // without scouting), 'read' (the notes and the numbers: the run starts at the chapters), 'sources' (the sources lens's findings).
 //
@@ -64,8 +65,12 @@ const known = () => {
   if (!Array.isArray(A.sources) || !A.sources.length) throw new Error("done 'scout' needs args.sources: the output of case-study.mjs sources <work>")
   return [{ sources: A.sources }]
 }
-const scouted = READ_DONE ? [] : SCOUT_DONE ? known() : (await parallel(LANES.map(lane => () => agent(
-  `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your lane: ${lane} (see "Scout lanes" in the type file).${share(LANES.length)}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}`,
+// The news lists are fetched once, for every name, before the scouts start: each lane picks from them, and lanes that
+// fetched them on their own waited on each other behind the command's lock.
+const NAMES = [...new Set([A.subject, ...String(A.names || '').split(',')].map(name => name.trim()).filter(Boolean))]
+const newsFetched = () => runs(`news "${WORK}"${A.since ? ` --since ${A.since}` : ''} ${NAMES.map(name => `"${name}"`).join(' ')}`, 'news', 'Scout')
+const scouted = READ_DONE ? [] : SCOUT_DONE ? known() : (await newsFetched(), await parallel(LANES.map(lane => () => agent(
+  `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your lane: ${lane} (see "Scout lanes" in the type file).${share(LANES.length)}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}\nThe news lists are fetched: ${WORK}/raw/news/ (gnews-<name>.jsonl for each name, gdelt.jsonl), one JSON article per line.`,
   { label: `scout:${lane}`, phase: 'Scout', schema: FOUND, ...SONNET })))).filter(Boolean)
 const seen = new Set()
 const urls = []

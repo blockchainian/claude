@@ -3,6 +3,7 @@
 // ABOUTME: init writes chapters.json + sources.json; book strips the chapters' source marks; check verifies the chapters, the book text and sources.
 //
 // Usage: case-study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
+//        case-study.mjs news <work dir> [--since <year>] <name>...   (the news lists the scouts pick press from, into raw/news/)
 //        case-study.mjs merge <work dir>
 //        case-study.mjs sources <work dir>   (the sources already in sources.json, as a scout would list them)
 //        case-study.mjs cited <work dir>               (how many sources the chapters name)
@@ -25,7 +26,7 @@
 // and notes/<name>.raw.tsv (a line of url, tab, file per saved text) and notes/<name>.raw.json (url -> the files its
 // text was saved to) into raw.json. Sources the readers gave the same
 // label get a letter each (Outlet 2025a, Outlet 2025b), in sources.json and in the notes' bullets, so that a label names one source.
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -145,6 +146,34 @@ function savedByReader(path) {
     if (url && file) (saved[url] ??= []).push(file)
   }
   return saved
+}
+
+// One gate.mjs command, run without blocking: resolves with its status and its output once it ends.
+function runGate(args) {
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./gate.mjs', import.meta.url)), ...args])
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => { stdout += chunk })
+    child.stderr.on('data', chunk => { stderr += chunk })
+    child.on('close', status => resolve({ status, stdout, stderr }))
+  })
+}
+
+// The news lists the scouts pick press from, fetched once for the whole study: Google News for each name and GDELT
+// for all of them, all at once, from the first day of the year `since` (without it, the commands' own first day) to
+// today, into raw/news/. Returns per file the articles it holds, or why its command failed.
+export async function news(work, since, names, run = runGate) {
+  const dir = join(work, 'raw', 'news')
+  mkdirSync(dir, { recursive: true })
+  const from = since ? [`${since}-01-01`] : []
+  const jobs = [...names.map(name => [`gnews-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.jsonl`, ['gnews', name, ...from]]),
+    ['gdelt.jsonl', ['gdelt', ...names, ...from]]]
+  return Object.fromEntries(await Promise.all(jobs.map(async ([file, args]) => {
+    const { status, stdout, stderr } = await run(args)
+    writeFileSync(join(dir, file), stdout)
+    return [file, status === 0 ? stdout.split('\n').filter(Boolean).length : `FAILED: ${stderr.trim().split('\n').at(-1)}`]
+  })))
 }
 
 export function unread(work, batch, urls) {
@@ -735,6 +764,7 @@ export function check(work) {
 const OPTIONS = {
   init: { title: { type: 'string' }, cover: { type: 'string' }, source: { type: 'string' }, account: { type: 'string', multiple: true },
     out: { type: 'string' }, chapters: { type: 'string', default: '11' } },
+  news: { since: { type: 'string' } },
   merge: {},
   cited: {},
   slice: {},
@@ -767,6 +797,11 @@ function main(argv) {
   const { values, positionals } = parsed
   const need = (count, names) => {
     if (positionals.length !== count) fail(`case-study.mjs ${cmd}: expected ${names}, got ${positionals.length} argument(s)`)
+  }
+  if (cmd === 'news') {
+    if (positionals.length < 2) fail('case-study.mjs news: expected the work directory and at least one name')
+    news(positionals[0], values.since, positionals.slice(1)).then(result => console.log(JSON.stringify(result)))
+    return
   }
   if (cmd === 'cited') {
     need(1, 'work')
