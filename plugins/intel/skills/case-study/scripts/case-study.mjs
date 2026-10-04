@@ -176,8 +176,10 @@ export async function news(work, since, names, run = runGate) {
     const { status, stdout, stderr } = await run(args)
     writeFileSync(join(dir, file), stdout)
     const why = stderr.trim().split('\n').at(-1)
+    const count = stdout.split('\n').filter(Boolean).length // a failed command still prints what it holds
+    const held = count ? ` (${count} held)` : ''
     // gate.mjs exits 3 when GDELT's free quota of the month is used up: GDELT is then a gap, as the tool list says
-    return [file, status === 0 ? stdout.split('\n').filter(Boolean).length : status === 3 ? `GAP: ${why}` : `FAILED: ${why}`]
+    return [file, status === 0 ? count : status === 3 ? `GAP: ${why}${held}` : `FAILED: ${why}${held}`]
   })))
 }
 
