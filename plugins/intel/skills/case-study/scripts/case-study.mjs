@@ -170,7 +170,7 @@ export async function news(work, since, names, run = runGate) {
   const dir = join(work, 'raw', 'news')
   mkdirSync(dir, { recursive: true })
   const from = since ? [`${since}-01-01`] : []
-  const jobs = [...names.map(name => [`gnews-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.jsonl`, ['gnews', name, ...from]]),
+  const jobs = [...names.map(name => [`gnews-${name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-')}.jsonl`, ['gnews', name, ...from]]),
     ['gdelt.jsonl', ['gdelt', ...names, ...from]]]
   return Object.fromEntries(await Promise.all(jobs.map(async ([file, args]) => {
     const { status, stdout, stderr } = await run(args)
