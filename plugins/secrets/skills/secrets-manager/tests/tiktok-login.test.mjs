@@ -186,7 +186,7 @@ const credentialFills = [
   { selector: "input[type='password']", value: "password" },
 ];
 
-test("a login button still disabled on the poll after filling ends sign-in with a capture", async () => {
+test("a login button still disabled on the poll after filling ends sign-in with its own error and a capture", async () => {
   const fake = credentialForm({ polls: 10 });
   const waits = [];
   const wait = fake.page.waitForTimeout;
@@ -194,7 +194,7 @@ test("a login button still disabled on the poll after filling ends sign-in with 
   let captured = false;
   fake.page.screenshot = async () => { captured = true; };
   await assert.rejects(signInWithFake(fake), (error) => {
-    assert.ok(error instanceof TiktokLoginError);
+    assert.ok(error instanceof tiktok.TiktokDisabledLoginError);
     assert.match(error.message, /disabled login button/i);
     assert.ok(captured);
     return true;
@@ -204,6 +204,82 @@ test("a login button still disabled on the poll after filling ends sign-in with 
   assert.deepEqual(waits, [1500]);
   assert.deepEqual(fake.clicks, []);
 });
+
+for (const scenario of ["disabled-success", "disabled-twice", "banned"]) {
+  test(`fresh profile retry: ${scenario}`, () => {
+    const scripts = new URL("../scripts/", import.meta.url);
+    const result = spawnSync(process.execPath, ["--experimental-test-module-mocks", "--input-type=module", "-e", `
+      import assert from "node:assert/strict";
+      import { mock } from "node:test";
+      import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
+      import { dirname, join } from "node:path";
+      const scenario = ${JSON.stringify(scenario)};
+      const config = await import(${JSON.stringify(new URL("config.mjs", scripts).href)});
+      const profile = config.profileDirFor("bob1");
+      mkdirSync(profile, { recursive: true });
+      writeFileSync(join(profile, "fingerprint.json"), "old fingerprint");
+      const backups = () => readdirSync(dirname(profile)).filter(name => name.startsWith("bob1.bak-"));
+      let attempts = 0, closed = 0, tiktok;
+      mock.module(${JSON.stringify(new URL("login.mjs", scripts).href)}, {
+        namedExports: { withProfile: async (username, options, run) => {
+          assert.equal(username, "bob1");
+          assert.equal(options.proxyUrl, "http://isp.example:8003");
+          assert.equal(options.headed, true);
+          attempts++;
+          if (attempts === 2) {
+            assert.equal(closed, 1);
+            assert.equal(backups().length, 1);
+            assert.ok(!existsSync(profile));
+            mkdirSync(profile);
+            writeFileSync(join(profile, "fingerprint.json"), "fresh fingerprint");
+          }
+          const success = scenario === "disabled-success" && attempts === 2;
+          const cookies = [{ name: "sessionid", value: "new-session", domain: ".tiktok.com" }];
+          try {
+            return await run({ cookies: async () => success ? cookies : [] }, {
+              goto: async () => {
+                if (!success) throw scenario === "banned"
+                  ? new tiktok.TiktokBannedError("banned")
+                  : new tiktok.TiktokDisabledLoginError("disabled");
+              },
+              evaluate: async () => true,
+            });
+          } finally {
+            // The first profile must still exist until its browser is closed.
+            if (attempts === 1) assert.equal(backups().length, 0);
+            closed++;
+          }
+        } },
+      });
+      tiktok = await import(${JSON.stringify(new URL("tiktok-login.mjs", scripts).href)});
+      const store = await import(${JSON.stringify(new URL("store.mjs", scripts).href)});
+      process.env.ISP_PROXY_URL = "http://isp.example:8000";
+      const db = store.openDb(":memory:");
+      try {
+        store.upsertTiktok(db, { username: "bob1", password: "pw" });
+        const outcome = await tiktok.loginTiktokAccount(db,
+          { ...store.getTiktok(db, "bob1"), isp_slot: 3 }, { headed: true });
+        const row = store.getTiktok(db, "bob1");
+        assert.equal(attempts, scenario === "banned" ? 1 : 2);
+        assert.equal(closed, attempts);
+        assert.equal(outcome, scenario === "banned" ? "restricted" : scenario === "disabled-twice" ? "needs-human" : "ok");
+        assert.equal(row.status, scenario === "banned" ? store.STATUS_RESTRICTED : scenario === "disabled-twice" ? store.STATUS_ESCALATED : store.STATUS_ACTIVE);
+        assert.equal(backups().length, scenario === "banned" ? 0 : 1);
+        if (scenario !== "banned") {
+          assert.match(backups()[0], /^bob1\\.bak-\\d{4}-\\d{2}-\\d{2}T.*Z$/);
+          assert.equal(readFileSync(join(dirname(profile), backups()[0], "fingerprint.json"), "utf8"), "old fingerprint");
+        }
+        if (scenario === "disabled-success") {
+          assert.equal(row.isp_slot, 3);
+          assert.ok(row.cookies.includes("new-session"));
+        }
+      } finally { db.close(); }
+    `], { encoding: "utf8", timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const logs = result.stdout.match(/login button disabled; retrying once/g) ?? [];
+    assert.equal(logs.length, scenario === "banned" ? 0 : 1);
+  });
+}
 
 test("a disabled login button never refills credentials containing a human edit", async () => {
   for (const values of [["edited-user", "password"], ["bob1", "edited-password"]]) {

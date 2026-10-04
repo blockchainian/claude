@@ -2,6 +2,7 @@
 // ABOUTME: The login runs on one ISP pool slot (a fixed IP), the only exit the session is used from.
 
 import { createInterface } from "node:readline";
+import { existsSync, renameSync } from "node:fs";
 
 
 import * as config from "./config.mjs";
@@ -30,6 +31,7 @@ const SESSION_COOKIE = "sessionid";
 
 export class TiktokLoginError extends Error {}
 export class TiktokBannedError extends TiktokLoginError {}
+export class TiktokDisabledLoginError extends TiktokLoginError {}
 
 // The tiktok.com cookies of a signed-in browser, or null while it is not signed in.
 export function sessionCookies(cookies) {
@@ -114,7 +116,7 @@ export async function signInTiktok(context, page, username, password, deadlineMs
   await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" });
   const ended = new AbortController();
   let submitted = false;
-  let failure = `no ${SESSION_COOKIE} cookie after login (challenge unresolved?)`;
+  let failure = new TiktokLoginError(`${username}: no ${SESSION_COOKIE} cookie after login (challenge unresolved?)`);
   let codeAsked = false;
   let code = null;
   const submittedCodes = new Set();
@@ -125,7 +127,7 @@ export async function signInTiktok(context, page, username, password, deadlineMs
       if (!submitted) {
         const result = await submitCredentials(page, username, password);
         if (result === "disabled") {
-          failure = "disabled login button after the form was filled";
+          failure = new TiktokDisabledLoginError(`${username}: disabled login button after the form was filled`);
           break;
         }
         submitted = result;
@@ -158,7 +160,7 @@ export async function signInTiktok(context, page, username, password, deadlineMs
     ended.abort();
   }
   await debug.capture(page, username, "tiktok-login-no-session");
-  throw new TiktokLoginError(`${username}: ${failure}`);
+  throw failure;
 }
 
 // Whether tiktok.com itself treats this browser as signed in: its page data names the user. A
@@ -176,7 +178,7 @@ export async function loginTiktokAccount(db, row, { headed = false, timeoutS = 3
   const username = row.username;
 
   const { slot, url } = loginProxy(process.env, row.isp_slot);
-  return withProfile(username, { headed, proxyUrl: url, blockAssets: false }, async (context, page) => {
+  const login = () => withProfile(username, { headed, proxyUrl: url, blockAssets: false }, async (context, page) => {
     // Already logged in from a previous run's persistent profile? A cookie TikTok no longer
     // honours is dropped, so the sign-in below starts from a signed-out browser.
     let cookies = sessionCookies(await context.cookies());
@@ -188,16 +190,31 @@ export async function loginTiktokAccount(db, row, { headed = false, timeoutS = 3
       try {
         cookies = await signInTiktok(context, page, username, row.password, Date.now() + timeoutS * 1000);
       } catch (e) {
-        if (e instanceof TiktokBannedError) {
-          store.setTiktokStatus(db, username, store.STATUS_RESTRICTED);
-          return "restricted";
-        }
         if (!(e instanceof TiktokLoginError)) throw e;
-        store.setTiktokStatus(db, username, store.STATUS_ESCALATED);
-        return "needs-human";
+        return e;
       }
     }
     store.saveTiktokLogin(db, username, { cookies, ispSlot: slot });
     return "ok";
   });
+
+  let result = await login();
+  if (result instanceof TiktokDisabledLoginError) {
+    // withProfile has closed the browser before its profile is moved aside.
+    const profile = config.profileDirFor(username);
+    const backup = `${profile}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    if (existsSync(backup)) throw new Error(`Profile backup already exists: ${backup}`);
+    renameSync(profile, backup);
+    console.log(`  ${username}: login button disabled; retrying once with a fresh browser profile (old one kept at ${backup})`);
+    result = await login();
+  }
+  if (result instanceof TiktokBannedError) {
+    store.setTiktokStatus(db, username, store.STATUS_RESTRICTED);
+    return "restricted";
+  }
+  if (result instanceof TiktokLoginError) {
+    store.setTiktokStatus(db, username, store.STATUS_ESCALATED);
+    return "needs-human";
+  }
+  return result;
 }
