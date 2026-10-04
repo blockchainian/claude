@@ -80,14 +80,18 @@ async function clickVisible(locator) {
   return locator.click({ timeout: 4000 }).then(() => true, () => false);
 }
 
+async function clickCodeSubmit(page) {
+  for (const name of CODE_SUBMIT_LABELS) {
+    if (await clickVisible(page.getByRole("button", { name, exact: true }).last())) return;
+  }
+}
+
 // Type the emailed code into the dialog's code field and submit it.
 async function submitEmailCode(page, code) {
   await page.locator(CODE_SELECTOR).first().click({ timeout: 4000 });
   await page.keyboard.type(code, { delay: 80 });
   await page.waitForTimeout(1000);
-  for (const name of CODE_SUBMIT_LABELS) {
-    if (await clickVisible(page.getByRole("button", { name, exact: true }).last())) return;
-  }
+  await clickCodeSubmit(page);
 }
 
 // Drive TikTok's username + password form and the email-code dialog after it, polling for the
@@ -101,6 +105,7 @@ export async function signInTiktok(context, page, username, password, deadlineMs
   let submitted = false;
   let codeAsked = false;
   let code = null;
+  const submittedCodes = new Set();
   try {
     while (Date.now() < deadlineMs) {
       const cookies = sessionCookies(await context.cookies());
@@ -108,11 +113,19 @@ export async function signInTiktok(context, page, username, password, deadlineMs
       if (!submitted) {
         submitted = await submitCredentials(page, username, password);
       } else if (code) {
+        submittedCodes.add(code);
         await submitEmailCode(page, code).catch(() => {});
         code = null;
-      } else if (!codeAsked && (await page.locator(CODE_SELECTOR).first().isVisible().catch(() => false))) {
-        codeAsked = true;
-        readCode(username, ended.signal).then((answer) => (code = answer));
+      } else if (await page.locator(CODE_SELECTOR).first().isVisible().catch(() => false)) {
+        if (!codeAsked) {
+          codeAsked = true;
+          readCode(username, ended.signal).then((answer) => (code = answer));
+        }
+        const value = await page.locator(CODE_SELECTOR).first().inputValue();
+        if (!code && /^\d{6}$/.test(value) && !submittedCodes.has(value)) {
+          submittedCodes.add(value);
+          await clickCodeSubmit(page);
+        }
       } else if (!codeAsked) {
         await clickVisible(page.getByText("Email", { exact: true }).last());
       }

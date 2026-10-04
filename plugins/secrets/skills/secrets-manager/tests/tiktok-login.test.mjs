@@ -1,12 +1,12 @@
-// ABOUTME: Tests the TikTok login's browser-free helpers: the session predicate over a cookie jar
-// ABOUTME: and the ISP slot a login is bound to. No browser, no network.
+// ABOUTME: Tests TikTok login helpers and code submission with a minimal fake browser page.
+// ABOUTME: Covers session cookies, ISP slots, and terminal/headed codes. No browser, no network.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { PassThrough } from "node:stream";
 
-import { sessionCookies, loginProxy, promptEmailCode } from "../scripts/tiktok-login.mjs";
+import { sessionCookies, loginProxy, promptEmailCode, signInTiktok } from "../scripts/tiktok-login.mjs";
 
 const cookie = (name, domain, value = "v") => ({ name, value, domain, path: "/" });
 
@@ -42,4 +42,53 @@ test("the code prompt answers with the typed code, and with nothing once it is c
   const waiting = promptEmailCode("bob1", off.signal, { input: new PassThrough(), output: new PassThrough() });
   off.abort();
   assert.equal(await waiting, null);
+});
+
+function codeDialog(values) {
+  let poll = 0;
+  const fields = new Map();
+  const clicks = [];
+  const codeField = {
+    isVisible: async () => true,
+    inputValue: async () => values[poll],
+    click: async () => {},
+  };
+  const page = {
+    goto: async () => {},
+    fill: async (selector, value) => fields.set(selector, value),
+    inputValue: async (selector) => fields.get(selector),
+    isEnabled: async () => true,
+    click: async () => clicks.push("credentials"),
+    locator: () => ({ first: () => codeField }),
+    keyboard: { type: async (value) => { values[poll] = value; } },
+    getByRole: (role, { name }) => ({ last: () => ({
+      isVisible: async () => name === "Verify",
+      click: async () => clicks.push({ name, code: values[poll] }),
+    }) }),
+    waitForTimeout: async (ms) => { if (ms === 1500) poll++; },
+  };
+  const context = {
+    cookies: async () => poll >= values.length ? [cookie("sessionid", ".tiktok.com")] : [],
+  };
+  return { context, page, clicks };
+}
+
+test("codes typed in the headed dialog submit once per distinct six-digit value", async () => {
+  const { context, page, clicks } = codeDialog([
+    "", "", "12345", "12345x", "1234567", "123456", "123456", "654321", "654321", "123456",
+  ]);
+  await signInTiktok(context, page, "bob1", "password", Date.now() + 10000, {
+    readCode: () => new Promise(() => {}),
+  });
+  assert.deepEqual(clicks, [
+    "credentials", { name: "Verify", code: "123456" }, { name: "Verify", code: "654321" },
+  ]);
+});
+
+test("a terminal code is typed and submitted without resubmitting it from the dialog", async () => {
+  const { context, page, clicks } = codeDialog(["", "", "", "123456", "123456"]);
+  await signInTiktok(context, page, "bob1", "password", Date.now() + 10000, {
+    readCode: async () => "123456",
+  });
+  assert.deepEqual(clicks, ["credentials", { name: "Verify", code: "123456" }]);
 });
