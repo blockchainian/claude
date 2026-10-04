@@ -73,6 +73,18 @@ expect_eq "merge is a merge commit, not a fast-forward" 2 "$(git -C "$REPO" rev-
 git -C "$REPO" rev-parse -q --verify workstream/auth >/dev/null 2>&1 && report "merge deletes the branch" fail || report "merge deletes the branch" pass
 expect_eq "base survives a merge" "$BASE_SHA" "$("$WS" base)"
 
+# --- merge, no checks ---
+"$WS" open batch >/dev/null 2>&1
+echo "batch" > "$SANDBOX/.workstream-batch/batch.txt"
+git -C "$SANDBOX/.workstream-batch" add batch.txt && git -C "$SANDBOX/.workstream-batch" commit -qm "add batch"
+out=$("$WS" merge batch 2>&1); rc=$?
+expect_eq "merge without commands exits 0" 0 "$rc"
+expect_eq "merge without commands prints the recorded base" "$BASE_SHA" "$out"
+[ -f "$REPO/batch.txt" ] && report "merge without commands lands the workstream" pass || report "merge without commands lands the workstream" fail
+expect_eq "merge without commands makes a merge commit" 2 "$(git -C "$REPO" rev-list --parents -n1 HEAD | wc -w | tr -d ' ' | awk '{print $1-1}')"
+[ ! -d "$SANDBOX/.workstream-batch" ] && report "merge without commands removes the worktree" pass || report "merge without commands removes the worktree" fail
+git -C "$REPO" rev-parse -q --verify workstream/batch >/dev/null 2>&1 && report "merge without commands deletes the branch" fail || report "merge without commands deletes the branch" pass
+
 # --- merge, red check ---
 HEAD_BEFORE=$(git -C "$REPO" rev-parse HEAD)
 "$WS" open red >/dev/null 2>&1
