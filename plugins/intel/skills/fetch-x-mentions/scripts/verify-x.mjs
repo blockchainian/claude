@@ -12,7 +12,7 @@ export async function verifyX(db, opts, { provision = provisionPair, dispatcher,
   const concurrency = Number(opts.concurrency ?? 1);
   if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error('--concurrency must be a positive integer');
   const rows = db.prepare('SELECT * FROM x WHERE auth_token IS NOT NULL ORDER BY username').all()
-    .filter(row => opts.only?.length ? opts.only.includes(row.username) : opts.all || row.ct0 === null);
+    .filter(row => opts.select?.length ? opts.select.includes(row.username) : opts.all || row.ct0 === null);
   if (!rows.length) { io.log('no rows with a stored token to check'); return 0; }
   let cursor = 0, failed = false;
   await Promise.all(Array.from({length: Math.min(concurrency, rows.length)}, async () => {
@@ -41,8 +41,8 @@ export async function verifyX(db, opts, { provision = provisionPair, dispatcher,
 export async function main(argv) {
   let db, dispatcher;
   try {
-    const {values,positionals}=parseArgs({args:argv,options:{only:{type:'string',multiple:true},all:{type:'boolean'},concurrency:{type:'string'}},allowPositionals:true});
-    if (positionals.length) throw new Error('Usage: verify-x.mjs [--only USER]... [--all] [--concurrency N]');
+    const {values,positionals}=parseArgs({args:argv,options:{select:{type:'string',multiple:true},all:{type:'boolean'},concurrency:{type:'string'}},allowPositionals:true});
+    if (positionals.length) throw new Error('Usage: verify-x.mjs [--select USER]... [--all] [--concurrency N]');
     const url=requireEnv('RESIDENTIAL_PROXY_URL'), u=new URL(url);
     const {ProxyAgent}=await import('undici');
     const token=u.username ? `Basic ${Buffer.from(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`).toString('base64')}` : null;

@@ -66,7 +66,7 @@ Setup: `npm install --prefix "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scri
 
 Verify vendor tokens into stored ct0 pairs after importing X accounts:
 ```sh
-node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/verify-x.mjs" [--only USER]... [--all] [--concurrency N]
+node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/verify-x.mjs" [--select USER]... [--all] [--concurrency N]
 ```
 Writes the existing secrets store; defaults to rows with a token but no ct0.
 A rejected token is expired; a valid pair is active. Request config is ~/.config/intel/.env.
