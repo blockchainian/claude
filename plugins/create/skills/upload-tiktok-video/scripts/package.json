@@ -1,0 +1,13 @@
+{
+  "name": "upload-tiktok-video",
+  "private": true,
+  "type": "module",
+  "description": "Skill runtime: the secrets-manager TikTok account's own Camoufox profile, driving TikTok Studio's upload page",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "camoufox-js": "0.12.0",
+    "playwright-core": "1.60.0"
+  }
+}
