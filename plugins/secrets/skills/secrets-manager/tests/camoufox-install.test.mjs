@@ -2,10 +2,26 @@
 // ABOUTME: Uses temporary version files and a fake installer; no network or browser.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assetName, ensurePinnedBrowser, browserReport } from "../scripts/camoufox-install.mjs";
+
+test("the installer runs --check through a symlinked entry point", () => {
+  const dir = mkdtempSync(join(tmpdir(), "camoufox-symlink-"));
+  const link = join(dir, "camoufox-install.mjs");
+  try {
+    symlinkSync(fileURLToPath(new URL("../scripts/camoufox-install.mjs", import.meta.url)), link);
+    writeFileSync(join(dir, "version.json"), JSON.stringify({ version: "152.0.4", release: "beta.30" }));
+    const result = spawnSync(process.execPath, [link, "--check"], {
+      env: { ...process.env, CAMOUFOX_INSTALL_DIR: dir }, encoding: "utf8", timeout: 10000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /camoufox: 152\.0\.4-beta\.30 \(matches pin\)/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test("pinned assets match supported platform and architecture names", () => {
   for (const [platform, arch, suffix] of [
