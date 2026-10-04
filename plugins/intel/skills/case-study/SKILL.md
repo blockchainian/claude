@@ -184,7 +184,8 @@ ask for one name.
   reasoning chapter.
 - A run that cannot be resumed (another session started it) continues from
   its files: `done: 'scout'` skips the scouts and reads the known sources
-  again, into fresh notes; pass them as `sources`, the `sources` array printed
+  again, into fresh notes: move `notes/` to `notes.old/` first (two sets of
+  notes would both be merged); pass them as `sources`, the `sources` array printed
   by `case-study.mjs sources "<work>"` (an agent relaying the list drops
   entries). A source whose text any earlier agent saved is read from disk,
   not fetched; `done: 'read'` starts at the chapters, from the notes and numbers

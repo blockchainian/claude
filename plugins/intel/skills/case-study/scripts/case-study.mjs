@@ -191,7 +191,16 @@ export function unread(work, batch, urls) {
   // `saved` with the files when its text was saved but not read into the notes, `fetch` otherwise.
   const notes = join(work, 'notes', `${batch}.md`)
   const noted = new Set(existsSync(notes) ? lines(read(notes)).filter(l => l.startsWith('url:')).map(l => l.slice(4).trim()) : [])
-  const saved = savedByReader(join(work, 'notes', `${batch}.raw.tsv`))
+  // Any reader's saved text counts, in another batch or in notes.old/ (the notes moved aside for a fresh reading),
+  // as long as its file is still there
+  const saved = {}
+  for (const dir of ['notes', 'notes.old']) {
+    for (const [url, list] of Object.entries(Object.assign({}, ...files(join(work, dir), '.raw.tsv').map(savedByReader)))) {
+      const there = list.filter(f => existsSync(join(work, f)))
+      if (there.length && !saved[url]) saved[url] = there
+    }
+  }
+  Object.assign(saved, Object.fromEntries(Object.entries(savedByReader(join(work, 'notes', `${batch}.raw.tsv`)))))
   return urls.map(url => (noted.has(url) ? `done ${url}` : saved[url] ? `saved ${url} ${saved[url].join(' ')}` : `fetch ${url}`))
 }
 

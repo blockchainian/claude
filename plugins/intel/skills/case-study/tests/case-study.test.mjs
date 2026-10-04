@@ -338,6 +338,18 @@ test('unread tells an interrupted reader which sources are done, which are saved
   assert.deepEqual(json(cut, 'raw.json'), { [done]: ['raw/read-01/a.txt', 'raw/archive/000'], [saved]: ['raw/read-01/b.txt', 'raw/read-01/b2.txt'] })
 })
 
+test('a source whose text an earlier reader saved, in another batch or in the notes moved aside, is read from disk, not fetched again', () => {
+  const again = cs.init('read-again', 'How Again grew', 'https://example.com/@again', join(tmp, 'pdf', 'again.pdf'), 12, 'Again').work
+  const [other, aside, gone] = ['https://a.example/other', 'https://b.example/aside', 'https://c.example/gone']
+  for (const dir of [['raw', 'read-07'], ['raw', 'read-03'], ['notes.old']]) mkdirSync(join(again, ...dir), { recursive: true })
+  write(join(again, 'raw', 'read-07', 'a.txt'), 'text a')
+  write(join(again, 'raw', 'read-03', 'b.txt'), 'text b')
+  write(join(again, 'notes', 'read-07.raw.tsv'), `${other}\traw/read-07/a.txt\n${gone}\traw/read-09/missing.txt\n`)
+  write(join(again, 'notes.old', 'read-03.raw.tsv'), `${aside}\traw/read-03/b.txt\n`)
+  assert.deepEqual(cs.unread(again, 'read-01', [other, aside, gone]),
+    [`saved ${other} raw/read-07/a.txt`, `saved ${aside} raw/read-03/b.txt`, `fetch ${gone}`], 'a saved file that is gone is fetched')
+})
+
 test('findings gives each finding a name that stays the same, and leaves out the ones the fix log already names', () => {
   const half = cs.init('half-fixed', 'How Half grew', 'https://example.com/@half', join(tmp, 'pdf', 'half.pdf'), 12, 'Half').work
   write(join(half, 'drafts', '04.md'), '# Methods\n\nShe posted daily (self-reported, A 2020).\n')
