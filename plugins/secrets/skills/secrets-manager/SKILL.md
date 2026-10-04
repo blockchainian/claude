@@ -30,7 +30,7 @@ Run `secrets-manager validate /absolute/path/adapters.mjs` to check the real kit
 Without a config file or override, no app adapters are loaded; other commands still work.
 See the plugin README's Adapter interface for every field and kit helper.
 
-Pinned: camoufox-js 0.12.0, playwright-core 1.60.0. Headed runs open the window on the
+Pinned: Camoufox v152.0.4-beta.30, camoufox-js 0.12.0, playwright-core 1.60.0. Headed runs open the window on the
 built-in display (`builtinDisplay.swift`), move OAuth popups there (`moveWindows.swift`, needs
 Accessibility trust) and record them (`recordWindows.swift`, needs Screen Recording
 permission), both through `swift`.
