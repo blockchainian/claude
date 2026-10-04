@@ -67,4 +67,6 @@ the readers open every page. Do not use the archive of profile pages,
 statistics sites or channel listings: the numbers agents own those.
 
 Return for each source its URL, outlet, year, source type, and one line on
-what it should contain. No other text.
+what it should contain. Every video and every podcast episode is a source of
+its own, with its own URL: never name another one in a source's line. No
+other text.

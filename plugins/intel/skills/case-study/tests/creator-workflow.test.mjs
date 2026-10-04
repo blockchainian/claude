@@ -128,6 +128,17 @@ test('with the scouting done, the known sources are read again, eight to a reade
   assert.equal((await result()).scouted, 20)
 })
 
+test('a video or an episode is read two to a reader, in the first batches, so the long ones start first', async () => {
+  const TEXT = Array.from({ length: 10 }, (_, i) => ({ url: `https://text.example/${i}`, outlet: 'Text' }))
+  const MEDIA = ['https://www.youtube.com/watch?v=aaaaaaaaaaa', 'https://youtu.be/bbbbbbbbbbb', 'https://www.spreaker.com/episode/x--1',
+    'https://podcasts.apple.com/us/podcast/x/id1?i=2', 'https://open.spotify.com/episode/abc'].map(url => ({ url, outlet: 'Media' }))
+  const { calls } = await run({ ...ARGS, done: 'scout', sources: [...TEXT.slice(0, 3), ...MEDIA, ...TEXT.slice(3)] })
+  const readers = calls.filter(c => c.label.startsWith('read:'))
+  const sourcesOf = c => c.prompt.split('\n').filter(l => l.startsWith('- ')).map(l => l.slice(2).split(' ')[0])
+  assert.deepEqual(readers.map(sourcesOf), [MEDIA.slice(0, 2), MEDIA.slice(2, 4), MEDIA.slice(4), TEXT.slice(0, 8), TEXT.slice(8)].map(b => b.map(s => s.url)))
+  assert.deepEqual(readers.map(c => c.label), ['read:01', 'read:02', 'read:03', 'read:04', 'read:05'])
+})
+
 test('with the reading done, the run starts at the chapters: no scout, reader or numbers agent', async () => {
   const { calls } = await run({ ...ARGS, done: 'read' })
   assert.deepEqual([...labels(calls, 'scout:'), ...labels(calls, 'read:')], [])

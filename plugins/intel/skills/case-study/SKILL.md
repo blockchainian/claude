@@ -113,7 +113,7 @@ ask for one name.
    | Stage | Agents | Does |
    |---|---|---|
    | Scout | 10 scouts, one per source type, each searching all its queries at once and opening nothing; the 2 numbers agents start at once | Find sources from search results; return URLs only, the readers open them. The curve comes from `gate.mjs wayback curve` in one batch |
-   | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
+   | Read | one per 8 sources, per 2 videos or podcast episodes (these first) | Read into `notes/`, tagged by chapter |
    | Write | one per chapter, as soon as the reading is merged, on Opus 4.8 | The chapter as the reader gets it, with its source marks, in `drafts/`, from the notes only |
    | Book | one, on the session's model, when every chapter is written | `case-study.mjs book` strips the marks into `book/` and lists the cited sources; the agent writes the introduction and the reasoning chapter from those chapters |
 
