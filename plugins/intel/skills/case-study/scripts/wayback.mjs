@@ -148,7 +148,7 @@ function once(url, via) {
 
 export async function httpGet(proxy, url) {
   // {status, body} for one url, through the proxy when given, redirects followed. Throws when the archive
-  // itself answers 429.
+  // itself answers 429, 503 or 504.
   let response
   for (let hop = 0; ; hop++) {
     response = await once(url, proxy)
@@ -160,6 +160,8 @@ export async function httpGet(proxy, url) {
   // the archive limiting the caller.
   const replayed = Object.keys(response.headers).some(name => name.toLowerCase().startsWith('x-archive-orig-'))
   if (response.status === 429 && !replayed) throw new Throttled(url)
+  // 503 (the archive "temporarily offline") and 504 pass on the next asking, measured 2026-10: 19 of 20 at once.
+  if ([503, 504].includes(response.status) && !replayed) throw new Error(`the archive answered ${response.status}`)
   return { status: response.status, body: response.body }
 }
 

@@ -27,9 +27,11 @@ const server = http.createServer((req, res) => {
   if (req.url.startsWith('/cdx/search/cdx')) {
     const rows = [['timestamp', 'statuscode'], ['20140115000000', '200'], ['20150715000000', '200'], ['20200915000000', '200']]
     if (req.url.includes('channel-throttled')) { res.writeHead(429); res.end('Too Many Requests'); return }
+    if (req.url.includes('channel-offline') && !refusedOnce.has(req.url)) { refusedOnce.add(req.url); res.writeHead(503); res.end('<html>Temporarily Offline</html>'); return }
+    if (req.url.includes('channel-gateway') && !refusedOnce.has(req.url)) { refusedOnce.add(req.url); res.writeHead(504); res.end('<html>Gateway Time-out</html>'); return }
     if (req.url.includes('channel-broken')) { res.writeHead(503); res.end('<html>Service Unavailable</html>'); return }
     res.writeHead(200)
-    res.end(JSON.stringify(req.url.includes('channel-a') || req.url.includes('channel-flaky') ? rows : []))
+    res.end(JSON.stringify(/channel-(a|flaky|offline|gateway)/.test(req.url) ? rows : []))
     return
   }
   if (req.url.startsWith('/web/')) {
@@ -209,6 +211,12 @@ test('curve asks again at once for a capture the archive refused, without pausin
   assert.deepEqual(missing, [])
   assert.equal(rows.length, 3)
   assert.ok(performance.now() - started < 3000, `took ${Math.round(performance.now() - started)} ms`)
+})
+
+test('a list the archive answers 503 or 504 is asked for again, not taken for an empty one', async () => {
+  const { rows, missing } = await wb.curve(['example.com/channel-offline', 'example.com/channel-gateway'], null, join(tmp, 'off'), { perMinute: 6000, archive: base, retryWait: 1 })
+  assert.deepEqual(missing, [])
+  assert.equal(rows.length, 6)
 })
 
 test('the partial results of a refused batch come with the refusal', async () => {
