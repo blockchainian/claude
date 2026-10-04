@@ -1,29 +1,33 @@
 # Scout brief
 
-You find sources for one case study. You do not read them in depth and you
-write no notes: other agents read what you find. Your message names the
-subject, the type file, your lane, the work directory and the tool list.
+You find sources of one kind for one case study, fast: about three minutes.
+You do not open or read them and you write no notes: readers open every
+source you return and drop what is not usable. Your message names the subject,
+the type file, your lane, the work directory and the tool list.
 
-Read `references/evidence.md` ("Who cannot be evidence") and
-`references/tools.md` next to this brief's folder, and the type file's source
-types. Then search your lane only, as widely as the tools allow: several
-queries per growth phase, the subject's home country and language, and the
-leads inside what you find. Press from the time comes from the news lists,
-fetched once for every name the subject goes by before the scouts start: your
-message names their folder. Pick what to open from them; never run the two news
-commands yourself. Videos are searched with the video
-search command, with those names.
+Read `references/tools.md` next to this brief's folder and your lane's row and
+source types in the type file. Then:
 
-Append every source you accept to `notes/scout-<lane>.md` as you go (URL,
-outlet, year, type, one line; see "Writing as you go" in the evidence rules).
+1. Write every query for your lane at once — several per growth phase, the
+   subject's home country and language, every name the subject goes by — and
+   run them all in one command, in parallel, each into its own file:
 
-For every candidate open just enough to confirm it exists, is about the
-subject, and is the original (not a repost, an aggregator, a search page or a
-wiki). Leave out sellers of courses, coaching, tools or consulting, press
-releases and content farms. Aim for 40 or more sources from many sites.
+   ```bash
+   cd <work>/raw && mkdir -p scout-<lane> && i=0; for q in "<query>" "<query>" ...; do i=$((i+1)); $G search "$q" 8 > scout-<lane>/$i.txt & done; wait
+   ```
+
+   Videos the same way with the video search command. The press-at-the-time
+   lane runs no search: it picks from the news lists in `<work>/raw/news/`
+   (count the domains and the years with one command first).
+2. Pick from the results in one look: the original pages about the subject,
+   from many sites. Leave out search pages, wikis, aggregators, sellers of
+   courses, coaching, tools or consulting, press releases and content farms.
+   Aim for 15 or more.
+3. Return them. No second round of searches unless the first found fewer than
+   ten.
 
 Do not use the archive of profile pages, statistics sites or channel listings:
 the numbers agents own those.
 
-Return the list from that file: for each source its URL, outlet, year, source type, and one
-line on what it should contain. No other text.
+Return for each source its URL, outlet, year, source type, and one line on
+what it should contain. No other text.

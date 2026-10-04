@@ -36,14 +36,20 @@ introduction and in the money chapter, and their own account of their method sta
 
 ## Scout lanes
 
-Four scouts search in parallel, one lane each:
+Ten scouts search at once, one lane each:
 
 | Lane | Source types |
 |---|---|
-| own-words | 1, 2, and the books the subject wrote. Interviews and podcasts: the video search, with every name the subject goes by |
-| press | 4, 5, and the large later profiles. Starts from the news lists (both news commands over every name the subject goes by, from the first growth year to today, fetched once before the scouts) |
-| business-and-people | 3, 6, 7, 9 |
-| analysts-and-critics | 10, 11, and what the subject does today |
+| interviews | 1. The video search, with every name the subject goes by, and podcast search |
+| own-explainers | 2, and the books the subject wrote |
+| internal-documents | 3 |
+| press-at-the-time | 4, picked from the news lists (both news commands over every name the subject goes by, from the first growth year to today, fetched once before the scouts) |
+| trade-and-profiles | 5, and the large later profiles |
+| books-and-films | 6 |
+| people | 7 |
+| records | 9 |
+| data-and-today | 10, and what the subject does today |
+| criticism | 11 |
 
 Source type 8 belongs to the numbers agents.
 

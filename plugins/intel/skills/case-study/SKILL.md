@@ -44,7 +44,7 @@ they are sent the absolute paths of the files below and read them themselves.
 | `references/evidence.md` | every agent | What counts as read, the kinds of claim, who cannot be evidence |
 | `references/tools.md` | every agent | The commands for pages, search, uploads, archives, records, all through `scripts/gate.mjs` |
 | `types/creator.md` | every agent | The gate, source types, scout lanes, what the numbers must establish, the chapters |
-| `briefs/scout.md` | scouts | Finding sources by lane |
+| `briefs/scout.md` | scouts | Finding sources of one type, fast |
 | `briefs/read.md` | readers | Reading a batch of sources into tagged notes |
 | `briefs/numbers.md` | numbers agents | The curve from the archive, the upload record |
 | `briefs/write.md` | chapter writers | One chapter of the book, from the notes, with its source marks |
@@ -95,7 +95,7 @@ ask for one name.
 
    | Stage | Agents | Does |
    |---|---|---|
-   | Scout | a script fetches the news lists once (`case-study.mjs news`), then 4 scouts, one per lane; the 2 numbers agents start at once | Find sources; return URLs only. The curve comes from `gate.mjs wayback curve` in one batch |
+   | Scout | a script fetches the news lists once (`case-study.mjs news`), then 10 scouts, one per source type, each searching all its queries at once and opening nothing; the 2 numbers agents start at once | Find sources from search results; return URLs only, the readers open them. The curve comes from `gate.mjs wayback curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Write | one per chapter, as soon as the reading is merged, on Opus 4.8 | The chapter as the reader gets it, with its source marks, in `drafts/`, from the notes only |
    | Book | one, on the session's model, when every chapter is written | `case-study.mjs book` strips the marks into `book/` and lists the cited sources; the agent writes the introduction and the reasoning chapter from those chapters |

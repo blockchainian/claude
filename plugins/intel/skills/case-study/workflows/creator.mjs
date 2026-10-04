@@ -4,7 +4,7 @@ export const meta = {
   name: 'case-study-creator',
   description: 'Research one creator into a book: scouts, parallel readers, numbers, a writer per chapter, then the introduction and the reasoning chapter',
   phases: [
-    { title: 'Scout', detail: 'the news lists are fetched once, then four scouts find sources by lane; the two numbers agents start at once', model: 'sonnet' },
+    { title: 'Scout', detail: 'the news lists are fetched once, then one scout per source type; the two numbers agents start at once', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
     { title: 'Write', detail: 'one writer per chapter, as soon as the reading is merged: the text the reader gets, with its source marks', model: 'claude-opus-4-8' },
     { title: 'Book', detail: 'one agent strips the marks from the chapters and writes the introduction and the reasoning chapter from them' },
@@ -45,7 +45,8 @@ const runs = (command, label, phaseName) => agent(`Run exactly this command and 
 const merge = label => runs(`merge "${WORK}"`, label)
 
 phase('Scout')
-const LANES = ['own-words', 'press', 'business-and-people', 'analysts-and-critics']
+// One scout per source type (see "Scout lanes" in the type file): a scout with one kind of source to find needs few turns.
+const LANES = ['interviews', 'own-explainers', 'internal-documents', 'press-at-the-time', 'trade-and-profiles', 'books-and-films', 'people', 'records', 'data-and-today', 'criticism']
 const FOUND = { type: 'object', required: ['sources'], properties: { sources: { type: 'array', items: { type: 'object', required: ['url', 'outlet'],
   properties: { url: { type: 'string' }, outlet: { type: 'string' }, year: { type: 'string' }, kind: { type: 'string' }, why: { type: 'string' } } } } } }
 // The numbers agents need no scout: the archive and the upload record are the profile's own addresses.
