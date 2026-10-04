@@ -44,14 +44,15 @@ export function loginProxy(env, slot = null) {
   return { slot, url: ispProxyAt(env.ISP_PROXY_URL, slot) };
 }
 
-// Fill the form and submit it. False when the form is not ready to take input yet: the page
-// renders the fields before its script takes them over, and what is typed until then is wiped, so
-// the values are read back and the button must have become enabled.
+// Fill only empty fields, preserving existing values and human edits. Return false while fields
+// are unreadable or empty after filling, or the submit button is disabled; otherwise submit once.
 async function submitCredentials(page, username, password) {
   try {
-    await page.fill(USER_SELECTOR, username, { timeout: 4000 });
-    await page.fill(PASS_SELECTOR, password, { timeout: 4000 });
-    if ((await page.inputValue(USER_SELECTOR)) !== username || (await page.inputValue(PASS_SELECTOR)) !== password) return false;
+    const userValue = await page.inputValue(USER_SELECTOR, { timeout: 1000 });
+    const passValue = await page.inputValue(PASS_SELECTOR, { timeout: 1000 });
+    if (userValue === "") await page.fill(USER_SELECTOR, username, { timeout: 4000 });
+    if (passValue === "") await page.fill(PASS_SELECTOR, password, { timeout: 4000 });
+    if (!(await page.inputValue(USER_SELECTOR, { timeout: 1000 })) || !(await page.inputValue(PASS_SELECTOR, { timeout: 1000 }))) return false;
     if (!(await page.isEnabled(SUBMIT_SELECTOR))) return false;
     await page.click(SUBMIT_SELECTOR, { timeout: 4000 });
     return true;
