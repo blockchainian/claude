@@ -36,6 +36,11 @@ describe("batch: buildCmd shape", () => {
     assert.ok(cmd.includes("/tmp/a.mp3"));
     assert.ok(cmd.includes("/tmp/out"));
   });
+
+  test("does not feed one window's text to the next, which loops a misheard line for minutes", () => {
+    const at = cmd.indexOf("--condition-on-previous-text");
+    assert.ok(at > 0 && cmd[at + 1] === "False");
+  });
 });
 
 describe("batch: getAudio", () => {
