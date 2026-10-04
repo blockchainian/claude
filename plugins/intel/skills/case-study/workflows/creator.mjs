@@ -69,7 +69,7 @@ const known = () => {
   return [{ sources: A.sources }]
 }
 const scouted = READ_DONE ? [] : SCOUT_DONE ? known() : allSettled(await parallel(LANES.map(lane => () => settled(
-  `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your lane: ${lane} (see "Scout lanes" in the type file).${A.since ? ` First year of growth: ${A.since}.` : ''}${share(LANES.length)}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}\nThe news lists are fetched: ${WORK}/raw/news/ (gnews-<name>.jsonl for each name, gdelt.jsonl), one JSON article per line.`,
+  `${COMMON}\nYou are a scout. Follow ${S}/briefs/scout.md. Your lane: ${lane} (see "Scout lanes" in the type file).${A.since ? ` First year of growth: ${A.since}.` : ''}${share(LANES.length + 2)}${A.seeds ? `\nKnown starting sources: ${A.seeds}` : ''}\nThe news lists are fetched: ${WORK}/raw/news/ (gnews-<name>.jsonl for each name, gdelt.jsonl), one JSON article per line.`,
   { label: `scout:${lane}`, phase: 'Scout', schema: FOUND, ...SONNET }))), LANES.map(lane => `scout ${lane}`), 'Scout')
 const seen = new Set()
 const urls = []

@@ -50,7 +50,7 @@ test('one scout per source type, each told to search at once and open nothing, w
   const { calls } = await run(ARGS)
   const scouts = calls.filter(c => c.label.startsWith('scout:') && !c.label.endsWith('-numbers'))
   assert.deepEqual(scouts.map(c => c.label.slice(6)).sort(), [...LANES].sort())
-  assert.ok(scouts.every(c => c.prompt.includes('1/10 share')))
+  assert.ok(scouts.every(c => c.prompt.includes('1/12 share')), 'the two numbers agents run beside the ten scouts')
 })
 
 test('sources found by several scouts are read once, eight to a reader; the numbers agents start with the scouts', async () => {

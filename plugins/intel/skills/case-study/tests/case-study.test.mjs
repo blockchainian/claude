@@ -443,6 +443,13 @@ test('codex reports how many findings of the chapter are still without a log lin
   assert.equal(cs.codex(work, '04', 'gpt-6-luna', stopsEarly).remaining, 1)
 })
 
+test('a dated row is thinned also when a bar or a bullet stands before its date, as numbers agents write them', () => {
+  const piped = cs.init('piped-curve', 'How Piped grew', 'https://example.com/@piped', join(tmp, 'pdf', 'piped.pdf'), 12, 'Piped').work
+  const rows = ['2021-04-01', '2021-04-11', '2021-05-02', '2021-07-03'].map((d, i) => `${i % 2 ? '- ' : ''}[c03][c07] [on record] | ${d} | ${i}M followers | https://x.example/${i}`)
+  write(join(piped, 'notes', 'numbers-followers.md'), ['## Curve', '', ...rows, ''].join('\n'))
+  assert.deepEqual(cs.bullets(piped, '03'), ['## Curve', rows[0], rows[3], '(2 more rows of this table are in notes/numbers-followers.md)'])
+})
+
 test('bullets prints a chapter\'s lines from the notes, with a dated table of the numbers notes thinned to a row per quarter', () => {
   const long = cs.init('long-curve', 'How Long grew', 'https://example.com/@long', join(tmp, 'pdf', 'long.pdf'), 12, 'Long').work
   const row = (date, n, tags = '[c03]') => `${tags} [on record] ${date} | ${n} followers | https://web.archive.org/web/${date.replaceAll('-', '')}/x`
