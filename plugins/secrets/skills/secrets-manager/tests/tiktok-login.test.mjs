@@ -1,12 +1,26 @@
 // ABOUTME: Tests TikTok login helpers and code submission with a minimal fake browser page.
 // ABOUTME: Covers session cookies, ISP slots, and terminal/headed codes. No browser, no network.
 
-import { test } from "node:test";
+import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { PassThrough } from "node:stream";
 
-import { sessionCookies, loginProxy, promptEmailCode, signInTiktok } from "../scripts/tiktok-login.mjs";
+import { sessionCookies, loginProxy, promptEmailCode, signInTiktok, TiktokLoginError } from "../scripts/tiktok-login.mjs";
+
+let previousStatePath;
+beforeEach(() => {
+  previousStatePath = process.env.SECRETS_MANAGER_STATE_PATH;
+  process.env.SECRETS_MANAGER_STATE_PATH = mkdtempSync(join(tmpdir(), "tiktok-login-"));
+});
+afterEach(() => {
+  rmSync(process.env.SECRETS_MANAGER_STATE_PATH, { recursive: true, force: true });
+  if (previousStatePath === undefined) delete process.env.SECRETS_MANAGER_STATE_PATH;
+  else process.env.SECRETS_MANAGER_STATE_PATH = previousStatePath;
+});
 
 const cookie = (name, domain, value = "v") => ({ name, value, domain, path: "/" });
 
@@ -115,18 +129,29 @@ const credentialFills = [
   { selector: "input[type='password']", value: "password" },
 ];
 
-test("a disabled login button permits only three credential refills across many polls", async () => {
+test("a login button still disabled on the poll after filling ends sign-in with a capture", async () => {
   const fake = credentialForm({ polls: 10 });
-  await signInWithFake(fake);
-  assert.deepEqual(fake.fills, Array(4).fill(credentialFills).flat());
-  assert.deepEqual(fake.fillPolls, [0, 0, 1, 1, 2, 2, 3, 3]);
+  const waits = [];
+  const wait = fake.page.waitForTimeout;
+  fake.page.waitForTimeout = async (ms) => { waits.push(ms); await wait(ms); };
+  let captured = false;
+  fake.page.screenshot = async () => { captured = true; };
+  await assert.rejects(signInWithFake(fake), (error) => {
+    assert.ok(error instanceof TiktokLoginError);
+    assert.match(error.message, /disabled login button/i);
+    assert.ok(captured);
+    return true;
+  });
+  assert.deepEqual(fake.fills, credentialFills);
+  assert.deepEqual(fake.fillPolls, [0, 0]);
+  assert.deepEqual(waits, [1500]);
   assert.deepEqual(fake.clicks, []);
 });
 
 test("a disabled login button never refills credentials containing a human edit", async () => {
   for (const values of [["edited-user", "password"], ["bob1", "edited-password"]]) {
     const fake = credentialForm({ values, polls: 10 });
-    await signInWithFake(fake);
+    await assert.rejects(signInWithFake(fake), TiktokLoginError);
     assert.deepEqual(fake.fills, []);
     assert.deepEqual(fake.clicks, []);
   }
@@ -134,7 +159,9 @@ test("a disabled login button never refills credentials containing a human edit"
 
 test("credentials wiped to empty after the first fill are filled again", async () => {
   const fake = credentialForm({ wipe: true });
-  await signInWithFake(fake);
+  fake.page.inputValue = async () => "";
+  const cookies = await signInWithFake(fake);
+  assert.deepEqual(cookies, [cookie("sessionid", ".tiktok.com")]);
   assert.deepEqual(fake.fills, [...credentialFills, ...credentialFills]);
   assert.deepEqual(fake.clicks, []);
 });
