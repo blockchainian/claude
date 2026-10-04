@@ -27,9 +27,8 @@ loadEnv()
 // minute spread evenly over the ten exits had 19 of 120 requests answered 429, and one exit alone was refused after 20
 // in a minute.
 export const PER_MINUTE = 30
-// Through the residential proxy. Measured 2026-10: the archive answers 429 to the exits of one busy network at a time
-// (all of them on COMCAST-7922, 4 of 30 with US exits, none of 30 with exits worldwide), whatever the rate; the proxy
-// itself refuses some connections at any rate tried (18 of 118 at 90 a minute). Both are asked again.
+// Through the residential proxy. Measured 2026-10 with exits worldwide: 0 of 40 captures answered 429 at 10 at once;
+// the proxy itself refuses some connections at any rate tried (18 of 118 at 90 a minute), and those are asked again.
 export const RESIDENTIAL_PER_MINUTE = 100
 export const RETRIES = 8 // times a request that failed is asked again, each after a longer wait
 const PER_WORKER = 10 // requests a minute one worker carries: a page takes seconds to arrive
@@ -143,8 +142,9 @@ function once(url, via) {
       headers: { ...headers, Host: target.host, ...proxyAuth(proxy) }, timeout: TIMEOUT, agent: false }), resolve, reject))
   }
   // Both ends of the tunnel are closed with the answer: a proxy that keeps its side open would keep the process from ending.
+  // No `agent: false` here: Node then makes an agent of its own, which ignores createConnection and goes straight to the host.
   return tunnel(proxy, target).then(({ secure, raw }) => new Promise((resolve, reject) => collect(
-    https.request(target, { method: 'GET', headers, timeout: TIMEOUT, agent: false, createConnection: () => secure }), resolve, reject))
+    https.request(target, { method: 'GET', headers: { ...headers, Host: target.host }, timeout: TIMEOUT, createConnection: () => secure }), resolve, reject))
     .finally(() => { secure.destroy(); raw.destroy() }))
 }
 
