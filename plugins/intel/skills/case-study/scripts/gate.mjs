@@ -11,7 +11,7 @@
 //        gate.mjs ytsearch "<query>" "<name>"...   YouTube search, only the videos whose title, channel or description has one of the names
 //        gate.mjs ytuploads <channel url>          every upload of a YouTube channel with its exact date and plays, one JSON video per line, oldest first
 //        gate.mjs gdelt "<name>"... [<from> <to>]  news articles GDELT found the names in (BigQuery), up to 100 names, dates YYYY-MM-DD
-//        gate.mjs gnews "<name>" [<from> <to>]    Google News articles for the name, asked for week by week
+//        gate.mjs gnews "<name>" [<from> <to>]    Google News articles for the name, asked for month by month
 //        gate.mjs stats                   calls and failures per command since the log began
 // gdelt and gnews print one JSON article per line, oldest first, and keep what they fetched in
 // ~/.local/share/case-study/<gdelt|gnews>/<name>/: articles.jsonl and, beside it, articles.out.json with the days held.
@@ -43,7 +43,7 @@ const GDELT_NAMES = 100 // the most names one call may ask for
 const GDELT_MAX_BYTES = 120e9
 const OUTPUT_MAX = 512e6 // bytes of one BigQuery answer; a Node string holds 537 MB
 const GNEWS_GAP = 0.1 // seconds between two Google News requests machine-wide: ten a second, spread over the ISP exits
-const GNEWS_WEEKS = EXITS // weeks one gnews call reads at once
+const GNEWS_MONTHS = EXITS // months one gnews call reads at once
 const YT_RESULTS = 20 // videos asked of one YouTube search, before the name filter
 const YT_BATCH = 8 // video pages one yt-dlp run reads
 const YT_ROUTE_RUNS = 3 // yt-dlp runs at once on one route, when reading video pages without the login
@@ -244,6 +244,8 @@ export function read(url) {
 
 const day = date => date.toISOString().slice(0, 10)
 const addDays = (date, n) => day(new Date(Date.parse(`${date}T00:00:00Z`) + n * 864e5))
+// The first day of the month after the one `date` (a first day) starts.
+const nextMonth = date => { const d = new Date(`${date}T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + 1); return day(d) }
 
 // The parts of from..to (days, both included) that the ranges in `covered` do not hold.
 export function missingDays(covered, from, to) {
@@ -401,42 +403,42 @@ async function articleAddress(link, call) {
 
 // The Google News articles for `name` between two days, oldest first: { url, domain, date, title }; url is the
 // article's own address, not Google's link to it. One search answers with a part of what it has, and a narrower one with more of it, so every
-// week (Monday to Sunday) is asked for on its own; a week is held once it was asked for and its links resolved, the
-// running one once it ended. `workers` weeks are read at once, each one request at a time; the first refusal stops the
-// weeks not yet started, and the weeks read are kept. The lock is per name: runs asking for other names go on.
+// calendar month is asked for on its own; a month is held once it was asked for and its links resolved, the
+// running one once it ended. `workers` months are read at once, each one request at a time; the first refusal stops the
+// months not yet started, and the months read are kept. The lock is per name: runs asking for other names go on.
 export async function gnews(name, from, to, { data = DATA, state = STATE, now = new Date(), gap = GNEWS_GAP,
-  call = gnewsRequest, workers = GNEWS_WEEKS } = {}) {
+  call = gnewsRequest, workers = GNEWS_MONTHS } = {}) {
   const [start, end, yesterday] = dayRange(from, to, GDELT_START, now)
   mkdirSync(state, { recursive: true })
   return withLockAsync(join(state, `gnews-${nameFolder(nameKey(name))}.lock`), async () => {
     const a = archive('gnews', name, data)
-    const mondays = new Set()
+    const months = new Set()
     const ask = async (...request) => { if (gap) await pacedAsync('gnews', gap, state); return call(...request) }
     const addresses = new Map()
     const address = link => addresses.get(link) || addresses.set(link, articleAddress(link, ask)).get(link)
     for (const [x, y] of missingDays(a.covered, start, end)) {
-      for (let d = addDays(x, -((new Date(`${x}T00:00:00Z`).getUTCDay() + 6) % 7)); d <= y; d = addDays(d, 7)) mondays.add(d)
+      for (let d = `${x.slice(0, 7)}-01`; d <= y; d = nextMonth(d)) months.add(d)
     }
-    const readWeek = async monday => {
-      const query = `${String(name).trim()} after:${monday} before:${addDays(monday, 7)}`
+    const readMonth = async first => {
+      const query = `${String(name).trim()} after:${first} before:${nextMonth(first)}`
       const r = await ask(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`)
-      if (r.status !== 200) throw Error(`Google News answered ${r.status} for the week of ${monday}; the weeks read are kept`)
+      if (r.status !== 200) throw Error(`Google News answered ${r.status} for the month of ${first.slice(0, 7)}; the months read are kept`)
       const found = []
       for (const [, item] of r.body.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
         const field = tag => xmlText((item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)) || [])[1])
         const published = new Date(field('pubDate'))
         const link = field('link')
         const url = link && await address(link)
-        if (url) found.push({ url, domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? monday : day(published), title: field('title') })
+        if (url) found.push({ url, domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? first : day(published), title: field('title') })
       }
-      const sunday = addDays(monday, 6)
-      a.add(found, monday, sunday > yesterday ? yesterday : sunday)
+      const last = addDays(nextMonth(first), -1)
+      a.add(found, first, last > yesterday ? yesterday : last)
     }
-    const queue = [...mondays].sort()
+    const queue = [...months].sort()
     let refusal
     const work = async () => {
       while (queue.length && !refusal) {
-        try { await readWeek(queue.shift()) } catch (error) { refusal ??= error }
+        try { await readMonth(queue.shift()) } catch (error) { refusal ??= error }
       }
     }
     await Promise.all(Array.from({ length: workers }, work))
