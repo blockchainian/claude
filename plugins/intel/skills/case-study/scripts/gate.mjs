@@ -42,7 +42,8 @@ const GDELT_NAMES = 100 // the most names one call may ask for
 // The most one GDELT query (a year at most) may read. Measured 2026-10: 52 GB for one year of names.
 const GDELT_MAX_BYTES = 120e9
 const OUTPUT_MAX = 512e6 // bytes of one BigQuery answer; a Node string holds 537 MB
-const GNEWS_GAP = 0.3 // seconds between two Google News requests machine-wide
+const GNEWS_GAP = 0.1 // seconds between two Google News requests machine-wide: ten a second, spread over the ISP exits
+const GNEWS_WEEKS = EXITS // weeks one gnews call reads at once
 const YT_RESULTS = 20 // videos asked of one YouTube search, before the name filter
 const YT_BATCH = 8 // video pages one yt-dlp run reads
 const YT_ROUTE_RUNS = 3 // yt-dlp runs at once on one route, when reading video pages without the login
@@ -102,6 +103,27 @@ export function paced(key, gap, state = STATE) {
   })
 }
 
+// The same lock held while an async fn runs, waiting for it without blocking the process.
+async function withLockAsync(path, fn) {
+  let release
+  while (!(release = tryLock(path))) await new Promise(resolve => setTimeout(resolve, 100))
+  try { return await fn() } finally { release() }
+}
+
+// paced without blocking the process: each call reserves the next free moment under the lock and waits for it outside.
+export async function pacedAsync(key, gap, state = STATE) {
+  mkdirSync(state, { recursive: true })
+  const file = join(state, `${key}.pace`)
+  const at = withLock(`${file}.lock`, () => {
+    let last = 0
+    try { last = Number(readFileSync(file, 'utf8')) || 0 } catch {}
+    const next = Math.max(now(), last + gap)
+    writeFileSync(file, String(next))
+    return next
+  })
+  await new Promise(resolve => setTimeout(resolve, Math.max(0, (at - now()) * 1000)))
+}
+
 // The index of an exit whose pace gap has passed, waiting until one has.
 export function freeRoute(count, gap, state = STATE) {
   mkdirSync(state, { recursive: true })
@@ -138,6 +160,17 @@ export function slot(name, count, fn, { state = STATE, tryOnce = false } = {}) {
 }
 
 const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', maxBuffer: 1 << 28, ...options })
+
+// run, without blocking the process: resolves with the status and the output once the command ends.
+const runAsync = (command, args) => new Promise(resolve => {
+  const child = spawn(command, args)
+  let stdout = ''
+  let stderr = ''
+  child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
+  child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
+  child.on('error', () => resolve({ status: null, stdout, stderr }))
+  child.on('close', status => resolve({ status, stdout, stderr }))
+})
 
 // Exa's answer, or '' when the account is out of credits (asked again every 10 minutes).
 export function exa(tool, params, { tries = 6, state = STATE, call = (args) => run('mcporter', args) } = {}) {
@@ -243,10 +276,14 @@ function writeWhole(path, text) {
 
 // The articles kept for one name of one source: <data>/<source>/<name>/articles.jsonl, one per line, oldest first, one
 // per url, and articles.out.json beside it with the days already fetched. The .out.json is what decides what to fetch.
+// A name as it is kept: lower case, single spaces; and the folder it is kept under.
+const nameKey = name => String(name || '').toLowerCase().split(/\s+/).filter(Boolean).join(' ')
+const nameFolder = key => key.replace(/[\s/\\]+/g, '-')
+
 function archive(source, name, data) {
-  const key = String(name || '').toLowerCase().split(/\s+/).filter(Boolean).join(' ')
+  const key = nameKey(name)
   if (!key || key.includes('://')) throw Error('give the name to look for, not a URL')
-  const folder = join(data, source, key.replace(/[\s/\\]+/g, '-'))
+  const folder = join(data, source, nameFolder(key))
   const file = join(folder, 'articles.jsonl')
   const progress = join(folder, 'articles.out.json')
   let covered = []
@@ -330,11 +367,11 @@ export function gdelt(names, from, to, { data = DATA, state = STATE, project = p
 // One Google News request, compressed, through a random ISP exit; when Google refuses that exit (429, 503) or it fails,
 // asked again through the residential proxy. Google refuses an address it has seen too often, so neither goes direct
 // unless no proxy is set.
-export function gnewsRequest(url, form, { exits = proxies(), residential = (process.env.RESIDENTIAL_PROXY_URL || '').trim(), curl = args => run('curl', args) } = {}) {
+export async function gnewsRequest(url, form, { exits = proxies(), residential = (process.env.RESIDENTIAL_PROXY_URL || '').trim(), curl = args => runAsync('curl', args) } = {}) {
   const routes = [exits.length ? exits[Math.floor(Math.random() * exits.length)] : null, ...(residential ? [residential] : [])]
   let answer
   for (const proxy of routes) {
-    const r = curl(['-sL', '--compressed', '-m', '30', '-w', '\n%{http_code}', ...(proxy ? ['-x', proxy] : []), ...(form ? ['--data-urlencode', `f.req=${form}`] : []), url])
+    const r = await curl(['-sL', '--compressed', '-m', '30', '-w', '\n%{http_code}', ...(proxy ? ['-x', proxy] : []), ...(form ? ['--data-urlencode', `f.req=${form}`] : []), url])
     const out = r.stdout || ''
     const cut = out.lastIndexOf('\n')
     answer = { status: Number(out.slice(cut + 1)), body: out.slice(0, cut) }
@@ -347,14 +384,14 @@ const xmlText = s => (s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').repla
 
 // The article's own address behind one of Google News's links: Google's page for the link carries a signature, and its
 // batchexecute answers with the address for that signature. A link Google gives neither for is returned as it is.
-function articleAddress(link, call) {
+async function articleAddress(link, call) {
   const id = (link.match(/^https:\/\/news\.google\.com\/(?:rss\/)?(?:articles|read)\/([\w-]+)/) || [])[1]
   if (!id) return link
-  const page = call(`https://news.google.com/rss/articles/${id}`)
+  const page = await call(`https://news.google.com/rss/articles/${id}`)
   if (page.status !== 200) throw Error(`Google News answered ${page.status} for the address of an article`)
   const [signature, time] = ['sg', 'ts'].map(k => (page.body.match(new RegExp(`data-n-a-${k}="([^"]+)"`)) || [])[1])
   if (!signature || !time) return link
-  const answer = call('https://news.google.com/_/DotsSplashUi/data/batchexecute', JSON.stringify([[['Fbv4je',
+  const answer = await call('https://news.google.com/_/DotsSplashUi/data/batchexecute', JSON.stringify([[['Fbv4je',
     `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${time},"${signature}"]`]]]))
   if (answer.status !== 200) throw Error(`Google News answered ${answer.status} for the address of an article`)
   try {
@@ -364,33 +401,46 @@ function articleAddress(link, call) {
 
 // The Google News articles for `name` between two days, oldest first: { url, domain, date, title }; url is the
 // article's own address, not Google's link to it. One search answers with a part of what it has, and a narrower one with more of it, so every
-// week (Monday to Sunday) is asked for on its own; a week is held once it was asked for, the running one once it ended.
-export function gnews(name, from, to, { data = DATA, state = STATE, now = new Date(), gap = GNEWS_GAP,
-  call = gnewsRequest } = {}) {
+// week (Monday to Sunday) is asked for on its own; a week is held once it was asked for and its links resolved, the
+// running one once it ended. `workers` weeks are read at once, each one request at a time; the first refusal stops the
+// weeks not yet started, and the weeks read are kept. The lock is per name: runs asking for other names go on.
+export async function gnews(name, from, to, { data = DATA, state = STATE, now = new Date(), gap = GNEWS_GAP,
+  call = gnewsRequest, workers = GNEWS_WEEKS } = {}) {
   const [start, end, yesterday] = dayRange(from, to, GDELT_START, now)
   mkdirSync(state, { recursive: true })
-  return withLock(join(state, 'gnews.lock'), () => {
+  return withLockAsync(join(state, `gnews-${nameFolder(nameKey(name))}.lock`), async () => {
     const a = archive('gnews', name, data)
     const mondays = new Set()
-    const ask = (...request) => { if (gap) paced('gnews', gap, state); return call(...request) }
+    const ask = async (...request) => { if (gap) await pacedAsync('gnews', gap, state); return call(...request) }
     const addresses = new Map()
     const address = link => addresses.get(link) || addresses.set(link, articleAddress(link, ask)).get(link)
     for (const [x, y] of missingDays(a.covered, start, end)) {
       for (let d = addDays(x, -((new Date(`${x}T00:00:00Z`).getUTCDay() + 6) % 7)); d <= y; d = addDays(d, 7)) mondays.add(d)
     }
-    for (const monday of [...mondays].sort()) {
+    const readWeek = async monday => {
       const query = `${String(name).trim()} after:${monday} before:${addDays(monday, 7)}`
-      const r = ask(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`)
-      if (r.status !== 200) throw Error(`Google News answered ${r.status} for the week of ${monday}; the weeks before it are kept`)
-      const found = [...r.body.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(([, item]) => {
+      const r = await ask(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`)
+      if (r.status !== 200) throw Error(`Google News answered ${r.status} for the week of ${monday}; the weeks read are kept`)
+      const found = []
+      for (const [, item] of r.body.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
         const field = tag => xmlText((item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)) || [])[1])
         const published = new Date(field('pubDate'))
         const link = field('link')
-        return { url: link && address(link), domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? monday : day(published), title: field('title') }
-      }).filter(article => article.url)
+        const url = link && await address(link)
+        if (url) found.push({ url, domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? monday : day(published), title: field('title') })
+      }
       const sunday = addDays(monday, 6)
       a.add(found, monday, sunday > yesterday ? yesterday : sunday)
     }
+    const queue = [...mondays].sort()
+    let refusal
+    const work = async () => {
+      while (queue.length && !refusal) {
+        try { await readWeek(queue.shift()) } catch (error) { refusal ??= error }
+      }
+    }
+    await Promise.all(Array.from({ length: workers }, work))
+    if (refusal) throw refusal
     return a.between(start, end)
   })
 }
@@ -547,17 +597,16 @@ function main(argv) {
     const isDay = arg => /^\d{4}-\d{2}(-\d{2})?$/.test(arg)
     const names = args.filter(arg => !isDay(arg))
     const [from, to] = args.filter(isDay)
-    try {
-      const found = command === 'gdelt' ? gdelt(names, from, to)
-        : command === 'gnews' ? gnews(names[0], from, to)
-          : ytsearch(names[0], names.slice(1))
+    ;(async () => command === 'gdelt' ? gdelt(names, from, to)
+      : command === 'gnews' ? gnews(names[0], from, to)
+        : ytsearch(names[0], names.slice(1)))().then(found => {
       for (const line of found) console.log(JSON.stringify(line))
       log(command, 'ok', args.join(' '))
-    } catch (error) {
+    }, error => {
       log(command, 'FAILED', args.join(' '))
       console.error(`${command}: ${error.message}`)
       process.exit(1)
-    }
+    })
   } else if (command === 'ytuploads') {
     ytuploads(args[0] || '').then(({ uploads, missing }) => {
       for (const upload of uploads) console.log(JSON.stringify(upload))
