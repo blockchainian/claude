@@ -184,6 +184,30 @@ test('gnews asks Google News for each week it lacks, keeps the articles under th
   rmSync(data, { recursive: true, force: true })
 })
 
+test('a Google News request goes compressed through an ISP exit, and through the residential proxy when Google refuses that exit', () => {
+  const exits = gate.proxies('http://u:p@isp.example:8001')
+  const residential = 'http://r:p@resi.example:9000'
+  const asked = []
+  const curl = answers => args => { asked.push(args); return { status: 0, stdout: `body\n${answers.shift()}` } }
+  assert.deepEqual(gate.gnewsRequest('https://news.google.com/rss/search?q=x', undefined, { exits, residential, curl: curl([200]) }), { status: 200, body: 'body' })
+  assert.equal(asked.length, 1)
+  assert.ok(asked[0].includes('--compressed'), 'asked for a compressed answer')
+  assert.ok(exits.includes(asked[0][asked[0].indexOf('-x') + 1]), 'through one of the ISP exits')
+  assert.equal(asked[0].at(-1), 'https://news.google.com/rss/search?q=x')
+  asked.length = 0
+  for (const refusal of [503, 429]) {
+    assert.deepEqual(gate.gnewsRequest('https://news.google.com/x', 'form', { exits, residential, curl: curl([refusal, 200]) }).status, 200)
+    assert.equal(asked.at(-1)[asked.at(-1).indexOf('-x') + 1], residential, `a ${refusal} is asked again through the residential proxy`)
+    assert.ok(asked.at(-1).includes('f.req=form'), 'with the same form')
+  }
+  asked.length = 0
+  assert.equal(gate.gnewsRequest('https://news.google.com/x', undefined, { exits, residential, curl: curl([404]) }).status, 404)
+  assert.equal(asked.length, 1, 'an answer that is not a refusal is not asked again')
+  asked.length = 0
+  assert.equal(gate.gnewsRequest('https://news.google.com/x', undefined, { exits: [], residential: '', curl: curl([503]) }).status, 503)
+  assert.deepEqual([asked.length, asked[0].includes('-x')], [1, false], 'without a proxy, one direct request')
+})
+
 test('ytsearch keeps the videos whose title, channel or description names the subject', () => {
   const video = (id, channel, title, description) => JSON.stringify({ id, channel, title, description })
   const stdout = [
