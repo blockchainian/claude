@@ -190,9 +190,8 @@ under the home directory.
   exits. Without it the gate reads direct, with one exit's share of the
   limits.
 - `RESIDENTIAL_PROXY_URL`: the rotating residential proxy `wayback` reads the
-  archive through, one URL. Without it `wayback` goes through
-  `ISP_PROXY_URL` at 30 requests a minute (the archive counts its exits
-  together), and without both it goes direct. `gnews` asks Google News
+  archive's captures through, one URL; without it `wayback` stops with an
+  error. The capture lists go through `ISP_PROXY_URL`. `gnews` asks Google News
   through an `ISP_PROXY_URL` exit and again through this proxy when Google
   refuses the exit.
 - `FETCH_X_POSTS`: the fetch-x-posts script (X search on an account pool).
