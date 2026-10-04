@@ -17,8 +17,8 @@
 // ~/.local/share/case-study/<gdelt|gnews>/<name>/: articles.jsonl and, beside it, articles.out.json with the days held.
 // State (pace files, slot locks, the log) lives in ~/.cache/case-study-limits, shared with fetch-x-posts. Settings come
 // from the .env file env.mjs finds: ISP_PROXY_URL (one URL; the ten ports after its own are the exits; without it every
-// request goes direct), FETCH_X_POSTS (the fetch-x-posts script) and GDELT_BQ_PROJECT (the Google Cloud project the
-// BigQuery queries run in).
+// request goes direct), RESIDENTIAL_PROXY_URL (Google News asked again through it when an exit is refused),
+// FETCH_X_POSTS (the fetch-x-posts script) and GDELT_BQ_PROJECT (the Google Cloud project the BigQuery queries run in).
 import { spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -327,6 +327,22 @@ export function gdelt(names, from, to, { data = DATA, state = STATE, project = p
   })
 }
 
+// One Google News request, compressed, through a random ISP exit; when Google refuses that exit (429, 503) or it fails,
+// asked again through the residential proxy. Google refuses an address it has seen too often, so neither goes direct
+// unless no proxy is set.
+export function gnewsRequest(url, form, { exits = proxies(), residential = (process.env.RESIDENTIAL_PROXY_URL || '').trim(), curl = args => run('curl', args) } = {}) {
+  const routes = [exits.length ? exits[Math.floor(Math.random() * exits.length)] : null, ...(residential ? [residential] : [])]
+  let answer
+  for (const proxy of routes) {
+    const r = curl(['-sL', '--compressed', '-m', '30', '-w', '\n%{http_code}', ...(proxy ? ['-x', proxy] : []), ...(form ? ['--data-urlencode', `f.req=${form}`] : []), url])
+    const out = r.stdout || ''
+    const cut = out.lastIndexOf('\n')
+    answer = { status: Number(out.slice(cut + 1)), body: out.slice(0, cut) }
+    if (![0, 429, 503].includes(answer.status)) break
+  }
+  return answer
+}
+
 const xmlText = s => (s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&')
 
 // The article's own address behind one of Google News's links: Google's page for the link carries a signature, and its
@@ -350,7 +366,7 @@ function articleAddress(link, call) {
 // article's own address, not Google's link to it. One search answers with a part of what it has, and a narrower one with more of it, so every
 // week (Monday to Sunday) is asked for on its own; a week is held once it was asked for, the running one once it ended.
 export function gnews(name, from, to, { data = DATA, state = STATE, now = new Date(), gap = GNEWS_GAP,
-  call = (url, form) => { const r = run('curl', ['-sL', '-m', '30', '-w', '\n%{http_code}', ...(form ? ['--data-urlencode', `f.req=${form}`] : []), url]); const cut = (r.stdout || '').lastIndexOf('\n'); return { status: Number(r.stdout.slice(cut + 1)), body: r.stdout.slice(0, cut) } } } = {}) {
+  call = gnewsRequest } = {}) {
   const [start, end, yesterday] = dayRange(from, to, GDELT_START, now)
   mkdirSync(state, { recursive: true })
   return withLock(join(state, 'gnews.lock'), () => {
