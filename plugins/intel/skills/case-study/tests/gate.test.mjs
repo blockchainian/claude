@@ -141,7 +141,7 @@ test('gdelt reads the running day again every time, keeps the years done before 
   rmSync(data, { recursive: true, force: true })
 })
 
-test('gnews asks Google News for each week it lacks, keeps the articles under their own addresses, and stops at the first refusal', () => {
+test('gnews asks Google News for each week it lacks, keeps the articles under their own addresses, and stops at the first refusal', async () => {
   const data = mkdtempSync(join(tmpdir(), 'data-'))
   const item = (title, link, date, source) => `<item><title>${title}</title><link>${link}</link><pubDate>${date}</pubDate><source url="https://www.${source}">X</source></item>`
   const weeks = {
@@ -163,49 +163,76 @@ test('gnews asks Google News for each week it lacks, keeps the articles under th
     const week = decodeURIComponent(url).match(/after:([\d-]+) before:([\d-]+)/); asked.push(`${week[1]} ${week[2]}`); return { status: 200, body: `<rss>${weeks[week[1]] || ''}</rss>` }
   }
   const options = { data, state, call, now: new Date('2026-10-03T12:00:00Z'), gap: 0 }
-  assert.deepEqual(gate.gnews('Kobeissi Letter', '2025-06-04', '2025-06-12', options), [
+  assert.deepEqual((await gate.gnews('Kobeissi Letter', '2025-06-04', '2025-06-12', options)), [
     { url: 'https://two.example/story?a=1&b=2', domain: 'b.example', date: '2025-06-11', title: 'Second - B' },
   ], 'only the days asked for')
   assert.deepEqual(asked, ['2025-06-02 2025-06-09', '2025-06-09 2025-06-16'], 'whole weeks, Monday to Monday')
-  assert.deepEqual(gate.gnews('kobeissi letter', '2025-06-02', '2025-06-15', options).map(a => a.title), ['Stocks & bonds - A', 'Second - B'], 'one article per link, oldest first')
+  assert.deepEqual((await gate.gnews('kobeissi letter', '2025-06-02', '2025-06-15', options)).map(a => a.title), ['Stocks & bonds - A', 'Second - B'], 'one article per link, oldest first')
   assert.equal(asked.length, 2, 'weeks already held are not asked for again')
   assert.deepEqual(resolved, ['one', 'two'], 'a link is resolved once')
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')), { name: 'kobeissi letter', covered: [['2025-06-02', '2025-06-15']], count: 2 })
   let n = 0
   const refusing = { ...options, call: url => { asked.push('x'); return n++ ? { status: 429, body: '' } : { status: 200, body: '<rss></rss>' } } }
-  assert.throws(() => gate.gnews('Kobeissi Letter', '2025-06-02', '2025-07-06', refusing), /429/)
+  await assert.rejects(() => gate.gnews('Kobeissi Letter', '2025-06-02', '2025-07-06', refusing), /429/)
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')).covered, [['2025-06-02', '2025-06-22']], 'the week read before the refusal is kept')
   weeks['2025-06-23'] = item('No signature - C', 'https://news.google.com/rss/articles/bare?oc=5', 'Tue, 24 Jun 2025 07:00:00 GMT', 'c.example')
-  assert.deepEqual(gate.gnews('Kobeissi Letter', '2025-06-23', '2025-06-29', options).map(a => a.url), ['https://news.google.com/rss/articles/bare?oc=5'], 'a link Google gives no address for stays as it is')
+  assert.deepEqual((await gate.gnews('Kobeissi Letter', '2025-06-23', '2025-06-29', options)).map(a => a.url), ['https://news.google.com/rss/articles/bare?oc=5'], 'a link Google gives no address for stays as it is')
   weeks['2025-06-30'] = item('Third - D', 'https://news.google.com/rss/articles/three', 'Tue, 01 Jul 2025 07:00:00 GMT', 'd.example')
   const unresolved = { ...options, call: (url, form) => url.includes('/rss/articles/') ? { status: 429, body: '' } : call(url, form) }
-  assert.throws(() => gate.gnews('Kobeissi Letter', '2025-06-30', '2025-07-06', unresolved), /429/)
+  await assert.rejects(() => gate.gnews('Kobeissi Letter', '2025-06-30', '2025-07-06', unresolved), /429/)
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')).covered, [['2025-06-02', '2025-06-29']], 'a week whose links were not resolved is asked for again')
   rmSync(data, { recursive: true, force: true })
 })
 
-test('a Google News request goes compressed through an ISP exit, and through the residential proxy when Google refuses that exit', () => {
+test('a Google News request goes compressed through an ISP exit, and through the residential proxy when Google refuses that exit', async () => {
   const exits = gate.proxies('http://u:p@isp.example:8001')
   const residential = 'http://r:p@resi.example:9000'
   const asked = []
   const curl = answers => args => { asked.push(args); return { status: 0, stdout: `body\n${answers.shift()}` } }
-  assert.deepEqual(gate.gnewsRequest('https://news.google.com/rss/search?q=x', undefined, { exits, residential, curl: curl([200]) }), { status: 200, body: 'body' })
+  assert.deepEqual((await gate.gnewsRequest('https://news.google.com/rss/search?q=x', undefined, { exits, residential, curl: curl([200]) })), { status: 200, body: 'body' })
   assert.equal(asked.length, 1)
   assert.ok(asked[0].includes('--compressed'), 'asked for a compressed answer')
   assert.ok(exits.includes(asked[0][asked[0].indexOf('-x') + 1]), 'through one of the ISP exits')
   assert.equal(asked[0].at(-1), 'https://news.google.com/rss/search?q=x')
   asked.length = 0
   for (const refusal of [503, 429]) {
-    assert.deepEqual(gate.gnewsRequest('https://news.google.com/x', 'form', { exits, residential, curl: curl([refusal, 200]) }).status, 200)
+    assert.deepEqual((await gate.gnewsRequest('https://news.google.com/x', 'form', { exits, residential, curl: curl([refusal, 200]) })).status, 200)
     assert.equal(asked.at(-1)[asked.at(-1).indexOf('-x') + 1], residential, `a ${refusal} is asked again through the residential proxy`)
     assert.ok(asked.at(-1).includes('f.req=form'), 'with the same form')
   }
   asked.length = 0
-  assert.equal(gate.gnewsRequest('https://news.google.com/x', undefined, { exits, residential, curl: curl([404]) }).status, 404)
+  assert.equal((await gate.gnewsRequest('https://news.google.com/x', undefined, { exits, residential, curl: curl([404]) })).status, 404)
   assert.equal(asked.length, 1, 'an answer that is not a refusal is not asked again')
   asked.length = 0
-  assert.equal(gate.gnewsRequest('https://news.google.com/x', undefined, { exits: [], residential: '', curl: curl([503]) }).status, 503)
+  assert.equal((await gate.gnewsRequest('https://news.google.com/x', undefined, { exits: [], residential: '', curl: curl([503]) })).status, 503)
   assert.deepEqual([asked.length, asked[0].includes('-x')], [1, false], 'without a proxy, one direct request')
+})
+
+test('gnews asks for several weeks at once and resolves their links while other weeks are asked for', async () => {
+  const data = mkdtempSync(join(tmpdir(), 'data-'))
+  let open = 0
+  let most = 0
+  const call = async url => {
+    open++; most = Math.max(most, open)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    open--
+    if (url.includes('/rss/articles/')) return { status: 200, body: '<c-wiz></c-wiz>' }
+    const monday = decodeURIComponent(url).match(/after:([\d-]+)/)[1]
+    return { status: 200, body: `<rss><item><title>T</title><link>https://news.google.com/rss/articles/w${monday.replace(/-/g, '')}</link><pubDate>${monday}</pubDate></item></rss>` }
+  }
+  const found = await gate.gnews('Many Weeks', '2025-01-06', '2025-03-30', { data, state, call, now: new Date('2026-10-03T12:00:00Z'), gap: 0, workers: 4 })
+  assert.equal(found.length, 12, 'one article for each of the twelve weeks')
+  assert.equal(most, 4, 'four requests in flight at once')
+  rmSync(data, { recursive: true, force: true })
+})
+
+test('pacedAsync spaces the calls with one key by the gap without blocking the process', async () => {
+  let ticked = false
+  setTimeout(() => { ticked = true }, 50)
+  const t0 = Date.now()
+  await Promise.all([gate.pacedAsync('ta', 0.3, state), gate.pacedAsync('ta', 0.3, state)])
+  assert.ok(Date.now() - t0 >= 280, 'the second call waited out the gap')
+  assert.ok(ticked, 'a timer ran while it waited')
 })
 
 test('ytsearch keeps the videos whose title, channel or description names the subject', () => {
