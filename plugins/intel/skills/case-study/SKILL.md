@@ -90,12 +90,27 @@ ask for one name.
    Report what you searched and what you found. If they do and the user has not
    already said to include them, stop and ask.
 
-3. **Research and write — the workflow.** Every stage that can run in
+3. **News lists.** Fetch them yourself, before the workflow, for every name
+   the subject has gone by — the name, the real name, every handle the
+   accounts have had (an account renamed after it grew is searched under its
+   old handle too) — each on its own, no URL, no description, from the first
+   year of their growth:
+
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case-study.mjs" news "<work>" --since <YYYY> "<name>" "<other name>"...
+   ```
+
+   It prints the articles per list and exits non-zero when a list failed.
+   Run it again until every list holds articles: what was fetched is kept, so
+   a second run asks only for what is missing. Do not launch the workflow on
+   a failed list; a list that keeps failing is reported and the run stops.
+
+4. **Research and write — the workflow.** Every stage that can run in
    parallel does, and nothing waits for a stage it does not need:
 
    | Stage | Agents | Does |
    |---|---|---|
-   | Scout | a script fetches the news lists once (`case-study.mjs news`), then 10 scouts, one per source type, each searching all its queries at once and opening nothing; the 2 numbers agents start at once | Find sources from search results; return URLs only, the readers open them. The curve comes from `gate.mjs wayback curve` in one batch |
+   | Scout | 10 scouts, one per source type, each searching all its queries at once and opening nothing; the 2 numbers agents start at once | Find sources from search results; return URLs only, the readers open them. The curve comes from `gate.mjs wayback curve` in one batch |
    | Read | one per 8 sources | Read into `notes/`, tagged by chapter |
    | Write | one per chapter, as soon as the reading is merged, on Opus 4.8 | The chapter as the reader gets it, with its source marks, in `drafts/`, from the notes only |
    | Book | one, on the session's model, when every chapter is written | `case-study.mjs book` strips the marks into `book/` and lists the cited sources; the agent writes the introduction and the reasoning chapter from those chapters |
@@ -107,8 +122,8 @@ ask for one name.
    into your scratchpad directory first, and launch and resume from that copy,
    never from a repository checkout.
    `scriptPath: <scratchpad>/creator.mjs`,
-   `args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, names, since }`
-   — `skill` is this skill's absolute folder, `names` the subject's other names, comma-separated, `since` the first year of their growth (YYYY): the news lists are fetched once for them, `product` the `--apply-to` text, `seeds` any
+   `args: { subject, work, skill, lang, today, product, seeds, caps, done, sources, since }`
+   — `subject` the subject's name and the names it goes by, `skill` this skill's absolute folder, `since` the first year of their growth (YYYY), which the scouts search every year from, `product` the `--apply-to` text, `seeds` any
    starting sources you know, `caps` the machine-wide request limits from the
    tool list in one line (the script gives each agent its share). Empty
    strings where there is nothing. It runs in the background: end the turn.
@@ -124,7 +139,7 @@ ask for one name.
    sources, because only so many agents run at once; do not cut sources to
    save time.
 
-4. **Render.** Do not recheck or edit the chapters by hand. Run the check
+5. **Render.** Do not recheck or edit the chapters by hand. Run the check
    and render:
 
    ```bash
@@ -134,7 +149,7 @@ ask for one name.
 
    Render even when the check reports hits; list them in the report.
 
-5. **Report and stop.** One short report:
+6. **Report and stop.** One short report:
    - the PDF path and page count;
    - sources read, sources the book cites, archive snapshots and distinct
      sites, from the check;

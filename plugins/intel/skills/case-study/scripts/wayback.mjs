@@ -221,12 +221,12 @@ export function extract(page) {
   return { value, text }
 }
 
-export async function curve(addresses, proxy, out, { perMinute = PER_MINUTE, archive = ARCHIVE, listProxy = proxy } = {}) {
+export async function curve(addresses, proxy, out, { perMinute = PER_MINUTE, archive = ARCHIVE, listProxy = proxy, listPerMinute = perMinute } = {}) {
   // One row per monthly capture of every address, oldest first, with the count each capture shows. The capture
   // lists are asked through listProxy: the archive answers 429 to a list asked from a residential address.
   const listings = addresses.map(address => `${archive}/cdx/search/cdx?url=${address}&output=json&fl=timestamp,statuscode&filter=statuscode:200&collapse=timestamp:6`)
   const captures = []
-  const listed = await fetchAll(listings, listProxy, join(out, 'lists'), { perMinute })
+  const listed = await fetchAll(listings, listProxy, join(out, 'lists'), { perMinute: listPerMinute })
   addresses.forEach((address, n) => {
     const rows = JSON.parse(readFileSync(listed[n].file, 'utf8') || '[]')
     captures.push(...rows.slice(1).map(([stamp]) => `${archive}/web/${stamp}id_/${address}`))
@@ -238,6 +238,13 @@ export async function curve(addresses, proxy, out, { perMinute = PER_MINUTE, arc
     rows.push({ date: `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6)}`, ...found, url: page.url, file: page.file })
   }
   return rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+}
+
+// The proxy and rate for the captures, and for the capture lists, which go through the ISP proxy at its own rate: the
+// lists asked at the residential rate through the ISP exits were answered 429 until the run stopped (2026-10).
+export function routes(residential, isp) {
+  const proxy = residential || isp
+  return { proxy, perMinute: residential ? RESIDENTIAL_PER_MINUTE : PER_MINUTE, listProxy: isp, listPerMinute: PER_MINUTE }
 }
 
 const USAGE = 'usage: wayback.mjs {fetch,curve} <out dir> ...'
@@ -262,12 +269,11 @@ async function main(argv) {
   }
   const residential = (process.env.RESIDENTIAL_PROXY_URL || '').trim()
   const isp = (process.env.ISP_PROXY_URL || '').trim() || null
-  const proxy = residential || isp
-  const perMinute = residential ? RESIDENTIAL_PER_MINUTE : PER_MINUTE
+  const { proxy, perMinute, listProxy, listPerMinute } = routes(residential, isp)
   try {
     let results
     if (cmd === 'curve') {
-      results = await curve(items, proxy, out, { perMinute, listProxy: isp })
+      results = await curve(items, proxy, out, { perMinute, listProxy, listPerMinute })
     } else {
       const urls = [...items, ...(parsed.values.from ? readFileSync(parsed.values.from, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(Boolean) : [])]
       results = await fetchAll(urls, proxy, out, { perMinute })
