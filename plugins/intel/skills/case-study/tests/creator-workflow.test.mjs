@@ -10,11 +10,12 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 
 // Every stand-in agent finishes on the next tick, except those named in `slow`, which finish when `release` is called:
 // the order of `calls` then shows which agents waited for which.
-async function run(args, slow = []) {
+async function run(args, slow = [], dead = []) {
   const calls = []
   const releases = []
   const agent = (prompt, opts) => {
     calls.push({ prompt, ...opts })
+    if (dead.includes(opts.label)) return Promise.resolve(null) // an agent that died returns nothing
     const finish = () => {
       if (opts.label.startsWith('scout:')) {
         const lane = opts.label.slice(6)
@@ -133,4 +134,17 @@ test('with the reading done, the run starts at the chapters: no scout, reader or
   assert.equal(calls[0].label, 'merge:read')
   assert.deepEqual(labels(calls, 'write:').sort(), BODY.map(f => `write:${f}`))
   assert.deepEqual(labels(calls, 'book:'), ['book:01-and-10'])
+})
+
+test('an agent that dies is asked once more to pick up from its files; one that dies twice stops the run, naming it', async () => {
+  const once = await run(ARGS, [], ['read:03', 'scout:criticism', 'write:05'])
+  await once.result()
+  for (const label of ['read:03', 'scout:criticism', 'write:05']) {
+    const again = once.calls.find(c => c.label === `${label}:again`)
+    assert.ok(again, `${label} is asked again`)
+    assert.match(again.prompt, /pick up from the files/)
+  }
+  const twice = await run(ARGS, [], ['read:03', 'read:03:again'])
+  await assert.rejects(twice.result(), /read-03/)
+  assert.equal(labels(twice.calls, 'write:').length, 0, 'no chapter is written from a reading that lost a batch')
 })
