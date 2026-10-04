@@ -1,7 +1,7 @@
 // ABOUTME: Installs the Camoufox release compatible with the pinned JavaScript launcher.
 // ABOUTME: Uses camoufox-js's own cache, extraction, permissions, and version.json layout.
-import { readFileSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // v156.0.1-beta.34 removed navigator.product and other properties that camoufox-js 0.12.0 sets.
@@ -59,6 +59,6 @@ async function main() {
   console.log(browserReport(INSTALL_DIR));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   main().catch((error) => { console.error(`camoufox: ${error.message}`); process.exitCode = 1; });
 }
