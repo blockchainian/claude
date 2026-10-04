@@ -27,8 +27,9 @@ loadEnv()
 // minute spread evenly over the ten exits had 19 of 120 requests answered 429, and one exit alone was refused after 20
 // in a minute.
 export const PER_MINUTE = 30
-// Through the residential proxy. Measured 2026-10: the archive answered no 429 at 120 or at 240 a minute; the proxy
-// itself refuses some connections at any rate tried (18 of 118 at 90 a minute), and those are asked again.
+// Through the residential proxy. Measured 2026-10: the archive answers 429 to the exits of one busy network at a time
+// (all of them on COMCAST-7922, 4 of 30 with US exits, none of 30 with exits worldwide), whatever the rate; the proxy
+// itself refuses some connections at any rate tried (18 of 118 at 90 a minute). Both are asked again.
 export const RESIDENTIAL_PER_MINUTE = 100
 export const RETRIES = 8 // times a request that failed is asked again, each after a longer wait
 const PER_WORKER = 10 // requests a minute one worker carries: a page takes seconds to arrive
@@ -164,8 +165,9 @@ export async function httpGet(proxy, url) {
   return { status: response.status, body: response.body }
 }
 
-export async function fetchAll(urls, proxy, out, { perMinute = PER_MINUTE, get = httpGet, retryWait = 1000 } = {}) {
-  // Fetch every url, save each body under out, and return one result per url in input order.
+export async function fetchAll(urls, proxy, out, { perMinute = PER_MINUTE, get = httpGet, retryWait = 1000, rotating = false } = {}) {
+  // Fetch every url, save each body under out, and return one result per url in input order. rotating: the proxy gives
+  // every request another address, so a 429, which the archive answers to one network, is asked again at once.
   mkdirSync(out, { recursive: true })
   const todo = urls.map((url, position) => ({ position, url }))
   const results = new Map()
@@ -173,7 +175,7 @@ export async function fetchAll(urls, proxy, out, { perMinute = PER_MINUTE, get =
   let cause = ''
   const failures = {} // how many requests failed, by reason
   let nextStart = 0
-  let pausedUntil = 0 // a 429 from the archive pauses every worker: it counts the caller, not the url
+  let pausedUntil = 0 // a 429 from the archive pauses every worker on fixed addresses: it counts the caller, not the url
   const now = () => performance.now()
   const work = async () => {
     while (!refused && results.size < urls.length) {
@@ -201,8 +203,9 @@ export async function fetchAll(urls, proxy, out, { perMinute = PER_MINUTE, get =
           cause = reason
           return
         }
-        if (error instanceof Throttled) pausedUntil = Math.max(pausedUntil, now() + retryWait * 2 ** (item.failures - 1))
-        else await sleep(retryWait * item.failures)
+        if (error instanceof Throttled) {
+          if (!rotating) pausedUntil = Math.max(pausedUntil, now() + retryWait * 2 ** (item.failures - 1))
+        } else await sleep(retryWait * item.failures)
         continue
       }
       const name = `${String(item.position).padStart(3, '0')}-` + item.url.replace(/[^A-Za-z0-9]+/g, '-').slice(-120).replace(/^-+|-+$/g, '') + '.html'
@@ -263,7 +266,7 @@ export async function curve(addresses, proxy, out, { perMinute = PER_MINUTE, arc
     if (!rows) { missing.push(list.url); return } // an error page instead of a list
     captures.push(...rows.slice(1).map(([stamp]) => `${archive}/web/${stamp}id_/${address}`))
   })
-  const pages = await fetchWhatItGives(captures, proxy, out, { perMinute, retryWait })
+  const pages = await fetchWhatItGives(captures, proxy, out, { perMinute, retryWait, rotating: true })
   missing.push(...pages.missing)
   const rows = []
   for (const page of pages.results.filter(Boolean)) {
@@ -325,7 +328,7 @@ async function main(argv) {
       return
     } else {
       const urls = [...items, ...(parsed.values.from ? readFileSync(parsed.values.from, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(Boolean) : [])]
-      results = await fetchAll(urls, proxy, out, { perMinute })
+      results = await fetchAll(urls, proxy, out, { perMinute, rotating: true })
     }
     for (const result of results) console.log(JSON.stringify(result))
   } catch (error) {
