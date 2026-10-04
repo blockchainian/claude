@@ -4,10 +4,10 @@
 //
 // Usage: wayback.mjs fetch <out dir> <url>... [--from <file with one url per line>]
 //        wayback.mjs curve <out dir> <profile url>...     (every address the profile has had)
-// Requests go through the proxy in RESIDENTIAL_PROXY_URL (from the .env file env.mjs finds), one URL that gives every
-// connection another household address, which the archive counts apart. Without it they go through ISP_PROXY_URL,
-// whose exits the archive counts together, at a quarter of the rate; without both they go direct, through the
-// HTTPS_PROXY / HTTP_PROXY of the environment when one is set (NO_PROXY is honoured). A request that fails, or that
+// Captures go through the proxy in RESIDENTIAL_PROXY_URL (from the .env file env.mjs finds), one URL that gives every
+// connection another household address, which the archive counts apart; without it the run stops with an error. The
+// capture lists go through ISP_PROXY_URL, else direct, through the HTTPS_PROXY / HTTP_PROXY of the environment when
+// one is set (NO_PROXY is honoured). A request that fails, or that
 // the archive answers with 429, is asked for again; when it keeps failing the run stops with an error. fetch prints one JSON line per url (url, status, file). curve prints one JSON line per capture (date,
 // value, text, url, file): value is the count when it could be read, text is the page's own wording when it is
 // rounded or in another language, and both are null when the page shows no count.
@@ -275,10 +275,11 @@ export async function curve(addresses, proxy, out, { perMinute = PER_MINUTE, arc
 }
 
 // The proxy and rate for the captures, and for the capture lists, which go through the ISP proxy at its own rate: the
-// lists asked at the residential rate through the ISP exits were answered 429 until the run stopped (2026-10).
+// lists asked at the residential rate through the ISP exits were answered 429 until the run stopped (2026-10). The
+// captures go only through the residential proxy: from one address the archive answers 429 to nearly every one.
 export function routes(residential, isp) {
-  const proxy = residential || isp
-  return { proxy, perMinute: residential ? RESIDENTIAL_PER_MINUTE : PER_MINUTE, listProxy: isp, listPerMinute: PER_MINUTE }
+  if (!residential) throw new Error('RESIDENTIAL_PROXY_URL is not set: the archive captures are read only through the residential proxy')
+  return { proxy: residential, perMinute: RESIDENTIAL_PER_MINUTE, listProxy: isp, listPerMinute: PER_MINUTE }
 }
 
 const USAGE = 'usage: wayback.mjs {fetch,curve} <out dir> ...'
@@ -303,7 +304,14 @@ async function main(argv) {
   }
   const residential = (process.env.RESIDENTIAL_PROXY_URL || '').trim()
   const isp = (process.env.ISP_PROXY_URL || '').trim() || null
-  const { proxy, perMinute, listProxy, listPerMinute } = routes(residential, isp)
+  let route
+  try {
+    route = routes(residential, isp)
+  } catch (error) {
+    console.error(`error: ${error.message}`)
+    process.exit(2)
+  }
+  const { proxy, perMinute, listProxy, listPerMinute } = route
   try {
     let results
     if (cmd === 'curve') {
