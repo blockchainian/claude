@@ -56,7 +56,7 @@ function codeDialog(values) {
   const page = {
     goto: async () => {},
     fill: async (selector, value) => fields.set(selector, value),
-    inputValue: async (selector) => fields.get(selector),
+    inputValue: async (selector) => fields.get(selector) ?? "",
     isEnabled: async () => true,
     click: async () => clicks.push("credentials"),
     locator: () => ({ first: () => codeField }),
@@ -72,6 +72,75 @@ function codeDialog(values) {
   };
   return { context, page, clicks };
 }
+
+function credentialForm({ values = ["", ""], enabled = false, wipe = false, unreadable = false } = {}) {
+  const fake = codeDialog(["", "", "", ""]);
+  const selectors = ["input[name='username']", "input[type='password']"];
+  const fields = new Map(selectors.map((selector, i) => [selector, values[i]]));
+  const fills = [];
+  const reads = [];
+  fake.page.inputValue = async (selector, options) => {
+    reads.push(options);
+    if (unreadable) throw new Error("Form not ready");
+    return fields.get(selector);
+  };
+  fake.page.fill = async (selector, value) => {
+    fills.push({ selector, value });
+    fields.set(selector, value);
+  };
+  fake.page.isEnabled = async () => enabled;
+  const wait = fake.page.waitForTimeout;
+  fake.page.waitForTimeout = async (ms) => {
+    if (wipe) {
+      for (const selector of selectors) fields.set(selector, "");
+      wipe = false;
+    }
+    await wait(ms);
+  };
+  return { ...fake, fills, reads };
+}
+
+async function signInWithFake({ context, page }) {
+  return signInTiktok(context, page, "bob1", "password", Date.now() + 10000, {
+    readCode: async () => null,
+  });
+}
+
+const credentialFills = [
+  { selector: "input[name='username']", value: "bob1" },
+  { selector: "input[type='password']", value: "password" },
+];
+
+test("a disabled login button leaves filled credentials alone across polls", async () => {
+  const fake = credentialForm();
+  await signInWithFake(fake);
+  assert.deepEqual(fake.fills, credentialFills);
+  assert.deepEqual(fake.clicks, []);
+});
+
+test("credentials wiped to empty after the first fill are filled again", async () => {
+  const fake = credentialForm({ wipe: true });
+  await signInWithFake(fake);
+  assert.deepEqual(fake.fills, [...credentialFills, ...credentialFills]);
+  assert.deepEqual(fake.clicks, []);
+});
+
+test("filled credentials with an enabled button submit once and preserve human edits", async () => {
+  const fake = credentialForm({ values: ["edited-user", "edited-password"], enabled: true });
+  await signInWithFake(fake);
+  assert.deepEqual(fake.fills, []);
+  assert.deepEqual(fake.clicks, ["credentials"]);
+});
+
+test("an unreadable credential field leaves the form alone and keeps polling", async () => {
+  const fake = credentialForm({ unreadable: true, enabled: true });
+  const cookies = await signInWithFake(fake);
+  assert.deepEqual(cookies, [cookie("sessionid", ".tiktok.com")]);
+  assert.deepEqual(fake.fills, []);
+  assert.deepEqual(fake.clicks, []);
+  assert.ok(fake.reads.length >= 4);
+  for (const options of fake.reads) assert.ok(options.timeout > 0 && options.timeout <= 1500);
+});
 
 test("codes typed in the headed dialog submit once per distinct six-digit value", async () => {
   const { context, page, clicks } = codeDialog([
