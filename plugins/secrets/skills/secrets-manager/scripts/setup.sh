@@ -8,13 +8,13 @@ if [ "${1:-}" = "--check" ]; then
   [ -d "$scripts/node_modules/camoufox-js" ] && echo 'dependencies: present' || echo 'dependencies: missing'
   [ -x "$launcher" ] && echo "launcher: present ($launcher)" || echo "launcher: missing ($launcher)"
   if [ -d "$scripts/node_modules/camoufox-js" ]; then
-    node --input-type=module -e 'import(process.argv[1]).then(m => console.log("camoufox: " + (m.camoufoxPath(false) ? "present" : "missing"))).catch(() => console.log("camoufox: missing"))' "$scripts/node_modules/camoufox-js/dist/pkgman.js"
+    node "$scripts/camoufox-install.mjs" --check
   else echo 'camoufox: missing'; fi
   exit 0
 fi
 cd "$scripts"
 npm install
-npx camoufox-js fetch
+node "$scripts/camoufox-install.mjs"
 mkdir -p "$(dirname "$launcher")"
 # Shell-quote the absolute install path, including apostrophes.
 quoted=$(printf '%s' "$scripts/cli.mjs" | sed "s/'/'\\\\''/g")
