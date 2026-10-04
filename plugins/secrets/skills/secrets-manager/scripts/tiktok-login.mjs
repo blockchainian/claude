@@ -18,7 +18,7 @@ const USER_SELECTOR = "input[name='username']";
 const PASS_SELECTOR = "input[type='password']";
 const SUBMIT_SELECTOR = "button[data-e2e='login-button']";
 const BANNED_HEADING = "Your account was banned";
-const SUSPENDED_ERROR = "Your account is currently suspended";
+const SUSPENDED_ERROR = "Your account is currently suspended.";
 
 // "Verify it's really you": TikTok asks a new device for a code it mails to the account's address.
 // The dialog offers the Email method, then a code field.

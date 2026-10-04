@@ -90,7 +90,7 @@ function codeDialog(values) {
   return { context, page, clicks };
 }
 
-for (const message of ["Your account was banned", "Your account is currently suspended"]) {
+for (const message of ["Your account was banned", "Your account is currently suspended."]) {
   test(`visible "${message}" after submitting ends sign-in as banned without further clicks`, async () => {
     const fake = codeDialog(["", "", "", ""]);
     fake.page.getByText = (text, options) => {
