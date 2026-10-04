@@ -186,8 +186,12 @@ export function exa(tool, params, { tries = 6, state = STATE, call = (args) => r
       writeFileSync(outFile, '')
       return ''
     }
-    if (!out.includes('error (429)')) return out
-    sleep((1 + Math.random() * 2 * (attempt + 1)) * 1000)
+    // A limit, a server error or a timeout is asked again; any other error (a refused key) is no result, so the
+    // caller falls back instead of taking the error text for results
+    const passing = /error \((429|5\d\d)\)|timed? ?out|ETIMEDOUT|ECONNRESET/i.test(out)
+    if (!passing && (/error \(\d{3}\)/.test(out) || (r.status && r.status !== 0))) return ''
+    if (!passing) return out
+    if (attempt < tries - 1) sleep((1 + Math.random() * 2 * (attempt + 1)) * 1000)
   }
   return ''
 }
@@ -613,8 +617,8 @@ function main(argv) {
   } else if (command === 'search') {
     const [engine, out] = search(args[0], args[1] ? Number(args[1]) : 8)
     log('search', engine, args[0])
+    if (engine === 'FAILED') { console.error(out); process.exit(1) } // on stderr: the results file stays empty, so a scout asks again
     console.log(out)
-    if (engine === 'FAILED') process.exit(1)
   } else if (command === 'wayback') {
     const code = slot('wayback', 1, () => passthrough('node', [WAYBACK, ...args]))
     log('wayback', code === 0 ? 'ok' : 'FAILED', args.slice(0, 2).join(' '))

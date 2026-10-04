@@ -61,6 +61,18 @@ test('exa retries on 429, stops asking for ten minutes after a 402, and otherwis
   assert.equal(calls, 1)
 })
 
+test('an Exa answer that is an error is no result: a 5xx or a timeout is asked again, any other error gives nothing', () => {
+  const fresh = mkdtempSync(join(tmpdir(), 'exa-'))
+  let calls = 0
+  const unauthorized = () => { calls++; return { status: 1, stdout: 'MCP error: error (401) Unauthorized: invalid API key', stderr: '' } }
+  assert.equal(gate.exa('web_search_exa', ['query=x'], { state: fresh, call: unauthorized }), '', 'a refused key is not a result')
+  assert.equal(calls, 1, 'and is not asked again')
+  const flaky = [{ status: 1, stdout: 'error (503) Service Unavailable', stderr: '' }, { status: 1, stdout: '', stderr: 'Error: request timed out' }, { status: 0, stdout: 'result', stderr: '' }]
+  assert.equal(gate.exa('web_search_exa', ['query=x'], { state: fresh, call: () => flaky.shift() }), 'result')
+  assert.equal(gate.exa('web_search_exa', ['query=x'], { state: fresh, tries: 2, call: () => ({ status: 1, stdout: 'error (500)', stderr: '' }) }), '', 'one that keeps failing gives nothing')
+  rmSync(fresh, { recursive: true, force: true })
+})
+
 // A bq stand-in: answers every call with the rows of the year it was asked for.
 function bigquery(rowsByYear, calls) {
   return args => {
