@@ -130,8 +130,9 @@ test('gdelt reads the running day again every time, keeps the years done before 
   assert.equal(calls.length, 2)
 
   let asked = 0
-  const failing = { ...options, call: args => asked++ ? { status: 1, stdout: 'Quota exceeded: Your project exceeded quota for free query bytes scanned', stderr: '' } : { status: 0, stdout: '[]', stderr: '' } }
-  assert.throws(() => gate.gdelt(['nobody'], '2024-01-01', '2025-12-31', failing), /Quota exceeded/)
+  // bq ends its message with the help page's address, so the quota is recognised anywhere in the output
+  const failing = { ...options, call: args => asked++ ? { status: 1, stdout: 'BigQuery error in query operation: Quota exceeded: Your project exceeded quota for free query bytes scanned. For more information, see\nhttps://cloud.google.com/bigquery/docs/troubleshoot-quotas', stderr: '' } : { status: 0, stdout: '[]', stderr: '' } }
+  assert.throws(() => gate.gdelt(['nobody'], '2024-01-01', '2025-12-31', failing), error => error instanceof gate.QuotaUsedUp && /free BigQuery quota/.test(error.message))
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gdelt', 'nobody', 'articles.out.json'), 'utf8')).covered, [['2024-01-01', '2024-12-31']], 'the year read before the failure is kept')
   assert.throws(() => gate.gdelt(['nobody'], '2025-01-01', '2025-12-31', { ...options, project: '' }), /GDELT_BQ_PROJECT/)
   assert.throws(() => gate.gdelt(['https://api.gdeltproject.org/api/v2/doc/doc?query=x'], undefined, undefined, options), /name/)

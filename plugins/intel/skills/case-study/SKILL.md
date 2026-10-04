@@ -101,6 +101,8 @@ ask for one name.
    ```
 
    It prints the articles per list and exits non-zero when a list failed.
+   GDELT with its free quota of the month used up prints `GAP:` and is not a
+   failure: the run goes on without it, and the report names the gap.
    Run it again until every list holds articles: what was fetched is kept, so
    a second run asks only for what is missing. Do not launch the workflow on
    a failed list; a list that keeps failing is reported and the run stops.

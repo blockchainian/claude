@@ -323,6 +323,9 @@ function dayRange(from, to, start, now) {
   return [from, to, addDays(today, -1)]
 }
 
+// GDELT's free BigQuery quota of the month is used up: the news lists go on without GDELT, which is then a gap.
+export class QuotaUsedUp extends Error {}
+
 // The bq call that lists, for each of `names`, the articles of the days from..to in whose names GDELT found it.
 export function gdeltCommand(names, from, to, project) {
   const sql = `SELECT name, DocumentIdentifier AS url, CAST(DATE AS STRING) AS seen, SourceCommonName AS domain,
@@ -357,6 +360,7 @@ export function gdelt(names, from, to, { data = DATA, state = STATE, project = p
       let rows
       try { rows = r.status === 0 ? JSON.parse(r.stdout.trim() || '[]') : null } catch { rows = null }
       if (r.error?.code === 'ENOBUFS') throw Error(`the answer for ${year} is over ${OUTPUT_MAX / 1e6} MB: ask for fewer names or fewer days (${lacking.map(l => l.a.key).join(', ')})`)
+      if (!rows && /Quota exceeded/i.test(`${r.stdout}${r.stderr}`)) throw new QuotaUsedUp(`the free BigQuery quota of the month is used up (project ${project})`)
       if (!rows) throw Error(((r.stdout || '') + (r.stderr || '') || r.error?.message || 'bq failed').trim().split('\n').at(-1).slice(0, 300))
       for (const { a } of lacking) {
         const found = rows.filter(row => row.name === a.key).map(row => ({ url: row.url, domain: row.domain, date: `${row.seen.slice(0, 4)}-${row.seen.slice(4, 6)}-${row.seen.slice(6, 8)}`, mentions: Number(row.mentions) }))
@@ -634,9 +638,9 @@ function main(argv) {
       for (const line of found) console.log(JSON.stringify(line))
       log(command, 'ok', args.join(' '))
     }, error => {
-      log(command, 'FAILED', args.join(' '))
+      log(command, error instanceof QuotaUsedUp ? 'QUOTA' : 'FAILED', args.join(' '))
       console.error(`${command}: ${error.message}`)
-      process.exit(1)
+      process.exit(error instanceof QuotaUsedUp ? 3 : 1) // 3: a gap, not a failure
     })
   } else if (command === 'ytuploads') {
     ytuploads(args[0] || '').then(({ uploads, missing }) => {
