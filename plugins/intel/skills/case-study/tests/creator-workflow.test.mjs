@@ -1,5 +1,5 @@
 // ABOUTME: Runs the creator workflow script against stand-in agents to check its control flow:
-// ABOUTME: the news lists are fetched once, scouted sources are de-duplicated and batched, every chapter from the notes is
+// ABOUTME: the scouts start at once, scouted sources are de-duplicated and batched, every chapter from the notes is
 // ABOUTME: written, and the introduction and the reasoning chapter come last.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -62,19 +62,17 @@ test('sources found by several scouts are read once, eight to a reader; the numb
   assert.ok(calls.findIndex(c => c.label === 'scout:follower-numbers') < calls.findIndex(c => c.label === 'read:01'))
 })
 
-test('the news lists are fetched once, for every name, before the scouts start; the numbers agents do not wait for them', async () => {
-  const { calls, release } = await run({ ...ARGS, names: 'Jane Doe, JaneDoeVlogs', since: '2015' }, ['news'])
-  const news = calls.find(c => c.label === 'news')
-  assert.match(news.prompt, /case-study\.mjs news "\/w" --since 2015 "Jane Doe" "JaneDoeVlogs"$/)
-  assert.deepEqual(labels(calls, 'scout:'), ['scout:follower-numbers', 'scout:posting-numbers'], 'no scout starts before the news lists are in')
-  await release()
-  assert.equal(labels(calls, 'news').length, 1)
+test('the workflow fetches no news lists: the orchestrator fetched them before launching it, and every scout is pointed at them', async () => {
+  const { calls } = await run({ ...ARGS, subject: 'Jane Doe, YouTube https://www.youtube.com/@janedoe' })
+  assert.equal(labels(calls, 'news').length, 0)
+  assert.ok(!calls.some(c => /case-study\.mjs news/.test(c.prompt)))
   for (const scout of calls.filter(c => c.label.startsWith('scout:') && !c.label.endsWith('-numbers'))) assert.match(scout.prompt, /raw\/news\//)
 })
 
-test('without other names or a first year, the news lists are fetched for the subject from the commands\' own first day', async () => {
-  const { calls } = await run(ARGS)
-  assert.match(calls.find(c => c.label === 'news').prompt, /case-study\.mjs news "\/w" "Jane Doe"$/)
+test('every scout is told the first year of growth, which it searches every year from', async () => {
+  const { calls } = await run({ ...ARGS, since: '2017' })
+  const scouts = calls.filter(c => c.label.startsWith('scout:') && !c.label.endsWith('-numbers'))
+  assert.ok(scouts.every(c => c.prompt.includes('First year of growth: 2017.')))
 })
 
 test('the chapters from the notes are written at once; one agent writes the introduction and the reasoning chapter into the book, last', async () => {

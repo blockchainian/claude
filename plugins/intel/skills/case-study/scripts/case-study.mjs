@@ -164,6 +164,9 @@ function runGate(args) {
 // for all of them, all at once, from the first day of the year `since` (without it, the commands' own first day) to
 // today, into raw/news/. Returns per file the articles it holds, or why its command failed.
 export async function news(work, since, names, run = runGate) {
+  // A URL or a description in the list would fail GDELT for every name: refused before anything is asked.
+  const wrong = names.filter(name => /:\/\/|[,()]/.test(name))
+  if (wrong.length) throw Error(`not a name: ${wrong.join(' | ')}; give each name the subject goes by on its own`)
   const dir = join(work, 'raw', 'news')
   mkdirSync(dir, { recursive: true })
   const from = since ? [`${since}-01-01`] : []
@@ -800,7 +803,11 @@ function main(argv) {
   }
   if (cmd === 'news') {
     if (positionals.length < 2) fail('case-study.mjs news: expected the work directory and at least one name')
-    news(positionals[0], values.since, positionals.slice(1)).then(result => console.log(JSON.stringify(result)))
+    news(positionals[0], values.since, positionals.slice(1)).then(result => {
+      console.log(JSON.stringify(result))
+      // A list that failed fails the command: the scouts are not to start on part of the news
+      if (Object.values(result).some(v => typeof v === 'string')) process.exit(1)
+    }, error => fail(`case-study.mjs news: ${error.message}`))
     return
   }
   if (cmd === 'cited') {

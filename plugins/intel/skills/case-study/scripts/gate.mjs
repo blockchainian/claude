@@ -367,8 +367,9 @@ export function gdelt(names, from, to, { data = DATA, state = STATE, project = p
   })
 }
 
-// One Google News request, compressed, through a random ISP exit; when Google refuses that exit (429, 503) or it fails,
-// asked again through the residential proxy. Google refuses an address it has seen too often, so neither goes direct
+// One Google News request, compressed, through a random ISP exit; when Google refuses that exit (429, 503, or a 302
+// left after following its redirects, seen once in 2026-10 for an article's page) or it fails, asked again through the
+// residential proxy. Google refuses an address it has seen too often, so neither goes direct
 // unless no proxy is set.
 export async function gnewsRequest(url, form, { exits = proxies(), residential = (process.env.RESIDENTIAL_PROXY_URL || '').trim(), curl = args => runAsync('curl', args) } = {}) {
   const routes = [exits.length ? exits[Math.floor(Math.random() * exits.length)] : null, ...(residential ? [residential] : [])]
@@ -378,7 +379,7 @@ export async function gnewsRequest(url, form, { exits = proxies(), residential =
     const out = r.stdout || ''
     const cut = out.lastIndexOf('\n')
     answer = { status: Number(out.slice(cut + 1)), body: out.slice(0, cut) }
-    if (![0, 429, 503].includes(answer.status)) break
+    if (![0, 302, 429, 503].includes(answer.status)) break
   }
   return answer
 }
@@ -442,7 +443,8 @@ export async function gnews(name, from, to, { data = DATA, state = STATE, now = 
     }
     const items = new Map() // month -> its articles, with Google's link
     let refusal = await pool([...months].sort(), workers, async first => {
-      const query = `${String(name).trim()} after:${first} before:${nextMonth(first)}`
+      // In quotes: a name of several words searched as separate words matches every article with any of them
+      const query = `"${String(name).trim()}" after:${first} before:${nextMonth(first)}`
       const r = await call(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`)
       if (r.status !== 200) throw Error(`Google News answered ${r.status} for the month of ${first.slice(0, 7)}; the months done are kept`)
       items.set(first, [...r.body.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(([, item]) => {

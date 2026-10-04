@@ -129,3 +129,11 @@ test('curve has one dated row per capture of every address, each naming its capt
   assert.equal(rows[0].url, `${base}/web/20140115000000id_/example.com/channel-a`)
   assert.ok(statSync(rows[0].file).isFile())
 })
+
+test('the capture lists go through the ISP proxy at its own rate, the captures through the residential proxy at the residential rate', () => {
+  assert.deepEqual(wb.routes('http://home.example:1', 'http://isp.example:2'),
+    { proxy: 'http://home.example:1', perMinute: wb.RESIDENTIAL_PER_MINUTE, listProxy: 'http://isp.example:2', listPerMinute: wb.PER_MINUTE })
+  assert.deepEqual(wb.routes('', 'http://isp.example:2'),
+    { proxy: 'http://isp.example:2', perMinute: wb.PER_MINUTE, listProxy: 'http://isp.example:2', listPerMinute: wb.PER_MINUTE })
+  assert.deepEqual(wb.routes('', null), { proxy: null, perMinute: wb.PER_MINUTE, listProxy: null, listPerMinute: wb.PER_MINUTE })
+})

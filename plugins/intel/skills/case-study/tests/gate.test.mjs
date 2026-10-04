@@ -149,6 +149,7 @@ test('gnews asks Google News for each month it lacks, keeps the articles under t
       + item('Second - B', 'https://news.google.com/rss/articles/two', 'Wed, 11 Jun 2025 07:00:00 GMT', 'b.example') + item('Again - A', 'https://news.google.com/rss/articles/one', 'Tue, 03 Jun 2025 07:00:00 GMT', 'a.example'),
   }
   const asked = []
+  const searched = []
   const resolved = []
   // Google's page for a link carries a signature, and its batchexecute answers with the article's address for it
   const call = (url, form) => {
@@ -164,7 +165,7 @@ test('gnews asks Google News for each month it lacks, keeps the articles under t
       })
       return { status: 200, body: `)]}'\n\n${JSON.stringify([...answers.reverse(), ['di', 11]])}\n` }
     }
-    const month = decodeURIComponent(url).match(/after:([\d-]+) before:([\d-]+)/); asked.push(`${month[1]} ${month[2]}`); return { status: 200, body: `<rss>${months[month[1]] || ''}</rss>` }
+    const month = decodeURIComponent(url).match(/after:([\d-]+) before:([\d-]+)/); searched.push(new URL(url).searchParams.get('q')); asked.push(`${month[1]} ${month[2]}`); return { status: 200, body: `<rss>${months[month[1]] || ''}</rss>` }
   }
   const options = { data, state, call, now: new Date('2026-10-03T12:00:00Z') }
   assert.deepEqual((await gate.gnews('Kobeissi Letter', '2025-06-04', '2025-06-12', options)), [
@@ -172,6 +173,7 @@ test('gnews asks Google News for each month it lacks, keeps the articles under t
   ], 'only the days asked for')
   assert.deepEqual(asked, ['2025-06-01 2025-07-01'], 'whole calendar months, first day to first day')
   assert.deepEqual((await gate.gnews('kobeissi letter', '2025-06-02', '2025-06-15', options)).map(a => a.title), ['Stocks & bonds - A', 'Second - B'], 'one article per link, oldest first')
+  assert.ok(searched.every(q => q.startsWith('"Kobeissi Letter" after:') || q.startsWith('"kobeissi letter" after:')), 'the name is searched as a phrase, not as separate words')
   assert.equal(asked.length, 1, 'months already held are not asked for again')
   assert.deepEqual(resolved, ['one', 'two'], 'a link is resolved once')
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')), { name: 'kobeissi letter', covered: [['2025-06-01', '2025-06-30']], count: 2 })
@@ -199,7 +201,7 @@ test('a Google News request goes compressed through an ISP exit, and through the
   assert.ok(exits.includes(asked[0][asked[0].indexOf('-x') + 1]), 'through one of the ISP exits')
   assert.equal(asked[0].at(-1), 'https://news.google.com/rss/search?q=x')
   asked.length = 0
-  for (const refusal of [503, 429]) {
+  for (const refusal of [503, 429, 302]) {
     assert.deepEqual((await gate.gnewsRequest('https://news.google.com/x', 'form', { exits, residential, curl: curl([refusal, 200]) })).status, 200)
     assert.equal(asked.at(-1)[asked.at(-1).indexOf('-x') + 1], residential, `a ${refusal} is asked again through the residential proxy`)
     assert.ok(asked.at(-1).includes('f.req=form'), 'with the same form')

@@ -506,5 +506,8 @@ test('news fetches Google News for each name and GDELT for all of them at once, 
   assert.equal(readFileSync(join(work, 'raw', 'news', 'gdelt.jsonl'), 'utf8').split('\n').filter(Boolean).length, 2)
   await cs.news(work, '', ['Jane Doe'], run)
   assert.deepEqual(asked.at(-1), ['gdelt', 'Jane Doe'], 'without a first year, the commands\' own first day')
+  asked.length = 0
+  await assert.rejects(() => cs.news(work, '2015', ['Jane Doe', 'Jane Doe, YouTube https://www.youtube.com/@janedoe'], run), /not a name/)
+  assert.equal(asked.length, 0, 'a list of names with a URL or a description in it asks for nothing')
   rmSync(work, { recursive: true, force: true })
 })
