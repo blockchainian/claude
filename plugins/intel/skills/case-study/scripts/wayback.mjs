@@ -41,10 +41,16 @@ const EXACT = [ // patterns whose first group is the full count, digits with any
   /title="([\d][\d,.\s ]*) Followers"/,
   /([\d][\d,]{4,}) subscribers/,
 ]
-// The channel's own header on the script-rendered page; other channels listed on the page have counts too.
-const HEADER = /"c4TabbedHeaderRenderer"[\s\S]*?"subscriberCountText":\{(?:"simpleText":"|"runs":\[\{"text":")([^"]+)"/
+// The channel's own count, rounded or in words, where the page shows it; other channels listed on the page have counts
+// too. In order: the script-rendered channel header (its accessibility label comes first from 2021), the page header
+// YouTube uses from 2024, and Social Blade's statistics page from 2025.
+const HEADERS = [
+  /"c4TabbedHeaderRenderer"[\s\S]*?"subscriberCountText":\{(?:"accessibility":\{"accessibilityData":\{"label":"[^"]*"\}\},)?(?:"simpleText":"|"runs":\[\{"text":")([^"]+)"/,
+  /"pageHeaderRenderer"[\s\S]*?"content":"([^"]*\bsubscribers)"/,
+  />subscribers<\/p><p[^>]*>([\d.,]+[KMB]?)<\/p>/,
+]
 const FULL = /^\d{1,3}(?:[.,\s ]\d{3})+/ // a whole count with thousands separators
-const ROUNDED = /^([\d.]+)([KMB]) subscribers$/
+const ROUNDED = /^([\d.]+)([KMB])(?: subscribers)?$/
 
 export class Refused extends Error {
   // The archive (or the proxy) turned the caller away before the batch finished.
@@ -211,7 +217,7 @@ export function extract(page) {
     const match = pattern.exec(page)
     if (match) return { value: Number(match[1].replace(/\D/g, '')), text: match[1].trim() }
   }
-  const match = HEADER.exec(page)
+  const match = HEADERS.map(pattern => pattern.exec(page)).find(Boolean)
   if (!match) return { value: null, text: null }
   const text = match[1]
   const full = FULL.exec(text)

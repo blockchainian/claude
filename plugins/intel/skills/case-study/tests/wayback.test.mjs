@@ -60,6 +60,13 @@ test('extract reads the count a capture shows', () => {
   assert.equal(wb.extract('"c4TabbedHeaderRenderer":{"subscriberCountText":{"simpleText":"57.216.326 iscritti"}}').value, 57216326, 'a full count in the header, whatever the language')
   assert.equal(wb.extract('{"followers_count":342701,"friends_count":10}').value, 342701, 'a twitter capture gives the follower count')
   assert.deepEqual(wb.extract('<html>subscribe</html>'), { value: null, text: null }, 'a page with no count gives nothing')
+  // Formats in the IShowSpeed captures of 2021-2026, each the channel's own count
+  assert.deepEqual(wb.extract('"subscriberCountText":{"accessibility":{"accessibilityData":{"label":"61.1K subscribers"}},"simpleText":"61.1K subscribers"},"x":1,"c4TabbedHeaderRenderer":{"channelId":"UC","subscriberCountText":{"accessibility":{"accessibilityData":{"label":"1.6 million subscribers"}},"simpleText":"1.6M subscribers"},"tvBanner":{}}'),
+    { value: 1600000, text: '1.6M subscribers' }, 'the header\'s count when its accessibility label comes before the text')
+  assert.deepEqual(wb.extract('"metadataParts":[{"text":{"content":"9K subscribers"}}],"pageHeaderRenderer":{"pageTitle":"IShowSpeed","metadataRows":[{"metadataParts":[{"text":{"content":"@IShowSpeed"}}]},{"metadataParts":[{"text":{"content":"47M subscribers"}},{"text":{"content":"1.8K videos"}}]}]}'),
+    { value: 47000000, text: '47M subscribers' }, 'the page header of 2024 on, not a count before it')
+  assert.deepEqual(wb.extract('<div class="py-1"><p class="m-0 text-[0.75em] font-medium capitalize pr-[50px]">subscribers</p><p class="text-[1.25em] font-extralight pr-[50px]">36.8M</p></div>'),
+    { value: 36800000, text: '36.8M' }, 'Social Blade\'s layout of 2025 on')
 })
 
 test('fetchAll saves every page in input order at its rate; a replayed 429 is a result', async () => {
