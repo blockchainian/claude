@@ -43,13 +43,22 @@ const ARGS = { subject: 'Jane Doe', work: '/w', skill: '/s', lang: 'English', to
 const labels = (calls, prefix) => calls.filter(c => c.label.startsWith(prefix)).map(c => c.label)
 const BODY = ['02', '03', '04', '05', '06', '07', '08', '09']
 
+const LANES = ['interviews', 'own-explainers', 'internal-documents', 'press-at-the-time', 'trade-and-profiles', 'books-and-films', 'people', 'records', 'data-and-today', 'criticism']
+
+test('one scout per source type, each told to search at once and open nothing, with its share of the caps', async () => {
+  const { calls } = await run(ARGS)
+  const scouts = calls.filter(c => c.label.startsWith('scout:') && !c.label.endsWith('-numbers'))
+  assert.deepEqual(scouts.map(c => c.label.slice(6)).sort(), [...LANES].sort())
+  assert.ok(scouts.every(c => c.prompt.includes('1/10 share')))
+})
+
 test('sources found by several scouts are read once, eight to a reader; the numbers agents start with the scouts', async () => {
   const { calls, result } = await run(ARGS)
-  assert.equal((await result()).scouted, 4 * 29 + 1)
-  assert.equal(labels(calls, 'read:').length, Math.ceil(117 / 8))
+  assert.equal((await result()).scouted, 10 * 29 + 1)
+  assert.equal(labels(calls, 'read:').length, Math.ceil(291 / 8))
   assert.equal(calls.filter(c => c.prompt.includes('https://shared.example/a/')).filter(c => c.label.startsWith('read:')).length, 1)
   assert.deepEqual(labels(calls, 'scout:').filter(l => l.endsWith('-numbers')), ['scout:follower-numbers', 'scout:posting-numbers'])
-  assert.ok(labels(calls, 'scout:').includes('scout:analysts-and-critics'))
+  assert.ok(labels(calls, 'scout:').includes('scout:criticism'))
   assert.ok(calls.findIndex(c => c.label === 'scout:follower-numbers') < calls.findIndex(c => c.label === 'read:01'))
 })
 
@@ -106,7 +115,7 @@ test('nothing reviews or fixes a chapter: the introduction and the reasoning cha
 test('writers run on Opus 4.8 at high effort, and each agent is told its share of the caps', async () => {
   const { calls } = await run(ARGS)
   assert.ok(calls.filter(c => c.label.startsWith('write:')).every(c => c.model === 'claude-opus-4-8' && c.effort === 'high'), 'a writer\'s chapter is the text the reader gets')
-  assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/17 share'))
+  assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/39 share'))
 })
 
 test('with the scouting done, the known sources are read again, eight to a reader, and the numbers agents still run', async () => {
