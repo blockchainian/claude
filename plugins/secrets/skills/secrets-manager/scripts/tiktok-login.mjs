@@ -44,16 +44,27 @@ export function loginProxy(env, slot = null) {
   return { slot, url: ispProxyAt(env.ISP_PROXY_URL, slot) };
 }
 
-// Fill only empty fields, preserving existing values and human edits. Return false while fields
-// are unreadable or empty after filling, or the submit button is disabled; otherwise submit once.
-async function submitCredentials(page, username, password) {
+// TikTok renders fields before its script takes them over, so early input can be wiped or not
+// registered. Fill empty fields and retry our unchanged values at most three times while disabled,
+// keeping the page from jumping indefinitely so a person can take over. Preserve human edits.
+async function submitCredentials(page, username, password, state) {
   try {
-    const userValue = await page.inputValue(USER_SELECTOR, { timeout: 1000 });
-    const passValue = await page.inputValue(PASS_SELECTOR, { timeout: 1000 });
+    let userValue = await page.inputValue(USER_SELECTOR, { timeout: 1000 });
+    let passValue = await page.inputValue(PASS_SELECTOR, { timeout: 1000 });
+    const filledEmpty = userValue === "" || passValue === "";
     if (userValue === "") await page.fill(USER_SELECTOR, username, { timeout: 4000 });
     if (passValue === "") await page.fill(PASS_SELECTOR, password, { timeout: 4000 });
-    if (!(await page.inputValue(USER_SELECTOR, { timeout: 1000 })) || !(await page.inputValue(PASS_SELECTOR, { timeout: 1000 }))) return false;
-    if (!(await page.isEnabled(SUBMIT_SELECTOR))) return false;
+    userValue = await page.inputValue(USER_SELECTOR, { timeout: 1000 });
+    passValue = await page.inputValue(PASS_SELECTOR, { timeout: 1000 });
+    if (!userValue || !passValue) return false;
+    if (!(await page.isEnabled(SUBMIT_SELECTOR))) {
+      if (!filledEmpty && userValue === username && passValue === password && state.refills < 3) {
+        state.refills++;
+        await page.fill(USER_SELECTOR, username, { timeout: 4000 });
+        await page.fill(PASS_SELECTOR, password, { timeout: 4000 });
+      }
+      return false;
+    }
     await page.click(SUBMIT_SELECTOR, { timeout: 4000 });
     return true;
   } catch {
@@ -105,6 +116,7 @@ export async function signInTiktok(context, page, username, password, deadlineMs
   await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" });
   const ended = new AbortController();
   let submitted = false;
+  const credentialState = { refills: 0 };
   let codeAsked = false;
   let code = null;
   const submittedCodes = new Set();
@@ -113,7 +125,7 @@ export async function signInTiktok(context, page, username, password, deadlineMs
       const cookies = sessionCookies(await context.cookies());
       if (cookies) return cookies;
       if (!submitted) {
-        submitted = await submitCredentials(page, username, password);
+        submitted = await submitCredentials(page, username, password, credentialState);
       } else if (code) {
         submittedCodes.add(code);
         await submitEmailCode(page, code).catch(() => {});
