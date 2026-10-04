@@ -88,13 +88,10 @@ The gate adds the Chrome login itself: never add `--cookies-from-browser`.
 
 ## X
 
-The account logged in in Chrome is a side account (joinupcomment).
+Every post on X — a search, an account's own posts, a thread — comes from
+`$G fetch-x-posts`, and from nothing else.
 
-- Before using it: `$G chrome twitter whoami`. If it is not joinupcomment,
-  stop and report. Never use a scraper's account token.
-- Posts: `$G chrome twitter tweets <handle> --limit 50 -f yaml`,
-  `$G chrome twitter thread <post id> -f yaml`.
-- Search: `$G fetch-x-posts "<query>" --limit 40` (newest first; `--top` by
+- `$G fetch-x-posts "<query>" --limit 40` (newest first; `--top` by
   engagement). One JSON post per line: id, url, created_at (UTC), user, text
   (in full), likes, retweets, replies, views, quoted, in_reply_to. It runs on
   an account pool, not on the side account: search freely.
@@ -108,12 +105,9 @@ The account logged in in Chrome is a side account (joinupcomment).
     about 40 seconds).
   - A non-zero exit is a failure and the last stderr line says why: write it
     into the gaps as it is. Exit 0 with no output is a true empty result.
-  - Not `opencli twitter search`.
-- One post, or an account's current follower count and join date, without
-  login (`$G read` cannot read JSON, use curl here):
-  `curl -s https://api.fxtwitter.com/<handle>` and
-  `curl -s https://api.fxtwitter.com/<handle>/status/<id>`.
-- `opencli twitter profile` returns 0 followers: do not use it.
+  - An account's own posts: `from:<handle>`; a thread: `conversation_id:<post id>`.
+- An account's current follower count and join date (not posts):
+  `curl -s https://api.fxtwitter.com/<handle>`.
 
 ## TikTok and Instagram
 

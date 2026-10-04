@@ -16,9 +16,15 @@ source types in the type file. Then:
    cd <work>/raw && mkdir -p scout-<lane> && i=0; for q in "<query>" "<query>" ...; do i=$((i+1)); $G search "$q" 8 > scout-<lane>/$i.txt & done; wait
    ```
 
-   Videos the same way with the video search command. The press-at-the-time
-   lane runs no search: it picks from the news lists in `<work>/raw/news/`
-   (count the domains and the years with one command first).
+   Other channels go in the same command, each its own file, by lane:
+
+   | Lane | Also |
+   |---|---|
+   | interviews | `$G ytsearch`, `$G chrome apple-podcasts search` |
+   | own-explainers | `$G fetch-x-posts "from:<handle> <words>" --top --limit 100`, for every account of the subject on X |
+   | press-at-the-time | Picks from the news lists in `<work>/raw/news/` (count the domains and the years with one command first); they hold US English Google News, so it also runs `$G search` in the subject's home language and other large languages |
+   | criticism | `$G chrome reddit search`, `$G fetch-x-posts` |
+
 2. Pick from the results in one look: the original pages about the subject,
    from many sites. Leave out search pages, wikis, aggregators, sellers of
    courses, coaching, tools or consulting, press releases and content farms.
