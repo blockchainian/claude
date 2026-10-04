@@ -5,7 +5,7 @@ export const meta = {
   description: 'Research one creator into a book: scouts, parallel readers, numbers, a writer per chapter, then the introduction and the reasoning chapter',
   phases: [
     { title: 'Scout', detail: 'one scout per source type, picking press from the news lists fetched before the workflow; the two numbers agents start at once', model: 'sonnet' },
-    { title: 'Read', detail: 'readers in batches of 8 sources', model: 'sonnet' },
+    { title: 'Read', detail: 'readers in batches of 8 sources, 2 for videos and podcast episodes, which start first', model: 'sonnet' },
     { title: 'Write', detail: 'one writer per chapter, as soon as the reading is merged: the text the reader gets, with its source marks', model: 'claude-opus-4-8' },
     { title: 'Book', detail: 'one agent strips the marks from the chapters and writes the introduction and the reasoning chapter from them' },
   ],
@@ -77,8 +77,11 @@ for (const s of scouted.flatMap(r => r.sources)) {
   const key = s.url.split('#')[0].replace(/[?&]utm_[^&]*/g, '').replace(/\/$/, '')
   if (!seen.has(key)) { seen.add(key); urls.push(s) }
 }
-const batches = []
-for (let i = 0; i < urls.length; i += 8) batches.push(urls.slice(i, i + 8))
+// A video or a podcast episode is often an hour to download, transcribe and read: two go to a reader, and their
+// batches come first, so the long ones start in the first wave of readers instead of waiting for a free one.
+const MEDIA = /^https?:\/\/((www|m)\.)?(youtube\.com\/(watch|live\/)|youtu\.be\/|spreaker\.com\/episode|podcasts\.apple\.com\/|open\.spotify\.com\/episode)/
+const slices = (list, size) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, (i + 1) * size))
+const batches = [...slices(urls.filter(s => MEDIA.test(s.url)), 2), ...slices(urls.filter(s => !MEDIA.test(s.url)), 8)]
 if (!READ_DONE) log(SCOUT_DONE ? `known sources: ${urls.length}, ${batches.length} reader batches` : `scouts: ${scouted.length}/${LANES.length} lanes, ${urls.length} distinct sources, ${batches.length} reader batches`)
 
 phase('Read')
