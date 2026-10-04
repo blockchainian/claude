@@ -131,8 +131,10 @@ test('gdelt reads the running day again every time, keeps the years done before 
 
   let asked = 0
   // bq ends its message with the help page's address, so the quota is recognised anywhere in the output
-  const failing = { ...options, call: args => asked++ ? { status: 1, stdout: 'BigQuery error in query operation: Quota exceeded: Your project exceeded quota for free query bytes scanned. For more information, see\nhttps://cloud.google.com/bigquery/docs/troubleshoot-quotas', stderr: '' } : { status: 0, stdout: '[]', stderr: '' } }
-  assert.throws(() => gate.gdelt(['nobody'], '2024-01-01', '2025-12-31', failing), error => error instanceof gate.QuotaUsedUp && /free BigQuery quota/.test(error.message))
+  const heldRow = JSON.stringify([{ name: 'nobody', url: 'https://h.example/held', seen: '20240105000000', domain: 'h.example', mentions: '1' }])
+  const failing = { ...options, call: args => asked++ ? { status: 1, stdout: 'BigQuery error in query operation: Quota exceeded: Your project exceeded quota for free query bytes scanned. For more information, see\nhttps://cloud.google.com/bigquery/docs/troubleshoot-quotas', stderr: '' } : { status: 0, stdout: heldRow, stderr: '' } }
+  assert.throws(() => gate.gdelt(['nobody'], '2024-01-01', '2025-12-31', failing), error => error instanceof gate.QuotaUsedUp && /free BigQuery quota/.test(error.message)
+    && error.held.map(a => a.url).join() === 'https://h.example/held')
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gdelt', 'nobody', 'articles.out.json'), 'utf8')).covered, [['2024-01-01', '2024-12-31']], 'the year read before the failure is kept')
   assert.throws(() => gate.gdelt(['nobody'], '2025-01-01', '2025-12-31', { ...options, project: '' }), /GDELT_BQ_PROJECT/)
   assert.throws(() => gate.gdelt(['https://api.gdeltproject.org/api/v2/doc/doc?query=x'], undefined, undefined, options), /name/)
@@ -180,7 +182,8 @@ test('gnews asks Google News for each month it lacks, keeps the articles under t
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')), { name: 'kobeissi letter', covered: [['2025-06-01', '2025-06-30']], count: 2 })
   let n = 0
   const refusing = { ...options, call: url => { asked.push('x'); return n++ ? { status: 429, body: '' } : { status: 200, body: '<rss></rss>' } } }
-  await assert.rejects(() => gate.gnews('Kobeissi Letter', '2025-06-02', '2025-08-31', refusing), /429/)
+  await assert.rejects(() => gate.gnews('Kobeissi Letter', '2025-06-02', '2025-08-31', refusing), error => /429/.test(error.message)
+    && error.held.map(a => a.title).join() === 'Stocks & bonds - A,Second - B')
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'kobeissi-letter', 'articles.out.json'), 'utf8')).covered, [['2025-06-01', '2025-07-31']], 'the month read before the refusal is kept')
   months['2025-08-01'] = item('No signature - C', 'https://news.google.com/rss/articles/bare?oc=5', 'Tue, 05 Aug 2025 07:00:00 GMT', 'c.example')
   assert.deepEqual((await gate.gnews('Kobeissi Letter', '2025-08-01', '2025-08-31', options)).map(a => a.url), ['https://news.google.com/rss/articles/bare?oc=5'], 'a link Google gives no address for stays as it is')
@@ -317,4 +320,17 @@ test('the command prints its usage without arguments and runs through a symlink'
   const stats = spawnSync(process.execPath, [script, 'stats'], { encoding: 'utf8', env: { ...process.env, CASE_STUDY_LIMITS: state } })
   assert.equal(stats.status, 0)
   assert.equal(JSON.parse(stats.stdout)['read:jina'], 2)
+})
+
+test('a month searched before Google refused the next one has its links resolved and is kept', async () => {
+  const data = mkdtempSync(join(tmpdir(), 'data-'))
+  const july = '<item><title>July - A</title><link>https://news.google.com/rss/articles/jul</link><pubDate>Tue, 08 Jul 2025 07:00:00 GMT</pubDate><source url="https://www.a.example">A</source></item>'
+  const call = (url, form) => {
+    if (url.includes('/rss/articles/')) return { status: 200, body: '<c-wiz><div data-n-a-sg="s" data-n-a-ts="1"></div></c-wiz>' }
+    if (url.endsWith('/batchexecute')) return { status: 200, body: `)]}'\n\n${JSON.stringify([['wrb.fr', 'Fbv4je', JSON.stringify(['garturlres', 'https://a.example/july', 1]), null, null, null, '0']])}\n` }
+    return decodeURIComponent(url).includes('after:2025-07-01') ? { status: 200, body: `<rss>${july}</rss>` } : { status: 429, body: '' }
+  }
+  await assert.rejects(() => gate.gnews('Someone', '2025-07-01', '2025-08-31', { data, state, call, now: new Date('2026-10-03T12:00:00Z'), workers: 1 }), /429/)
+  assert.deepEqual(JSON.parse(readFileSync(join(data, 'gnews', 'someone', 'articles.out.json'), 'utf8')).covered, [['2025-07-01', '2025-07-31']])
+  rmSync(data, { recursive: true, force: true })
 })

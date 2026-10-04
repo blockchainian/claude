@@ -350,24 +350,30 @@ export function gdelt(names, from, to, { data = DATA, state = STATE, project = p
   mkdirSync(state, { recursive: true })
   return withLock(join(state, 'gdelt.lock'), () => {
     const kept = [...new Map(names.map(name => archive('gdelt', name, data)).map(a => [a.key, a])).values()]
-    for (let year = Number(start.slice(0, 4)); year <= Number(end.slice(0, 4)); year++) {
-      const inYear = ([a, b]) => [a < `${year}-01-01` ? `${year}-01-01` : a, b > `${year}-12-31` ? `${year}-12-31` : b]
-      const lacking = kept.map(a => ({ a, gaps: missingDays(a.covered, start, end).map(inYear).filter(([x, y]) => x <= y) })).filter(l => l.gaps.length)
-      if (!lacking.length) continue
-      const first = lacking.map(l => l.gaps[0][0]).sort()[0]
-      const last = lacking.map(l => l.gaps.at(-1)[1]).sort().at(-1)
-      const r = call(gdeltCommand(lacking.map(l => l.a.key), first, last, project))
-      let rows
-      try { rows = r.status === 0 ? JSON.parse(r.stdout.trim() || '[]') : null } catch { rows = null }
-      if (r.error?.code === 'ENOBUFS') throw Error(`the answer for ${year} is over ${OUTPUT_MAX / 1e6} MB: ask for fewer names or fewer days (${lacking.map(l => l.a.key).join(', ')})`)
-      if (!rows && /Quota exceeded/i.test(`${r.stdout}${r.stderr}`)) throw new QuotaUsedUp(`the free BigQuery quota of the month is used up (project ${project})`)
-      if (!rows) throw Error(((r.stdout || '') + (r.stderr || '') || r.error?.message || 'bq failed').trim().split('\n').at(-1).slice(0, 300))
-      for (const { a } of lacking) {
-        const found = rows.filter(row => row.name === a.key).map(row => ({ url: row.url, domain: row.domain, date: `${row.seen.slice(0, 4)}-${row.seen.slice(4, 6)}-${row.seen.slice(6, 8)}`, mentions: Number(row.mentions) }))
-        a.add(found, first, last > yesterday ? yesterday : last)
+    const held = () => kept.flatMap(a => a.between(start, end).map(article => ({ name: a.key, ...article })))
+    try {
+      for (let year = Number(start.slice(0, 4)); year <= Number(end.slice(0, 4)); year++) {
+        const inYear = ([a, b]) => [a < `${year}-01-01` ? `${year}-01-01` : a, b > `${year}-12-31` ? `${year}-12-31` : b]
+        const lacking = kept.map(a => ({ a, gaps: missingDays(a.covered, start, end).map(inYear).filter(([x, y]) => x <= y) })).filter(l => l.gaps.length)
+        if (!lacking.length) continue
+        const first = lacking.map(l => l.gaps[0][0]).sort()[0]
+        const last = lacking.map(l => l.gaps.at(-1)[1]).sort().at(-1)
+        const r = call(gdeltCommand(lacking.map(l => l.a.key), first, last, project))
+        let rows
+        try { rows = r.status === 0 ? JSON.parse(r.stdout.trim() || '[]') : null } catch { rows = null }
+        if (r.error?.code === 'ENOBUFS') throw Error(`the answer for ${year} is over ${OUTPUT_MAX / 1e6} MB: ask for fewer names or fewer days (${lacking.map(l => l.a.key).join(', ')})`)
+        if (!rows && /Quota exceeded/i.test(`${r.stdout}${r.stderr}`)) throw new QuotaUsedUp(`the free BigQuery quota of the month is used up (project ${project})`)
+        if (!rows) throw Error(((r.stdout || '') + (r.stderr || '') || r.error?.message || 'bq failed').trim().split('\n').at(-1).slice(0, 300))
+        for (const { a } of lacking) {
+          const found = rows.filter(row => row.name === a.key).map(row => ({ url: row.url, domain: row.domain, date: `${row.seen.slice(0, 4)}-${row.seen.slice(4, 6)}-${row.seen.slice(6, 8)}`, mentions: Number(row.mentions) }))
+          a.add(found, first, last > yesterday ? yesterday : last)
+        }
       }
+    } catch (error) {
+      error.held = held() // what is held is printed even when a year fails
+      throw error
     }
-    return kept.flatMap(a => a.between(start, end).map(article => ({ name: a.key, ...article })))
+    return held()
   })
 }
 
@@ -457,16 +463,17 @@ export async function gnews(name, from, to, { data = DATA, state = STATE, now = 
         return { link: field('link'), domain: ((item.match(/<source url="([^"]*)"/) || [])[1] || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''), date: isNaN(published) ? first : day(published), title: field('title') }
       }).filter(article => article.link))
     })
+    // The months searched before a refusal still have their links resolved, so that they are kept
     const links = [...new Set([...items.values()].flat().map(article => article.link))]
     const addresses = new Map() // link -> the article's own address, or the link itself when Google gives none
     const signed = []
-    refusal ??= await pool(links, workers, async link => {
+    let linkRefusal = await pool(links, workers, async link => {
       const signature = await linkSignature(link, call)
       if (signature) signed.push({ link, ...signature })
       else addresses.set(link, link)
     })
     const batches = Array.from({ length: Math.ceil(signed.length / batch) }, (_, i) => signed.slice(i * batch, (i + 1) * batch))
-    refusal ??= await pool(batches, workers, async some => {
+    linkRefusal ??= await pool(batches, workers, async some => {
       const resolved = await resolveLinks(some, call)
       for (const { link } of some) addresses.set(link, resolved.get(link) || link)
     })
@@ -475,7 +482,8 @@ export async function gnews(name, from, to, { data = DATA, state = STATE, now = 
       const last = addDays(nextMonth(first), -1)
       a.add(articles.map(({ link, ...article }) => ({ url: addresses.get(link), ...article })), first, last > yesterday ? yesterday : last)
     }
-    if (refusal) throw refusal
+    refusal ??= linkRefusal
+    if (refusal) { refusal.held = a.between(start, end); throw refusal } // what is held is printed even so
     return a.between(start, end)
   })
 }
@@ -638,6 +646,7 @@ function main(argv) {
       for (const line of found) console.log(JSON.stringify(line))
       log(command, 'ok', args.join(' '))
     }, error => {
+      for (const line of error.held || []) console.log(JSON.stringify(line))
       log(command, error instanceof QuotaUsedUp ? 'QUOTA' : 'FAILED', args.join(' '))
       console.error(`${command}: ${error.message}`)
       process.exit(error instanceof QuotaUsedUp ? 3 : 1) // 3: a gap, not a failure
