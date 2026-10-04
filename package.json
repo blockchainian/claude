@@ -1,13 +1,13 @@
 {
   "name": "blockchainian-claude",
   "private": true,
-  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, mobile, render, cloudflare, proxy, intel, and web plugins.",
+  "description": "The blockchainian plugin marketplace for Claude Code: the feature, codex, mobile, render, cloudflare, proxy, intel, web, secrets and create plugins.",
   "type": "module",
   "engines": {
     "node": ">=18.18"
   },
   "scripts": {
-    "test": "npm run test:marketplace && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web && npm run test:mobile && npm run test:secrets",
+    "test": "npm run test:marketplace && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web && npm run test:mobile && npm run test:secrets && npm run test:create",
     "test:marketplace": "node --test tests/marketplace.test.mjs",
     "test:codex": "node --test plugins/codex/tests/*.mjs",
     "validate": "claude plugin validate --strict .",
@@ -16,6 +16,7 @@
     "test:intel": "node --test plugins/intel/skills/transcribe/tests/*.mjs && uv run plugins/intel/skills/digest/tests/test_fetch_source.py && node --test plugins/intel/skills/digest/tests/*.mjs && uv run plugins/intel/skills/digest/tests/test_pdf_highlights.py && node --test plugins/intel/skills/translate/tests/*.mjs && uv run plugins/intel/skills/translate/tests/test_render.py && node --test plugins/intel/skills/find-domain-names/tests/check.test.mjs && node --test plugins/intel/skills/download-book/tests/*.mjs && node --test plugins/intel/skills/case-study/tests/*.mjs && node --test plugins/intel/skills/analyze-appstore-reviews/tests/*.mjs && node --test plugins/intel/skills/fetch-x-mentions/tests/*.mjs plugins/intel/skills/fetch-x-posts/tests/*.mjs plugins/intel/skills/fetch-x-user-posts/tests/*.mjs plugins/intel/skills/analyze-x-mentions/tests/*.mjs plugins/intel/skills/analyze-x-user/tests/*.mjs plugins/intel/skills/analyze-x-users/tests/*.mjs plugins/intel/skills/fetch-tiktok-mentions/tests/*.mjs",
     "test:web": "node --test plugins/web/skills/heap-snapshot-leaks/tests/*.mjs && uv run plugins/web/skills/check-web-design/tests/test_check_design.py",
     "test:mobile": "uv run plugins/mobile/hooks/tests/test_phone_session_gate.py && node --test plugins/mobile/skills/ios-take-screenshot/tests/*.mjs && uv run plugins/mobile/skills/ios-take-screenshot/tests/test_frame_diff.py && uv run plugins/mobile/skills/ios-take-screenshot/tests/test_stitch_screens.py && uv run plugins/mobile/skills/check-mobile-design/tests/test_check_design.py",
-    "test:secrets": "node --test plugins/secrets/skills/secrets-manager/tests/*.mjs"
+    "test:secrets": "node --test plugins/secrets/skills/secrets-manager/tests/*.mjs",
+    "test:create": "node --test plugins/create/skills/upload-tiktok-video/tests/*.mjs plugins/create/skills/track-tiktok-stats/tests/*.mjs"
   }
 }

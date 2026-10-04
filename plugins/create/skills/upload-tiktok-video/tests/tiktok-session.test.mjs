@@ -1,0 +1,85 @@
+// ABOUTME: Tests the pure parts of tiktok-session.mjs: the account pick, the store lookup, proxies,
+// ABOUTME: the request template, the browser pid lookup and the data directory.
+
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
+
+import { apiUrl, dataDir, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, templateFrom } from "../scripts/tiktok-session.mjs";
+
+const row = (username, status, isp_slot, created_at) => ({ username, status, isp_slot, created_at });
+
+test("pickAccount takes the earliest imported active account that has a slot", () => {
+  const rows = [
+    row("late", "active", 2, "2026-10-04T19:41:10Z"),
+    row("banned", "restricted", 7, "2026-10-01T00:00:00Z"),
+    row("noslot", "active", null, "2026-10-01T00:00:00Z"),
+    row("early", "active", 10, "2026-10-02T03:58:32Z"),
+  ];
+  assert.equal(pickAccount(rows).username, "early");
+});
+
+test("pickAccount breaks a created_at tie by username", () => {
+  const rows = [row("bob", "active", 2, "2026-10-04T19:41:10Z"), row("amy", "active", 1, "2026-10-04T19:41:10Z")];
+  assert.equal(pickAccount(rows).username, "amy");
+});
+
+test("pickAccount is null without an active account", () => {
+  assert.equal(pickAccount([row("x", "expired", 1, "2026-10-01T00:00:00Z")]), null);
+});
+
+test("loadAccount reads the secrets-manager store and names the profile", () => {
+  const state = mkdtempSync(join(tmpdir(), "create-store-"));
+  const db = new DatabaseSync(join(state, "secrets.sqlite"));
+  db.exec("CREATE TABLE tiktok (username TEXT, password TEXT, isp_slot INTEGER, status TEXT, created_at TEXT, updated_at TEXT)");
+  const insert = db.prepare("INSERT INTO tiktok VALUES (?, 'pw', ?, ?, ?, ?)");
+  insert.run("second", 3, "active", "2026-10-04T00:00:00Z", "2026-10-04T00:00:00Z");
+  insert.run("first", 9, "active", "2026-10-02T00:00:00Z", "2026-10-04T00:00:00Z");
+  db.close();
+  assert.deepEqual(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), {
+    username: "first",
+    slot: 9,
+    profile: join(state, "profiles", "first"),
+  });
+});
+
+test("loadAccount is null when there is no store", () => {
+  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: join(tmpdir(), "no-such-store") }), null);
+});
+
+test("ispProxyAt adds the slot to the base port", () => {
+  assert.equal(ispProxyAt("http://u:p@isp.example:10000", 3), "http://u:p@isp.example:10003");
+});
+
+test("proxyDict splits the credentials out of the url", () => {
+  assert.deepEqual(proxyDict("http://u%40x:p@isp.example:10003"), { server: "http://isp.example:10003", username: "u@x", password: "p" });
+});
+
+test("templateFrom keeps an API request's params without its signatures", () => {
+  const url = "https://www.tiktok.com/api/user/detail/?aid=1988&device_id=42&uniqueId=a&msToken=t&X-Bogus=b&X-Gnarly=g";
+  assert.deepEqual(templateFrom(url), { aid: "1988", device_id: "42", uniqueId: "a" });
+  assert.equal(templateFrom("https://www.tiktok.com/api/user/detail/?aid=1988"), null);
+  assert.equal(templateFrom("https://www.tiktok.com/foryou?device_id=42"), null);
+});
+
+test("apiUrl lays the call's params over the template", () => {
+  assert.equal(apiUrl({ aid: "1988", count: "10" }, "post/item_list/", { count: 35 }), "https://www.tiktok.com/api/post/item_list/?aid=1988&count=35");
+});
+
+test("findPid picks the Camoufox main process of a profile", () => {
+  const ps = [
+    "  101 /Applications/Camoufox.app/Contents/MacOS/camoufox -profile /state/profiles/other",
+    "  202 /Applications/Camoufox.app/Contents/MacOS/camoufox -contentproc plugin-container /state/profiles/me",
+    "  303 /Applications/Camoufox.app/Contents/MacOS/camoufox -profile /state/profiles/me",
+  ].join("\n");
+  assert.equal(findPid("/state/profiles/me", ps), 303);
+  assert.equal(findPid("/state/profiles/none", ps), null);
+});
+
+test("dataDir defaults under ~/.local/share and follows CREATE_TIKTOK_DIR", () => {
+  assert.equal(dataDir({}), join(homedir(), ".local", "share", "create", "tiktok"));
+  assert.equal(dataDir({ CREATE_TIKTOK_DIR: "/x" }), "/x");
+});
