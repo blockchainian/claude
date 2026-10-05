@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-// One status vocabulary for every table (google identities, app sessions, x logins):
+// Shared status vocabulary (ready is used by app setup; builtins have no setup hooks):
 //   new        imported, no login run has recorded an outcome yet
 //   active     logged in and usable
 //   ready      logged in and app setup done

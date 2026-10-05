@@ -2,9 +2,10 @@
 -- ABOUTME: `google` (accounts), `x` (X logins) and `tiktok` (TikTok logins); per-app session tables  are created on demand by store.mjs.
 --
 -- Applied idempotently on every open (CREATE TABLE IF NOT EXISTS). Column names are snake_case.
--- Credentials are plaintext; the file lives outside the repo. One status vocabulary everywhere:
--- new | active | ready (logged in and app setup done) | expired | restricted | escalated. A google account is `new` on import and only
--- leaves `new` when a login run records an outcome (active on success, or expired/restricted/escalated).
+-- Credentials are plaintext; the file lives outside the repo. Status vocabulary:
+-- new | active | expired | restricted | escalated; app sessions also support ready (setup done).
+-- A google account is `new` on import and only leaves `new` when a login run records an outcome
+-- (active on success, or expired/restricted/escalated).
 
 -- Google accounts: credentials + status per account. profile_dir is the persistent Camoufox
 -- profile (the "device" Google sees); proxy is the residential proxy the account logs in through.
