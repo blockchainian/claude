@@ -444,11 +444,11 @@ test('byEmail, verify, validate and orphan table reads use the adapter contract'
  assert.equal(await main(['login','orphan'],io()),1);
 });
 
-test('setup --check reports without creating a launcher', () => {
+test('setup --check reports dependencies without a global launcher', () => {
  const home=mkdtempSync(join(tmpdir(),'setup-'));
  const result=spawnSync('sh',[fileURLToPath(new URL('../scripts/setup.sh',import.meta.url)),'--check'],{env:{...process.env,HOME:home},encoding:'utf8'});
  assert.equal(result.status,0);
- assert.match(result.stdout,/launcher: missing/);
+ assert.doesNotMatch(result.stdout,/launcher:/);
  assert.match(result.stdout,/camoufox:/);
  assert.equal(spawnSync('test',['-e',join(home,'.local/bin/secrets-manager')]).status,1);
 });

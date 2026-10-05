@@ -6,15 +6,17 @@ and lets external adapters define app login, verification and credential exports
 
 ## Setup
 
-Install `secrets@blockchainian`, then after every install or update run:
+Install `secrets@blockchainian`. Set `SKILL_DIR` to the absolute directory containing
+the installed secrets-manager `SKILL.md`, then after every install or update run:
 
 ```sh
-"${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/setup.sh"
-"${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/setup.sh" --check
+SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
+"$SKILL_DIR/scripts/setup.sh"
+"$SKILL_DIR/scripts/setup.sh" --check
 ```
 
-Setup runs npm install, fetches Camoufox and writes a two-line launcher at
-`~/.local/bin/secrets-manager` pointing at this install. Add `~/.local/bin` to PATH.
+Setup runs npm install and fetches Camoufox. Invoke `node "$SKILL_DIR/scripts/cli.mjs"`
+directly from the installed skill; setup does not install a global launcher.
 Node with `node:sqlite` support is required; headed macOS window placement uses Swift.
 State defaults to `~/.config/secrets-manager` (`SECRETS_MANAGER_STATE_PATH` overrides it).
 `~/.config/secrets-manager/.env` loads without overriding existing environment values:
