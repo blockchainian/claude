@@ -50,17 +50,29 @@ node \
   deduplicated by id, newest first once a run completes.
 - `tweets.out.json`: `{ query, dailyLimit, days: { "YYYY-MM-DD": { count, oldest, refill } } }`.
 
-## Config
+## Environment Variables
 
-Accounts come from the secrets-manager store (`~/.config/secrets-manager/secrets.sqlite`) — the single
-source. Fill it with the secrets-manager skill (`secrets-manager import x` then the verify-x.mjs command below); each account is its
-own rate bucket. `SECRETS_DB` overrides the store path.
+Copy `scripts/.env.example` to `scripts/.env` beside this skill’s scripts, then fill in the values. The CLI loads that file without replacing variables already exported in the shell.
 
-`$SKILL_DIR/scripts/.env` holds only request config:
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `X_BEARER` | X web-client bearer token | Yes | `$SKILL_DIR/scripts/.env` |
+| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `$SKILL_DIR/scripts/.env` |
+| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `$SKILL_DIR/scripts/.env` |
+| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `$SKILL_DIR/scripts/.env` |
+| `X_TID_ROW` | Animation row index used to sign requests | Yes | `$SKILL_DIR/scripts/.env` |
+| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `$SKILL_DIR/scripts/.env` |
+| `RESIDENTIAL_PROXY_URL` | Default residential proxy | One proxy source required | `$SKILL_DIR/scripts/.env` |
+| `X_PROXY_URLS` | Comma-separated proxies aligned to account row order | Alternative to the default proxy | `$SKILL_DIR/scripts/.env` |
+| `HTTPS_PROXY` | Default proxy when RESIDENTIAL_PROXY_URL is unset | Alternative to RESIDENTIAL_PROXY_URL | `$SKILL_DIR/scripts/.env` |
+| `SECRETS_MANAGER_STATE_PATH` | Account-store directory; default ~/.config/secrets-manager | No | `$SKILL_DIR/scripts/.env` |
+| `SECRETS_DB` | SQLite account-store path; overrides the directory setting | No | `$SKILL_DIR/scripts/.env` |
 
-- `RESIDENTIAL_PROXY_URL`, or `X_PROXY_URLS` aligned to the accounts by row order.
-- `X_SEARCH_QUERY_ID`, `X_BEARER`, `X_TID_*`: captured from x.com; re-extract when X answers 404 or the
-  transaction-id check fails. The script comments say where each comes from.
+Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.config/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
+
+Provision accounts with `secrets-manager import x`, then run `verify-x.mjs` below; each account has its own rate bucket.
+
+`verify-x.mjs` specifically requires `RESIDENTIAL_PROXY_URL` when verifying tokens.
 
 ## Failures
 
@@ -77,12 +89,6 @@ node --test "$SKILL_DIR/tests/fetch-x-mentions.test.mjs"
 Archive paths are relative to the working directory, run from the repo root that owns the archive.
 
 Log the account in with the `secrets` plugin’s `secrets-manager login x`.
-
-`$SKILL_DIR/scripts/.env` loads automatically without replacing existing environment values.
-Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
-`X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
-`RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.
-Only keys needed by this script are required. Missing required keys report this config path.
 
 Setup: `npm install --prefix "$SKILL_DIR/scripts"`.
 

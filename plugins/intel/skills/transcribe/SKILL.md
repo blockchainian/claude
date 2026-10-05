@@ -38,6 +38,10 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
+## Environment Variables
+
+No skill-specific environment variables or `.env` file are required.
+
 One whisper engine (`whisper-large-v3-turbo`, Apple Silicon), two entry points:
 a **batch** script for finite audio, a **live** script for an ongoing stream.
 Both write plain text and print JSON about it.

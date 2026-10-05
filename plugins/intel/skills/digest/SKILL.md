@@ -39,6 +39,12 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `DIGESTS_DIR` | Digest storage and work directory; default ~/Documents/digests | No | Shell environment before running the command; no automatic `.env` loading |
+
 A source URL after `/digest` is fetched, read, and turned into a highlights
 draft — that is the default. Two keywords instead select a store command.
 

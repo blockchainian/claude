@@ -55,18 +55,13 @@ retries incomplete apps for up to 6 passes.
 `docs/intel/reviews/<name>.json`: `{ appId, appName, updatedAt, complete, countriesDone, count, reviews }`.
 `complete` is true only when every storefront reached a confirmed end.
 
-## Config
+## Environment Variables
 
-`$SKILL_DIR/scripts/.env`: `RESIDENTIAL_PROXY_URL`, the rotating
-residential proxy. A new exit IP is handed out per connection, so the script opens a fresh
-proxy connection per request; that is what defeats Apple's per-IP throttling.
+Copy `scripts/.env.example` to `scripts/.env` beside this skill’s scripts, then fill in the values. The CLI loads that file without replacing variables already exported in the shell.
 
-Archive paths are relative to the working directory, run from the repo root that owns the archive.
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `RESIDENTIAL_PROXY_URL` | Rotating residential proxy | Yes, unless HTTPS_PROXY is set | `$SKILL_DIR/scripts/.env` |
+| `HTTPS_PROXY` | Proxy when RESIDENTIAL_PROXY_URL is unset | Alternative to RESIDENTIAL_PROXY_URL | `$SKILL_DIR/scripts/.env` |
 
-`$SKILL_DIR/scripts/.env` loads automatically without replacing existing environment values.
-Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
-`X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
-`RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.
-Only keys needed by this script are required. Missing required keys report this config path.
-
-Setup: `npm install --prefix "$SKILL_DIR/scripts"`.
+Each request opens a fresh proxy connection to rotate the exit IP.

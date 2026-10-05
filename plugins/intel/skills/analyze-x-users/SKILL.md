@@ -27,6 +27,10 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
+## Environment Variables
+
+No skill-specific environment variables or `.env` file are required.
+
 The accounts behind one app's X mentions → `users.md`: how the accounts split into
 behavioral segments, how much of the posts and engagement each segment owns, the
 die-hard daily promoters and whether they have a stake, and each segment's

@@ -147,14 +147,20 @@ answer is held against the IP: the slot's next session opens after a one-minute 
 Video files are fetched inside the session too: `item/detail/` gives a fresh play address, signed
 for the session's IP, and the page's `fetch()` pulls the bytes, four files at a time per session.
 
-## Config
+## Environment Variables
 
-- `$SKILL_DIR/scripts/.env`: `ISP_PROXY_URL` (the pool's base url) and `ISP_PROXY_COUNT`
-  (slot n is the base port + n, one fixed IP each).
-- `SECRETS_MANAGER_STATE_PATH` (default `~/.config/secrets-manager`): where the account's store
-  and browser profile are.
-- First use in a checkout: `npm install --prefix "$SKILL_DIR/scripts"`. The Camoufox
-  browser is the one secrets-manager installs (`npx camoufox-js fetch`).
+Copy `scripts/.env.example` to `scripts/.env` beside this skill’s scripts, then fill in the values. The CLI loads that file without replacing variables already exported in the shell.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `$SKILL_DIR/scripts/.env` |
+| `ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `$SKILL_DIR/scripts/.env` |
+| `SECRETS_MANAGER_STATE_PATH` | Account-store and browser-profile directory; default ~/.config/secrets-manager | No | `$SKILL_DIR/scripts/.env` |
+| `TIKTOK_VIDEOS_DIR` | Video output directory; default ~/.local/share/tiktok | No | `$SKILL_DIR/scripts/.env` |
+
+Account credentials, login sessions and browser profiles stay in the existing Secrets Manager store; do not copy them into `.env`.
+
+First use in a checkout: `npm install --prefix "$SKILL_DIR/scripts"`. Use the Camoufox browser installed by secrets-manager (`npx camoufox-js fetch`).
 
 ## Failures
 
@@ -175,12 +181,6 @@ node --test "$SKILL_DIR/tests/fetch-tiktok-mentions.test.mjs"
 Archive paths are relative to the working directory, run from the repo root that owns the archive.
 
 Log the account in with the `secrets` plugin’s `secrets-manager login tiktok`.
-
-`$SKILL_DIR/scripts/.env` loads automatically without replacing existing environment values.
-Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
-`X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
-`RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.
-Only keys needed by this script are required. Missing required keys report this config path.
 
 ## Shared account prerequisite
 

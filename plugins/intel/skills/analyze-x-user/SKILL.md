@@ -27,6 +27,14 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
+
+The shared `analyze-x-mentions` labeler uses this setting for its existing Codex login. No X credentials are needed to analyze an existing timeline archive.
+
 One account's own timeline → `profile.md`: who this account is, what they talk about most, which
 tokens and people they push, how and when they post, and what motivates them — read from their
 own posts, no aggregation across accounts. Deterministic stats come from the archive; the kind,

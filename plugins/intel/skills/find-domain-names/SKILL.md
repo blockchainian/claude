@@ -27,6 +27,15 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
+## Environment Variables
+
+Copy `scripts/.env.example` to `scripts/.env` beside this skill’s scripts, then fill in the values. The checker reads this file directly; exported shell variables are not used for these credentials.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `NAMECHEAP_API_USER` | Namecheap account username | Yes | `$SKILL_DIR/scripts/.env` |
+| `NAMECHEAP_API_KEY` | Namecheap API key | Yes | `$SKILL_DIR/scripts/.env` |
+
 Brainstorm a brand name and hand back only the ones you can actually register.
 The naming taste is fixed (below); the one thing that changes per run is the
 **theme**, which you always ask for. Availability is checked live against

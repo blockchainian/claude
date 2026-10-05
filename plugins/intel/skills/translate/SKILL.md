@@ -36,6 +36,15 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
+| `CHROME` | Chrome executable path; omit to use installed Chrome/Chromium | No | Shell environment before running the command; no automatic `.env` loading |
+
+The translator uses the existing Codex CLI login; no API key is required.
+
 The book's sections drive everything: each section (from the EPUB's OPF spine and nav/ncx) is one Luna call, and
 the finished sections are typeset into one book that copies the source's page size, chapter openers, running
 heads, roman/arabic folios and cover image.
