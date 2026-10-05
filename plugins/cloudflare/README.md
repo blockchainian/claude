@@ -1,8 +1,8 @@
 # cloudflare
 
-Cloudflare from Claude Code: the five Cloudflare MCP servers (API, docs,
-bindings, builds, observability), the `/build-agent` and `/build-mcp` commands,
-and the six Cloudflare skills below.
+Cloudflare skills and five Cloudflare MCP servers (API, docs, bindings, builds,
+observability) for Claude Code and Codex. Claude Code also provides the
+`/build-agent` and `/build-mcp` commands.
 
 This plugin carries the [cloudflare/skills](https://github.com/cloudflare/skills)
 plugin (Apache-2.0, version pinned in `plugin.json`) with five of its eleven skills
@@ -26,7 +26,19 @@ SDK, Turnstile. Install the upstream plugin for those.
 
 ## Install
 
+### Claude Code
+
 ```
 /plugin marketplace add blockchainian/claude
 /plugin install cloudflare@blockchainian
 ```
+
+### Codex
+
+See [Codex compatibility](../../docs/codex-compatibility.md) for installation
+and MCP authentication. Both hosts use the same six skills and references.
+
+In Codex, use the `agents-sdk` skill to build agents or MCP servers; the Claude
+slash commands are convenience entry points and are not duplicated as skills.
+`web-perf` additionally requires a configured Chrome DevTools MCP server; the
+five bundled Cloudflare servers do not provide browser performance tools.

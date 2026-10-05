@@ -19,14 +19,13 @@ Your knowledge of web performance metrics, thresholds, and tooling APIs may be o
 
 **Run this before starting.** Try calling `navigate_page` or `performance_start_trace`. If unavailable, STOP—the chrome-devtools MCP server isn't configured.
 
-Ask the user to add this to their MCP config:
+The five Cloudflare MCP servers do not include Chrome DevTools. Configure it
+separately for the current host using command `npx` and arguments
+`["-y", "chrome-devtools-mcp@latest"]` (stdio transport). Use the host's MCP
+configuration format; do not copy another host's configuration schema.
 
-```json
-"chrome-devtools": {
-  "type": "local",
-  "command": ["npx", "-y", "chrome-devtools-mcp@latest"]
-}
-```
+Find the tools by their exposed names on the current host; prefixes can differ
+between Claude Code and Codex. Verify the connection before starting the audit.
 
 ## Key Guidelines
 
