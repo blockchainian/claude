@@ -163,13 +163,43 @@ export async function signInTiktok(context, page, username, password, deadlineMs
   throw failure;
 }
 
-// Whether tiktok.com itself treats this browser as signed in: its page data names the user. A
+// The handle tiktok.com's own page data names as the signed-in user, or null when it names none. A
 // session TikTok ended on its side leaves the cookie behind, so the cookie alone does not tell.
-async function signedIn(page) {
+async function pageUser(page) {
   await page.goto(HOME_URL, { waitUntil: "domcontentloaded" });
   return page.evaluate(() => {
     const data = JSON.parse(document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__")?.textContent || "{}");
-    return Boolean(data.__DEFAULT_SCOPE__?.["webapp.app-context"]?.user?.uniqueId);
+    return data.__DEFAULT_SCOPE__?.["webapp.app-context"]?.user?.uniqueId || null;
+  });
+}
+
+async function signedIn(page) {
+  return Boolean(await pageUser(page));
+}
+
+async function showsBan(page) {
+  for (const text of [BANNED_HEADING, SUSPENDED_ERROR]) {
+    if (await page.getByText(text, { exact: true }).first().isVisible().catch(() => false)) return true;
+  }
+  return false;
+}
+
+// The account status the explore page says for `username`: TikTok's ban text wins, a page naming
+// the account is a live session, a page naming no one a lapsed one.
+export function tiktokStatusFromPage({ uniqueId, banned }, username) {
+  if (banned) return "restricted";
+  if (!uniqueId) return "expired";
+  if (uniqueId.toLowerCase() !== username.toLowerCase()) throw new Error(`profile is signed in as @${uniqueId}, not @${username}`);
+  return "active";
+}
+
+// `verify tiktok`: opens the account's profile on its own ISP slot and reads who the explore page
+// says is signed in. Never signs in.
+export async function checkTiktok({ row, opts = {} }) {
+  const { url } = loginProxy(process.env, row.isp_slot);
+  return withProfile(row.username, { headed: opts.headed, proxyUrl: url, blockAssets: false }, async (_context, page) => {
+    const uniqueId = await pageUser(page);
+    return tiktokStatusFromPage({ uniqueId, banned: await showsBan(page) }, row.username);
   });
 }
 

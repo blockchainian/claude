@@ -99,6 +99,17 @@ test("verify google and tiktok write to their own tables", async () => {
   assert.equal(status("tiktok", "username", "tok"), "restricted");
 });
 
+test("verify google skips plus-alias rows: they hold app sessions, not a Google sign-in", async () => {
+  for (const email of ["g@mail.com", "g+axiom@mail.com"]) {
+    store.upsertAccount(db, email, "pw", null);
+    store.setAccountStatus(db, email, "active");
+  }
+  const seen = [];
+  BUILTIN_CHECKS.google.check = async ({ row }) => (seen.push(row.email), "active");
+  assert.equal(await main(["verify", "google", "--all"], io()), 0);
+  assert.deepEqual(seen, ["g@mail.com"]);
+});
+
 test("verify with no active rows says so and exits 0", async () => {
   const o = io();
   assert.equal(await main(["verify", "tiktok"], o), 0);
