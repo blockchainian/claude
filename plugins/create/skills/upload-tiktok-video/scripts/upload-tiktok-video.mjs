@@ -64,22 +64,15 @@ export function findDelay(random = Math.random) {
   return Math.round(FIND_EVERY_MS - FIND_JITTER_MS + random() * 2 * FIND_JITTER_MS);
 }
 
-// Close what TikTok Studio lays over the form: the "new editing features" tour and the offer to turn
-// on automatic content checks (declined: account settings are not changed here). Returns once
-// nothing has shown for a few seconds.
-async function dismissOverlays(page) {
-  for (let quiet = 0; quiet < 3; ) {
-    const tour = page.getByRole("button", { name: "Got it", exact: true });
-    const checks = page.getByText("Turn on automatic content checks?");
-    if (await tour.isVisible().catch(() => false)) {
-      await tour.click();
-      quiet = 0;
-    } else if (await checks.isVisible().catch(() => false)) {
-      await page.getByRole("button", { name: "Cancel", exact: true }).click();
-      quiet = 0;
-    } else quiet++;
-    await sleep(1000);
-  }
+// Answer what TikTok Studio lays over the form whenever it gets in the way of the next step, and
+// never wait for it otherwise: the "new editing features" tour is closed, and the offer to turn on
+// automatic content checks (music copyright and For You eligibility, an account setting) is accepted.
+async function handleOverlays(page) {
+  const tour = page.getByRole("button", { name: "Got it", exact: true });
+  await page.addLocatorHandler(tour, () => tour.click());
+  await page.addLocatorHandler(page.getByText("Turn on automatic content checks?"), () =>
+    page.getByRole("button", { name: "Turn on", exact: true }).click(),
+  );
 }
 
 // Replace the description TikTok prefilled (the file name) with `caption`, typed as a person would:
@@ -102,7 +95,8 @@ async function setVisibility(page, visibility) {
   if (now !== VISIBILITY[visibility]) throw new Error(`visibility is "${now}", not "${VISIBILITY[visibility]}"`);
 }
 
-// Turn on the "AI-generated content" switch under "Show more", accepting TikTok's confirmation.
+// Turn on the "AI-generated content" switch under "Show more". It turns on at once, with no
+// confirmation ("Creator labeled as AI-generated" appears under it).
 async function labelAiGenerated(page) {
   const more = page.getByText("Show more", { exact: true });
   if (await more.isVisible().catch(() => false)) await more.click();
@@ -110,8 +104,6 @@ async function labelAiGenerated(page) {
     'xpath=//*[normalize-space(text())="AI-generated content"]/ancestor::*[.//input[contains(@class,"Switch__input")]][1]//input[contains(@class,"Switch__input")]',
   );
   if (!(await toggle.isChecked())) await toggle.click({ force: true });
-  const confirm = page.getByRole("button", { name: "Turn on", exact: true });
-  await confirm.waitFor({ state: "visible", timeout: 3000 }).then(() => confirm.click(), () => {});
   if (!(await toggle.isChecked())) throw new Error("the AI-generated content label did not turn on");
 }
 
@@ -171,12 +163,12 @@ async function main() {
     if (!(await signedIn(context))) {
       throw new Error(`@${account.username}'s profile is logged out; run the secrets-manager skill's \`login tiktok\``);
     }
+    await handleOverlays(page);
     const input = page.locator("input[type=file]").first();
     await input.waitFor({ state: "attached", timeout: 60000 });
     await input.setInputFiles(file);
     await page.locator("[data-e2e=upload_status_container]").getByText(/^Uploaded/).waitFor({ timeout: UPLOAD_TIMEOUT_MS });
     console.log("  uploaded");
-    await dismissOverlays(page);
     await setCaption(page, args.caption);
     await setVisibility(page, args.visibility);
     if (args.aiGenerated) await labelAiGenerated(page);
