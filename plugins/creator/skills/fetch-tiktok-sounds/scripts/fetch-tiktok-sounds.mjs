@@ -1,8 +1,8 @@
 // ABOUTME: Lists the hottest sounds of TikTok's commercial (royalty-free) music library, as TikTok Studio's
 // ABOUTME: "Royalty-free sounds" page shows them, with the ids upload-tiktok-video's --sound takes.
 //
-// Usage:
-//   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-sounds/scripts/fetch-tiktok-sounds.mjs [--username <name>] [--count <n>] [--headed [--with-sound]]
+// Usage (SKILL_DIR is the absolute directory of this skill's loaded SKILL.md):
+//   node "$SKILL_DIR/scripts/fetch-tiktok-sounds.mjs" [--username <name>] [--count <n>] [--headed [--with-sound]]
 //   --username reads the list as that account of the store (default: the account upload-tiktok-video
 //     posts as, the store's earliest imported active TikTok account).
 //   --count is how many sounds to list, hottest first (default 20).
