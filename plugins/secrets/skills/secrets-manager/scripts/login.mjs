@@ -1562,7 +1562,7 @@ export async function waitForHuman(surface, cred, { message, timeoutMs = ASSIST_
 // back to the app. Returns at once if the app's session lands without a Google prompt. On a headed
 // run (`assist`) a challenge the script cannot pass hands control to the person at the window instead
 // of failing, and resumes once they clear it.
-export async function completeGoogleOauth(page, cred, adapter, { timeoutMs = 60000, assist = false, proxyUrl } = {}) {
+export async function completeGoogleOauth(page, cred, adapter, { timeoutMs = 60000, assist = false } = {}) {
   const surface = await oauthSurface(page, adapter, cred.email);
   if (!surface) return; // the app's session landed with no Google prompt to answer
   // Same traversal as the Google login: consent and the account-chooser tile are handled as nodes,
@@ -1572,7 +1572,6 @@ export async function completeGoogleOauth(page, cred, adapter, { timeoutMs = 600
   await driveGoogleChallenges(surface, cred, {
     assist,
     timeoutMs,
-    proxyUrl,
     done: (s) => !s.url().includes("accounts.google.com"),
   });
 }
@@ -1719,7 +1718,7 @@ export async function withAppRetries(attempts, attempt, { onRetry } = {}) {
 
 // One pass at signing into the app and storing its scoped session. Throws on any step that did not
 // complete; exportApp decides whether the failure is worth another pass.
-async function attemptAppLogin(page, db, adapter, cred, { assist, proxyUrl }) {
+async function attemptAppLogin(page, db, adapter, cred, { assist }) {
   // An adapter that knows its app's ban answer (`bannedResponse({url, status, body})` → reason or
   // null) has every failed (>= 400) app response read for it, so a ban surfaces as AppRestricted,
   // not a timeout.
@@ -1731,18 +1730,18 @@ async function attemptAppLogin(page, db, adapter, cred, { assist, proxyUrl }) {
   };
   page.context().on("response", onResponse);
   try {
-    await signIntoApp(page, db, adapter, cred, { assist, proxyUrl }, () => banned);
+    await signIntoApp(page, db, adapter, cred, { assist }, () => banned);
   } finally {
     page.context().off("response", onResponse);
   }
 }
 
-async function signIntoApp(page, db, adapter, cred, { assist, proxyUrl }, bannedReason) {
+async function signIntoApp(page, db, adapter, cred, { assist }, bannedReason) {
   await gotoPastCloudflare(page, adapter.startUrl, { assist });
   // Skip the whole login when the profile is already signed in.
   if (!(await appAlreadySignedIn(page, adapter))) {
     await adapter.signIn(page, cred.email);
-    await completeGoogleOauth(page, cred, adapter, { assist, proxyUrl });
+    await completeGoogleOauth(page, cred, adapter, { assist });
     if (!(await waitReady(page, adapter))) {
       if (bannedReason()) throw new AppRestricted(adapter.name, `${adapter.name} restricted ${cred.email}: ${bannedReason()}`);
       // OAuth returned to the app but the session token never landed. This is an app-side
@@ -1762,8 +1761,8 @@ async function signIntoApp(page, db, adapter, cred, { assist, proxyUrl }, banned
 
 // Sign into one app with Google and store its scoped session, once it is complete. Retries an app
 // whose adapter asks for it (an app with a transient edge) on a fresh page load.
-export async function exportApp(page, db, adapter, cred, { assist = false, proxyUrl } = {}) {
-  await withAppRetries(adapter.attempts ?? 1, () => attemptAppLogin(page, db, adapter, cred, { assist, proxyUrl }), {
+export async function exportApp(page, db, adapter, cred, { assist = false } = {}) {
+  await withAppRetries(adapter.attempts ?? 1, () => attemptAppLogin(page, db, adapter, cred, { assist }), {
     onRetry: (i, e) => console.log(`  ${adapter.name}: attempt ${i} failed (${e.message}); reloading and retrying`),
   });
 }
@@ -1832,8 +1831,7 @@ export async function withProfile(key, { headed = false, rotate = false, proxyUr
       recording = debug.startScreenRecording(key, windowPlace.findPid(profile));
       if (recording) console.log(`  recording headed session to ${recording.path}`);
     }
-    // Hand the account's resolved proxy URL to the flow.
-    return await fn(context, page, proxyUrl);
+    return await fn(context, page);
   } catch (e) {
     if (shouldHoldOpenForDebug(headed, e)) await holdOpenForDebug(context, page, e);
     throw e;
@@ -1935,7 +1933,7 @@ export function onSettingsPage(url, target) {
 // page appears — identifier, password or TOTP — reusing the sign-in email, password and computed
 // TOTP, until the URL is back on the settings page named by `target` (a path fragment such as
 // `apppasswords` or `twosv`). Returns whether the re-auth cleared.
-async function reauthSensitive(page, cred, target = "apppasswords", { assist = false, timeoutMs = 120000, proxyUrl } = {}) {
+async function reauthSensitive(page, cred, target = "apppasswords", { assist = false, timeoutMs = 120000 } = {}) {
   // Same graph traversal as sign-in — identifier / password / TOTP, and a reCAPTCHA or other challenge
   // Google throws on a fresh exit IP (the vision model clears the reCAPTCHA headless, a headed run's person does) —
   // done once the URL is back on the settings page named by `target`. A dead-end (wrong password, no
@@ -1945,7 +1943,6 @@ async function reauthSensitive(page, cred, target = "apppasswords", { assist = f
     await driveGoogleChallenges(page, cred, {
       assist,
       timeoutMs,
-      proxyUrl,
       done: (s) => onSettingsPage(s.url(), target),
     });
   } catch (e) {
@@ -1961,9 +1958,9 @@ async function reauthSensitive(page, cred, target = "apppasswords", { assist = f
 // Returns the `xxxx xxxx xxxx xxxx` code, or null on any step that did not complete. Never logged.
 export async function mintAppPassword(cred, { name, headed = false, rotate = false } = {}) {
   if (typeof name !== "string" || !name) throw new Error("app password name is required");
-  return withProfile(cred.email, { headed, rotate }, async (_context, page, proxyUrl) => {
+  return withProfile(cred.email, { headed, rotate }, async (_context, page) => {
     await gotoWithRetry(page, APPPASSWORDS_URL);
-    if (!(await reauthSensitive(page, cred, "apppasswords", { assist: headed, proxyUrl }))) {
+    if (!(await reauthSensitive(page, cred, "apppasswords", { assist: headed }))) {
       await debug.capture(page, cred.email, "apppw-reauth-failed");
       return null;
     }
@@ -2010,10 +2007,10 @@ export const TWOSV_URL = "https://myaccount.google.com/signinoptions/twosv?hl=en
 // complete (a debug capture is left). Throws NotLoggedIn when the profile has no session and
 // NeedsHuman on a Google challenge. Not unit-tested; verify with --headed on the first account.
 export async function enrollAuthenticator(cred, { headed = false, rotate = false } = {}) {
-  return withProfile(cred.email, { headed, rotate }, async (_context, page, proxyUrl) => {
+  return withProfile(cred.email, { headed, rotate }, async (_context, page) => {
     if (!(await isGoogleLoggedIn(page))) throw new NotLoggedIn(`${cred.email}: no Google session; run \`login google\` first`);
     await gotoWithRetry(page, TWOSV_URL);
-    if (!(await reauthSensitive(page, cred, "twosv", { assist: headed, proxyUrl }))) {
+    if (!(await reauthSensitive(page, cred, "twosv", { assist: headed }))) {
       await debug.capture(page, cred.email, "twofactor-reauth-failed");
       return null;
     }
@@ -2067,10 +2064,10 @@ export async function enrollAuthenticator(cred, { headed = false, rotate = false
 // returns true immediately when 2-Step already reads as on, so a resumed run is safe. Throws
 // NotLoggedIn without a session. Not unit-tested; verify with --headed on the first account.
 export async function turnOnTwoStep(cred, { headed = false, rotate = false } = {}) {
-  return withProfile(cred.email, { headed, rotate }, async (_context, page, proxyUrl) => {
+  return withProfile(cred.email, { headed, rotate }, async (_context, page) => {
     if (!(await isGoogleLoggedIn(page))) throw new NotLoggedIn(`${cred.email}: no Google session; run \`login google\` first`);
     await gotoWithRetry(page, TWOSV_URL);
-    if (!(await reauthSensitive(page, cred, "twosv", { assist: headed, proxyUrl }))) {
+    if (!(await reauthSensitive(page, cred, "twosv", { assist: headed }))) {
       await debug.capture(page, cred.email, "twofactor-reauth-failed");
       return false;
     }
@@ -2086,7 +2083,7 @@ export async function turnOnTwoStep(cred, { headed = false, rotate = false } = {
     }
     await turnOn.click();
     await page.waitForTimeout(4000);
-    await reauthSensitive(page, cred, "twosv", { assist: headed, proxyUrl }); // Google may re-prompt on the switch
+    await reauthSensitive(page, cred, "twosv", { assist: headed }); // Google may re-prompt on the switch
     // "Add a phone number for two-step verification?" — Skip it to stay authenticator-only.
     const skip = page.getByRole("button", { name: /^Skip$/i }).first();
     if (await skip.isVisible({ timeout: 5000 }).catch(() => false)) await skip.click();
@@ -2106,9 +2103,9 @@ export async function runAccount(db, cred, adapters, { headed = false, rotate = 
   // A headed run is interactive, so the flow may pause for the person to clear a reCAPTCHA in the
   // window; `assist` is that "a human is at the window", derived from headed — never a separate flag.
   const assist = headed;
-  await withProfile(cred.email, { headed, rotate }, async (_context, page, proxyUrl) => {
+  await withProfile(cred.email, { headed, rotate }, async (_context, page) => {
     await signInGoogle(page, cred, { assist });
     store.markLoggedIn(db, cred.email);
-    for (const adapter of adapters) await exportApp(page, db, adapter, cred, { assist, proxyUrl });
+    for (const adapter of adapters) await exportApp(page, db, adapter, cred, { assist });
   });
 }

@@ -8,7 +8,8 @@ export default kit => [{
       toAlias: alias, sinceEpoch: 0, timeoutS: 0, pollS: 0,
     });
     if (!hit?.otp) return {status:'error', detail:'no signup code'};
-    return kit.withProfile(alias, {proxyUrl: kit.config.proxyFor(alias)}, async (_context, page, proxyUrl) => {
+    const proxyUrl = kit.config.proxyFor(alias);
+    return kit.withProfile(alias, {proxyUrl}, async (_context, page) => {
       await page.fill('input[name=code]', hit.otp);
       return {status:'ok', alias, detail: await page.title(), proxyUrl, message: hit};
     });

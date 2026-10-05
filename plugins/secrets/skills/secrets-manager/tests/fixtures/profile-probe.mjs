@@ -41,8 +41,8 @@ assert.equal(launches[0].headless,true);assert.equal(launches[0].geoip,true);
 assert.deepEqual(launches[0].proxy,{server:'http://proxy.example:8080',username:'user',password:'pass'});
 assert.ok(launches[0].fingerprint);assert.ok(existsSync(join(launches[0].user_data_dir,'fingerprint.json')));
 assert.equal(contexts[0].routes.length,1);assert.equal(contexts[0].sockets[0][0],'wss://data.delta.example/**');
-await assert.rejects(kit.withProfile(result.alias, {}, async (context, received, proxyUrl) => {
- assert.equal(received,page);assert.equal(context,contexts[1]);assert.equal(proxyUrl,result.proxyUrl);
+await assert.rejects(kit.withProfile(result.alias, {}, async (context, received) => {
+ assert.equal(received,page);assert.equal(context,contexts[1]);
  throw new Error('hook failure');
 }), /hook failure/);
 assert.equal(contexts[1].closed,true);assert.deepEqual(launches[1].fingerprint,launches[0].fingerprint);
