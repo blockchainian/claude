@@ -17,6 +17,38 @@ test("the marketplace lists every plugin in the repository", async () => {
   }
 });
 
+test("the Codex marketplace exposes only the six selected plugins", async () => {
+  const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
+  assert.equal(marketplace.name, "blockchainian");
+  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile"]);
+
+  for (const entry of marketplace.plugins) {
+    assert.equal(entry.source.source, "local");
+    assert.equal(entry.source.path, `./plugins/${entry.name}`);
+    assert.deepEqual(entry.policy, { installation: "AVAILABLE", authentication: "ON_USE" });
+    const plugin = JSON.parse(await readFile(`${entry.source.path}/.claude-plugin/plugin.json`, "utf8"));
+    assert.equal(plugin.name, entry.name);
+  }
+});
+
+test("Render keeps OAuth clients and edit hooks scoped to their host", async () => {
+  const root = "plugins/render";
+  const [claude, codex, mcp] = await Promise.all([
+    `${root}/.claude-plugin/plugin.json`,
+    `${root}/.codex-plugin/plugin.json`,
+    `${root}/.mcp.json`,
+  ].map(async (path) => JSON.parse(await readFile(path, "utf8"))));
+  assert.equal(codex.name, claude.name);
+  assert.equal(codex.version, claude.version);
+  assert.equal(codex.mcpServers.render.url, mcp.mcpServers.render.url);
+  assert.equal(codex.mcpServers.render.oauth.clientId, "codex");
+  assert.equal(mcp.mcpServers.render.oauth.clientId, "claude");
+  const codexHooks = JSON.parse(await readFile(`${root}/${codex.hooks}`, "utf8"));
+  assert.deepEqual(codexHooks.hooks, {});
+  const claudeHooks = JSON.parse(await readFile(`${root}/hooks/hooks.json`, "utf8"));
+  assert.equal(claudeHooks.hooks.PostToolUse[0].matcher, "Edit|Write|MultiEdit");
+});
+
 test("the shared check-design engine stays byte-identical across plugins", async () => {
   const copies = [
     "plugins/mobile/skills/check-mobile-design",

@@ -33,7 +33,7 @@
 **Cause:** Missing or expired OAuth authorization (plugin setup), or a missing, invalid, or expired API key (manual setup).
 
 **Fix:**
-1. Plugin setup: reinstall or update the Render plugin, then complete the Render OAuth prompt after reloading the tool.
+1. Plugin setup: verify the host-specific OAuth client ID (`claude` for Claude Code, `codex` for Codex), reload the tool, and complete the Render OAuth prompt.
 2. Manual setup: generate a new API key (`https://dashboard.render.com/u/*/settings#api-keys`) and update it in your tool's MCP config.
 3. Restart the tool.
 4. Verify with `list_services()`.
@@ -66,7 +66,9 @@
 
 ### Codex
 
-- Requires `RENDER_API_KEY` env var to be set in the shell where Codex runs
+- OAuth uses client ID `codex`, not `claude`; [Render's manual setup](https://render.com/docs/mcp-server) uses `codex mcp add render --url https://mcp.render.com/mcp --oauth-client-id codex`
+- Check `codex mcp add --help` for support before using that option on an older CLI
+- API-key setup requires `RENDER_API_KEY` env var to be set in the shell where Codex runs
 - Added via: `codex mcp add render --url https://mcp.render.com/mcp --bearer-token-env-var RENDER_API_KEY`
 - If the env var is not set when Codex starts, MCP auth fails
 

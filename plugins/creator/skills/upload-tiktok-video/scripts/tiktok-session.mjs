@@ -14,7 +14,7 @@
 //                               (default ~/.local/share/creator/tiktok).
 
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -59,13 +59,19 @@ export function pickAccount(rows, username = null, { anyStatus = false } = {}) {
 
 // The picked account with the profile directory it logged in with, or null without a store or account.
 export function loadAccount(env = process.env, username = null, options = {}) {
+  const path = join(storeDir(env), "secrets.sqlite");
+  try {
+    statSync(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  const db = new DatabaseSync(path, { readOnly: true });
   let rows;
   try {
-    const db = new DatabaseSync(join(storeDir(env), "secrets.sqlite"), { readOnly: true });
     rows = db.prepare("SELECT username, status, isp_slot, created_at FROM tiktok").all();
+  } finally {
     db.close();
-  } catch {
-    return null;
   }
   const row = pickAccount(rows, username, options);
   return row ? { username: row.username, status: row.status, slot: row.isp_slot, profile: join(storeDir(env), "profiles", row.username) } : null;

@@ -1,8 +1,9 @@
 # render
 
-Render from Claude Code: the Render MCP server over OAuth, the `render-assistant`
-agent, the `/check-render-status` command, a `PostToolUse` hook that validates
-`render.yaml` on every edit, and the nine Render skills below.
+Render MCP and the nine skills below are shared by Claude Code and Codex.
+Claude Code additionally provides the `render-assistant` agent, the
+`/check-render-status` command, and a `PostToolUse` hook that validates
+`render.yaml` on every edit.
 
 This plugin carries the [render-oss/render-plugin-claude-code](https://github.com/render-oss/render-plugin-claude-code)
 plugin (MIT, version pinned in `plugin.json`) with twelve of its twenty-one skills
@@ -30,9 +31,23 @@ workflows. Install the upstream plugin for those.
 
 ## Install
 
+### Claude Code
+
 ```
 /plugin marketplace add blockchainian/claude
 /plugin install render@blockchainian
 ```
 
-The MCP server authenticates over OAuth on first use; no API key is needed.
+The Claude MCP server authenticates over OAuth on first use.
+
+### Codex
+
+See [Codex installation](../../README.md#codex) for installation. Complete MCP authentication when prompted. Render registers separate OAuth clients for Claude
+and Codex; see `render-mcp` for manual OAuth or API-key configuration.
+
+Select Render with `@render` in Codex before using its MCP tools. For `codex exec`, include `[@render](plugin://render@blockchainian)` in the prompt to select the installed plugin; mentioning its name as plain text does not select its MCP server.
+
+The Claude agent and edit hook remain Claude-specific. Codex CLI may import the
+status command as a generated skill; the shared entry point is `render-monitor`. In Codex,
+use `render-monitor` to check status and `render-blueprints` to validate
+`render.yaml` explicitly; validation does not run automatically after edits.

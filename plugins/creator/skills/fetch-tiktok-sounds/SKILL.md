@@ -5,8 +5,36 @@ description: List the hottest sounds of TikTok's commercial (royalty-free) music
 
 # Fetch TikTok sounds
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory containing the
+`SKILL.md` that the host loaded for this skill; replace the example value below with that actual
+path. Do not use the project's working directory or a host-specific plugin-root variable.
+Keep the full creator plugin installed: all four skills use its
+`upload-tiktok-video/scripts/tiktok-session.mjs` runtime and dependencies.
+
+Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
+and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
+shared across both hosts at `~/.config/secrets-manager` (`SECRETS_MANAGER_STATE_PATH` explicitly
+overrides it), including its `.env`, TikTok account rows, ISP slots and browser profiles.
+`ISP_PROXY_URL` must be configured there or in the process environment. Creator reads this
+store; use secrets-manager to provision or log in an account if it is missing. Installing
+creator in another host does not create or migrate accounts.
+
+## Shared runtime setup
+
+Run once for the installed creator plugin (all four skills use this same install):
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+(cd "$SKILL_DIR/../upload-tiktok-video/scripts" && npm ci)
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-sounds/scripts/fetch-tiktok-sounds.mjs" [--username <name>] [--count <n>] [--headed [--with-sound]]
+
+## Run
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+node "$SKILL_DIR/scripts/fetch-tiktok-sounds.mjs" [--username <name>] [--count <n>] [--headed [--with-sound]]
 ```
 
 - `--username`: read the list as that account of the store; default the account
@@ -34,5 +62,5 @@ it needs a signed-in account: the account's Camoufox profile is opened on its IS
 else may have the profile open at the same time. Every sound on this list is cleared for use in
 any post on TikTok, promotional ones included; the clearance does not extend to other platforms.
 
-Needs the upload-tiktok-video skill's `npm install` and `ISP_PROXY_URL` in the secrets-manager's
+Needs the upload-tiktok-video skill's `npm ci` and `ISP_PROXY_URL` in the secrets-manager's
 `.env`.

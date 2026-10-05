@@ -27,7 +27,19 @@ content rather than the device. If the request does not say and both are availab
 
 ## Where Results Go
 
-### Every name in this document is a value to paste, not a variable
+### Script location and shell values
+
+Resolve this skill's directory from the absolute path of the loaded `SKILL.md`.
+In each shell call that runs a script, set `SKILL_DIR` to that directory:
+
+```bash
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Use the actual installed path, not the app repository's working directory or a
+host-specific plugin environment variable. If the loaded path is unavailable,
+stop and report it before running a script. Repeat the assignment in each shell
+call; variables may not persist between calls.
 
 Each command runs in its own shell, so a variable assigned in one command is empty in the
 next. Where this document writes `$SLICE_DIR`, `$OUT_ROOT` or `$UDID`, it means
@@ -68,22 +80,28 @@ Set `IOS_SCREENSHOT_DIR` to the session's scratchpad directory when your system 
 one, and to a durable directory for screens worth keeping. With neither, the root falls under
 `$TMPDIR`, which macOS clears.
 
-Several agents can share that library safely; a phone or a simulator they cannot, so this
-skill provides a lock: `claim-simulator.mjs` holds one UDID for one `RUN_ID`, and
-`capture-slice.sh` refuses a simulator nobody has claimed. Neither target refuses a second
-agent on its own. On a phone, WebDriverAgent serves one session, and a second Appium
-session does not fail — it wins, and the first agent's next call fails with "Session does
-not exist" mid-run. On a simulator, XcodeBuildMCP retargets its session default to whoever
-set it last. So the second claim fails, and that agent chooses to wait or abort; with
-several agents queued on one phone, waiting and claiming again is the normal path. On a
-phone the plugin's `phone-session-gate` hook enforces the claim: `appium_session_management`
-`create` is denied unless its capabilities carry `appium:udid`, that UDID is claimed, and no
-session is recorded open on it. The hook cannot tell agents apart, so it stops a second
-session, not a second driver on the holder's session. Several
-sessions on several simulators is fine: each session has its own XcodeBuildMCP server and
-its own defaults. The stitcher writes to a staging file and renames it into place, so a
-reader never sees a half-written PNG, and its verdict reports `replaced_existing` when a
-run overwrites an earlier capture of the same screen.
+Several agents can share the artifact library. Device use is exclusive per UDID:
+`claim-simulator.mjs` atomically holds one device for one `RUN_ID`, and
+`capture-slice.sh` refuses an unclaimed simulator or another run's claim.
+Different simulators can run in parallel; multiple callers use one phone in turn,
+waiting and claiming again after the holder releases it. There is no background queue.
+
+The phone hook binds the claimed task to the host session and its agent identity
+on the first WebDriverAgent preparation or session create. It reserves a create
+before execution and records only that call's successful session. Every Appium
+phone operation must pass its explicit `sessionId`; shared active-session defaults
+are denied, as are operations by the main agent or a sibling when a subagent owns
+the task. Session listing and device discovery remain available to everyone.
+Deletes clear the connection but retain the task owner, including across failed
+creates and reconnects, until the claim is released. Do not detach an owned session.
+A same-run reclaim preserves ownership; release refuses while a connection or
+create is recorded. `RUN_ID` remains the cooperative shell claim identifier: only
+the assigned agent should claim/release it. Give the entire phone task to one agent;
+do not delegate phone operations to another agent while holding the claim.
+
+The stitcher writes to a staging file and renames it into place, so readers never
+see a half-written PNG. Its verdict reports `replaced_existing` when a run replaces
+an earlier capture of the same screen.
 
 ## Core Workflow
 
@@ -98,10 +116,12 @@ Keep slices in a run-specific temp dir, never under the skill folder.
 
 ## Tool Names
 
-The plugin serves both MCP servers, so their tools carry its prefix. `appium_screenshot` is
-`mcp__plugin_mobile_appium-mcp__appium_screenshot`, and `swipe` is
-`mcp__plugin_mobile_xcodebuildmcp__swipe`. They are written unprefixed below for
-readability.
+Tool names below are unprefixed. Discover Appium tools such as `appium_screenshot`
+from the `appium-mcp` server, and simulator tools such as `swipe` from the
+`xcodebuildmcp` server, through the current host's tool inventory or tool search.
+Call their actual registered names; Claude Code and Codex use different namespace
+prefixes, so do not construct one. If a required tool is unavailable, report it
+before proceeding.
 
 Device-specific capabilities — UDID, team id, WebDriverAgent bundle id — are not in the
 plugin config, since they differ per machine. Pass them inline to
@@ -133,10 +153,15 @@ body often does nothing, and repeating it wastes turns.
 
 ### Real device
 
+Before phone automation, verify the plugin's `phone-session-gate` hook is active.
+In Codex, review and trust the loaded hook in `/hooks`. If the gate is not active
+or trusted, stop phone automation and report it; the written claim workflow does
+not replace the hook. The loaded hook must be active before using a shared phone.
+
 Discover the session values rather than asking for them or remembering them:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/discover-ios-setup.mjs"
+"$SKILL_DIR/scripts/discover-ios-setup.mjs"
 ```
 
 It reports the connected devices, which provisioning profiles cover them, whether
@@ -145,6 +170,18 @@ object to pass straight to `appium_session_management` (`action=create`). Exit 0
 ready; exit 1 lists what is missing. The UDID comes from the device list, the team id from
 a profile that covers the device, and the WebDriverAgent bundle id from the runner already
 installed on it.
+
+Before preparing WebDriverAgent or creating the session, claim the phone for this
+run, so no other agent opens a session that ends yours:
+
+```bash
+"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
+```
+
+Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim again, since
+there is no other phone to pick. Hold the claim across every screen of the flow and
+release it at cleanup, after deleting the Appium session. The hook records the session id
+in the claim when `create` succeeds, and clears only that session when an explicit `sessionId` delete succeeds.
 
 **If WebDriverAgent is not installed, do not build it by hand.** Use
 `appium_prepare_ios_real_device`:
@@ -155,18 +192,6 @@ installed on it.
    packages it as an IPA, resigns it with that profile, and returns a `capabilitiesHint`.
 3. Pass that hint to `appium_session_management` (`action=create`), serialising the whole
    object — do not drop its boolean or numeric values.
-
-Before creating the session, claim the phone for this run, so no other agent opens a
-session that ends yours:
-
-```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
-```
-
-Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim again, since
-there is no other phone to pick. Hold the claim across every screen of the flow and
-release it at cleanup, after deleting the Appium session. The hook records the session id
-in the claim when `create` succeeds, and clears it when `delete` succeeds.
 
 Two switches live on the phone and cannot be set from the Mac. Developer Mode, which
 `devicectl` does report, and **Settings -> Developer -> UI TESTING -> Enable UI
@@ -184,7 +209,7 @@ There is no WebDriverAgent, no provisioning profile and no session to create. A 
 simulator is the whole requirement:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/discover-ios-setup.mjs" --target simulator
+"$SKILL_DIR/scripts/discover-ios-setup.mjs" --target simulator
 ```
 
 Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says either that
@@ -198,7 +223,7 @@ every command that needs it, as above.
 Then claim it for this run, so no other agent drives it while you capture:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
+"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
 Exit 0 means it is yours. Exit 3 means another run holds it, and the message says which
@@ -206,33 +231,40 @@ run and for how long. Decide: wait and claim again, or abort and pick another si
 Never `--steal` unless you know that run is dead. The claim is a file under `TMPDIR`, so
 it is visible to every session of the same user; releasing it is part of cleanup.
 
-Pass the `sessionDefaults` object to `session_set_defaults`, so every XcodeBuildMCP call
-targets that simulator, then call `session_show_defaults` and check that `simulatorId` is
-the UDID you claimed. The defaults belong to the XcodeBuildMCP server, which every agent in
-this session shares, so they can already hold a different simulator, or a different
-app's bundle id, set by an earlier agent, and nothing warns you. Set both and read both
-back. None of `launch_app_sim`, `snapshot_ui`, `tap`, `swipe` or
-`screenshot` takes a simulator of its own, whatever their `nextSteps` hints claim about a
-`simulatorId` parameter; there is no per-call targeting. What each response does carry is
-the simulator it hit, as `artifacts.simulatorId` (`udid` in a snapshot). Compare that with
-the capture UDID whenever a screen seems not to move.
+This plugin enables `XCODEBUILDMCP_DISABLE_SESSION_DEFAULTS=true`. Pass the claimed
+`simulatorId` on every simulator/UI tool call, and `bundleId` on launch/stop calls;
+build or app-path calls also need the explicit project/workspace and scheme.
+Do not call `session_set_defaults` or switch active profiles: those settings remain
+shared across agents. The discovery report's `sessionDefaults` is a compatibility
+output; copy its selected UUID into calls instead of setting shared defaults.
+If the exposed schema omits `simulatorId`, reconnect the server with this plugin's
+configuration before parallel use. Do not drive an ambiguous target.
 
-**The default and the capture UDID must agree.** XcodeBuildMCP scrolls whatever its
-session default points at, while `simctl` captures whatever UDID you hand it; if they
-differ you will swipe one simulator and photograph another, and the slices will look like a
-screen that never moves. The stitcher refuses an identical pair for exactly this reason.
+Compare each reported `artifacts.simulatorId` (or snapshot `udid`) with the chosen
+UUID. Stop on a mismatch. `simctl` capture uses the same explicit UDID, so swipes
+and screenshots target the same simulator.
 
 For the same reason, do not use `booted` as a stand-in for the UDID. `simctl` resolves it to
 one running simulator without saying which, and simulators routinely hold different builds
 of the same app — on one machine the same app was version 62 on one booted simulator and 64
 on another. `claim-simulator.mjs` and `capture-slice.sh` refuse it outright.
 
+### Interrupted runs
+
+Never expire a claim just because its timestamp is old: profiling may take a long
+time. If a caller crashed or a create result is unknown, inspect Appium's session
+list and confirm the old run is no longer operating the phone. Only then use the
+existing `--steal` option to recover the claim; it clears the old reservation.
+Delete any leftover session by explicit `sessionId` before creating a new one.
+A late result from the old create cannot commit over a new reservation. Do not
+manually delete mutex files; the OS releases their locks when processes exit.
+
 ## 1. Open the App
 
 ### Real device
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/find-ios-app.sh" --device <udid> --name <app name>
+"$SKILL_DIR/scripts/find-ios-app.sh" --device <udid> --name <app name>
 ```
 
 `xcrun devicectl device info apps` lists **only developer-installed apps by default** — an App Store app looks absent. The script passes `--include-all-apps`, which is the whole reason it exists. Do not call `devicectl` directly for this.
@@ -241,12 +273,12 @@ Foreground it with `appium_app_lifecycle` (`action=activate`, `id=<bundleId>`), 
 screenshot. An app resumes where the user left it, not on its home screen, so confirm
 where you actually are before navigating.
 
-If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create` and the discovered capabilities, which carry `appium:udid`. Sessions idle out. When a call fails with "Session does not exist", delete the session first (`action=delete`), then create again; the gate denies a create while the claim still records the old session.
+If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create` and the discovered capabilities, which carry `appium:udid`. Sessions idle out. When a call fails with "Session does not exist", delete the session first (`action=delete`, with that explicit `sessionId`), then create again; the gate denies a create while the claim still records the old session.
 
 ### Simulator
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/find-ios-app.sh" --simulator "$UDID" --name <app name>
+"$SKILL_DIR/scripts/find-ios-app.sh" --simulator "$UDID" --name <app name>
 ```
 
 `devicectl` cannot see simulators at all, so this reads `simctl listapps` instead. The
@@ -318,7 +350,7 @@ with the wrapper instead, which writes a full-resolution PNG straight into `SLIC
 there is no copy step, and refuses a simulator this run does not hold:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/capture-slice.sh" --simulator "$UDID" --run "$RUN_ID" \
+"$SKILL_DIR/scripts/capture-slice.sh" --simulator "$UDID" --run "$RUN_ID" \
   --out "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
@@ -406,7 +438,7 @@ to anything.
 Compare two frames with:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/frame_diff.py" <before.png> <after.png>
+"$SKILL_DIR/scripts/frame_diff.py" <before.png> <after.png>
 ```
 
 It prints `mean_abs_diff` on a 0-255 scale, and — more useful — `scrolled_px`, the offset
@@ -483,7 +515,7 @@ The stitcher trusts the order it is given; passing slices out of order produces 
 ## 4. Stitch
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/stitch_screens.py" \
+"$SKILL_DIR/scripts/stitch_screens.py" \
   --out "$OUT_ROOT/<app-slug>/<screen-slug>.png" \
   --slices "$SLICE_DIR"/slice-*.png
 ```
@@ -544,12 +576,14 @@ anything should sit between them.
 
 ## 5. Clean Up
 
-Delete the slice directory, on a phone delete the Appium session, and release the claim.
+Delete the slice directory, on a phone delete this run's explicit Appium `sessionId`,
+then release the claim. Nested screenshot/profiling work retains the outer run's
+UDID and RUN_ID; only the outer run releases the claim.
 A run that captures several screens keeps its claim until the last one; releasing between
 screens only invites another agent in mid-run:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
+"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
 ```
 
 The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.

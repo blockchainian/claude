@@ -16,15 +16,34 @@ equality. Device pixel ratio, browser zoom, antialiasing, font rendering and
 colour profiles make identical designs differ by a few units; chasing zero never
 converges. The `pass` field is the loop's stop condition.
 
+## Script location and browser tools
+
+Resolve this skill's directory from the absolute path of the loaded `SKILL.md`.
+In each shell call that runs a script, set `SKILL_DIR` to that directory:
+
+```bash
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Use the actual installed path, not the caller's working directory or a
+host-specific plugin environment variable. Shell variables may not persist
+between tool calls; repeat the assignment in each call. If the loaded path is
+unavailable, stop and report it before running a script.
+
+Use the current host's connected browser tools for screenshots and DOM reads
+(for example, Claude's `claude-in-chrome`, or Codex's connected Chrome tools).
+Check that the tool supports the needed capture or DOM operation; report a
+missing capability rather than assuming a tool name exists.
+
 ## The loop
 
 1. **Capture the actual page.** Take a browser screenshot of the built page —
-   `claude-in-chrome`, or a DevTools/Playwright full-page capture when the design
+   the connected browser tools, or a DevTools/Playwright full-page capture when the design
    runs below the fold. Save the design mock as `desired.png`.
 2. **Build `elements.json` (the hybrid step, optional but recommended)** — a JSON
    **list** of `{"label": str, "type": str, "bbox": [x, y, w, h]}`, with `bbox`
    in **actual-image pixels**. This turns anonymous regions into named elements.
-   Read it from the DOM in the page (e.g. `claude-in-chrome` `javascript_tool`):
+   Read it from the DOM in the page with the host's supported DOM evaluation tool:
 
    ```js
    const s = W / document.documentElement.clientWidth;  // W = actual.png width, px
@@ -47,7 +66,7 @@ converges. The `pass` field is the loop's stop condition.
 3. **Run the diff:**
 
    ```
-   "${CLAUDE_PLUGIN_ROOT}/skills/check-web-design/scripts/check_design.py" \
+   "$SKILL_DIR/scripts/check_design.py" \
      --actual actual.png --desired desired.png --out-dir diff \
      [--hierarchy elements.json] \
      [--mask-top 0 --mask-bottom 0] \

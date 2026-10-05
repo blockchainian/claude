@@ -5,8 +5,36 @@ description: Record the current plays, likes, comments, shares and saves of ever
 
 # Fetch TikTok stats
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory containing the
+`SKILL.md` that the host loaded for this skill; replace the example value below with that actual
+path. Do not use the project's working directory or a host-specific plugin-root variable.
+Keep the full creator plugin installed: all four skills use its
+`upload-tiktok-video/scripts/tiktok-session.mjs` runtime and dependencies.
+
+Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
+and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
+shared across both hosts at `~/.config/secrets-manager` (`SECRETS_MANAGER_STATE_PATH` explicitly
+overrides it), including its `.env`, TikTok account rows, ISP slots and browser profiles.
+`ISP_PROXY_URL` must be configured there or in the process environment. Creator reads this
+store; use secrets-manager to provision or log in an account if it is missing. Installing
+creator in another host does not create or migrate accounts.
+
+## Shared runtime setup
+
+Run once for the installed creator plugin (all four skills use this same install):
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+(cd "$SKILL_DIR/../upload-tiktok-video/scripts" && npm ci)
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-stats/scripts/fetch-tiktok-stats.mjs" [--username <name>] [--headed [--with-sound]]
+
+## Run
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+node "$SKILL_DIR/scripts/fetch-tiktok-stats.mjs" [--username <name>] [--headed [--with-sound]]
 ```
 
 - `--username` reads another account; default the account upload-tiktok-video posts as: the
@@ -36,5 +64,5 @@ An anonymous viewer gets the first page of a profile, about 35 videos, newest fi
 are not sampled. A video posted a minute ago may not show to an anonymous viewer yet (measured: 0
 videos about 20 s after posting, the video a minute later); it is in the next sample.
 
-Needs the upload-tiktok-video skill's `npm install` (the browser code lives there) and
+Needs the upload-tiktok-video skill's `npm ci` (the browser code lives there) and
 `ISP_PROXY_URL` in the secrets-manager's `.env`.

@@ -1,6 +1,6 @@
 {
   "name": "render",
-  "description": "Deploy, debug, and monitor applications on Render: the Render MCP server over OAuth, the render-assistant agent, the render.yaml validation hook, and the nine Render skills for CLI, Blueprints, debugging, monitoring, env vars, Postgres, Key Value, disks, and MCP setup.",
+  "description": "Deploy, debug, and monitor applications on Render with nine shared skills and the Render MCP server over Codex OAuth.",
   "version": "0.2.3",
   "author": {
     "name": "Render",
@@ -17,5 +17,16 @@
     "blueprint",
     "monitoring",
     "debugging"
-  ]
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/codex.json",
+  "mcpServers": {
+    "render": {
+      "type": "http",
+      "url": "https://mcp.render.com/mcp",
+      "oauth": {
+        "clientId": "codex"
+      }
+    }
+  }
 }

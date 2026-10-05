@@ -30,7 +30,7 @@ Activate this skill when:
 
 **CLI (fallback):** `render --version` - use if MCP tools unavailable
 
-**Authentication:** If you installed the Render plugin (Cursor, Codex, Claude Code), it provides OAuth for MCP — complete the OAuth prompt. For manual MCP clients, use a Render API key. For CLI, verify with `render whoami -o json`.
+**Authentication:** Complete OAuth using the plugin configuration for the current host (`claude` and `codex` use separate client IDs). For manual OAuth or API-key setup, see **render-mcp**. For CLI, verify with `render whoami -o json`.
 
 **Workspace:** `get_selected_workspace()` or `render workspace current -o json`
 

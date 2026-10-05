@@ -1,8 +1,8 @@
 // ABOUTME: Opens a secrets-manager TikTok account's own Camoufox profile in a shown window, signed in as
 // ABOUTME: that account, for a person to look around (private posts, Studio analytics), and waits until it is closed.
 //
-// Usage:
-//   node ${CLAUDE_PLUGIN_ROOT}/skills/open-tiktok-account/scripts/open-tiktok-account.mjs [--username <name>] [--url <url>] [--with-sound]
+// Usage (SKILL_DIR is the absolute directory of this skill's loaded SKILL.md):
+//   node "$SKILL_DIR/scripts/open-tiktok-account.mjs" [--username <name>] [--url <url>] [--with-sound]
 //   --username opens that account of the store in any status, a restricted one too, to see TikTok's
 //     ban notice or appeal (default: the account upload-tiktok-video posts as, the store's earliest
 //     imported active TikTok account).
