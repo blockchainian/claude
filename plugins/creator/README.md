@@ -9,13 +9,16 @@ live in the secrets plugin's `secrets-manager` store; this plugin only reads it.
   account through TikTok Studio's upload page, in the account's own Camoufox profile on its ISP
   slot (the same device and IP it logged in with). Sets the caption, who can see it, the
   AI-generated label, the promotion disclosure and a commercial-library sound, then finds the
-  posted video's id. The browser window is shown and screen-recorded for debugging. Each post is
-  appended to `posts.jsonl`.
+  posted video's id. Each post is appended to `posts.jsonl`.
 - **`fetch-tiktok-stats`** — sample the plays, likes, comments, shares and saves of the
   account's videos, read anonymously through TikTok's own signed web API, appended to
   `stats.jsonl` as a time series.
 - **`fetch-tiktok-sounds`** — list the hottest sounds of TikTok's commercial (royalty-free)
   music library with the ids `upload-tiktok-video --sound` takes.
+
+Every skill runs its browser hidden. `--headed` shows it and screen-records it to the account's
+`recordings/`, for debugging a flow that TikTok's page changes broke; `--with-sound` also unmutes
+it.
 
 Account health and status (logged out, restricted, banned) belong to `secrets-manager`.
 

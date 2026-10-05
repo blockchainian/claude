@@ -1,6 +1,6 @@
 ---
 name: upload-tiktok-video
-description: Post one mp4 to the TikTok account the secrets-manager skill logged in — its earliest imported active account — through TikTok Studio's upload page in that account's own Camoufox profile on its ISP slot, with a caption, who can see it, the AI-generated label, the promotion disclosure and a commercial-library sound; the browser window is shown and screen-recorded; the posted video's id is found and the post logged to posts.jsonl. Use when asked to upload / post / 上传 / 发 a video to TikTok, or to test the upload flow. NOT for logging the account in or its status (secrets-manager), NOT for the video's numbers afterwards (fetch-tiktok-stats) and NOT for the official Content Posting API.
+description: Post one mp4 to the TikTok account the secrets-manager skill logged in — its earliest imported active account — through TikTok Studio's upload page in that account's own Camoufox profile on its ISP slot, with a caption, who can see it, the AI-generated label, the promotion disclosure and a commercial-library sound; --headed shows and screen-records the browser to debug a broken step; the posted video's id is found and the post logged to posts.jsonl. Use when asked to upload / post / 上传 / 发 a video to TikTok, or to test the upload flow. NOT for logging the account in or its status (secrets-manager), NOT for the video's numbers afterwards (fetch-tiktok-stats) and NOT for the official Content Posting API.
 ---
 
 # Upload a TikTok video
@@ -8,7 +8,8 @@ description: Post one mp4 to the TikTok account the secrets-manager skill logged
 ```
 node "${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-video.mjs" <video.mp4> \
   [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc] \
-  [--promotion your-brand|branded-content|your-brand,branded-content] [--sound <id>]
+  [--promotion your-brand|branded-content|your-brand,branded-content] [--sound <id>] \
+  [--headed [--with-sound]]
 ```
 
 - `--username`: post as that account of the store; it must be `active`. Default below.
@@ -20,9 +21,12 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-vid
   agrees to TikTok's Branded Content Policy), or both, comma-separated.
 - `--sound`: add the commercial-library sound with that id (fetch-tiktok-sounds lists them). It
   plays under the video's own audio, and the post links to it as its sound.
+- `--headed`: show the browser window and screen-record it. Use it when a step fails: TikTok
+  Studio's page changes, and the selectors with it. Without it the browser is hidden.
+- `--with-sound`: with `--headed`, unmute the browser (Playwright mutes it) to hear the video.
 
-Launch it in the background and reread the log; a post takes a few minutes, most of it waiting for
-the video to show on the profile.
+Launch it in the background and reread the log; a post takes from about 20 s to a few minutes,
+most of it waiting for the video to show on the profile.
 
 ## The account
 
@@ -36,7 +40,7 @@ have the profile open at the same time (a fetch-tiktok-mentions run using the sa
 
 ## What it does
 
-1. Opens `tiktokstudio/upload` headed and starts recording the window.
+1. Opens `tiktokstudio/upload`; with `--headed`, shows the window and starts recording it.
 2. Chooses the file and waits for TikTok's "Uploaded".
 3. Whenever an overlay gets in the way of a step (never waiting for one otherwise): closes the
    "new editing features" tour, and accepts the offer to turn on automatic content checks (music
@@ -59,8 +63,8 @@ overrides `~/.local/share/creator/tiktok`):
 - `posts.jsonl`: one line per post,
   `{ at, username, file, caption, visibility, aigc, promotion, sound, videoId, url, recording }`.
   `videoId` is null when the video had not reached the profile in time.
-- `recordings/<ts>.mov`: the screen recording of the run, also on failure. Watch it
-  first when a step fails: TikTok Studio's page changes, and the selectors with it.
+- `recordings/upload-<ts>.mov`: the screen recording of a `--headed` run, also on failure. When a
+  step fails, rerun with `--headed` and watch it first.
 
 ## Setup
 

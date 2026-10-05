@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { accountDir, apiUrl, dataDir, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, stopRecording, templateFrom } from "../scripts/tiktok-session.mjs";
+import { accountDir, apiUrl, browserFlag, browserPrefs, dataDir, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, recordingPath, stopRecording, templateFrom } from "../scripts/tiktok-session.mjs";
 
 const row = (username, status, isp_slot, created_at) => ({ username, status, isp_slot, created_at });
 
@@ -88,14 +88,33 @@ test("apiUrl lays the call's params over the template", () => {
   assert.equal(apiUrl({ aid: "1988", count: "10" }, "post/item_list/", { count: 35 }), "https://www.tiktok.com/api/post/item_list/?aid=1988&count=35");
 });
 
-test("findPid picks the Camoufox main process of a profile", () => {
+test("findPid picks the Camoufox main process this process launched, with or without a profile", () => {
   const ps = [
-    "  101 /Applications/Camoufox.app/Contents/MacOS/camoufox -profile /state/profiles/other",
-    "  202 /Applications/Camoufox.app/Contents/MacOS/camoufox -contentproc plugin-container /state/profiles/me",
-    "  303 /Applications/Camoufox.app/Contents/MacOS/camoufox -profile /state/profiles/me",
+    "  101    1 /Applications/Camoufox.app/Contents/MacOS/camoufox -profile /state/profiles/other",
+    "  202  303 /Applications/Camoufox.app/Contents/MacOS/camoufox -contentproc plugin-container /state/profiles/me",
+    "  303   50 /Applications/Camoufox.app/Contents/MacOS/camoufox -profile /tmp/playwright_firefoxdev_profile-x",
+    "  404   50 /usr/bin/swift recordWindows.swift 303 /x.mov",
   ].join("\n");
-  assert.equal(findPid("/state/profiles/me", ps), 303);
-  assert.equal(findPid("/state/profiles/none", ps), null);
+  assert.equal(findPid(50, ps), 303);
+  assert.equal(findPid(51, ps), null);
+});
+
+test("browserPrefs turns the sound back on only when asked", () => {
+  assert.deepEqual(browserPrefs(false), {});
+  assert.deepEqual(browserPrefs(true), { "media.volume_scale": "1.0" });
+});
+
+test("browserFlag reads --headed and --with-sound into the options", () => {
+  const out = { headed: false, withSound: false };
+  assert.equal(browserFlag("--headed", out), true);
+  assert.equal(browserFlag("--with-sound", out), true);
+  assert.equal(browserFlag("--other", out), false);
+  assert.deepEqual(out, { headed: true, withSound: true });
+});
+
+test("recordingPath names a run's recording by its skill and time, under the account", () => {
+  const at = new Date("2026-10-05T01:20:23.996Z");
+  assert.equal(recordingPath("me", "upload", at, { CREATOR_TIKTOK_DIR: "/x" }), "/x/me/recordings/upload-2026-10-05T01-20-23-996Z.mov");
 });
 
 test("dataDir defaults under ~/.local/share and follows CREATOR_TIKTOK_DIR", () => {

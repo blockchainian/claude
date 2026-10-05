@@ -91,21 +91,48 @@ export function apiUrl(base, path, params) {
   return `${API}${path}?${new URLSearchParams({ ...base, ...params })}`;
 }
 
-// The pid of the Camoufox main process running `profileDir`, from `ps -Ao pid=,args=` output.
-export function findPid(profileDir, ps = execFileSync("ps", ["-Ao", "pid=,args="], { encoding: "utf8" })) {
+// The pid of the Camoufox main process that `parentPid` launched (Playwright starts it directly), from
+// `ps -Ao pid=,ppid=,args=` output. Its own content and GPU processes are its children, not ours.
+export function findPid(parentPid = process.pid, ps = execFileSync("ps", ["-Ao", "pid=,ppid=,args="], { encoding: "utf8" })) {
   for (const line of ps.split("\n")) {
-    if (line.includes(profileDir) && line.includes("MacOS/camoufox") && !line.includes("plugin-container") && !line.includes("gpu-helper")) {
-      const pid = Number.parseInt(line.trim().split(/\s+/, 1)[0], 10);
-      if (Number.isInteger(pid)) return pid;
-    }
+    const [pid, ppid, ...args] = line.trim().split(/\s+/);
+    if (Number(ppid) === parentPid && args.join(" ").includes("MacOS/camoufox")) return Number(pid);
   }
   return null;
 }
 
+// The Firefox prefs a launch adds: Playwright mutes the browser (media.volume_scale 0), and
+// `withSound` turns it back up, for a person watching a headed run.
+export function browserPrefs(withSound) {
+  return withSound ? { "media.volume_scale": "1.0" } : {};
+}
+
+// Read the browser options every creator script takes into `out`: --headed shows the window and
+// screen-records it (for debugging a flow TikTok's page changes broke), --with-sound unmutes it.
+// Returns whether `arg` was one of them.
+export function browserFlag(arg, out) {
+  if (arg === "--headed") out.headed = true;
+  else if (arg === "--with-sound") out.withSound = true;
+  else return false;
+  return true;
+}
+
+// Refuse --with-sound without --headed: a hidden browser has no one to listen.
+export function checkBrowserFlags(out) {
+  if (out.withSound && !out.headed) throw new Error("--with-sound needs --headed");
+}
+
+// Where a headed run of `kind` (upload, stats, sounds) started `at` records to, under the account.
+export function recordingPath(username, kind, at = new Date(), env = process.env) {
+  return join(accountDir(username, env), "recordings", `${kind}-${at.toISOString().replace(/[:.]/g, "-")}.mov`);
+}
+
 // Camoufox on the account's ISP slot at `url`. With `profile` it is the account's own browser
 // profile and fingerprint, signed in or not; without, an anonymous browser. `headed` shows the
-// window. Returns { context, page, template }: `template()` resolves to the base of signed API calls.
-export async function openBrowser({ slot, profile = null, headed = false, url }) {
+// window and, given `recordTo`, screen-records it there; `withSound` unmutes it. Returns
+// { context, page, template, close }: `template()` resolves to the base of signed API calls, and
+// `close()` saves the recording and closes the browser.
+export async function openBrowser({ slot, profile = null, headed = false, withSound = false, recordTo = null, url }) {
   if (!process.env.ISP_PROXY_URL) throw new Error(`No ISP_PROXY_URL in ${envFile}.`);
   const { Camoufox } = await import("camoufox-js");
   const context = await Camoufox({
@@ -114,19 +141,27 @@ export async function openBrowser({ slot, profile = null, headed = false, url })
     locale: "en-US", // as `login tiktok` opens it, so the page's labels are English
     proxy: proxyDict(ispProxyAt(process.env.ISP_PROXY_URL, slot)),
     main_world_eval: true, // API calls run in the page's own world, where TikTok's script signs fetch()
+    firefox_user_prefs: browserPrefs(withSound),
     ...(profile && {
       user_data_dir: profile,
       fingerprint: JSON.parse(readFileSync(join(profile, "fingerprint.json"), "utf8")),
       i_know_what_im_doing: true, // the fingerprint is the one the profile logged in with
     }),
   });
+  const recording = headed && recordTo ? startRecording(recordTo) : null;
+  if (recording) console.log(`  recording to ${recording.path}`);
+  const close = async () => {
+    const saved = await stopRecording(recording);
+    if (saved) console.log(`  saved recording: ${saved}`);
+    await context.close().catch(() => {});
+  };
   try {
     const page = context.pages?.()[0] ?? (await context.newPage());
     const template = captureTemplate(page);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    return { context, page, template };
+    return { context, page, template, close };
   } catch (e) {
-    await context.close().catch(() => {});
+    await close();
     throw e;
   }
 }
@@ -175,10 +210,10 @@ export async function accountVideos(page, base, username) {
   return { user: user.userInfo, items: list.itemList ?? [] };
 }
 
-// Start recording the windows of the Camoufox running `profile` to `path` (.mov, cursor shown).
+// Start recording the windows of the Camoufox this process launched to `path` (.mov, cursor shown).
 // macOS only and best-effort: returns a handle for stopRecording, or null.
-export function startRecording(profile, path) {
-  const pid = process.platform === "darwin" ? findPid(profile) : null;
+export function startRecording(path) {
+  const pid = process.platform === "darwin" ? findPid() : null;
   if (!pid) return null;
   try {
     mkdirSync(join(path, ".."), { recursive: true });

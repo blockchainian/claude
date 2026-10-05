@@ -6,9 +6,10 @@ import { test } from "node:test";
 
 import { pageBodies, parseArgs, soundRows } from "../scripts/fetch-tiktok-sounds.mjs";
 
-test("parseArgs takes an optional --username and --count", () => {
-  assert.deepEqual(parseArgs([]), { username: null, count: 20 });
-  assert.deepEqual(parseArgs(["--username", "@me", "--count", "45"]), { username: "me", count: 45 });
+test("parseArgs takes an optional --username, --count, --headed and --with-sound", () => {
+  assert.deepEqual(parseArgs([]), { username: null, count: 20, headed: false, withSound: false });
+  assert.deepEqual(parseArgs(["--username", "@me", "--count", "45", "--headed", "--with-sound"]), { username: "me", count: 45, headed: true, withSound: true });
+  assert.throws(() => parseArgs(["--with-sound"]), /--with-sound needs --headed/);
   assert.throws(() => parseArgs(["--count", "0"]), /--count/);
   assert.throws(() => parseArgs(["--count", "many"]), /--count/);
   assert.throws(() => parseArgs(["--bogus"]), /Unknown option --bogus/);

@@ -1,10 +1,10 @@
 // ABOUTME: Posts one video to the secrets-manager TikTok account through TikTok Studio's upload page, in the
-// ABOUTME: account's own Camoufox profile, screen-recorded, then finds the posted video's id and logs the post.
+// ABOUTME: account's own Camoufox profile, then finds the posted video's id and logs the post.
 //
 // Usage:
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-video.mjs <video.mp4> \
 //     [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc]
-//     [--promotion your-brand|branded-content|your-brand,branded-content] [--sound <id>]
+//     [--promotion your-brand|branded-content|your-brand,branded-content] [--sound <id>] [--headed [--with-sound]]
 //   --username posts as that account of the store (default: its earliest imported active account).
 //   --caption is the post's description, hashtags included (default: empty, TikTok then shows nothing).
 //   --visibility is who can see the post (default everyone).
@@ -13,10 +13,12 @@
 //     `branded-content` (a third party's, under TikTok's Branded Content Policy).
 //   --sound adds the commercial-library sound with that id (fetch-tiktok-sounds lists them) under the
 //     video's own audio.
+//   --headed shows the browser window and screen-records it, to debug a step TikTok Studio's page
+//     changes broke; --with-sound also unmutes it. Without --headed the browser is hidden.
 //
 // The account (the named one, else the store's earliest imported active one) is opened as its
-// own profile on its own ISP slot (see tiktok-session.mjs). The window is shown and recorded to
-// <CREATOR_TIKTOK_DIR>/<username>/recordings/<ts>.mov. A logged-out profile stops the run: log the
+// own profile on its own ISP slot (see tiktok-session.mjs). A --headed run is recorded to
+// <CREATOR_TIKTOK_DIR>/<username>/recordings/upload-<ts>.mov. A logged-out profile stops the run: log the
 // account in again with secrets-manager's `login tiktok`; the store is never written here.
 //
 // Each post appends a line to <CREATOR_TIKTOK_DIR>/<username>/posts.jsonl:
@@ -27,7 +29,7 @@ import { appendFileSync, existsSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { accountDir, accountVideos, callApi, captureTemplate, loadAccount, openBrowser, signedIn, startRecording, stopRecording } from "./tiktok-session.mjs";
+import { accountDir, accountVideos, browserFlag, callApi, captureTemplate, checkBrowserFlags, loadAccount, openBrowser, recordingPath, signedIn } from "./tiktok-session.mjs";
 
 const UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?from=webapp";
 const UPLOAD_TIMEOUT_MS = 300000; // the file upload, from choosing it to TikTok's "Uploaded"
@@ -41,12 +43,12 @@ const VISIBILITY = { everyone: "Everyone", friends: "Friends", "only-me": "Only 
 // The checkboxes under "Disclose post content", by --promotion kind.
 const PROMOTION = { "your-brand": "Your brand", "branded-content": "Branded content" };
 const USAGE =
-  "Usage: upload-tiktok-video.mjs <video.mp4> [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc] [--promotion your-brand,branded-content] [--sound <id>]";
+  "Usage: upload-tiktok-video.mjs <video.mp4> [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc] [--promotion your-brand,branded-content] [--sound <id>] [--headed [--with-sound]]";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function parseArgs(argv) {
-  const out = { file: null, username: null, caption: "", visibility: "everyone", aigc: false, promotion: [], sound: null };
+  const out = { file: null, username: null, caption: "", visibility: "everyone", aigc: false, promotion: [], sound: null, headed: false, withSound: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--caption") out.caption = argv[++i] ?? "";
@@ -63,10 +65,12 @@ export function parseArgs(argv) {
     } else if (a === "--sound") {
       out.sound = argv[++i] ?? "";
       if (!/^\d+$/.test(out.sound)) throw new Error("--sound must be a sound id (fetch-tiktok-sounds lists them)");
-    } else if (a.startsWith("--")) throw new Error(`Unknown option ${a}`);
+    } else if (browserFlag(a, out)) continue;
+    else if (a.startsWith("--")) throw new Error(`Unknown option ${a}`);
     else out.file = a;
   }
   if (!out.file) throw new Error(USAGE);
+  checkBrowserFlags(out);
   return out;
 }
 
@@ -242,17 +246,10 @@ async function main() {
   console.log(`posting ${basename(file)} as @${account.username} (ISP slot ${account.slot})`);
 
   const startedS = Math.floor(Date.now() / 1000) - CLOCK_SKEW_S;
-  const { context, page } = await openBrowser({ slot: account.slot, profile: account.profile, headed: true, url: UPLOAD_URL });
+  const recordTo = recordingPath(account.username, "upload");
+  const { context, page, close } = await openBrowser({ headed: args.headed, withSound: args.withSound, slot: account.slot, profile: account.profile, recordTo, url: UPLOAD_URL });
   const dir = accountDir(account.username);
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const recording = startRecording(account.profile, join(dir, "recordings", `${stamp}.mov`));
-  if (recording) console.log(`  recording to ${recording.path}`);
-  const finish = async () => {
-    const saved = await stopRecording(recording);
-    if (saved) console.log(`  saved recording: ${saved}`);
-    await context.close().catch(() => {});
-  };
-  process.once("SIGINT", () => finish().then(() => process.exit(130)));
+  process.once("SIGINT", () => close().then(() => process.exit(130)));
 
   try {
     if (!(await signedIn(context))) {
@@ -293,12 +290,12 @@ async function main() {
       sound: args.sound,
       videoId: video?.id ?? null,
       url,
-      recording: recording?.path ?? null,
+      recording: args.headed ? recordTo : null,
     };
     appendFileSync(join(dir, "posts.jsonl"), JSON.stringify(record) + "\n");
     console.log(video ? `posted ${url}` : "posted, but the video has not reached the profile yet; fetch-tiktok-stats will list it once it has");
   } finally {
-    await finish();
+    await close();
   }
 }
 

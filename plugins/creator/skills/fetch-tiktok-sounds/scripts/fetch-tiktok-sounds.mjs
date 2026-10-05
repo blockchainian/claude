@@ -2,33 +2,36 @@
 // ABOUTME: "Royalty-free sounds" page shows them, with the ids upload-tiktok-video's --sound takes.
 //
 // Usage:
-//   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-sounds/scripts/fetch-tiktok-sounds.mjs [--username <name>] [--count <n>]
+//   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-sounds/scripts/fetch-tiktok-sounds.mjs [--username <name>] [--count <n>] [--headed [--with-sound]]
 //   --username reads the list as that account of the store (default: the account upload-tiktok-video
 //     posts as, the store's earliest imported active TikTok account).
 //   --count is how many sounds to list, hottest first (default 20).
+//   --headed shows the browser window and screen-records it to <username>/recordings/sounds-<ts>.mov,
+//   to debug a read TikTok's page changes broke; --with-sound also unmutes it, to play the sounds.
 //
 // The list is Studio's own, so it needs a signed-in account: the account's Camoufox profile is opened
-// headless on its ISP slot, and the list endpoint is called with fetch() inside the Studio page.
+// on its ISP slot, and the list endpoint is called with fetch() inside the Studio page.
 // Prints one line per sound: id, title, author, length, and how many posts use it.
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { loadAccount, openBrowser, signedIn } from "../../upload-tiktok-video/scripts/tiktok-session.mjs";
+import { browserFlag, checkBrowserFlags, loadAccount, openBrowser, recordingPath, signedIn } from "../../upload-tiktok-video/scripts/tiktok-session.mjs";
 
 const LIBRARY_URL = "https://www.tiktok.com/tiktokstudio/sound-library";
 const LIST_URL = "https://www.tiktok.com/tiktok/v1/creator/music/unlimited/list/?aid=1988";
 const PAGE_SIZE = 20;
 
 export function parseArgs(argv) {
-  const out = { username: null, count: 20 };
+  const out = { username: null, count: 20, headed: false, withSound: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--username") out.username = (argv[++i] ?? "").replace(/^@/, "");
     else if (argv[i] === "--count") {
       out.count = Number(argv[++i]);
       if (!Number.isInteger(out.count) || out.count < 1) throw new Error("--count must be a whole number of sounds, 1 or more");
-    } else throw new Error(`Unknown option ${argv[i]}`);
+    } else if (!browserFlag(argv[i], out)) throw new Error(`Unknown option ${argv[i]}`);
   }
+  checkBrowserFlags(out);
   return out;
 }
 
@@ -51,7 +54,14 @@ async function main() {
   if (!account) {
     throw new Error(`No active TikTok account${args.username ? ` @${args.username}` : ""} in the secrets-manager store; run its \`login tiktok\`.`);
   }
-  const { context, page } = await openBrowser({ slot: account.slot, profile: account.profile, url: LIBRARY_URL });
+  const { context, page, close } = await openBrowser({
+    slot: account.slot,
+    profile: account.profile,
+    headed: args.headed,
+    withSound: args.withSound,
+    recordTo: recordingPath(account.username, "sounds"),
+    url: LIBRARY_URL,
+  });
   try {
     if (!(await signedIn(context))) {
       throw new Error(`@${account.username}'s profile is logged out; run the secrets-manager skill's \`login tiktok\``);
@@ -70,7 +80,7 @@ async function main() {
       console.log(`${r.id}  ${r.title} — ${r.author}  ${minutes(r.seconds)}  ${r.posts} posts`);
     }
   } finally {
-    await context.close().catch(() => {});
+    await close();
   }
 }
 
