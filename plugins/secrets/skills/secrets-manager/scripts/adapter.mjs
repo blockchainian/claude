@@ -11,6 +11,7 @@ import * as config from './config.mjs';
 import * as credentials from './credentials.mjs';
 import { configureBlocklist } from './traffic.mjs';
 import { filterState } from './state.mjs';
+import { ispFetch } from './http.mjs';
 
 /**
  * @typedef {{db: object, cred: object, opts: object, io: object}} ByEmailContext
@@ -41,6 +42,7 @@ export const kit = {
   appAlreadySignedIn: async (...args) => (await import('./login.mjs')).appAlreadySignedIn(...args),
   withAppRetries: async (...args) => (await import('./login.mjs')).withAppRetries(...args),
   filterState: (...args) => filterState(...args),
+  ispFetch: (...args) => ispFetch(...args),
 };
 // aliasFor is synchronous and does not need the browser runtime.
 kit.aliasFor = (baseEmail, tag) => {

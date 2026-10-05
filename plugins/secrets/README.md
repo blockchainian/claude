@@ -88,6 +88,9 @@ The kit provides:
   headed diagnostics and cleanup. Calls `fn(context, page, proxyUrl)`, returns its result,
   and closes the context in `finally`, including when the callback throws.
   Resolve proxy URLs explicitly with `kit.config.proxyFor(key, {rotate})` when needed.
+- `ispFetch(url, init)` is `fetch` through a random ISP pool slot (`ISP_PROXY_URL`, slots
+  1..`ISP_PROXY_COUNT`) with a Chrome TLS fingerprint (impit), for a `verify` hook that checks
+  an account over the app's own API. Returns a fetch `Response`; it throws without `ISP_PROXY_URL`.
 - The engine's app-flow steps, for a hook that drives a login itself:
   `gotoPastCloudflare(page, url, {assist = false, timeoutMs = 45000})` (waits out a
   Cloudflare challenge, assisting when headed), `waitReady(page, adapter, timeoutMs = 40000)`
