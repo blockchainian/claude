@@ -28,9 +28,12 @@ PHONE = "00008030-001A2B3C4D5E6F7A"
 SESSION = "3f1c0a52-7d4e-4b0e-9d7a-6c1b2e3d4f50"
 
 
-def hook(event: str, tool_input: dict, tmp: str, response=None, caller="caller-a", call="call-a", interrupted=False) -> dict:
-    payload = {"hook_event_name": event, "tool_name": TOOL, "tool_input": tool_input,
+def hook(event: str, tool_input: dict, tmp: str, response=None, caller="caller-a",
+         call="call-a", interrupted=False, agent=None, tool=TOOL) -> dict:
+    payload = {"hook_event_name": event, "tool_name": tool, "tool_input": tool_input,
                "session_id": caller, "tool_use_id": call}
+    if agent is not None:
+        payload["agent_id"] = agent
     if event == "PostToolUseFailure":
         payload.update(error="Failed to create session: boom", is_interrupt=interrupted)
     if response is not None:
@@ -66,7 +69,6 @@ def main() -> int:
             if not re.fullmatch(group["matcher"], name):
                 failures.append(f"{event} does not match Appium session tool {name}")
         for name in ("mcp__plugin_mobile_xcodebuildmcp__session_set_defaults",
-                     "mcp__appium_mcp__appium_screenshot",
                      "mcp__other__appium_session_management"):
             if re.fullmatch(group["matcher"], name):
                 failures.append(f"{event} incorrectly matches unrelated tool {name}")
@@ -160,9 +162,11 @@ def main() -> int:
         if "session" in lock(tmp) or "pending" in lock(tmp):
             failures.append(f"failed create was recorded as a session: {lock(tmp)}")
 
-        for action in ("list", "select", "detach"):
-            if hook("PreToolUse", {"action": action, "sessionId": SESSION}, tmp):
-                failures.append(f"{action} was gated")
+        if hook("PreToolUse", {"action": "list"}, tmp):
+            failures.append("session discovery was gated")
+        for action in ("select", "attach", "detach"):
+            if decision(hook("PreToolUse", {"action": action, "sessionId": SESSION}, tmp))[0] != "deny":
+                failures.append(f"{action} could bypass a missing live session")
 
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run([str(CLAIM), PHONE, "--run", "run-a"], check=True,
@@ -227,9 +231,66 @@ def main() -> int:
         if "pending" not in lock(tmp):
             failures.append("interrupted create incorrectly freed an unknown outcome")
 
+    # A shared MCP process must not let main/sibling agents drive a child's session.
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run([str(CLAIM), PHONE, "--run", "run-a"], check=True,
+                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+        prepare_tool = "mcp__appium_mcp__appium_prepare_ios_real_device"
+        if hook("PreToolUse", {"udid": PHONE}, tmp, agent="child-a", tool=prepare_tool):
+            failures.append("claimed preparation by its first agent was denied")
+        for agent in (None, "child-b"):
+            if decision(hook("PreToolUse", create(PHONE), tmp, agent=agent))[0] != "deny":
+                failures.append("another agent could create after preparation bound the task")
+            if decision(hook("PreToolUse", {"udid": PHONE}, tmp, agent=agent, tool=prepare_tool))[0] != "deny":
+                failures.append("another agent could prepare the owned phone")
+        hook("PreToolUse", create(PHONE), tmp, agent="child-a")
+        hook("PostToolUse", create(PHONE), tmp,
+             {"content": [{"type": "text", "text": f"IOS session created successfully with ID: {SESSION}"}]},
+             agent="child-a")
+        held_before = lock(tmp)
+        tools = ["appium_screenshot", "appium_gestures", "appium_app_lifecycle", "appium_get_page_source"]
+        for tool_name in tools:
+            name = "mcp__appium_mcp__" + tool_name
+            if not re.fullmatch(config["hooks"]["PreToolUse"][0]["matcher"], name):
+                failures.append(f"operation hook did not match {name}")
+            args = {"sessionId": SESSION}
+            if hook("PreToolUse", args, tmp, agent="child-a", tool=name):
+                failures.append(f"owner was denied {tool_name}")
+            for caller, agent in (("caller-a", None), ("caller-a", "child-b"), ("caller-b", "child-a")):
+                if decision(hook("PreToolUse", args, tmp, caller=caller, agent=agent, tool=name))[0] != "deny":
+                    failures.append(f"non-owner could call {tool_name}")
+            if decision(hook("PreToolUse", {}, tmp, agent="child-a", tool=name))[0] != "deny":
+                failures.append(f"{tool_name} could use the shared default session")
+            if decision(hook("PreToolUse", {"sessionId": "untracked"}, tmp, agent="child-a", tool=name))[0] != "deny":
+                failures.append(f"{tool_name} could drive an untracked session")
+        for action in ("select", "attach", "delete"):
+            args = {"action": action, "sessionId": SESSION}
+            if hook("PreToolUse", args, tmp, agent="child-a"):
+                failures.append(f"owner was denied {action}")
+            if decision(hook("PreToolUse", args, tmp, agent="child-b"))[0] != "deny":
+                failures.append(f"sibling could {action} the owner's session")
+        if lock(tmp) != held_before:
+            failures.append("operation checks changed the task ownership")
+        hook("PostToolUse", {"action": "delete", "sessionId": SESSION}, tmp,
+             {"text": f"Session {SESSION} deleted successfully."}, agent="child-a")
+        if lock(tmp).get("sessionAgent") != "child-a" or "session" in lock(tmp):
+            failures.append("delete did not retain the task owner while clearing the session")
+        if decision(hook("PreToolUse", create(PHONE), tmp, agent="child-b"))[0] != "deny":
+            failures.append("sibling could take over between delete and release")
+        hook("PreToolUse", create(PHONE), tmp, agent="child-a")
+        hook("PostToolUseFailure", create(PHONE), tmp, agent="child-a")
+        if decision(hook("PreToolUse", create(PHONE), tmp, agent="child-b"))[0] != "deny":
+            failures.append("failed create freed the task ownership")
+        subprocess.run([str(CLAIM), PHONE, "--run", "run-a", "--release"], check=True,
+                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+        subprocess.run([str(CLAIM), PHONE, "--run", "run-b"], check=True,
+                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+        if hook("PreToolUse", create(PHONE), tmp, agent="child-b"):
+            failures.append("next agent could not take over after task release")
+
     for f in failures:
         print("FAIL:", f)
-    print("PASS: one Appium session per phone, only after a claim, cleared by delete"
+    print("PASS: one agent per phone task; explicit sessions, atomic creates, release and recovery"
           if not failures else f"{len(failures)} failure(s)")
     return 1 if failures else 0
 

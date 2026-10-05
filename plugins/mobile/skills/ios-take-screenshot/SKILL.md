@@ -86,13 +86,18 @@ Several agents can share the artifact library. Device use is exclusive per UDID:
 Different simulators can run in parallel; multiple callers use one phone in turn,
 waiting and claiming again after the holder releases it. There is no background queue.
 
-The phone hook reserves a create before it starts, then records only that call's
-successful session. Deletes require an explicit `sessionId` and clear only that
-session's record. A same-run reclaim preserves the connection; release refuses
-while a connection or create is recorded. The hook checks host session identity,
-and subagent identity when supplied, but it does not bind `RUN_ID` to a caller or
-guard every Appium action. Callers must obey their assigned claim and always pass
-their own `sessionId`; do not select or drive another caller's active session.
+The phone hook binds the claimed task to the host session and its agent identity
+on the first WebDriverAgent preparation or session create. It reserves a create
+before execution and records only that call's successful session. Every Appium
+phone operation must pass its explicit `sessionId`; shared active-session defaults
+are denied, as are operations by the main agent or a sibling when a subagent owns
+the task. Session listing and device discovery remain available to everyone.
+Deletes clear the connection but retain the task owner, including across failed
+creates and reconnects, until the claim is released. Do not detach an owned session.
+A same-run reclaim preserves ownership; release refuses while a connection or
+create is recorded. `RUN_ID` remains the cooperative shell claim identifier: only
+the assigned agent should claim/release it. Give the entire phone task to one agent;
+do not delegate phone operations to another agent while holding the claim.
 
 The stitcher writes to a staging file and renames it into place, so readers never
 see a half-written PNG. Its verdict reports `replaced_existing` when a run replaces
@@ -166,18 +171,8 @@ ready; exit 1 lists what is missing. The UDID comes from the device list, the te
 a profile that covers the device, and the WebDriverAgent bundle id from the runner already
 installed on it.
 
-**If WebDriverAgent is not installed, do not build it by hand.** Use
-`appium_prepare_ios_real_device`:
-
-1. Call it with no `provisioningProfileUuid` to list available profiles.
-2. Call it again with the chosen UUID and `isFreeAccount` — false for a paid Apple
-   Developer account, true otherwise. It downloads the matching WebDriverAgent release,
-   packages it as an IPA, resigns it with that profile, and returns a `capabilitiesHint`.
-3. Pass that hint to `appium_session_management` (`action=create`), serialising the whole
-   object — do not drop its boolean or numeric values.
-
-Before creating the session, claim the phone for this run, so no other agent opens a
-session that ends yours:
+Before preparing WebDriverAgent or creating the session, claim the phone for this
+run, so no other agent opens a session that ends yours:
 
 ```bash
 "$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
@@ -187,6 +182,16 @@ Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim agai
 there is no other phone to pick. Hold the claim across every screen of the flow and
 release it at cleanup, after deleting the Appium session. The hook records the session id
 in the claim when `create` succeeds, and clears only that session when an explicit `sessionId` delete succeeds.
+
+**If WebDriverAgent is not installed, do not build it by hand.** Use
+`appium_prepare_ios_real_device`:
+
+1. Call it with no `provisioningProfileUuid` to list available profiles.
+2. Call it again with the chosen UUID and `isFreeAccount` — false for a paid Apple
+   Developer account, true otherwise. It downloads the matching WebDriverAgent release,
+   packages it as an IPA, resigns it with that profile, and returns a `capabilitiesHint`.
+3. Pass that hint to `appium_session_management` (`action=create`), serialising the whole
+   object — do not drop its boolean or numeric values.
 
 Two switches live on the phone and cannot be set from the Mac. Developer Mode, which
 `devicectl` does report, and **Settings -> Developer -> UI TESTING -> Enable UI
