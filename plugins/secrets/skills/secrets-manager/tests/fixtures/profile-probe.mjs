@@ -46,4 +46,8 @@ await assert.rejects(kit.withProfile(result.alias, {}, async (context, received)
  throw new Error('hook failure');
 }), /hook failure/);
 assert.equal(contexts[1].closed,true);assert.deepEqual(launches[1].fingerprint,launches[0].fingerprint);
+// A headless run asked to record saves the page video under the account's debug dir; no other run does.
+assert.equal(launches[0].recordVideo,undefined);
+await kit.withProfile(result.alias, {record:true}, async () => {});
+assert.ok(launches[2].recordVideo.dir.startsWith(join(kit.config.debugDir(),result.alias,'rec-')));
 console.log('profile and mailbox contract verified');
