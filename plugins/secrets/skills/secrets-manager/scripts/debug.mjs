@@ -56,13 +56,17 @@ export function startScreenRecording(email, pid) {
 export async function stopScreenRecording(handle, timeoutMs = 15000) {
   const child = handle?.child;
   if (!child || child.exitCode !== null || child.signalCode !== null) return null;
+  let timer;
   try {
     const exited = new Promise((r) => child.once("exit", r));
     child.kill("SIGINT");
-    await Promise.race([exited, new Promise((r) => setTimeout(r, timeoutMs))]);
+    // The timeout is cleared once the recorder exits: left armed, it would hold the process open.
+    await Promise.race([exited, new Promise((r) => (timer = setTimeout(r, timeoutMs)))]);
     return handle.path;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
