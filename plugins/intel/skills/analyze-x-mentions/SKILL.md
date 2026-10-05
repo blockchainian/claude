@@ -27,6 +27,14 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
+
+The labeler reads `auth.json` from that directory and copies the login into a temporary private Codex home. No X credentials are needed to analyze an existing archive.
+
 One app's X mentions → an evidence-only reception doc: an overview, what users
 like and dislike about the app, what they ask for, the timeline, and what it means for
 us. Every number comes from the JSON; every post is read and labeled by a model (no
