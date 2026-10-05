@@ -3,7 +3,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -133,4 +133,86 @@ describe("one run holds a simulator or phone at a time, and capture needs the cl
     assert.equal(r.status, 2);
     assert.ok(r.stderr.includes("--run"), r.stderr);
   });
+});
+
+
+describe("concurrent claims and existing state", () => {
+  function concurrentClaim(udid, runId) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(path.join(scriptsDir, "claim-simulator.mjs"), [udid, "--run", runId], {
+        env: { ...process.env, TMPDIR: tmp },
+      });
+      let stdout = "", stderr = "";
+      child.stdout.on("data", (data) => { stdout += data; });
+      child.stderr.on("data", (data) => { stderr += data; });
+      child.on("error", reject);
+      child.on("close", (status) => resolve({ status, stdout, stderr }));
+    });
+  }
+
+  test("simultaneous callers get exactly one holder per device", async () => {
+    const devices = ["CONCURRENT-A", "CONCURRENT-B"];
+    const results = await Promise.all(devices.flatMap((udid) =>
+      Array.from({ length: 8 }, (_, i) => concurrentClaim(udid, `${udid}-${i}`))));
+    for (const udid of devices) {
+      const group = results.filter((r) => parse(r.stdout).udid === udid);
+      assert.equal(group.length, 8);
+      const winners = group.filter((r) => r.status === 0);
+      assert.equal(winners.length, 1, JSON.stringify(group));
+      const holder = parse(winners[0].stdout).heldBy;
+      for (const result of group.filter((r) => r.status !== 0)) {
+        assert.equal(result.status, 3, result.stderr);
+        assert.equal(parse(result.stdout).heldBy, holder);
+      }
+      assert.equal(JSON.parse(fs.readFileSync(path.join(tmp, `ios-screenshot-lock.${udid}.json`))).run, holder);
+      assert.equal(claim(udid, "--run", holder, "--release").status, 0);
+    }
+  });
+
+  test("reclaim preserves an active phone session and original claim age", () => {
+    const file = path.join(tmp, "ios-screenshot-lock.RECLAIM-PHONE.json");
+    const held = { run: "run-a", since: 123, session: "live-session", sessionOwner: "caller-a" };
+    fs.writeFileSync(file, JSON.stringify(held));
+    assert.equal(claim("RECLAIM-PHONE", "--run", "run-a").status, 0);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file)), held);
+    assert.equal(claim("RECLAIM-PHONE", "--run", "run-a", "--release").status, 3);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file)), held);
+  });
+
+  test("explicit steal recovers an interrupted create", () => {
+    const file = path.join(tmp, "ios-screenshot-lock.DEAD-CREATE.json");
+    fs.writeFileSync(file, JSON.stringify({ run: "dead", pending: { caller: "old", call: "old-call" } }));
+    assert.equal(claim("DEAD-CREATE", "--run", "new", "--steal").status, 0);
+    const held = JSON.parse(fs.readFileSync(file));
+    assert.equal(held.run, "new");
+    assert.equal(held.pending, undefined);
+  });
+
+  test("a corrupt claim fails explicitly and is never replaced", () => {
+    const file = path.join(tmp, "ios-screenshot-lock.CORRUPT.json");
+    fs.writeFileSync(file, "{unfinished");
+    const result = claim("CORRUPT", "--run", "run-a");
+    assert.notEqual(result.status, 0);
+    assert.equal(fs.readFileSync(file, "utf8"), "{unfinished");
+  });
+
+  test("device identifiers cannot escape the shared claim directory", () => {
+    assert.equal(claim("../other", "--run", "run-a").status, 2);
+    assert.equal(claim("VALID", "--run", "").status, 2);
+  });
+});
+
+
+test("claims work from a relocated plugin path containing spaces", () => {
+  const plugin = path.join(tmp, "mobile plugin with spaces");
+  const scripts = path.join(plugin, "skills", "ios-take-screenshot", "scripts");
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.mkdirSync(path.join(plugin, "hooks"));
+  fs.copyFileSync(path.join(scriptsDir, "claim-simulator.mjs"), path.join(scripts, "claim-simulator.mjs"));
+  fs.copyFileSync(path.resolve(scriptsDir, "../../../hooks/claim_state.py"), path.join(plugin, "hooks", "claim_state.py"));
+  const result = spawnSync(process.execPath, [path.join(scripts, "claim-simulator.mjs"), "RELOCATED", "--run", "run-a"], {
+    cwd: os.tmpdir(), encoding: "utf8", env: { ...process.env, TMPDIR: tmp },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(parse(result.stdout).claimed, true);
 });

@@ -1,6 +1,6 @@
 # mobile
 
-Drive iOS apps from Claude Code — build and run them on the simulator, walk the
+Drive iOS apps from Claude Code or Codex — build and run them on the simulator, walk the
 UI, profile CPU, prove memory leaks, and capture whole app screens from a
 connected iPhone.
 
@@ -39,12 +39,14 @@ npx -y xcodebuildmcp@latest mcp
 XCODEBUILDMCP_ENABLED_WORKFLOWS=simulator,simulator-management,ui-automation,debugging,device
 ```
 
-That registers 59 tools. `session-management` is added by the server itself.
+The tested XcodeBuildMCP 2.7.0 configuration registers 59 tools. `session-management` is added by the server itself.
 `project-discovery`, `utilities`, and `coverage` are deliberately absent: the
 `simulator` workflow already re-lists their tools, so enabling them would add
 only `get_mac_bundle_id`.
 
-Tools are namespaced `mcp__plugin_mobile_xcodebuildmcp__*`.
+Skills name tools without a host-specific prefix. Discover them from the
+`xcodebuildmcp` server through the host's tool inventory or tool search, and use
+their actual registered names.
 
 `appium-mcp` drives a physical iPhone, which XcodeBuildMCP cannot do — its UI
 automation is simulator-only:
@@ -54,14 +56,36 @@ npx -y appium-mcp@latest
 NO_UI=true
 ```
 
-Tools are namespaced `mcp__plugin_mobile_appium-mcp__*`. The plugin's
+Discover physical-device tools from the `appium-mcp` server the same way. The plugin's
 `phone-session-gate` hook denies `appium_session_management` `create` unless the phone is
 claimed through `ios-take-screenshot`'s claim script and no session is open on it, since
 WebDriverAgent serves one session and a second create ends the first. Device-specific
 capabilities are not in `.mcp.json`, since they differ per machine; pass them
 when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 
+The gate is shared by both hosts. In Codex, review and trust the loaded
+`phone-session-gate` in `/hooks` before phone automation; stop if it is not active
+or trusted. Device claims and phone-session changes are serialized across hosts.
+The first preparation/create binds the claimed phone task to its host session and
+agent identity. Every Appium phone operation requires the owner's explicit
+`sessionId`; main and sibling agents cannot use the owner's connection. Delete
+clears the session but keeps task ownership until claim release, so reconnecting
+cannot hand the phone to another agent. Discovery/listing stay available; there
+is no shared active-session default or detach for owned phone tasks. Assign the
+whole phone task, including claim/release, to one agent.
+
 ## Install
+
+For Codex installation, see
+[Codex installation](../../README.md#codex).
+
+Different simulators can run in parallel: every simulator call names its UUID,
+and agents do not change shared session defaults. A phone is used by one run at a
+time; other callers wait and retry after release. The claim and hook use the same
+OS lock, preserve active connections on reclaim, and clear only explicit session
+deletes. There is no automatic queue or claim expiry.
+
+In Claude Code:
 
 ```
 /plugin marketplace add blockchainian/claude
@@ -120,7 +144,7 @@ Changes in this fork:
   `swiftui-view-refactor`) and the Codex-only `ios-simulator-browser` skill,
   keeping the three simulator-runtime skills.
 - Corrected `ios-debugger-agent` against xcodebuildmcp 2.7.0: real tool names
-  (`snapshot_ui`, `session_set_defaults`, `elementRef`-based `tap`/`type_text`),
+  (`snapshot_ui`, explicit `simulatorId`, `elementRef`-based `tap`/`type_text`),
   and log guidance matching the automatic runtime-log capture that
   `build_run_sim`/`launch_app_sim` provide. Upstream still documents
   `describe_ui` and `start_sim_log_cap`/`stop_sim_log_cap`, which no longer

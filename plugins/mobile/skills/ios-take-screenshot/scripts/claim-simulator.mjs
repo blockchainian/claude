@@ -4,9 +4,8 @@
 //
 // Hold one simulator or phone for one capture run, so two agents never drive it at once.
 //
-// XcodeBuildMCP scrolls whatever its session default points at and gives no
-// per-call way to name a simulator, so a second agent capturing the same
-// simulator silently retargets the first one's swipes. On a phone, WebDriverAgent
+// XcodeBuildMCP calls must explicitly name the claimed simulator; do not
+// change shared session defaults. On a phone, WebDriverAgent
 // serves one session, so a second Appium session ends the first one's mid-run.
 // The lock is a file per UDID under TMPDIR, which every session of the same user
 // shares. A claim on a UDID another run holds exits 3 and says who holds it and
@@ -16,15 +15,16 @@
 // Prints JSON. Exit 0 claimed or released, 2 bad arguments, 3 held by another run.
 
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const DESCRIPTION = `Hold one simulator or phone for one capture run, so two agents never drive it at once.
 
-XcodeBuildMCP scrolls whatever its session default points at and gives no
-per-call way to name a simulator, so a second agent capturing the same
-simulator silently retargets the first one's swipes. On a phone, WebDriverAgent
+XcodeBuildMCP calls must explicitly name the claimed simulator; do not
+change shared session defaults. On a phone, WebDriverAgent
 serves one session, so a second Appium session ends the first one's mid-run.
 The lock is a file per UDID under TMPDIR, which every session of the same user
 shares. A claim on a UDID another run holds exits 3 and says who holds it and
@@ -126,15 +126,14 @@ export function readClaim(lockFile) {
     if (error.code === "ENOENT") return null;
     throw error;
   }
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    if (error instanceof SyntaxError) return null;
-    throw error;
+  const held = JSON.parse(text);
+  if (!held || typeof held.run !== "string" || !held.run) {
+    throw new Error(`Invalid device claim: ${lockFile}`);
   }
+  return held;
 }
 
-export function main(argv = process.argv.slice(2)) {
+export function main(argv = process.argv.slice(2), underLock = false) {
   const args = parseArgs(argv);
 
   if (args.udid === "booted") {
@@ -142,10 +141,27 @@ export function main(argv = process.argv.slice(2)) {
     return 2;
   }
 
+  if (!/^[A-Za-z0-9-]+$/.test(args.udid) || !args.run) {
+    usageError("pass an explicit device UDID and a nonempty run id");
+  }
   const lockFile = lockPath(args.udid);
+  if (!underLock) {
+    const helper = fileURLToPath(new URL("../../../hooks/claim_state.py", import.meta.url));
+    const entry = `import { main } from ${JSON.stringify(import.meta.url)}; process.exitCode = main(JSON.parse(process.argv[1]), true);`;
+    const result = spawnSync("uv", ["run", "--quiet", "--script", helper, lockFile,
+      process.execPath, "--input-type=module", "-e", entry, JSON.stringify(argv)], { stdio: "inherit" });
+    if (result.error) throw result.error;
+    if (result.signal) throw new Error(`Device claim interrupted by ${result.signal}`);
+    return result.status;
+  }
   const held = readClaim(lockFile);
   const other = held !== null && held.run !== args.run;
   const now = Date.now() / 1000;
+
+  if (held && (held.session || held.pending) && args.release) {
+    process.stderr.write(`${args.udid} has an Appium session or create in progress; delete the session before releasing the claim.\n`);
+    return 3;
+  }
 
   if (args.release) {
     if (other) {
@@ -176,7 +192,15 @@ export function main(argv = process.argv.slice(2)) {
     return 3;
   }
 
-  fs.writeFileSync(lockFile, pyDumps({ run: args.run, since: now, pid: process.pid }));
+  if (held === null || other || args.steal) {
+    const temporary = `${lockFile}.${randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporary, pyDumps({ run: args.run, since: now, pid: process.pid }), { flag: "wx" });
+      fs.renameSync(temporary, lockFile);
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+  }
   process.stdout.write(pyDumps({
     claimed: true, udid: args.udid, heldBy: args.run,
     stolenFrom: other ? held.run : null, lock: lockFile,
@@ -184,6 +208,6 @@ export function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.existsSync(process.argv[1]) && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exitCode = main();
 }

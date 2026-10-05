@@ -5,8 +5,27 @@ description: Post one mp4 to the TikTok account the secrets-manager skill logged
 
 # Upload a TikTok video
 
-```
-node "${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-video.mjs" <video.mp4> \
+## Runtime and paths
+
+Works in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory containing the
+`SKILL.md` that the host loaded for this skill; replace the example value below with that actual
+path. Do not use the project's working directory or a host-specific plugin-root variable.
+Keep the full creator plugin installed: all four skills use its
+`upload-tiktok-video/scripts/tiktok-session.mjs` runtime and dependencies.
+
+Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
+and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
+shared across both hosts at `~/.config/secrets-manager` (`SECRETS_MANAGER_STATE_PATH` explicitly
+overrides it), including its `.env`, TikTok account rows, ISP slots and browser profiles.
+`ISP_PROXY_URL` must be configured there or in the process environment. Creator reads this
+store; use secrets-manager to provision or log in an account if it is missing. Installing
+creator in another host does not create or migrate accounts.
+
+## Run
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+node "$SKILL_DIR/scripts/upload-tiktok-video.mjs" <video.mp4> \
   [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc] \
   [--promotion your-brand|branded-content|your-brand,branded-content] [--sound <id>] \
   [--headed [--with-sound]]
@@ -25,8 +44,12 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-vid
   Studio's page changes, and the selectors with it. Without it the browser is hidden.
 - `--with-sound`: with `--headed`, unmute the browser (Playwright mutes it) to hear the video.
 
-Launch it in the background and reread the log; a post takes from about 20 s to a few minutes,
-most of it waiting for the video to show on the profile.
+Run through the host's shell execution tool and retain its process/session handle and output.
+If it continues in the background, use the host's completion notification or a wait on that
+handle, rather than repeatedly rereading a log. Set a ten-minute deadline before launch;
+a post takes from about 20 s to a few minutes, most of it waiting for the video to show on the
+profile. On timeout, preserve output and report the process handle and its state; do not
+retry a possibly completed post automatically.
 
 ## The account
 
@@ -68,8 +91,14 @@ overrides `~/.local/share/creator/tiktok`):
 
 ## Setup
 
-`npm install` in this skill's `scripts/` (fetch-tiktok-stats uses the same install). Camoufox is
-fetched by the secrets plugin's setup. `ISP_PROXY_URL` comes from the secrets-manager's `.env`.
+All four creator skills share this install:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+(cd "$SKILL_DIR/scripts" && npm ci)
+```
+
+Camoufox is fetched by the secrets plugin's setup. `ISP_PROXY_URL` comes from the secrets-manager's `.env`.
 Recording needs macOS's Screen Recording permission for the terminal running `swift`.
 
 ## Not here
