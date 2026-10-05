@@ -88,17 +88,16 @@ and 100 to do, at most N run at a time.
 
 The Google sign-in is one graph traversal, not a set of flag-gated modes. A single run walks the
 whole sign-in graph — password, TOTP, and the phone step (always driven with a rented HeroSMS
-number) — handling whatever challenge appears, in any order, without restarting. The reCAPTCHA and
-the password-page text CAPTCHA are cleared automatically when `CAPSOLVER_API_KEY` is set in
-`~/.config/secrets-manager/.env`. The reCAPTCHA is solved by driving the real widget — click the checkbox (it often
-passes outright), and when Google shows the image grid, CapSolver classifies which tiles hold the
-requested object (bus, crosswalk, …) and the script clicks them and Verify, handling both the static
-"select all squares" and the dynamic "verify once none left" grids, 3x3 and 4x4. The text CAPTCHA is
-read off its image. With no CapSolver key, `--headed` is the fallback:
-it shows the browser, and when the flow hits a node only a person can clear (a reCAPTCHA the solver
-did not clear, or a real phone number once HeroSMS is exhausted) it leaves the page where Google put
-it, waits, and resumes the moment the URL moves on. A headless run with no solver has no window to
-clear, so such a node escalates instead. There is no `--assist` and no `--sms`: "is a human here" is
+number) — handling whatever challenge appears, in any order, without restarting. The reCAPTCHA is
+met by clicking the real widget's checkbox (it often passes outright). When Google shows the image
+grid instead, a headless run has a vision model (`codex exec`, `GRID_MODEL`) name the tiles holding
+the requested object (bus, crosswalk, …) and clicks them and Verify, handling both the static
+"select all squares" and the dynamic "verify once none left" grids, 3x3 and 4x4; the same model reads
+the password-page text CAPTCHA off its image. A headed run never uses the vision model: it shows the
+browser, and when the flow hits a node only a person clears (the image grid, the password-page text
+CAPTCHA, or a real phone number once HeroSMS is exhausted) it leaves the page where Google put it,
+waits, and resumes the moment the URL moves on. A headless run the model could not clear has no
+window, so such a node escalates instead. There is no `--assist` and no `--sms`: "is a human here" is
 just whether the run is headed, and the phone step is always attempted automatically. `--headed`
 also, on any error, leaves the window open so you can inspect and finish by hand — close it to let
 the run end.
@@ -264,16 +263,13 @@ RESIDENTIAL_PROXY_URL=http://user:pass@host:port
 HERO_SMS_API_KEY=...        # optional — rents phone numbers for the SMS step
 ISP_PROXY_URL=http://user:pass@host:port  # TikTok fixed ISP pool
 ISP_PROXY_COUNT=1                      # TikTok slots
-CAPSOLVER_API_KEY=...        # optional — auto-solves the reCAPTCHA and password-page CAPTCHA
 X_BEARER=...                 # verify x: x.com's web-app bearer token
 X_VIEWER_QUERY_ID=...        # verify x: the GraphQL Viewer queryId from x.com's main.js
 ```
 
 Compatible proxies that take `sessid`/`sesstime` in the username give each account a sticky
 exit (`sessid` derived from its ID) so one login never hops IPs. The browser runs with `geoip` so timezone/locale/WebRTC match the exit. Without a proxy,
-browser commands refuse to run. `CAPSOLVER_API_KEY` is optional: with it, the reCAPTCHA and the
-password-page text CAPTCHA are cleared automatically; without it they fall back to the `--headed`
-human click.
+browser commands refuse to run.
 
 To keep proxy traffic down, every browser context aborts requests a login never needs before
 they leave the browser (`scripts/traffic.mjs`): all images, media and fonts on any site, plus a
@@ -298,10 +294,9 @@ page helpers, adapters, CLI dispatch and setup reporting. Live login selectors n
 
 ## Limits
 
-- reCAPTCHA and the password-page text CAPTCHA are auto-solved by CapSolver when `CAPSOLVER_API_KEY`
-  is set; no solver is 100%, so a failed solve still falls back to the `--headed` human click. A
-  headless run with no key (or a solver miss) that hits a CAPTCHA marks the account `escalated` and
-  moves on; re-run `--headed`, or set the key, so it can be cleared.
+- reCAPTCHA grids and the password-page text CAPTCHA are auto-solved by the vision model on headless
+  runs only; it is not 100%, so a headless miss marks the account `escalated` and moves on. Re-run
+  `--headed` to clear it by hand.
 - The phone step (`challenge/iap`) is always driven with a rented HeroSMS number — the flow handles
   it with no flag. That path is unproven: Google has so far refused to send its verification SMS to
   every rented number (Cameroon, Canada, a real Philippines number all failed on fresh accounts with

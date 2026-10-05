@@ -237,17 +237,18 @@ async function hasPasswordField(page) {
 // (Google is holding a re-verification only a person can clear).
 async function reachPasswordPage(page, cred, { assist = false, timeoutS = 20 } = {}) {
   let deadline = Date.now() + timeoutS * 1000;
-  let recaptchaTries = 0; // cap the paid CapSolver attempts so a page that never clears can't re-solve forever
+  let recaptchaTries = 0; // cap the auto attempts so a page that never clears can't re-solve forever
   while (Date.now() < deadline) {
     if (await hasPasswordField(page)) return;
     await ensureEnglish(page); // the identifier hop can drop `hl`; "Verify it" below is matched in English
     // Fresh, low-trust accounts hit a reCAPTCHA at challenge/recaptcha before the password field.
-    // CapSolver clears it automatically when a key is set; otherwise a headed run lets the person
-    // click it and we wait for the password field, and a headless run with no solver escalates.
+    // The checkbox is clicked either way; an image grid behind it is solved by the vision model only
+    // on a headless run. A headed run hands the grid to the person and waits for the password field,
+    // and a headless run the model could not clear escalates.
     if (await onRecaptcha(page)) {
       if (recaptchaTries < 2) {
         recaptchaTries += 1;
-        if (await clearRecaptcha(page, cred)) {
+        if (await clearRecaptcha(page, cred, { vision: !assist })) {
           deadline = Date.now() + timeoutS * 1000; // fresh budget for the steps after the CAPTCHA
           if (await hasPasswordField(page)) return;
           continue;
@@ -255,7 +256,7 @@ async function reachPasswordPage(page, cred, { assist = false, timeoutS = 20 } =
       }
       if (!assist) {
         await debug.capture(page, cred.email, "google-recaptcha");
-        throw new NeedsHuman(`${cred.email}: Google is holding a reCAPTCHA — set CAPSOLVER_API_KEY or run headed to clear it by hand`);
+        throw new NeedsHuman(`${cred.email}: Google is holding a reCAPTCHA — run headed to clear it by hand`);
       }
       await waitForHuman(page, cred, {
         message: `click the reCAPTCHA for ${cred.email} in the browser`,
@@ -403,18 +404,19 @@ export async function submitRecaptcha(page, cred) {
 }
 
 // Try to clear a reCAPTCHA by driving the real widget. Google gates form submission on the widget's
-// own solved-state (the widget lives in an iframe; a CapSolver token injected into the page textarea
+// own solved-state (the widget lives in an iframe; a solver token injected into the page textarea
 // is never consumed), so the only thing that works is to act on the widget itself: click the
 // checkbox — on a good Camoufox fingerprint + residential exit it often passes with no image
-// challenge — and if Google then shows the image grid, solve that with CapSolver's tile
-// classification. Returns true only when the flow actually leaves the reCAPTCHA. Never throws: any
-// failure degrades to the human `--assist` click.
-async function clearRecaptcha(page, cred) {
+// challenge — and if Google then shows the image grid, solve that with the vision model when
+// `vision` is set (headless runs only; a headed run leaves the grid to the person). Returns true only
+// when the flow actually leaves the reCAPTCHA. Never throws: any failure degrades to the human.
+async function clearRecaptcha(page, cred, { vision }) {
   try {
     // A grid may already be open (a retry, or a previous click that expanded it) — solve it directly
     // instead of clicking the checkbox again, which would reset the challenge.
     if (await recaptchaGridOpen(page)) {
-      console.log(`  captcha: image grid already open for ${cred.email} — solving with CapSolver classification`);
+      if (!vision) return false;
+      console.log(`  captcha: image grid already open for ${cred.email} — solving with the vision model`);
       if (await solveRecaptchaGrid(page, cred)) return await submitRecaptcha(page, cred);
       return false;
     }
@@ -451,7 +453,8 @@ async function clearRecaptcha(page, cred) {
       return await submitRecaptcha(page, cred);
     }
     if (outcome === "grid") {
-      console.log(`  captcha: image grid appeared for ${cred.email} — solving with CapSolver classification`);
+      if (!vision) return false;
+      console.log(`  captcha: image grid appeared for ${cred.email} — solving with the vision model`);
       if (await solveRecaptchaGrid(page, cred)) return await submitRecaptcha(page, cred);
       return false;
     }
@@ -588,17 +591,14 @@ export async function waitGridChanged(page, { prevSrc, timeoutMs }) {
   );
 }
 
-// Solve the reCAPTCHA image grid with CapSolver's per-tile classification. Each round waits for the
-// grid to finish rendering, screenshots every unselected tile element, and classifies them in parallel
-// with CapSolver's single-tile mode — which returns a real yes/no per tile, unlike the whole-grid mode
-// that always names ~3 tiles and never reports "none". Matching tiles are clicked at a human pace. Two
-// challenge shapes: the static "select all squares … if there are none click skip" is verified in one
-// pass; the dynamic "select all images … click verify once there are none left" replaces clicked tiles,
-// so it loops — clicking matches, waiting for the swap, re-checking — and presses Verify once a round
-// finds no matches (the yes/no mode makes that "none" reachable). Bounded rounds, then the human.
-// Returns true once the challenge closes. Never throws.
+// Solve the reCAPTCHA image grid with the vision model. Each round waits for the grid to finish
+// rendering, screenshots the whole table, and asks the model which cells hold the prompt's object (it
+// can answer "none"). Matching tiles are clicked at a human pace. Two challenge shapes: the static
+// "select all squares … if there are none click skip" is verified in one pass; the dynamic "select all
+// images … click verify once there are none left" replaces clicked tiles, so it loops — clicking
+// matches, waiting for the swap, re-checking — and presses Verify once a round finds no matches.
+// Bounded rounds, then the human. Returns true once the challenge closes. Never throws.
 export async function solveRecaptchaGrid(page, cred) {
-  if (!config.capSolverKey()) return false;
   try {
     let prevSig = null;
     let prevObject = null;
@@ -637,8 +637,7 @@ export async function solveRecaptchaGrid(page, cred) {
         return false;
       }
       // Classify the whole grid with a vision model (classifyImage): it sees the full picture, so it
-      // handles an object spanning several cells and can report "none" — both of which CapSolver's grid
-      // and per-tile classifiers get wrong. Screenshot the table and ask which cells hold the object.
+      // handles an object spanning several cells and can report "none". Screenshot the table and ask which cells hold the object.
       const table = bframe.locator("table[class*='rc-imageselect-table']").first();
       const shot = await table.screenshot().catch(() => null);
       if (!shot) return false;
@@ -742,16 +741,16 @@ export async function solveRecaptchaGrid(page, cred) {
   }
 }
 
-// Try to read the password-page distorted-text CAPTCHA with CapSolver and fill the `ca` answer field.
-// Returns true when the field was filled (the caller then submits the password). False (no key, no
-// image, or a solver failure) falls back to the human. Never throws.
+// Try to read the password-page distorted-text CAPTCHA with the vision model and fill the `ca` answer
+// field. Returns true when the field was filled (the caller then submits the password). False (no
+// image, or a model failure) falls back to the human. Never throws.
 async function clearPasswordCaptcha(page, cred) {
   try {
     const img = page.locator("img#captchaimg, img[src*='Captcha'], img[src*='captcha']").first();
     if (!(await img.isVisible().catch(() => false))) return false;
     const shot = await img.screenshot();
     // Read the distorted characters with the same vision model that solves the reCAPTCHA grid; the
-    // model sees the whole warped string at once, where CapSolver's OCR kept failing on these.
+    // model sees the whole warped string at once.
     const result = await readImageText(shot);
     if (!result) {
       console.log(`  captcha: vision could not read the password-page CAPTCHA for ${cred.email}`);
@@ -837,8 +836,8 @@ async function driveGoogleChallenges(surface, cred, { assist = false, done, time
   let stuck = 0;
   let passwordTries = 0;
   let identifierTries = 0;
-  let recaptchaTries = 0; // cap the paid CapSolver reCAPTCHA attempts per traversal
-  let captchaTries = 0; // cap the paid CapSolver password-page image reads per traversal
+  let recaptchaTries = 0; // cap the auto reCAPTCHA attempts per traversal
+  let captchaTries = 0; // cap the vision-model password-page image reads per traversal
   let lastTotp = null; // the last TOTP code we submitted, so we only re-enter when the 30s window rolls
   let choseAccount = false;
   while (waited < timeoutMs) {
@@ -866,10 +865,10 @@ async function driveGoogleChallenges(surface, cred, { assist = false, done, time
       await debug.capture(surface, cred.email, "google-recaptcha");
       if (recaptchaTries < 2) {
         recaptchaTries += 1;
-        if (await clearRecaptcha(surface, cred)) continue;
+        if (await clearRecaptcha(surface, cred, { vision: !assist })) continue;
       }
       if (assist && (await handOff(`click the reCAPTCHA for ${cred.email} in the window`))) continue;
-      throw new NeedsHuman(`${cred.email}: Google is holding a reCAPTCHA — set CAPSOLVER_API_KEY or run headed to clear it by hand`);
+      throw new NeedsHuman(`${cred.email}: Google is holding a reCAPTCHA — run headed to clear it by hand`);
     }
 
     const inputs = await inputInventory(surface);
@@ -926,11 +925,11 @@ async function driveGoogleChallenges(surface, cred, { assist = false, done, time
         break;
       case "password-captcha":
         // Google put an image-text CAPTCHA on the password page (low-trust account/IP). Fill the
-        // password first, then let CapSolver read the distorted text and fill the `ca` field and
-        // submit. With no solver a headed run hands off for a person to type it, and a headless run
-        // escalates (the caller marks the account escalated on NeedsHuman).
+        // password first. A headless run lets the vision model read the distorted text, fill the `ca`
+        // field and submit, and escalates if it cannot (the caller marks the account escalated on
+        // NeedsHuman); a headed run hands it straight to the person to type.
         await tryFill(surface, "input[type=password]", cred.password);
-        if (captchaTries < 2) {
+        if (!assist && captchaTries < 2) {
           captchaTries += 1;
           if (await clearPasswordCaptcha(surface, cred)) {
             await clickNext(surface);
@@ -939,7 +938,7 @@ async function driveGoogleChallenges(surface, cred, { assist = false, done, time
         }
         await debug.capture(surface, cred.email, "google-password-captcha");
         if (assist && (await handOff(`solve the image CAPTCHA on the password page for ${cred.email} in the window`))) continue;
-        throw new NeedsHuman(`${cred.email}: Google is holding an image CAPTCHA on the password page — set CAPSOLVER_API_KEY or run headed to type it by hand`);
+        throw new NeedsHuman(`${cred.email}: Google is holding an image CAPTCHA on the password page — run headed to type it by hand`);
       case "totp": {
         if (!cred.totp_secret) {
           if (assist && (await handOff(`clear the 2-Step step for ${cred.email} in the window`))) continue;
@@ -1945,7 +1944,7 @@ export function onSettingsPage(url, target) {
 // `apppasswords` or `twosv`). Returns whether the re-auth cleared.
 async function reauthSensitive(page, cred, target = "apppasswords", { assist = false, timeoutMs = 120000, proxyUrl } = {}) {
   // Same graph traversal as sign-in — identifier / password / TOTP, and a reCAPTCHA or other challenge
-  // Google throws on a fresh exit IP (CapSolver clears the reCAPTCHA, or a headed run's person does) —
+  // Google throws on a fresh exit IP (the vision model clears the reCAPTCHA headless, a headed run's person does) —
   // done once the URL is back on the settings page named by `target`. A dead-end (wrong password, no
   // TOTP, an unpassable challenge) raises NeedsHuman; the caller only wants a boolean, so translate it
   // to "did we land on the page".

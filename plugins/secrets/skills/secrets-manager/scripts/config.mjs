@@ -53,12 +53,6 @@ export function heroSmsKey() {
   return process.env.HERO_SMS_API_KEY || null;
 }
 
-// CapSolver API key for auto-solving the reCAPTCHA and password-page CAPTCHAs Google throws on the
-// sign-in path (~/.config/secrets-manager/.env). Absent → the login falls back to the human `--assist` click.
-export function capSolverKey() {
-  return process.env.CAPSOLVER_API_KEY || null;
-}
-
 // HeroSMS country ids that must never be rented for a Google-verification number, whatever the price.
 // Google accepts a Cameroon (41) number but never delivers the code, and an Indonesia (6) number did
 // not deliver either — renting one only burns a rent and a poll cycle. A Philippines (4) and a Kenya

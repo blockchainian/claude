@@ -18,7 +18,7 @@ Setup runs npm install, fetches Camoufox and writes a two-line launcher at
 Node with `node:sqlite` support is required; headed macOS window placement uses Swift.
 State defaults to `~/.config/secrets-manager` (`SECRETS_MANAGER_STATE_PATH` overrides it).
 `~/.config/secrets-manager/.env` loads without overriding existing environment values:
-`RESIDENTIAL_PROXY_URL`, optional `HERO_SMS_API_KEY`, optional `CAPSOLVER_API_KEY`, and
+`RESIDENTIAL_PROXY_URL`, optional `HERO_SMS_API_KEY`, and
 TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
 
 ## Commands
