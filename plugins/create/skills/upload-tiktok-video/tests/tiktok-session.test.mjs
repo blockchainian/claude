@@ -28,6 +28,13 @@ test("pickAccount breaks a created_at tie by username", () => {
   assert.equal(pickAccount(rows).username, "amy");
 });
 
+test("pickAccount takes the named account when it is active and has a slot", () => {
+  const rows = [row("early", "active", 10, "2026-10-02T00:00:00Z"), row("Named", "active", 3, "2026-10-04T00:00:00Z"), row("gone", "expired", 4, "2026-10-01T00:00:00Z")];
+  assert.equal(pickAccount(rows, "named").username, "Named");
+  assert.equal(pickAccount(rows, "gone"), null);
+  assert.equal(pickAccount(rows, "nobody"), null);
+});
+
 test("pickAccount is null without an active account", () => {
   assert.equal(pickAccount([row("x", "expired", 1, "2026-10-01T00:00:00Z")]), null);
 });
@@ -45,6 +52,17 @@ test("loadAccount reads the secrets-manager store and names the profile", () => 
     slot: 9,
     profile: join(state, "profiles", "first"),
   });
+});
+
+test("loadAccount takes a named account", () => {
+  const state = mkdtempSync(join(tmpdir(), "create-store-"));
+  const db = new DatabaseSync(join(state, "secrets.sqlite"));
+  db.exec("CREATE TABLE tiktok (username TEXT, password TEXT, isp_slot INTEGER, status TEXT, created_at TEXT, updated_at TEXT)");
+  const insert = db.prepare("INSERT INTO tiktok VALUES (?, 'pw', ?, 'active', ?, ?)");
+  insert.run("first", 9, "2026-10-02T00:00:00Z", "2026-10-04T00:00:00Z");
+  insert.run("other", 3, "2026-10-04T00:00:00Z", "2026-10-04T00:00:00Z");
+  db.close();
+  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }, "other").slot, 3);
 });
 
 test("loadAccount is null when there is no store", () => {

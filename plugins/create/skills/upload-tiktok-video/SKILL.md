@@ -7,9 +7,10 @@ description: Post one mp4 to the TikTok account the secrets-manager skill logged
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-video.mjs" <video.mp4> \
-  [--caption <text>] [--visibility everyone|friends|only-me] [--ai-generated]
+  [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--ai-generated]
 ```
 
+- `--username`: post as that account of the store; it must be `active`. Default below.
 - `--caption`: the description, hashtags included (`"my words #tag #other"`). Default empty.
 - `--visibility`: who can see the post. Default `everyone`.
 - `--ai-generated`: turn on TikTok's "AI-generated content" label (under "Show more").
@@ -19,8 +20,8 @@ the video to show on the profile.
 
 ## The account
 
-The secrets-manager store's earliest imported (`created_at`) `active` TikTok account with an ISP
-slot. It is opened exactly as `login tiktok` opened it: the same profile directory
+`--username`, else the secrets-manager store's earliest imported (`created_at`) `active` TikTok
+account with an ISP slot. It is opened exactly as `login tiktok` opened it: the same profile directory
 (`<state>/profiles/<username>`), the same stored fingerprint, the same ISP slot, English locale.
 The store is only read. A profile that is no longer signed in stops the run with
 `run the secrets-manager skill's login tiktok`; log it in there and run again. Nothing else may

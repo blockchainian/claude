@@ -7,8 +7,9 @@ import { test } from "node:test";
 import { findPosted, findDelay, parseArgs } from "../scripts/upload-tiktok-video.mjs";
 
 test("parseArgs takes the file, the caption and the post settings", () => {
-  assert.deepEqual(parseArgs(["a.mp4", "--caption", "hi #tag", "--visibility", "only-me", "--ai-generated"]), {
+  assert.deepEqual(parseArgs(["a.mp4", "--caption", "hi #tag", "--visibility", "only-me", "--ai-generated", "--username", "@me"]), {
     file: "a.mp4",
+    username: "me",
     caption: "hi #tag",
     visibility: "only-me",
     aiGenerated: true,
@@ -16,7 +17,7 @@ test("parseArgs takes the file, the caption and the post settings", () => {
 });
 
 test("parseArgs defaults to an empty caption, everyone, and no AI label", () => {
-  assert.deepEqual(parseArgs(["a.mp4"]), { file: "a.mp4", caption: "", visibility: "everyone", aiGenerated: false });
+  assert.deepEqual(parseArgs(["a.mp4"]), { file: "a.mp4", username: null, caption: "", visibility: "everyone", aiGenerated: false });
 });
 
 test("parseArgs refuses a missing file, an unknown visibility and an unknown option", () => {

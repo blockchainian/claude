@@ -3,12 +3,13 @@
 //
 // Usage:
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-video.mjs <video.mp4> \
-//     [--caption <text>] [--visibility everyone|friends|only-me] [--ai-generated]
+//     [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--ai-generated]
+//   --username posts as that account of the store (default: its earliest imported active account).
 //   --caption is the post's description, hashtags included (default: empty, TikTok then shows nothing).
 //   --visibility is who can see the post (default everyone).
 //   --ai-generated turns on TikTok's "AI-generated content" label.
 //
-// The account is the secrets-manager store's earliest imported active TikTok account, opened as its
+// The account (the named one, else the store's earliest imported active one) is opened as its
 // own profile on its own ISP slot (see tiktok-session.mjs). The window is shown and recorded to
 // <CREATE_TIKTOK_DIR>/recordings/<username>-<ts>.mov. A logged-out profile stops the run: log the
 // account in again with secrets-manager's `login tiktok`; the store is never written here.
@@ -33,15 +34,16 @@ const CLOCK_SKEW_S = 120; // TikTok's createTime against this machine's clock
 // The labels of "Who can see this post", by --visibility.
 const VISIBILITY = { everyone: "Everyone", friends: "Friends", "only-me": "Only you" };
 const USAGE =
-  "Usage: upload-tiktok-video.mjs <video.mp4> [--caption <text>] [--visibility everyone|friends|only-me] [--ai-generated]";
+  "Usage: upload-tiktok-video.mjs <video.mp4> [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--ai-generated]";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function parseArgs(argv) {
-  const out = { file: null, caption: "", visibility: "everyone", aiGenerated: false };
+  const out = { file: null, username: null, caption: "", visibility: "everyone", aiGenerated: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--caption") out.caption = argv[++i] ?? "";
+    else if (a === "--username") out.username = (argv[++i] ?? "").replace(/^@/, "");
     else if (a === "--visibility") {
       out.visibility = argv[++i];
       if (!VISIBILITY[out.visibility]) throw new Error(`--visibility must be one of ${Object.keys(VISIBILITY).join(", ")}`);
@@ -104,6 +106,9 @@ async function labelAiGenerated(page) {
     'xpath=//*[normalize-space(text())="AI-generated content"]/ancestor::*[.//input[contains(@class,"Switch__input")]][1]//input[contains(@class,"Switch__input")]',
   );
   if (!(await toggle.isChecked())) await toggle.click({ force: true });
+  // The switch reads as checked only once the page has re-rendered (about half a second), so wait
+  // for the line it shows when on rather than reading the switch straight after the click.
+  await page.getByText("Creator labeled as AI-generated").waitFor({ timeout: 10000 });
   if (!(await toggle.isChecked())) throw new Error("the AI-generated content label did not turn on");
 }
 
@@ -143,8 +148,10 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const file = resolve(args.file);
   if (!existsSync(file)) throw new Error(`No such file: ${file}`);
-  const account = loadAccount();
-  if (!account) throw new Error("No active TikTok account in the secrets-manager store; run its `login tiktok`.");
+  const account = loadAccount(process.env, args.username);
+  if (!account) {
+    throw new Error(`No active TikTok account${args.username ? ` @${args.username}` : ""} in the secrets-manager store; run its \`login tiktok\`.`);
+  }
   console.log(`posting ${basename(file)} as @${account.username} (ISP slot ${account.slot})`);
 
   const startedS = Math.floor(Date.now() / 1000) - CLOCK_SKEW_S;

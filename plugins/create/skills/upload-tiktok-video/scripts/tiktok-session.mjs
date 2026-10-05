@@ -36,16 +36,18 @@ export const dataDir = (env = process.env) => env.CREATE_TIKTOK_DIR || join(home
 const envFile = join(storeDir(), ".env");
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
-// The account to act as: the earliest imported active row that has an ISP slot (its login ran),
-// ties broken by username. Null when there is none.
-export function pickAccount(rows) {
-  const usable = rows.filter((r) => r.status === "active" && r.isp_slot != null);
+// The account to act as: the one named `username` (any case), else the earliest imported, ties
+// broken by username; either way an active row with an ISP slot (its login ran). Null when there is none.
+export function pickAccount(rows, username = null) {
+  const usable = rows.filter(
+    (r) => r.status === "active" && r.isp_slot != null && (!username || r.username.toLowerCase() === username.toLowerCase()),
+  );
   usable.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.username.localeCompare(b.username));
   return usable[0] ?? null;
 }
 
 // The picked account with the profile directory it logged in with, or null without a store or account.
-export function loadAccount(env = process.env) {
+export function loadAccount(env = process.env, username = null) {
   let rows;
   try {
     const db = new DatabaseSync(join(storeDir(env), "secrets.sqlite"), { readOnly: true });
@@ -54,7 +56,7 @@ export function loadAccount(env = process.env) {
   } catch {
     return null;
   }
-  const row = pickAccount(rows);
+  const row = pickAccount(rows, username);
   return row ? { username: row.username, slot: row.isp_slot, profile: join(storeDir(env), "profiles", row.username) } : null;
 }
 
