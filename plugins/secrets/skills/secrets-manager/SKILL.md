@@ -1,6 +1,6 @@
 ---
 name: secrets-manager
-description: Manage local plaintext credentials and browser sessions, import Google/X/TikTok accounts, log in through external app adapters, verify app sessions, provision Google 2FA, and export refresh tokens.
+description: Manage local plaintext credentials and browser sessions, import Google/X/TikTok accounts, log in through external app adapters, verify app sessions, provision Google 2FA, and export app credentials.
 ---
 
 # Secrets manager
@@ -40,8 +40,8 @@ permission), both through `swift`.
 A fresh Google account signs into the apps your adapters define. Run each step separately:
 
 1. `secrets-manager import google <file>`.
-2. `secrets-manager login google --only <email> --headed`.
-3. `secrets-manager login <app> --only <email> --headed` for each required adapter.
+2. `secrets-manager login google --select <email> --headed`.
+3. `secrets-manager login <app> --select <email> --headed` for each required adapter.
 
 Done means Google and every required app session are active; `list` shows their status.
 
@@ -55,7 +55,7 @@ fails it records a status that says how to proceed:
 
 A failed step does not halt the others, but an app step needs Google `active` first (an
 `escalated` account is skipped by `login <app>`), so fix `login google` before chasing an app
-failure. Run one account at a time (`--only`, `--headed`) for a fresh batch so each outcome is
+failure. Run one account at a time (`--select`, `--headed`) for a fresh batch so each outcome is
 watched; widen to `--all` / higher `--concurrency` once the flow is proven on a few.
 
 ## Commands
@@ -64,18 +64,18 @@ watched; widen to `--all` / higher `--concurrency` once the flow is proven on a 
 node "${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/cli.mjs" <command> [options]
 
 import <google|x|tiktok> [file...]
-login <google|x|tiktok|app> [--only ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
-login <app> --by-email [--mint-app-password] [--only EMAIL]... [--headed]
-verify <app> [--only ID]... [--all] [--concurrency N] [--headed]
-setup-2fa [--only EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
+login <google|x|tiktok|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
+login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
+verify <app> [--select ID]... [--all] [--concurrency N] [--headed]
+setup-2fa [--select EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
 sms <balance|prices|number> [--country N] [--max-price X] [--yes]
-export-env <app> [--only EMAIL]... [--out FILE]
+export <app> [--select EMAIL]...
 get <app> <id>
 set-status <app> <id> <active|expired|restricted|escalated>
 list [--json]
 ```
 
-IDs are emails for Google-backed accounts and usernames for X and TikTok. `--only` narrows any command to
+IDs are emails for Google-backed accounts and usernames for X and TikTok. `--select` narrows any command to
 the named IDs (repeatable); `--all` includes accounts that are already fine; `--limit N` caps the
 run; `--rotate-proxy` uses a rotating proxy exit instead of the account's sticky one. `--concurrency N`
 (default 1 = sequential) drives up to N accounts at once — it applies to every per-account command
@@ -202,11 +202,15 @@ through the residential proxy.
 its `active`, `restricted` or `expired` result. Errors leave the session unchanged and fail the command.
 X token verification moved to the intel plugin's `fetch-x-mentions/scripts/verify-x.mjs`.
 
-### export-env
+### export
 
-`export-env <app>` calls `adapter.exportEnv.token(session)` on active sessions. Prints only
-presence and counts; `--out FILE` writes `adapter.exportEnv.envVar=token1,token2`.
-Missing hooks and unknown adapter targets fail with loaded names.
+`export <app> [--select EMAIL]...` calls `adapter.credentials(session)` for each selected
+account with an active app session. The hook returns `Record<string, string> | null`.
+Each object prints one JSON line to stdout: `{"app":"<app>","email":"<email>",...fields}`.
+Credential values are printed in clear; callers decide how to use them. A null result prints
+`<email>\tmissing` to stderr. Stdout contains only JSON lines, so it pipes cleanly into jq.
+There is no file-output option or environment-variable naming in the adapter interface.
+An adapter without the hook fails with `<app> has no credentials hook`.
 
 ### get / set-status / list
 

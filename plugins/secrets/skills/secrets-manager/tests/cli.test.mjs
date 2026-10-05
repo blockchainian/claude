@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the secrets-manager CLI: the vendor X line decoder, argv parsing, and the
-// ABOUTME: browser-free commands (import, get, set-status, list, export-env, login/verify skip paths).
+// ABOUTME: browser-free commands (import, get, set-status, list, export, login/verify skip paths).
 
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -63,11 +63,11 @@ test("parseTiktokLine rejects a line with no password", () => {
 
 // --- argv parsing -------------------------------------------------------------------
 
-test("parseCli reads repeated --only and the flags", () => {
-  const { command, opts } = parseCli(["login", "alpha", "--only", "a@x.com", "--only", "b@x.com", "--headed", "--all", "--limit", "2", "--rotate-proxy"]);
+test("parseCli reads repeated --select and the flags", () => {
+  const { command, opts } = parseCli(["login", "alpha", "--select", "a@x.com", "--select", "b@x.com", "--headed", "--all", "--limit", "2", "--rotate-proxy"]);
   assert.equal(command, "login");
   assert.deepEqual(opts.positional, ["alpha"]);
-  assert.deepEqual(opts.only, ["a@x.com", "b@x.com"]);
+  assert.deepEqual(opts.select, ["a@x.com", "b@x.com"]);
   assert.equal(opts.headed, true);
   assert.equal(opts.all, true);
   assert.equal(opts.limit, 2);
@@ -106,10 +106,10 @@ test("parseCli reads the sms verb and its flags", () => {
 });
 
 test("parseCli reads setup-2fa (no positional) with its flags", () => {
-  const { command, opts } = parseCli(["setup-2fa", "--only", "a@x.com", "--all", "--headed"]);
+  const { command, opts } = parseCli(["setup-2fa", "--select", "a@x.com", "--all", "--headed"]);
   assert.equal(command, "setup-2fa");
   assert.deepEqual(opts.positional, []);
-  assert.deepEqual(opts.only, ["a@x.com"]);
+  assert.deepEqual(opts.select, ["a@x.com"]);
   assert.equal(opts.all, true);
   assert.equal(opts.headed, true);
   assert.throws(() => parseCli(["setup-2fa", "google"]), /Usage/); // takes no positional target
@@ -274,26 +274,63 @@ test("set-status rejects an unknown status and a missing session", async () => {
   assert.ok(o.errText().includes("has no alpha session"));
 });
 
-test("export-env reports presence per active session and writes the env line", async () => {
-  for (const e of ["a@x.com", "b@x.com", "c@x.com"]) store.upsertAccount(db, e, "pw", null, null);
+test("export prints JSONL credentials only for active sessions and missing on stderr", async () => {
+  for (const e of ["a@x.com", "b@x.com", "c@x.com", "d@x.com", "e@x.com"]) store.upsertAccount(db, e, "pw", null, null);
   store.saveSession(db, "beta", "a@x.com", [{ name: "auth-refresh-token", value: "RA" }], []);
   store.saveSession(db, "beta", "b@x.com", [], []);
   store.saveSession(db, "beta", "c@x.com", [{ name: "auth-refresh-token", value: "RC" }], []);
   store.setSessionStatus(db, "beta", "c@x.com", store.STATUS_EXPIRED);
+  store.saveSession(db, "beta", "e@x.com", [{ name: "auth-refresh-token", value: "RE" }], []);
   const o = io();
-  assert.equal(await main(["export-env", "beta"], o), 0);
-  assert.ok(o.text().includes("a@x.com\tpresent"));
-  assert.ok(o.text().includes("b@x.com\tmissing"));
-  assert.ok(!o.text().includes("c@x.com"));
-  assert.ok(o.text().includes("1/2 active beta sessions carry a refresh token"));
-  assert.ok(!o.text().includes("RA")); // never print a token value
-  const out = join(base, "tokens.env");
+  assert.equal(await main(["export", "beta"], o), 0);
+  assert.deepEqual(o.out.map(JSON.parse), [
+    { app: "beta", email: "a@x.com", refresh_token: "RA" },
+    { app: "beta", email: "e@x.com", refresh_token: "RE" },
+  ]);
+  assert.deepEqual(o.err, ["b@x.com\tmissing"]);
   const w = io();
-  assert.equal(await main(["export-env", "beta", "--only", "a@x.com", "--out", out], w), 0);
-  assert.equal(readFileSync(out, "utf8"), "BETA_REFRESH_TOKEN=RA\n");
+  assert.equal(await main(["export", "beta", "--select", "a@x.com", "--select", "c@x.com"], w), 0);
+  assert.deepEqual(w.out, ['{"app":"beta","email":"a@x.com","refresh_token":"RA"}']);
+  assert.deepEqual(w.err, []);
+  const empty = io();
+  assert.equal(await main(["export", "beta", "--select", "d@x.com"], empty), 0);
+  assert.deepEqual(empty.out, []);
+  assert.deepEqual(empty.err, []);
   const g = io();
-  assert.equal(await main(["export-env", "gamma"], g), 1);
+  assert.equal(await main(["export", "gamma"], g), 1);
   assert.ok(g.errText().includes("unknown adapter gamma; loaded: alpha, beta"));
+  assert.deepEqual(g.out, []);
+});
+
+test("export supports arbitrary credential fields and fails without the hook", async () => {
+  const path = join(base, "adapter.mjs");
+  writeFileSync(path, `export default () => [{
+    name: 'custom', domain: 'custom.example', startUrl: 'https://custom.example/',
+    entryTexts: ['Login'], signIn: async () => {}, ready: async () => true,
+    credentials: () => ({api_key: 'key', access_token: 'token'}),
+  }, {
+    name: 'no_hook', domain: 'custom.example', startUrl: 'https://custom.example/',
+    entryTexts: ['Login'], signIn: async () => {}, ready: async () => true,
+  }];`);
+  process.env.SECRETS_MANAGER_ADAPTERS = path;
+  store.upsertAccount(db, "a@x.com", "pw", null, null);
+  store.saveSession(db, "custom", "a@x.com", [], []);
+  const o = io();
+  assert.equal(await main(["export", "custom"], o), 0);
+  assert.deepEqual(o.out.map(JSON.parse), [{app: "custom", email: "a@x.com", api_key: "key", access_token: "token"}]);
+  assert.deepEqual(o.err, []);
+  const missing = io();
+  assert.equal(await main(["export", "no_hook"], missing), 1);
+  assert.deepEqual(missing.out, []);
+  assert.deepEqual(missing.err, ["no_hook has no credentials hook"]);
+});
+
+test("parseCli rejects removed --only, --out and export-env", () => {
+  for (const args of [
+    ["login", "alpha", "--only", "a@x.com"],
+    ["export", "alpha", "--out", "tokens.env"],
+    ["export-env", "alpha"],
+  ]) assert.throws(() => parseCli(args), /Unknown option|Usage/);
 });
 
 test("loginSkipReason retries escalated for login google, skips it for apps, always skips restricted", () => {

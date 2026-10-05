@@ -20,10 +20,10 @@ test('verification selects pending rows and saves valid pairs or expiry', async 
   assert.equal(db.prepare('SELECT ct0 FROM x WHERE username=?').get('b').ct0,'old');
  } finally {db.close();}
 });
-test('only selects an already paired row; failures persist expiry and return nonzero', async () => {
+test('select explicitly includes an already paired row; failures persist expiry and return nonzero', async () => {
  const db=database();
  try {
-  assert.equal(await verifyX(db,{only:['b']},{io,provision:async()=>{throw new Error('network');}}),1);
+  assert.equal(await verifyX(db,{select:['b']},{io,provision:async()=>{throw new Error('network');}}),1);
   assert.equal(db.prepare('SELECT status FROM x WHERE username=?').get('b').status,'expired');
   await assert.rejects(verifyX(db,{concurrency:0},{io}),/positive integer/);
  } finally {db.close();}
