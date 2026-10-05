@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parseXVendorLine, parseTiktokLine, parseFile, parseCli, main, needsRefresh, loginSkipReason } from "../scripts/cli.mjs";
+import { parseXVendorLine, parseTiktokLine, parseFile, parseCli, main, needsRefresh, loginSkipReason, googleBrowserOpts } from "../scripts/cli.mjs";
 import { parseLine } from "../scripts/credentials.mjs";
 import * as config from "../scripts/config.mjs";
 import * as store from "../scripts/store.mjs";
@@ -62,6 +62,11 @@ test("parseTiktokLine rejects a line with no password", () => {
 });
 
 // --- argv parsing -------------------------------------------------------------------
+
+test("a Google sign-in runs headed unless --headless asks otherwise", () => {
+  assert.deepEqual(googleBrowserOpts(parseCli(["login", "google"]).opts), { headed: true, rotate: undefined });
+  assert.deepEqual(googleBrowserOpts(parseCli(["setup-2fa", "--headless", "--rotate-proxy"]).opts), { headed: false, rotate: true });
+});
 
 test("parseCli reads repeated --select and the flags", () => {
   const { command, opts } = parseCli(["login", "alpha", "--select", "a@x.com", "--select", "b@x.com", "--headed", "--all", "--limit", "2", "--rotate-proxy"]);
