@@ -70,8 +70,8 @@ verify <app> [--select ID]... [--all] [--concurrency N] [--headed]
 setup-2fa [--select EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
 sms <balance|prices|number> [--country N] [--max-price X] [--yes]
 export <app> [--select EMAIL]...
-get <app> <id>
-set-status <app> <id> <active|expired|restricted|escalated>
+get <app> --select ID...
+set-status <app> <active|expired|restricted|escalated> --select ID...
 list [--json]
 ```
 
@@ -214,7 +214,7 @@ An adapter without the hook fails with `<app> has no credentials hook`.
 
 ### get / set-status / list
 
-`get` prints a stored session; `set-status` updates it; `list` shows every Google account and
+`get` prints the stored session of each `--select`ed account; `set-status` sets their status (both need `--select`, repeatable; a missing account is reported and makes the exit 1); `list` shows every Google account and
 its app statuses. Existing app tables remain readable even without their adapters.
 
 ## State

@@ -461,32 +461,48 @@ function runExport(db, opts, io) {
 
 // --- get / set-status / list -------------------------------------------------
 
-function runGet(db, opts, io) {
-  const [app, id] = opts.positional;
-  assertOneOf("app", app, [...new Set([...APP_ADAPTERS, ...store.listApps(db), ...Object.keys(USERNAME_TABLES)])]);
-  const session = app in USERNAME_TABLES ? db.prepare(`SELECT * FROM ${app} WHERE username = ?`).get(id) : store.getSession(db, app, id);
-  if (!session) {
-    io.error(`no ${app} session for ${id}`);
-    return 1;
-  }
-  io.log(JSON.stringify(session, null, 2));
-  return 0;
+// The accounts --select names, required by the commands that read or change named accounts.
+function selected(command, opts) {
+  if (!opts.select.length) throw new Error(`${command} needs --select ID`);
+  return opts.select;
 }
 
+// Print each selected account's stored session; a missing one is reported and makes the exit 1.
+function runGet(db, opts, io) {
+  const [app] = opts.positional;
+  assertOneOf("app", app, [...new Set([...APP_ADAPTERS, ...store.listApps(db), ...Object.keys(USERNAME_TABLES)])]);
+  let code = 0;
+  for (const id of selected("get", opts)) {
+    const session = app in USERNAME_TABLES ? db.prepare(`SELECT * FROM ${app} WHERE username = ?`).get(id) : store.getSession(db, app, id);
+    if (!session) {
+      io.error(`no ${app} session for ${id}`);
+      code = 1;
+      continue;
+    }
+    io.log(JSON.stringify(session, null, 2));
+  }
+  return code;
+}
+
+// Set each selected account's status; a missing one is reported and makes the exit 1.
 function runSetStatus(db, opts, io) {
-  const [app, id, status] = opts.positional;
+  const [app, status] = opts.positional;
   assertOneOf("app", app, [...new Set([...APP_ADAPTERS, ...store.listApps(db), ...Object.keys(USERNAME_TABLES), "google"])]);
   assertOneOf("status", status, [...store.STATUSES].sort());
-  try {
-    if (app === "google") store.setAccountStatus(db, id, status);
-    else if (app in USERNAME_TABLES) USERNAME_TABLES[app].setStatus(db, id, status);
-    else store.setSessionStatus(db, app, id, status);
-  } catch (e) {
-    io.error(e.message);
-    return 1;
+  let code = 0;
+  for (const id of selected("set-status", opts)) {
+    try {
+      if (app === "google") store.setAccountStatus(db, id, status);
+      else if (app in USERNAME_TABLES) USERNAME_TABLES[app].setStatus(db, id, status);
+      else store.setSessionStatus(db, app, id, status);
+    } catch (e) {
+      io.error(e.message);
+      code = 1;
+      continue;
+    }
+    io.log(`${id} @ ${app}: ${status}`);
   }
-  io.log(`${id} @ ${app}: ${status}`);
-  return 0;
+  return code;
 }
 
 function runList(db, opts, io) {
@@ -536,8 +552,8 @@ const COMMANDS = {
   "setup-2fa": { run: runSetup2fa, positional: [0, 0] },
   sms: { run: runSms, positional: [1, 1] },
   export: { run: runExport, positional: [1, 1] },
-  get: { run: runGet, positional: [2, 2] },
-  "set-status": { run: runSetStatus, positional: [3, 3] },
+  get: { run: runGet, positional: [1, 1] },
+  "set-status": { run: runSetStatus, positional: [2, 2] },
   list: { run: runList, positional: [0, 0] },
 };
 
@@ -549,8 +565,8 @@ const USAGE = `Usage: secrets-manager <command> [options]
   setup-2fa [--select EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
   export <app> [--select EMAIL]...
-  get <app> <id>
-  set-status <app> <id> <active|expired|restricted|escalated>
+  get <app> --select ID...
+  set-status <app> <active|expired|restricted|escalated> --select ID...
   list [--json]`;
 
 export function parseCli(argv) {

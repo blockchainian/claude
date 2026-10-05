@@ -32,8 +32,8 @@ TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
 | `setup-2fa` | Enroll Google TOTP, turn on 2-Step, mint an app password. |
 | `sms <balance\|prices\|number>` | Manage verification SMS. |
 | `export <app> [--select EMAIL]...` | Print active-session credentials as JSONL. |
-| `get <app> <id>` | Read a stored session. |
-| `set-status <app> <id> <status>` | Set session status. |
+| `get <app> --select ID...` | Read stored sessions. |
+| `set-status <app> <status> --select ID...` | Set session status. |
 | `list [--json]` | List accounts and all stored app tables. |
 | `validate <adapters.mjs>...` | Load modules with the real kit and print validated names. |
 
