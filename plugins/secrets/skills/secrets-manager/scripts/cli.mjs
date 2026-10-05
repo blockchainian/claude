@@ -580,7 +580,7 @@ const USAGE = `Usage: secrets-manager <command> [options]
   import <google|x|tiktok> [file...]
   login <google|x|tiktok|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
   login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
-  verify <app> [--select ID]... [--all] [--concurrency N] [--headed]
+  verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
   setup-2fa [--select EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
   export <app> [--select EMAIL]...
