@@ -303,7 +303,11 @@ test("openDb widens old google and every app CHECK for ready without changing ro
   const db = store.openDb(path);
   assert.equal(store.STATUS_READY, "ready");
   assert.ok(store.STATUSES.has("ready"));
-  for (const table of Object.keys(before)) assert.deepEqual(db.prepare(`SELECT * FROM ${table}`).all(), before[table]);
+  for (const table of Object.keys(before)) assert.deepEqual(db.prepare(`SELECT * FROM ${table}`).all().map(row => {
+    const { setup_state, ...old } = row;
+    if (table !== "google") assert.equal(setup_state, null);
+    return old;
+  }), before[table].map(row => ({ ...row })));
   store.setAccountStatus(db, "old@x.com", "ready");
   for (const app of ["alpha", "orphan"]) {
     store.setSessionStatus(db, app, "old@x.com", "ready");
@@ -332,5 +336,50 @@ test("re-login refreshes session data but preserves ready and created_at", () =>
     store.setSessionStatus(db, "alpha", "a@x.com", "expired");
     store.saveSession(db, "alpha", "a@x.com", [], {});
     assert.equal(store.getSession(db, "alpha", "a@x.com").status, "active");
+  } finally { db.close(); }
+});
+
+
+test("setup_state migration adds a nullable column without rebuilding or losing rows", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "store-setup-")), "s.sqlite");
+  const raw = new DatabaseSync(path);
+  raw.exec(`CREATE TABLE alpha (
+    email TEXT PRIMARY KEY, cookies TEXT NOT NULL, local_storage TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active','ready')),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  );
+  CREATE INDEX alpha_status ON alpha(status);
+  INSERT INTO alpha VALUES ('a@x.com', '[]', '{}', 'active', 'created', 'updated')`);
+  const before = { ...raw.prepare("SELECT * FROM alpha").get() };
+  const root = raw.prepare("SELECT rootpage FROM sqlite_master WHERE name='alpha'").get().rootpage;
+  raw.close();
+  const db = store.openDb(path);
+  try {
+    const column = db.prepare("PRAGMA table_info(alpha)").all().find(c => c.name === "setup_state");
+    assert.equal(column.type, "TEXT");
+    assert.equal(column.notnull, 0);
+    assert.deepEqual({ ...db.prepare("SELECT * FROM alpha").get() }, { ...before, setup_state: null });
+    assert.equal(db.prepare("SELECT rootpage FROM sqlite_master WHERE name='alpha'").get().rootpage, root);
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name='alpha_status'").get());
+    const version = db.prepare("PRAGMA schema_version").get();
+    const reopened = store.openDb(path);
+    try { assert.deepEqual(reopened.prepare("PRAGMA schema_version").get(), version); }
+    finally { reopened.close(); }
+  } finally { db.close(); }
+});
+
+test("new app sessions expose null setup_state; re-login keeps existing setup_state", () => {
+  const db = open();
+  try {
+    store.saveSession(db, "alpha", "a@x.com", [], {});
+    assert.equal(store.getSession(db, "alpha", "a@x.com").setup_state, null);
+    const state = { wallet: { id: "test-wallet" }, steps: [true, null, 3] };
+    db.prepare("UPDATE alpha SET setup_state = ?, status = 'ready'").run(JSON.stringify(state));
+    for (const status of ["ready", "expired"]) {
+      store.setSessionStatus(db, "alpha", "a@x.com", status);
+      store.saveSession(db, "alpha", "a@x.com", [{ name: "fresh" }], { token: "new" });
+      assert.deepEqual(store.getSession(db, "alpha", "a@x.com").setup_state, state);
+      assert.equal(db.prepare("SELECT setup_state FROM alpha").get().setup_state, JSON.stringify(state));
+    }
   } finally { db.close(); }
 });
