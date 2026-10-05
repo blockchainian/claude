@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // ABOUTME: Checks domain availability + premium pricing via Namecheap's official domains.check API.
-// ABOUTME: Reads credentials from the script-local dotenv file, auto-detects the caller IP, prints a table.
+// ABOUTME: Reads credentials from the plugin user-config dotenv file, auto-detects the caller IP, prints a table.
 import { readFileSync } from "node:fs";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { parseEnv } from "node:util";
 
-const CONFIG_PATH = fileURLToPath(new URL(".env", import.meta.url));
+const CONFIG_PATH = join(homedir(), ".config", "intel", ".env");
 const ENDPOINT = "https://api.namecheap.com/xml.response";
 const TLDS = ["xyz", "ai", "fun"];
 

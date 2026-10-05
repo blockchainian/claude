@@ -23,7 +23,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { join } from "node:path";
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) loadEnvFile(new URL(".env", import.meta.url));
+if (isMain) loadEnvFile();
 
 let ProxyAgent;
 try { ({ ProxyAgent } = await import("undici")); }
@@ -112,7 +112,7 @@ function proxyConfig() {
   const url = process.env.RESIDENTIAL_PROXY_URL || process.env.HTTPS_PROXY;
   if (!url) {
     throw new Error(
-      "RESIDENTIAL_PROXY_URL (or HTTPS_PROXY) is required in the calling script's .env.",
+      "RESIDENTIAL_PROXY_URL (or HTTPS_PROXY) is required in ~/.config/intel/.env.",
     );
   }
   const u = new URL(url);

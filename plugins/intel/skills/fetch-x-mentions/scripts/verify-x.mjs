@@ -43,7 +43,7 @@ export async function main(argv) {
   try {
     const {values,positionals}=parseArgs({args:argv,options:{select:{type:'string',multiple:true},all:{type:'boolean'},concurrency:{type:'string'}},allowPositionals:true});
     if (positionals.length) throw new Error('Usage: verify-x.mjs [--select USER]... [--all] [--concurrency N]');
-    loadEnvFile(new URL('.env', import.meta.url));
+    loadEnvFile();
     const url=requireEnv('RESIDENTIAL_PROXY_URL'), u=new URL(url);
     const {ProxyAgent}=await import('undici');
     const token=u.username ? `Basic ${Buffer.from(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`).toString('base64')}` : null;

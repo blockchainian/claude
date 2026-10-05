@@ -29,11 +29,11 @@ process state before retrying. Use the current host's image/file tools to inspec
 
 ## Environment Variables
 
-Copy `scripts/.env.example` to `scripts/.env` beside this skill’s scripts, then fill in the value. The script reads this file directly; it does not read the member key from the process environment.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in the member key. The script reads this file directly; it does not read the member key from the process environment.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `ANNA_ARCHIVE_SECRET_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `$SKILL_DIR/scripts/.env` |
+| `ANNA_ARCHIVE_SECRET_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `~/.config/intel/.env` |
 
 ## Setup (once)
 

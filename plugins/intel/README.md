@@ -94,6 +94,10 @@ searchable store on top, over whatever produced the words. New source kinds
 (Twitch VODs, conference talks) slot in by reusing `transcribe` for the
 audio leg and `digest` for the notes.
 
+## Configuration
+
+Intel uses `~/.config/intel/.env` for file-based request settings and API keys, shared by both hosts and all checkouts. Create the directory, copy this plugin’s `.env.example` there as `.env`, and fill in only the values needed by the skills you use. Each skill’s **Environment Variables** section lists its settings and source; optional shell-only settings remain documented there. Account credentials and login sessions stay in Secrets Manager.
+
 ## Requirements
 
 - `transcribe`: Apple Silicon; `setup.sh` installs `ffmpeg`,

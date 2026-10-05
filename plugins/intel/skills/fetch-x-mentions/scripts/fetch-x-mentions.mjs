@@ -2,7 +2,7 @@ import { requireEnv, loadEnvFile } from "./env.mjs";
 // ABOUTME: Fetches X/Twitter mentions of an app over a date range, one authenticated GraphQL
 // ABOUTME: SearchTimeline per day, sharded across accounts through the residential proxy, resumable.
 //
-// Usage (config from the calling script's .env loaded automatically):
+// Usage (config from ~/.config/intel/.env loaded automatically):
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/fetch-x-mentions.mjs \
 //     <slug> "<query>" [sinceYYYY-MM-DD] [untilYYYY-MM-DD] [--daily-limit <n>] [--refill [<n>]]
 //   <slug> names the output dir docs/intel/x/<slug>/ holding tweets.jsonl and tweets.out.json.
@@ -21,7 +21,7 @@ import { requireEnv, loadEnvFile } from "./env.mjs";
 //
 // Accounts come from the secrets-manager store (~/.config/secrets-manager/secrets.sqlite): active X rows,
 // each its own X rate bucket, so N accounts ~= N x throughput. SECRETS_DB overrides the path.
-// Config (the calling script's .env):
+// Config (~/.config/intel/.env):
 //   RESIDENTIAL_PROXY_URL Proxy every request routes through (or X_PROXY_URLS).
 //   X_PROXY_URLS          Comma-separated, aligned to the store accounts by row order (one exit each).
 //   X_SEARCH_QUERY_ID / X_BEARER / X_TID_*  anti-bot ingredients; refresh if X starts returning 404.
@@ -43,7 +43,7 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) loadEnvFile(new URL(".env", import.meta.url));
+if (isMain) loadEnvFile();
 
 let ProxyAgent;
 try { ({ ProxyAgent } = await import("undici")); }
@@ -189,7 +189,7 @@ function init() {
   if (!KEY_BYTE_INDICES.length) missing.push("X_TID_INDICES");
   if (missing.length) {
     throw new Error(
-      `x-client-transaction-id needs ${missing.join(", ")} in the calling script's .env ` +
+      `x-client-transaction-id needs ${missing.join(", ")} in ~/.config/intel/.env ` +
         `(re-extract from x.com when X redeploys).`,
     );
   }
@@ -243,7 +243,7 @@ export function generateTransactionId(method, path) {
 }
 
 const GQL = "https://x.com/i/api/graphql";
-// From the calling script's .env — no hardcoded fallbacks. QUERY_ID rotates with X's web bundle;
+// From ~/.config/intel/.env — no hardcoded fallbacks. QUERY_ID rotates with X's web bundle;
 // BEARER is X's public web bearer.
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
@@ -311,7 +311,7 @@ export function duration(ms) {
 function makeDispatcher(url) {
   if (!url) {
     throw new Error(
-      "No proxy set. Add RESIDENTIAL_PROXY_URL (or X_PROXY_URLS) to the calling script's .env.",
+      "No proxy set. Add RESIDENTIAL_PROXY_URL (or X_PROXY_URLS) to ~/.config/intel/.env.",
     );
   }
   const u = new URL(url);

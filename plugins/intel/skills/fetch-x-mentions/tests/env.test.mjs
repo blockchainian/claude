@@ -1,10 +1,22 @@
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {loadEnvFile,requireEnv,envPath} from '../scripts/env.mjs';
+test('default configuration comes from the user directory, independent of cwd', () => {
+ const home=mkdtempSync(join(tmpdir(),'intel-config-home-'));
+ mkdirSync(join(home,'.config/intel'),{recursive:true});
+ writeFileSync(join(home,'.config/intel/.env'),'INTEL_SHARED_CONFIG="shared value"\n');
+ writeFileSync(join(home,'.env'),'INTEL_SHARED_CONFIG=wrong-location\n');
+ const moduleUrl=new URL('../scripts/env.mjs',import.meta.url).href;
+ const code=`const {loadEnvFile,requireEnv,envPath}=await import(${JSON.stringify(moduleUrl)}); loadEnvFile(); if(requireEnv('INTEL_SHARED_CONFIG')!=='shared value') throw Error('wrong configuration source'); console.log(envPath);`;
+ const env={...process.env,HOME:home};delete env.INTEL_SHARED_CONFIG;
+ const result=spawnSync(process.execPath,['--input-type=module','-e',code],{cwd:home,env,encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);
+ assert.equal(result.stdout.trim(),join(home,'.config/intel/.env'));
+});
 test('optional env file preserves exported variables and identifies missing keys',()=>{
  const dir=mkdtempSync(join(tmpdir(),'intel-env-')),path=join(dir,'.env');
  writeFileSync(path,'# comment\nINTEL_TEST_KEY=file\nINTEL_SECOND_KEY=loaded\n');
@@ -15,7 +27,7 @@ test('optional env file preserves exported variables and identifies missing keys
   assert.throws(()=>requireEnv('INTEL_MISSING_KEY'),e=>e.message.includes('INTEL_MISSING_KEY')&&e.message.includes(envPath));
  } finally {delete process.env.INTEL_TEST_KEY;delete process.env.INTEL_SECOND_KEY;}
 });
-test('a missing script-local file reports that exact path for a required key', () => {
+test('a missing config file reports that exact path for a required key', () => {
  const path=join(mkdtempSync(join(tmpdir(),'intel-local-env-')),'.env');
  delete process.env.INTEL_MISSING_LOCAL_KEY;
  loadEnvFile(path);
