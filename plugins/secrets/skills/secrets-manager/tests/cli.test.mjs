@@ -447,3 +447,13 @@ test('setup --check reports without creating a launcher', () => {
  assert.match(result.stdout,/camoufox:/);
  assert.equal(spawnSync('test',['-e',join(home,'.local/bin/secrets-manager')]).status,1);
 });
+
+test("login <app> never retries an account the app restricted, even with --all", async () => {
+  writeGoogleFile("a@x.com:pw:SECRET:\n");
+  store.upsertAccount(db, "a@x.com", "pw", "SECRET");
+  store.setAccountStatus(db, "a@x.com", "active");
+  store.recordSessionStatus(db, "alpha", "a@x.com", store.STATUS_RESTRICTED);
+  const o = io();
+  assert.equal(await main(["login", "alpha", "--all"], o), 0);
+  assert.ok(o.text().includes("skip a@x.com: alpha status restricted"));
+});

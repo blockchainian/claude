@@ -27,6 +27,15 @@ export class NeedsHuman extends Error {}
 // clear it, so the caller marks the account restricted (never retried) rather than escalated.
 export class Restricted extends Error {}
 
+// An app (not Google) banned the account at sign-in. Terminal like Restricted, but the verdict belongs
+// to that app's session, so the caller records it there and leaves the Google account alone.
+export class AppRestricted extends Restricted {
+  constructor(app, message) {
+    super(message);
+    this.app = app;
+  }
+}
+
 // Google temporarily refused the account — a phone-step cooldown ("Too many failed attempts. Try
 // again in a few hours.") or a rejected sign-in. Not a dead end and not a human's job: the caller
 // marks it expired so a later run retries. `holdOpen` keeps a headed window open on this stop so the
@@ -1716,12 +1725,31 @@ export async function withAppRetries(attempts, attempt, { onRetry } = {}) {
 // One pass at signing into the app and storing its scoped session. Throws on any step that did not
 // complete; exportApp decides whether the failure is worth another pass.
 async function attemptAppLogin(page, db, adapter, cred, { assist, proxyUrl }) {
+  // An adapter that knows its app's ban answer (`bannedResponse({url, status, body})` → reason or
+  // null) has every failed (>= 400) app response read for it, so a ban surfaces as AppRestricted,
+  // not a timeout.
+  let banned = null;
+  const onResponse = async (res) => {
+    if (banned || !adapter.bannedResponse || res.status() < 400 || !onAppDomain(res.url(), adapter.domain)) return;
+    const body = await res.text().catch(() => "");
+    banned = (await adapter.bannedResponse({ url: res.url(), status: res.status(), body })) || null;
+  };
+  page.context().on("response", onResponse);
+  try {
+    await signIntoApp(page, db, adapter, cred, { assist, proxyUrl }, () => banned);
+  } finally {
+    page.context().off("response", onResponse);
+  }
+}
+
+async function signIntoApp(page, db, adapter, cred, { assist, proxyUrl }, bannedReason) {
   await gotoPastCloudflare(page, adapter.startUrl, { assist });
   // Skip the whole login when the profile is already signed in.
   if (!(await appAlreadySignedIn(page, adapter))) {
     await adapter.signIn(page, cred.email);
     await completeGoogleOauth(page, cred, adapter, { assist, proxyUrl });
     if (!(await waitReady(page, adapter))) {
+      if (bannedReason()) throw new AppRestricted(adapter.name, `${adapter.name} restricted ${cred.email}: ${bannedReason()}`);
       // OAuth returned to the app but the session token never landed. This is an app-side
       // outcome, distinct from a Google-side stop, which completeGoogleOauth throws as
       // NeedsHuman before we get here.

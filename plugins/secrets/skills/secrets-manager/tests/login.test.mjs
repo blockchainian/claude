@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } fro
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { APPPASSWORDS_URL, TWOSV_URL, toProxyDict, filterState, extractAppPassword, submitPassword, submitIdentifier, aliasFor, parseSetupKey, onSettingsPage, nationalNumber, DIAL_CODES, COUNTRY_NAMES, isMyAccountUrl, isOnboardingUrl, isSignedInUrl, forceEnglishUrl, ensureEnglish, waitForHuman, pollForState, submitRecaptcha, visibleRecaptchaAnchor, waitGridChanged, waitTilesSwapped, classifyGoogleNode, shouldHoldOpenForDebug, gotoWithRetry, signInGoogle, appAlreadySignedIn, oauthSurface, withAppRetries, isTransientAppError, loadOrCreateFingerprint, Restricted, Expired, NeedsHuman } from "../scripts/login.mjs";
+import { APPPASSWORDS_URL, TWOSV_URL, toProxyDict, filterState, extractAppPassword, submitPassword, submitIdentifier, aliasFor, parseSetupKey, onSettingsPage, nationalNumber, DIAL_CODES, COUNTRY_NAMES, isMyAccountUrl, isOnboardingUrl, isSignedInUrl, forceEnglishUrl, ensureEnglish, waitForHuman, pollForState, submitRecaptcha, visibleRecaptchaAnchor, waitGridChanged, waitTilesSwapped, classifyGoogleNode, shouldHoldOpenForDebug, gotoWithRetry, signInGoogle, appAlreadySignedIn, oauthSurface, withAppRetries, isTransientAppError, loadOrCreateFingerprint, Restricted, Expired, NeedsHuman, AppRestricted } from "../scripts/login.mjs";
 
 // classifyGoogleNode maps (url, visible-input inventory) to the graph node the loop dispatches on.
 // A hidden input (visible:false) never decides the node — the phone challenge ships a hidden
@@ -120,6 +120,7 @@ test("isTransientAppError retries a generic flake but not a ban, a human stop, o
   assert.equal(isTransientAppError(new Error("beta: session token never appeared")), true);
   assert.equal(isTransientAppError(new Error('login entry not found (tried ["Sign up"])')), true);
   assert.equal(isTransientAppError(new Restricted("banned")), false);
+  assert.equal(isTransientAppError(new AppRestricted("beta", "beta refused the sign-in")), false);
   assert.equal(isTransientAppError(new NeedsHuman("captcha")), false);
   assert.equal(isTransientAppError(new Expired("session lapsed")), false);
 });
@@ -956,4 +957,11 @@ test("the account settings pages are opened in English", () => {
   }
   assert.equal(onSettingsPage(APPPASSWORDS_URL, "apppasswords"), true);
   assert.equal(onSettingsPage(TWOSV_URL, "twosv"), true);
+});
+
+test("an app's ban names the app and is not a Google restriction to the caller's eye", () => {
+  const e = new AppRestricted("axiom", "Axiom refused the Google sign-in");
+  assert.equal(e.app, "axiom");
+  assert.ok(e instanceof Restricted);
+  assert.equal(shouldHoldOpenForDebug(true, e), false);
 });

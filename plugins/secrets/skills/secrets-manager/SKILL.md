@@ -140,7 +140,9 @@ its file and line number.
   lands on the dashboard from the sign-in page itself and nothing more is done.
 - **adapter apps** — sign into Google when needed, then drive the adapter's Google OAuth
   flow and store its scoped cookies and localStorage. Default: missing or expired sessions;
-  `--all` refreshes every selected account.
+  `--all` refreshes every selected account. An account whose app session is `restricted` is
+  never retried; an adapter's `bannedResponse` hook records that verdict when the app refuses a
+  banned account at sign-in.
 - **x** — password login through a real Camoufox browser (X blocks the headless onboarding API):
   identifier → password → TOTP, then `auth_token`+`ct0`+cookie jar are stored, status `active`.
   Default: rows without a `ct0`. An unresolved challenge marks the row `escalated`.
