@@ -9,6 +9,7 @@ import { runWithConcurrency } from "./concurrency.mjs";
 import { loadCredentials, parseLine, setAppPassword, setTotpSecret } from "./credentials.mjs";
 import * as sms from "./sms-otp.mjs";
 import * as store from "./store.mjs";
+import { BUILTIN_CHECKS, CHECK_RESULTS } from "./verify.mjs";
 // --- credential file parsing -------------------------------------------------
 
 // X accounts arrive from a vendor in a few colon-separated shapes (6 or 8 fields, and the
@@ -422,23 +423,41 @@ async function runSms(_db, opts, io) {
 
 // --- verify ------------------------------------------------------------------
 
-async function runVerify(db, opts, io) {
-  const [target] = opts.positional;
-  if (target === "x") throw new Error("X verification moved to intel: run fetch-x-mentions/scripts/verify-x.mjs");
+// An adapter app's sessions as a verify target: one row per Google account holding a session, checked
+// by the adapter's own verify hook.
+function adapterCheck(target) {
   const adapter = getAdapter(target);
   if (!adapter.verify) throw new Error(`${target} has no verify hook`);
-  const accounts = pick(store.listAccounts(db).filter(a => store.getSession(db, target, a.email)?.status === store.STATUS_ACTIVE || opts.all), a => a.email, opts);
-  if (!accounts.length) { io.log(`no ${target} active accounts to check`); return 0; }
-  const results = await runWithConcurrency(accounts, opts.concurrency, async account => {
-    const email = account.email, session = store.getSession(db, target, email);
-    if (!session) return false;
+  return {
+    label: target,
+    rows: db => store.listAccounts(db).flatMap(a => {
+      const session = store.getSession(db, target, a.email);
+      return session ? [{ email: a.email, status: session.status }] : [];
+    }),
+    id: row => row.email,
+    setStatus: (db, email, status) => store.setSessionStatus(db, target, email, status),
+    check: ({ db, row, opts, io }) => adapter.verify({ db, email: row.email, session: store.getSession(db, target, row.email), opts, io }),
+    results: [store.STATUS_ACTIVE, store.STATUS_RESTRICTED, store.STATUS_EXPIRED],
+  };
+}
+
+// Checks each selected account of a builtin target (google, x, tiktok) or an adapter app and writes
+// back its status; a check that throws or returns something else leaves the status as it was.
+async function runVerify(db, opts, io) {
+  const [target] = opts.positional;
+  const spec = BUILTIN_CHECKS[target] ?? adapterCheck(target);
+  const allowed = spec.results ?? CHECK_RESULTS;
+  const rows = pick(spec.rows(db).filter(r => r.status === store.STATUS_ACTIVE || opts.all), spec.id, opts);
+  if (!rows.length) { io.log(`no ${spec.label} active accounts to check`); return 0; }
+  const results = await runWithConcurrency(rows, opts.concurrency, async row => {
+    const id = spec.id(row);
     try {
-      const status = await adapter.verify({ db, email, session, opts, io });
-      if (!['active', 'restricted', 'expired'].includes(status)) throw new Error('invalid verify result');
-      store.setSessionStatus(db, target, email, status);
-      io.log(`${email}: ${status}`);
+      const status = await spec.check({ db, row, opts, io });
+      if (!allowed.includes(status)) throw new Error(`invalid verify result ${status}`);
+      spec.setStatus(db, id, status);
+      io.log(`${id}: ${status}`);
       return false;
-    } catch (e) { io.error(`${email}: ${e.message}`); return true; }
+    } catch (e) { io.error(`${id}: ${e.message}`); return true; }
   });
   return results.some(Boolean) ? 1 : 0;
 }
