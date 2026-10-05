@@ -117,8 +117,10 @@ test("parseCli reads setup-2fa (no positional) with its flags", () => {
 
 test("parseCli rejects an unknown command, a wrong positional count and an unknown flag", () => {
   assert.throws(() => parseCli(["frobnicate"]), /Usage/);
-  assert.throws(() => parseCli(["get", "alpha"]), /Usage/);
-  assert.throws(() => parseCli(["set-status", "alpha", "a@x.com"]), /Usage/);
+  assert.throws(() => parseCli(["get"]), /Usage/);
+  assert.throws(() => parseCli(["get", "alpha", "a@x.com"]), /Usage/); // the id goes in --select
+  assert.throws(() => parseCli(["set-status", "alpha"]), /Usage/);
+  assert.throws(() => parseCli(["set-status", "alpha", "a@x.com", "expired"]), /Usage/);
   assert.throws(() => parseCli(["login"]), /Usage/);
   assert.throws(() => parseCli(["login", "x", "--user", "bob"]));
 });
@@ -207,12 +209,12 @@ test("login tiktok with nothing pending opens no browser", async () => {
 
 test("get and set-status reach the tiktok row by username", async () => {
   store.upsertTiktok(db, { username: "bob1", password: "pw" });
-  assert.equal(await main(["set-status", "tiktok", "bob1", "expired"], io()), 0);
+  assert.equal(await main(["set-status", "tiktok", "expired", "--select", "bob1"], io()), 0);
   const o = io();
-  assert.equal(await main(["get", "tiktok", "bob1"], o), 0);
+  assert.equal(await main(["get", "tiktok", "--select", "bob1"], o), 0);
   assert.ok(o.text().includes('"status": "expired"'));
   const missing = io();
-  assert.equal(await main(["set-status", "tiktok", "nobody", "expired"], missing), 1);
+  assert.equal(await main(["set-status", "tiktok", "expired", "--select", "nobody"], missing), 1);
   assert.ok(missing.errText().includes("no TikTok account"));
 });
 
@@ -241,36 +243,61 @@ test("list on an empty store, then with an account and its apps", async () => {
 
 test("get of a missing session returns 1 and reports on stderr", async () => {
   const o = io();
-  assert.equal(await main(["get", "alpha", "a@x.com"], o), 1);
+  assert.equal(await main(["get", "alpha", "--select", "a@x.com"], o), 1);
   assert.ok(o.errText().includes("no alpha session for a@x.com"));
 });
 
 test("set-status and get round-trip; get x reads the x row", async () => {
   store.saveSession(db, "alpha", "a@x.com", [{ name: "c" }], {});
-  assert.equal(await main(["set-status", "alpha", "a@x.com", "expired"], io()), 0);
+  assert.equal(await main(["set-status", "alpha", "expired", "--select", "a@x.com"], io()), 0);
   const o = io();
-  assert.equal(await main(["get", "alpha", "a@x.com"], o), 0);
+  assert.equal(await main(["get", "alpha", "--select", "a@x.com"], o), 0);
   assert.ok(o.text().includes('"status": "expired"'));
   store.upsertX(db, { username: "bob", password: "p", email: "b@x.com", totp_secret: "s" });
-  assert.equal(await main(["set-status", "x", "bob", "escalated"], io()), 0);
+  assert.equal(await main(["set-status", "x", "escalated", "--select", "bob"], io()), 0);
   const x = io();
-  assert.equal(await main(["get", "x", "bob"], x), 0);
+  assert.equal(await main(["get", "x", "--select", "bob"], x), 0);
   assert.ok(x.text().includes('"status": "escalated"'));
 });
 
 test("get and set-status refuse an unregistered app instead of creating a table", async () => {
   const o = io();
-  assert.equal(await main(["get", "alphao", "a@x.com"], o), 1);
-  assert.equal(await main(["set-status", "alphao", "a@x.com", "expired"], o), 1);
+  assert.equal(await main(["get", "alphao", "--select", "a@x.com"], o), 1);
+  assert.equal(await main(["set-status", "alphao", "expired", "--select", "a@x.com"], o), 1);
   assert.ok(o.errText().includes("app must be one of alpha, beta, x, tiktok"));
   assert.deepEqual(store.listApps(db), []);
 });
 
+test("get and set-status need --select, and take several accounts", async () => {
+  const o = io();
+  assert.equal(await main(["get", "alpha"], o), 1);
+  assert.equal(await main(["set-status", "alpha", "expired"], o), 1);
+  assert.ok(o.errText().includes("get needs --select"));
+  assert.ok(o.errText().includes("set-status needs --select"));
+  store.saveSession(db, "alpha", "a@x.com", [], {});
+  store.saveSession(db, "alpha", "b@x.com", [], {});
+  assert.equal(await main(["set-status", "alpha", "restricted", "--select", "a@x.com", "--select", "b@x.com"], io()), 0);
+  const g = io();
+  assert.equal(await main(["get", "alpha", "--select", "a@x.com", "--select", "b@x.com"], g), 0);
+  assert.equal(g.text().split('"status": "restricted"').length - 1, 2);
+});
+
+test("get and set-status report a missing account, still handle the others, and return 1", async () => {
+  store.saveSession(db, "alpha", "a@x.com", [], {});
+  const s = io();
+  assert.equal(await main(["set-status", "alpha", "expired", "--select", "nobody@x.com", "--select", "a@x.com"], s), 1);
+  assert.ok(s.errText().includes("has no alpha session"));
+  const g = io();
+  assert.equal(await main(["get", "alpha", "--select", "nobody@x.com", "--select", "a@x.com"], g), 1);
+  assert.ok(g.errText().includes("no alpha session for nobody@x.com"));
+  assert.ok(g.text().includes('"status": "expired"'));
+});
+
 test("set-status rejects an unknown status and a missing session", async () => {
   const o = io();
-  assert.equal(await main(["set-status", "alpha", "a@x.com", "sleeping"], o), 1);
+  assert.equal(await main(["set-status", "alpha", "sleeping", "--select", "a@x.com"], o), 1);
   assert.ok(o.errText().includes("status must be one of"));
-  assert.equal(await main(["set-status", "alpha", "a@x.com", "expired"], o), 1);
+  assert.equal(await main(["set-status", "alpha", "expired", "--select", "a@x.com"], o), 1);
   assert.ok(o.errText().includes("has no alpha session"));
 });
 
@@ -407,7 +434,7 @@ test('byEmail, verify, validate and orphan table reads use the adapter contract'
  assert.ok(validated.text().includes('alpha, beta'));
  store.saveSession(db,'orphan','base@example.com',[],[]);
  process.env.SECRETS_MANAGER_ADAPTERS='';
- assert.equal(await main(['get','orphan','base@example.com'],io()),0);
+ assert.equal(await main(['get','orphan','--select','base@example.com'],io()),0);
  assert.equal(await main(['list'],io()),0);
  assert.equal(await main(['login','orphan'],io()),1);
 });
