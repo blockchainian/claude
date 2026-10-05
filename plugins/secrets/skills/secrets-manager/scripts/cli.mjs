@@ -10,6 +10,7 @@ import { loadCredentials, parseLine, setAppPassword, setTotpSecret } from "./cre
 import * as sms from "./sms-otp.mjs";
 import * as store from "./store.mjs";
 import { BUILTIN_CHECKS, CHECK_RESULTS, nextStatus } from "./verify.mjs";
+import { NeedsHuman } from "./errors.mjs";
 // --- credential file parsing -------------------------------------------------
 
 // X accounts arrive from a vendor in a few colon-separated shapes (6 or 8 fields, and the
@@ -477,8 +478,8 @@ async function runVerify(db, opts, io) {
 
 // --- setup -------------------------------------------------------------------
 
-// Setup needs a live app session. Ready rows only join an explicit --all rerun; failures leave
-// their status unchanged so one account's incomplete setup never claims the whole run succeeded.
+// Setup needs a live app session. Ready rows only join an explicit --all rerun;
+// NeedsHuman escalates the session, while other failures leave its status unchanged.
 async function runSetup(db, opts, io) {
   const [app] = opts.positional;
   const adapter = getAdapter(app);
@@ -500,7 +501,13 @@ async function runSetup(db, opts, io) {
       store.saveSetupState(db, app, email, state);
       io.log(`${email}: ${summary}`);
       return false;
-    } catch (e) { io.error(`${email}: ${e.message}`); return true; }
+    } catch (e) {
+      if (e instanceof NeedsHuman) {
+        store.setSessionStatus(db, app, email, store.STATUS_ESCALATED);
+        io.error(`${email}: escalated: ${e.message}`);
+      } else io.error(`${email}: ${e.message}`);
+      return true;
+    }
   });
   return results.some(Boolean) ? 1 : 0;
 }
