@@ -7,6 +7,32 @@ description: Capture and interpret iOS Simulator ETTrace profiles. Use when prof
 
 Use this skill to capture a focused, symbolicated ETTrace profile from an iOS simulator app. Pair it with `../ios-debugger-agent/SKILL.md` when the task also needs simulator build, install, launch, UI driving, logs, or screenshots.
 
+## Simulator ownership
+
+For live simulator work, select an explicit UUID and claim it before build, launch or capture.
+Use this skill's actual loaded directory, and keep the same `UDID` and `RUN_ID` throughout:
+
+In each shell call, reassign `SKILL_DIR`, `UDID`, and `RUN_ID` to the resolved
+values; shell variables do not persist between calls.
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+UDID="<chosen-simulator-uuid>"
+RUN_ID="$(uuidgen)"
+node "$SKILL_DIR/../ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
+```
+
+The coordinator assigns different UUIDs to parallel runs. Exit 3 means the chosen target is
+owned: wait for release or choose another UUID; do not steal a live run. When called inside an
+existing debugger/screenshot run, reuse its claim and run id; only the outer run releases it.
+Analyzing existing artifacts needs no simulator claim.
+
+XcodeBuildMCP calls must pass `simulatorId` explicitly; build and app-path calls also pass
+`projectPath` or `workspacePath`, `scheme`, configuration and a run-specific `derivedDataPath`.
+Launch/stop calls pass `bundleId`. Do not change shared session defaults or active profiles.
+Check that the exposed schema accepts `simulatorId` and each response targets the chosen UUID;
+stop on a mismatch or reconnect a server that still exposes only shared-default targeting.
+
 ## Core Workflow
 
 1. Pick one focused flow and write down the expected start and stop points.
@@ -49,7 +75,7 @@ Preferred options:
 - If none exists, build a simulator-only copy into `RUN_DIR` from the upstream ETTrace package.
 - Link the framework directly into the app target, not only into tests, resources, data files, or a nested launcher target.
 - Confirm launch logs print `Starting ETTrace`.
-- Profile only one ETTrace-instrumented simulator app at a time because simulator mode listens on a fixed localhost port.
+- Profile only one ETTrace-instrumented simulator app on the host at a time because simulator mode listens on a fixed localhost port. A different UUID does not isolate this port; serialize ETTrace captures, and ensure only the selected app connects.
 
 Build a simulator framework when needed:
 
@@ -195,3 +221,9 @@ Report:
 ## Cleanup
 
 Remove temporary ETTrace app wiring when profiling is complete unless the user asked to keep it. Keep or discard run artifacts based on the active task.
+After ETTrace and simulator-driving processes have finished, release this run's own claim,
+on success or failure (an outer caller retains and releases its shared claim):
+
+```sh
+node "$SKILL_DIR/../ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
+```

@@ -39,7 +39,7 @@ npx -y xcodebuildmcp@latest mcp
 XCODEBUILDMCP_ENABLED_WORKFLOWS=simulator,simulator-management,ui-automation,debugging,device
 ```
 
-That registers 59 tools. `session-management` is added by the server itself.
+The tested XcodeBuildMCP 2.7.0 configuration registers 59 tools. `session-management` is added by the server itself.
 `project-discovery`, `utilities`, and `coverage` are deliberately absent: the
 `simulator` workflow already re-lists their tools, so enabling them would add
 only `get_mac_bundle_id`.
@@ -65,16 +65,18 @@ when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 
 The gate is shared by both hosts. In Codex, review and trust the loaded
 `phone-session-gate` in `/hooks` before phone automation; stop if it is not active
-or trusted. This pass adapts host compatibility and leaves occupancy behavior unchanged.
+or trusted. Device claims and phone-session changes are serialized across hosts.
 
 ## Install
 
 For Codex installation, see
 [Codex installation](../../README.md#codex).
 
-This compatibility pass changes skill instructions and plugin configuration;
-it does not change device claims, session defaults, or synchronization behavior.
-Occupancy improvements are deferred.
+Different simulators can run in parallel: every simulator call names its UUID,
+and agents do not change shared session defaults. A phone is used by one run at a
+time; other callers wait and retry after release. The claim and hook use the same
+OS lock, preserve active connections on reclaim, and clear only explicit session
+deletes. There is no automatic queue or claim expiry.
 
 In Claude Code:
 
@@ -135,7 +137,7 @@ Changes in this fork:
   `swiftui-view-refactor`) and the Codex-only `ios-simulator-browser` skill,
   keeping the three simulator-runtime skills.
 - Corrected `ios-debugger-agent` against xcodebuildmcp 2.7.0: real tool names
-  (`snapshot_ui`, `session_set_defaults`, `elementRef`-based `tap`/`type_text`),
+  (`snapshot_ui`, explicit `simulatorId`, `elementRef`-based `tap`/`type_text`),
   and log guidance matching the automatic runtime-log capture that
   `build_run_sim`/`launch_app_sim` provide. Upstream still documents
   `describe_ui` and `start_sim_log_cap`/`stop_sim_log_cap`, which no longer

@@ -8,7 +8,8 @@
         "mcp"
       ],
       "env": {
-        "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,simulator-management,ui-automation,debugging,device"
+        "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,simulator-management,ui-automation,debugging,device",
+        "XCODEBUILDMCP_DISABLE_SESSION_DEFAULTS": "true"
       }
     },
     "appium-mcp": {

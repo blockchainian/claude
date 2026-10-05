@@ -7,6 +7,32 @@ description: Capture and inspect iOS leaks and memgraphs. Use when debugging lea
 
 Use this skill to prove iOS leaks from a live simulator process or an existing `.memgraph`. Pair it with `../ios-debugger-agent/SKILL.md` when the task also needs simulator build, install, launch, UI driving, logs, or screenshots.
 
+## Simulator ownership
+
+For live simulator work, select an explicit UUID and claim it before build, launch or capture.
+Use this skill's actual loaded directory, and keep the same `UDID` and `RUN_ID` throughout:
+
+In each shell call, reassign `SKILL_DIR`, `UDID`, and `RUN_ID` to the resolved
+values; shell variables do not persist between calls.
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+UDID="<chosen-simulator-uuid>"
+RUN_ID="$(uuidgen)"
+node "$SKILL_DIR/../ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
+```
+
+The coordinator assigns different UUIDs to parallel runs. Exit 3 means the chosen target is
+owned: wait for release or choose another UUID; do not steal a live run. When called inside an
+existing debugger/screenshot run, reuse its claim and run id; only the outer run releases it.
+Analyzing existing artifacts needs no simulator claim.
+
+XcodeBuildMCP calls must pass `simulatorId` explicitly; build and app-path calls also pass
+`projectPath` or `workspacePath`, `scheme`, configuration and a run-specific `derivedDataPath`.
+Launch/stop calls pass `bundleId`. Do not change shared session defaults or active profiles.
+Check that the exposed schema accepts `simulatorId` and each response targets the chosen UUID;
+stop on a mismatch or reconnect a server that still exposes only shared-default targeting.
+
 ## Core Workflow
 
 1. Build, launch, and drive the exact flow that should release objects.
@@ -24,7 +50,7 @@ Prefer capturing from the simulator already used for the reproduction. Resolve t
 
 ```bash
 SKILL_DIR="<absolute path to this loaded skill folder>"
-SIM="<simulator-udid>"
+SIM="$UDID"
 BUNDLE_ID="<app.bundle.identifier>"
 MEMGRAPH_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mobile-ios-memgraph.XXXXXX")"
 
@@ -74,3 +100,12 @@ A useful leak report includes:
 - before/after evidence when a fix was made
 
 If the memgraph shows only framework/runtime noise, say that and recommend the next narrower capture rather than inventing an app leak.
+
+## Cleanup
+
+After capture and simulator-driving processes finish, release this run's own claim on success
+or failure; an outer caller retains and releases its shared claim. Preserve diagnostics first.
+
+```sh
+node "$SKILL_DIR/../ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
+```

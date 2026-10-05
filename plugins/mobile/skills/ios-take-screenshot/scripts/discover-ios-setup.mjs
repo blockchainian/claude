@@ -255,9 +255,8 @@ export function simulatorReport(requested) {
 
   const report = { target: "simulator", simulators: sims, selectedSimulator: sim, ready: sim !== null };
   if (sim) {
-    // XcodeBuildMCP takes its simulator from the session defaults, so there
-    // are no per-call capabilities to pass — just this, once. The name goes
-    // with the id, or a name left by an earlier default survives beside it.
+    // Preserve the existing report shape for callers using session defaults.
+    // This plugin passes simulatorId explicitly on each tool call instead.
     report.sessionDefaults = { simulatorId: sim.udid, simulatorName: sim.name };
   } else if (requested) {
     report.missing = [`simulator ${requested} is not booted; boot it with `

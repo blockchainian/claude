@@ -80,22 +80,23 @@ Set `IOS_SCREENSHOT_DIR` to the session's scratchpad directory when your system 
 one, and to a durable directory for screens worth keeping. With neither, the root falls under
 `$TMPDIR`, which macOS clears.
 
-Several agents can share that library safely; a phone or a simulator they cannot, so this
-skill provides a lock: `claim-simulator.mjs` holds one UDID for one `RUN_ID`, and
-`capture-slice.sh` refuses a simulator nobody has claimed. Neither target refuses a second
-agent on its own. On a phone, WebDriverAgent serves one session, and a second Appium
-session does not fail — it wins, and the first agent's next call fails with "Session does
-not exist" mid-run. On a simulator, XcodeBuildMCP retargets its session default to whoever
-set it last. So the second claim fails, and that agent chooses to wait or abort; with
-several agents queued on one phone, waiting and claiming again is the normal path. On a
-phone the plugin's `phone-session-gate` hook enforces the claim: `appium_session_management`
-`create` is denied unless its capabilities carry `appium:udid`, that UDID is claimed, and no
-session is recorded open on it. The hook cannot tell agents apart, so it stops a second
-session, not a second driver on the holder's session. Several
-sessions on several simulators is fine: each session has its own XcodeBuildMCP server and
-its own defaults. The stitcher writes to a staging file and renames it into place, so a
-reader never sees a half-written PNG, and its verdict reports `replaced_existing` when a
-run overwrites an earlier capture of the same screen.
+Several agents can share the artifact library. Device use is exclusive per UDID:
+`claim-simulator.mjs` atomically holds one device for one `RUN_ID`, and
+`capture-slice.sh` refuses an unclaimed simulator or another run's claim.
+Different simulators can run in parallel; multiple callers use one phone in turn,
+waiting and claiming again after the holder releases it. There is no background queue.
+
+The phone hook reserves a create before it starts, then records only that call's
+successful session. Deletes require an explicit `sessionId` and clear only that
+session's record. A same-run reclaim preserves the connection; release refuses
+while a connection or create is recorded. The hook checks host session identity,
+and subagent identity when supplied, but it does not bind `RUN_ID` to a caller or
+guard every Appium action. Callers must obey their assigned claim and always pass
+their own `sessionId`; do not select or drive another caller's active session.
+
+The stitcher writes to a staging file and renames it into place, so readers never
+see a half-written PNG. Its verdict reports `replaced_existing` when a run replaces
+an earlier capture of the same screen.
 
 ## Core Workflow
 
@@ -150,7 +151,7 @@ body often does nothing, and repeating it wastes turns.
 Before phone automation, verify the plugin's `phone-session-gate` hook is active.
 In Codex, review and trust the loaded hook in `/hooks`. If the gate is not active
 or trusted, stop phone automation and report it; the written claim workflow does
-not replace the hook. This compatibility pass leaves occupancy behavior unchanged.
+not replace the hook. The loaded hook must be active before using a shared phone.
 
 Discover the session values rather than asking for them or remembering them:
 
@@ -185,7 +186,7 @@ session that ends yours:
 Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim again, since
 there is no other phone to pick. Hold the claim across every screen of the flow and
 release it at cleanup, after deleting the Appium session. The hook records the session id
-in the claim when `create` succeeds, and clears it when `delete` succeeds.
+in the claim when `create` succeeds, and clears only that session when an explicit `sessionId` delete succeeds.
 
 Two switches live on the phone and cannot be set from the Mac. Developer Mode, which
 `devicectl` does report, and **Settings -> Developer -> UI TESTING -> Enable UI
@@ -225,26 +226,33 @@ run and for how long. Decide: wait and claim again, or abort and pick another si
 Never `--steal` unless you know that run is dead. The claim is a file under `TMPDIR`, so
 it is visible to every session of the same user; releasing it is part of cleanup.
 
-Pass the `sessionDefaults` object to `session_set_defaults`, so every XcodeBuildMCP call
-targets that simulator, then call `session_show_defaults` and check that `simulatorId` is
-the UDID you claimed. The defaults belong to the XcodeBuildMCP server, which every agent in
-this session shares, so they can already hold a different simulator, or a different
-app's bundle id, set by an earlier agent, and nothing warns you. Set both and read both
-back. None of `launch_app_sim`, `snapshot_ui`, `tap`, `swipe` or
-`screenshot` takes a simulator of its own, whatever their `nextSteps` hints claim about a
-`simulatorId` parameter; there is no per-call targeting. What each response does carry is
-the simulator it hit, as `artifacts.simulatorId` (`udid` in a snapshot). Compare that with
-the capture UDID whenever a screen seems not to move.
+This plugin enables `XCODEBUILDMCP_DISABLE_SESSION_DEFAULTS=true`. Pass the claimed
+`simulatorId` on every simulator/UI tool call, and `bundleId` on launch/stop calls;
+build or app-path calls also need the explicit project/workspace and scheme.
+Do not call `session_set_defaults` or switch active profiles: those settings remain
+shared across agents. The discovery report's `sessionDefaults` is a compatibility
+output; copy its selected UUID into calls instead of setting shared defaults.
+If the exposed schema omits `simulatorId`, reconnect the server with this plugin's
+configuration before parallel use. Do not drive an ambiguous target.
 
-**The default and the capture UDID must agree.** XcodeBuildMCP scrolls whatever its
-session default points at, while `simctl` captures whatever UDID you hand it; if they
-differ you will swipe one simulator and photograph another, and the slices will look like a
-screen that never moves. The stitcher refuses an identical pair for exactly this reason.
+Compare each reported `artifacts.simulatorId` (or snapshot `udid`) with the chosen
+UUID. Stop on a mismatch. `simctl` capture uses the same explicit UDID, so swipes
+and screenshots target the same simulator.
 
 For the same reason, do not use `booted` as a stand-in for the UDID. `simctl` resolves it to
 one running simulator without saying which, and simulators routinely hold different builds
 of the same app — on one machine the same app was version 62 on one booted simulator and 64
 on another. `claim-simulator.mjs` and `capture-slice.sh` refuse it outright.
+
+### Interrupted runs
+
+Never expire a claim just because its timestamp is old: profiling may take a long
+time. If a caller crashed or a create result is unknown, inspect Appium's session
+list and confirm the old run is no longer operating the phone. Only then use the
+existing `--steal` option to recover the claim; it clears the old reservation.
+Delete any leftover session by explicit `sessionId` before creating a new one.
+A late result from the old create cannot commit over a new reservation. Do not
+manually delete mutex files; the OS releases their locks when processes exit.
 
 ## 1. Open the App
 
@@ -260,7 +268,7 @@ Foreground it with `appium_app_lifecycle` (`action=activate`, `id=<bundleId>`), 
 screenshot. An app resumes where the user left it, not on its home screen, so confirm
 where you actually are before navigating.
 
-If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create` and the discovered capabilities, which carry `appium:udid`. Sessions idle out. When a call fails with "Session does not exist", delete the session first (`action=delete`), then create again; the gate denies a create while the claim still records the old session.
+If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create` and the discovered capabilities, which carry `appium:udid`. Sessions idle out. When a call fails with "Session does not exist", delete the session first (`action=delete`, with that explicit `sessionId`), then create again; the gate denies a create while the claim still records the old session.
 
 ### Simulator
 
@@ -563,7 +571,9 @@ anything should sit between them.
 
 ## 5. Clean Up
 
-Delete the slice directory, on a phone delete the Appium session, and release the claim.
+Delete the slice directory, on a phone delete this run's explicit Appium `sessionId`,
+then release the claim. Nested screenshot/profiling work retains the outer run's
+UDID and RUN_ID; only the outer run releases the claim.
 A run that captures several screens keeps its claim until the last one; releasing between
 screens only invites another agent in mid-run:
 
