@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { accountDir, apiUrl, browserFlag, browserPrefs, dataDir, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, recordingPath, stopRecording, templateFrom } from "../scripts/tiktok-session.mjs";
+import { accountDir, apiUrl, browserFlag, browserPrefs, dataDir, displayName, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, recordingPath, stopRecording, templateFrom } from "../scripts/tiktok-session.mjs";
 
 const row = (username, status, isp_slot, created_at) => ({ username, status, isp_slot, created_at });
 
@@ -97,6 +97,11 @@ test("findPid picks the Camoufox main process this process launched, with or wit
   ].join("\n");
   assert.equal(findPid(50, ps), 303);
   assert.equal(findPid(51, ps), null);
+});
+
+test("displayName is the secrets-manager's CAMOUFOX_DISPLAY, or empty for the main display", () => {
+  assert.equal(displayName({ CAMOUFOX_DISPLAY: "SAMSUNG" }), "SAMSUNG");
+  assert.equal(displayName({}), "");
 });
 
 test("browserPrefs turns the sound back on only when asked", () => {

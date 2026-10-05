@@ -1,6 +1,6 @@
 {
   "name": "creator",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Run creator accounts: upload a video to the secrets-manager TikTok account through its own Camoufox profile, fetch the account's video stats over time, list the commercial music library's hottest sounds, and open the account's browser for a person to look.",
   "author": {
     "name": "blockchainian"

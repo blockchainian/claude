@@ -1,4 +1,4 @@
-// ABOUTME: Puts an account's Camoufox windows on the built-in display, off the main screen: the main
+// ABOUTME: Puts an account's Camoufox windows on one display, CAMOUFOX_DISPLAY (else the main one): the main
 // ABOUTME: window opens there, popups are moved there. Best-effort and macOS-only; any failure is a no-op.
 
 import { execFileSync } from "node:child_process";
@@ -9,8 +9,12 @@ import { fileURLToPath } from "node:url";
 // System Events cannot see the Camoufox process (it is not a registered GUI app), and JXA cannot
 // build the CGPoint an AXValue needs, so the raw Accessibility calls live in a Swift script.
 const MOVE_SCRIPT = fileURLToPath(new URL("./moveWindows.swift", import.meta.url));
-const DISPLAY_SCRIPT = fileURLToPath(new URL("./builtinDisplay.swift", import.meta.url));
+const DISPLAY_SCRIPT = fileURLToPath(new URL("./displayOrigin.swift", import.meta.url));
 const BROWSER_DOC = "chrome://browser/content/browser.xhtml";
+
+// The display the windows go on: CAMOUFOX_DISPLAY in the secrets-manager's .env, any part of the
+// display's name in any case (e.g. SAMSUNG); empty means the main display.
+export const displayName = (env = process.env) => env.CAMOUFOX_DISPLAY ?? "";
 
 // The main camoufox process for this profile (not the gpu/plugin child processes).
 export function findPid(profileDir) {
@@ -44,12 +48,12 @@ export function storeWindowPosition(profileDir, x, y) {
   writeFileSync(path, JSON.stringify(stored));
 }
 
-// Make this profile's next launch open its window on the built-in display. A no-op (returns false)
-// off macOS and when there is no built-in display. Must run before the browser launches.
-export function openOnBuiltin(profileDir, margin = 40) {
+// Make this profile's next launch open its window on the display. A no-op (returns false) off macOS
+// and when no connected display has that name. Must run before the browser launches.
+export function openOnDisplay(profileDir, name = displayName(), margin = 40) {
   if (process.platform !== "darwin") return false;
   try {
-    const out = execFileSync("swift", [DISPLAY_SCRIPT], {
+    const out = execFileSync("swift", [DISPLAY_SCRIPT, name], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 60000,
@@ -63,16 +67,16 @@ export function openOnBuiltin(profileDir, margin = 40) {
   }
 }
 
-// Move every window of this account's Camoufox that is off the built-in display onto it. Needed for
-// OAuth popups: the app positions them itself, from screen coordinates that land on the main display.
-// A no-op (returns false) off macOS, when there is no built-in display, when the built-in already is
-// the main display, or when Accessibility trust is missing. Returns true once a window has been placed.
-export function moveToBuiltin(profileDir, margin = 40) {
+// Move every window of this account's Camoufox that is off the display onto it. Needed for OAuth
+// popups: the app positions them itself, from screen coordinates of its own choosing. A no-op
+// (returns false) off macOS, when no connected display has that name, or when Accessibility trust is
+// missing. Returns true once a window has been placed.
+export function moveToDisplay(profileDir, name = displayName(), margin = 40) {
   if (process.platform !== "darwin") return false;
   try {
     const pid = findPid(profileDir);
     if (!pid) return false;
-    const out = execFileSync("swift", [MOVE_SCRIPT, String(pid), String(margin)], {
+    const out = execFileSync("swift", [MOVE_SCRIPT, String(pid), String(margin), name], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 60000,
@@ -83,8 +87,8 @@ export function moveToBuiltin(profileDir, margin = 40) {
   }
 }
 
-// Move this profile's windows to the built-in display whenever the browser opens a new page, so a
-// popup leaves the main screen as soon as it appears.
-export function movePopupsToBuiltin(context, profileDir, move = moveToBuiltin) {
+// Move this profile's windows to the display whenever the browser opens a new page, so a popup
+// joins the others as soon as it appears.
+export function movePopupsToDisplay(context, profileDir, move = moveToDisplay) {
   context.on("page", () => move(profileDir));
 }

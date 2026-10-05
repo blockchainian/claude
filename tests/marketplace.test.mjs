@@ -1,5 +1,5 @@
 // ABOUTME: Tests the marketplace manifest: it lists every plugin in the repository, and the check-design
-// ABOUTME: engine shared by the mobile and web plugins and the window recorder shared by secrets and creator stay byte-identical.
+// ABOUTME: engine shared by the mobile and web plugins and the window recorder and mover shared by secrets and creator stay byte-identical.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -28,11 +28,10 @@ test("the shared check-design engine stays byte-identical across plugins", async
   }
 });
 
-test("the window recorder stays byte-identical across plugins", async () => {
-  const copies = [
-    "plugins/secrets/skills/secrets-manager/scripts/recordWindows.swift",
-    "plugins/creator/skills/upload-tiktok-video/scripts/recordWindows.swift",
-  ];
-  const [a, b] = await Promise.all(copies.map((path) => readFile(path, "utf8")));
-  assert.equal(a, b, "recordWindows.swift has drifted between the secrets and creator copies");
-});
+for (const script of ["recordWindows.swift", "moveWindows.swift"]) {
+  test(`the window script ${script} stays byte-identical across plugins`, async () => {
+    const copies = [`plugins/secrets/skills/secrets-manager/scripts/${script}`, `plugins/creator/skills/upload-tiktok-video/scripts/${script}`];
+    const [a, b] = await Promise.all(copies.map((path) => readFile(path, "utf8")));
+    assert.equal(a, b, `${script} has drifted between the secrets and creator copies`);
+  });
+}

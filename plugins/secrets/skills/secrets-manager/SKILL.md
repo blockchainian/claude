@@ -31,8 +31,9 @@ Without a config file or override, no app adapters are loaded; other commands st
 See the plugin README's Adapter interface for every field and kit helper.
 
 Pinned: Camoufox v152.0.4-beta.30, camoufox-js 0.12.0, playwright-core 1.60.0. Headed runs open the window on the
-built-in display (`builtinDisplay.swift`), move OAuth popups there (`moveWindows.swift`, needs
-Accessibility trust) and record them (`recordWindows.swift`, needs Screen Recording
+display `CAMOUFOX_DISPLAY` names in `~/.config/secrets-manager/.env` (any part of its name, any
+case, e.g. `SAMSUNG`; unset means the main display; `displayOrigin.swift`), move OAuth popups there
+(`moveWindows.swift`, needs Accessibility trust) and record them (`recordWindows.swift`, needs Screen Recording
 permission), both through `swift`.
 
 ## New account flow
@@ -106,7 +107,7 @@ When a headed run is backgrounded and the log stalls — an `>>> ASSIST NEEDED` 
 progress while the browser process is still alive — Claude MUST proactively look at the Camoufox
 window with computer-use instead of idling on the log or waiting to be told: `request_access` for
 Camoufox (bundleId `org.mozilla.camoufox`), `switch_display` to the display it moved to (the
-built-in one), and `screenshot`. Browsers are read-tier, so Claude can SEE but not click; the point
+`CAMOUFOX_DISPLAY` one), and `screenshot`. Browsers are read-tier, so Claude can SEE but not click; the point
 is to name the real blocker and the exact control the user must click, and to catch a stuck node the
 graph mishandles (e.g. a reCAPTCHA checkbox already passed where the true block is an unclicked
 **Next**, which the handoff message may still mislabel "click the reCAPTCHA").

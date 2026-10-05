@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 import { EventEmitter } from "node:events";
 
-import { movePopupsToBuiltin, storeWindowPosition } from "../scripts/window-place.mjs";
+import { displayName, movePopupsToDisplay, storeWindowPosition } from "../scripts/window-place.mjs";
 
 const DOC = "chrome://browser/content/browser.xhtml";
 const read = (dir) => JSON.parse(readFileSync(join(dir, "xulstore.json"), "utf8"));
@@ -41,10 +41,15 @@ test("storeWindowPosition replaces an unreadable xulstore.json", () => {
   assert.deepEqual(read(dir), { [DOC]: { "main-window": { screenX: "10", screenY: "20" } } });
 });
 
-test("movePopupsToBuiltin moves the profile's windows each time a new page opens", () => {
+test("displayName is CAMOUFOX_DISPLAY, or empty for the main display", () => {
+  assert.equal(displayName({ CAMOUFOX_DISPLAY: "SAMSUNG" }), "SAMSUNG");
+  assert.equal(displayName({}), "");
+});
+
+test("movePopupsToDisplay moves the profile's windows each time a new page opens", () => {
   const context = new EventEmitter();
   const moved = [];
-  movePopupsToBuiltin(context, "/profiles/a", (dir) => moved.push(dir));
+  movePopupsToDisplay(context, "/profiles/a", (dir) => moved.push(dir));
   assert.deepEqual(moved, []);
   context.emit("page", {});
   context.emit("page", {});

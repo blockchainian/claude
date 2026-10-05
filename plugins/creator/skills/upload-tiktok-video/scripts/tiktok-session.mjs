@@ -8,11 +8,12 @@
 //
 // Config (SECRETS_MANAGER_STATE_PATH/.env, the secrets-manager's own, loaded automatically):
 //   ISP_PROXY_URL               the ISP pool's base url; slot n is the base port + n.
+//   CAMOUFOX_DISPLAY            the display a headed window goes on, any part of its name (else the main one).
 //   SECRETS_MANAGER_STATE_PATH  where the store and profiles are (default ~/.config/secrets-manager).
 //   CREATOR_TIKTOK_DIR           where posts, stats and recordings go, one directory per account
 //                               (default ~/.local/share/creator/tiktok).
 
-import { spawn, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +27,7 @@ const SESSION_COOKIE = "sessionid"; // the cookie of a signed-in tiktok.com brow
 const TEMPLATE_WAIT_MS = 30000;
 const REQUEST_TIMEOUT_MS = 30000;
 const RECORD_SCRIPT = fileURLToPath(new URL("./recordWindows.swift", import.meta.url));
+const MOVE_SCRIPT = fileURLToPath(new URL("./moveWindows.swift", import.meta.url));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -101,6 +103,17 @@ export function findPid(parentPid = process.pid, ps = execFileSync("ps", ["-Ao",
   return null;
 }
 
+// The display a headed window goes on: CAMOUFOX_DISPLAY in the secrets-manager's .env, any part of
+// the display's name in any case (e.g. SAMSUNG), shared with its headed logins; empty means the main display.
+export const displayName = (env = process.env) => env.CAMOUFOX_DISPLAY ?? "";
+
+// Move the windows of the Camoufox `pid` that are off the display onto it, through the Accessibility
+// API. macOS only and best-effort: resolves either way, never rejects.
+export function moveToDisplay(pid, name = displayName()) {
+  if (process.platform !== "darwin" || !pid) return Promise.resolve();
+  return new Promise((resolve) => execFile("swift", [MOVE_SCRIPT, String(pid), "40", name], { timeout: 60000 }, () => resolve()));
+}
+
 // The Firefox prefs a launch adds: Playwright mutes the browser (media.volume_scale 0), and
 // `withSound` turns it back up, for a person watching a headed run.
 export function browserPrefs(withSound) {
@@ -129,7 +142,8 @@ export function recordingPath(username, kind, at = new Date(), env = process.env
 
 // Camoufox on the account's ISP slot at `url`. With `profile` it is the account's own browser
 // profile and fingerprint, signed in or not; without, an anonymous browser. `headed` shows the
-// window and, given `recordTo`, screen-records it there; `withSound` unmutes it. Returns
+// window on the CAMOUFOX_DISPLAY display (moved there, as are the windows it opens later) and, given
+// `recordTo`, screen-records it; `withSound` unmutes it. Returns
 // { context, page, template, close }: `template()` resolves to the base of signed API calls, and
 // `close()` saves the recording and closes the browser.
 export async function openBrowser({ slot, profile = null, headed = false, withSound = false, recordTo = null, url }) {
@@ -159,6 +173,11 @@ export async function openBrowser({ slot, profile = null, headed = false, withSo
     const page = context.pages?.()[0] ?? (await context.newPage());
     const template = captureTemplate(page);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    if (headed) {
+      const pid = findPid();
+      await moveToDisplay(pid);
+      context.on("page", () => moveToDisplay(pid));
+    }
     return { context, page, template, close };
   } catch (e) {
     await close();
