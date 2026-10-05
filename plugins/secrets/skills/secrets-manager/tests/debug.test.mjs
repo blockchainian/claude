@@ -70,6 +70,13 @@ test("stopScreenRecording waits for the recorder to finalize after SIGINT", asyn
   assert.notEqual(child.exitCode, null);
 });
 
+test("stopScreenRecording leaves no timer holding the process open once the recorder exits", async () => {
+  const child = spawn(process.execPath, ["-e", 'process.on("SIGINT", () => process.exit(0)); console.log("recording"); setInterval(() => {}, 1000)'], { stdio: ["ignore", "pipe", "ignore"] });
+  await new Promise((r) => child.stdout.once("data", r));
+  assert.equal(await stopScreenRecording({ child, path: "/x/rec.mov" }), "/x/rec.mov");
+  assert.ok(!process.getActiveResourcesInfo().includes("Timeout"), "a timer is still pending");
+});
+
 test("stopScreenRecording returns null when the recorder never started", async () => {
   const child = spawn(process.execPath, ["-e", "console.log('skip: no app for pid')"], { stdio: ["ignore", "pipe", "ignore"] });
   await new Promise((r) => child.once("exit", r));
