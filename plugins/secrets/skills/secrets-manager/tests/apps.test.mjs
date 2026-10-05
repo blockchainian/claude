@@ -114,3 +114,23 @@ test('the kit exposes the credential-file writers so a hook can persist a minted
   }
   assert.equal(typeof kit.config.credentialsDir, 'function');
 });
+
+
+test('adapter NeedsHuman is the engine error and stops app retries', async () => {
+  const { NeedsHuman, withAppRetries } = await import('../scripts/login.mjs');
+  assert.equal(kit.NeedsHuman, NeedsHuman);
+  const dir = mkdtempSync(join(tmpdir(), 'human-adapter-'));
+  const path = join(dir, 'adapters.mjs');
+  writeFileSync(path, `export default kit => [{
+    name: 'human', domain: 'example.com', startUrl: 'https://example.com', entryTexts: ['Login'],
+    signIn: async () => { throw new kit.NeedsHuman('finish in the browser'); },
+    ready: async () => false,
+  }];`);
+  const [adapter] = await loadAdapters({ paths: [path] });
+  let attempts = 0;
+  await assert.rejects(withAppRetries(3, async () => {
+    attempts++;
+    await adapter.signIn({});
+  }), error => error instanceof NeedsHuman && error.message === 'finish in the browser');
+  assert.equal(attempts, 1);
+});

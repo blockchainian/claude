@@ -21,8 +21,8 @@ import { filterState } from "./state.mjs";
 export { filterState };
 export { gotoWithRetry } from "./page-helpers.mjs";
 
-// Google demanded a challenge we cannot script (e.g. add a phone number).
-export class NeedsHuman extends Error {}
+import { NeedsHuman } from "./errors.mjs";
+export { NeedsHuman } from "./errors.mjs";
 
 // Google restricted the account (the banned-account speedbump). A terminal dead end: no human can
 // clear it, so the caller marks the account restricted (never retried) rather than escalated.
