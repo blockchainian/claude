@@ -1,3 +1,6 @@
+// ABOUTME: Shared browser page helpers for external login adapters.
+// ABOUTME: Handles click timeouts and navigation retries while preserving diagnostics.
+
 export async function hasLsKey(page, substr) {
   try {
     return await page.evaluate((s) => Object.keys(localStorage).some((k) => k.includes(s)), substr);
@@ -10,13 +13,16 @@ export async function hasCookie(page, name) {
   return (await page.context().cookies()).some((c) => c.name === name);
 }
 
-export async function clickFirst(page, texts, timeout = 15000) {
+export async function clickFirst(page, texts, timeout = 15000, misses = []) {
   for (const text of texts) {
     try {
       await page.getByText(text, { exact: false }).first().click({ timeout });
       return true;
     } catch (e) {
-      if (e?.name === "TimeoutError") continue;
+      if (e?.name === "TimeoutError") {
+        misses.push({ text, reason: e.message.trim().slice(0, 2000) });
+        continue;
+      }
       throw e;
     }
   }

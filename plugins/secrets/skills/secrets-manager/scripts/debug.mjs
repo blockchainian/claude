@@ -79,7 +79,7 @@ export async function stopScreenRecording(handle, timeoutMs = 15000) {
 // Write a screenshot and page facts for one failed step; return its directory. Lands under
 // debugDir()/<email>/<label>-<ts>/. Every field is read independently and a missing one is noted
 // rather than aborting the dump, so a half-dead page still yields whatever it can. Never throws.
-export async function capture(surface, email, label) {
+export async function capture(surface, email, label, note) {
   let out;
   try {
     out = join(debugDir(), email, `${label}-${stamp()}`);
@@ -91,6 +91,13 @@ export async function capture(surface, email, label) {
     await surface.screenshot({ path: join(out, "screenshot.png") });
   } catch {
     /* no screenshot */
+  }
+  if (note !== undefined) {
+    try {
+      writeFileSync(join(out, "screenshot.txt"), note);
+    } catch {
+      /* no note */
+    }
   }
   const fields = [
     ["url", async () => surface.url()],
