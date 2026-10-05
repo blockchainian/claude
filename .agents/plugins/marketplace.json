@@ -63,6 +63,18 @@
         "authentication": "ON_USE"
       },
       "category": "Developer Tools"
+    },
+    {
+      "name": "mobile",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mobile"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
     }
   ]
 }

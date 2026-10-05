@@ -1,7 +1,7 @@
 # claude
 
 The `blockchainian` plugin marketplace for Claude Code, with Cloudflare, Web,
-Proxy, Creator, and Render also available in Codex from the same repository.
+Proxy, Creator, Render, and Mobile also available in Codex from the same repository.
 
 | Plugin | What it does |
 |---|---|
@@ -46,9 +46,10 @@ codex plugin add web@blockchainian
 codex plugin add proxy@blockchainian
 codex plugin add creator@blockchainian
 codex plugin add render@blockchainian
+codex plugin add mobile@blockchainian
 ```
 
-The Codex catalog contains these five plugins only. See
+The Codex catalog contains these six plugins only. See
 [Codex compatibility](docs/codex-compatibility.md) for local installation,
 testing the draft branch, shared prerequisites, and platform-specific behavior.
 
@@ -56,7 +57,7 @@ testing the draft branch, shared prerequisites, and platform-specific behavior.
 
 ```
 .claude-plugin/marketplace.json   the catalog, listing every plugin
-.agents/plugins/marketplace.json the Codex catalog, listing five portable plugins
+.agents/plugins/marketplace.json the Codex catalog, listing six portable plugins
 plugins/codex/                    the codex-manager plugin
 plugins/feature/                  the ship / handoff / retro plugin
 plugins/mobile/                   the iOS plugin

@@ -1,7 +1,7 @@
 # Codex compatibility
 
-Cloudflare, Web, Proxy, Creator, and Render share their skills and scripts between
-Claude Code and Codex. `.agents/plugins/marketplace.json` exposes only those five
+Cloudflare, Web, Proxy, Creator, Render, and Mobile share their skills and scripts between
+Claude Code and Codex. `.agents/plugins/marketplace.json` exposes only those six
 plugins to Codex; `.claude-plugin/marketplace.json` continues to expose all ten to
 Claude Code. No other plugin is included in this compatibility change.
 
@@ -17,6 +17,7 @@ codex plugin add web@blockchainian
 codex plugin add proxy@blockchainian
 codex plugin add creator@blockchainian
 codex plugin add render@blockchainian
+codex plugin add mobile@blockchainian
 ```
 
 Before this PR merges, use `codex plugin marketplace add blockchainian/claude --ref codex`
@@ -34,6 +35,7 @@ Claude Code installation remains unchanged:
 /plugin install proxy@blockchainian
 /plugin install creator@blockchainian
 /plugin install render@blockchainian
+/plugin install mobile@blockchainian
 ```
 
 ## Shared paths and dependencies
@@ -49,6 +51,7 @@ shell's variables. Full plugin installation preserves sibling script imports.
 | Web | Node 22+, Chrome with a debug port for heap capture, `uv` for image comparison | Screenshot and UI instructions use the host's available browser tools |
 | Proxy | macOS, mitmproxy and trusted CA; logged-in Chrome with Zero Omega or an iPhone WireGuard tunnel | User enables browser routing; the script detaches its own proxy hub |
 | Creator | Node 22.13+, npm dependencies, Camoufox, existing secrets-manager state and proxy configuration | Shell process handles and completion notifications belong to the host; shown windows and recording need macOS permissions |
+| Mobile | Xcode, XcodeBuildMCP, Appium MCP; Node and `uv` for capture scripts | Discover tool names from the host; in Codex, trust the phone-session gate in `/hooks` before phone automation |
 | Render | Render MCP authentication; Render CLI for CLI/Blueprint operations | Separate OAuth clients; Claude's agent and edit-validation hook stay Claude-specific; Codex uses `render-monitor` |
 
 Creator uses the existing secrets-manager database, logged-in profiles and ISP
@@ -70,25 +73,35 @@ hook is not loaded. In Codex, use `render-blueprints` to validate YAML explicitl
 there is no automatic validation after an edit. The `render-mcp` skill also covers
 manual configuration for clients without plugin OAuth support.
 
-Codex reads the existing Claude manifests for the other four plugins. Only Render
+Codex reads the existing Claude manifests for the other five plugins. Only Render
 needs a separate manifest; its identity and version stay aligned across both files.
 See [OpenAI's plugin packaging documentation](https://developers.openai.com/plugins/build/plugins)
 for compatible manifests, marketplace discovery and bundled MCP configuration.
 
+Mobile reuses the existing phone-session hook through both hosts' compatible hook
+format and plugin-root variable. Its matcher accepts both tool namespace formats.
+Device claims, synchronization, and session-default behavior are unchanged;
+occupancy repairs are a separate follow-up.
+
 ## Validation
 
-- Marketplace regression tests cover the five-plugin boundary and Render's separate
+- Marketplace regression tests cover the six-plugin boundary and Render's separate
   OAuth clients, aligned versions and host-scoped hooks.
 - Existing Web, Proxy and Creator suites cover their unchanged business scripts.
 - Codex CLI 0.160.0 discovers and installs all five into a temporary `CODEX_HOME`.
   App-server `plugin/read` reports 22 skills, six MCP servers and no hooks;
   `skills/list` loads all 22 authored plugin skills without parsing errors; this CLI
   also generates one Render status shortcut from the existing command.
+- Mobile installs into a separate temporary `CODEX_HOME`; `plugin/read` reports
+  five skills, two MCP servers and both phone-session hooks, and `skills/list` loads
+  the five skills without parsing errors. Hook regressions cover both namespace
+  formats and an installed path containing spaces; existing Mobile suites cover
+  claims, simulator selection, frame comparison, stitching and design comparison.
 - Creator CLI smoke checks run from a relocated path containing spaces, with a
   different working directory and without `CLAUDE_PLUGIN_ROOT`; missing inputs or
   account state fail explicitly, without opening browsers or posting.
 - Claude's strict marketplace and individual-plugin validators accept the packages.
 
 Live OAuth login, real TikTok browser/posting flows, Chrome CDP capture, Zero Omega
-routing and WireGuard capture were not exercised. They require the user's local
+routing, WireGuard capture, live iOS builds and physical-device sessions were not exercised. They require the user's local
 services or account state; successful installation is not a live end-to-end result.

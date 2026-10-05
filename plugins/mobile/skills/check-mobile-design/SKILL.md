@@ -16,12 +16,31 @@ equality. Device scale, the status bar, antialiasing and colour profiles make
 identical designs differ by a few units; chasing zero never converges. The
 `pass` field is the loop's stop condition.
 
+## Script location and tools
+
+Resolve this skill's directory from the absolute path of the loaded `SKILL.md`.
+In each shell call that runs a script, set `SKILL_DIR` to that directory:
+
+```bash
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Use the actual installed path, not the app repository's working directory or a
+host-specific plugin environment variable. Repeat the assignment in each shell
+call; variables may not persist between calls. If the loaded path is unavailable,
+stop and report it before running a script.
+
+Discover `snapshot_ui` and `screenshot` from the `xcodebuildmcp` server using the
+current host's tool inventory or tool search. Use their actual registered names;
+namespace prefixes differ between Claude Code and Codex. Report a missing tool
+rather than constructing a name.
+
 ## The loop
 
 1. **Capture the actual screen.** Use `ios-take-screenshot` (or, for a single
    viewport, XcodeBuildMCP `screenshot`). Save the desired reference alongside.
 2. **Lift the view frames (the hybrid step, optional but recommended).** Call
-   `mcp__plugin_mobile_xcodebuildmcp__snapshot_ui` on the running app. Convert
+   `snapshot_ui` on the running app. Convert
    its tree to `elements.json`: a JSON **list** of
    `{"label": str, "type": str, "bbox": [x, y, w, h]}`, with `bbox` in
    **actual-image pixels**. `snapshot_ui` frames are in points, so multiply by
@@ -31,7 +50,7 @@ identical designs differ by a few units; chasing zero never converges. The
 3. **Run the diff:**
 
    ```
-   "${CLAUDE_PLUGIN_ROOT}/skills/check-mobile-design/scripts/check_design.py" \
+   "$SKILL_DIR/scripts/check_design.py" \
      --actual actual.png --desired desired.png --out-dir diff \
      [--hierarchy elements.json] \
      [--mask-top 47 --mask-bottom 34] \
