@@ -27,7 +27,19 @@ content rather than the device. If the request does not say and both are availab
 
 ## Where Results Go
 
-### Every name in this document is a value to paste, not a variable
+### Script location and shell values
+
+Resolve this skill's directory from the absolute path of the loaded `SKILL.md`.
+In each shell call that runs a script, set `SKILL_DIR` to that directory:
+
+```bash
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Use the actual installed path, not the app repository's working directory or a
+host-specific plugin environment variable. If the loaded path is unavailable,
+stop and report it before running a script. Repeat the assignment in each shell
+call; variables may not persist between calls.
 
 Each command runs in its own shell, so a variable assigned in one command is empty in the
 next. Where this document writes `$SLICE_DIR`, `$OUT_ROOT` or `$UDID`, it means
@@ -98,10 +110,12 @@ Keep slices in a run-specific temp dir, never under the skill folder.
 
 ## Tool Names
 
-The plugin serves both MCP servers, so their tools carry its prefix. `appium_screenshot` is
-`mcp__plugin_mobile_appium-mcp__appium_screenshot`, and `swipe` is
-`mcp__plugin_mobile_xcodebuildmcp__swipe`. They are written unprefixed below for
-readability.
+Tool names below are unprefixed. Discover Appium tools such as `appium_screenshot`
+from the `appium-mcp` server, and simulator tools such as `swipe` from the
+`xcodebuildmcp` server, through the current host's tool inventory or tool search.
+Call their actual registered names; Claude Code and Codex use different namespace
+prefixes, so do not construct one. If a required tool is unavailable, report it
+before proceeding.
 
 Device-specific capabilities — UDID, team id, WebDriverAgent bundle id — are not in the
 plugin config, since they differ per machine. Pass them inline to
@@ -133,10 +147,15 @@ body often does nothing, and repeating it wastes turns.
 
 ### Real device
 
+Before phone automation, verify the plugin's `phone-session-gate` hook is active.
+In Codex, review and trust the loaded hook in `/hooks`. If the gate is not active
+or trusted, stop phone automation and report it; the written claim workflow does
+not replace the hook. This compatibility pass leaves occupancy behavior unchanged.
+
 Discover the session values rather than asking for them or remembering them:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/discover-ios-setup.mjs"
+"$SKILL_DIR/scripts/discover-ios-setup.mjs"
 ```
 
 It reports the connected devices, which provisioning profiles cover them, whether
@@ -160,7 +179,7 @@ Before creating the session, claim the phone for this run, so no other agent ope
 session that ends yours:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
+"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
 Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim again, since
@@ -184,7 +203,7 @@ There is no WebDriverAgent, no provisioning profile and no session to create. A 
 simulator is the whole requirement:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/discover-ios-setup.mjs" --target simulator
+"$SKILL_DIR/scripts/discover-ios-setup.mjs" --target simulator
 ```
 
 Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says either that
@@ -198,7 +217,7 @@ every command that needs it, as above.
 Then claim it for this run, so no other agent drives it while you capture:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
+"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
 Exit 0 means it is yours. Exit 3 means another run holds it, and the message says which
@@ -232,7 +251,7 @@ on another. `claim-simulator.mjs` and `capture-slice.sh` refuse it outright.
 ### Real device
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/find-ios-app.sh" --device <udid> --name <app name>
+"$SKILL_DIR/scripts/find-ios-app.sh" --device <udid> --name <app name>
 ```
 
 `xcrun devicectl device info apps` lists **only developer-installed apps by default** — an App Store app looks absent. The script passes `--include-all-apps`, which is the whole reason it exists. Do not call `devicectl` directly for this.
@@ -246,7 +265,7 @@ If no Appium session exists yet, create one: `select_device` (`platform=ios`, `i
 ### Simulator
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/find-ios-app.sh" --simulator "$UDID" --name <app name>
+"$SKILL_DIR/scripts/find-ios-app.sh" --simulator "$UDID" --name <app name>
 ```
 
 `devicectl` cannot see simulators at all, so this reads `simctl listapps` instead. The
@@ -318,7 +337,7 @@ with the wrapper instead, which writes a full-resolution PNG straight into `SLIC
 there is no copy step, and refuses a simulator this run does not hold:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/capture-slice.sh" --simulator "$UDID" --run "$RUN_ID" \
+"$SKILL_DIR/scripts/capture-slice.sh" --simulator "$UDID" --run "$RUN_ID" \
   --out "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
@@ -406,7 +425,7 @@ to anything.
 Compare two frames with:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/frame_diff.py" <before.png> <after.png>
+"$SKILL_DIR/scripts/frame_diff.py" <before.png> <after.png>
 ```
 
 It prints `mean_abs_diff` on a 0-255 scale, and — more useful — `scrolled_px`, the offset
@@ -483,7 +502,7 @@ The stitcher trusts the order it is given; passing slices out of order produces 
 ## 4. Stitch
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/stitch_screens.py" \
+"$SKILL_DIR/scripts/stitch_screens.py" \
   --out "$OUT_ROOT/<app-slug>/<screen-slug>.png" \
   --slices "$SLICE_DIR"/slice-*.png
 ```
@@ -549,7 +568,7 @@ A run that captures several screens keeps its claim until the last one; releasin
 screens only invites another agent in mid-run:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
+"$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
 ```
 
 The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.

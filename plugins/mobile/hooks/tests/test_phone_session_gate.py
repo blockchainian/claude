@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -52,6 +54,36 @@ def lock(tmp: str) -> dict:
 
 def main() -> int:
     failures = []
+    config = json.loads((HERE.parent / "hooks.json").read_text())
+    for event in ("PreToolUse", "PostToolUse"):
+        group = config["hooks"][event][0]
+        for name in (TOOL, "mcp__plugin_mobile_appium_mcp__appium_session_management",
+                     "mcp__appium_mcp__appium_session_management"):
+            if not re.fullmatch(group["matcher"], name):
+                failures.append(f"{event} does not match Appium session tool {name}")
+        for name in ("mcp__plugin_mobile_xcodebuildmcp__session_set_defaults",
+                     "mcp__appium_mcp__appium_screenshot",
+                     "mcp__other__appium_session_management"):
+            if re.fullmatch(group["matcher"], name):
+                failures.append(f"{event} incorrectly matches unrelated tool {name}")
+
+    # Execute the configured hook from an installed path containing spaces.
+    with tempfile.TemporaryDirectory(prefix="mobile plugin ") as installed:
+        hook_dir = Path(installed) / "hooks"
+        hook_dir.mkdir()
+        shutil.copy2(HOOK, hook_dir / HOOK.name)
+        payload = {"hook_event_name": "PreToolUse", "tool_name": TOOL,
+                   "tool_input": create()}
+        result = subprocess.run(
+            ["/bin/sh", "-c", config["hooks"]["PreToolUse"][0]["hooks"][0]["command"]],
+            input=json.dumps(payload), text=True, capture_output=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": installed}, check=False,
+        )
+        if result.returncode != 0:
+            failures.append(f"installed hook path failed: {result.stderr}")
+        elif decision(json.loads(result.stdout))[0] != "deny":
+            failures.append("installed hook did not refuse create without a UDID")
+
     with tempfile.TemporaryDirectory() as tmp:
         d, why = decision(hook("PreToolUse", create(), tmp))
         if d != "deny" or "appium:udid" not in why:

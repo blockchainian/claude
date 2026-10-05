@@ -1,6 +1,6 @@
 # mobile
 
-Drive iOS apps from Claude Code — build and run them on the simulator, walk the
+Drive iOS apps from Claude Code or Codex — build and run them on the simulator, walk the
 UI, profile CPU, prove memory leaks, and capture whole app screens from a
 connected iPhone.
 
@@ -44,7 +44,9 @@ That registers 59 tools. `session-management` is added by the server itself.
 `simulator` workflow already re-lists their tools, so enabling them would add
 only `get_mac_bundle_id`.
 
-Tools are namespaced `mcp__plugin_mobile_xcodebuildmcp__*`.
+Skills name tools without a host-specific prefix. Discover them from the
+`xcodebuildmcp` server through the host's tool inventory or tool search, and use
+their actual registered names.
 
 `appium-mcp` drives a physical iPhone, which XcodeBuildMCP cannot do — its UI
 automation is simulator-only:
@@ -54,14 +56,27 @@ npx -y appium-mcp@latest
 NO_UI=true
 ```
 
-Tools are namespaced `mcp__plugin_mobile_appium-mcp__*`. The plugin's
+Discover physical-device tools from the `appium-mcp` server the same way. The plugin's
 `phone-session-gate` hook denies `appium_session_management` `create` unless the phone is
 claimed through `ios-take-screenshot`'s claim script and no session is open on it, since
 WebDriverAgent serves one session and a second create ends the first. Device-specific
 capabilities are not in `.mcp.json`, since they differ per machine; pass them
 when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 
+The gate is shared by both hosts. In Codex, review and trust the loaded
+`phone-session-gate` in `/hooks` before phone automation; stop if it is not active
+or trusted. This pass adapts host compatibility and leaves occupancy behavior unchanged.
+
 ## Install
+
+For Codex installation and the shared script-path convention, see
+[Codex compatibility](../../docs/codex-compatibility.md).
+
+This compatibility pass changes skill instructions and plugin configuration;
+it does not change device claims, session defaults, or synchronization behavior.
+Occupancy improvements are deferred.
+
+In Claude Code:
 
 ```
 /plugin marketplace add blockchainian/claude
