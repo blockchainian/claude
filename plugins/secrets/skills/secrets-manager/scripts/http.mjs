@@ -10,8 +10,8 @@ export function ispSlotUrl(env, random = Math.random) {
 }
 
 // fetch(url, init) through a random ISP slot with a Firefox TLS fingerprint — the browser family
-// Camoufox logs in with. Axiom's JA3 wall refuses Node's own TLS, and GMGN's Cloudflare challenges
-// impit's Chrome profile but passes its Firefox one (measured 2026-10-04). Returns a fetch Response.
+// Camoufox logs in with. App TLS fingerprint checks can refuse Node's own TLS or Chrome
+// while accepting Firefox. Returns a fetch Response.
 export async function ispFetch(url, init = {}) {
   const { Impit } = await import("impit");
   const client = new Impit({ browser: "firefox", proxyUrl: ispSlotUrl(process.env) });

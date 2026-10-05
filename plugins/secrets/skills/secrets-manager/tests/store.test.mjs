@@ -270,12 +270,12 @@ test("listApps excludes tiktok", () => {
 
 test("recordSessionStatus records an app's verdict for an account with no session yet, or updates one", () => {
   const db = open();
-  store.recordSessionStatus(db, "axiom", "base@x.com", store.STATUS_RESTRICTED);
-  const s = store.getSession(db, "axiom", "base@x.com");
+  store.recordSessionStatus(db, "alpha", "base@x.com", store.STATUS_RESTRICTED);
+  const s = store.getSession(db, "alpha", "base@x.com");
   assert.equal(s.status, "restricted");
   assert.deepEqual([s.cookies, s.local_storage], [[], []]);
-  store.saveSession(db, "axiom", "live@x.com", [{ name: "c" }], []);
-  store.recordSessionStatus(db, "axiom", "live@x.com", store.STATUS_RESTRICTED);
-  assert.equal(store.getSession(db, "axiom", "live@x.com").status, "restricted");
-  assert.deepEqual(store.getSession(db, "axiom", "live@x.com").cookies, [{ name: "c" }]);
+  store.saveSession(db, "alpha", "live@x.com", [{ name: "c" }], []);
+  store.recordSessionStatus(db, "alpha", "live@x.com", store.STATUS_RESTRICTED);
+  assert.equal(store.getSession(db, "alpha", "live@x.com").status, "restricted");
+  assert.deepEqual(store.getSession(db, "alpha", "live@x.com").cookies, [{ name: "c" }]);
 });

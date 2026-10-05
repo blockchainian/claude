@@ -71,3 +71,46 @@ export async function checkX({ row, opts = {} }) {
   }
   return classifyViewer({ status: res.status, body }, row.username);
 }
+
+function assertWhoamiResponse(res) {
+  if (res.status === 404) throw new Error('X whoami: X_VIEWER_QUERY_ID is stale');
+  if (![200, 403].includes(res.status)) throw new Error(`X whoami: HTTP ${res.status}`);
+}
+
+// Bootstrap a CSRF cookie, then ask the authenticated Viewer for the caller's identity.
+export async function whoamiX({ credential }, { fetchImpl = fetch, dispatcher, queryId, bearer } = {}) {
+  if (typeof credential !== 'string' || !/^[0-9a-f]{40}$/i.test(credential)) {
+    throw new Error('X whoami: expected a 40-hex auth_token');
+  }
+  const url = viewerUrl(queryId ?? requireEnv('X_VIEWER_QUERY_ID'));
+  const headers = { authorization: `Bearer ${bearer ?? requireEnv('X_BEARER')}`,
+    cookie: `auth_token=${credential}`, 'User-Agent': UA };
+  const ownedDispatcher = dispatcher === undefined && fetchImpl === fetch;
+  if (ownedDispatcher) dispatcher = xDispatcher(config.proxyFor('whoami-x'));
+  try {
+    const boot = await fetchImpl(url, { dispatcher, headers, signal: AbortSignal.timeout(20_000) });
+    await boot.text();
+    assertWhoamiResponse(boot);
+    const csrfCookie = boot.headers.getSetCookie().map(cookie => cookie.split(';')[0])
+      .find(cookie => /^ct0=.+$/.test(cookie));
+    if (!csrfCookie) throw new Error('X whoami: unable to obtain ct0; credential may be invalid or expired');
+    const res = await fetchImpl(url, { dispatcher, signal: AbortSignal.timeout(20_000), headers: {
+      ...headers, cookie: `${headers.cookie}; ${csrfCookie}`, 'x-csrf-token': csrfCookie.slice(4),
+      'x-twitter-auth-type': 'OAuth2Session', 'x-twitter-active-user': 'yes',
+    } });
+    assertWhoamiResponse(res);
+    let body;
+    try { body = await res.json(); }
+    catch { throw new Error('X whoami: invalid Viewer identity'); }
+    const codes = (body?.errors ?? []).map(error => error.code);
+    if (codes.length) throw new Error(`X whoami: authentication failed (codes ${codes.join(',')})`);
+    const user = body?.data?.viewer?.user_results?.result;
+    const username = user?.core?.screen_name ?? user?.legacy?.screen_name;
+    if (res.status !== 200 || user?.__typename === 'UserUnavailable' || typeof username !== 'string' || !/^[A-Za-z0-9_]{1,15}$/.test(username)) {
+      throw new Error('X whoami: invalid Viewer identity');
+    }
+    return { username };
+  } finally {
+    if (ownedDispatcher) await dispatcher.close();
+  }
+}

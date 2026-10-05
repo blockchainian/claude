@@ -974,8 +974,8 @@ test("the account settings pages are opened in English", () => {
 });
 
 test("an app's ban names the app and is not a Google restriction to the caller's eye", () => {
-  const e = new AppRestricted("axiom", "Axiom refused the Google sign-in");
-  assert.equal(e.app, "axiom");
+  const e = new AppRestricted("alpha", "App refused the Google sign-in");
+  assert.equal(e.app, "alpha");
   assert.ok(e instanceof Restricted);
   assert.equal(shouldHoldOpenForDebug(true, e), false);
 });
