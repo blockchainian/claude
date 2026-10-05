@@ -149,14 +149,14 @@ for the session's IP, and the page's `fetch()` pulls the bytes, four files at a 
 
 ## Environment Variables
 
-Copy `scripts/.env.example` to `scripts/.env` beside this skill’s scripts, then fill in the values. The CLI loads that file without replacing variables already exported in the shell.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `$SKILL_DIR/scripts/.env` |
-| `ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `$SKILL_DIR/scripts/.env` |
-| `SECRETS_MANAGER_STATE_PATH` | Account-store and browser-profile directory; default ~/.config/secrets-manager | No | `$SKILL_DIR/scripts/.env` |
-| `TIKTOK_VIDEOS_DIR` | Video output directory; default ~/.local/share/tiktok | No | `$SKILL_DIR/scripts/.env` |
+| `ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `~/.config/intel/.env` |
+| `ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `~/.config/intel/.env` |
+| `SECRETS_MANAGER_STATE_PATH` | Account-store and browser-profile directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
+| `TIKTOK_VIDEOS_DIR` | Video output directory; default ~/.local/share/tiktok | No | `~/.config/intel/.env` |
 
 Account credentials, login sessions and browser profiles stay in the existing Secrets Manager store; do not copy them into `.env`.
 

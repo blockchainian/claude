@@ -29,12 +29,12 @@ process state before retrying. Use the current host's image/file tools to inspec
 
 ## Environment Variables
 
-Copy `scripts/.env.example` to `scripts/.env` beside this skill’s scripts, then fill in the values. The checker reads this file directly; exported shell variables are not used for these credentials.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The checker reads this file directly; exported shell variables are not used for these credentials.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `NAMECHEAP_API_USER` | Namecheap account username | Yes | `$SKILL_DIR/scripts/.env` |
-| `NAMECHEAP_API_KEY` | Namecheap API key | Yes | `$SKILL_DIR/scripts/.env` |
+| `NAMECHEAP_API_USER` | Namecheap account username | Yes | `~/.config/intel/.env` |
+| `NAMECHEAP_API_KEY` | Namecheap API key | Yes | `~/.config/intel/.env` |
 
 Brainstorm a brand name and hand back only the ones you can actually register.
 The naming taste is fixed (below); the one thing that changes per run is the

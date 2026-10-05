@@ -13,7 +13,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 // `fetch-x-posts: <reason>` line on stderr (posts found before the failure are still printed).
 //
 // The request itself (headers, x-client-transaction-id, query id, bearer, proxy, accounts) is the
-// fetch-x-mentions client, imported with its the calling script's .env. This file adds the rotation: the state
+// fetch-x-mentions client, configured through ~/.config/intel/.env. This file adds the rotation: the state
 // in ~/.cache/case-study-limits/fetch-x-posts.sqlite holds, per account, when its next request may start
 // and until when it is paused, plus a log of every request (table `requests`).
 
@@ -24,7 +24,7 @@ import { homedir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) loadEnvFile(new URL(".env", import.meta.url));
+if (isMain) loadEnvFile();
 
 const STATE_PATH = join(homedir(), ".cache", "case-study-limits", "fetch-x-posts.sqlite");
 

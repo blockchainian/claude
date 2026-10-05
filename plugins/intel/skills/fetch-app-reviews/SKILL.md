@@ -57,11 +57,11 @@ retries incomplete apps for up to 6 passes.
 
 ## Environment Variables
 
-Copy `scripts/.env.example` to `scripts/.env` beside this skill’s scripts, then fill in the values. The CLI loads that file without replacing variables already exported in the shell.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `RESIDENTIAL_PROXY_URL` | Rotating residential proxy | Yes, unless HTTPS_PROXY is set | `$SKILL_DIR/scripts/.env` |
-| `HTTPS_PROXY` | Proxy when RESIDENTIAL_PROXY_URL is unset | Alternative to RESIDENTIAL_PROXY_URL | `$SKILL_DIR/scripts/.env` |
+| `RESIDENTIAL_PROXY_URL` | Rotating residential proxy | Yes, unless HTTPS_PROXY is set | `~/.config/intel/.env` |
+| `HTTPS_PROXY` | Proxy when RESIDENTIAL_PROXY_URL is unset | Alternative to RESIDENTIAL_PROXY_URL | `~/.config/intel/.env` |
 
 Each request opens a fresh proxy connection to rotate the exit IP.
