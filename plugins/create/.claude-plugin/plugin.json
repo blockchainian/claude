@@ -1,6 +1,6 @@
 {
   "name": "create",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Run creator accounts: upload a video to the secrets-manager TikTok account through its own Camoufox profile, and track the account's video stats over time.",
   "author": {
     "name": "blockchainian"
