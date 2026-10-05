@@ -45,6 +45,8 @@ The Claude MCP server authenticates over OAuth on first use.
 See [Codex installation](../../README.md#codex) for installation. Complete MCP authentication when prompted. Render registers separate OAuth clients for Claude
 and Codex; see `render-mcp` for manual OAuth or API-key configuration.
 
+Select Render with `@render` in Codex before using its MCP tools. For `codex exec`, include `[@render](plugin://render@blockchainian)` in the prompt to select the installed plugin; mentioning its name as plain text does not select its MCP server.
+
 The Claude agent and edit hook remain Claude-specific. Codex CLI may import the
 status command as a generated skill; the shared entry point is `render-monitor`. In Codex,
 use `render-monitor` to check status and `render-blueprints` to validate
