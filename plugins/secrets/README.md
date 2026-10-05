@@ -45,7 +45,7 @@ as described in the skill.
 `verify google|x|tiktok` are builtin checks; any other target calls the adapter's `verify` hook.
 Deriving a ct0 for a vendor X auth_token stays in intel's `fetch-x-mentions/scripts/verify-x.mjs`.
 
-`setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy]`
+`setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy] [app flags]`
 selects imported accounts with `active` app sessions; `--all` adds `ready` sessions for a rerun.
 The hook receives `{db, email, session, opts, io}` and resolves to `{summary, state}`.
 `summary` must be a nonempty one-line string; `state` is any JSON-serialisable app-specific
@@ -54,6 +54,22 @@ value, including `null`, but not `undefined`. Success stores the state as JSON i
 invalid result, summary or state prints `<email>: <message>` to stderr, writes nothing,
 keeps status and prior setup state, and exits 1 while other accounts continue.
 A missing hook fails with `<app> has no setup hook`.
+
+Adapters may declare `setupFlags`, an object mapping kebab-case flag names to
+`{type: "boolean" | "string", description: string}`. Descriptions must be nonempty;
+engine global flag names and `help` are reserved. For example:
+
+```js
+setupFlags: {
+  "follow-lowest-ranked": { type: "boolean", description: "Follow the lowest ranked account." },
+}
+```
+
+Only `setup <app>` accepts that app's flags; other apps, commands and unknown flags
+fail before the setup hook runs or a browser opens. Values reach the hook under their
+original names, e.g. `opts["follow-lowest-ranked"] === true`. `setup <app> --help`
+and flag errors list the app's flags with descriptions. The hook's `session.state`
+is already parsed JSON from the previous setup, or `null` when absent.
 
 `ready` means logged in and app setup done, a step above `active`. Default verification and
 credential export accept both. Re-login and an `active` verification result preserve `ready`
@@ -86,6 +102,7 @@ An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files
 | `attempts` | Optional positive retry count, default 1. |
 | `byEmail(ctx)` | Optional password signup/login through a Gmail plus-alias. |
 | `verify(ctx)` | Optional hook returning `active`, `restricted` or `expired`. |
+| `setupFlags` | Optional object of kebab-case names to `{type: "boolean" \| "string", description: string}`; nonempty descriptions, no global flag names or `help`. Accepted only by this app’s `setup` command. |
 | `setup({db, email, session, opts, io})` | Optional async hook returning `{summary, state}`: a nonempty one-line string and JSON-serialisable app state (not `undefined`); throws on failure. The engine stores JSON `state` and `ready` together on success. |
 | `bannedResponse({url, status, body})` | Optional; called during `login <app>` for every app-domain response with status >= 400. A non-empty reason means the app banned the account: its session row is recorded `restricted` (created if absent), the Google account is untouched, and `login <app>` never retries it. |
 | `whoami({credential})` | Optional async hook returning `{email: string}`; credential type is app-specific. Missing or ambiguous identity throws. |
