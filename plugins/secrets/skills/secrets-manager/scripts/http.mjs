@@ -1,4 +1,4 @@
-// ABOUTME: HTTP for adapters' API checks: a Chrome-shaped TLS client (impit) leaving from a random
+// ABOUTME: HTTP for adapters' API checks: a Firefox-shaped TLS client (impit) leaving from a random
 // ABOUTME: slot of the ISP proxy pool, the same pool the apps' production clients call from.
 import { ispProxyAt } from "./config.mjs";
 
@@ -9,10 +9,11 @@ export function ispSlotUrl(env, random = Math.random) {
   return ispProxyAt(env.ISP_PROXY_URL, 1 + Math.floor(random() * count));
 }
 
-// fetch(url, init) through a random ISP slot with a Chrome TLS fingerprint, which the apps'
-// Cloudflare and JA3 walls require. Returns a fetch Response.
+// fetch(url, init) through a random ISP slot with a Firefox TLS fingerprint — the browser family
+// Camoufox logs in with. Axiom's JA3 wall refuses Node's own TLS, and GMGN's Cloudflare challenges
+// impit's Chrome profile but passes its Firefox one (measured 2026-10-04). Returns a fetch Response.
 export async function ispFetch(url, init = {}) {
   const { Impit } = await import("impit");
-  const client = new Impit({ browser: "chrome", proxyUrl: ispSlotUrl(process.env) });
+  const client = new Impit({ browser: "firefox", proxyUrl: ispSlotUrl(process.env) });
   return client.fetch(url, init);
 }
