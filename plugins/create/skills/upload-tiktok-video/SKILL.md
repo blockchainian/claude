@@ -31,13 +31,16 @@ have the profile open at the same time (a fetch-tiktok-mentions run using the sa
 
 1. Opens `tiktokstudio/upload` headed and starts recording the window.
 2. Chooses the file and waits for TikTok's "Uploaded".
-3. Closes the "new editing features" tour and declines the offer to turn on automatic content
-   checks (account settings are left as they are).
+3. Whenever an overlay gets in the way of a step (never waiting for one otherwise): closes the
+   "new editing features" tour, and accepts the offer to turn on automatic content checks (music
+   copyright and For You eligibility, an account setting). Both show only on a profile's first
+   few visits.
 4. Replaces the prefilled description (the file name) with the caption, typed key by key.
-5. Sets who can see the post, and the AI-generated label when asked.
+5. Sets who can see the post, and the AI-generated label when asked (it turns on at once, no
+   confirmation).
 6. Presses Post, confirming "Post now" if TikTok asks, and waits to leave the upload page.
 7. Opens the account's profile and finds the new video by its create time, through the same
-   page-signed API calls track-tiktok-stats uses, for up to five minutes.
+   page-signed API calls track-tiktok-stats uses, every 5 s, moved randomly by up to 1.5 s, for up to five minutes.
 
 ## Output
 
