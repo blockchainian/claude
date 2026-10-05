@@ -189,6 +189,10 @@ async function loginOneGoogleBacked(db, target, adapters, login, opts, io, cred)
     io.log(`skip ${cred.email}: ${skip}`);
     return false;
   }
+  if (target !== "google" && store.getSession(db, target, cred.email)?.status === store.STATUS_RESTRICTED) {
+    io.log(`skip ${cred.email}: ${target} status restricted`);
+    return false;
+  }
   if (target !== "google" && !opts.all && !needsRefresh(db, target, cred.email)) {
     io.log(`${cred.email}: ${target} up to date, skipping`);
     return false;
@@ -199,7 +203,10 @@ async function loginOneGoogleBacked(db, target, adapters, login, opts, io, cred)
     io.log(`  ${cred.email}: ok`);
     return false;
   } catch (e) {
-    if (e instanceof login.Restricted) {
+    if (e instanceof login.AppRestricted) {
+      store.recordSessionStatus(db, e.app, cred.email, store.STATUS_RESTRICTED);
+      io.error(`  ${e.app} restricted (won't retry): ${e.message}`);
+    } else if (e instanceof login.Restricted) {
       store.setAccountStatus(db, cred.email, store.STATUS_RESTRICTED);
       io.error(`  restricted (won't retry): ${e.message}`);
     } else if (e instanceof login.Expired) {

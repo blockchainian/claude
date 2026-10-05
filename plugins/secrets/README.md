@@ -65,6 +65,7 @@ An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files
 | `attempts` | Optional positive retry count, default 1. |
 | `byEmail(ctx)` | Optional password signup/login through a Gmail plus-alias. |
 | `verify(ctx)` | Optional hook returning `active`, `restricted` or `expired`. |
+| `bannedResponse({url, status, body})` | Optional; called during `login <app>` for every app-domain response with status >= 400. A non-empty reason means the app banned the account: its session row is recorded `restricted` (created if absent), the Google account is untouched, and `login <app>` never retries it. |
 | `credentials(session)` | Optional `(session) => Record<string, string> \| null`; returns usable credential fields. |
 | `blockedHosts` | Optional host wildcard strings merged at startup. |
 | `blockedWebSockets` | Optional WebSocket URL wildcards merged at startup. |

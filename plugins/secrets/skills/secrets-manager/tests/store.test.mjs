@@ -267,3 +267,15 @@ test("listApps excludes tiktok", () => {
   store.upsertTiktok(db, { username: "bob1", password: "pw", email: "bob@mail.com" });
   assert.deepEqual(store.listApps(db), []);
 });
+
+test("recordSessionStatus records an app's verdict for an account with no session yet, or updates one", () => {
+  const db = open();
+  store.recordSessionStatus(db, "axiom", "base@x.com", store.STATUS_RESTRICTED);
+  const s = store.getSession(db, "axiom", "base@x.com");
+  assert.equal(s.status, "restricted");
+  assert.deepEqual([s.cookies, s.local_storage], [[], []]);
+  store.saveSession(db, "axiom", "live@x.com", [{ name: "c" }], []);
+  store.recordSessionStatus(db, "axiom", "live@x.com", store.STATUS_RESTRICTED);
+  assert.equal(store.getSession(db, "axiom", "live@x.com").status, "restricted");
+  assert.deepEqual(store.getSession(db, "axiom", "live@x.com").cookies, [{ name: "c" }]);
+});

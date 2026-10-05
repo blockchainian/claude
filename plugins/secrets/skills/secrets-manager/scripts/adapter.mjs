@@ -63,7 +63,7 @@ export function validateAdapter(adapter) {
   }
   if (!Array.isArray(adapter.entryTexts) || !adapter.entryTexts.length || adapter.entryTexts.some(t => typeof t !== 'string' || !t)) throw new Error('adapter entryTexts must be nonempty strings');
   for (const hook of ['signIn', 'ready']) if (typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
-  for (const hook of ['signedInUrl', 'byEmail', 'verify', 'credentials']) if (adapter[hook] !== undefined && typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
+  for (const hook of ['signedInUrl', 'byEmail', 'verify', 'credentials', 'bannedResponse']) if (adapter[hook] !== undefined && typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
   if (adapter.attempts !== undefined && (!Number.isInteger(adapter.attempts) || adapter.attempts < 1)) throw new Error('adapter attempts must be a positive integer');
   for (const field of ['blockedHosts', 'blockedWebSockets']) if (adapter[field] !== undefined && (!Array.isArray(adapter[field]) || adapter[field].some(t => typeof t !== 'string' || !t))) throw new Error(`adapter ${field} must be strings`);
   return adapter;

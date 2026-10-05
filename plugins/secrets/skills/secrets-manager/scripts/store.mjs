@@ -209,6 +209,19 @@ export function setSessionStatus(db, app, email, status) {
   if (changes === 0) throw new Error(`${email} has no ${app} session`);
 }
 
+// Record an app's verdict on an account, creating its row when the app never gave it a session (an
+// app that bans an account at sign-in leaves no cookies to store). A stored session keeps its state.
+export function recordSessionStatus(db, app, email, status) {
+  assertStatus(status);
+  const table = ensureAppTable(db, app);
+  const ts = now();
+  db.prepare(
+    `INSERT INTO "${table}" (email, cookies, local_storage, status, created_at, updated_at)
+     VALUES (?, '[]', '[]', ?, ?, ?)
+     ON CONFLICT(email) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at`,
+  ).run(email, status, ts, ts);
+}
+
 // Map each app that has a session for this account to that session's status.
 export function sessionsForAccount(db, email) {
   const out = {};
