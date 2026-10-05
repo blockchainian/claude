@@ -21,10 +21,19 @@ not the whole hub — and two agents capturing two apps at once run over one pro
 one Zero Omega profile, with a file per app. No second proxy, no read that pays for another
 capture's traffic.
 
-## Every name here is a value to paste, not a variable
+## Script location and shell values
 
-Each Bash call runs in its own shell, so a variable assigned in one command is empty in the
-next. Where this document writes `$CAP` or `$PROXY_DIR`, paste the actual value
+Resolve this skill's directory from the absolute path of the loaded `SKILL.md`.
+In each shell call that runs a script, set `SKILL_DIR` to that directory:
+
+```bash
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Use the actual installed path, not the caller's working directory or a host-specific
+plugin environment variable. If the loaded path is unavailable, stop and report it.
+Shell variables may not persist between tool calls; repeat the assignment in each call.
+Where this document writes `$CAP` or `$PROXY_DIR`, paste the actual value
 — read it out of the JSON a previous command printed and type it in full, or run the whole
 sequence as one command.
 
@@ -35,7 +44,7 @@ captures across a reboot.
 ## 0. Setup (skip if already set up)
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/setup.sh"
+"$SKILL_DIR/scripts/setup.sh"
 ```
 
 Exit 0 means mitmdump is installed and the CA is generated and trusted in the System keychain
@@ -55,11 +64,17 @@ toggle the mitmproxy CA on. Without that, TLS interception fails on the phone.
 ## 1. Start a capture
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" start --label myapp --hosts myapp.com
+"$SKILL_DIR/scripts/capture.mjs" start --label myapp --hosts myapp.com
 ```
 
 This brings the hub up on 8080 if it is not already running, and opens a capture. Read its
 `capture` id from the JSON — that is `$CAP` for every command below.
+
+`start` launches and detaches the hub itself; run the command normally, without a
+host-specific background-task flag. Keep the host session alive for the capture and
+use `status`/`check` to confirm the hub is running before driving the app. If the host
+cannot retain the detached process, report that limitation and have the user run the
+same command in a persistent terminal; do not repeatedly launch replacement hubs.
 
 - `--hosts` is the read scope, not an interception filter (the hub keeps everything). List
   the app's domains; subdomains are matched automatically, so `myapp.com` also covers
@@ -70,10 +85,12 @@ This brings the hub up on 8080 if it is not already running, and opens a capture
 
 Point **one** Zero Omega profile at **`127.0.0.1:8080`** and enable it for the target site
 (an auto-switch rule for the app's domains, or the whole browser while you work on it). Use
-the user's own logged-in Chrome — the sites worth capturing are login-gated and the Claude
-Chrome extension drives that profile. A throwaway Chrome (`--user-data-dir`) has no logins
-and no extension; do not use it. **Zero Omega's routing is a manual step — the extension
-cannot toggle it (its UI is a `chrome-extension://` page the browser tools cannot reach).**
+the user's own logged-in Chrome — the sites worth capturing are login-gated. Drive that
+profile with the current host's connected Chrome tools (Claude's Chrome extension or
+Codex's connected Chrome), or have the user interact with it. Verify the browser tools
+can access that profile before automating it. A throwaway Chrome (`--user-data-dir`)
+has no logins or configured Zero Omega profile; do not use it. **Zero Omega's routing is
+a manual step — have the user enable it in the extension's UI before capturing.**
 
 The Zero Omega auto-switch rule must cover **every** host the app calls — the API often sits
 on a different subdomain (`api.myapp.com`) than the page (`www.myapp.com`). A rule
@@ -86,8 +103,8 @@ If the browser shows `NET::ERR_CERT_AUTHORITY_INVALID` or an HSTS block, the CA 
 ### iPhone app — WireGuard
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" start --label pump --hosts pump.fun --wireguard
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/wg-config.mjs" --qr "$PROXY_DIR/pump-qr.png"
+"$SKILL_DIR/scripts/capture.mjs" start --label pump --hosts pump.fun --wireguard
+"$SKILL_DIR/scripts/wg-config.mjs" --qr "$PROXY_DIR/pump-qr.png"
 ```
 
 `start --wireguard` brings the hub up serving WireGuard too; `wg-config.mjs` prints the client
@@ -102,7 +119,7 @@ LAN with the router's AP/client isolation **off**, or it cannot reach the Mac.
 After the user enables the proxy and loads the app once:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" check "$CAP"
+"$SKILL_DIR/scripts/capture.mjs" check "$CAP"
 ```
 
 It cannot read Zero Omega's on/off state, but it sees what reaches the hub. `clientsConnected`
@@ -115,15 +132,15 @@ app's hosts (widen `--hosts`, or the routing rule does not cover them). Requests
 it is working. Run it before investing in a drive.
 
 Capturing is passive: traffic can come from the user clicking through the app or from the
-Claude Chrome extension driving it. Either way, enable Zero Omega first.
+current host's connected Chrome tools driving it. Either way, enable Zero Omega first.
 
 ## 3. Read the capture
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind flows     # one line per request
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind ws        # websocket frames
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind hosts     # host tally
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind origins   # callers of each host
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind flows     # one line per request
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind ws        # websocket frames
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind hosts     # host tally
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind origins   # callers of each host
 ```
 
 `--kind ws` takes `--wsmax <chars>` to widen frame bodies. For a request or response body,
@@ -146,8 +163,8 @@ flows are written to **both** captures' files (both match it). `--hosts` cannot 
 on the *same* host. Split by **caller** with origins:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind origins                       # list callers
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" read "$CAP" --kind origins --source app-a.example  # one app's calls
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind origins                       # list callers
+"$SKILL_DIR/scripts/capture.mjs" read "$CAP" --kind origins --source app-a.example  # one app's calls
 ```
 
 Each web app sends a distinct `Origin`/`Referer`, and some shared auth providers carry a per-app
@@ -156,9 +173,9 @@ id header, so a shared host separates cleanly at read time.
 ## 5. Close a capture, and stop the hub
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" status               # the hub and the open captures
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" stop "$CAP" --wipe   # close a capture AND delete its file
-"${CLAUDE_PLUGIN_ROOT}/skills/inspect-app-traffic/scripts/capture.mjs" down --wipe          # stop the hub and delete all capture files
+"$SKILL_DIR/scripts/capture.mjs" status               # the hub and the open captures
+"$SKILL_DIR/scripts/capture.mjs" stop "$CAP" --wipe   # close a capture AND delete its file
+"$SKILL_DIR/scripts/capture.mjs" down --wipe          # stop the hub and delete all capture files
 ```
 
 Capture files hold unredacted tokens and are **not** cleaned automatically. Leave nothing
@@ -184,8 +201,11 @@ terminal). Leave the CA installed otherwise; re-trusting it is the slow part.
 
 ## Reporting
 
-When a capture is on a phone, the user is often on another device — send the WireGuard QR with
-`SendUserFile` rather than only printing a path. `SendUserFile` is a deferred tool: load it with
-`ToolSearch` ("select:SendUserFile") before calling it. State the target hosts, the flow file, and
+When a capture is on a phone, the user is often on another device — present the WireGuard QR
+using the current host's image or file-delivery tool, so the user can scan or download it.
+In Claude, if `SendUserFile` is available as a deferred tool, load it with `ToolSearch`
+("select:SendUserFile") before calling it. In Codex, use the available local-image display
+tool and a clickable file link. If delivery is unavailable, report that limitation and
+give the local QR path and the client config's path for the user to open or import.
+State the target hosts, the flow file, and
 for the findings give the endpoint shapes and WebSocket message formats — never the tokens.
-
