@@ -8,7 +8,7 @@ import { findPosted, findDelay, parseArgs, soundIndex } from "../scripts/upload-
 
 test("parseArgs takes the file, the caption and the post settings", () => {
   assert.deepEqual(
-    parseArgs(["a.mp4", "--caption", "hi #tag", "--visibility", "only-me", "--aigc", "--promotion", "your-brand,branded-content", "--sound", "7603363008859047972", "--username", "@me"]),
+    parseArgs(["a.mp4", "--caption", "hi #tag", "--visibility", "only-me", "--aigc", "--promotion", "your-brand,branded-content", "--sound", "7603363008859047972", "--username", "@me", "--headed", "--with-sound"]),
     {
       file: "a.mp4",
       username: "me",
@@ -17,6 +17,8 @@ test("parseArgs takes the file, the caption and the post settings", () => {
       aigc: true,
       promotion: ["your-brand", "branded-content"],
       sound: "7603363008859047972",
+      headed: true,
+      withSound: true,
     },
   );
 });
@@ -25,8 +27,8 @@ test("parseArgs takes one kind of promotion", () => {
   assert.deepEqual(parseArgs(["a.mp4", "--promotion", "branded-content"]).promotion, ["branded-content"]);
 });
 
-test("parseArgs defaults to an empty caption, everyone, no AI label, no promotion and no sound", () => {
-  assert.deepEqual(parseArgs(["a.mp4"]), { file: "a.mp4", username: null, caption: "", visibility: "everyone", aigc: false, promotion: [], sound: null });
+test("parseArgs defaults to an empty caption, everyone, no AI label, no promotion, no sound, headless", () => {
+  assert.deepEqual(parseArgs(["a.mp4"]), { file: "a.mp4", username: null, caption: "", visibility: "everyone", aigc: false, promotion: [], sound: null, headed: false, withSound: false });
 });
 
 test("parseArgs refuses a missing file, an unknown visibility or promotion, a sound that is not an id, and an unknown option", () => {
@@ -36,6 +38,7 @@ test("parseArgs refuses a missing file, an unknown visibility or promotion, a so
   assert.throws(() => parseArgs(["a.mp4", "--promotion", "ad"]), /--promotion/);
   assert.throws(() => parseArgs(["a.mp4", "--ai-generated"]), /Unknown option --ai-generated/);
   assert.throws(() => parseArgs(["a.mp4", "--sound", "Comedy Corridor"]), /--sound/);
+  assert.throws(() => parseArgs(["a.mp4", "--with-sound"]), /--with-sound needs --headed/);
 });
 
 test("findPosted takes the newest video created since the post began", () => {

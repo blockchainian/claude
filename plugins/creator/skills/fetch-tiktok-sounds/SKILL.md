@@ -6,12 +6,16 @@ description: List the hottest sounds of TikTok's commercial (royalty-free) music
 # Fetch TikTok sounds
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-sounds/scripts/fetch-tiktok-sounds.mjs" [--username <name>] [--count <n>]
+node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-sounds/scripts/fetch-tiktok-sounds.mjs" [--username <name>] [--count <n>] [--headed [--with-sound]]
 ```
 
 - `--username`: read the list as that account of the store; default the account
   upload-tiktok-video posts as.
 - `--count`: how many sounds, hottest first. Default 20.
+- `--headed`: show the browser window and screen-record it to
+  `<username>/recordings/sounds-<ts>.mov`, to debug a read that stopped working.
+- `--with-sound`: with `--headed`, unmute the browser (Playwright mutes it), to play the sounds on
+  the page.
 
 Prints one line per sound:
 
@@ -25,7 +29,7 @@ the sound.
 ## How it works
 
 The list is Studio's own (`creator/music/unlimited/list`, about 770,000 sounds, sorted by hot), so
-it needs a signed-in account: the account's Camoufox profile is opened headless on its ISP slot at
+it needs a signed-in account: the account's Camoufox profile is opened on its ISP slot at
 `tiktokstudio/sound-library`, and the list is fetched inside that page, 20 sounds a page. Nothing
 else may have the profile open at the same time. Every sound on this list is cleared for use in
 any post on TikTok, promotional ones included; the clearance does not extend to other platforms.

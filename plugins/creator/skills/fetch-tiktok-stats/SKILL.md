@@ -6,11 +6,14 @@ description: Record the current plays, likes, comments, shares and saves of ever
 # Fetch TikTok stats
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-stats/scripts/fetch-tiktok-stats.mjs" [--username <name>]
+node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-stats/scripts/fetch-tiktok-stats.mjs" [--username <name>] [--headed [--with-sound]]
 ```
 
 - `--username` reads another account; default the account upload-tiktok-video posts as: the
   secrets-manager store's earliest imported `active` TikTok account.
+- `--headed` shows the browser window and screen-records it to
+  `<username>/recordings/stats-<ts>.mov`, to debug a read that stopped working; `--with-sound`
+  also unmutes it.
 - One run is one sample. Run it again later (a schedule, or by hand) to build the series.
 
 Each run appends one row per video to `~/.local/share/creator/tiktok/<username>/stats.jsonl`

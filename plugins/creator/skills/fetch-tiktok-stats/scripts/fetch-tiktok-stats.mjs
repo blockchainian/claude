@@ -2,9 +2,11 @@
 // ABOUTME: read anonymously from its profile page through TikTok's own signed web API, one row per video per run.
 //
 // Usage:
-//   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-stats/scripts/fetch-tiktok-stats.mjs [--username <name>]
+//   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-stats/scripts/fetch-tiktok-stats.mjs [--username <name>] [--headed [--with-sound]]
 //   --username names the account to read; default the account upload-tiktok-video posts as (the
 //   secrets-manager store's earliest imported active TikTok account).
+//   --headed shows the browser window and screen-records it to <username>/recordings/stats-<ts>.mov,
+//   to debug a read TikTok's page changes broke; --with-sound also unmutes it.
 //
 // The read is anonymous: a fresh Camoufox browser, not the account's profile, on the account's ISP
 // slot. TikTok gives an anonymous viewer the first page of a profile (about 35 videos), newest first.
@@ -16,17 +18,18 @@ import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { accountDir, accountVideos, loadAccount, openBrowser } from "../../upload-tiktok-video/scripts/tiktok-session.mjs";
+import { accountDir, accountVideos, browserFlag, checkBrowserFlags, loadAccount, openBrowser, recordingPath } from "../../upload-tiktok-video/scripts/tiktok-session.mjs";
 
 const START_URL = "https://www.tiktok.com/explore";
 const COUNTERS = ["playCount", "diggCount", "commentCount", "shareCount", "collectCount"];
 
 export function parseArgs(argv) {
-  const out = { username: null };
+  const out = { username: null, headed: false, withSound: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--username") out.username = argv[++i].replace(/^@/, "");
-    else throw new Error(`Unknown option ${argv[i]}`);
+    else if (!browserFlag(argv[i], out)) throw new Error(`Unknown option ${argv[i]}`);
   }
+  checkBrowserFlags(out);
   return out;
 }
 
@@ -46,7 +49,13 @@ async function main() {
   const account = loadAccount();
   if (!account) throw new Error("No active TikTok account in the secrets-manager store; run its `login tiktok`.");
   const username = args.username ?? account.username;
-  const { context, page, template } = await openBrowser({ slot: account.slot, url: START_URL });
+  const { page, template, close } = await openBrowser({
+    slot: account.slot,
+    headed: args.headed,
+    withSound: args.withSound,
+    recordTo: recordingPath(username, "stats"),
+    url: START_URL,
+  });
   try {
     const { items } = await accountVideos(page, await template(), username);
     const rows = statsRows(username, items, new Date().toISOString());
@@ -58,7 +67,7 @@ async function main() {
     }
     console.log(`@${username}: ${rows.length} video(s) -> ${out}`);
   } finally {
-    await context.close().catch(() => {});
+    await close();
   }
 }
 

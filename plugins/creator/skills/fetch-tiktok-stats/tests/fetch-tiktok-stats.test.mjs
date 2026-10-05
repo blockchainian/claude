@@ -6,9 +6,10 @@ import { test } from "node:test";
 
 import { parseArgs, statsRows } from "../scripts/fetch-tiktok-stats.mjs";
 
-test("parseArgs takes an optional --username", () => {
-  assert.deepEqual(parseArgs([]), { username: null });
-  assert.deepEqual(parseArgs(["--username", "@someone"]), { username: "someone" });
+test("parseArgs takes an optional --username, --headed and --with-sound", () => {
+  assert.deepEqual(parseArgs([]), { username: null, headed: false, withSound: false });
+  assert.deepEqual(parseArgs(["--username", "@someone", "--headed", "--with-sound"]), { username: "someone", headed: true, withSound: true });
+  assert.throws(() => parseArgs(["--with-sound"]), /--with-sound needs --headed/);
   assert.throws(() => parseArgs(["--bogus"]), /Unknown option --bogus/);
 });
 
