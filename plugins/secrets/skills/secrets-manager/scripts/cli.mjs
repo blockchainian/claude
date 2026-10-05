@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { loadAdapters } from "./adapter.mjs";
+import { loadAdapters, OPTIONS } from "./adapter.mjs";
 import * as config from "./config.mjs";
 import { runWithConcurrency } from "./concurrency.mjs";
 import { loadCredentials, parseLine, setAppPassword, setTotpSecret } from "./credentials.mjs";
@@ -612,22 +612,6 @@ function runList(db, opts, io) {
 
 // --- CLI ---------------------------------------------------------------------
 
-const OPTIONS = {
-  all: { type: "boolean" },
-  "by-email": { type: "boolean" },
-  concurrency: { type: "string" },
-  country: { type: "string" },
-  headed: { type: "boolean" },
-  headless: { type: "boolean" },
-  json: { type: "boolean" },
-  limit: { type: "string" },
-  "max-price": { type: "string" },
-  "mint-app-password": { type: "boolean" },
-  select: { type: "string", multiple: true },
-  "rotate-proxy": { type: "boolean" },
-  yes: { type: "boolean" },
-};
-
 const COMMANDS = {
   whoami: { positional: [1, 1] },
   validate: { positional: [1, Infinity] },
@@ -649,7 +633,7 @@ const USAGE = `Usage: secrets-manager <command> [options]
   login <x|tiktok> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
   login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
   verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed] [--rotate-proxy]
-  setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy]
+  setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy] [app flags]
   setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
   whoami <x|app> --select CREDENTIAL [--json]
@@ -658,11 +642,29 @@ const USAGE = `Usage: secrets-manager <command> [options]
   set-status <app> <active|ready|expired|restricted|escalated> --select ID...
   list [--json]`;
 
-export function parseCli(argv) {
+function setupUsage(adapter) {
+  const flags = Object.entries(adapter?.setupFlags ?? {}).map(([name, flag]) =>
+    `  --${name}${flag.type === "string" ? " VALUE" : ""}  ${flag.description}`);
+  return [USAGE.split("\n").find(line => line.startsWith("  setup <app>")),
+    ...(flags.length ? [`${adapter.name} flags:`, ...flags] : [])].join("\n");
+}
+
+export function parseCli(argv, setupAdapter) {
   const [command, ...rest] = argv;
   const spec = COMMANDS[command];
   if (!spec) throw new Error(USAGE);
-  const { values, positionals } = parseArgs({ args: rest, options: OPTIONS, allowPositionals: true });
+  let options = OPTIONS;
+  if (command === "setup") {
+    const flags = Object.fromEntries(Object.entries(setupAdapter?.setupFlags ?? {}).map(([name, flag]) => [name, { type: flag.type }]));
+    options = { ...OPTIONS, help: { type: "boolean" }, ...flags };
+  }
+  let values, positionals;
+  try {
+    ({ values, positionals } = parseArgs({ args: rest, options, allowPositionals: true }));
+  } catch (e) {
+    if (command === "setup") throw new Error(`${e.message}\n${setupUsage(setupAdapter)}`, { cause: e });
+    throw e;
+  }
   const [min, max] = spec.positional;
   if (positionals.length < min || positionals.length > max) throw new Error(USAGE);
   if (command === "whoami") {
@@ -690,16 +692,25 @@ export function parseCli(argv) {
 export async function main(argv, io = console) {
   let parsed;
   try {
-    parsed = parseCli(argv);
+    if (argv[0] === "setup") {
+      // Only discovery is permissive: strict parsing with the selected app's schema must finish
+      // before opening the store or calling a hook that may launch a browser.
+      adapters = await loadAdapters();
+      APP_ADAPTERS = adapters.map(a => a.name);
+      const { positionals } = parseArgs({ args: argv.slice(1), options: OPTIONS, allowPositionals: true, strict: false });
+      if (!positionals.length) throw new Error(USAGE);
+      parsed = parseCli(argv, getAdapter(positionals[0]));
+    } else parsed = parseCli(argv);
   } catch (e) {
     io.error(e.message);
     return 1;
   }
   let db;
   try {
-    adapters = await loadAdapters(parsed.command === "validate" ? { paths: parsed.opts.positional.map(p => resolve(p)) } : {});
+    if (parsed.command !== "setup") adapters = await loadAdapters(parsed.command === "validate" ? { paths: parsed.opts.positional.map(p => resolve(p)) } : {});
     APP_ADAPTERS = adapters.map(a => a.name);
     SESSION_TABLES = [...APP_ADAPTERS, ...Object.keys(USERNAME_TABLES)];
+    if (parsed.command === "setup" && parsed.opts.help) { io.log(setupUsage(getAdapter(parsed.opts.positional[0]))); return 0; }
     if (parsed.command === "validate") { io.log(APP_ADAPTERS.join(", ")); return 0; }
     if (parsed.command === "whoami") return await runWhoami(parsed.opts, io);
     db = store.openDb(config.dbPath());

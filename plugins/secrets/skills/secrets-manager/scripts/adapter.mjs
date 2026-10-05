@@ -13,11 +13,28 @@ import { configureBlocklist } from './traffic.mjs';
 import { filterState } from './state.mjs';
 import { ispFetch } from './http.mjs';
 
+// One shared schema keeps adapter validation and CLI parsing in sync as global flags change.
+export const OPTIONS = {
+  all: { type: "boolean" },
+  "by-email": { type: "boolean" },
+  concurrency: { type: "string" },
+  country: { type: "string" },
+  headed: { type: "boolean" },
+  headless: { type: "boolean" },
+  json: { type: "boolean" },
+  limit: { type: "string" },
+  "max-price": { type: "string" },
+  "mint-app-password": { type: "boolean" },
+  select: { type: "string", multiple: true },
+  "rotate-proxy": { type: "boolean" },
+  yes: { type: "boolean" },
+};
+
 /**
  * @typedef {{db: object, cred: object, opts: object, io: object}} ByEmailContext
  * @typedef {{status: 'ok'|'error', alias?: string, detail?: string}} ByEmailResult
  * @typedef {{db: object, email: string, session: object, opts: object, io: object}} VerifyContext
- * @typedef {{db: object, email: string, session: object, opts: object, io: object}} SetupContext
+ * @typedef {{db: object, email: string, session: {state: *}, opts: object, io: object}} SetupContext Session state is parsed JSON, or null when absent.
  * @typedef {{summary: string, state: *}} SetupResult Nonempty one-line summary and JSON-serialisable app state (not undefined).
  * @typedef {object} Adapter
  * @property {string} name Table and CLI target, [a-z0-9_].
@@ -30,6 +47,7 @@ import { ispFetch } from './http.mjs';
  * @property {number} [attempts] Default 1.
  * @property {(ctx: ByEmailContext) => Promise<ByEmailResult>} [byEmail]
  * @property {(ctx: VerifyContext) => Promise<'active'|'restricted'|'expired'>} [verify]
+ * @property {Record<string, {type: "boolean"|"string", description: string}>} [setupFlags] App-only kebab-case flags; global names and help are reserved.
  * @property {(ctx: SetupContext) => Promise<SetupResult>} [setup] Returns {summary, state}; throws on failure.
  * @property {(ctx: {credential: string}) => Promise<{email: string}>} [whoami]
  * @property {(session: object) => Record<string, string>|null} [credentials]
@@ -70,6 +88,14 @@ export function validateAdapter(adapter) {
   for (const hook of ['signedInUrl', 'byEmail', 'verify', 'setup', 'whoami', 'credentials', 'bannedResponse']) if (adapter[hook] !== undefined && typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
   if (adapter.attempts !== undefined && (!Number.isInteger(adapter.attempts) || adapter.attempts < 1)) throw new Error('adapter attempts must be a positive integer');
   for (const field of ['blockedHosts', 'blockedWebSockets']) if (adapter[field] !== undefined && (!Array.isArray(adapter[field]) || adapter[field].some(t => typeof t !== 'string' || !t))) throw new Error(`adapter ${field} must be strings`);
+  if (adapter.setupFlags !== undefined) {
+    if (!adapter.setupFlags || typeof adapter.setupFlags !== 'object' || Array.isArray(adapter.setupFlags)) throw new Error('adapter setupFlags must be an object');
+    for (const [name, flag] of Object.entries(adapter.setupFlags)) {
+      if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name) || Object.hasOwn(OPTIONS, name) || name === 'help') throw new Error(`bad adapter setupFlags name: ${name}`);
+      if (!flag || typeof flag !== 'object' || Array.isArray(flag) || !['boolean', 'string'].includes(flag.type) ||
+          typeof flag.description !== 'string' || !flag.description.trim()) throw new Error(`invalid adapter setupFlags declaration: ${name}`);
+    }
+  }
   return adapter;
 }
 
