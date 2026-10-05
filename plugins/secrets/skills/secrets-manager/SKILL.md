@@ -77,7 +77,7 @@ login <google|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--hea
 login <x|tiktok> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
 login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
 verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed] [--rotate-proxy]
-setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy]
+setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy] [app flags]
 setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
 sms <balance|prices|number> [--country N] [--max-price X] [--yes]
 whoami <x|app> --select CREDENTIAL [--json]
@@ -242,7 +242,7 @@ intel plugin's `fetch-x-mentions/scripts/verify-x.mjs`.
 
 ### setup
 
-`setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy]`
+`setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy] [app flags]`
 prepares each selected logged-in account through the adapter's optional
 `setup({db, email, session, opts, io})` hook. Like adapter verification, it selects imported
 accounts holding an app session: by default only `active`; `--all` also includes `ready`
@@ -255,6 +255,22 @@ nothing and leaves status and prior setup state unchanged, prints `<email>: <mes
 stderr and makes the command exit 1;
 other selected accounts still run, up to `--concurrency` (default 1).
 An adapter without the hook fails with `<app> has no setup hook`.
+
+Adapters may declare `setupFlags`, an object mapping kebab-case flag names to
+`{type: "boolean" | "string", description: string}`. Descriptions must be nonempty;
+engine global flag names and `help` are reserved. For example:
+
+```js
+setupFlags: {
+  "follow-lowest-ranked": { type: "boolean", description: "Follow the lowest ranked account." },
+}
+```
+
+Only `setup <app>` accepts that app's flags; other apps, commands and unknown flags
+fail before the setup hook runs or a browser opens. Values reach the hook under their
+original names, e.g. `opts["follow-lowest-ranked"] === true`. `setup <app> --help`
+and flag errors list the app's flags with descriptions. The hook's `session.state`
+is already parsed JSON from the previous setup, or `null` when absent.
 
 ### whoami
 
