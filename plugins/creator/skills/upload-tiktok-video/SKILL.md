@@ -95,7 +95,7 @@ All four creator skills share this install:
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
-npm ci --prefix "$SKILL_DIR/scripts"
+(cd "$SKILL_DIR/scripts" && npm ci)
 ```
 
 Camoufox is fetched by the secrets plugin's setup. `ISP_PROXY_URL` comes from the secrets-manager's `.env`.
