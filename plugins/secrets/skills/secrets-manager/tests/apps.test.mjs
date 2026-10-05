@@ -114,3 +114,12 @@ test('the kit exposes the credential-file writers so a hook can persist a minted
   }
   assert.equal(typeof kit.config.credentialsDir, 'function');
 });
+
+
+test('setup is an optional function hook', () => {
+ const base = factory(kit)[0];
+ assert.equal(validateAdapter(base), base);
+ const setup = async () => 'configured';
+ assert.equal(validateAdapter({...base, setup}).setup, setup);
+ assert.throws(() => validateAdapter({...base, setup: 'configured'}), /adapter setup must be a function/);
+});
