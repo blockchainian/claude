@@ -100,7 +100,7 @@ test("verify google and tiktok write to their own tables", async () => {
 });
 
 test("verify google skips plus-alias rows: they hold app sessions, not a Google sign-in", async () => {
-  for (const email of ["g@mail.com", "g+axiom@mail.com"]) {
+  for (const email of ["g@mail.com", "g+1@mail.com"]) {
     store.upsertAccount(db, email, "pw", null);
     store.setAccountStatus(db, email, "active");
   }
