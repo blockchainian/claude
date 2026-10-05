@@ -2,13 +2,13 @@
 // ABOUTME: read anonymously from its profile page through TikTok's own signed web API, one row per video per run.
 //
 // Usage:
-//   node ${CLAUDE_PLUGIN_ROOT}/skills/track-tiktok-stats/scripts/track-tiktok-stats.mjs [--username <name>]
+//   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-stats/scripts/fetch-tiktok-stats.mjs [--username <name>]
 //   --username names the account to read; default the account upload-tiktok-video posts as (the
 //   secrets-manager store's earliest imported active TikTok account).
 //
 // The read is anonymous: a fresh Camoufox browser, not the account's profile, on the account's ISP
 // slot. TikTok gives an anonymous viewer the first page of a profile (about 35 videos), newest first.
-// Each run appends one row per video to <CREATE_TIKTOK_DIR>/stats.jsonl:
+// Each run appends one row per video to <CREATOR_TIKTOK_DIR>/stats.jsonl:
 //   { at, username, videoId, createTime, playCount, diggCount, commentCount, shareCount, collectCount }
 // Run it on a schedule to build the time series.
 

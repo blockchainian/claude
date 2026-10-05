@@ -1,20 +1,20 @@
 ---
-name: track-tiktok-stats
+name: fetch-tiktok-stats
 description: Record the current plays, likes, comments, shares and saves of every video on a TikTok account's profile — by default the secrets-manager account upload-tiktok-video posts as — read anonymously through TikTok's own signed web API in Camoufox, one row per video per run appended to a time series. Use when asked to check / 看 / 监测 how the uploaded TikTok videos are doing, or to take a stats sample for the time series. NOT for account health or status (secrets-manager owns that), NOT for uploading (upload-tiktok-video) and NOT for other people's videos (intel's fetch-tiktok-mentions).
 ---
 
-# Track TikTok stats
+# Fetch TikTok stats
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/track-tiktok-stats/scripts/track-tiktok-stats.mjs" [--username <name>]
+node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-stats/scripts/fetch-tiktok-stats.mjs" [--username <name>]
 ```
 
 - `--username` reads another account; default the account upload-tiktok-video posts as: the
   secrets-manager store's earliest imported `active` TikTok account.
 - One run is one sample. Run it again later (a schedule, or by hand) to build the series.
 
-Each run appends one row per video to `~/.local/share/create/tiktok/stats.jsonl`
-(`CREATE_TIKTOK_DIR` overrides the directory) and prints them:
+Each run appends one row per video to `~/.local/share/creator/tiktok/stats.jsonl`
+(`CREATOR_TIKTOK_DIR` overrides the directory) and prints them:
 
 ```
 { at, username, videoId, createTime, playCount, diggCount, commentCount, shareCount, collectCount }

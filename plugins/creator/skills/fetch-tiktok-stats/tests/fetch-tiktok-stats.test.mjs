@@ -1,10 +1,10 @@
-// ABOUTME: Tests the pure parts of track-tiktok-stats.mjs: arg parsing and turning a page of TikTok's
+// ABOUTME: Tests the pure parts of fetch-tiktok-stats.mjs: arg parsing and turning a page of TikTok's
 // ABOUTME: items into one stats row per video.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseArgs, statsRows } from "../scripts/track-tiktok-stats.mjs";
+import { parseArgs, statsRows } from "../scripts/fetch-tiktok-stats.mjs";
 
 test("parseArgs takes an optional --username", () => {
   assert.deepEqual(parseArgs([]), { username: null });
