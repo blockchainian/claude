@@ -1,7 +1,8 @@
 # creator
 
-Run creator accounts on TikTok. The accounts, their credentials, browser profiles and status
-live in the secrets plugin's `secrets-manager` store; this plugin only reads it.
+Run creator accounts on TikTok from Claude Code or Codex. See
+[installation and compatibility](../../docs/codex-compatibility.md). The accounts, their
+credentials, browser profiles and status live in the secrets plugin's `secrets-manager` store; this plugin only reads it.
 
 ## Skills
 
@@ -29,14 +30,28 @@ Account health and status (logged out, restricted, banned) belong to `secrets-ma
 ## Setup
 
 ```sh
-cd "${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts" && npm install
+# Use the actual directory of the loaded upload-tiktok-video/SKILL.md.
+SKILL_DIR="/absolute/path/to/loaded/skill"
+npm ci --prefix "$SKILL_DIR/scripts"
 ```
 
-All four skills use that install. Camoufox itself is fetched by the secrets plugin's setup.
-`ISP_PROXY_URL` is read from the secrets-manager's `.env`. Data goes to
+Requires Node.js 22.13+ with `node:sqlite`. Keep the full creator plugin installed:
+all four skills import the upload skill's runtime by sibling-relative paths and use that install.
+The browser flows run in Camoufox scripts without Claude Workflow, Claude API, or MCP browser
+tools. Camoufox itself is fetched by the secrets plugin's setup.
+Both hosts read the same existing secrets-manager state, by default `~/.config/secrets-manager`;
+set `SECRETS_MANAGER_STATE_PATH` explicitly if yours is elsewhere. The store, logged-in profiles,
+ISP slots and `ISP_PROXY_URL` in its `.env` must already be provisioned through secrets-manager.
+Creator does not install secrets-manager or create/migrate its accounts; use the existing
+secrets-manager setup when those prerequisites are missing. Never open the same account profile
+in both hosts at once. Data goes to
 `~/.local/share/creator/tiktok/<username>/`, one directory per account (`CREATOR_TIKTOK_DIR`
 overrides the parent). Recording uses
 ScreenCaptureKit through `swift` and needs the Screen Recording permission.
+
+Use the host's shell execution tool for the scripts; retain the process/session handle and
+wait for completion instead of repeatedly polling logs. `open-tiktok-account` remains running
+until the person closes its shown browser.
 
 ## Tests
 

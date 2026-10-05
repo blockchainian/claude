@@ -1,8 +1,8 @@
 // ABOUTME: Posts one video to the secrets-manager TikTok account through TikTok Studio's upload page, in the
 // ABOUTME: account's own Camoufox profile, then finds the posted video's id and logs the post.
 //
-// Usage:
-//   node ${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-video.mjs <video.mp4> \
+// Usage (SKILL_DIR is the absolute directory of this skill's loaded SKILL.md):
+//   node "$SKILL_DIR/scripts/upload-tiktok-video.mjs" <video.mp4> \
 //     [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc]
 //     [--promotion your-brand|branded-content|your-brand,branded-content] [--sound <id>] [--headed [--with-sound]]
 //   --username posts as that account of the store (default: its earliest imported active account).

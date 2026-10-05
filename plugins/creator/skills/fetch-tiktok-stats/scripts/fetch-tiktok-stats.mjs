@@ -1,8 +1,8 @@
 // ABOUTME: Records the current play, like, comment, share and save counts of a TikTok account's videos,
 // ABOUTME: read anonymously from its profile page through TikTok's own signed web API, one row per video per run.
 //
-// Usage:
-//   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-stats/scripts/fetch-tiktok-stats.mjs [--username <name>] [--headed [--with-sound]]
+// Usage (SKILL_DIR is the absolute directory of this skill's loaded SKILL.md):
+//   node "$SKILL_DIR/scripts/fetch-tiktok-stats.mjs" [--username <name>] [--headed [--with-sound]]
 //   --username names the account to read; default the account upload-tiktok-video posts as (the
 //   secrets-manager store's earliest imported active TikTok account).
 //   --headed shows the browser window and screen-records it to <username>/recordings/stats-<ts>.mov,
