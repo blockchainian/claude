@@ -5,6 +5,28 @@ talks, videos, live streams — and from **what people say** about an app — Ap
 Store reviews — into text you can read and search. The plugin also finds book
 download links and checks domain names.
 
+## Hosts and install
+
+Claude Code loads all fifteen skills. Codex loads fourteen; `case-study` keeps its
+Claude Workflow implementation and is excluded by Intel's Codex manifest.
+
+```sh
+# Claude Code
+/plugin marketplace add blockchainian/claude
+/plugin install intel@blockchainian
+
+# Codex (use --ref codex until this branch merges)
+codex plugin marketplace add blockchainian/claude --ref codex
+codex plugin add intel@blockchainian
+```
+
+Start a new session after installation. Resolve script paths from the absolute
+loaded `SKILL.md` directory in each shell call. Both hosts use the same scripts,
+archives, `~/.config/intel/.env`, and existing secrets-manager store. Account
+provisioning uses the external secrets-manager CLI; this does not add the secrets
+plugin to the Codex catalog or migrate account state. Download-book continues to
+launch its own headed Chrome through its existing Playwright script.
+
 ## Skills
 
 - **`transcribe`** — turn audio into plain-text words, transcribed
@@ -113,6 +135,8 @@ chunk-readiness logic, platform resolution, and `setup.sh --check`; when
 `ffmpeg` and a whisper runner are present it also runs a real end-to-end batch
 and live transcription of a generated clip.
 
-Install research dependencies with `npm install --prefix` in fetch-x-mentions/scripts,
+Install research dependencies in the installed skill directories: fetch-x-mentions/scripts,
 fetch-app-reviews/scripts and fetch-tiktok-mentions/scripts. The X post and timeline
-skills share the X client install. Each SKILL.md gives its full plugin-root command.
+skills share the X client install. Each portable SKILL.md gives its skill-relative command; case-study retains Claude plugin-root commands.
+
+Keep `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` versions equal.

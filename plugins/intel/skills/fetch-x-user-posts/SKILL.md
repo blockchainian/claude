@@ -5,6 +5,28 @@ description: Fetch an X/Twitter account's own posts and replies over a date rang
 
 # Fetch X users
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
 Fetch what accounts post themselves — their own tweets and their replies — as opposed to
 `fetch-x-mentions`, which fetches what everyone says about an app. Give it a batch of screen
 names; it writes one folder per user. The auth core (x-client-transaction-id, the account list,
@@ -15,7 +37,7 @@ Run from the repo root.
 
 ```
 node \
-  "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-user-posts/scripts/fetch-x-user-posts.mjs" \
+  "$SKILL_DIR/scripts/fetch-x-user-posts.mjs" \
   <user> [<user> ...] [--file <path>] [--since YYYY-MM-DD] [--until YYYY-MM-DD] \
   [--max-pages <n>] [--max-tries <n>]
 ```
@@ -37,12 +59,12 @@ node \
 
 ```
 node \
-  "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-user-posts/scripts/fetch-x-user-posts.mjs" \
+  "$SKILL_DIR/scripts/fetch-x-user-posts.mjs" \
   --file docs/intel/kols/2026-09-24.json --since 2025-09-24 --until 2026-09-24
 ```
 
 Every X account has its own rate bucket, so N accounts ≈ N× throughput; the streams drain
-across all accounts at once. Launch it in the background and reread the log, don't tail it.
+across all accounts at once. Run it using the host-specific long-command instructions above.
 
 ## Output
 
@@ -109,12 +131,12 @@ as `fetch-x-mentions`. Additionally: `X_USER_QUERY_ID` (UserByScreenName) and `X
 - `SearchTimeline 400` mentioning the operation/features means X redeployed; update
   `X_SEARCH_QUERY_ID` / `FEATURES` in `fetch-x-mentions`.
 - `Cannot find package 'undici'` in a fresh worktree:
-  `npm install --prefix "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts"`.
+  `npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`.
 
 ## Test
 
 ```
-node --test "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-user-posts/tests/fetch-x-user-posts.test.mjs"
+node --test "$SKILL_DIR/tests/fetch-x-user-posts.test.mjs"
 ```
 
 Archive paths are relative to the working directory, run from the repo root that owns the archive.
@@ -125,4 +147,11 @@ Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
 `RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.
 Only keys needed by this script are required. Missing required keys report this config path.
 
-Setup shared X client: `npm install --prefix "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts"`.
+Setup shared X client: `npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`.
+
+## Shared account prerequisite
+
+Use the existing secrets-manager CLI and store to provision or log in accounts.
+It need not be installed as a Codex plugin to run its CLI. If the CLI, required
+account, proxy or browser profile is missing, report the prerequisite; do not
+create a second store or switch to a host browser profile.
