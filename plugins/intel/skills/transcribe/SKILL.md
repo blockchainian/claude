@@ -16,6 +16,28 @@ description: >
 
 # Transcribe audio — local whisper, file, URL, or live stream
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
 One whisper engine (`whisper-large-v3-turbo`, Apple Silicon), two entry points:
 a **batch** script for finite audio, a **live** script for an ongoing stream.
 Both write plain text and print JSON about it.
@@ -26,7 +48,7 @@ Run setup once at the start; it installs only what is missing and is a near-inst
 no-op when everything is present, so it is safe to run every time.
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/setup.sh"
+"$SKILL_DIR/scripts/setup.sh"
 ```
 
 It ensures `ffmpeg` (pulls and segments audio), `streamlink` and `yt-dlp`
@@ -39,7 +61,7 @@ what is present or missing without installing anything.
 ## Batch — a finite file or URL
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-audio.mjs" \
+"$SKILL_DIR/scripts/transcribe-audio.mjs" \
   "<audio-url-or-file>" "<out.txt>"
 ```
 
@@ -52,7 +74,7 @@ what is present or missing without installing anything.
 ## Live — an ongoing stream
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-live.mjs" \
+"$SKILL_DIR/scripts/transcribe-live.mjs" \
   "<stream>" "<out.txt>" [--segment-seconds 30] [--max-minutes N]
 ```
 
@@ -67,7 +89,10 @@ what is present or missing without installing anything.
 - It stops when the stream ends, at `--max-minutes` if given, or on Ctrl-C
   (SIGINT) — in every case it lets the open chunk finalize and transcribes it
   before exiting, then prints a JSON summary (`words`, `chunks`, ...).
-- It is long-running by nature: run it in the **background** and tail `<out.txt>`.
+- It is long-running by nature: choose `--max-minutes` before launch unless the user
+  requested an ongoing stream. Retain the process handle; read `<out.txt>` when needed
+  for partial results. Await the bounded run, or send SIGINT to stop and finalize an
+  ongoing stream; do not use a blocking `tail -f` to wait for completion.
 
 ## What the transcript is, and is not
 

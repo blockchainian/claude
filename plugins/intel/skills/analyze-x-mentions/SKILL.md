@@ -5,6 +5,28 @@ description: Turn a fetched X/Twitter mentions archive (tweets.jsonl from fetch-
 
 # Analyze Twitter
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
 One app's X mentions → an evidence-only reception doc: an overview, what users
 like and dislike about the app, what they ask for, the timeline, and what it means for
 us. Every number comes from the JSON; every post is read and labeled by a model (no
@@ -15,7 +37,7 @@ bug, the number, the date.
 ## Input & output
 
 - **Input**: `docs/intel/x/<slug>/tweets.jsonl` as written by
-  `${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/fetch-x-mentions.mjs`
+  `$SKILL_DIR/../fetch-x-mentions/scripts/fetch-x-mentions.mjs`
   (one tweet per line with `id, author, text, created_at, likes, replies, lang, url`;
   `clean.mjs` dedups by id). Run
   on a finished archive; pass `--since/--until` to analyze a window of it. The doc
@@ -32,7 +54,7 @@ bug, the number, the date.
   (`reception-2026-09-01..22.md`, `reception-2026-08-15..09-22.md`,
   `reception-2024-01-01..2028-01-20.md`) so it never overwrites the all-time doc.
 
-Every command runs from the repo root; `S="${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-mentions/scripts"` below.
+Every command runs from the repo root; `S="$SKILL_DIR/scripts"` below.
 
 ## Runs
 
@@ -127,7 +149,10 @@ low): 167 posts ≈ 87s, 500 ≈ ~4 min, 1500 ≈ ~12 min (~0.5s/post); -P 20 ov
 split. Luna over-uses `mobile-app` as a feature for "I use the app": fold it with
 `--rename` when it dominates.
 
-**Fallback labeler: Sonnet subagents**, when the ChatGPT plan quota is out. Chunk
+**Claude Code fallback labeler: Sonnet subagents**, when the ChatGPT plan quota is out.
+This fallback requires Claude Code and is unchanged there. In Codex, report the
+quota block and preserve the chunks for a later resume; do not silently switch
+models or assume Sonnet is available through Codex. Chunk
 with `--size 2000`, spawn `general-purpose` Sonnet labelers, one chunk each, about
 10 in flight; start the next when one finishes. Write the prompt once to
 `<scratch>/PROMPT.md` (the app facts plus the field definitions below) and point
@@ -135,8 +160,7 @@ each labeler at it. The prompt says:
 
 - First print all the posts, in batches of 100 as `id \t author \t likes \t date
   \t lang \t text`, into batch files under a private `work_N/` directory (never a
-  shared one: labelers run side by side), then Read every batch file (the Read
-  tool returns at most 25k tokens per call, Bash output about 30 KB, so reading
+  shared one: labelers run side by side), then read every batch file (host tools truncate large results, so reading
   is batched whatever the prompt says). After each batch, write that batch's
   labels as DATA — a file with one object per post id, the label the labeler
   decided while reading — never a classifier: no keyword rules, no regex, no
@@ -332,7 +356,7 @@ Rules:
 ## Tests
 
 ```
-node --test "${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-mentions/tests/test_analyze_tweets.mjs"
+node --test "$SKILL_DIR/tests/test_analyze_tweets.mjs"
 ```
 
 Archive paths are relative to the working directory, run from the repo root that owns the archive.

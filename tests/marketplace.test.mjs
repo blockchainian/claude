@@ -17,10 +17,10 @@ test("the marketplace lists every plugin in the repository", async () => {
   }
 });
 
-test("the Codex marketplace exposes only the six selected plugins", async () => {
+test("the Codex marketplace exposes only the seven selected plugins", async () => {
   const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
   assert.equal(marketplace.name, "blockchainian");
-  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile"]);
+  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel"]);
 
   for (const entry of marketplace.plugins) {
     assert.equal(entry.source.source, "local");
@@ -67,3 +67,24 @@ for (const script of ["recordWindows.swift", "moveWindows.swift"]) {
     assert.equal(a, b, `${script} has drifted between the secrets and creator copies`);
   });
 }
+
+test("Intel shares fourteen portable skills and keeps case-study Claude-only", async () => {
+  const root = "plugins/intel";
+  const claude = JSON.parse(await readFile(`${root}/.claude-plugin/plugin.json`, "utf8"));
+  const codex = JSON.parse(await readFile(`${root}/.codex-plugin/plugin.json`, "utf8"));
+  assert.equal(codex.name, claude.name);
+  assert.equal(codex.version, claude.version);
+  assert.deepEqual(codex.skills, [
+    "analyze-appstore-reviews", "analyze-x-mentions", "analyze-x-user", "analyze-x-users",
+    "digest", "download-book", "fetch-app-reviews", "fetch-tiktok-mentions",
+    "fetch-x-mentions", "fetch-x-posts", "fetch-x-user-posts", "find-domain-names",
+    "transcribe", "translate",
+  ].map((name) => `./skills/${name}`));
+  for (const skill of codex.skills) {
+    const text = await readFile(`${root}/${skill}/SKILL.md`, "utf8");
+    assert.ok(!text.includes("CLAUDE_PLUGIN_ROOT"), skill);
+    assert.ok(text.includes("SKILL_DIR"), skill);
+  }
+  const excluded = await readFile(`${root}/skills/case-study/SKILL.md`, "utf8");
+  assert.ok(excluded.includes("Workflow tool"));
+});

@@ -1,0 +1,53 @@
+{
+  "name": "intel",
+  "version": "0.57.0",
+  "description": "Research, transcription, book translation, social archives and analysis: fourteen shared Claude Code and Codex skills. Case-study remains Claude-only.",
+  "author": {
+    "name": "blockchainian"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/blockchainian/claude",
+  "repository": "https://github.com/blockchainian/claude",
+  "keywords": [
+    "transcription",
+    "whisper",
+    "podcast",
+    "audio",
+    "highlights",
+    "research",
+    "media",
+    "reviews",
+    "app-store",
+    "sentiment",
+    "domains",
+    "naming",
+    "branding",
+    "translation",
+    "books",
+    "epub",
+    "pdf",
+    "case-study",
+    "creators",
+    "x",
+    "social-research",
+    "tiktok",
+    "mentions",
+    "user-profiles"
+  ],
+  "skills": [
+    "./skills/analyze-appstore-reviews",
+    "./skills/analyze-x-mentions",
+    "./skills/analyze-x-user",
+    "./skills/analyze-x-users",
+    "./skills/digest",
+    "./skills/download-book",
+    "./skills/fetch-app-reviews",
+    "./skills/fetch-tiktok-mentions",
+    "./skills/fetch-x-mentions",
+    "./skills/fetch-x-posts",
+    "./skills/fetch-x-user-posts",
+    "./skills/find-domain-names",
+    "./skills/transcribe",
+    "./skills/translate"
+  ]
+}

@@ -5,6 +5,28 @@ description: Brainstorm brand names for a product and return the ones whose doma
 
 # Find Domain Names
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
 Brainstorm a brand name and hand back only the ones you can actually register.
 The naming taste is fixed (below); the one thing that changes per run is the
 **theme**, which you always ask for. Availability is checked live against
@@ -14,7 +36,7 @@ Namecheap's official API, so a name on the final list is real, not a guess.
 
 The checker calls Namecheap's official `domains.check`, which needs an API key
 and a whitelisted IP. Config lives in the shared plugin file
-`~/.config/blockchainian/claude.json`, under this skill's key:
+`~/.config/blockchainian/claude.json`, under this skill's key. This existing filename is shared by both hosts; do not rename or duplicate it:
 
 ```json
 { "find-domain-names": { "namecheap": { "apiUser": "<username>", "apiKey": "<key>" } } }
@@ -78,7 +100,7 @@ Priority is separate and by type: coined outranks metaphor regardless of length.
 ## The checker — `scripts/check.mjs`
 
 ```
-"${CLAUDE_PLUGIN_ROOT}/skills/find-domain-names/scripts/check.mjs" <name|domain> ...
+"$SKILL_DIR/scripts/check.mjs" <name|domain> ...
 ```
 
 A bare word (`trovy`) expands to `.xyz/.ai/.fun`; a full domain (`trovy.xyz`)
