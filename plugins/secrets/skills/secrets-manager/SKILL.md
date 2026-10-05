@@ -69,7 +69,7 @@ login <app> --by-email [--mint-app-password] [--only EMAIL]... [--headed]
 verify <app> [--only ID]... [--all] [--concurrency N] [--headed]
 setup-2fa [--only EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
 sms <balance|prices|number> [--country N] [--max-price X] [--yes]
-export-env <app> [--only EMAIL]... [--out FILE]
+export <app> [--only EMAIL]... [--out FILE]
 get <app> <id>
 set-status <app> <id> <active|expired|restricted|escalated>
 list [--json]
@@ -202,9 +202,9 @@ through the residential proxy.
 its `active`, `restricted` or `expired` result. Errors leave the session unchanged and fail the command.
 X token verification moved to the intel plugin's `fetch-x-mentions/scripts/verify-x.mjs`.
 
-### export-env
+### export
 
-`export-env <app>` calls `adapter.exportEnv.token(session)` on active sessions. Prints only
+`export <app>` calls `adapter.exportEnv.token(session)` on active sessions. Prints only
 presence and counts; `--out FILE` writes `adapter.exportEnv.envVar=token1,token2`.
 Missing hooks and unknown adapter targets fail with loaded names.
 
