@@ -475,6 +475,21 @@ async function runVerify(db, opts, io) {
   return results.some(Boolean) ? 1 : 0;
 }
 
+// --- whoami ------------------------------------------------------------------
+
+// Resolve the caller-supplied credential without opening or changing the local store.
+async function runWhoami(opts, io) {
+  const [app] = opts.positional;
+  const adapter = getAdapter(app);
+  if (!adapter.whoami) throw new Error(`${app} has no whoami hook`);
+  const identity = await adapter.whoami({ credential: opts.select[0] });
+  if (!identity || typeof identity.email !== "string" || !/^\S+@\S+\.\S+$/.test(identity.email)) {
+    throw new Error(`${app} returned an invalid whoami result`);
+  }
+  io.log(opts.json ? JSON.stringify({ app, email: identity.email }) : identity.email);
+  return 0;
+}
+
 // --- export ------------------------------------------------------------------
 
 function runExport(db, opts, io) {
@@ -578,6 +593,7 @@ const OPTIONS = {
 };
 
 const COMMANDS = {
+  whoami: { positional: [1, 1] },
   validate: { positional: [1, Infinity] },
   import: { run: runImport, positional: [1, Infinity] },
   login: { run: runLogin, positional: [1, 1] },
@@ -598,6 +614,7 @@ const USAGE = `Usage: secrets-manager <command> [options]
   verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
   setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
+  whoami <app> --select CREDENTIAL [--json]
   export <app> [--select EMAIL]...
   get <app> --select ID...
   set-status <app> <active|expired|restricted|escalated> --select ID...
@@ -610,6 +627,14 @@ export function parseCli(argv) {
   const { values, positionals } = parseArgs({ args: rest, options: OPTIONS, allowPositionals: true });
   const [min, max] = spec.positional;
   if (positionals.length < min || positionals.length > max) throw new Error(USAGE);
+  if (command === "whoami") {
+    if (values.select?.length !== 1 || !values.select[0].trim()) {
+      throw new Error("whoami needs exactly one nonempty --select CREDENTIAL");
+    }
+    for (const flag of Object.keys(values)) {
+      if (!["select", "json"].includes(flag)) throw new Error(`whoami does not support --${flag}`);
+    }
+  }
   return {
     command,
     opts: {
@@ -638,10 +663,12 @@ export async function main(argv, io = console) {
     APP_ADAPTERS = adapters.map(a => a.name);
     SESSION_TABLES = [...APP_ADAPTERS, ...Object.keys(USERNAME_TABLES)];
     if (parsed.command === "validate") { io.log(APP_ADAPTERS.join(", ")); return 0; }
+    if (parsed.command === "whoami") return await runWhoami(parsed.opts, io);
     db = store.openDb(config.dbPath());
     return await COMMANDS[parsed.command].run(db, parsed.opts, io);
   } catch (e) {
-    io.error(e.message);
+    const message = parsed.command === "whoami" ? e.message.replaceAll(parsed.opts.select[0], "[redacted]") : e.message;
+    io.error(message);
     return 1;
   } finally {
     db?.close();

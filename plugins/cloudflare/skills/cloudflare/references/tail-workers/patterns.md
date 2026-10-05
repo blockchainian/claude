@@ -5,7 +5,6 @@
 While most tail Worker implementations are custom, these libraries may help:
 
 **Logging/Observability:**
-- **Axiom** - `axiom-cloudflare-workers` (npm) - Direct Axiom integration
 - **Baselime** - SDK for Baselime observability platform
 - **LogFlare** - Structured log aggregation
 
