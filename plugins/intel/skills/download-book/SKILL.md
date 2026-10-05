@@ -29,11 +29,6 @@ process state before retrying. Use the current host's image/file tools to inspec
 
 ## Setup (once)
 
-The fast download API reads `ANNA_ARCHIVE_SECRET_KEY` only from
-`~/.config/intel/.env`, using dotenv syntax (quoted values and comments supported).
-Never obtain this key from process environment variables or another file. If the
-file is missing, unreadable, or the key is empty, report the fast API prerequisite;
-the existing slow-link flow remains available. Do not print the key.
 Requires Node.js 20.12+ for `util.parseEnv`.
 
 The site sits behind DDoS-Guard, which serves a captcha to headless browsers and to plain HTTP clients. The script therefore drives a headed Google Chrome window through Playwright: it needs Google Chrome installed and the `playwright` package next to the script. The same script launches its own headed Chrome in both hosts; it does not require host browser tools. Install dependencies beside that script:
@@ -68,6 +63,6 @@ The waitlist server usually downloads at megabytes per second, so a `slow.url` f
 
 To turn the downloaded EPUB into a Chinese PDF, pass it to the `translate` skill, which reads the EPUB directly.
 
-If the browser check still fails (the script reports 未通过浏览器验证, usually a captcha), save the search results and selected detail page as HTML from your own browser, then pass `--search-html` and `--detail-html`. Pass `--slow-html` for a saved slow download page when its live entry is blocked. The saved slow page must refer to the selected MD5 record. The member key for the fast API is read only from `~/.config/intel/.env`; do not print its value. Calling that API with a valid key may use the member's quota.
+If the browser check still fails (the script reports 未通过浏览器验证, usually a captcha), save the search results and selected detail page as HTML from your own browser, then pass `--search-html` and `--detail-html`. Pass `--slow-html` for a saved slow download page when its live entry is blocked. The saved slow page must refer to the selected MD5 record.
 
 Report missing or blocked links as unavailable. Do not infer a direct file URL from an error page; only download the file URL the script actually returned.

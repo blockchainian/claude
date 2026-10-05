@@ -22,7 +22,7 @@ codex plugin add intel@blockchainian
 
 Start a new session after installation. Resolve script paths from the absolute
 loaded `SKILL.md` directory in each shell call. Both hosts use the same scripts,
-archives, `~/.config/intel/.env`, and existing secrets-manager store. Account
+archives and existing secrets-manager store. Account
 provisioning uses the external secrets-manager CLI; this does not add the secrets
 plugin to the Codex catalog or migrate account state. Download-book continues to
 launch its own headed Chrome through its existing Playwright script.
@@ -82,8 +82,7 @@ launch its own headed Chrome through its existing Playwright script.
 - **`fetch-tiktok-mentions`** — archive TikTok videos and comments through ISP sessions.
 - **`fetch-app-reviews`** — archive written App Store reviews across storefronts.
 
-Research scripts use `~/.config/intel/.env`; archive paths are relative to the working
-directory, run from the repo root that owns the archive. X/TikTok accounts are logged in
+Archive paths are relative to the working directory; run from the repo root that owns the archive. X/TikTok accounts are logged in
 with the secrets plugin's `secrets-manager login x|tiktok`.
 
 ## Why they live together
@@ -112,8 +111,7 @@ audio leg and `digest` for the notes.
   script), plus `curl`; a file of machine-tested tool commands is optional.
 - `download-book`: Node.js 20.12+, Google Chrome, and `npm install` in the skill's
   `scripts/` dir (Playwright drives a headed Chrome window through the site's
-  DDoS-Guard check; headless browsers get a captcha). Optional `ANNA_ARCHIVE_SECRET_KEY`
-  for the member fast download API, read only from `~/.config/intel/.env` (not process environment variables).
+  DDoS-Guard check; headless browsers get a captcha).
 
 ## Tests
 
