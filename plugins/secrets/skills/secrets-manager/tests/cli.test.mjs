@@ -462,3 +462,22 @@ test("login <app> never retries an account the app restricted, even with --all",
   assert.equal(await main(["login", "alpha", "--all"], o), 0);
   assert.ok(o.text().includes("skip a@x.com: alpha status restricted"));
 });
+
+
+test("ready sessions are usable for export and skipped by default login without a browser", async () => {
+  writeGoogleFile("a@x.com:pw:SECRET:\n");
+  store.upsertAccount(db, "a@x.com", "pw", "SECRET");
+  store.setAccountStatus(db, "a@x.com", "ready");
+  store.saveSession(db, "beta", "a@x.com", [{ name: "auth-refresh-token", value: "READY" }], []);
+  store.setSessionStatus(db, "beta", "a@x.com", "ready");
+  assert.equal(needsRefresh(db, "beta", "a@x.com"), false);
+  assert.equal(loginSkipReason("ready", "beta"), null);
+  assert.equal(loginSkipReason("ready", "google"), null);
+  const login = io();
+  assert.equal(await main(["login", "beta"], login), 0);
+  assert.deepEqual(login.out, ["a@x.com: beta up to date, skipping"]);
+  const output = io();
+  assert.equal(await main(["export", "beta", "--select", "a@x.com"], output), 0);
+  assert.deepEqual(output.out.map(JSON.parse), [{ app: "beta", email: "a@x.com", refresh_token: "READY" }]);
+  assert.equal(store.getSession(db, "beta", "a@x.com").status, "ready");
+});

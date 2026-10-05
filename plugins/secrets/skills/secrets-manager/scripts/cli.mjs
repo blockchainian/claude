@@ -141,7 +141,7 @@ function runImport(db, opts, io) {
 // --- login -------------------------------------------------------------------
 
 // Apps that need a fresh session: never seen, or explicitly marked expired. Skips active (still
-// good), restricted and escalated (won't retry until cleared).
+// good, including ready), restricted and escalated (won't retry until cleared).
 export function needsRefresh(db, app, email) {
   const session = store.getSession(db, app, email);
   return session === null || session.status === store.STATUS_EXPIRED;
@@ -459,7 +459,7 @@ async function runVerify(db, opts, io) {
   const [target] = opts.positional;
   const spec = BUILTIN_CHECKS[target] ?? adapterCheck(target);
   const allowed = spec.results ?? CHECK_RESULTS;
-  const rows = pick(spec.rows(db).filter(r => r.status === store.STATUS_ACTIVE || opts.all), spec.id, opts);
+  const rows = pick(spec.rows(db).filter(r => [store.STATUS_ACTIVE, store.STATUS_READY].includes(r.status) || opts.all), spec.id, opts);
   if (!rows.length) { io.log(`no ${spec.label} active accounts to check`); return 0; }
   const results = await runWithConcurrency(rows, opts.concurrency, async row => {
     const id = spec.id(row);
@@ -504,7 +504,7 @@ function runExport(db, opts, io) {
   if (!adapter.credentials) throw new Error(`${app} has no credentials hook`);
   for (const account of pick(store.listAccounts(db), (a) => a.email, opts)) {
     const session = store.getSession(db, app, account.email);
-    if (!session || session.status !== store.STATUS_ACTIVE) continue;
+    if (!session || ![store.STATUS_ACTIVE, store.STATUS_READY].includes(session.status)) continue;
     const fields = adapter.credentials(session);
     if (fields === null) io.error(`${account.email}\tmissing`);
     else io.log(JSON.stringify({ app, email: account.email, ...fields }));

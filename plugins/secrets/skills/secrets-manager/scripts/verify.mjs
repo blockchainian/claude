@@ -8,10 +8,12 @@ export const CHECK_RESULTS = [store.STATUS_ACTIVE, store.STATUS_EXPIRED, store.S
 
 // The status to store after a check. `expired` only says the stored token no longer works, which a
 // banned (`restricted`) or person-blocked (`escalated`) account's token usually also is, so it never
-// overwrites those; any other result is newer knowledge and is written.
+// overwrites those. An active check confirms login but cannot undo server-side setup, so ready
+// is kept; other results are newer knowledge and are written.
 export function nextStatus(current, result) {
   const kept = result === store.STATUS_EXPIRED && (current === store.STATUS_RESTRICTED || current === store.STATUS_ESCALATED);
-  return kept ? current : result;
+  const setupKept = result === store.STATUS_ACTIVE && current === store.STATUS_READY;
+  return kept || setupKept ? current : result;
 }
 
 // Each entry: `label` for messages, `rows(db)` every account of the target, `id(row)` its key,
