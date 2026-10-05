@@ -1,14 +1,15 @@
 // ABOUTME: Tests the pure parts of tiktok-session.mjs: the account pick, the store lookup, proxies,
-// ABOUTME: the request template, the browser pid lookup and the data directory.
+// ABOUTME: the request template, the browser pid lookup, stopping a recording and the data directory.
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { apiUrl, dataDir, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, templateFrom } from "../scripts/tiktok-session.mjs";
+import { apiUrl, dataDir, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, stopRecording, templateFrom } from "../scripts/tiktok-session.mjs";
 
 const row = (username, status, isp_slot, created_at) => ({ username, status, isp_slot, created_at });
 
@@ -82,4 +83,12 @@ test("findPid picks the Camoufox main process of a profile", () => {
 test("dataDir defaults under ~/.local/share and follows CREATE_TIKTOK_DIR", () => {
   assert.equal(dataDir({}), join(homedir(), ".local", "share", "create", "tiktok"));
   assert.equal(dataDir({ CREATE_TIKTOK_DIR: "/x" }), "/x");
+});
+
+test("stopRecording waits for the recorder to exit and leaves no timer holding the process open", async () => {
+  const child = spawn(process.execPath, ["-e", 'process.on("SIGINT", () => process.exit(0)); console.log("ready"); setInterval(() => {}, 1000)']);
+  await new Promise((r) => child.stdout.once("data", r));
+  assert.equal(await stopRecording({ child, path: "/x.mov" }), "/x.mov");
+  assert.equal(child.exitCode, 0);
+  assert.ok(!process.getActiveResourcesInfo().includes("Timeout"), "a timer is still pending");
 });

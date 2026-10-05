@@ -27,7 +27,8 @@ const UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?from=webapp";
 const UPLOAD_TIMEOUT_MS = 300000; // the file upload, from choosing it to TikTok's "Uploaded"
 const POSTED_TIMEOUT_MS = 120000; // from pressing Post to leaving the upload page
 const FIND_TIMEOUT_MS = 300000; // how long the posted video may take to show on the profile
-const FIND_EVERY_MS = 20000;
+const FIND_EVERY_MS = 5000; // between looks at the profile, give or take FIND_JITTER_MS
+const FIND_JITTER_MS = 1500;
 const CLOCK_SKEW_S = 120; // TikTok's createTime against this machine's clock
 // The labels of "Who can see this post", by --visibility.
 const VISIBILITY = { everyone: "Everyone", friends: "Friends", "only-me": "Only you" };
@@ -55,6 +56,12 @@ export function parseArgs(argv) {
 // The newest of the account's videos created at or after `sinceS` (unix seconds), or null.
 export function findPosted(items, sinceS) {
   return items.filter((v) => v.createTime >= sinceS).sort((a, b) => b.createTime - a.createTime)[0] ?? null;
+}
+
+// The wait before the next look at the profile: FIND_EVERY_MS moved by a random amount up to
+// FIND_JITTER_MS either way, so the looks do not come on a fixed beat.
+export function findDelay(random = Math.random) {
+  return Math.round(FIND_EVERY_MS - FIND_JITTER_MS + random() * 2 * FIND_JITTER_MS);
 }
 
 // Close what TikTok Studio lays over the form: the "new editing features" tour and the offer to turn
@@ -133,7 +140,7 @@ async function findOnProfile(context, username, sinceS) {
       const found = findPosted((await accountVideos(page, base, username)).items, sinceS);
       if (found || Date.now() > deadline) return found;
       console.log("  the video is not on the profile yet");
-      await sleep(FIND_EVERY_MS);
+      await sleep(findDelay());
     }
   } finally {
     await page.close().catch(() => {});
