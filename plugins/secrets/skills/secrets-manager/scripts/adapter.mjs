@@ -18,6 +18,7 @@ import { ispFetch } from './http.mjs';
  * @typedef {{status: 'ok'|'error', alias?: string, detail?: string}} ByEmailResult
  * @typedef {{db: object, email: string, session: object, opts: object, io: object}} VerifyContext
  * @typedef {{db: object, email: string, session: object, opts: object, io: object}} SetupContext
+ * @typedef {{summary: string, state: *}} SetupResult Nonempty one-line summary and JSON-serialisable app state (not undefined).
  * @typedef {object} Adapter
  * @property {string} name Table and CLI target, [a-z0-9_].
  * @property {string} domain Registrable domain and session scope.
@@ -29,7 +30,7 @@ import { ispFetch } from './http.mjs';
  * @property {number} [attempts] Default 1.
  * @property {(ctx: ByEmailContext) => Promise<ByEmailResult>} [byEmail]
  * @property {(ctx: VerifyContext) => Promise<'active'|'restricted'|'expired'>} [verify]
- * @property {(ctx: SetupContext) => Promise<string>} [setup] One-line summary; throws on failure.
+ * @property {(ctx: SetupContext) => Promise<SetupResult>} [setup] Returns {summary, state}; throws on failure.
  * @property {(ctx: {credential: string}) => Promise<{email: string}>} [whoami]
  * @property {(session: object) => Record<string, string>|null} [credentials]
  * @property {string[]} [blockedHosts] Host wildcards.

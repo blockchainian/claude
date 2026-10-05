@@ -47,15 +47,21 @@ Deriving a ct0 for a vendor X auth_token stays in intel's `fetch-x-mentions/scri
 
 `setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy]`
 selects imported accounts with `active` app sessions; `--all` adds `ready` sessions for a rerun.
-The hook receives `{db, email, session, opts, io}` and resolves to a nonempty one-line summary.
-Success stores `ready` and prints `<email>: <summary>`; a throw or invalid summary prints
-`<email>: <message>` to stderr, keeps status, and exits 1 while other accounts continue.
+The hook receives `{db, email, session, opts, io}` and resolves to `{summary, state}`.
+`summary` must be a nonempty one-line string; `state` is any JSON-serialisable app-specific
+value, including `null`, but not `undefined`. Success stores the state as JSON in
+`state` and status `ready` in one write, then prints `<email>: <summary>`. A throw or
+invalid result, summary or state prints `<email>: <message>` to stderr, writes nothing,
+keeps status and prior setup state, and exits 1 while other accounts continue.
 A missing hook fails with `<app> has no setup hook`.
 
 `ready` means logged in and app setup done, a step above `active`. Default verification and
 credential export accept both. Re-login and an `active` verification result preserve `ready`
 because setup lives server-side; expired/restricted results still invalidate usability.
 Old Google and app tables are widened on open, preserving rows; only app setup promotes to `ready`.
+App tables have a nullable `state TEXT` column containing JSON. Existing stores add it
+on open with guarded, idempotent `ALTER TABLE ... ADD COLUMN`, without rebuilding for this
+column. `get <app> --select EMAIL` shows parsed `state`; re-login leaves it untouched.
 
 `export` prints one JSON line per selected active or ready session:
 `{"app":"<app>","email":"<email>",...fields}`. Credential values are printed in clear.
@@ -80,7 +86,7 @@ An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files
 | `attempts` | Optional positive retry count, default 1. |
 | `byEmail(ctx)` | Optional password signup/login through a Gmail plus-alias. |
 | `verify(ctx)` | Optional hook returning `active`, `restricted` or `expired`. |
-| `setup({db, email, session, opts, io})` | Optional async hook returning a nonempty one-line summary string; throws on failure. The engine stores `ready` on success. |
+| `setup({db, email, session, opts, io})` | Optional async hook returning `{summary, state}`: a nonempty one-line string and JSON-serialisable app state (not `undefined`); throws on failure. The engine stores JSON `state` and `ready` together on success. |
 | `bannedResponse({url, status, body})` | Optional; called during `login <app>` for every app-domain response with status >= 400. A non-empty reason means the app banned the account: its session row is recorded `restricted` (created if absent), the Google account is untouched, and `login <app>` never retries it. |
 | `whoami({credential})` | Optional async hook returning `{email: string}`; credential type is app-specific. Missing or ambiguous identity throws. |
 | `credentials(session)` | Optional `(session) => Record<string, string> \| null`; returns usable credential fields. |
@@ -125,7 +131,7 @@ The kit provides:
   newer than the click (`sinceEpoch` in seconds), then checks Spam after the inbox timeout.
   Returns `{otp, from, subject, to, folder}`, or the same metadata with
   `{securityAlert: true, otp: null}` for a Security Alert, or `null` on timeout.
-- `store`: `openDb`, `getSession`, `saveSession`, `setSessionStatus`, `listAccounts`,
+- `store`: `openDb`, `getSession`, `saveSession`, `saveSetupState`, `setSessionStatus`, `listAccounts`,
   `sessionsForAccount`, `STATUS_*` and the remaining store exports.
 - `config`: `dbPath`, `statePath`, `defaultProxy`, `proxyFor` and the remaining config exports.
 - `credentials`: `loadCredentials(dir)`, `setAppPassword(dir, email, appPassword)`,

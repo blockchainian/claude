@@ -493,9 +493,11 @@ async function runSetup(db, opts, io) {
   const results = await runWithConcurrency(rows, opts.concurrency, async session => {
     const email = session.email;
     try {
-      const summary = await adapter.setup({ db, email, session, opts, io });
-      if (typeof summary !== "string" || !summary.trim()) throw new Error("invalid setup summary");
-      store.setSessionStatus(db, app, email, store.STATUS_READY);
+      const result = await adapter.setup({ db, email, session, opts, io });
+      if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("invalid setup result");
+      const { summary, state } = result;
+      if (typeof summary !== "string" || !summary.trim() || /[\r\n\u2028\u2029]/.test(summary)) throw new Error("invalid setup summary");
+      store.saveSetupState(db, app, email, state);
       io.log(`${email}: ${summary}`);
       return false;
     } catch (e) { io.error(`${email}: ${e.message}`); return true; }
