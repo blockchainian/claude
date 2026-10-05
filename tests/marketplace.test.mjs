@@ -17,10 +17,10 @@ test("the marketplace lists every plugin in the repository", async () => {
   }
 });
 
-test("the Codex marketplace exposes only the seven selected plugins", async () => {
+test("the Codex marketplace exposes only the eight selected plugins", async () => {
   const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
   assert.equal(marketplace.name, "blockchainian");
-  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel"]);
+  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel", "secrets"]);
 
   for (const entry of marketplace.plugins) {
     assert.equal(entry.source.source, "local");
