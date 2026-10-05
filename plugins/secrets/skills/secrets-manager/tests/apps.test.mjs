@@ -123,3 +123,21 @@ test('setup is an optional function hook', () => {
  assert.equal(validateAdapter({...base, setup}).setup, setup);
  assert.throws(() => validateAdapter({...base, setup: 'configured'}), /adapter setup must be a function/);
 });
+
+
+test('setupFlags validates names, global collisions, types and descriptions', () => {
+ const base = factory(kit)[0];
+ const setupFlags = {'follow-lowest-ranked': {type: 'boolean', description: 'Follow the lowest ranked account.'}, 'wallet-name': {type: 'string', description: 'Wallet name.'}};
+ assert.equal(validateAdapter({...base, setupFlags}).setupFlags, setupFlags);
+ assert.doesNotThrow(() => validateAdapter({...base, setupFlags: {}}));
+ for (const bad of [null, [], 'flags', true]) assert.throws(() => validateAdapter({...base, setupFlags: bad}), /setupFlags/);
+ for (const name of ['', 'Bad', 'bad_name', '-bad', 'bad-', 'bad--name', '1bad',
+   'all', 'by-email', 'concurrency', 'country', 'headed', 'headless', 'json', 'limit', 'max-price',
+   'mint-app-password', 'select', 'rotate-proxy', 'yes', 'help']) {
+  assert.throws(() => validateAdapter({...base, setupFlags: {[name]: {type: 'boolean', description: 'Flag.'}}}), /setupFlags/);
+ }
+ for (const flag of [null, [], 'boolean', {}, {type: 'number', description: 'Flag.'}, {type: 'boolean'},
+   {type: 'string', description: ''}, {type: 'boolean', description: '   '}, {type: 'boolean', description: 1}]) {
+  assert.throws(() => validateAdapter({...base, setupFlags: {'app-flag': flag}}), /setupFlags/);
+ }
+});

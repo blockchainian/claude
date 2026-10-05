@@ -484,14 +484,14 @@ test("ready sessions are usable for export and skipped by default login without 
 
 
 // Runtime fixture modules stay in the temporary state directory; these hooks never open a browser.
-function setupAdapter(hook) {
+function setupAdapter(hook, setupFlags = {}) {
   const path = join(base, "setup-adapter.mjs");
   writeFileSync(path, `export default kit => {
     let running = 0, peak = 0;
     return [{
       name: 'alpha', domain: 'alpha.example', startUrl: 'https://alpha.example/',
       entryTexts: ['Login'], signIn: async () => {}, ready: async () => true,
-      setup: ${hook},
+      setup: ${hook}, setupFlags: ${JSON.stringify(setupFlags)},
     }];
   };`);
   process.env.SECRETS_MANAGER_ADAPTERS = path;
@@ -645,3 +645,64 @@ test("a failed setup write preserves both state and status", async () => {
   assert.deepEqual(output.out, []);
   assert.deepEqual(db.prepare("SELECT * FROM alpha").get(), before);
 });
+
+const appSetupFlags = {
+  "follow-lowest-ranked": { type: "boolean", description: "Follow the lowest ranked account." },
+  "wallet-name": { type: "string", description: "Name of the wallet to create." },
+};
+
+test("setup app flags reach opts with their declared types", async () => {
+  setupAdapter(`async ({ opts }) => ({ summary: 'configured', state: {
+    follow: opts['follow-lowest-ranked'], wallet: opts['wallet-name'], headed: opts.headed
+  } })`, appSetupFlags);
+  setupSession("a@x.com", "active");
+  const output = io();
+  assert.equal(await main(["setup", "alpha", "--follow-lowest-ranked", "--wallet-name", "test wallet", "--headed"], output), 0, output.errText());
+  assert.deepEqual(store.getSession(db, "alpha", "a@x.com").state, { follow: true, wallet: "test wallet", headed: true });
+});
+
+test("setup flags belong only to their app and do not extend other commands", async () => {
+  setupAdapter("async () => { throw new Error('hook must not run'); }", appSetupFlags);
+  const path = join(base, "other-adapter.mjs");
+  writeFileSync(path, `export default () => [{ name: 'beta', domain: 'beta.example', startUrl: 'https://beta.example/',
+    entryTexts: ['Login'], signIn: async () => {}, ready: async () => true,
+    setup: async () => { throw new Error('hook must not run'); } }];`);
+  process.env.SECRETS_MANAGER_ADAPTERS += ':' + path;
+  setupSession("a@x.com", "active");
+  for (const args of [["setup", "beta"], ["login", "alpha"], ["verify", "alpha"]]) {
+    const output = io();
+    assert.equal(await main([...args, "--follow-lowest-ranked"], output), 1);
+    assert.match(output.errText(), /Unknown option.*follow-lowest-ranked/);
+    assert.doesNotMatch(output.errText(), /hook must not run/);
+    assert.equal(store.getSession(db, "alpha", "a@x.com").status, "active");
+  }
+});
+
+test("setup help and unknown flags list app descriptions before the hook runs", async () => {
+  setupAdapter("async () => { throw new Error('hook must not run'); }", appSetupFlags);
+  setupSession("a@x.com", "active");
+  for (const flag of ["--help", "--follow-lowest-rankd", "--unknown"]) {
+    const output = io();
+    assert.equal(await main(["setup", "alpha", flag], output), flag === "--help" ? 0 : 1);
+    const text = flag === "--help" ? output.text() : output.errText();
+    assert.match(text, /setup <app>.*\[app flags\]/);
+    for (const [name, { description }] of Object.entries(appSetupFlags)) {
+      assert.ok(text.includes('--' + name), text);
+      assert.ok(text.includes(description), text);
+    }
+    if (flag !== "--help") assert.match(text, /Unknown option/);
+    assert.doesNotMatch(text, /hook must not run/);
+    assert.equal(store.getSession(db, "alpha", "a@x.com").status, "active");
+  }
+});
+
+for (const state of [null, false, 0, "wallet", [1, null], { wallet: { id: "previous" } }]) {
+  test(`setup hook receives parsed previous state ${JSON.stringify(state)}`, async () => {
+    setupAdapter("async ({ session }) => ({ summary: 'configured', state: { previous: session.state } })");
+    setupSession("a@x.com", "active");
+    if (state !== null) store.saveSetupState(db, "alpha", "a@x.com", state);
+    const output = io();
+    assert.equal(await main(["setup", "alpha", "--all"], output), 0, output.errText());
+    assert.deepEqual(store.getSession(db, "alpha", "a@x.com").state, { previous: state });
+  });
+}
