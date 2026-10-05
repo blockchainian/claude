@@ -10,7 +10,8 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/open-tiktok-account/scripts/open-tiktok-accou
   [--username <name>] [--url <url>] [--with-sound]
 ```
 
-- `--username`: the account of the store; default the account upload-tiktok-video posts as.
+- `--username`: the account of the store, in any status: a `restricted` one opens too, to see
+  TikTok's ban notice or appeal. Default the account upload-tiktok-video posts as.
 - `--url`: the tiktok.com page to open. Default TikTok Studio's home.
 - `--with-sound`: unmute the browser (Playwright mutes it), to hear the videos.
 

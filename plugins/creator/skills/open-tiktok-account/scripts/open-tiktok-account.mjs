@@ -3,8 +3,9 @@
 //
 // Usage:
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/open-tiktok-account/scripts/open-tiktok-account.mjs [--username <name>] [--url <url>] [--with-sound]
-//   --username opens that account of the store (default: the account upload-tiktok-video posts as, the
-//     store's earliest imported active TikTok account).
+//   --username opens that account of the store in any status, a restricted one too, to see TikTok's
+//     ban notice or appeal (default: the account upload-tiktok-video posts as, the store's earliest
+//     imported active TikTok account).
 //   --url is the page to open (default TikTok Studio's home).
 //   --with-sound unmutes the browser (Playwright mutes it), to hear the videos.
 //
@@ -44,14 +45,14 @@ export function parseArgs(argv) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const account = loadAccount(process.env, args.username);
+  const account = loadAccount(process.env, args.username, { anyStatus: true });
   if (!account) {
-    throw new Error(`No active TikTok account${args.username ? ` @${args.username}` : ""} in the secrets-manager store; run its \`login tiktok\`.`);
+    throw new Error(`No ${args.username ? `TikTok account @${args.username} with an ISP slot` : "active TikTok account"} in the secrets-manager store; run its \`login tiktok\`.`);
   }
   const { context, close } = await openBrowser({ slot: account.slot, profile: account.profile, headed: true, withSound: args.withSound, url: args.url });
   process.once("SIGINT", () => close().then(() => process.exit(130)));
   if (!(await signedIn(context))) console.log(`  @${account.username}'s profile is logged out; run the secrets-manager skill's \`login tiktok\``);
-  console.log(`opened @${account.username} at ${args.url}${args.withSound ? ", with sound" : ""}; close the window to end`);
+  console.log(`opened @${account.username} (${account.status}) at ${args.url}${args.withSound ? ", with sound" : ""}; close the window to end`);
   await untilClosed(context);
   await close();
 }

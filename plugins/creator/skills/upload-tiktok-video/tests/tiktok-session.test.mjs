@@ -35,11 +35,18 @@ test("pickAccount takes the named account when it is active and has a slot", () 
   assert.equal(pickAccount(rows, "nobody"), null);
 });
 
+test("pickAccount takes a named account in any status when asked, still only with a slot", () => {
+  const rows = [row("gone", "restricted", 4, "2026-10-01T00:00:00Z"), row("noslot", "restricted", null, "2026-10-01T00:00:00Z"), row("early", "active", 1, "2026-09-01T00:00:00Z")];
+  assert.equal(pickAccount(rows, "gone", { anyStatus: true }).username, "gone");
+  assert.equal(pickAccount(rows, "noslot", { anyStatus: true }), null);
+  assert.equal(pickAccount(rows, null, { anyStatus: true }).username, "early"); // the default account is always an active one
+});
+
 test("pickAccount is null without an active account", () => {
   assert.equal(pickAccount([row("x", "expired", 1, "2026-10-01T00:00:00Z")]), null);
 });
 
-test("loadAccount reads the secrets-manager store and names the profile", () => {
+test("loadAccount reads the secrets-manager store, names the profile and gives the status", () => {
   const state = mkdtempSync(join(tmpdir(), "creator-store-"));
   const db = new DatabaseSync(join(state, "secrets.sqlite"));
   db.exec("CREATE TABLE tiktok (username TEXT, password TEXT, isp_slot INTEGER, status TEXT, created_at TEXT, updated_at TEXT)");
@@ -49,6 +56,7 @@ test("loadAccount reads the secrets-manager store and names the profile", () => 
   db.close();
   assert.deepEqual(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), {
     username: "first",
+    status: "active",
     slot: 9,
     profile: join(state, "profiles", "first"),
   });
@@ -63,6 +71,11 @@ test("loadAccount takes a named account", () => {
   insert.run("other", 3, "2026-10-04T00:00:00Z", "2026-10-04T00:00:00Z");
   db.close();
   assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }, "other").slot, 3);
+  const again = new DatabaseSync(join(state, "secrets.sqlite"));
+  again.exec("UPDATE tiktok SET status = 'restricted' WHERE username = 'other'");
+  again.close();
+  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }, "other"), null);
+  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }, "other", { anyStatus: true }).status, "restricted");
 });
 
 test("loadAccount is null when there is no store", () => {
