@@ -11,10 +11,10 @@
 //
 // The account (the named one, else the store's earliest imported active one) is opened as its
 // own profile on its own ISP slot (see tiktok-session.mjs). The window is shown and recorded to
-// <CREATOR_TIKTOK_DIR>/recordings/<username>-<ts>.mov. A logged-out profile stops the run: log the
+// <CREATOR_TIKTOK_DIR>/<username>/recordings/<ts>.mov. A logged-out profile stops the run: log the
 // account in again with secrets-manager's `login tiktok`; the store is never written here.
 //
-// Each post appends a line to <CREATOR_TIKTOK_DIR>/posts.jsonl:
+// Each post appends a line to <CREATOR_TIKTOK_DIR>/<username>/posts.jsonl:
 //   { at, username, file, caption, visibility, aiGenerated, videoId, url, recording }
 // videoId is null when the video had not reached the profile when the run gave up looking.
 
@@ -22,7 +22,7 @@ import { appendFileSync, existsSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { accountVideos, captureTemplate, dataDir, loadAccount, openBrowser, signedIn, startRecording, stopRecording } from "./tiktok-session.mjs";
+import { accountDir, accountVideos, captureTemplate, loadAccount, openBrowser, signedIn, startRecording, stopRecording } from "./tiktok-session.mjs";
 
 const UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?from=webapp";
 const UPLOAD_TIMEOUT_MS = 300000; // the file upload, from choosing it to TikTok's "Uploaded"
@@ -156,8 +156,9 @@ async function main() {
 
   const startedS = Math.floor(Date.now() / 1000) - CLOCK_SKEW_S;
   const { context, page } = await openBrowser({ slot: account.slot, profile: account.profile, headed: true, url: UPLOAD_URL });
+  const dir = accountDir(account.username);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const recording = startRecording(account.profile, join(dataDir(), "recordings", `${account.username}-${stamp}.mov`));
+  const recording = startRecording(account.profile, join(dir, "recordings", `${stamp}.mov`));
   if (recording) console.log(`  recording to ${recording.path}`);
   const finish = async () => {
     const saved = await stopRecording(recording);
@@ -185,7 +186,7 @@ async function main() {
 
     const video = await findOnProfile(context, account.username, startedS);
     const url = video ? `https://www.tiktok.com/@${account.username}/video/${video.id}` : null;
-    mkdirSync(dataDir(), { recursive: true });
+    mkdirSync(dir, { recursive: true });
     const record = {
       at: new Date().toISOString(),
       username: account.username,
@@ -197,7 +198,7 @@ async function main() {
       url,
       recording: recording?.path ?? null,
     };
-    appendFileSync(join(dataDir(), "posts.jsonl"), JSON.stringify(record) + "\n");
+    appendFileSync(join(dir, "posts.jsonl"), JSON.stringify(record) + "\n");
     console.log(video ? `posted ${url}` : "posted, but the video has not reached the profile yet; fetch-tiktok-stats will list it once it has");
   } finally {
     await finish();

@@ -45,12 +45,13 @@ have the profile open at the same time (a fetch-tiktok-mentions run using the sa
 
 ## Output
 
-Under `~/.local/share/creator/tiktok/` (`CREATOR_TIKTOK_DIR` overrides it):
+Under `~/.local/share/creator/tiktok/<username>/`, one directory per account (`CREATOR_TIKTOK_DIR`
+overrides `~/.local/share/creator/tiktok`):
 
 - `posts.jsonl`: one line per post,
   `{ at, username, file, caption, visibility, aiGenerated, videoId, url, recording }`.
   `videoId` is null when the video had not reached the profile in time.
-- `recordings/<username>-<ts>.mov`: the screen recording of the run, also on failure. Watch it
+- `recordings/<ts>.mov`: the screen recording of the run, also on failure. Watch it
   first when a step fails: TikTok Studio's page changes, and the selectors with it.
 
 ## Setup

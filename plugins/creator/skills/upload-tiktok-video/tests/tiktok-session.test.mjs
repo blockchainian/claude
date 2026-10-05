@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { apiUrl, dataDir, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, stopRecording, templateFrom } from "../scripts/tiktok-session.mjs";
+import { accountDir, apiUrl, dataDir, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, stopRecording, templateFrom } from "../scripts/tiktok-session.mjs";
 
 const row = (username, status, isp_slot, created_at) => ({ username, status, isp_slot, created_at });
 
@@ -101,6 +101,11 @@ test("findPid picks the Camoufox main process of a profile", () => {
 test("dataDir defaults under ~/.local/share and follows CREATOR_TIKTOK_DIR", () => {
   assert.equal(dataDir({}), join(homedir(), ".local", "share", "creator", "tiktok"));
   assert.equal(dataDir({ CREATOR_TIKTOK_DIR: "/x" }), "/x");
+});
+
+test("accountDir keeps each account's data in its own directory under dataDir", () => {
+  assert.equal(accountDir("me", { CREATOR_TIKTOK_DIR: "/x" }), "/x/me");
+  assert.equal(accountDir("me", {}), join(dataDir({}), "me"));
 });
 
 test("stopRecording waits for the recorder to exit and leaves no timer holding the process open", async () => {

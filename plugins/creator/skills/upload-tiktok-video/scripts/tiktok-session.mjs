@@ -9,7 +9,8 @@
 // Config (SECRETS_MANAGER_STATE_PATH/.env, the secrets-manager's own, loaded automatically):
 //   ISP_PROXY_URL               the ISP pool's base url; slot n is the base port + n.
 //   SECRETS_MANAGER_STATE_PATH  where the store and profiles are (default ~/.config/secrets-manager).
-//   CREATOR_TIKTOK_DIR           where posts, stats and recordings go (default ~/.local/share/creator/tiktok).
+//   CREATOR_TIKTOK_DIR           where posts, stats and recordings go, one directory per account
+//                               (default ~/.local/share/creator/tiktok).
 
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -31,6 +32,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const storeDir = (env = process.env) => env.SECRETS_MANAGER_STATE_PATH || join(homedir(), ".config", "secrets-manager");
 
 export const dataDir = (env = process.env) => env.CREATOR_TIKTOK_DIR || join(homedir(), ".local", "share", "creator", "tiktok");
+
+// Where one account's posts, stats and recordings go.
+export const accountDir = (username, env = process.env) => join(dataDir(env), username);
 
 // The secrets-manager's .env carries the ISP pool; a value already in the environment wins.
 const envFile = join(storeDir(), ".env");

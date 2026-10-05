@@ -13,8 +13,8 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-stats/scripts/fetch-tiktok-stats
   secrets-manager store's earliest imported `active` TikTok account.
 - One run is one sample. Run it again later (a schedule, or by hand) to build the series.
 
-Each run appends one row per video to `~/.local/share/creator/tiktok/stats.jsonl`
-(`CREATOR_TIKTOK_DIR` overrides the directory) and prints them:
+Each run appends one row per video to `~/.local/share/creator/tiktok/<username>/stats.jsonl`
+(`CREATOR_TIKTOK_DIR` overrides `~/.local/share/creator/tiktok`) and prints them:
 
 ```
 { at, username, videoId, createTime, playCount, diggCount, commentCount, shareCount, collectCount }
