@@ -7,6 +7,22 @@ One skill, `inspect-app-traffic`, owns the run end to end: check setup, start a 
 connect the client (a Mac browser via the Zero Omega extension, or an iPhone via a WireGuard
 tunnel), read the flows, tear it down.
 
+The skill works in Claude Code and Codex. Browser automation must use the user's
+logged-in Chrome profile with Zero Omega enabled; the proxy scripts do not depend
+on either host's browser tools.
+
+## Install
+
+For Codex installation and the shared script-path convention, see
+[Codex compatibility](../../docs/codex-compatibility.md).
+
+In Claude Code:
+
+```
+/plugin marketplace add blockchainian/claude
+/plugin install proxy@blockchainian
+```
+
 ## What it gives you
 
 - **One shared hub.** A single long-lived mitmdump serves the HTTP proxy and, when asked,

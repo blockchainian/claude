@@ -16,6 +16,20 @@ Two scripts, both plain Node (no npm install; Node builtins only):
   Chrome over the DevTools protocol. Needs Node 22+ (global `WebSocket`).
 - `scripts/diff-heap-snapshots.mjs` — diffs two snapshots; reads no browser.
 
+## Script location
+
+Resolve this skill's directory from the absolute path of the loaded `SKILL.md`.
+In each shell call that runs a script, set `SKILL_DIR` to that directory:
+
+```bash
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Use the actual installed path, not the caller's working directory or a
+host-specific plugin environment variable. Shell variables may not persist
+between tool calls; repeat the assignment in each call. If the loaded path is
+unavailable, stop and report it before running a script.
+
 ## The loop
 
 1. **Start Chrome with a debug port** and open the page under test:
@@ -34,13 +48,16 @@ Two scripts, both plain Node (no npm install; Node builtins only):
 2. **Baseline snapshot**, at rest:
 
    ```
-   "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/capture-heap-snapshot.mjs" \
+   "$SKILL_DIR/scripts/capture-heap-snapshot.mjs" \
      --url-contains myapp --out leaks/before.heapsnapshot
    ```
 
 3. **Do the suspect action N times** (open and close the modal, route away and
-   back, ~10–20×) — drive it with `claude-in-chrome` or by hand. Repetition is
-   what separates a real leak from one-off allocation.
+   back, ~10–20×) — drive it with the current host's connected Chrome tools
+   (such as Claude's `claude-in-chrome` or Codex's connected Chrome), or by hand.
+   Confirm those tools can access the same debug-profile tab before using them;
+   if they cannot, have the user perform the action in that window. Repetition
+   is what separates a real leak from one-off allocation.
 
 4. **Second snapshot** the same way, to `leaks/after.heapsnapshot`. The capture
    forces a GC first, so what remains is genuinely retained.
@@ -48,7 +65,7 @@ Two scripts, both plain Node (no npm install; Node builtins only):
 5. **Diff:**
 
    ```
-   "${CLAUDE_PLUGIN_ROOT}/skills/heap-snapshot-leaks/scripts/diff-heap-snapshots.mjs" \
+   "$SKILL_DIR/scripts/diff-heap-snapshots.mjs" \
      --before leaks/before.heapsnapshot --after leaks/after.heapsnapshot \
      [--top 25] [--min-size-delta 50000]
    ```

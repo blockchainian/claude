@@ -1,6 +1,6 @@
 # web
 
-Inspect web apps from Claude Code: find memory leaks by diffing V8 heap
+Inspect web apps from Claude Code or Codex: find memory leaks by diffing V8 heap
 snapshots, and check a built page against a design reference.
 
 ## Skills
@@ -38,6 +38,11 @@ platform nouns (element/view, page/screen). No test covers the prose — change
 both copies together.
 
 ## Install
+
+For Codex installation and the shared script-path convention, see
+[Codex compatibility](../../docs/codex-compatibility.md).
+
+In Claude Code:
 
 ```
 /plugin marketplace add blockchainian/claude
