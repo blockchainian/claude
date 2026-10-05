@@ -40,7 +40,7 @@ test("pickAccount is null without an active account", () => {
 });
 
 test("loadAccount reads the secrets-manager store and names the profile", () => {
-  const state = mkdtempSync(join(tmpdir(), "create-store-"));
+  const state = mkdtempSync(join(tmpdir(), "creator-store-"));
   const db = new DatabaseSync(join(state, "secrets.sqlite"));
   db.exec("CREATE TABLE tiktok (username TEXT, password TEXT, isp_slot INTEGER, status TEXT, created_at TEXT, updated_at TEXT)");
   const insert = db.prepare("INSERT INTO tiktok VALUES (?, 'pw', ?, ?, ?, ?)");
@@ -55,7 +55,7 @@ test("loadAccount reads the secrets-manager store and names the profile", () => 
 });
 
 test("loadAccount takes a named account", () => {
-  const state = mkdtempSync(join(tmpdir(), "create-store-"));
+  const state = mkdtempSync(join(tmpdir(), "creator-store-"));
   const db = new DatabaseSync(join(state, "secrets.sqlite"));
   db.exec("CREATE TABLE tiktok (username TEXT, password TEXT, isp_slot INTEGER, status TEXT, created_at TEXT, updated_at TEXT)");
   const insert = db.prepare("INSERT INTO tiktok VALUES (?, 'pw', ?, 'active', ?, ?)");
@@ -98,9 +98,9 @@ test("findPid picks the Camoufox main process of a profile", () => {
   assert.equal(findPid("/state/profiles/none", ps), null);
 });
 
-test("dataDir defaults under ~/.local/share and follows CREATE_TIKTOK_DIR", () => {
-  assert.equal(dataDir({}), join(homedir(), ".local", "share", "create", "tiktok"));
-  assert.equal(dataDir({ CREATE_TIKTOK_DIR: "/x" }), "/x");
+test("dataDir defaults under ~/.local/share and follows CREATOR_TIKTOK_DIR", () => {
+  assert.equal(dataDir({}), join(homedir(), ".local", "share", "creator", "tiktok"));
+  assert.equal(dataDir({ CREATOR_TIKTOK_DIR: "/x" }), "/x");
 });
 
 test("stopRecording waits for the recorder to exit and leaves no timer holding the process open", async () => {

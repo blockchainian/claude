@@ -1,6 +1,6 @@
 ---
 name: upload-tiktok-video
-description: Post one mp4 to the TikTok account the secrets-manager skill logged in — its earliest imported active account — through TikTok Studio's upload page in that account's own Camoufox profile on its ISP slot, with a caption, who can see it and the AI-generated label; the browser window is shown and screen-recorded; the posted video's id is found and the post logged to posts.jsonl. Use when asked to upload / post / 上传 / 发 a video to TikTok, or to test the upload flow. NOT for logging the account in or its status (secrets-manager), NOT for the video's numbers afterwards (track-tiktok-stats) and NOT for the official Content Posting API.
+description: Post one mp4 to the TikTok account the secrets-manager skill logged in — its earliest imported active account — through TikTok Studio's upload page in that account's own Camoufox profile on its ISP slot, with a caption, who can see it and the AI-generated label; the browser window is shown and screen-recorded; the posted video's id is found and the post logged to posts.jsonl. Use when asked to upload / post / 上传 / 发 a video to TikTok, or to test the upload flow. NOT for logging the account in or its status (secrets-manager), NOT for the video's numbers afterwards (fetch-tiktok-stats) and NOT for the official Content Posting API.
 ---
 
 # Upload a TikTok video
@@ -41,11 +41,11 @@ have the profile open at the same time (a fetch-tiktok-mentions run using the sa
    confirmation).
 6. Presses Post, confirming "Post now" if TikTok asks, and waits to leave the upload page.
 7. Opens the account's profile and finds the new video by its create time, through the same
-   page-signed API calls track-tiktok-stats uses, every 5 s, moved randomly by up to 1.5 s, for up to five minutes.
+   page-signed API calls fetch-tiktok-stats uses, every 5 s, moved randomly by up to 1.5 s, for up to five minutes.
 
 ## Output
 
-Under `~/.local/share/create/tiktok/` (`CREATE_TIKTOK_DIR` overrides it):
+Under `~/.local/share/creator/tiktok/` (`CREATOR_TIKTOK_DIR` overrides it):
 
 - `posts.jsonl`: one line per post,
   `{ at, username, file, caption, visibility, aiGenerated, videoId, url, recording }`.
@@ -55,7 +55,7 @@ Under `~/.local/share/create/tiktok/` (`CREATE_TIKTOK_DIR` overrides it):
 
 ## Setup
 
-`npm install` in this skill's `scripts/` (track-tiktok-stats uses the same install). Camoufox is
+`npm install` in this skill's `scripts/` (fetch-tiktok-stats uses the same install). Camoufox is
 fetched by the secrets plugin's setup. `ISP_PROXY_URL` comes from the secrets-manager's `.env`.
 Recording needs macOS's Screen Recording permission for the terminal running `swift`.
 

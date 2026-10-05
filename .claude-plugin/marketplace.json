@@ -80,12 +80,12 @@
       "source": "./plugins/secrets"
     },
     {
-      "name": "create",
-      "description": "Run creator accounts: upload a video to the secrets-manager TikTok account through its own Camoufox profile, screen-recorded, and track the account's video stats over time.",
+      "name": "creator",
+      "description": "Run creator accounts: upload a video to the secrets-manager TikTok account through its own Camoufox profile, screen-recorded, and fetch the account's video stats over time.",
       "author": {
         "name": "blockchainian"
       },
-      "source": "./plugins/create"
+      "source": "./plugins/creator"
     }
   ]
 }

@@ -1,0 +1,14 @@
+{
+  "name": "creator",
+  "version": "0.2.0",
+  "description": "Run creator accounts: upload a video to the secrets-manager TikTok account through its own Camoufox profile, and fetch the account's video stats over time.",
+  "author": {
+    "name": "blockchainian"
+  },
+  "license": "MIT",
+  "keywords": [
+    "tiktok",
+    "upload",
+    "creator"
+  ]
+}

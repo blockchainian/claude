@@ -11,10 +11,10 @@
 //
 // The account (the named one, else the store's earliest imported active one) is opened as its
 // own profile on its own ISP slot (see tiktok-session.mjs). The window is shown and recorded to
-// <CREATE_TIKTOK_DIR>/recordings/<username>-<ts>.mov. A logged-out profile stops the run: log the
+// <CREATOR_TIKTOK_DIR>/recordings/<username>-<ts>.mov. A logged-out profile stops the run: log the
 // account in again with secrets-manager's `login tiktok`; the store is never written here.
 //
-// Each post appends a line to <CREATE_TIKTOK_DIR>/posts.jsonl:
+// Each post appends a line to <CREATOR_TIKTOK_DIR>/posts.jsonl:
 //   { at, username, file, caption, visibility, aiGenerated, videoId, url, recording }
 // videoId is null when the video had not reached the profile when the run gave up looking.
 
@@ -198,7 +198,7 @@ async function main() {
       recording: recording?.path ?? null,
     };
     appendFileSync(join(dataDir(), "posts.jsonl"), JSON.stringify(record) + "\n");
-    console.log(video ? `posted ${url}` : "posted, but the video has not reached the profile yet; track-tiktok-stats will list it once it has");
+    console.log(video ? `posted ${url}` : "posted, but the video has not reached the profile yet; fetch-tiktok-stats will list it once it has");
   } finally {
     await finish();
   }
