@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -80,6 +80,47 @@ test("loadAccount takes a named account", () => {
 
 test("loadAccount is null when there is no store", () => {
   assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: join(tmpdir(), "no-such-store") }), null);
+});
+
+test("loadAccount is null when the readable store has no usable account", (t) => {
+  const state = mkdtempSync(join(tmpdir(), "creator-store-"));
+  t.after(() => rmSync(state, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(state, "secrets.sqlite"));
+  db.exec("CREATE TABLE tiktok (username TEXT, status TEXT, isp_slot INTEGER, created_at TEXT)");
+  db.exec("INSERT INTO tiktok VALUES ('inactive', 'expired', 1, '2026-10-04'), ('no-slot', 'active', NULL, '2026-10-04')");
+  db.close();
+  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), null);
+});
+
+test("loadAccount preserves database open errors", (t) => {
+  const state = mkdtempSync(join(tmpdir(), "creator-store-"));
+  t.after(() => rmSync(state, { recursive: true, force: true }));
+  mkdirSync(join(state, "secrets.sqlite"));
+  assert.throws(() => loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), {
+    code: "ERR_SQLITE_ERROR",
+    message: /unable to open database file|disk I\/O error/,
+  });
+});
+
+test("loadAccount preserves corrupt database errors", (t) => {
+  const state = mkdtempSync(join(tmpdir(), "creator-store-"));
+  t.after(() => rmSync(state, { recursive: true, force: true }));
+  writeFileSync(join(state, "secrets.sqlite"), "not a SQLite database");
+  assert.throws(() => loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), {
+    code: "ERR_SQLITE_ERROR",
+    message: "file is not a database",
+  });
+});
+
+test("loadAccount preserves schema errors", (t) => {
+  const state = mkdtempSync(join(tmpdir(), "creator-store-"));
+  t.after(() => rmSync(state, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(state, "secrets.sqlite"));
+  db.close();
+  assert.throws(() => loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), {
+    code: "ERR_SQLITE_ERROR",
+    message: "no such table: tiktok",
+  });
 });
 
 test("ispProxyAt adds the slot to the base port", () => {
