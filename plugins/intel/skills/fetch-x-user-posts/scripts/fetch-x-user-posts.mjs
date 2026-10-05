@@ -2,7 +2,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 // ABOUTME: Fetches one X/Twitter account's own posts and replies over a date range, paging the
 // ABOUTME: authenticated SearchTimeline `from:<user>` chronologically, sharded across accounts, resumable per user.
 //
-// Usage (config from ~/.config/intel/.env loaded automatically):
+// Usage (config from the calling script's .env loaded automatically):
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-user-posts/scripts/fetch-x-user-posts.mjs \
 //     <user> [<user> ...] [--file <json|txt>] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--max-pages <n>]
 //   Each <user> is a bare screen name (no @). --file adds more names from a JSON array,
@@ -40,6 +40,9 @@ import {
   sortTweets,
   untilInstant,
 } from "../../fetch-x-mentions/scripts/fetch-x-mentions.mjs";
+
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) loadEnvFile(new URL(".env", import.meta.url));
 
 const PAGE = 20; // tweets per SearchTimeline page
 const DEFAULT_MAX_PAGES = 500; // 10000 posts per stream (20/page) — a guard, not an expected cap
@@ -692,4 +695,4 @@ async function main() {
   );
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+if (isMain) await main();

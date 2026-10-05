@@ -149,7 +149,7 @@ for the session's IP, and the page's `fetch()` pulls the bytes, four files at a 
 
 ## Config
 
-- `~/.config/intel/.env`: `ISP_PROXY_URL` (the pool's base url) and `ISP_PROXY_COUNT`
+- `$SKILL_DIR/scripts/.env`: `ISP_PROXY_URL` (the pool's base url) and `ISP_PROXY_COUNT`
   (slot n is the base port + n, one fixed IP each).
 - `SECRETS_MANAGER_STATE_PATH` (default `~/.config/secrets-manager`): where the account's store
   and browser profile are.
@@ -176,7 +176,7 @@ Archive paths are relative to the working directory, run from the repo root that
 
 Log the account in with the `secrets` plugin’s `secrets-manager login tiktok`.
 
-`~/.config/intel/.env` loads automatically without replacing existing environment values.
+`$SKILL_DIR/scripts/.env` loads automatically without replacing existing environment values.
 Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
 `X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
 `RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.

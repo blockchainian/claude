@@ -32,29 +32,11 @@ The naming taste is fixed (below); the one thing that changes per run is the
 **theme**, which you always ask for. Availability is checked live against
 Namecheap's official API, so a name on the final list is real, not a guess.
 
-## Setup (once, needs an API key)
+## Setup
 
-The checker calls Namecheap's official `domains.check`, which needs an API key
-and a whitelisted IP. Config lives in the shared plugin file
-`~/.config/blockchainian/claude.json`, under this skill's key. This existing filename is shared by both hosts; do not rename or duplicate it:
-
-```json
-{ "find-domain-names": { "namecheap": { "apiUser": "<username>", "apiKey": "<key>" } } }
-```
-
-**Before the first run, check that section exists.** `scripts/check.mjs` exits
-with a setup message if it's missing. If it is, walk the user through it — do
-not brainstorm until it's set:
-
-1. Open Namecheap → Profile → Tools → **API Access**, enable it, copy the **API Key**.
-   (API access needs 20+ domains, a $50 balance, or $50 spent in the last 2 years.)
-2. On the same page, **whitelist the current IP** (Namecheap requires it; this
-   skill does **not** manage the whitelist — the user adds their IP there once).
-3. Write `apiUser` (the Namecheap username) and `apiKey` into the config above.
-
-`ClientIp` is auto-detected each run, so a changing IP is fine **as long as
-that IP is whitelisted**. An un-whitelisted IP makes the API return an error —
-tell the user to whitelist it.
+Requires Namecheap API access with the caller's public IP whitelisted. If the checker
+reports a missing credential or rejected IP, resolve that prerequisite before checking
+names; do not repeatedly send the same failed request.
 
 ## The flow
 

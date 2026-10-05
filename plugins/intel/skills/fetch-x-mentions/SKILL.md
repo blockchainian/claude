@@ -56,7 +56,7 @@ Accounts come from the secrets-manager store (`~/.config/secrets-manager/secrets
 source. Fill it with the secrets-manager skill (`secrets-manager import x` then the verify-x.mjs command below); each account is its
 own rate bucket. `SECRETS_DB` overrides the store path.
 
-`~/.config/intel/.env` holds only request config:
+`$SKILL_DIR/scripts/.env` holds only request config:
 
 - `RESIDENTIAL_PROXY_URL`, or `X_PROXY_URLS` aligned to the accounts by row order.
 - `X_SEARCH_QUERY_ID`, `X_BEARER`, `X_TID_*`: captured from x.com; re-extract when X answers 404 or the
@@ -78,7 +78,7 @@ Archive paths are relative to the working directory, run from the repo root that
 
 Log the account in with the `secrets` plugin’s `secrets-manager login x`.
 
-`~/.config/intel/.env` loads automatically without replacing existing environment values.
+`$SKILL_DIR/scripts/.env` loads automatically without replacing existing environment values.
 Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
 `X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
 `RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.
@@ -91,7 +91,7 @@ Verify vendor tokens into stored ct0 pairs after importing X accounts:
 node "$SKILL_DIR/scripts/verify-x.mjs" [--select USER]... [--all] [--concurrency N]
 ```
 Writes the existing secrets store; defaults to rows with a token but no ct0.
-A rejected token is expired; a valid pair is active. Request config is ~/.config/intel/.env.
+A rejected token is expired; a valid pair is active. Request config is $SKILL_DIR/scripts/.env.
 
 ## Shared account prerequisite
 

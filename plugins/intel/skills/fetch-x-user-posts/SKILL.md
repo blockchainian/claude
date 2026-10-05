@@ -31,7 +31,7 @@ Fetch what accounts post themselves — their own tweets and their replies — a
 `fetch-x-mentions`, which fetches what everyone says about an app. Give it a batch of screen
 names; it writes one folder per user. The auth core (x-client-transaction-id, the account list,
 the SearchTimeline request, page parsing, retry/quota handling, cross-account draining) is
-imported from `fetch-x-mentions`, so its `~/.config/intel/.env` is the single source of secrets.
+imported from `fetch-x-mentions`, with request settings loaded from this script's own directory.
 
 Run from the repo root.
 
@@ -120,7 +120,7 @@ exits 0** (e.g. `for i in $(seq 8); do node … && break; sleep 120; done`). Cha
 
 ## Config
 
-Uses `~/.config/intel/.env` and the same account store
+Uses `$SKILL_DIR/scripts/.env` and the same account store
 (`~/.config/secrets-manager/secrets.sqlite`, active X rows) and `X_SEARCH_QUERY_ID / X_BEARER / X_TID_*`
 as `fetch-x-mentions`. Additionally: `X_USER_QUERY_ID` (UserByScreenName) and `X_USER_TWEETS_QID`
 (UserTweetsAndReplies) for the pre-check and the timeline fallback.
@@ -141,7 +141,7 @@ node --test "$SKILL_DIR/tests/fetch-x-user-posts.test.mjs"
 
 Archive paths are relative to the working directory, run from the repo root that owns the archive.
 
-`~/.config/intel/.env` loads automatically without replacing existing environment values.
+`$SKILL_DIR/scripts/.env` loads automatically without replacing existing environment values.
 Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
 `X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
 `RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.
