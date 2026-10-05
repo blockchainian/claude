@@ -1,6 +1,7 @@
 // ABOUTME: The X account check behind `verify x`: one GraphQL Viewer call with the stored
 // ABOUTME: auth_token + ct0 through the account's residential exit, mapped to an account status.
-import { ProxyAgent, fetch } from "undici";
+import { fetch } from "undici";
+import { dispatcherFor } from "./proxy-check.mjs";
 import * as config from "./config.mjs";
 
 const UA =
@@ -40,20 +41,16 @@ export function classifyViewer({ status, body }, username) {
   throw new Error(`Viewer inconclusive: HTTP ${status}, error codes ${[...codes].join(",") || "none"}`);
 }
 
-function dispatcherFor(proxyUrl) {
+function xDispatcher(proxyUrl) {
   if (!proxyUrl) throw new Error("RESIDENTIAL_PROXY_URL is required; X is never called from the home IP");
-  const u = new URL(proxyUrl);
-  const uri = `${u.protocol}//${u.host}`;
-  if (!u.username) return new ProxyAgent(uri);
-  const token = `Basic ${Buffer.from(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`).toString("base64")}`;
-  return new ProxyAgent({ uri, token });
+  return dispatcherFor(proxyUrl);
 }
 
 // Checks one `x` row. A row without a token pair has no session to check, so it is expired.
 export async function checkX({ row, opts = {} }) {
   if (!row.auth_token || !row.ct0) return "expired";
   const url = viewerUrl(requireEnv("X_VIEWER_QUERY_ID"));
-  const dispatcher = dispatcherFor(config.proxyFor(row.username, { rotate: opts["rotate-proxy"] }));
+  const dispatcher = xDispatcher(config.proxyFor(row.username, { rotate: opts["rotate-proxy"] }));
   const res = await fetch(url, {
     dispatcher,
     headers: {
