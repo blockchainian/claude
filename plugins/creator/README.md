@@ -32,7 +32,7 @@ Account health and status (logged out, restricted, banned) belong to `secrets-ma
 ```sh
 # Use the actual directory of the loaded upload-tiktok-video/SKILL.md.
 SKILL_DIR="/absolute/path/to/loaded/skill"
-npm ci --prefix "$SKILL_DIR/scripts"
+(cd "$SKILL_DIR/scripts" && npm ci)
 ```
 
 Requires Node.js 22.13+ with `node:sqlite`. Keep the full creator plugin installed:

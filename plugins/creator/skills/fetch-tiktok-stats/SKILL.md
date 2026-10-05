@@ -27,7 +27,7 @@ Run once for the installed creator plugin (all four skills use this same install
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
-npm ci --prefix "$SKILL_DIR/../upload-tiktok-video/scripts"
+(cd "$SKILL_DIR/../upload-tiktok-video/scripts" && npm ci)
 ```
 
 ## Run
