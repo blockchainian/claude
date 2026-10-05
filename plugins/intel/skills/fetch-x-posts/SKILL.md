@@ -31,7 +31,7 @@ Fetch the posts one search returns and print them — as opposed to `fetch-x-men
 `fetch-x-user-posts`, which fetch everything over a date range and save it under `docs/intel/x/`.
 Give it any X search query; it prints a small number of posts and writes no file. The request
 (x-client-transaction-id, the account list, the SearchTimeline url, the proxy) is imported from
-`fetch-x-mentions`, so its `~/.config/intel/.env` is the single source of secrets.
+`fetch-x-mentions`, with request settings loaded from this script's own directory.
 
 Run from the repo root.
 
@@ -45,7 +45,7 @@ node \
   `"from:zachxbt min_faves:5000"`, `"Kobeissi Letter since:2026-01-01_00:00:00_UTC"`, `"to:alpha filter:replies"`.
 - `--limit` is how many posts to print (default 40). A request returns 20 and takes 1 to 2 seconds.
 - `--latest` (the default) is the chronological view, `--top` X's ranked one.
-- From another directory, call the script by its full path. It loads `~/.config/intel/.env` automatically.
+- From another directory, call the script by its full path. It loads `$SKILL_DIR/scripts/.env` automatically.
 
 ## Output
 
@@ -81,7 +81,7 @@ fetch running at the same time can push an account into a 429, which this script
 
 ## Config
 
-Uses `~/.config/intel/.env` and the same account store
+Uses `$SKILL_DIR/scripts/.env` and the same account store
 (`~/.config/secrets-manager/secrets.sqlite`, active X rows) and `X_SEARCH_QUERY_ID / X_BEARER / X_TID_*`
 as `fetch-x-mentions`. Needs Node 22.13+ (`node:sqlite`).
 
@@ -107,7 +107,7 @@ Archive paths are relative to the working directory, run from the repo root that
 
 Log the account in with the `secrets` plugin’s `secrets-manager login x`.
 
-`~/.config/intel/.env` loads automatically without replacing existing environment values.
+`$SKILL_DIR/scripts/.env` loads automatically without replacing existing environment values.
 Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
 `X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
 `RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.

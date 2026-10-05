@@ -1,10 +1,9 @@
 import test from 'node:test';
-import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {loadEnvFile,requireEnv,envPath} from '../scripts/env.mjs';
 test('optional env file preserves exported variables and identifies missing keys',()=>{
  const dir=mkdtempSync(join(tmpdir(),'intel-env-')),path=join(dir,'.env');
@@ -16,11 +15,11 @@ test('optional env file preserves exported variables and identifies missing keys
   assert.throws(()=>requireEnv('INTEL_MISSING_KEY'),e=>e.message.includes('INTEL_MISSING_KEY')&&e.message.includes(envPath));
  } finally {delete process.env.INTEL_TEST_KEY;delete process.env.INTEL_SECOND_KEY;}
 });
-test('a fresh X invocation fails on its first missing key with the config path',()=>{
- const env={...process.env,HOME:mkdtempSync(join(tmpdir(),'intel-home-'))};
- for(const key of Object.keys(env)) if(key.startsWith('X_')) delete env[key];
- const result=spawnSync(process.execPath,[fileURLToPath(new URL('../scripts/fetch-x-mentions.mjs',import.meta.url)),'example','query'],{env,encoding:'utf8'});
- assert.equal(result.status,1);assert.match(result.stderr,/X_BEARER is required in .*\.config\/intel\/\.env/);
+test('a missing script-local file reports that exact path for a required key', () => {
+ const path=join(mkdtempSync(join(tmpdir(),'intel-local-env-')),'.env');
+ delete process.env.INTEL_MISSING_LOCAL_KEY;
+ loadEnvFile(path);
+ assert.throws(()=>requireEnv('INTEL_MISSING_LOCAL_KEY'),e=>e.message.includes(path));
 });
 
 test('Node env-file parsing handles quotes, inline comments and exported precedence', () => {
@@ -48,4 +47,12 @@ INTEL_PRECEDENCE="file value"
    if (saved[key] === undefined) delete process.env[key]; else process.env[key]=saved[key];
   }
  }
+});
+
+test('importing a shared client never loads its sibling dotenv file', () => {
+ const client=new URL('../../fetch-x-user-posts/scripts/fetch-x-user-posts.mjs', import.meta.url).href;
+ const app=new URL('../../fetch-app-reviews/scripts/fetch-app-reviews.mjs', import.meta.url).href;
+ const code=`process.loadEnvFile = () => { throw new Error('unexpected dotenv load during library import'); }; await import(${JSON.stringify(client)}); await import(${JSON.stringify(app)});`;
+ const result=spawnSync(process.execPath,[...process.execArgv,'--input-type=module','-e',code],{encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);
 });

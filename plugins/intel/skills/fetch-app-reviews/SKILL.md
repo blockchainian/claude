@@ -57,13 +57,13 @@ retries incomplete apps for up to 6 passes.
 
 ## Config
 
-`~/.config/intel/.env`: `RESIDENTIAL_PROXY_URL`, the rotating
+`$SKILL_DIR/scripts/.env`: `RESIDENTIAL_PROXY_URL`, the rotating
 residential proxy. A new exit IP is handed out per connection, so the script opens a fresh
 proxy connection per request; that is what defeats Apple's per-IP throttling.
 
 Archive paths are relative to the working directory, run from the repo root that owns the archive.
 
-`~/.config/intel/.env` loads automatically without replacing existing environment values.
+`$SKILL_DIR/scripts/.env` loads automatically without replacing existing environment values.
 Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
 `X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
 `RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.

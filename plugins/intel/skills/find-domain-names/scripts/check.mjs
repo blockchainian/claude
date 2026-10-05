@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 // ABOUTME: Checks domain availability + premium pricing via Namecheap's official domains.check API.
-// ABOUTME: Reads credentials from the shared plugin config, auto-detects the caller IP, prints a table.
+// ABOUTME: Reads credentials from the script-local dotenv file, auto-detects the caller IP, prints a table.
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { parseEnv } from "node:util";
 
-const CONFIG_PATH = join(homedir(), ".config", "blockchainian", "claude.json");
-const SKILL_KEY = "find-domain-names";
+const CONFIG_PATH = fileURLToPath(new URL(".env", import.meta.url));
 const ENDPOINT = "https://api.namecheap.com/xml.response";
 const TLDS = ["xyz", "ai", "fun"];
 
@@ -43,18 +41,14 @@ export function classify(r) {
   return { status: "available-premium", price };
 }
 
-export function loadCreds() {
-  let raw;
-  try {
-    raw = readFileSync(CONFIG_PATH, "utf8");
-  } catch {
-    throw new Error(`No config at ${CONFIG_PATH} — run the find-domain-names setup step first.`);
+export function loadCreds(configPath = CONFIG_PATH) {
+  const config = parseEnv(readFileSync(configPath, "utf8"));
+  const apiUser = config.NAMECHEAP_API_USER;
+  const apiKey = config.NAMECHEAP_API_KEY;
+  if (!apiUser?.trim() || !apiKey?.trim()) {
+    throw new Error(`Missing NAMECHEAP_API_USER / NAMECHEAP_API_KEY in ${configPath}`);
   }
-  const nc = JSON.parse(raw)?.[SKILL_KEY]?.namecheap;
-  if (!nc?.apiUser || !nc?.apiKey) {
-    throw new Error(`Missing ${SKILL_KEY}.namecheap.{apiUser,apiKey} in ${CONFIG_PATH} — run the setup step.`);
-  }
-  return nc;
+  return { apiUser, apiKey };
 }
 
 async function publicIp() {

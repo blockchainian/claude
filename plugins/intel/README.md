@@ -103,10 +103,8 @@ audio leg and `digest` for the notes.
   extractor and the PDF scripts), `yt-dlp` (YouTube subtitles) and `poppler`
   (PDFs); a highlights PDF needs Google Chrome.
 - `translate`: `setup.sh` installs `poppler` and `uv` (for `render.py`; extract and translate are Node scripts); needs a logged-in
-  `codex` CLI (ChatGPT plan, for gpt-6-luna) and Google Chrome (`CHROME=` to
-  point elsewhere).
-- `find-domain-names`: a Namecheap API key with the calling IP whitelisted,
-  stored at `~/.config/blockchainian/claude.json` (see the skill's Setup step).
+  `codex` CLI (ChatGPT plan, for gpt-6-luna) and Google Chrome.
+- `find-domain-names`: Node.js 20.12+ and Namecheap API access with the calling IP whitelisted.
 - `case-study`: Node.js 18+ (its own scripts), everything `digest` needs (it renders with `digest`'s PDF
   script), plus `curl`; a file of machine-tested tool commands is optional.
 - `download-book`: Node.js 20.12+, Google Chrome, and `npm install` in the skill's

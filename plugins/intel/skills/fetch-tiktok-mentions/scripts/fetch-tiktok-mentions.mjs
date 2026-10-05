@@ -2,7 +2,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 // ABOUTME: Fetches a brand's TikTok videos from hashtag pages, user pages and keyword searches, each video's
 // ABOUTME: comments and its video file, through Camoufox sessions on the ISP proxy pool, resumable.
 //
-// Usage (config from ~/.config/intel/.env loaded automatically):
+// Usage (config from the calling script's .env loaded automatically):
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/scripts/fetch-tiktok-mentions.mjs \
 //     <slug> [--hashtag <name>]... [--user <handle>]... [--keyword <words>]... \
 //     [--hashtag-min-plays <n>] \
@@ -74,6 +74,9 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) loadEnvFile(new URL(".env", import.meta.url));
 
 const START_URL = "https://www.tiktok.com/explore";
 const API = "https://www.tiktok.com/api/";
@@ -596,7 +599,7 @@ async function openAccountSession(account) {
 // A session: Camoufox on one ISP slot, on tiktok.com, with the page's request template captured.
 // Media, images and fonts are not loaded and audio is muted. `launch` adds to the browser's options.
 async function openSessionOn(slot, rate, launch) {
-  if (!process.env.ISP_PROXY_URL) throw new Error("No ISP_PROXY_URL in ~/.config/intel/.env.");
+  if (!process.env.ISP_PROXY_URL) throw new Error("No ISP_PROXY_URL in the calling script's .env.");
   const proxyUrl = ispProxyAt(process.env.ISP_PROXY_URL, slot);
   const { Camoufox } = await import("camoufox-js");
   const browser = await Camoufox({
@@ -847,4 +850,4 @@ async function main() {
   );
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+if (isMain) await main();
