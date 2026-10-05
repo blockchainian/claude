@@ -81,7 +81,7 @@
     },
     {
       "name": "creator",
-      "description": "Run creator accounts: upload a video to the secrets-manager TikTok account through its own Camoufox profile, screen-recorded, and fetch the account's video stats over time.",
+      "description": "Run creator accounts: upload a video to the secrets-manager TikTok account through its own Camoufox profile, screen-recorded, fetch the account's video stats over time, and list the commercial music library's hottest sounds.",
       "author": {
         "name": "blockchainian"
       },

@@ -4,13 +4,15 @@
 // Usage:
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-video.mjs <video.mp4> \
 //     [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc]
-//     [--promotion your-brand|branded-content|your-brand,branded-content]
+//     [--promotion your-brand|branded-content|your-brand,branded-content] [--sound <id>]
 //   --username posts as that account of the store (default: its earliest imported active account).
 //   --caption is the post's description, hashtags included (default: empty, TikTok then shows nothing).
 //   --visibility is who can see the post (default everyone).
 //   --aigc turns on TikTok's "AI-generated content" label.
 //   --promotion discloses that the post promotes a brand: `your-brand` (the account's own) and/or
 //     `branded-content` (a third party's, under TikTok's Branded Content Policy).
+//   --sound adds the commercial-library sound with that id (fetch-tiktok-sounds lists them) under the
+//     video's own audio.
 //
 // The account (the named one, else the store's earliest imported active one) is opened as its
 // own profile on its own ISP slot (see tiktok-session.mjs). The window is shown and recorded to
@@ -18,14 +20,14 @@
 // account in again with secrets-manager's `login tiktok`; the store is never written here.
 //
 // Each post appends a line to <CREATOR_TIKTOK_DIR>/<username>/posts.jsonl:
-//   { at, username, file, caption, visibility, aigc, promotion, videoId, url, recording }
+//   { at, username, file, caption, visibility, aigc, promotion, sound, videoId, url, recording }
 // videoId is null when the video had not reached the profile when the run gave up looking.
 
 import { appendFileSync, existsSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { accountDir, accountVideos, captureTemplate, loadAccount, openBrowser, signedIn, startRecording, stopRecording } from "./tiktok-session.mjs";
+import { accountDir, accountVideos, callApi, captureTemplate, loadAccount, openBrowser, signedIn, startRecording, stopRecording } from "./tiktok-session.mjs";
 
 const UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?from=webapp";
 const UPLOAD_TIMEOUT_MS = 300000; // the file upload, from choosing it to TikTok's "Uploaded"
@@ -39,12 +41,12 @@ const VISIBILITY = { everyone: "Everyone", friends: "Friends", "only-me": "Only 
 // The checkboxes under "Disclose post content", by --promotion kind.
 const PROMOTION = { "your-brand": "Your brand", "branded-content": "Branded content" };
 const USAGE =
-  "Usage: upload-tiktok-video.mjs <video.mp4> [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc] [--promotion your-brand,branded-content]";
+  "Usage: upload-tiktok-video.mjs <video.mp4> [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc] [--promotion your-brand,branded-content] [--sound <id>]";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function parseArgs(argv) {
-  const out = { file: null, username: null, caption: "", visibility: "everyone", aigc: false, promotion: [] };
+  const out = { file: null, username: null, caption: "", visibility: "everyone", aigc: false, promotion: [], sound: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--caption") out.caption = argv[++i] ?? "";
@@ -58,12 +60,20 @@ export function parseArgs(argv) {
       if (!out.promotion.length || out.promotion.some((k) => !PROMOTION[k])) {
         throw new Error(`--promotion must be ${Object.keys(PROMOTION).join(" and/or ")}, comma-separated`);
       }
-    }
-    else if (a.startsWith("--")) throw new Error(`Unknown option ${a}`);
+    } else if (a === "--sound") {
+      out.sound = argv[++i] ?? "";
+      if (!/^\d+$/.test(out.sound)) throw new Error("--sound must be a sound id (fetch-tiktok-sounds lists them)");
+    } else if (a.startsWith("--")) throw new Error(`Unknown option ${a}`);
     else out.file = a;
   }
   if (!out.file) throw new Error(USAGE);
   return out;
+}
+
+// Where the sound `id` is among the Sounds panel's search results (TikTok's search/music/full
+// response, in the order the panel lists them), or -1.
+export function soundIndex(results, id) {
+  return (results.data ?? []).findIndex((x) => x.music_info?.id_str === id);
 }
 
 // The newest of the account's videos created at or after `sinceS` (unix seconds), or null.
@@ -152,6 +162,43 @@ async function expectChecked(control, message) {
   throw new Error(message);
 }
 
+// The title of the sound `id`, read through the page-signed web API on a page of its own. Whether
+// the sound is in the commercial library is not checked here: this API reports is_commerce_music
+// false for sounds Studio's royalty-free list marks true, so the list (fetch-tiktok-sounds) decides.
+async function soundTitle(context, username, id) {
+  const page = await context.newPage();
+  try {
+    const template = captureTemplate(page);
+    await page.goto(`https://www.tiktok.com/@${username}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+    const music = (await callApi(page, await template(), "music/detail/", { musicId: id })).musicInfo?.music;
+    if (!music?.title) throw new Error(`TikTok has no sound ${id}`);
+    return music.title;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+// Add the sound `id` (titled `title`) in the post editor: open Sounds, search the title, press "+" on
+// the row whose id matches (titles repeat), then save the edit. The sound plays under the video's own audio.
+async function addSound(page, id, title) {
+  await page.getByText("Sounds", { exact: true }).first().click();
+  const search = page.getByPlaceholder("Search sounds");
+  await search.click();
+  const searched = page.waitForResponse((r) => r.url().includes("/api/search/music/full/"), { timeout: 30000 });
+  await page.keyboard.type(title, { delay: 40 });
+  await page.keyboard.press("Enter");
+  const index = soundIndex(await (await searched).json(), id);
+  if (index < 0) throw new Error(`searching "${title}" in Sounds does not list sound ${id}`);
+  const row = page.locator("[class*=MusicPanelMusicItem__container]").nth(index);
+  await row.getByText(title, { exact: true }).waitFor({ timeout: 10000 });
+  await row.hover();
+  await row.getByRole("button").last().click();
+  // The editor opens the added clip's audio settings once the sound is on the timeline.
+  await page.getByText("Fade in and out", { exact: true }).waitFor({ timeout: 30000 });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await search.waitFor({ state: "hidden", timeout: 60000 });
+}
+
 // Press Post and wait until TikTok takes the post and leaves the upload page, confirming a "post
 // now?" question on the way (asked while its checks are still running).
 async function post(page) {
@@ -211,12 +258,18 @@ async function main() {
     if (!(await signedIn(context))) {
       throw new Error(`@${account.username}'s profile is logged out; run the secrets-manager skill's \`login tiktok\``);
     }
+    const title = args.sound && (await soundTitle(context, account.username, args.sound));
     await handleOverlays(page);
     const input = page.locator("input[type=file]").first();
     await input.waitFor({ state: "attached", timeout: 60000 });
     await input.setInputFiles(file);
     await page.locator("[data-e2e=upload_status_container]").getByText(/^Uploaded/).waitFor({ timeout: UPLOAD_TIMEOUT_MS });
     console.log("  uploaded");
+    if (title) {
+      await addSound(page, args.sound, title);
+      await page.locator("[data-e2e=upload_status_container]").getByText(/^Uploaded/).waitFor({ timeout: UPLOAD_TIMEOUT_MS });
+      console.log(`  added sound ${args.sound} "${title}"`);
+    }
     await setCaption(page, args.caption);
     await setVisibility(page, args.visibility);
     if (args.aigc) await labelAigc(page);
@@ -237,6 +290,7 @@ async function main() {
       visibility: args.visibility,
       aigc: args.aigc,
       promotion: args.promotion,
+      sound: args.sound,
       videoId: video?.id ?? null,
       url,
       recording: recording?.path ?? null,
