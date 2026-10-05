@@ -20,7 +20,9 @@ live in the secrets plugin's `secrets-manager` store; this plugin only reads it.
 
 Every skill but `open-tiktok-account` runs its browser hidden. `--headed` shows it and screen-records it to the account's
 `recordings/`, for debugging a flow that TikTok's page changes broke; `--with-sound` also unmutes
-it.
+it. A shown window goes on the display `CAMOUFOX_DISPLAY` names in the secrets-manager's `.env`
+(any part of its name, e.g. `SAMSUNG`; unset means the main display), as secrets-manager's headed
+logins do; moving it needs the Accessibility permission for the terminal running `swift`.
 
 Account health and status (logged out, restricted, banned) belong to `secrets-manager`.
 

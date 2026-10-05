@@ -1720,7 +1720,7 @@ export async function exportApp(page, db, adapter, cred, { assist = false, proxy
 // Open one account's persistent Camoufox profile and run `fn(context, page)` inside it, closing
 // the browser afterwards. Shared by the login flow and any read-only probe (e.g.
 // check-restricted); the profile carries the account's Google + app sessions, so a probe reuses
-// them without signing in again. The window opens on the built-in display when headed.
+// them without signing in again. The window opens on the CAMOUFOX_DISPLAY display when headed.
 // `rotate` uses a rotating proxy exit instead of the account's sticky one. Refuses to launch
 // without the residential proxy: every login from the bare home IP gets that IP flagged.
 // Whether a failed headed run should keep the window open for a person. A headless run never can. A
@@ -1757,7 +1757,7 @@ export async function withProfile(key, { headed = false, rotate = false, proxyUr
   if (!proxyUrl) {
     throw new Error("No proxy set. Add RESIDENTIAL_PROXY_URL to ~/.config/secrets-manager/.env; never log in from the home IP.");
   }
-  if (headed) console.log(`  window opens on built-in display: ${windowPlace.openOnBuiltin(profile)}`);
+  if (headed) console.log(`  window opens on ${windowPlace.displayName() || "the main display"}: ${windowPlace.openOnDisplay(profile)}`);
   const context = await Camoufox({
     headless: !headed,
     geoip: true, // timezone/locale/geolocation still follow the account's sticky proxy IP
@@ -1776,7 +1776,7 @@ export async function withProfile(key, { headed = false, rotate = false, proxyUr
     if (blockAssets) await installBlocklist(context);
     page = context.pages()[0] ?? (await context.newPage());
     if (headed) {
-      windowPlace.movePopupsToBuiltin(context, profile);
+      windowPlace.movePopupsToDisplay(context, profile);
       // A headed run is a debug run: record the screen, and save each reCAPTCHA grid image with the
       // classifier's answer, so the grids can be reviewed and the classifier's accuracy measured after.
       process.env.SM_DEBUG_GRIDS = "1";
