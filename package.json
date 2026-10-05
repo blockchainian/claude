@@ -17,6 +17,6 @@
     "test:web": "node --test plugins/web/skills/heap-snapshot-leaks/tests/*.mjs && uv run plugins/web/skills/check-web-design/tests/test_check_design.py",
     "test:mobile": "uv run plugins/mobile/hooks/tests/test_phone_session_gate.py && node --test plugins/mobile/skills/ios-take-screenshot/tests/*.mjs && uv run plugins/mobile/skills/ios-take-screenshot/tests/test_frame_diff.py && uv run plugins/mobile/skills/ios-take-screenshot/tests/test_stitch_screens.py && uv run plugins/mobile/skills/check-mobile-design/tests/test_check_design.py",
     "test:secrets": "node --test plugins/secrets/skills/secrets-manager/tests/*.mjs",
-    "test:creator": "node --test plugins/creator/skills/upload-tiktok-video/tests/*.mjs plugins/creator/skills/fetch-tiktok-stats/tests/*.mjs plugins/creator/skills/fetch-tiktok-sounds/tests/*.mjs"
+    "test:creator": "node --test plugins/creator/skills/upload-tiktok-video/tests/*.mjs plugins/creator/skills/fetch-tiktok-stats/tests/*.mjs plugins/creator/skills/fetch-tiktok-sounds/tests/*.mjs plugins/creator/skills/open-tiktok-account/tests/*.mjs"
   }
 }
