@@ -13,7 +13,7 @@ ships.
 | [proxy](plugins/proxy/README.md) | Captures and decodes the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy, scoped to that app's hosts. |
 | [secrets](plugins/secrets/README.md) | Manages local credentials and browser sessions through external app adapters. |
 | [intel](plugins/intel/README.md) | Gathers and distills knowledge from long-form sources: transcribes audio locally with whisper, turns an article, podcast, video or PDF into searchable highlights, translates an English EPUB into a Chinese PDF, finds and downloads books, analyzes App Store reviews, finds brand names with a registrable domain, researches one creator into a sourced case study, and fetches and analyzes X, TikTok and app review archives. |
-| [creator](plugins/creator/README.md) | Posts a video to the secrets-manager TikTok account through its own browser profile, screen-recorded, and fetches the account's video stats. |
+| [creator](plugins/creator/README.md) | Posts a video to the secrets-manager TikTok account through its own browser profile, screen-recorded, fetches the account's video stats, and lists the commercial music library's hottest sounds. |
 | [web](plugins/web/README.md) | Finds web memory leaks by diffing V8 heap snapshots captured from a running Chrome over the DevTools protocol, and checks a built page against a design reference. |
 
 ## Install
@@ -68,7 +68,7 @@ npm run test:intel    # the intel plugin's skills; the render suites need Chrome
 npm run test:web      # the heap-snapshot diff and the design check; needs uv
 npm run test:mobile   # the phone-session hook, the simulator claim, frame diff, stitch and design check; needs uv
 npm run test:secrets  # the local secrets engine and adapter contract
-npm run test:creator  # the creator plugin's account pick, args and stats rows
+npm run test:creator  # the creator plugin's account pick, args, stats and sound rows
 npm run test:marketplace  # the marketplace manifest and shared-engine checks
 npm run validate      # the marketplace and plugin manifests
 ```
