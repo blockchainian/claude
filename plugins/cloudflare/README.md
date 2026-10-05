@@ -35,8 +35,7 @@ SDK, Turnstile. Install the upstream plugin for those.
 
 ### Codex
 
-See [Codex compatibility](../../docs/codex-compatibility.md) for installation
-and MCP authentication. Both hosts use the same six skills and references.
+See [Codex installation](../../README.md#codex) for installation. Complete MCP authentication when prompted. Both hosts use the same six skills and references.
 
 In Codex, use the `agents-sdk` skill to build agents or MCP servers; the Claude
 slash commands are convenience entry points and are not duplicated as skills.

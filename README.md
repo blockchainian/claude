@@ -49,9 +49,14 @@ codex plugin add render@blockchainian
 codex plugin add mobile@blockchainian
 ```
 
-The Codex catalog contains these six plugins only. See
-[Codex compatibility](docs/codex-compatibility.md) for local installation,
-testing the draft branch, shared prerequisites, and platform-specific behavior.
+The Codex catalog contains these six plugins only. Before this PR merges, add
+`--ref codex` to the marketplace command; for a local checkout, run
+`codex plugin marketplace add .` from its root. Start a new session after installing.
+These commands were verified with Codex CLI 0.160.0.
+
+Each plugin's README covers its requirements and platform-specific behavior.
+Skills resolve script paths from the loaded `SKILL.md` directory in each shell call.
+For Mobile phone automation, review and trust `phone-session-gate` in `/hooks` first.
 
 ## Layout
 
