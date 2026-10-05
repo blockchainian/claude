@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } fro
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { APPPASSWORDS_URL, TWOSV_URL, toProxyDict, filterState, extractAppPassword, submitPassword, submitIdentifier, aliasFor, parseSetupKey, onSettingsPage, nationalNumber, DIAL_CODES, COUNTRY_NAMES, isMyAccountUrl, isOnboardingUrl, isSignedInUrl, forceEnglishUrl, ensureEnglish, waitForHuman, pollForState, submitRecaptcha, visibleRecaptchaAnchor, waitGridChanged, waitTilesSwapped, classifyGoogleNode, shouldHoldOpenForDebug, gotoWithRetry, signInGoogle, appAlreadySignedIn, oauthSurface, withAppRetries, isTransientAppError, loadOrCreateFingerprint, Restricted, Expired, NeedsHuman, AppRestricted } from "../scripts/login.mjs";
+import { APPPASSWORDS_URL, TWOSV_URL, toProxyDict, filterState, extractAppPassword, submitPassword, submitIdentifier, aliasFor, parseSetupKey, onSettingsPage, nationalNumber, DIAL_CODES, COUNTRY_NAMES, isMyAccountUrl, isOnboardingUrl, isSignedInUrl, forceEnglishUrl, ensureEnglish, waitForHuman, pollForState, submitRecaptcha, visibleRecaptchaAnchor, waitGridChanged, waitTilesSwapped, classifyGoogleNode, hasWrongCredential, shouldHoldOpenForDebug, gotoWithRetry, signInGoogle, appAlreadySignedIn, oauthSurface, withAppRetries, isTransientAppError, loadOrCreateFingerprint, Restricted, Expired, NeedsHuman, AppRestricted } from "../scripts/login.mjs";
 
 // classifyGoogleNode maps (url, visible-input inventory) to the graph node the loop dispatches on.
 // A hidden input (visible:false) never decides the node — the phone challenge ships a hidden
@@ -27,6 +27,20 @@ test("classifyGoogleNode reads the SMS code page (idvPin, also type tel) as phon
   // HeroSMS number and types it into the code box.
   assert.equal(classifyGoogleNode("https://accounts.google.com/v3/signin/challenge/ipp", [{ id: "idvPin", type: "tel", visible: true }]), "phone-code");
   assert.equal(classifyGoogleNode("https://accounts.google.com/v3/signin/challenge/iap", [{ id: "phoneNumberId", type: "tel", visible: true }]), "phone");
+});
+
+// A surface whose only visible text is `shown`; getByText matches a probe contained in it.
+const textSurface = (shown) => ({
+  getByText: (probe) => ({ first: () => ({ count: async () => (shown.includes(probe) ? 1 : 0), isVisible: async () => shown.includes(probe) }) }),
+});
+
+test("hasWrongCredential reads Google's rejection banners, including an email Google cannot find", async () => {
+  assert.equal(await hasWrongCredential(textSurface("Wrong password. Try again")), "password");
+  assert.equal(await hasWrongCredential(textSurface("Wrong code. Try again.")), "totp");
+  // The identifier page of an address with no Google account (measured 2026-10-05).
+  assert.equal(await hasWrongCredential(textSurface("Couldn’t find this account")), "account");
+  assert.equal(await hasWrongCredential(textSurface("Couldn't find your Google Account")), "account");
+  assert.equal(await hasWrongCredential(textSurface("Sign in")), null);
 });
 
 test("signInGoogle does nothing more when the sign-in page lands on the account dashboard", async () => {

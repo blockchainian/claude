@@ -139,7 +139,9 @@ its file and line number.
 - **google** — sign every selected account into Google (password + TOTP, and the phone step via
   HeroSMS) in its own persistent Camoufox profile. `restricted` accounts are skipped; `escalated`
   accounts ARE retried here (headed by default, so a human can clear a reCAPTCHA), and a successful sign-in clears the status back to
-  `active`. (For `login <app>`, an `escalated` account is still skipped until cleared.) Google's
+  `active`. (For `login <app>`, an `escalated` account is still skipped until cleared.) An address
+  Google cannot find ("Couldn't find this account") and a verify-it's-you chooser with no
+  authenticator path (it offers only a recovery email, another device, …) mark it `restricted`. Google's
   optional post-login setup wizard (`gds.google.com/web/*`: add a recovery phone, set a home
   address, …) is skipped automatically by going straight to the dashboard — no clicking through its
   cards, and no dependence on their localized button text. A profile that is already signed in

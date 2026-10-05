@@ -240,6 +240,7 @@ async function reachPasswordPage(page, cred, { assist = false, timeoutS = 20 } =
   let recaptchaTries = 0; // cap the auto attempts so a page that never clears can't re-solve forever
   while (Date.now() < deadline) {
     if (await hasPasswordField(page)) return;
+    await throwIfNoSuchAccount(page, cred);
     await ensureEnglish(page); // the identifier hop can drop `hl`; "Verify it" below is matched in English
     // Fresh, low-trust accounts hit a reCAPTCHA at challenge/recaptcha before the password field.
     // The checkbox is clicked either way; an image grid behind it is solved by the vision model only
@@ -847,6 +848,7 @@ async function driveGoogleChallenges(surface, cred, { assist = false, done, time
       if (assist && (await handOff(`clear the Google error for ${cred.email} in the window`))) continue;
       throw new NeedsHuman(`${cred.email}: Google returned an error at ${safeUrl(surface)}`);
     }
+    await throwIfNoSuchAccount(surface, cred);
     const wrong = await hasWrongCredential(surface);
     if (wrong === "password") {
       await debug.capture(surface, cred.email, "google-password-rejected");
@@ -896,14 +898,10 @@ async function driveGoogleChallenges(surface, cred, { assist = false, done, time
       case "selection":
         // The "Verify it's you — choose how you want to sign in" chooser. Prefer the authenticator when
         // this account carries a TOTP secret — the chooser lists it directly. Otherwise none of its
-        // methods are scriptable here (recovery-email code, another device, …): if it offers a
-        // recovery-email path a person could still finish it, so escalate; with no such path there is
-        // nothing anyone can do, so it is a dead end — restrict. The recovery address is read off the page.
+        // methods are scriptable here (recovery-email code, another device, …) and no recovery
+        // address is on file, so it is a dead end — restrict.
         await debug.capture(surface, cred.email, "google-verify-selection");
         if (cred.totp_secret && (await switchToAuthenticator(surface))) break;
-        if (await hasRecoveryEmailOption(surface)) {
-          throw new NeedsHuman(`${cred.email}: Google's verify-it's-you chooser needs a recovery email at ${safeUrl(surface)}`);
-        }
         throw new Restricted(`${cred.email}: Google's verify-it's-you chooser offers no path we can take at ${safeUrl(surface)}`);
       case "identifier":
         // Google often lands back on the identifier page with the email already prefilled (e.g. after
@@ -1009,6 +1007,13 @@ async function driveGoogleChallenges(surface, cred, { assist = false, done, time
   await debug.capture(surface, cred.email, "google-timeout");
   if (assist && (await handOff(`finish the Google step for ${cred.email} in the window`))) return;
   throw new NeedsHuman(`${cred.email}: Google sign-in did not finish in ${timeoutMs}ms at ${safeUrl(surface)}`);
+}
+
+// An address Google cannot find has no account to sign into: a dead end, so restrict it.
+async function throwIfNoSuchAccount(surface, cred) {
+  if ((await hasWrongCredential(surface)) !== "account") return;
+  await debug.capture(surface, cred.email, "google-no-such-account");
+  throw new Restricted(`${cred.email}: Google couldn't find this account at ${safeUrl(surface)}`);
 }
 
 // Every input on the page (name/type/id/placeholder/visible) — for capturing an unmapped step.
@@ -1301,19 +1306,6 @@ async function tryFill(surface, selector, value, timeout = 2500) {
   }
 }
 
-// True if the verify-it's-you chooser (challenge/selection) offers a recovery-email path — a "Get a
-// verification code at <email>" or "Confirm your recovery email" option. Its presence means a human
-// (or a later recovery-email flow) could still get in, so the account is escalated rather than a dead
-// end. Read from the page, so no recovery address needs to be stored.
-async function hasRecoveryEmailOption(surface) {
-  try {
-    const loc = surface.getByText("recovery email", { exact: false }).first();
-    return (await loc.count()) > 0 && (await loc.isVisible());
-  } catch {
-    return false;
-  }
-}
-
 // True if Google is showing the phone-step cooldown banner ("Too many failed attempts. Unavailable
 // because of too many failed attempts. Try again in a few hours."). A temporary lockout, not a dead
 // end — the caller marks the account expired and retries later.
@@ -1340,11 +1332,13 @@ async function hasErrorModal(surface) {
 
 // The kind of rejected-credential message Google is showing, if any. 'Wrong code' means the TOTP
 // was rejected (a stale 2FA secret cannot be scripted around); 'Wrong password' means the
-// password was rejected.
-async function hasWrongCredential(surface) {
+// password was rejected; "Couldn't find this account" means the address has no Google account.
+export async function hasWrongCredential(surface) {
   for (const [probe, kind] of [
     ["Wrong code", "totp"],
     ["Wrong password", "password"],
+    ["find this account", "account"],
+    ["find your Google Account", "account"],
   ]) {
     try {
       const loc = surface.getByText(probe, { exact: false }).first();
