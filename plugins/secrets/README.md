@@ -105,6 +105,11 @@ a thrown error leaves status unchanged and fails the command.
 
 The kit provides:
 
+- `NeedsHuman`: the same error class the engine uses. Throw it when the current
+  step requires human action; the message must say what action is needed. App
+  login retries stop on this error. It does not itself pause a browser or resume
+  the interrupted hook: those behaviors belong to the calling flow.
+
 - `clickFirst(page, texts, timeout = 15000, misses = [])`, `hasLsKey(page, substr)`, `hasCookie(page, name)`,
   `gotoWithRetry(page, url)` (also under `kit.page`). Click timeouts append `{text, reason}`
   to `misses` (trimmed Playwright messages, capped at 2000 characters); the return stays boolean.

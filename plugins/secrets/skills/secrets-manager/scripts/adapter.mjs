@@ -12,6 +12,7 @@ import * as credentials from './credentials.mjs';
 import { configureBlocklist } from './traffic.mjs';
 import { filterState } from './state.mjs';
 import { ispFetch } from './http.mjs';
+import { NeedsHuman } from './errors.mjs';
 
 /**
  * @typedef {{db: object, cred: object, opts: object, io: object}} ByEmailContext
@@ -34,7 +35,7 @@ import { ispFetch } from './http.mjs';
  * @property {string[]} [blockedWebSockets] WebSocket URL wildcards.
  */
 export const kit = {
-  ...page, page, debug, restriction, emailOtp, store, config, credentials,
+  ...page, page, debug, restriction, emailOtp, store, config, credentials, NeedsHuman,
   withProfile: async (...args) => (await import('./login.mjs')).withProfile(...args),
   mintAppPassword: async (...args) => (await import('./login.mjs')).mintAppPassword(...args),
   exportScoped: async (...args) => (await import('./login.mjs')).exportScoped(...args),
