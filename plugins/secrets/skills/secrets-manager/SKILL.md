@@ -250,9 +250,10 @@ for a setup rerun. Other statuses are excluded even with `--all`.
 The hook resolves to `{summary, state}`: `summary` is a nonempty one-line string; `state`
 is any JSON-serialisable app-specific value, including `null`, but not `undefined`. Success
 stores JSON in `state` and marks the session `ready` (logged in and setup done) in one
-write, then prints `<email>: <summary>`. A throw or invalid result, summary or state writes
-nothing and leaves status and prior setup state unchanged, prints `<email>: <message>` to
-stderr and makes the command exit 1;
+write, then prints `<email>: <summary>`. Throwing `kit.NeedsHuman` marks the app session
+`escalated` and prints `<email>: escalated: <message>` to stderr without saving setup state.
+Other throws or invalid results, summaries or states leave status and prior setup state
+unchanged and print `<email>: <message>` to stderr. Any failure makes the command exit 1;
 other selected accounts still run, up to `--concurrency` (default 1).
 An adapter without the hook fails with `<app> has no setup hook`.
 

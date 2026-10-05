@@ -103,7 +103,7 @@ An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files
 | `byEmail(ctx)` | Optional password signup/login through a Gmail plus-alias. |
 | `verify(ctx)` | Optional hook returning `active`, `restricted` or `expired`. |
 | `setupFlags` | Optional object of kebab-case names to `{type: "boolean" \| "string", description: string}`; nonempty descriptions, no global flag names or `help`. Accepted only by this app’s `setup` command. |
-| `setup({db, email, session, opts, io})` | Optional async hook returning `{summary, state}`: a nonempty one-line string and JSON-serialisable app state (not `undefined`); throws on failure. The engine stores JSON `state` and `ready` together on success. |
+| `setup({db, email, session, opts, io})` | Optional async hook returning `{summary, state}`: a nonempty one-line string and JSON-serialisable app state (not `undefined`); throws `kit.NeedsHuman` to mark the session `escalated`. Other errors preserve status; every failure preserves setup state and exits 1. The engine stores JSON `state` and `ready` together on success. |
 | `bannedResponse({url, status, body})` | Optional; called during `login <app>` for every app-domain response with status >= 400. A non-empty reason means the app banned the account: its session row is recorded `restricted` (created if absent), the Google account is untouched, and `login <app>` never retries it. |
 | `whoami({credential})` | Optional async hook returning `{email: string}`; credential type is app-specific. Missing or ambiguous identity throws. |
 | `credentials(session)` | Optional `(session) => Record<string, string> \| null`; returns usable credential fields. |

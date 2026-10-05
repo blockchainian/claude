@@ -544,6 +544,22 @@ test("setup throws per account, preserves failed rows and continues with exit 1"
   assert.equal(store.getSession(db, "alpha", "good@x.com").status, "ready");
 });
 
+test("setup NeedsHuman escalates the session while plain errors preserve status and state", async () => {
+  setupAdapter("async ({ email }) => { if (email.startsWith('human')) throw new kit.NeedsHuman('finish by hand'); throw new Error('setup failed'); }");
+  for (const [email, status] of [["human@x.com", "active"], ["plain@x.com", "ready"]]) {
+    setupSession(email, status);
+    db.prepare("UPDATE alpha SET state = ? WHERE email = ?").run(JSON.stringify({ wallet: "existing" }), email);
+  }
+  const before = db.prepare("SELECT * FROM alpha ORDER BY email").all();
+  const output = io();
+  assert.equal(await main(["setup", "alpha", "--all"], output), 1);
+  assert.deepEqual(output.err, ["human@x.com: escalated: finish by hand", "plain@x.com: setup failed"]);
+  assert.deepEqual(output.out, []);
+  const after = db.prepare("SELECT * FROM alpha ORDER BY email").all();
+  assert.deepEqual({ ...after[0], updated_at: before[0].updated_at }, { ...before[0], status: "escalated" });
+  assert.deepEqual(after[1], before[1]);
+});
+
 test("setup fails explicitly without a hook even when there are no sessions", async () => {
   const output = io();
   assert.equal(await main(["setup", "alpha"], output), 1);

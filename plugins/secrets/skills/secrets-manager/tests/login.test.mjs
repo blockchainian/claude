@@ -7,8 +7,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { kit } from "../scripts/adapter.mjs";
 
 import { APPPASSWORDS_URL, TWOSV_URL, toProxyDict, filterState, extractAppPassword, submitPassword, submitIdentifier, aliasFor, parseSetupKey, onSettingsPage, nationalNumber, DIAL_CODES, COUNTRY_NAMES, isMyAccountUrl, isOnboardingUrl, isSignedInUrl, forceEnglishUrl, ensureEnglish, waitForHuman, pollForState, submitRecaptcha, visibleRecaptchaAnchor, waitGridChanged, waitTilesSwapped, classifyGoogleNode, hasWrongCredential, shouldHoldOpenForDebug, gotoWithRetry, signInGoogle, appAlreadySignedIn, oauthSurface, withAppRetries, isTransientAppError, loadOrCreateFingerprint, Restricted, Expired, NeedsHuman, AppRestricted } from "../scripts/login.mjs";
+
+test("kit.NeedsHuman is the existing login.NeedsHuman class", () => {
+  assert.equal(kit.NeedsHuman, NeedsHuman);
+  assert.ok(new kit.NeedsHuman("finish by hand") instanceof NeedsHuman);
+});
 
 // classifyGoogleNode maps (url, visible-input inventory) to the graph node the loop dispatches on.
 // A hidden input (visible:false) never decides the node — the phone challenge ships a hidden

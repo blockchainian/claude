@@ -12,6 +12,7 @@ import * as credentials from './credentials.mjs';
 import { configureBlocklist } from './traffic.mjs';
 import { filterState } from './state.mjs';
 import { ispFetch } from './http.mjs';
+import { NeedsHuman } from './errors.mjs';
 
 // One shared schema keeps adapter validation and CLI parsing in sync as global flags change.
 export const OPTIONS = {
@@ -48,14 +49,14 @@ export const OPTIONS = {
  * @property {(ctx: ByEmailContext) => Promise<ByEmailResult>} [byEmail]
  * @property {(ctx: VerifyContext) => Promise<'active'|'restricted'|'expired'>} [verify]
  * @property {Record<string, {type: "boolean"|"string", description: string}>} [setupFlags] App-only kebab-case flags; global names and help are reserved.
- * @property {(ctx: SetupContext) => Promise<SetupResult>} [setup] Returns {summary, state}; throws on failure.
+ * @property {(ctx: SetupContext) => Promise<SetupResult>} [setup] Returns {summary, state}; throws kit.NeedsHuman to mark the session escalated.
  * @property {(ctx: {credential: string}) => Promise<{email: string}>} [whoami]
  * @property {(session: object) => Record<string, string>|null} [credentials]
  * @property {string[]} [blockedHosts] Host wildcards.
  * @property {string[]} [blockedWebSockets] WebSocket URL wildcards.
  */
 export const kit = {
-  ...page, page, debug, restriction, emailOtp, store, config, credentials,
+  ...page, page, debug, restriction, emailOtp, store, config, credentials, NeedsHuman,
   withProfile: async (...args) => (await import('./login.mjs')).withProfile(...args),
   mintAppPassword: async (...args) => (await import('./login.mjs')).mintAppPassword(...args),
   exportScoped: async (...args) => (await import('./login.mjs')).exportScoped(...args),
