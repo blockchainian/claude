@@ -28,7 +28,7 @@ TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
 | `import <google\|x\|tiktok> [files...]` | Import credentials. |
 | `login <google\|x\|tiktok\|app>` | Store a browser session. |
 | `login <app> --by-email` | Call an adapter's email hook. |
-| `verify <app>` | Probe and persist session status. |
+| `verify <google\|x\|tiktok\|app>` | Check each account is still usable and persist its status. |
 | `setup-2fa` | Enroll Google TOTP, turn on 2-Step, mint an app password. |
 | `sms <balance\|prices\|number>` | Manage verification SMS. |
 | `export <app> [--select EMAIL]...` | Print active-session credentials as JSONL. |
@@ -39,7 +39,8 @@ TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
 
 Account commands accept repeatable `--select`, `--all`, `--limit`, `--concurrency`,
 `--headed`, and `--rotate-proxy` as described in the skill.
-X token verification lives in intel's `fetch-x-mentions/scripts/verify-x.mjs`.
+`verify google|x|tiktok` are builtin checks; any other target calls the adapter's `verify` hook.
+Deriving a ct0 for a vendor X auth_token stays in intel's `fetch-x-mentions/scripts/verify-x.mjs`.
 
 `export` prints one JSON line per selected active session:
 `{"app":"<app>","email":"<email>",...fields}`. Credential values are printed in clear.

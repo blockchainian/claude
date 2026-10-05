@@ -1,6 +1,6 @@
 ---
 name: secrets-manager
-description: Manage local plaintext credentials and browser sessions, import Google/X/TikTok accounts, log in through external app adapters, verify app sessions, provision Google 2FA, and export app credentials.
+description: Manage local plaintext credentials and browser sessions, import Google/X/TikTok accounts, log in through external app adapters, check that accounts are still usable (verify), provision Google 2FA, and export app credentials.
 ---
 
 # Secrets manager
@@ -67,7 +67,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/cli.mjs" <command> [o
 import <google|x|tiktok> [file...]
 login <google|x|tiktok|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
 login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
-verify <app> [--select ID]... [--all] [--concurrency N] [--headed]
+verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
 setup-2fa [--select EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
 sms <balance|prices|number> [--country N] [--max-price X] [--yes]
 export <app> [--select EMAIL]...
@@ -80,7 +80,7 @@ IDs are emails for Google-backed accounts and usernames for X and TikTok. `--sel
 the named IDs (repeatable); `--all` includes accounts that are already fine; `--limit N` caps the
 run; `--rotate-proxy` uses a rotating proxy exit instead of the account's sticky one. `--concurrency N`
 (default 1 = sequential) drives up to N accounts at once — it applies to every per-account command
-(`login google|x|app`, `login <app> --by-email`, `verify app`, `setup-2fa`). Each
+(`login google|x|app`, `login <app> --by-email`, `verify`, `setup-2fa`). Each
 account has its own profile, sticky exit and DB row, so the flows never collide, and DB and
 credential-file writes are synchronous so parallel workers never clobber each other; a headed run
 opens N browser windows and a held-open debug window holds its slot until closed, so with N accounts
@@ -199,9 +199,27 @@ through the residential proxy.
 
 ### verify
 
-`verify <app>` calls the adapter's `verify({db, email, session, opts, io})` hook and persists
-its `active`, `restricted` or `expired` result. Errors leave the session unchanged and fail the command.
-X token verification moved to the intel plugin's `fetch-x-mentions/scripts/verify-x.mjs`.
+Checks that each selected account is still usable and persists the result. By default only
+`active` accounts are checked; `--all` checks every one. `google`, `x` and `tiktok` are builtin
+checks; any other target calls the adapter's `verify({db, email, session, opts, io})` hook, which
+returns `active`, `restricted` or `expired`. A check that cannot tell (network error, 429, a stale
+queryId, an unexpected page) throws: the status is left unchanged and the command exits 1.
+
+- **google** — opens the account's own profile on its sticky residential exit and reads where
+  myaccount.google.com leaves it: the dashboard or setup wizard is `active`, Google's marketing or
+  sign-in page `expired`, the disabled speedbump `restricted`, another sign-in challenge
+  `escalated`. Plus-alias rows (`base+tag@`) are app alias accounts, not Google sign-ins, and are skipped.
+- **x** — one GraphQL `Viewer` call with the stored `auth_token` + `ct0` through the residential
+  proxy (no browser, no `x-client-transaction-id`). The handle it names matching the row is
+  `active`; auth errors 32/89/215 `expired`; 64 (suspended) `restricted`; 326 (locked, a person
+  must unlock it) `escalated`; a token signing in as another handle throws. Needs `X_BEARER` and
+  `X_VIEWER_QUERY_ID`; a 404 means the queryId is stale — re-read it from the `main.<hash>.js` that
+  x.com/home serves a signed-in account (`queryId:"…",operationName:"Viewer"`).
+- **tiktok** — opens the account's profile on its own ISP slot and reads the handle tiktok.com's
+  explore page names: the account is `active`, no one `expired`, TikTok's ban text `restricted`.
+
+Neither browser check ever signs in. Deriving a ct0 for a vendor X `auth_token` stays in the
+intel plugin's `fetch-x-mentions/scripts/verify-x.mjs`.
 
 ### export
 
@@ -242,6 +260,8 @@ HERO_SMS_API_KEY=...        # optional — rents phone numbers for the SMS step
 ISP_PROXY_URL=http://user:pass@host:port  # TikTok fixed ISP pool
 ISP_PROXY_COUNT=1                      # TikTok slots
 CAPSOLVER_API_KEY=...        # optional — auto-solves the reCAPTCHA and password-page CAPTCHA
+X_BEARER=...                 # verify x: x.com's web-app bearer token
+X_VIEWER_QUERY_ID=...        # verify x: the GraphQL Viewer queryId from x.com's main.js
 ```
 
 Compatible proxies that take `sessid`/`sesstime` in the username give each account a sticky
