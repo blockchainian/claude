@@ -1799,14 +1799,16 @@ export function loadOrCreateFingerprint(path, generate = generateFingerprint) {
 
 // Run `fn` in the persistent Camoufox profile of `key`, through the account's sticky residential
 // exit, or through `proxyUrl` when the caller pins the exit itself. `blockAssets: false` leaves
-// images, media and fonts on, for a site whose challenge is an image.
-export async function withProfile(key, { headed = false, rotate = false, proxyUrl = config.proxyFor(key, { rotate }), blockAssets = true }, fn) {
+// images, media and fonts on, for a site whose challenge is an image. A headed run screen-records its
+// windows; a headless run with `record` saves each page's video under the account's debug dir.
+export async function withProfile(key, { headed = false, rotate = false, proxyUrl = config.proxyFor(key, { rotate }), blockAssets = true, record = false }, fn) {
   const { Camoufox } = await import("camoufox-js");
   const profile = config.profileDirFor(key);
   mkdirSync(profile, { recursive: true });
   if (!proxyUrl) {
     throw new Error("No proxy set. Add RESIDENTIAL_PROXY_URL to ~/.config/secrets-manager/.env; never log in from the home IP.");
   }
+  const videoDir = record && !headed ? debug.videoDir(key) : null;
   if (headed) console.log(`  window opens on ${windowPlace.displayName() || "the main display"}: ${windowPlace.openOnDisplay(profile)}`);
   const context = await Camoufox({
     headless: !headed,
@@ -1816,6 +1818,7 @@ export async function withProfile(key, { headed = false, rotate = false, proxyUr
     user_data_dir: profile,
     fingerprint: loadOrCreateFingerprint(join(profile, "fingerprint.json")),
     i_know_what_im_doing: true, // the fingerprint is Camoufox's own, persisted per profile on purpose
+    ...(videoDir ? { recordVideo: { dir: videoDir } } : {}),
   });
   let page;
   let recording = null;
@@ -1841,6 +1844,7 @@ export async function withProfile(key, { headed = false, rotate = false, proxyUr
       if (saved) console.log(`  saved recording: ${saved}`);
     }
     await context.close().catch(() => {});
+    if (videoDir) console.log(`  saved recording: ${videoDir}`);
   }
 }
 
@@ -1958,7 +1962,7 @@ async function reauthSensitive(page, cred, target = "apppasswords", { assist = f
 // Returns the `xxxx xxxx xxxx xxxx` code, or null on any step that did not complete. Never logged.
 export async function mintAppPassword(cred, { name, headed = false, rotate = false } = {}) {
   if (typeof name !== "string" || !name) throw new Error("app password name is required");
-  return withProfile(cred.email, { headed, rotate }, async (_context, page) => {
+  return withProfile(cred.email, { headed, rotate, record: true }, async (_context, page) => {
     await gotoWithRetry(page, APPPASSWORDS_URL);
     if (!(await reauthSensitive(page, cred, "apppasswords", { assist: headed }))) {
       await debug.capture(page, cred.email, "apppw-reauth-failed");
@@ -2007,7 +2011,7 @@ export const TWOSV_URL = "https://myaccount.google.com/signinoptions/twosv?hl=en
 // complete (a debug capture is left). Throws NotLoggedIn when the profile has no session and
 // NeedsHuman on a Google challenge. Not unit-tested; verify with --headed on the first account.
 export async function enrollAuthenticator(cred, { headed = false, rotate = false } = {}) {
-  return withProfile(cred.email, { headed, rotate }, async (_context, page) => {
+  return withProfile(cred.email, { headed, rotate, record: true }, async (_context, page) => {
     if (!(await isGoogleLoggedIn(page))) throw new NotLoggedIn(`${cred.email}: no Google session; run \`login google\` first`);
     await gotoWithRetry(page, TWOSV_URL);
     if (!(await reauthSensitive(page, cred, "twosv", { assist: headed }))) {
@@ -2064,7 +2068,7 @@ export async function enrollAuthenticator(cred, { headed = false, rotate = false
 // returns true immediately when 2-Step already reads as on, so a resumed run is safe. Throws
 // NotLoggedIn without a session. Not unit-tested; verify with --headed on the first account.
 export async function turnOnTwoStep(cred, { headed = false, rotate = false } = {}) {
-  return withProfile(cred.email, { headed, rotate }, async (_context, page) => {
+  return withProfile(cred.email, { headed, rotate, record: true }, async (_context, page) => {
     if (!(await isGoogleLoggedIn(page))) throw new NotLoggedIn(`${cred.email}: no Google session; run \`login google\` first`);
     await gotoWithRetry(page, TWOSV_URL);
     if (!(await reauthSensitive(page, cred, "twosv", { assist: headed }))) {
@@ -2103,7 +2107,7 @@ export async function runAccount(db, cred, adapters, { headed = false, rotate = 
   // A headed run is interactive, so the flow may pause for the person to clear a reCAPTCHA in the
   // window; `assist` is that "a human is at the window", derived from headed — never a separate flag.
   const assist = headed;
-  await withProfile(cred.email, { headed, rotate }, async (_context, page) => {
+  await withProfile(cred.email, { headed, rotate, record: true }, async (_context, page) => {
     await signInGoogle(page, cred, { assist });
     store.markLoggedIn(db, cred.email);
     for (const adapter of adapters) await exportApp(page, db, adapter, cred, { assist });

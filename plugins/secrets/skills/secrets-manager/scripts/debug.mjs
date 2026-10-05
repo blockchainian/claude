@@ -1,4 +1,4 @@
-// ABOUTME: Dumps a screenshot and page facts when a login step fails, and screen-records headed runs,
+// ABOUTME: Dumps a screenshot and page facts when a login step fails, and records headed and headless runs,
 // ABOUTME: for offline inspection. Best-effort and never throws, so a capture failure can't mask errors.
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -29,6 +29,12 @@ export function write(email, name, buffer) {
   } catch {
     return null;
   }
+}
+
+// The directory a headless run's page videos are saved to: debugDir/<email>/rec-<ts>/, one .webm per
+// page (the OAuth popup included). Playwright writes them when the context closes.
+export function videoDir(email) {
+  return join(debugDir(), email, `rec-${stamp()}`);
 }
 
 // Start recording the headed browser's windows (the process `pid`, so an OAuth popup is included and

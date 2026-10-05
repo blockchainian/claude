@@ -34,7 +34,9 @@ Pinned: Camoufox v152.0.4-beta.30, camoufox-js 0.12.0, playwright-core 1.60.0. H
 display `CAMOUFOX_DISPLAY` names in `~/.config/secrets-manager/.env` (any part of its name, any
 case, e.g. `SAMSUNG`; unset means the main display; `displayOrigin.swift`), move OAuth popups there
 (`moveWindows.swift`, needs Accessibility trust) and record them (`recordWindows.swift`, needs Screen Recording
-permission), both through `swift`.
+permission), both through `swift`. Headless Google sign-ins (`login`, `setup-2fa`, app-password
+minting) save a Playwright page video per page, OAuth popup included, under
+`~/.config/secrets-manager/debug/<email>/rec-<ts>/`.
 
 ## New account flow
 

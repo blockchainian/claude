@@ -84,9 +84,10 @@ The kit provides:
 - `aliasFor(baseEmail, tag)` (required tag), `mintAppPassword(cred, {name, ...})`
   (required name).
 - `withProfile(key, {headed = false, rotate = false, proxyUrl = config.proxyFor(key, {rotate}),
-  blockAssets = true}, fn)` opens a persistent Camoufox browser for a `byEmail` or `verify`
+  blockAssets = true, record = false}, fn)` opens a persistent Camoufox browser for a `byEmail` or `verify`
   hook. It reuses the engine's profile directory, proxy, stored fingerprint, traffic blocking,
-  headed diagnostics and cleanup. Calls `fn(context, page)`, returns its result,
+  headed diagnostics and cleanup; a headless run with `record` saves page videos under the
+  account's debug dir. Calls `fn(context, page)`, returns its result,
   and closes the context in `finally`, including when the callback throws.
   Resolve proxy URLs explicitly with `kit.config.proxyFor(key, {rotate})` when needed.
 - `ispFetch(url, init)` is `fetch` through a random ISP pool slot (`ISP_PROXY_URL`, slots
