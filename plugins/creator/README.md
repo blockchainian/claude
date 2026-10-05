@@ -1,7 +1,7 @@
 # creator
 
 Run creator accounts on TikTok from Claude Code or Codex. See
-[installation and compatibility](../../docs/codex-compatibility.md). The accounts, their
+[installation](../../README.md#codex). The accounts, their
 credentials, browser profiles and status live in the secrets plugin's `secrets-manager` store; this plugin only reads it.
 
 ## Skills

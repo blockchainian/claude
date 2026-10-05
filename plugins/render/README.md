@@ -42,8 +42,7 @@ The Claude MCP server authenticates over OAuth on first use.
 
 ### Codex
 
-See [Codex compatibility](../../docs/codex-compatibility.md) for installation
-and MCP authentication. Render registers separate OAuth clients for Claude
+See [Codex installation](../../README.md#codex) for installation. Complete MCP authentication when prompted. Render registers separate OAuth clients for Claude
 and Codex; see `render-mcp` for manual OAuth or API-key configuration.
 
 The Claude agent and edit hook remain Claude-specific. Codex CLI may import the

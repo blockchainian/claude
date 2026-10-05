@@ -69,8 +69,8 @@ or trusted. This pass adapts host compatibility and leaves occupancy behavior un
 
 ## Install
 
-For Codex installation and the shared script-path convention, see
-[Codex compatibility](../../docs/codex-compatibility.md).
+For Codex installation, see
+[Codex installation](../../README.md#codex).
 
 This compatibility pass changes skill instructions and plugin configuration;
 it does not change device claims, session defaults, or synchronization behavior.

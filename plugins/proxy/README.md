@@ -13,8 +13,8 @@ on either host's browser tools.
 
 ## Install
 
-For Codex installation and the shared script-path convention, see
-[Codex compatibility](../../docs/codex-compatibility.md).
+For Codex installation, see
+[Codex installation](../../README.md#codex).
 
 In Claude Code:
 
