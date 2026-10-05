@@ -57,7 +57,10 @@ export function openDb(path) {
   }
   db.exec(readFileSync(SCHEMA_PATH, "utf8"));
   migrateGoogleStatus(db);
-  for (const app of listApps(db)) migrateAppStatus(db, app);
+  for (const app of listApps(db)) {
+    migrateAppStatus(db, app);
+    migrateAppSetupState(db, app);
+  }
   return db;
 }
 
@@ -105,16 +108,26 @@ function migrateAppStatus(db, table) {
       cookies TEXT NOT NULL,
       local_storage TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active' ${STATUS_CHECK},
+      setup_state TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )`);
-    db.exec(`INSERT INTO "${table}_migrate" SELECT email, cookies, local_storage, status, created_at, updated_at FROM "${table}"`);
+    const state = db.prepare(`PRAGMA table_info("${table}")`).all().some(c => c.name === "setup_state") ? "setup_state" : "NULL";
+    db.exec(`INSERT INTO "${table}_migrate" SELECT email, cookies, local_storage, status, ${state}, created_at, updated_at FROM "${table}"`);
     db.exec(`DROP TABLE "${table}"`);
     db.exec(`ALTER TABLE "${table}_migrate" RENAME TO "${table}"`);
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
+  }
+}
+
+// Adding setup state needs no rebuild, so existing indexes and rows stay intact. Guard the
+// ALTER because every open visits stored apps, including ones without an installed adapter.
+function migrateAppSetupState(db, table) {
+  if (!db.prepare(`PRAGMA table_info("${table}")`).all().some(c => c.name === "setup_state")) {
+    db.exec(`ALTER TABLE "${table}" ADD COLUMN setup_state TEXT`);
   }
 }
 
@@ -173,6 +186,7 @@ export function ensureAppTable(db, app) {
        cookies TEXT NOT NULL,
        local_storage TEXT NOT NULL,
        status TEXT NOT NULL DEFAULT 'active' ${STATUS_CHECK},
+       setup_state TEXT,
        created_at TEXT NOT NULL,
        updated_at TEXT NOT NULL
      )`,
@@ -197,7 +211,8 @@ export function listApps(db) {
     .filter((name) => hasEmailColumn(db, name));
 }
 
-// Store a fresh login state. Setup lives server-side, so refreshing tokens must not erase ready.
+// Store a fresh login state. Setup lives server-side, so refreshing tokens must not erase ready
+// or setup_state; neither setup field is replaced by the login export.
 export function saveSession(db, app, email, cookies, localStorage) {
   const table = ensureAppTable(db, app);
   const ts = now();
@@ -223,6 +238,7 @@ export function getSession(db, app, email) {
     updated_at: row.updated_at,
     cookies: JSON.parse(row.cookies),
     local_storage: JSON.parse(row.local_storage),
+    setup_state: row.setup_state === null ? null : JSON.parse(row.setup_state),
   };
 }
 
