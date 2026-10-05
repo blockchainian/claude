@@ -1,7 +1,6 @@
 // ABOUTME: Logs a TikTok account in through a real Camoufox browser and captures its session cookies.
 // ABOUTME: The login runs on one ISP pool slot (a fixed IP), the only exit the session is used from.
 
-import { createInterface } from "node:readline";
 import { existsSync, renameSync } from "node:fs";
 
 
@@ -72,21 +71,6 @@ async function submitCredentials(page, username, password) {
   }
 }
 
-// Ask for the emailed code on the terminal. Null when there is no terminal to answer (stdin
-// closed) or the question is called off (`signal`), which leaves the code to a person in the
-// headed window.
-export function promptEmailCode(username, signal, { input = process.stdin, output = process.stdout } = {}) {
-  return new Promise((resolve) => {
-    const rl = createInterface({ input, output });
-    rl.once("close", () => resolve(null));
-    signal?.addEventListener("abort", () => rl.close());
-    rl.question(`  ${username}: code TikTok emailed: `, (answer) => {
-      resolve(answer.trim() || null);
-      rl.close();
-    });
-  });
-}
-
 async function clickVisible(locator) {
   if (!(await locator.isVisible().catch(() => false))) return false;
   return locator.click({ timeout: 4000 }).then(() => true, () => false);
@@ -99,65 +83,49 @@ async function clickCodeSubmit(page) {
   }
 }
 
-// Type the emailed code into the dialog's code field and submit it.
-async function submitEmailCode(page, code) {
-  await page.locator(CODE_SELECTOR).first().click({ timeout: 4000 });
-  await page.keyboard.type(code, { delay: 80 });
-  await page.waitForTimeout(1000);
-  await clickCodeSubmit(page);
-}
-
-// Drive TikTok's username + password form and the email-code dialog after it, polling for the
-// session cookie until the deadline, so a person in the headed window can clear whatever else
-// TikTok shows (a CAPTCHA). `readCode` supplies the emailed code; the polling goes on while it is
-// asked, so that person may as well type the code into the window, and the question is called off
-// when the sign-in ends either way.
-export async function signInTiktok(context, page, username, password, deadlineMs, { readCode = promptEmailCode } = {}) {
+// Drive the login form and wait for a person to enter an emailed code in the headed window.
+// Headless runs cannot accept a human code and report that the account needs a headed login.
+export async function signInTiktok(context, page, username, password, deadlineMs, { headed = false } = {}) {
   await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" });
-  const ended = new AbortController();
   let submitted = false;
   let failure = new TiktokLoginError(`${username}: no ${SESSION_COOKIE} cookie after login (challenge unresolved?)`);
   let codeAsked = false;
-  let code = null;
   const submittedCodes = new Set();
-  try {
-    while (Date.now() < deadlineMs) {
-      const cookies = sessionCookies(await context.cookies());
-      if (cookies) return cookies;
-      if (!submitted) {
-        const result = await submitCredentials(page, username, password);
-        if (result === "disabled") {
-          failure = new TiktokDisabledLoginError(`${username}: disabled login button after the form was filled`);
-          break;
-        }
-        submitted = result;
-      } else if (
-        (await page.getByText(BANNED_HEADING, { exact: true }).first().isVisible().catch(() => false)) ||
-        (await page.getByText(SUSPENDED_ERROR, { exact: true }).first().isVisible().catch(() => false))
-      ) {
-        await debug.capture(page, username, "tiktok-login-banned");
-        throw new TiktokBannedError(`${username}: TikTok reports this account as banned or suspended`);
-      } else if (code) {
-        submittedCodes.add(code);
-        await submitEmailCode(page, code).catch(() => {});
-        code = null;
-      } else if (await page.locator(CODE_SELECTOR).first().isVisible().catch(() => false)) {
-        if (!codeAsked) {
-          codeAsked = true;
-          readCode(username, ended.signal).then((answer) => (code = answer));
-        }
-        const value = await page.locator(CODE_SELECTOR).first().inputValue({ timeout: 1000 }).catch(() => "");
-        if (!code && /^\d{6}$/.test(value) && !submittedCodes.has(value)) {
-          submittedCodes.add(value);
-          await clickCodeSubmit(page);
-        }
-      } else if (!codeAsked) {
-        await clickVisible(page.getByText("Email", { exact: true }).last());
+  while (Date.now() < deadlineMs) {
+    const cookies = sessionCookies(await context.cookies());
+    if (cookies) return cookies;
+    if (!submitted) {
+      const result = await submitCredentials(page, username, password);
+      if (result === "disabled") {
+        failure = new TiktokDisabledLoginError(`${username}: disabled login button after the form was filled`);
+        break;
       }
-      await page.waitForTimeout(1500);
+      submitted = result;
+    } else if (
+      (await page.getByText(BANNED_HEADING, { exact: true }).first().isVisible().catch(() => false)) ||
+      (await page.getByText(SUSPENDED_ERROR, { exact: true }).first().isVisible().catch(() => false))
+    ) {
+      await debug.capture(page, username, "tiktok-login-banned");
+      throw new TiktokBannedError(`${username}: TikTok reports this account as banned or suspended`);
+    } else if (await page.locator(CODE_SELECTOR).first().isVisible().catch(() => false)) {
+      if (!headed) {
+        failure = new TiktokLoginError(`${username}: email verification needs a person — run login tiktok --headed and enter the code in the browser`);
+        break;
+      }
+      if (!codeAsked) {
+        codeAsked = true;
+        const out = await debug.capture(page, username, "tiktok-email-code");
+        console.log(`  >>> ASSIST NEEDED: enter the code TikTok emailed to ${username} in the browser${out ? ` (debug: ${out})` : ""}`);
+      }
+      const value = await page.locator(CODE_SELECTOR).first().inputValue({ timeout: 1000 }).catch(() => "");
+      if (/^\d{6}$/.test(value) && !submittedCodes.has(value)) {
+        submittedCodes.add(value);
+        await clickCodeSubmit(page);
+      }
+    } else if (!codeAsked) {
+      await clickVisible(page.getByText("Email", { exact: true }).last());
     }
-  } finally {
-    ended.abort();
+    await page.waitForTimeout(1500);
   }
   await debug.capture(page, username, "tiktok-login-no-session");
   throw failure;
@@ -218,7 +186,7 @@ export async function loginTiktokAccount(db, row, { headed = false, timeoutS = 3
     }
     if (!cookies) {
       try {
-        cookies = await signInTiktok(context, page, username, row.password, Date.now() + timeoutS * 1000);
+        cookies = await signInTiktok(context, page, username, row.password, Date.now() + timeoutS * 1000, { headed });
       } catch (e) {
         if (!(e instanceof TiktokLoginError)) throw e;
         return e;
