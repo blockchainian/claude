@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { main } from "../scripts/cli.mjs";
-import { BUILTIN_CHECKS } from "../scripts/verify.mjs";
+import { BUILTIN_CHECKS, nextStatus } from "../scripts/verify.mjs";
 import * as config from "../scripts/config.mjs";
 import * as store from "../scripts/store.mjs";
 
@@ -114,4 +114,32 @@ test("verify with no active rows says so and exits 0", async () => {
   const o = io();
   assert.equal(await main(["verify", "tiktok"], o), 0);
   assert.ok(o.text().includes("no TikTok active accounts to check"));
+});
+
+test("expired never overwrites restricted or escalated; every other result is written", () => {
+  assert.equal(nextStatus("restricted", "expired"), "restricted");
+  assert.equal(nextStatus("escalated", "expired"), "escalated");
+  assert.equal(nextStatus("restricted", "active"), "active");
+  assert.equal(nextStatus("escalated", "restricted"), "restricted");
+  assert.equal(nextStatus("active", "expired"), "expired");
+  assert.equal(nextStatus("expired", "escalated"), "escalated");
+});
+
+test("verify --all keeps a banned account restricted when only its token is dead", async () => {
+  seedX(["amy", "restricted"], ["bob", "escalated"], ["cat", "active"]);
+  BUILTIN_CHECKS.x.check = async () => "expired";
+  const o = io();
+  assert.equal(await main(["verify", "x", "--all"], o), 0);
+  assert.equal(status("x", "username", "amy"), "restricted");
+  assert.equal(status("x", "username", "bob"), "escalated");
+  assert.equal(status("x", "username", "cat"), "expired");
+  assert.ok(o.text().includes("amy: expired (kept restricted)"));
+});
+
+test("an adapter app's restricted session is kept too", async () => {
+  store.upsertAccount(db, "g@mail.com", "pw", null);
+  store.saveSession(db, "beta", "g@mail.com", [], []);
+  store.setSessionStatus(db, "beta", "g@mail.com", "restricted");
+  assert.equal(await main(["verify", "beta", "--all"], io()), 0);
+  assert.equal(store.getSession(db, "beta", "g@mail.com").status, "restricted");
 });

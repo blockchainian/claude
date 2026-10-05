@@ -204,6 +204,9 @@ Checks that each selected account is still usable and persists the result. By de
 checks; any other target calls the adapter's `verify({db, email, session, opts, io})` hook, which
 returns `active`, `restricted` or `expired`. A check that cannot tell (network error, 429, a stale
 queryId, an unexpected page) throws: the status is left unchanged and the command exits 1.
+An `expired` result never overwrites `restricted` or `escalated` — a banned or person-blocked
+account's token is usually dead too — and is logged as `expired (kept restricted)`; any other
+result is written.
 
 - **google** — opens the account's own profile on its sticky residential exit and reads where
   myaccount.google.com leaves it: the dashboard or setup wizard is `active`, Google's marketing or

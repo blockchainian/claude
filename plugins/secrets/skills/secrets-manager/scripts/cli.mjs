@@ -9,7 +9,7 @@ import { runWithConcurrency } from "./concurrency.mjs";
 import { loadCredentials, parseLine, setAppPassword, setTotpSecret } from "./credentials.mjs";
 import * as sms from "./sms-otp.mjs";
 import * as store from "./store.mjs";
-import { BUILTIN_CHECKS, CHECK_RESULTS } from "./verify.mjs";
+import { BUILTIN_CHECKS, CHECK_RESULTS, nextStatus } from "./verify.mjs";
 // --- credential file parsing -------------------------------------------------
 
 // X accounts arrive from a vendor in a few colon-separated shapes (6 or 8 fields, and the
@@ -442,7 +442,7 @@ function adapterCheck(target) {
 }
 
 // Checks each selected account of a builtin target (google, x, tiktok) or an adapter app and writes
-// back its status; a check that throws or returns something else leaves the status as it was.
+// back its status (see nextStatus); a check that throws or returns something else leaves it as it was.
 async function runVerify(db, opts, io) {
   const [target] = opts.positional;
   const spec = BUILTIN_CHECKS[target] ?? adapterCheck(target);
@@ -454,8 +454,9 @@ async function runVerify(db, opts, io) {
     try {
       const status = await spec.check({ db, row, opts, io });
       if (!allowed.includes(status)) throw new Error(`invalid verify result ${status}`);
-      spec.setStatus(db, id, status);
-      io.log(`${id}: ${status}`);
+      const stored = nextStatus(row.status, status);
+      spec.setStatus(db, id, stored);
+      io.log(stored === status ? `${id}: ${status}` : `${id}: ${status} (kept ${stored})`);
       return false;
     } catch (e) { io.error(`${id}: ${e.message}`); return true; }
   });

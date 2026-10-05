@@ -6,6 +6,14 @@ import { checkX } from "./x-verify.mjs";
 // The statuses a check may return. `escalated` = usable only after a person clears something (X lock).
 export const CHECK_RESULTS = [store.STATUS_ACTIVE, store.STATUS_EXPIRED, store.STATUS_RESTRICTED, store.STATUS_ESCALATED];
 
+// The status to store after a check. `expired` only says the stored token no longer works, which a
+// banned (`restricted`) or person-blocked (`escalated`) account's token usually also is, so it never
+// overwrites those; any other result is newer knowledge and is written.
+export function nextStatus(current, result) {
+  const kept = result === store.STATUS_EXPIRED && (current === store.STATUS_RESTRICTED || current === store.STATUS_ESCALATED);
+  return kept ? current : result;
+}
+
 // Each entry: `label` for messages, `rows(db)` every account of the target, `id(row)` its key,
 // `setStatus(db, id, status)`, and `check({db, row, opts, io})` returning one of CHECK_RESULTS or
 // throwing when the probe cannot tell (the status is then left as it was).
