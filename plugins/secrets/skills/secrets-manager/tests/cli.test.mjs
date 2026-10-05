@@ -511,7 +511,7 @@ test("setup parses the same flags as verify and requires one app", () => {
 });
 
 test("setup succeeds for active sessions; --all adds ready and --select narrows", async () => {
-  setupAdapter("async ({ session }) => `configured from ${session.status}`");
+  setupAdapter("async ({ session }) => ({ summary: `configured from ${session.status}`, state: { from: session.status } })");
   for (const status of ["new", "active", "ready", "expired", "restricted", "escalated"]) setupSession(`${status}@x.com`, status);
   store.upsertAccount(db, "missing@x.com", "pw", null);
   // As with verify, an app session needs an imported account to be selected.
@@ -531,7 +531,7 @@ test("setup succeeds for active sessions; --all adds ready and --select narrows"
 });
 
 test("setup throws per account, preserves failed rows and continues with exit 1", async () => {
-  setupAdapter("async ({ email }) => { if (email.startsWith('bad')) throw new Error('setup failed'); return 'configured'; }");
+  setupAdapter("async ({ email }) => { if (email.startsWith('bad')) throw new Error('setup failed'); return { summary: 'configured', state: { configured: true } }; }");
   setupSession("bad-active@x.com", "active");
   setupSession("bad-ready@x.com", "ready");
   setupSession("good@x.com", "active");
@@ -552,7 +552,7 @@ test("setup fails explicitly without a hook even when there are no sessions", as
 });
 
 test("setup rejects missing or empty summaries without changing status", async () => {
-  setupAdapter("async ({ session }) => session.cookies[0].value");
+  setupAdapter("async ({ session }) => ({ summary: session.cookies[0].value, state: null })");
   for (const [i, value] of [undefined, null, 7, "", "   "].entries()) setupSession(`bad${i}@x.com`, "active", [{ name: "summary", value }]);
   const output = io();
   assert.equal(await main(["setup", "alpha"], output), 1);
@@ -569,7 +569,7 @@ test("setup passes the hook context and honors concurrency", async () => {
     peak = Math.max(peak, ++running);
     await new Promise(resolve => setImmediate(resolve));
     running--;
-    return 'configured (peak ' + peak + ')';
+    return { summary: 'configured (peak ' + peak + ')', state: { peak } };
   }`);
   for (const email of ["a@x.com", "b@x.com", "c@x.com", "d@x.com"]) setupSession(email, "active");
   const output = io();
@@ -577,4 +577,71 @@ test("setup passes the hook context and honors concurrency", async () => {
   assert.equal(output.out.length, 4);
   assert.ok(output.out.every(line => line.endsWith(": configured (peak 2)")));
   assert.ok(db.prepare("SELECT status FROM alpha").all().every(row => row.status === "ready"));
+});
+
+
+for (const state of [null, false, 0, "wallet", [1, null], { wallet: { id: "test" }, steps: [true] }]) {
+  test(`setup stores JSON state ${JSON.stringify(state)} and ready in one write; get parses it`, async () => {
+    setupAdapter(`async () => ({ summary: 'configured', state: ${JSON.stringify(state)} })`);
+    setupSession("a@x.com", "active");
+    // A trigger rejects an intermediate ready row, proving state and status arrive together.
+    db.exec(`CREATE TRIGGER require_state BEFORE UPDATE ON alpha
+      WHEN NEW.status = 'ready' AND NEW.state IS NULL
+      BEGIN SELECT RAISE(ABORT, 'ready needs setup state'); END`);
+    const output = io();
+    assert.equal(await main(["setup", "alpha", "--select", "a@x.com"], output), 0);
+    assert.deepEqual(output.out, ["a@x.com: configured"]);
+    assert.deepEqual(output.err, []);
+    const row = db.prepare("SELECT * FROM alpha").get();
+    assert.equal(row.status, "ready");
+    assert.equal(row.state, JSON.stringify(state));
+    const got = io();
+    assert.equal(await main(["get", "alpha", "--select", "a@x.com"], got), 0);
+    assert.deepEqual(JSON.parse(got.text()).state, state);
+  });
+}
+
+for (const [label, result, error] of [
+  ["undefined result", "undefined", "result"],
+  ["null result", "null", "result"],
+  ["old string contract", "'configured'", "result"],
+  ["array result", "[]", "result"],
+  ["missing summary", "({ state: null })", "summary"],
+  ["multiline summary", "({ summary: 'line\\nline', state: null })", "summary"],
+  ["carriage return summary", "({ summary: 'line\\rline', state: null })", "summary"],
+  ["missing state", "({ summary: 'configured' })", "state"],
+  ["undefined state", "({ summary: 'configured', state: undefined })", "state"],
+  ["function state", "({ summary: 'configured', state: () => {} })", "state"],
+  ["symbol state", "({ summary: 'configured', state: Symbol('state') })", "state"],
+  ["BigInt state", "({ summary: 'configured', state: { id: 1n } })", "state"],
+  ["circular state", "(() => { const state = {}; state.self = state; return { summary: 'configured', state }; })()", "state"],
+  ["toJSON returns undefined", "({ summary: 'configured', state: { toJSON: () => undefined } })", "state"],
+  ["toJSON throws", "({ summary: 'configured', state: { toJSON: () => { throw new Error('cannot encode'); } } })", "state"],
+]) {
+  test(`setup rejects ${label} without storing anything or changing status`, async () => {
+    setupAdapter(`async () => ${result}`);
+    setupSession("active@x.com", "active");
+    setupSession("ready@x.com", "ready");
+    db.prepare("UPDATE alpha SET state = ? WHERE email = 'ready@x.com'").run('{"previous":true}');
+    const before = db.prepare("SELECT * FROM alpha ORDER BY email").all();
+    const output = io();
+    assert.equal(await main(["setup", "alpha", "--all"], output), 1);
+    assert.deepEqual(output.out, []);
+    assert.equal(output.err.length, 2);
+    assert.ok(output.err.every(line => line.endsWith(`: invalid setup ${error}`)), output.errText());
+    assert.deepEqual(db.prepare("SELECT * FROM alpha ORDER BY email").all(), before);
+  });
+}
+
+test("a failed setup write preserves both state and status", async () => {
+  setupAdapter("async () => ({ summary: 'configured', state: { wallet: 'new' } })");
+  setupSession("a@x.com", "active");
+  db.exec(`CREATE TRIGGER reject_setup BEFORE UPDATE ON alpha
+    BEGIN SELECT RAISE(ABORT, 'write rejected'); END`);
+  const before = db.prepare("SELECT * FROM alpha").get();
+  const output = io();
+  assert.equal(await main(["setup", "alpha"], output), 1);
+  assert.match(output.errText(), /write rejected/);
+  assert.deepEqual(output.out, []);
+  assert.deepEqual(db.prepare("SELECT * FROM alpha").get(), before);
 });

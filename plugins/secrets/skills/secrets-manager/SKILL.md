@@ -247,9 +247,12 @@ prepares each selected logged-in account through the adapter's optional
 `setup({db, email, session, opts, io})` hook. Like adapter verification, it selects imported
 accounts holding an app session: by default only `active`; `--all` also includes `ready`
 for a setup rerun. Other statuses are excluded even with `--all`.
-The hook resolves to a nonempty one-line summary string. Success marks the session `ready`
-(logged in and setup done) and prints `<email>: <summary>`. A throw or invalid summary leaves
-status unchanged, prints `<email>: <message>` to stderr and makes the command exit 1;
+The hook resolves to `{summary, state}`: `summary` is a nonempty one-line string; `state`
+is any JSON-serialisable app-specific value, including `null`, but not `undefined`. Success
+stores JSON in `state` and marks the session `ready` (logged in and setup done) in one
+write, then prints `<email>: <summary>`. A throw or invalid result, summary or state writes
+nothing and leaves status and prior setup state unchanged, prints `<email>: <message>` to
+stderr and makes the command exit 1;
 other selected accounts still run, up to `--concurrency` (default 1).
 An adapter without the hook fails with `<app> has no setup hook`.
 
@@ -293,7 +296,10 @@ its app statuses. Existing app tables remain readable even without their adapter
 
 - `secrets.sqlite` — tables `google` (accounts), `x` (accounts + tokens), `tiktok` (accounts +
   cookies + ISP slot), and one per app
-  (cookies, localStorage, status per account). Status vocabulary:
+  (cookies, localStorage, status, nullable `state TEXT` per account). `state` holds
+  JSON from the app setup hook; `get <app> --select EMAIL` returns it parsed. Re-login leaves
+  it untouched. Existing app tables gain the column on open with a guarded, idempotent
+  `ALTER TABLE ... ADD COLUMN`, without rebuilding for this column. Status vocabulary:
   `new | active | ready | expired | restricted | escalated` (`new` = imported, `active` = logged
   in, `ready` = logged in and app setup done, restricted = banned by the app, escalated = needs a
   human). Only app sessions become `ready` through setup; builtins do not have setup hooks.
