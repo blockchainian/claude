@@ -5,6 +5,10 @@ description: Manage local plaintext credentials and browser sessions, import Goo
 
 # Secrets manager
 
+Works in Claude Code and Codex. Both hosts use the same CLI, adapter interface
+and existing account state; installing in another host does not migrate accounts.
+Close a profile’s browser before opening that same account from another host.
+
 Resolve `SKILL_DIR` from the absolute directory containing this loaded `SKILL.md`,
 not the project working directory. Set it in every shell call. Run the CLI directly
 from this skill; no global command is installed. All state lives under `SECRETS_MANAGER_STATE_PATH` (default

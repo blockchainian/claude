@@ -1,8 +1,30 @@
 # secrets
 
-Local plaintext account credentials and browser sessions, outside the repository. The
+Shared by Claude Code and Codex: local plaintext account credentials and browser sessions, outside the repository. The
 `secrets-manager` skill imports Google, X and TikTok credentials, drives Camoufox logins,
 and lets external adapters define app login, verification and credential exports.
+
+## Install
+
+Claude Code:
+
+```text
+/plugin marketplace add blockchainian/claude
+/plugin install secrets@blockchainian
+```
+
+Codex (use `--ref codex` until this branch merges):
+
+```sh
+codex plugin marketplace add blockchainian/claude --ref codex
+codex plugin add secrets@blockchainian
+```
+
+Start a new session after installing or updating. Both hosts load the same
+`secrets-manager` skill, CLI and adapter interface. Each install has its own npm
+dependencies; both read the same existing state at `~/.config/secrets-manager`.
+Installing in another host does not create or migrate accounts. Close a profile's
+browser before opening the same account from another host.
 
 ## Setup
 

@@ -1,7 +1,7 @@
 # claude
 
 The `blockchainian` plugin marketplace for Claude Code, with Cloudflare, Web,
-Proxy, Creator, Render, Mobile, and Intel also available in Codex from the same repository.
+Proxy, Creator, Render, Mobile, Intel, and Secrets also available in Codex from the same repository.
 
 | Plugin | What it does |
 |---|---|
@@ -48,9 +48,10 @@ codex plugin add creator@blockchainian
 codex plugin add render@blockchainian
 codex plugin add mobile@blockchainian
 codex plugin add intel@blockchainian
+codex plugin add secrets@blockchainian
 ```
 
-The Codex catalog contains these seven plugins only. Before this PR merges, add
+The Codex catalog contains these eight plugins only. Before this PR merges, add
 `--ref codex` to the marketplace command; for a local checkout, run
 `codex plugin marketplace add .` from its root. Start a new session after installing.
 These commands were verified with Codex CLI 0.160.0.
@@ -64,7 +65,7 @@ For Mobile phone automation, review and trust `phone-session-gate` in `/hooks` f
 
 ```
 .claude-plugin/marketplace.json   the catalog, listing every plugin
-.agents/plugins/marketplace.json the Codex catalog, listing seven portable plugins
+.agents/plugins/marketplace.json the Codex catalog, listing eight portable plugins
 plugins/codex/                    the codex-manager plugin
 plugins/feature/                  the ship / handoff / retro plugin
 plugins/mobile/                   the iOS plugin
