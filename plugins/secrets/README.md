@@ -81,9 +81,11 @@ a thrown error leaves status unchanged and fails the command.
 
 The kit provides:
 
-- `clickFirst(page, texts, timeout)`, `hasLsKey(page, substr)`, `hasCookie(page, name)`,
-  `gotoWithRetry(page, url)` (also under `kit.page`).
-- `debug.capture(page, label, tag)`; `restriction.storedTokenLive`, `restriction.tokenLive`.
+- `clickFirst(page, texts, timeout = 15000, misses = [])`, `hasLsKey(page, substr)`, `hasCookie(page, name)`,
+  `gotoWithRetry(page, url)` (also under `kit.page`). Click timeouts append `{text, reason}`
+  to `misses` (trimmed Playwright messages, capped at 2000 characters); the return stays boolean.
+- `debug.capture(page, email, label, note)` saves an optional text note as `screenshot.txt`
+  beside `screenshot.png`, best-effort; `restriction.storedTokenLive`, `restriction.tokenLive`.
 - `aliasFor(baseEmail, tag)` (required tag), `mintAppPassword(cred, {name, ...})`
   (required name).
 - `withProfile(key, {headed = false, rotate = false, proxyUrl = config.proxyFor(key, {rotate}),

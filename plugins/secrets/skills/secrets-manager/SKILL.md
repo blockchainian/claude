@@ -316,6 +316,12 @@ External ES modules default-export `(kit) => Adapter[]`. Apps are defined outsid
 the generic engine completes Google OAuth and scopes exports to each adapter domain.
 Adapter names are the table names, so existing session tables remain usable.
 
+The adapter kit provides `clickFirst(page, texts, timeout = 15000, misses = [])`: it returns
+a boolean and appends `{text, reason}` for each click timeout to the optional `misses` array.
+Reasons retain the trimmed Playwright message/call log, capped at 2000 characters.
+`debug.capture(page, email, label, note)` optionally saves that text as `screenshot.txt`
+beside the capture screenshot; capture remains best-effort and never throws.
+
 ## Tests
 
 ```sh
