@@ -444,9 +444,9 @@ async function runVerify(db, opts, io) {
   return results.some(Boolean) ? 1 : 0;
 }
 
-// --- export ------------------------------------------------------------------
+// --- export-env --------------------------------------------------------------
 
-function runExport(db, opts, io) {
+function runExportEnv(db, opts, io) {
   const [app] = opts.positional;
   const adapter = getAdapter(app);
   if (!adapter.exportEnv) throw new Error(`${app} has no exportEnv hook`);
@@ -546,7 +546,7 @@ const COMMANDS = {
   verify: { run: runVerify, positional: [1, 1] },
   "setup-2fa": { run: runSetup2fa, positional: [0, 0] },
   sms: { run: runSms, positional: [1, 1] },
-  export: { run: runExport, positional: [1, 1] },
+  "export-env": { run: runExportEnv, positional: [1, 1] },
   get: { run: runGet, positional: [2, 2] },
   "set-status": { run: runSetStatus, positional: [3, 3] },
   list: { run: runList, positional: [0, 0] },
@@ -559,7 +559,7 @@ const USAGE = `Usage: secrets-manager <command> [options]
   verify <app> [--only ID]... [--all] [--concurrency N] [--headed]
   setup-2fa [--only EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
-  export <app> [--only EMAIL]... [--out FILE]
+  export-env <app> [--only EMAIL]... [--out FILE]
   get <app> <id>
   set-status <app> <id> <active|expired|restricted|escalated>
   list [--json]`;

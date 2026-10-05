@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the secrets-manager CLI: the vendor X line decoder, argv parsing, and the
-// ABOUTME: browser-free commands (import, get, set-status, list, export, login/verify skip paths).
+// ABOUTME: browser-free commands (import, get, set-status, list, export-env, login/verify skip paths).
 
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -274,14 +274,14 @@ test("set-status rejects an unknown status and a missing session", async () => {
   assert.ok(o.errText().includes("has no alpha session"));
 });
 
-test("export reports presence per active session and writes the env line", async () => {
+test("export-env reports presence per active session and writes the env line", async () => {
   for (const e of ["a@x.com", "b@x.com", "c@x.com"]) store.upsertAccount(db, e, "pw", null, null);
   store.saveSession(db, "beta", "a@x.com", [{ name: "auth-refresh-token", value: "RA" }], []);
   store.saveSession(db, "beta", "b@x.com", [], []);
   store.saveSession(db, "beta", "c@x.com", [{ name: "auth-refresh-token", value: "RC" }], []);
   store.setSessionStatus(db, "beta", "c@x.com", store.STATUS_EXPIRED);
   const o = io();
-  assert.equal(await main(["export", "beta"], o), 0);
+  assert.equal(await main(["export-env", "beta"], o), 0);
   assert.ok(o.text().includes("a@x.com\tpresent"));
   assert.ok(o.text().includes("b@x.com\tmissing"));
   assert.ok(!o.text().includes("c@x.com"));
@@ -289,10 +289,10 @@ test("export reports presence per active session and writes the env line", async
   assert.ok(!o.text().includes("RA")); // never print a token value
   const out = join(base, "tokens.env");
   const w = io();
-  assert.equal(await main(["export", "beta", "--only", "a@x.com", "--out", out], w), 0);
+  assert.equal(await main(["export-env", "beta", "--only", "a@x.com", "--out", out], w), 0);
   assert.equal(readFileSync(out, "utf8"), "BETA_REFRESH_TOKEN=RA\n");
   const g = io();
-  assert.equal(await main(["export", "gamma"], g), 1);
+  assert.equal(await main(["export-env", "gamma"], g), 1);
   assert.ok(g.errText().includes("unknown adapter gamma; loaded: alpha, beta"));
 });
 
