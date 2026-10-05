@@ -480,6 +480,12 @@ async function runVerify(db, opts, io) {
 // Resolve the caller-supplied credential without opening or changing the local store.
 async function runWhoami(opts, io) {
   const [app] = opts.positional;
+  if (app === "x") {
+    const { whoamiX } = await import("./x-verify.mjs");
+    const identity = await whoamiX({ credential: opts.select[0] });
+    io.log(opts.json ? JSON.stringify({ app, username: identity.username }) : `@${identity.username}`);
+    return 0;
+  }
   const adapter = getAdapter(app);
   if (!adapter.whoami) throw new Error(`${app} has no whoami hook`);
   const identity = await adapter.whoami({ credential: opts.select[0] });
@@ -614,7 +620,7 @@ const USAGE = `Usage: secrets-manager <command> [options]
   verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
   setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
-  whoami <app> --select CREDENTIAL [--json]
+  whoami <x|app> --select CREDENTIAL [--json]
   export <app> [--select EMAIL]...
   get <app> --select ID...
   set-status <app> <active|expired|restricted|escalated> --select ID...

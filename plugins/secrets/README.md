@@ -31,7 +31,7 @@ TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
 | `verify <google\|x\|tiktok\|app>` | Check each account is still usable and persist its status. |
 | `setup-2fa` | Enroll Google TOTP, turn on 2-Step, mint an app password. |
 | `sms <balance\|prices\|number>` | Manage verification SMS. |
-| `whoami <app> --select CREDENTIAL [--json]` | Identify a credential without reading or changing stored accounts. |
+| `whoami <x\|app> --select CREDENTIAL [--json]` | Identify a credential without reading or changing stored accounts. |
 | `export <app> [--select EMAIL]...` | Print active-session credentials as JSONL. |
 | `get <app> --select ID...` | Read stored sessions. |
 | `set-status <app> <status> --select ID...` | Set session status. |
