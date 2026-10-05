@@ -110,6 +110,11 @@ function googleAccounts(db, opts) {
 // no window to clear, so such a node escalates instead. There is no per-challenge flag.
 const browserOpts = (opts) => ({ headed: opts.headed, rotate: opts["rotate-proxy"] });
 
+// A Google sign-in (login google/<app>, setup-2fa) runs headed by default: a person at the window
+// clears the CAPTCHAs, since the headless vision solver's misses get accounts banned. `--headless`
+// opts out.
+export const googleBrowserOpts = (opts) => ({ headed: !opts.headless, rotate: opts["rotate-proxy"] });
+
 // --- import ------------------------------------------------------------------
 
 const IMPORTERS = {
@@ -199,7 +204,7 @@ async function loginOneGoogleBacked(db, target, adapters, login, opts, io, cred)
   }
   io.log(`${cred.email}: logging in to ${target}`);
   try {
-    await login.runAccount(db, cred, adapters, browserOpts(opts));
+    await login.runAccount(db, cred, adapters, googleBrowserOpts(opts));
     io.log(`  ${cred.email}: ok`);
     return false;
   } catch (e) {
@@ -312,7 +317,7 @@ async function runSetup2fa(db, opts, io) {
     try {
       // 1. Authenticator + TOTP secret (skip when one is already on file).
       if (opts.all || !cred.totp_secret) {
-        const secret = await login.enrollAuthenticator(cred, browserOpts(opts));
+        const secret = await login.enrollAuthenticator(cred, googleBrowserOpts(opts));
         if (!secret) {
           io.error(`  ${cred.email}: could not enroll an authenticator (see debug capture)`);
           return true;
@@ -328,14 +333,14 @@ async function runSetup2fa(db, opts, io) {
         io.log(`  ${cred.email}: authenticator enrolled, TOTP secret saved`);
       }
       // 2. Turn 2-Step Verification on (idempotent — a re-run on an already-on account is a no-op).
-      if (!(await login.turnOnTwoStep(cred, browserOpts(opts)))) {
+      if (!(await login.turnOnTwoStep(cred, googleBrowserOpts(opts)))) {
         io.error(`  ${cred.email}: 2-Step Verification did not turn on (see debug capture)`);
         return true;
       }
       io.log(`  ${cred.email}: 2-Step Verification on`);
       // 3. Gmail app password (skip when one is already on file).
       if (opts.all || !cred.app_password) {
-        const appPw = await login.mintAppPassword(cred, { ...browserOpts(opts), name: "secrets-manager" });
+        const appPw = await login.mintAppPassword(cred, { ...googleBrowserOpts(opts), name: "secrets-manager" });
         if (!appPw) {
           io.error(`  ${cred.email}: could not mint an app password (see debug capture)`);
           return true;
@@ -562,6 +567,7 @@ const OPTIONS = {
   concurrency: { type: "string" },
   country: { type: "string" },
   headed: { type: "boolean" },
+  headless: { type: "boolean" },
   json: { type: "boolean" },
   limit: { type: "string" },
   "max-price": { type: "string" },
@@ -586,10 +592,11 @@ const COMMANDS = {
 
 const USAGE = `Usage: secrets-manager <command> [options]
   import <google|x|tiktok> [file...]
-  login <google|x|tiktok|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
+  login <google|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headless] [--rotate-proxy]
+  login <x|tiktok> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
   login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
   verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
-  setup-2fa [--select EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
+  setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
   export <app> [--select EMAIL]...
   get <app> --select ID...

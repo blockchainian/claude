@@ -43,22 +43,26 @@ minting) save a Playwright page video per page, OAuth popup included, under
 A fresh Google account signs into the apps your adapters define. Run each step separately:
 
 1. `secrets-manager import google <file>`.
-2. `secrets-manager login google --select <email> --headed`.
-3. `secrets-manager login <app> --select <email> --headed` for each required adapter.
+2. `secrets-manager login google --select <email>`.
+3. `secrets-manager login <app> --select <email>` for each required adapter.
+
+Every Google sign-in (`login google`, `login <app>`, `setup-2fa`) runs headed by default, so a person
+at the window clears any CAPTCHA: the headless vision solver's misses get accounts banned.
+`--headless` opts out. `login x|tiktok` and `verify` stay headless unless `--headed`.
 
 Done means Google and every required app session are active; `list` shows their status.
 
 Every step reuses the account's one profile, so an app step never re-does Google. When a step
 fails it records a status that says how to proceed:
 
-- `escalated` — a Google challenge the script could not pass. Re-run that step `--headed` so a
+- `escalated` — a Google challenge the script could not pass. Re-run that step (headed) so a
   person can clear it; a later successful `login google` clears the escalation.
 - `restricted` — the app banned the account. Stop for that app; the session is unusable.
 - `expired` — the session lapsed. Re-run that step.
 
 A failed step does not halt the others, but an app step needs Google `active` first (an
 `escalated` account is skipped by `login <app>`), so fix `login google` before chasing an app
-failure. Run one account at a time (`--select`, `--headed`) for a fresh batch so each outcome is
+failure. Run one account at a time (`--select`) for a fresh batch so each outcome is
 watched; widen to `--all` / higher `--concurrency` once the flow is proven on a few.
 
 ## Commands
@@ -67,10 +71,11 @@ watched; widen to `--all` / higher `--concurrency` once the flow is proven on a 
 node "${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/cli.mjs" <command> [options]
 
 import <google|x|tiktok> [file...]
-login <google|x|tiktok|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
+login <google|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headless] [--rotate-proxy]
+login <x|tiktok> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
 login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
 verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
-setup-2fa [--select EMAIL]... [--all] [--headed] [--limit N] [--concurrency N] [--rotate-proxy]
+setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
 sms <balance|prices|number> [--country N] [--max-price X] [--yes]
 export <app> [--select EMAIL]...
 get <app> --select ID...
@@ -133,7 +138,7 @@ its file and line number.
 
 - **google** — sign every selected account into Google (password + TOTP, and the phone step via
   HeroSMS) in its own persistent Camoufox profile. `restricted` accounts are skipped; `escalated`
-  accounts ARE retried here (run `--headed` so a human can clear a reCAPTCHA), and a successful sign-in clears the status back to
+  accounts ARE retried here (headed by default, so a human can clear a reCAPTCHA), and a successful sign-in clears the status back to
   `active`. (For `login <app>`, an `escalated` account is still skipped until cleared.) Google's
   optional post-login setup wizard (`gds.google.com/web/*`: add a recovery phone, set a home
   address, …) is skipped automatically by going straight to the dashboard — no clicking through its
@@ -177,7 +182,7 @@ a live Google session per account; a logged-out account is reported with "run `l
 first" and left as-is (not `escalated`). The three steps are independent, so a run resumes an
 account from wherever it stopped; by default an account that already has both a TOTP secret and an
 app password is skipped, `--all` redoes every step. A Google challenge the script cannot pass
-marks the account `escalated`. Run the first account `--headed` — the browser flow is tuned live,
+marks the account `escalated`. Watch the first account in its window — the browser flow is tuned live,
 not unit-tested, and the enrollment dialog's selectors drift.
 
 ### sms
@@ -297,8 +302,8 @@ page helpers, adapters, CLI dispatch and setup reporting. Live login selectors n
 ## Limits
 
 - reCAPTCHA grids and the password-page text CAPTCHA are auto-solved by the vision model on headless
-  runs only; it is not 100%, so a headless miss marks the account `escalated` and moves on. Re-run
-  `--headed` to clear it by hand.
+  runs only (`--headless`); it is not 100%, and its misses get accounts banned, so Google sign-ins
+  default to headed. A headless miss marks the account `escalated`; re-run headed to clear it by hand.
 - The phone step (`challenge/iap`) is always driven with a rented HeroSMS number — the flow handles
   it with no flag. That path is unproven: Google has so far refused to send its verification SMS to
   every rented number (Cameroon, Canada, a real Philippines number all failed on fresh accounts with

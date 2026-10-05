@@ -38,7 +38,8 @@ TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
 | `validate <adapters.mjs>...` | Load modules with the real kit and print validated names. |
 
 Account commands accept repeatable `--select`, `--all`, `--limit`, `--concurrency`,
-`--headed`, and `--rotate-proxy` as described in the skill.
+`--headed` (Google sign-ins are headed by default; `--headless` opts out), and `--rotate-proxy`
+as described in the skill.
 `verify google|x|tiktok` are builtin checks; any other target calls the adapter's `verify` hook.
 Deriving a ct0 for a vendor X auth_token stays in intel's `fetch-x-mentions/scripts/verify-x.mjs`.
 
