@@ -17,6 +17,7 @@ import { ispFetch } from './http.mjs';
  * @typedef {{db: object, cred: object, opts: object, io: object}} ByEmailContext
  * @typedef {{status: 'ok'|'error', alias?: string, detail?: string}} ByEmailResult
  * @typedef {{db: object, email: string, session: object, opts: object, io: object}} VerifyContext
+ * @typedef {{db: object, email: string, session: object, opts: object, io: object}} SetupContext
  * @typedef {object} Adapter
  * @property {string} name Table and CLI target, [a-z0-9_].
  * @property {string} domain Registrable domain and session scope.
@@ -28,6 +29,7 @@ import { ispFetch } from './http.mjs';
  * @property {number} [attempts] Default 1.
  * @property {(ctx: ByEmailContext) => Promise<ByEmailResult>} [byEmail]
  * @property {(ctx: VerifyContext) => Promise<'active'|'restricted'|'expired'>} [verify]
+ * @property {(ctx: SetupContext) => Promise<string>} [setup] One-line summary; throws on failure.
  * @property {(ctx: {credential: string}) => Promise<{email: string}>} [whoami]
  * @property {(session: object) => Record<string, string>|null} [credentials]
  * @property {string[]} [blockedHosts] Host wildcards.
@@ -64,7 +66,7 @@ export function validateAdapter(adapter) {
   }
   if (!Array.isArray(adapter.entryTexts) || !adapter.entryTexts.length || adapter.entryTexts.some(t => typeof t !== 'string' || !t)) throw new Error('adapter entryTexts must be nonempty strings');
   for (const hook of ['signIn', 'ready']) if (typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
-  for (const hook of ['signedInUrl', 'byEmail', 'verify', 'whoami', 'credentials', 'bannedResponse']) if (adapter[hook] !== undefined && typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
+  for (const hook of ['signedInUrl', 'byEmail', 'verify', 'setup', 'whoami', 'credentials', 'bannedResponse']) if (adapter[hook] !== undefined && typeof adapter[hook] !== 'function') throw new Error(`adapter ${hook} must be a function`);
   if (adapter.attempts !== undefined && (!Number.isInteger(adapter.attempts) || adapter.attempts < 1)) throw new Error('adapter attempts must be a positive integer');
   for (const field of ['blockedHosts', 'blockedWebSockets']) if (adapter[field] !== undefined && (!Array.isArray(adapter[field]) || adapter[field].some(t => typeof t !== 'string' || !t))) throw new Error(`adapter ${field} must be strings`);
   return adapter;

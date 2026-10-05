@@ -481,3 +481,100 @@ test("ready sessions are usable for export and skipped by default login without 
   assert.deepEqual(output.out.map(JSON.parse), [{ app: "beta", email: "a@x.com", refresh_token: "READY" }]);
   assert.equal(store.getSession(db, "beta", "a@x.com").status, "ready");
 });
+
+
+// Runtime fixture modules stay in the temporary state directory; these hooks never open a browser.
+function setupAdapter(hook) {
+  const path = join(base, "setup-adapter.mjs");
+  writeFileSync(path, `export default kit => {
+    let running = 0, peak = 0;
+    return [{
+      name: 'alpha', domain: 'alpha.example', startUrl: 'https://alpha.example/',
+      entryTexts: ['Login'], signIn: async () => {}, ready: async () => true,
+      setup: ${hook},
+    }];
+  };`);
+  process.env.SECRETS_MANAGER_ADAPTERS = path;
+}
+
+function setupSession(email, status, cookies = []) {
+  store.upsertAccount(db, email, "pw", null);
+  store.saveSession(db, "alpha", email, cookies, []);
+  store.setSessionStatus(db, "alpha", email, status);
+}
+
+test("setup parses the same flags as verify and requires one app", () => {
+  const flags = ["alpha", "--select", "a@x.com", "--select", "b@x.com", "--all", "--concurrency", "2", "--headed", "--rotate-proxy"];
+  assert.deepEqual(parseCli(["setup", ...flags]).opts, parseCli(["verify", ...flags]).opts);
+  assert.throws(() => parseCli(["setup"]), /Usage/);
+  assert.throws(() => parseCli(["setup", "alpha", "beta"]), /Usage/);
+});
+
+test("setup succeeds for active sessions; --all adds ready and --select narrows", async () => {
+  setupAdapter("async ({ session }) => `configured from ${session.status}`");
+  for (const status of ["new", "active", "ready", "expired", "restricted", "escalated"]) setupSession(`${status}@x.com`, status);
+  store.upsertAccount(db, "missing@x.com", "pw", null);
+  // As with verify, an app session needs an imported account to be selected.
+  store.saveSession(db, "alpha", "orphan@x.com", [], []);
+  const output = io();
+  assert.equal(await main(["setup", "alpha"], output), 0);
+  assert.deepEqual(output.out, ["active@x.com: configured from active"]);
+  assert.equal(store.getSession(db, "alpha", "active@x.com").status, "ready");
+  const skipped = io();
+  assert.equal(await main(["setup", "alpha", "--select", "ready@x.com"], skipped), 0);
+  assert.ok(!skipped.text().includes("configured"));
+  const all = io();
+  assert.equal(await main(["setup", "alpha", "--all", "--select", "active@x.com", "--select", "ready@x.com", "--select", "expired@x.com"], all), 0);
+  assert.deepEqual(all.out, ["active@x.com: configured from ready", "ready@x.com: configured from ready"]);
+  for (const status of ["new", "expired", "restricted", "escalated"]) assert.equal(store.getSession(db, "alpha", `${status}@x.com`).status, status);
+  assert.equal(store.getSession(db, "alpha", "orphan@x.com").status, "active");
+});
+
+test("setup throws per account, preserves failed rows and continues with exit 1", async () => {
+  setupAdapter("async ({ email }) => { if (email.startsWith('bad')) throw new Error('setup failed'); return 'configured'; }");
+  setupSession("bad-active@x.com", "active");
+  setupSession("bad-ready@x.com", "ready");
+  setupSession("good@x.com", "active");
+  const before = db.prepare("SELECT * FROM alpha WHERE email LIKE 'bad%' ORDER BY email").all();
+  const output = io();
+  assert.equal(await main(["setup", "alpha", "--all"], output), 1);
+  assert.deepEqual(output.err, ["bad-active@x.com: setup failed", "bad-ready@x.com: setup failed"]);
+  assert.deepEqual(output.out, ["good@x.com: configured"]);
+  assert.deepEqual(db.prepare("SELECT * FROM alpha WHERE email LIKE 'bad%' ORDER BY email").all(), before);
+  assert.equal(store.getSession(db, "alpha", "good@x.com").status, "ready");
+});
+
+test("setup fails explicitly without a hook even when there are no sessions", async () => {
+  const output = io();
+  assert.equal(await main(["setup", "alpha"], output), 1);
+  assert.deepEqual(output.err, ["alpha has no setup hook"]);
+  assert.deepEqual(output.out, []);
+});
+
+test("setup rejects missing or empty summaries without changing status", async () => {
+  setupAdapter("async ({ session }) => session.cookies[0].value");
+  for (const [i, value] of [undefined, null, 7, "", "   "].entries()) setupSession(`bad${i}@x.com`, "active", [{ name: "summary", value }]);
+  const output = io();
+  assert.equal(await main(["setup", "alpha"], output), 1);
+  assert.equal(output.err.length, 5);
+  assert.ok(output.err.every(line => line.endsWith(": invalid setup summary")));
+  assert.deepEqual(output.out, []);
+  assert.ok(db.prepare("SELECT status FROM alpha").all().every(row => row.status === "active"));
+});
+
+test("setup passes the hook context and honors concurrency", async () => {
+  setupAdapter(`async ({ db, email, session, opts, io }) => {
+    if (kit.store.getSession(db, 'alpha', email).status !== 'active' || session.email !== email ||
+        !opts.headed || !opts['rotate-proxy'] || opts.concurrency !== 2 || typeof io.log !== 'function') throw new Error('bad context');
+    peak = Math.max(peak, ++running);
+    await new Promise(resolve => setImmediate(resolve));
+    running--;
+    return 'configured (peak ' + peak + ')';
+  }`);
+  for (const email of ["a@x.com", "b@x.com", "c@x.com", "d@x.com"]) setupSession(email, "active");
+  const output = io();
+  assert.equal(await main(["setup", "alpha", "--concurrency", "2", "--headed", "--rotate-proxy"], output), 0);
+  assert.equal(output.out.length, 4);
+  assert.ok(output.out.every(line => line.endsWith(": configured (peak 2)")));
+  assert.ok(db.prepare("SELECT status FROM alpha").all().every(row => row.status === "ready"));
+});

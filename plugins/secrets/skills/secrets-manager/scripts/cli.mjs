@@ -475,6 +475,34 @@ async function runVerify(db, opts, io) {
   return results.some(Boolean) ? 1 : 0;
 }
 
+// --- setup -------------------------------------------------------------------
+
+// Setup needs a live app session. Ready rows only join an explicit --all rerun; failures leave
+// their status unchanged so one account's incomplete setup never claims the whole run succeeded.
+async function runSetup(db, opts, io) {
+  const [app] = opts.positional;
+  const adapter = getAdapter(app);
+  if (!adapter.setup) throw new Error(`${app} has no setup hook`);
+  const sessions = store.listAccounts(db).flatMap(account => {
+    const session = store.getSession(db, app, account.email);
+    return session ? [session] : [];
+  });
+  const rows = pick(sessions.filter(session => session.status === store.STATUS_ACTIVE ||
+    (opts.all && session.status === store.STATUS_READY)), session => session.email, opts);
+  if (!rows.length) { io.log(`no ${app} active sessions to set up`); return 0; }
+  const results = await runWithConcurrency(rows, opts.concurrency, async session => {
+    const email = session.email;
+    try {
+      const summary = await adapter.setup({ db, email, session, opts, io });
+      if (typeof summary !== "string" || !summary.trim()) throw new Error("invalid setup summary");
+      store.setSessionStatus(db, app, email, store.STATUS_READY);
+      io.log(`${email}: ${summary}`);
+      return false;
+    } catch (e) { io.error(`${email}: ${e.message}`); return true; }
+  });
+  return results.some(Boolean) ? 1 : 0;
+}
+
 // --- whoami ------------------------------------------------------------------
 
 // Resolve the caller-supplied credential without opening or changing the local store.
@@ -604,6 +632,7 @@ const COMMANDS = {
   import: { run: runImport, positional: [1, Infinity] },
   login: { run: runLogin, positional: [1, 1] },
   verify: { run: runVerify, positional: [1, 1] },
+  setup: { run: runSetup, positional: [1, 1] },
   "setup-2fa": { run: runSetup2fa, positional: [0, 0] },
   sms: { run: runSms, positional: [1, 1] },
   export: { run: runExport, positional: [1, 1] },
@@ -618,12 +647,13 @@ const USAGE = `Usage: secrets-manager <command> [options]
   login <x|tiktok> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
   login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
   verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
+  setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy]
   setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
   whoami <x|app> --select CREDENTIAL [--json]
   export <app> [--select EMAIL]...
   get <app> --select ID...
-  set-status <app> <active|expired|restricted|escalated> --select ID...
+  set-status <app> <active|ready|expired|restricted|escalated> --select ID...
   list [--json]`;
 
 export function parseCli(argv) {
