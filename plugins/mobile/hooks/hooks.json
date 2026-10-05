@@ -23,6 +23,18 @@
           }
         ]
       }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "^mcp__.*appium[-_]mcp__appium_session_management$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/phone-session-gate\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
