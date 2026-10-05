@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^mcp__.*appium[-_]mcp__appium_session_management$",
+        "matcher": "^mcp__.*appium[-_]mcp__.*$",
         "hooks": [
           {
             "type": "command",

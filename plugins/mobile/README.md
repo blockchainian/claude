@@ -66,6 +66,13 @@ when creating a session, or set `CAPABILITIES_CONFIG` to a local file.
 The gate is shared by both hosts. In Codex, review and trust the loaded
 `phone-session-gate` in `/hooks` before phone automation; stop if it is not active
 or trusted. Device claims and phone-session changes are serialized across hosts.
+The first preparation/create binds the claimed phone task to its host session and
+agent identity. Every Appium phone operation requires the owner's explicit
+`sessionId`; main and sibling agents cannot use the owner's connection. Delete
+clears the session but keeps task ownership until claim release, so reconnecting
+cannot hand the phone to another agent. Discovery/listing stay available; there
+is no shared active-session default or detach for owned phone tasks. Assign the
+whole phone task, including claim/release, to one agent.
 
 ## Install
 

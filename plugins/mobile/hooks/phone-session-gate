@@ -1,16 +1,10 @@
 #!/usr/bin/env -S uv run --quiet --script
-# ABOUTME: Pre/PostToolUse hook that allows one Appium session per phone, and only after the
-# ABOUTME: capture claim; it records the open session in the claim and clears it on delete.
-"""WebDriverAgent serves one session per phone, and a second create does not fail:
-it wins, and the first agent's next call dies with "Session does not exist". The
-claim file that claim-simulator.mjs writes per UDID under TMPDIR is the only thing
-agents across Claude Code and Codex share, so this gate keys on it.
-
-PreToolUse, action=create: deny unless the capabilities name an appium:udid, a
-claim exists for it, and no session or in-flight create is recorded there.
-The pre-hook reserves atomically; post-hook commits only its own reservation. PostToolUse: a successful
-create records its session id in the claim; a successful explicit delete clears only that session, so
-the holder can recreate after an idle-out by deleting first.
+# ABOUTME: One agent holds an entire claimed phone task; every Appium operation checks its owner.
+# ABOUTME: Creates are reserved atomically and explicit deletes retain ownership until release.
+"""WebDriverAgent replaces its previous session on a second create. A shared
+per-device claim prevents duplicate creates across hosts and binds preparation,
+connection and subsequent operations to one host session/agent for the whole task.
+All device operations require explicit session IDs; discovery remains available.
 """
 
 from __future__ import annotations
@@ -74,16 +68,76 @@ def response_text(response) -> tuple[str, bool]:
     return json.dumps(response), False
 
 
-def call_identity(payload: dict) -> dict | None:
+def caller_identity(payload: dict) -> tuple[str, str | None] | None:
     caller = payload.get("session_id")
-    call = payload.get("tool_use_id")
-    if not isinstance(caller, str) or not caller or not isinstance(call, str) or not call:
+    agent = payload.get("agent_id")
+    if not isinstance(caller, str) or not caller:
         return None
-    identity = {"caller": caller, "call": call}
-    if payload.get("agent_id"):
-        identity["agent"] = payload["agent_id"]
+    if agent is not None and (not isinstance(agent, str) or not agent):
+        return None
+    return caller, agent
+
+
+def call_identity(payload: dict) -> dict | None:
+    caller = caller_identity(payload)
+    call = payload.get("tool_use_id")
+    if caller is None or not isinstance(call, str) or not call:
+        return None
+    identity = {"caller": caller[0], "call": call}
+    if caller[1] is not None:
+        identity["agent"] = caller[1]
     return identity
 
+
+def owns(held: dict, payload: dict) -> bool:
+    caller = caller_identity(payload)
+    return caller is not None and caller == (held.get("sessionOwner"), held.get("sessionAgent"))
+
+
+def bind_owner(held: dict, payload: dict) -> bool:
+    """Bind once for the entire claim, including failed creates and reconnects."""
+    caller = caller_identity(payload)
+    if caller is None:
+        deny("The host must supply a valid session_id and, for subagents, agent_id.")
+        return False
+    if held.get("sessionOwner"):
+        if not owns(held, payload):
+            deny("This phone belongs to another agent; wait for its task to release the claim.")
+            return False
+    else:
+        held["sessionOwner"] = caller[0]
+        if caller[1] is not None:
+            held["sessionAgent"] = caller[1]
+    return True
+
+
+def before_prepare(payload: dict, tool_input: dict) -> None:
+    udid = tool_input.get("udid")
+    if not isinstance(udid, str) or not re.fullmatch(r"[A-Za-z0-9-]+", udid):
+        deny("Pass the explicit device udid before preparing WebDriverAgent.")
+        return
+    path = lock_path(udid)
+    with locked(path):
+        held = read(path)
+        if held is None:
+            deny(f"{udid} is not claimed. Run claim-simulator.mjs before preparing the device.")
+        elif bind_owner(held, payload):
+            write(path, held)
+
+
+def before_session_operation(payload: dict, tool_input: dict) -> None:
+    target = tool_input.get("sessionId")
+    if not isinstance(target, str) or not target:
+        deny("Pass your explicit sessionId on every phone operation; the MCP active session is shared.")
+        return
+    for path in lock_dir().glob("ios-screenshot-lock.*.json"):
+        with locked(path):
+            held = read(path)
+            if held and held.get("session") == target:
+                if not owns(held, payload):
+                    deny(f"Session {target} belongs to another agent; wait for its task to release the claim.")
+                return
+    deny(f"Session {target} has no device claim owned by this agent; create it through the claimed workflow.")
 
 def before_create(payload: dict, tool_input: dict) -> None:
     udid = udid_of(tool_input)
@@ -106,6 +160,8 @@ def before_create(payload: dict, tool_input: dict) -> None:
             deny(f"{udid} already has an Appium session or create in progress under run "
                  f"{held['run']}. Wait; if its session idled out, delete that explicit "
                  "sessionId before creating again.")
+            return
+        if not bind_owner(held, payload):
             return
         held["pending"] = identity
         write(path, held)
@@ -141,22 +197,6 @@ def after_create(payload: dict, tool_input: dict, response) -> None:
         write(path, held)
 
 
-def before_delete(payload: dict, tool_input: dict) -> None:
-    target = tool_input.get("sessionId")
-    if not isinstance(target, str) or not target:
-        deny("Pass the explicit sessionId when deleting; the active session may belong "
-             "to another task. Use action=list to find it.")
-        return
-    for path in lock_dir().glob("ios-screenshot-lock.*.json"):
-        with locked(path):
-            held = read(path)
-            if held and held.get("session") == target:
-                owner = held.get("sessionOwner")
-                if owner and (owner != payload.get("session_id") or held.get("sessionAgent") != payload.get("agent_id")):
-                    deny(f"Session {target} belongs to another caller; wait for its release.")
-                return
-
-
 def after_delete(payload: dict, tool_input: dict, response) -> None:
     text, is_error = response_text(response)
     target = tool_input.get("sessionId")
@@ -170,12 +210,9 @@ def after_delete(payload: dict, tool_input: dict, response) -> None:
             held = read(path)
             if not held or held.get("session") != target:
                 continue
-            owner = held.get("sessionOwner")
-            if owner and (owner != payload.get("session_id") or held.get("sessionAgent") != payload.get("agent_id")):
+            if not owns(held, payload):
                 continue
             del held["session"]
-            held.pop("sessionOwner", None)
-            held.pop("sessionAgent", None)
             write(path, held)
 
 
@@ -191,17 +228,28 @@ def main() -> int:
     event = payload.get("hook_event_name")
     tool_input = payload.get("tool_input") or {}
     action = tool_input.get("action")
+    tool = re.split(r"appium[-_]mcp__", payload.get("tool_name", ""))[-1]
+    session_tool = tool == "appium_session_management"
     try:
-        if event == "PreToolUse" and action == "create":
-            before_create(payload, tool_input)
-        elif event == "PreToolUse" and action == "delete":
-            before_delete(payload, tool_input)
-        elif event == "PostToolUse" and action == "create":
+        if event == "PreToolUse":
+            if session_tool and action == "create":
+                before_create(payload, tool_input)
+            elif session_tool and action == "list":
+                pass  # Discovery does not drive the device or change the active session.
+            elif tool == "select_device":
+                pass  # Creation still requires explicit capabilities and a claim.
+            elif tool in ("appium_prepare_ios_real_device", "prepare_ios_simulator", "appium_prepare_ios_simulator"):
+                before_prepare(payload, tool_input)
+            elif session_tool and action == "detach":
+                deny("Delete the explicit owned session before releasing the device; do not detach it.")
+            else:
+                before_session_operation(payload, tool_input)
+        elif session_tool and event == "PostToolUse" and action == "create":
             after_create(payload, tool_input, payload.get("tool_response"))
-        elif event == "PostToolUseFailure" and action == "create":
+        elif session_tool and event == "PostToolUseFailure" and action == "create":
             if not payload.get("is_interrupt"):
                 after_create(payload, tool_input, {"isError": True})
-        elif event == "PostToolUse" and action == "delete":
+        elif session_tool and event == "PostToolUse" and action == "delete":
             after_delete(payload, tool_input, payload.get("tool_response"))
     except (OSError, ValueError) as error:
         if event == "PreToolUse":
