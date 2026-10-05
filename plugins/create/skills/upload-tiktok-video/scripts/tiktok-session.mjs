@@ -189,8 +189,11 @@ export function startRecording(profile, path) {
 export async function stopRecording(handle, timeoutMs = 15000) {
   const child = handle?.child;
   if (!child || child.exitCode !== null || child.signalCode !== null) return null;
+  let timer;
   const exited = new Promise((r) => child.once("exit", r));
   child.kill("SIGINT");
-  await Promise.race([exited, sleep(timeoutMs)]);
+  // The timeout is cleared once the recorder exits: left armed, it would hold the process open.
+  await Promise.race([exited, new Promise((r) => (timer = setTimeout(r, timeoutMs)))]);
+  clearTimeout(timer);
   return handle.path;
 }
