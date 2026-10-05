@@ -1746,7 +1746,7 @@ async function signIntoApp(page, db, adapter, cred, { assist }, bannedReason) {
       throw new Error(`${adapter.name}: session token never appeared; login did not complete`);
     }
   } else if (!(await waitReady(page, adapter))) {
-    // Signed in, but the app has not finished setting the account up (fomo still creating its user):
+    // Signed in, but the app has not finished setting the account up:
     // exporting now would store a session the app does not serve.
     await debug.capture(page, cred.email, `${adapter.name}-not-ready`);
     throw new Error(`${adapter.name}: signed in but the session never became ready; not exported`);

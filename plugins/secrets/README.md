@@ -31,6 +31,7 @@ TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
 | `verify <google\|x\|tiktok\|app>` | Check each account is still usable and persist its status. |
 | `setup-2fa` | Enroll Google TOTP, turn on 2-Step, mint an app password. |
 | `sms <balance\|prices\|number>` | Manage verification SMS. |
+| `whoami <x\|app> --select CREDENTIAL [--json]` | Identify a credential without reading or changing stored accounts. |
 | `export <app> [--select EMAIL]...` | Print active-session credentials as JSONL. |
 | `get <app> --select ID...` | Read stored sessions. |
 | `set-status <app> <status> --select ID...` | Set session status. |
@@ -67,6 +68,7 @@ An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files
 | `byEmail(ctx)` | Optional password signup/login through a Gmail plus-alias. |
 | `verify(ctx)` | Optional hook returning `active`, `restricted` or `expired`. |
 | `bannedResponse({url, status, body})` | Optional; called during `login <app>` for every app-domain response with status >= 400. A non-empty reason means the app banned the account: its session row is recorded `restricted` (created if absent), the Google account is untouched, and `login <app>` never retries it. |
+| `whoami({credential})` | Optional async hook returning `{email: string}`; credential type is app-specific. Missing or ambiguous identity throws. |
 | `credentials(session)` | Optional `(session) => Record<string, string> \| null`; returns usable credential fields. |
 | `blockedHosts` | Optional host wildcard strings merged at startup. |
 | `blockedWebSockets` | Optional WebSocket URL wildcards merged at startup. |

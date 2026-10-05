@@ -77,6 +77,7 @@ login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
 verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
 setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
 sms <balance|prices|number> [--country N] [--max-price X] [--yes]
+whoami <x|app> --select CREDENTIAL [--json]
 export <app> [--select EMAIL]...
 get <app> --select ID...
 set-status <app> <active|expired|restricted|escalated> --select ID...
@@ -233,6 +234,25 @@ result is written.
 
 Neither browser check ever signs in. Deriving a ct0 for a vendor X `auth_token` stays in the
 intel plugin's `fetch-x-mentions/scripts/verify-x.mjs`.
+
+### whoami
+
+`whoami <x|app> --select CREDENTIAL [--json]` identifies the user behind one external
+credential. Here `--select` is the credential itself, not a stored account ID; its type
+is defined by the app adapter. It requires exactly one
+nonempty value and accepts no account-selection or browser flags.
+The adapter's optional `whoami({credential})` hook returns `{email: string}`.
+No database is opened and no local account or status is written. The account need not
+be imported or logged in locally. Stdout is the email, or `{"app":"<app>","email":"..."}`
+with `--json`. Unsupported adapters, invalid credentials or malformed identities exit 1
+with an error on stderr; credentials are redacted from errors.
+
+`whoami x --select AUTH_TOKEN [--json]` is builtin. It accepts one 40-hex X
+`auth_token`, automatically obtains `ct0`, then queries GraphQL Viewer through the
+residential proxy. No local account, stored ct0 or browser is needed. Stdout is
+`@username`, or `{"app":"x","username":"..."}` with `--json`; it does not promise
+an email. Requires `X_BEARER`, `X_VIEWER_QUERY_ID` and `RESIDENTIAL_PROXY_URL`.
+Expired, restricted, locked or inconclusive sessions fail without changing local state.
 
 ### export
 
