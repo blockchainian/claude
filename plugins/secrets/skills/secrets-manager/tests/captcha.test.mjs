@@ -1,15 +1,10 @@
-// ABOUTME: Tests captcha.mjs's pure helpers: the image-to-text task builder and the grid-ready check.
-// ABOUTME: The network call (createTask) is not covered — it costs money and needs a key.
+// ABOUTME: Tests captcha.mjs's grid-ready check: a reCAPTCHA grid is classified only once every
+// ABOUTME: tile is loaded, decoded and fully faded in.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildImageToTextTask, gridReady } from "../scripts/captcha.mjs";
-
-test("buildImageToTextTask carries the base64 body", () => {
-  assert.deepEqual(buildImageToTextTask("AAAA"), { type: "ImageToText", module: "common", body: "AAAA" });
-  assert.throws(() => buildImageToTextTask(""));
-});
+import { gridReady } from "../scripts/captcha.mjs";
 
 test("gridReady is true only when every tile is loaded, decoded, and fully faded in", () => {
   const ok = (over) => ({ hasImg: true, complete: true, naturalWidth: 100, opacity: 1, ...over });
