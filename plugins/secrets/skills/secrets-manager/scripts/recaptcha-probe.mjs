@@ -43,7 +43,6 @@ try {
 
     // #8/#9/#10 — only reachable if the demo actually served a grid
     if (outcome === "grid") {
-      process.env.SM_DEBUG_GRIDS = "1";
       const tSolve = now();
       result.gridSolved = await solveRecaptchaGrid(page, cred);
       result.steps.gridSolveMs = now() - tSolve;

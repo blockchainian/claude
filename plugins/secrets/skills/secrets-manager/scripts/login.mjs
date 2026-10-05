@@ -643,17 +643,15 @@ export async function solveRecaptchaGrid(page, cred) {
       if (!shot) return false;
       const tClassify = Date.now();
       const result = await classifyImage(shot, { object, gridN });
-      if (process.env.SM_DEBUG_GRIDS) console.log(`  captcha[dbg]: classify round ${round + 1} (${object}, ${dynamic ? "dynamic" : "static"}) took ${Date.now() - tClassify}ms`);
+      console.log(`  captcha[dbg]: classify round ${round + 1} (${object}, ${dynamic ? "dynamic" : "static"}) took ${Date.now() - tClassify}ms`);
       if (!result) {
         console.log(`  captcha: vision classify failed for ${cred.email} — falling back to human`);
         return false;
       }
-      // On a headed debug run, save the exact image sent to the classifier, named with its answer, so
-      // the classifier's accuracy can be checked by eye and re-tested offline afterward.
-      if (process.env.SM_DEBUG_GRIDS) {
-        const name = `grid-${object.replace(/[^a-z0-9]+/gi, "_")}-r${round + 1}-cells_${result.cells.join("-") || "none"}.png`;
-        debug.write(cred.email, name, shot);
-      }
+      // Save the exact image sent to the classifier, named with its answer, so the classifier's
+      // accuracy can be checked by eye and re-tested offline afterward.
+      const name = `grid-${object.replace(/[^a-z0-9]+/gi, "_")}-r${round + 1}-cells_${result.cells.join("-") || "none"}.png`;
+      debug.write(cred.email, name, shot);
       // Drop cells already chosen — clicking a selected tile only deselects it.
       const matches = [];
       for (const idx of result.cells) {
@@ -720,14 +718,12 @@ export async function solveRecaptchaGrid(page, cred) {
       // Solved the instant the grid closes; a rejected Verify instead swaps the grid or shows the next
       // challenge, which the next round re-reads. DOM truth, not a fixed 3s.
       const verdict = await waitGridChanged(page, { prevSrc: verifiedSrc, timeoutMs: RECAPTCHA_VERIFY_BUDGET_MS });
-      if (process.env.SM_DEBUG_GRIDS) {
-        let errShown = "none";
-        for (const s of [".rc-imageselect-error-select-more", ".rc-imageselect-error-dynamic-more", ".rc-imageselect-incorrect-response"]) {
-          const disp = await bframe.locator(s).first().evaluate((el) => getComputedStyle(el).display).catch(() => "none");
-          if (disp && disp !== "none") { errShown = s; break; }
-        }
-        console.log(`  captcha[dbg]: verify round ${round + 1} → ${verdict ?? "null"}; error=${errShown}`);
+      let errShown = "none";
+      for (const s of [".rc-imageselect-error-select-more", ".rc-imageselect-error-dynamic-more", ".rc-imageselect-incorrect-response"]) {
+        const disp = await bframe.locator(s).first().evaluate((el) => getComputedStyle(el).display).catch(() => "none");
+        if (disp && disp !== "none") { errShown = s; break; }
       }
+      console.log(`  captcha[dbg]: verify round ${round + 1} → ${verdict ?? "null"}; error=${errShown}`);
       if (verdict === "closed") {
         console.log(`  captcha: grid solved for ${cred.email}`);
         return true;
@@ -1832,14 +1828,11 @@ export async function withProfile(key, { headed = false, rotate = false, proxyUr
     page = context.pages()[0] ?? (await context.newPage());
     if (headed) {
       windowPlace.movePopupsToDisplay(context, profile);
-      // A headed run is a debug run: record the screen, and save each reCAPTCHA grid image with the
-      // classifier's answer, so the grids can be reviewed and the classifier's accuracy measured after.
-      process.env.SM_DEBUG_GRIDS = "1";
+      // A headed run is a debug run: record the screen so the session can be reviewed after.
       recording = debug.startScreenRecording(key, windowPlace.findPid(profile));
       if (recording) console.log(`  recording headed session to ${recording.path}`);
     }
-    // Hand the account's resolved proxy URL to the flow so the CAPTCHA solver can mint tokens behind
-    // the SAME sticky exit the browser submits from.
+    // Hand the account's resolved proxy URL to the flow.
     return await fn(context, page, proxyUrl);
   } catch (e) {
     if (shouldHoldOpenForDebug(headed, e)) await holdOpenForDebug(context, page, e);
