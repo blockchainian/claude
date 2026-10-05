@@ -13,8 +13,7 @@ test('validate all required fields and optional hooks', () => {
   const a = {...base}; delete a[field]; assert.throws(() => validateAdapter(a), new RegExp(field));
  }
  for (const name of ['', 'bad-name', [], 'google', 'x', 'tiktok']) assert.throws(() => validateAdapter({...base,name}));
- for (const hook of ['signIn','ready','signedInUrl','byEmail','verify']) assert.throws(() => validateAdapter({...base,[hook]:1}));
- assert.throws(() => validateAdapter({...base, exportEnv: {envVar:'BAD',token:1}}));
+ for (const hook of ['signIn','ready','signedInUrl','byEmail','verify','credentials']) assert.throws(() => validateAdapter({...base,[hook]:1}));
 });
 test('loader handles absence, config, env override, duplicates, and import errors', async () => {
  const dir = mkdtempSync(join(tmpdir(),'adapter-')), configPath = join(dir,'config.json');

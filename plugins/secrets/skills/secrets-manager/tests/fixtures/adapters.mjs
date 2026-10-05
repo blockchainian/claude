@@ -5,10 +5,10 @@ export default kit => [
     ready: page => kit.hasLsKey(page, 'session:token'),
     signedInUrl: url => { try { return new URL(url).pathname.startsWith('/token'); } catch { return false; } },
     verify: async ({ session }) => session.cookies.some(c => c.name === 'banned') ? 'restricted' : 'active',
-    exportEnv: { envVar: 'ALPHA_REFRESH_TOKEN', token: session => {
+    credentials: session => {
       const value = session.local_storage.flatMap(o => o.localStorage ?? []).find(k => k.name === 'session:refresh_token')?.value;
-      return value == null ? null : kit.restriction.unwrapJsonQuoted(value);
-    } },
+      return value == null ? null : { refresh_token: kit.restriction.unwrapJsonQuoted(value) };
+    },
     blockedHosts: ['app-actions*.alpha.example', 'data.alpha.example'],
     blockedWebSockets: ['wss://data.alpha.example/**'],
   },
@@ -18,7 +18,10 @@ export default kit => [
     ready: page => kit.hasCookie(page, 'auth-access-token'),
     byEmail: async ({ cred, io }) => { const alias = kit.aliasFor(cred.email, 'beta'); io.log('fixture byEmail'); return { status: 'ok', alias }; },
     verify: async () => 'expired',
-    exportEnv: { envVar: 'BETA_REFRESH_TOKEN', token: session => session.cookies.find(c => c.name === 'auth-refresh-token')?.value ?? null },
+    credentials: session => {
+      const value = session.cookies.find(c => c.name === 'auth-refresh-token')?.value;
+      return value == null ? null : { refresh_token: value };
+    },
     blockedHosts: ['cluster*.beta.trade', 'pulse*.beta.trade', 'friends.beta.trade', 'telemetry.beta.trade', 'beta-assets-v2.beta-cdn.io', 'app-actions*.alpha.family', 'mobula-api.alpha.family'],
   },
 ];
