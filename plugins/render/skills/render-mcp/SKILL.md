@@ -44,9 +44,11 @@ Action skills (render-deploy, render-debug, render-monitor) use MCP tools for th
 
 ### Render plugin (recommended)
 
-The Render plugin for Cursor, Codex, and Claude Code bundles this MCP server with a pre-registered OAuth client id, so no API key is needed. After installing or updating the plugin, reload the tool (restart Cursor or Claude Code, or start a new Codex thread) so it loads the plugin-provided MCP server, then complete the Render OAuth prompt the first time MCP tools are used. Verify with `list_services()`.
+Use the plugin's MCP configuration for the current host. Render registers separate OAuth client IDs: `claude` for Claude Code and `codex` for Codex; do not reuse the Claude client configuration in Codex. After installing or updating the plugin, reload the tool so it loads the plugin-provided MCP server, then complete the Render OAuth prompt. Verify with `list_services()`.
 
-The manual, API-key setups below are for tools without the plugin or for custom MCP configurations.
+MCP tool prefixes differ by host. Locate the exposed Render tools by their names (`list_services`, `list_workspaces`, etc.) rather than hardcoding a Claude-specific prefix.
+
+The manual setups below are for tools without the plugin or for custom MCP configurations. Configure a separate server only if the plugin has not already supplied one.
 
 ### Cursor
 
@@ -82,6 +84,16 @@ claude mcp add --transport http render https://mcp.render.com/mcp --header "Auth
 3. Restart Claude Code, then verify with `list_services()`
 
 ### Codex
+
+For manual OAuth setup, [Render documents](https://render.com/docs/mcp-server) the Codex client ID:
+
+```bash
+codex mcp add render --url https://mcp.render.com/mcp --oauth-client-id codex
+```
+
+Complete the browser authorization flow, reload Codex, and verify with `list_services()`. Check `codex mcp add --help` before running this on an older CLI; if it does not support `--oauth-client-id`, use API-key setup instead.
+
+For non-interactive API-key setup:
 
 1. Get an API key from the [Render Dashboard](https://dashboard.render.com/u/*/settings#api-keys)
 
