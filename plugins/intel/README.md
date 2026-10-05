@@ -110,10 +110,10 @@ audio leg and `digest` for the notes.
   stored at `~/.config/blockchainian/claude.json` (see the skill's Setup step).
 - `case-study`: Node.js 18+ (its own scripts), everything `digest` needs (it renders with `digest`'s PDF
   script), plus `curl`; a file of machine-tested tool commands is optional.
-- `download-book`: Node.js 18+, Google Chrome, and `npm install` in the skill's
+- `download-book`: Node.js 20.12+, Google Chrome, and `npm install` in the skill's
   `scripts/` dir (Playwright drives a headed Chrome window through the site's
-  DDoS-Guard check; headless browsers get a captcha). Optional `ANNA_SECRET_KEY`
-  for the member fast download API.
+  DDoS-Guard check; headless browsers get a captcha). Optional `ANNA_ARCHIVE_SECRET_KEY`
+  for the member fast download API, read only from `~/.config/intel/.env` (not process environment variables).
 
 ## Tests
 
