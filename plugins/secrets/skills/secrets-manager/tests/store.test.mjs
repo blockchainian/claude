@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -278,4 +278,59 @@ test("recordSessionStatus records an app's verdict for an account with no sessio
   store.recordSessionStatus(db, "alpha", "live@x.com", store.STATUS_RESTRICTED);
   assert.equal(store.getSession(db, "alpha", "live@x.com").status, "restricted");
   assert.deepEqual(store.getSession(db, "alpha", "live@x.com").cookies, [{ name: "c" }]);
+});
+
+
+test("openDb widens old google and every app CHECK for ready without changing rows", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "store-ready-")), "s.sqlite");
+  const raw = new DatabaseSync(path);
+  const schema = readFileSync(new URL("../scripts/schema.sql", import.meta.url), "utf8").replaceAll("'ready',", "");
+  raw.exec(schema);
+  raw.exec(`INSERT INTO google VALUES ('old@x.com', 'pw', 'SECRET', 'app-pw', 'active',
+    'profile', 'proxy', 'login-time', 'created', 'updated')`);
+  for (const app of ["alpha", "orphan"]) {
+    raw.exec(`CREATE TABLE ${app} (
+      email TEXT PRIMARY KEY, cookies TEXT NOT NULL, local_storage TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('new','active','expired','restricted','escalated')),
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )`);
+    raw.prepare(`INSERT INTO ${app} VALUES (?, ?, ?, ?, ?, ?)`).run(
+      "old@x.com", '[{"name":"session","value":"fake"}]', '{"token":"fake"}', "restricted", "created", "updated",
+    );
+  }
+  const before = Object.fromEntries(["google", "alpha", "orphan"].map(table => [table, raw.prepare(`SELECT * FROM ${table}`).all()]));
+  raw.close();
+  const db = store.openDb(path);
+  assert.equal(store.STATUS_READY, "ready");
+  assert.ok(store.STATUSES.has("ready"));
+  for (const table of Object.keys(before)) assert.deepEqual(db.prepare(`SELECT * FROM ${table}`).all(), before[table]);
+  store.setAccountStatus(db, "old@x.com", "ready");
+  for (const app of ["alpha", "orphan"]) {
+    store.setSessionStatus(db, app, "old@x.com", "ready");
+    assert.throws(() => db.exec(`UPDATE ${app} SET status = 'unknown'`), /CHECK/);
+  }
+  // schema_version changes on rebuild, so a second open must leave it alone.
+  const version = db.prepare("PRAGMA schema_version").get();
+  const reopened = store.openDb(path);
+  assert.deepEqual(reopened.prepare("PRAGMA schema_version").get(), version);
+  assert.equal(store.getSession(reopened, "orphan", "old@x.com").status, "ready");
+  reopened.close();
+  db.close();
+});
+
+test("re-login refreshes session data but preserves ready and created_at", () => {
+  const db = open();
+  try {
+    store.saveSession(db, "alpha", "a@x.com", [], {});
+    store.setSessionStatus(db, "alpha", "a@x.com", "ready");
+    const created = db.prepare("SELECT created_at FROM alpha").get().created_at;
+    store.saveSession(db, "alpha", "a@x.com", [{ name: "fresh" }], { token: "new" });
+    assert.equal(store.getSession(db, "alpha", "a@x.com").status, "ready");
+    assert.deepEqual(store.getSession(db, "alpha", "a@x.com").cookies, [{ name: "fresh" }]);
+    assert.deepEqual(store.getSession(db, "alpha", "a@x.com").local_storage, { token: "new" });
+    assert.equal(db.prepare("SELECT created_at FROM alpha").get().created_at, created);
+    store.setSessionStatus(db, "alpha", "a@x.com", "expired");
+    store.saveSession(db, "alpha", "a@x.com", [], {});
+    assert.equal(store.getSession(db, "alpha", "a@x.com").status, "active");
+  } finally { db.close(); }
 });
