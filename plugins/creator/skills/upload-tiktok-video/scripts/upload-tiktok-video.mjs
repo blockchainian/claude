@@ -3,11 +3,14 @@
 //
 // Usage:
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-video.mjs <video.mp4> \
-//     [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--ai-generated]
+//     [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc]
+//     [--promotion your-brand|branded-content|your-brand,branded-content]
 //   --username posts as that account of the store (default: its earliest imported active account).
 //   --caption is the post's description, hashtags included (default: empty, TikTok then shows nothing).
 //   --visibility is who can see the post (default everyone).
-//   --ai-generated turns on TikTok's "AI-generated content" label.
+//   --aigc turns on TikTok's "AI-generated content" label.
+//   --promotion discloses that the post promotes a brand: `your-brand` (the account's own) and/or
+//     `branded-content` (a third party's, under TikTok's Branded Content Policy).
 //
 // The account (the named one, else the store's earliest imported active one) is opened as its
 // own profile on its own ISP slot (see tiktok-session.mjs). The window is shown and recorded to
@@ -15,7 +18,7 @@
 // account in again with secrets-manager's `login tiktok`; the store is never written here.
 //
 // Each post appends a line to <CREATOR_TIKTOK_DIR>/<username>/posts.jsonl:
-//   { at, username, file, caption, visibility, aiGenerated, videoId, url, recording }
+//   { at, username, file, caption, visibility, aigc, promotion, videoId, url, recording }
 // videoId is null when the video had not reached the profile when the run gave up looking.
 
 import { appendFileSync, existsSync, mkdirSync, realpathSync } from "node:fs";
@@ -33,13 +36,15 @@ const FIND_JITTER_MS = 1500;
 const CLOCK_SKEW_S = 120; // TikTok's createTime against this machine's clock
 // The labels of "Who can see this post", by --visibility.
 const VISIBILITY = { everyone: "Everyone", friends: "Friends", "only-me": "Only you" };
+// The checkboxes under "Disclose post content", by --promotion kind.
+const PROMOTION = { "your-brand": "Your brand", "branded-content": "Branded content" };
 const USAGE =
-  "Usage: upload-tiktok-video.mjs <video.mp4> [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--ai-generated]";
+  "Usage: upload-tiktok-video.mjs <video.mp4> [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc] [--promotion your-brand,branded-content]";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function parseArgs(argv) {
-  const out = { file: null, username: null, caption: "", visibility: "everyone", aiGenerated: false };
+  const out = { file: null, username: null, caption: "", visibility: "everyone", aigc: false, promotion: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--caption") out.caption = argv[++i] ?? "";
@@ -47,7 +52,13 @@ export function parseArgs(argv) {
     else if (a === "--visibility") {
       out.visibility = argv[++i];
       if (!VISIBILITY[out.visibility]) throw new Error(`--visibility must be one of ${Object.keys(VISIBILITY).join(", ")}`);
-    } else if (a === "--ai-generated") out.aiGenerated = true;
+    } else if (a === "--aigc") out.aigc = true;
+    else if (a === "--promotion") {
+      out.promotion = (argv[++i] ?? "").split(",").filter(Boolean);
+      if (!out.promotion.length || out.promotion.some((k) => !PROMOTION[k])) {
+        throw new Error(`--promotion must be ${Object.keys(PROMOTION).join(" and/or ")}, comma-separated`);
+      }
+    }
     else if (a.startsWith("--")) throw new Error(`Unknown option ${a}`);
     else out.file = a;
   }
@@ -97,19 +108,48 @@ async function setVisibility(page, visibility) {
   if (now !== VISIBILITY[visibility]) throw new Error(`visibility is "${now}", not "${VISIBILITY[visibility]}"`);
 }
 
-// Turn on the "AI-generated content" switch under "Show more". It turns on at once, with no
-// confirmation ("Creator labeled as AI-generated" appears under it).
-async function labelAiGenerated(page) {
+// The settings under "Show more", opened if they are not yet.
+async function showMore(page) {
   const more = page.getByText("Show more", { exact: true });
   if (await more.isVisible().catch(() => false)) await more.click();
-  const toggle = page.locator(
-    'xpath=//*[normalize-space(text())="AI-generated content"]/ancestor::*[.//input[contains(@class,"Switch__input")]][1]//input[contains(@class,"Switch__input")]',
-  );
+}
+
+// The nearest input of `type` (an xpath predicate) to the element whose text is `label`.
+const inputBy = (page, label, type) =>
+  page.locator(`xpath=//*[normalize-space(text())="${label}"]/ancestor::*[.//input[${type}]][1]//input[${type}]`).first();
+
+// Turn on the "AI-generated content" switch under "Show more". It turns on at once, with no
+// confirmation ("Creator labeled as AI-generated" appears under it).
+async function labelAigc(page) {
+  await showMore(page);
+  const toggle = inputBy(page, "AI-generated content", 'contains(@class,"Switch__input")');
   if (!(await toggle.isChecked())) await toggle.click({ force: true });
   // The switch reads as checked only once the page has re-rendered (about half a second), so wait
   // for the line it shows when on rather than reading the switch straight after the click.
   await page.getByText("Creator labeled as AI-generated").waitFor({ timeout: 10000 });
   if (!(await toggle.isChecked())) throw new Error("the AI-generated content label did not turn on");
+}
+
+// Turn on "Disclose post content" under "Show more" and tick each kind of promotion in `kinds`.
+// The switch shows the two checkboxes; either or both may be ticked, with no confirmation.
+async function disclosePromotion(page, kinds) {
+  await showMore(page);
+  const toggle = inputBy(page, "Disclose post content", 'contains(@class,"Switch__input")');
+  if (!(await toggle.isChecked())) await toggle.click({ force: true });
+  for (const kind of kinds) {
+    const box = inputBy(page, PROMOTION[kind], '@type="checkbox"');
+    await box.waitFor({ state: "attached", timeout: 10000 });
+    if (!(await box.isChecked())) await box.click({ force: true });
+    await expectChecked(box, `the "${PROMOTION[kind]}" disclosure did not turn on`);
+  }
+}
+
+// Wait up to 10 s for a control to read as checked: the page re-renders it a moment after the click.
+async function expectChecked(control, message) {
+  for (const deadline = Date.now() + 10000; Date.now() < deadline; await sleep(200)) {
+    if (await control.isChecked()) return;
+  }
+  throw new Error(message);
 }
 
 // Press Post and wait until TikTok takes the post and leaves the upload page, confirming a "post
@@ -179,8 +219,10 @@ async function main() {
     console.log("  uploaded");
     await setCaption(page, args.caption);
     await setVisibility(page, args.visibility);
-    if (args.aiGenerated) await labelAiGenerated(page);
-    console.log(`  caption, ${args.visibility}${args.aiGenerated ? ", AI-generated label" : ""} set`);
+    if (args.aigc) await labelAigc(page);
+    if (args.promotion.length) await disclosePromotion(page, args.promotion);
+    const extras = [args.aigc && "AI-generated label", ...args.promotion.map((k) => `promotion: ${k}`)].filter(Boolean);
+    console.log(`  caption, ${[args.visibility, ...extras].join(", ")} set`);
     await post(page);
     console.log("  posted");
 
@@ -193,7 +235,8 @@ async function main() {
       file,
       caption: args.caption,
       visibility: args.visibility,
-      aiGenerated: args.aiGenerated,
+      aigc: args.aigc,
+      promotion: args.promotion,
       videoId: video?.id ?? null,
       url,
       recording: recording?.path ?? null,

@@ -7,23 +7,33 @@ import { test } from "node:test";
 import { findPosted, findDelay, parseArgs } from "../scripts/upload-tiktok-video.mjs";
 
 test("parseArgs takes the file, the caption and the post settings", () => {
-  assert.deepEqual(parseArgs(["a.mp4", "--caption", "hi #tag", "--visibility", "only-me", "--ai-generated", "--username", "@me"]), {
-    file: "a.mp4",
-    username: "me",
-    caption: "hi #tag",
-    visibility: "only-me",
-    aiGenerated: true,
-  });
+  assert.deepEqual(
+    parseArgs(["a.mp4", "--caption", "hi #tag", "--visibility", "only-me", "--aigc", "--promotion", "your-brand,branded-content", "--username", "@me"]),
+    {
+      file: "a.mp4",
+      username: "me",
+      caption: "hi #tag",
+      visibility: "only-me",
+      aigc: true,
+      promotion: ["your-brand", "branded-content"],
+    },
+  );
 });
 
-test("parseArgs defaults to an empty caption, everyone, and no AI label", () => {
-  assert.deepEqual(parseArgs(["a.mp4"]), { file: "a.mp4", username: null, caption: "", visibility: "everyone", aiGenerated: false });
+test("parseArgs takes one kind of promotion", () => {
+  assert.deepEqual(parseArgs(["a.mp4", "--promotion", "branded-content"]).promotion, ["branded-content"]);
 });
 
-test("parseArgs refuses a missing file, an unknown visibility and an unknown option", () => {
+test("parseArgs defaults to an empty caption, everyone, no AI label and no promotion", () => {
+  assert.deepEqual(parseArgs(["a.mp4"]), { file: "a.mp4", username: null, caption: "", visibility: "everyone", aigc: false, promotion: [] });
+});
+
+test("parseArgs refuses a missing file, an unknown visibility or promotion and an unknown option", () => {
   assert.throws(() => parseArgs([]), /Usage/);
   assert.throws(() => parseArgs(["a.mp4", "--visibility", "public"]), /--visibility/);
   assert.throws(() => parseArgs(["a.mp4", "--bogus"]), /Unknown option --bogus/);
+  assert.throws(() => parseArgs(["a.mp4", "--promotion", "ad"]), /--promotion/);
+  assert.throws(() => parseArgs(["a.mp4", "--ai-generated"]), /Unknown option --ai-generated/);
 });
 
 test("findPosted takes the newest video created since the post began", () => {
