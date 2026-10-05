@@ -16,6 +16,11 @@ mock.module(require.resolve('imapflow'), {namedExports: {ImapFlow: class {
  async fetchOne() {return {source: Buffer.from('From: Delta <signup@delta.example>\r\nTo: base+delta@example.com\r\nSubject: Verification code\r\nContent-Type: text/plain\r\n\r\nYour verification code is 481920.\r\n')};}
  async logout() {lifecycle.push('mail-logout');}
 }}});
+const exitChecks = [];
+mock.module(new URL('../../scripts/proxy-check.mjs', import.meta.url).href, {namedExports: {
+ assertExitUp: async (url) => {exitChecks.push([url, launches.length]);},
+ dispatcherFor: () => null, ProxyExitDown: class extends Error {},
+}});
 mock.module(require.resolve('camoufox-js'), {namedExports: {Camoufox: async options => {
  launches.push(options);
  const context = {closed:false, routes:[], sockets:[], pages:()=>[page],
@@ -37,6 +42,8 @@ assert.deepEqual(filled,[['input[name=code]','481920']]);
 assert.deepEqual(lifecycle,['mail-connect','mail-release','mail-logout']);
 assert.equal(contexts[0].closed,true);
 assert.equal(launches[0].user_data_dir,kit.config.profileDirFor(result.alias));
+// The exit is checked once per browser, before that browser launches.
+assert.deepEqual(exitChecks[0],[result.proxyUrl,0]);
 assert.equal(launches[0].headless,true);assert.equal(launches[0].geoip,true);
 assert.deepEqual(launches[0].proxy,{server:'http://proxy.example:8080',username:'user',password:'pass'});
 assert.ok(launches[0].fingerprint);assert.ok(existsSync(join(launches[0].user_data_dir,'fingerprint.json')));

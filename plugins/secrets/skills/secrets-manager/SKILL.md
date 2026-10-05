@@ -278,7 +278,11 @@ X_VIEWER_QUERY_ID=...        # verify x: the GraphQL Viewer queryId from x.com's
 
 Compatible proxies that take `sessid`/`sesstime` in the username give each account a sticky
 exit (`sessid` derived from its ID) so one login never hops IPs. The browser runs with `geoip` so timezone/locale/WebRTC match the exit. Without a proxy,
-browser commands refuse to run.
+browser commands refuse to run. Before every browser opens, its exit is checked (a request to
+`www.gstatic.com/generate_204`, two tries): an exit that cannot tunnel fails that account with
+`proxy exit down: <host> …` and leaves its status unchanged — sticky exits do go down for a while
+(CONNECT answers 522); re-run later. `--rotate-proxy` changes the IP on every connection, so it is
+no cure for a browser login.
 
 To keep proxy traffic down, every browser context aborts requests a login never needs before
 they leave the browser (`scripts/traffic.mjs`): all images, media and fonts on any site, plus a

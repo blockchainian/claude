@@ -9,6 +9,7 @@ import { generateFingerprint } from "camoufox-js/dist/fingerprints.js";
 import * as captcha from "./captcha.mjs";
 import { classifyImage, readImageText } from "./classify-image.mjs";
 import * as config from "./config.mjs";
+import { assertExitUp } from "./proxy-check.mjs";
 import * as debug from "./debug.mjs";
 import * as smsOtp from "./sms-otp.mjs";
 import * as store from "./store.mjs";
@@ -1802,6 +1803,7 @@ export async function withProfile(key, { headed = false, rotate = false, proxyUr
   if (!proxyUrl) {
     throw new Error("No proxy set. Add RESIDENTIAL_PROXY_URL to ~/.config/secrets-manager/.env; never log in from the home IP.");
   }
+  await assertExitUp(proxyUrl);
   const videoDir = record && !headed ? debug.videoDir(key) : null;
   if (headed) console.log(`  window opens on ${windowPlace.displayName() || "the main display"}: ${windowPlace.openOnDisplay(profile)}`);
   const context = await Camoufox({
