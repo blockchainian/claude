@@ -99,6 +99,29 @@ export function isSignedInUrl(url) {
   return isMyAccountUrl(url) || isOnboardingUrl(url);
 }
 
+// The account status a profile's landing page on myaccount.google.com says: the dashboard (or the
+// setup wizard) is a live session, Google's marketing or sign-in page a lapsed one, the disabled
+// speedbump a banned account, and any other sign-in challenge a person to clear it.
+export function googleStatusFromUrl(url) {
+  const node = classifyGoogleNode(url);
+  if (node === "signed-in" || node === "onboarding") return "active";
+  if (node === "restricted") return "restricted";
+  if (hostEquals(url, "accounts.google.com") && url.includes("challenge")) return "escalated";
+  if (hostEquals(url, "www.google.com") || hostEquals(url, "accounts.google.com")) return "expired";
+  throw new Error(`Google check inconclusive: landed on ${url}`);
+}
+
+// `verify google`: opens the account's own profile on its sticky residential exit and reads where
+// myaccount.google.com leaves it. Never signs in.
+export async function checkGoogle({ row, opts = {} }) {
+  return withProfile(row.email, browserOptsOf(opts), async (_context, page) => {
+    await isGoogleLoggedIn(page);
+    return googleStatusFromUrl(page.url());
+  });
+}
+
+const browserOptsOf = (opts) => ({ headed: opts.headed, rotate: opts["rotate-proxy"] });
+
 function hostEquals(url, host) {
   try {
     return new URL(url).hostname === host;
