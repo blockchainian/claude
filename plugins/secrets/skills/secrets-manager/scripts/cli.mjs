@@ -140,8 +140,8 @@ function runImport(db, opts, io) {
 
 // --- login -------------------------------------------------------------------
 
-// Apps that need a fresh session: never seen, or explicitly marked expired. Skips active (still
-// good, including ready), restricted and escalated (won't retry until cleared).
+// Apps that need a fresh session: never seen, or explicitly marked expired. Skips active and ready
+// (still good), restricted and escalated (won't retry until cleared).
 export function needsRefresh(db, app, email) {
   const session = store.getSession(db, app, email);
   return session === null || session.status === store.STATUS_EXPIRED;
@@ -646,7 +646,7 @@ const USAGE = `Usage: secrets-manager <command> [options]
   login <google|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headless] [--rotate-proxy]
   login <x|tiktok> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
   login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
-  verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
+  verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed] [--rotate-proxy]
   setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy]
   setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
