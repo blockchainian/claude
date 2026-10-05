@@ -9,7 +9,8 @@
 //   --with-sound unmutes the browser (Playwright mutes it), to hear the videos.
 //
 // The window is always shown, so there is no --headed; nothing is recorded, a person is watching.
-// The run ends when the window is closed. Nothing else may have the profile open at the same time.
+// The run ends when the window is closed (on macOS that closes the last tab, not the browser, so the
+// browser is closed then too). Nothing else may have the profile open at the same time.
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,16 @@ import { fileURLToPath } from "node:url";
 import { loadAccount, openBrowser, signedIn } from "../../upload-tiktok-video/scripts/tiktok-session.mjs";
 
 const STUDIO_URL = "https://www.tiktok.com/tiktokstudio";
+
+// Resolves once the person is done: the browser closed, or its last tab (the window) closed.
+export function untilClosed(context) {
+  return new Promise((resolve) => {
+    context.on("close", resolve);
+    const watch = (page) => page.on("close", () => context.pages().length || resolve());
+    context.pages().forEach(watch);
+    context.on("page", watch);
+  });
+}
 
 export function parseArgs(argv) {
   const out = { username: null, url: STUDIO_URL, withSound: false };
@@ -41,7 +52,8 @@ async function main() {
   process.once("SIGINT", () => close().then(() => process.exit(130)));
   if (!(await signedIn(context))) console.log(`  @${account.username}'s profile is logged out; run the secrets-manager skill's \`login tiktok\``);
   console.log(`opened @${account.username} at ${args.url}${args.withSound ? ", with sound" : ""}; close the window to end`);
-  await new Promise((r) => context.on("close", r));
+  await untilClosed(context);
+  await close();
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
