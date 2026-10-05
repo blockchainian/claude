@@ -24,7 +24,8 @@ cd "${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts" && npm install
 
 Both skills use that install. Camoufox itself is fetched by the secrets plugin's setup.
 `ISP_PROXY_URL` is read from the secrets-manager's `.env`. Data goes to
-`~/.local/share/creator/tiktok/` (`CREATOR_TIKTOK_DIR` overrides it). Recording uses
+`~/.local/share/creator/tiktok/<username>/`, one directory per account (`CREATOR_TIKTOK_DIR`
+overrides the parent). Recording uses
 ScreenCaptureKit through `swift` and needs the Screen Recording permission.
 
 ## Tests
