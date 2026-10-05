@@ -35,6 +35,7 @@ test("capture writes the screenshot and facts", async () => {
   assert.equal(basename(dirname(out)), "a@x.com");
   assert.ok(basename(out).startsWith("oauth-stuck-"));
   assert.ok(existsSync(join(out, "screenshot.png")));
+  assert.equal(existsSync(join(out, "screenshot.txt")), false);
   const info = readFileSync(join(out, "info.txt"), "utf8");
   assert.ok(info.includes("accounts.google.com"));
   assert.ok(info.includes("Continue with Google"));
@@ -81,4 +82,15 @@ test("stopScreenRecording returns null when the recorder never started", async (
   const child = spawn(process.execPath, ["-e", "console.log('skip: no app for pid')"], { stdio: ["ignore", "pipe", "ignore"] });
   await new Promise((r) => child.once("exit", r));
   assert.equal(await stopScreenRecording({ child, path: "/x/rec.mov" }), null);
+});
+
+test("capture writes the supplied note beside the screenshot with the same base name", async () => {
+  const note = 'Login: locator.click timed out\n<div> intercepts pointer events';
+  const out = await capture(stubPage("https://example.com"), "note@x.com", "click-failed", note);
+  assert.equal(readFileSync(join(out, "screenshot.txt"), "utf8"), note);
+});
+
+test("capture preserves the note even when the page cannot take a screenshot", async () => {
+  const out = await capture({}, "dead@x.com", "click-failed", "element is not visible");
+  assert.equal(readFileSync(join(out, "screenshot.txt"), "utf8"), "element is not visible");
 });
