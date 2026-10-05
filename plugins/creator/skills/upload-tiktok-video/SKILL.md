@@ -1,19 +1,23 @@
 ---
 name: upload-tiktok-video
-description: Post one mp4 to the TikTok account the secrets-manager skill logged in — its earliest imported active account — through TikTok Studio's upload page in that account's own Camoufox profile on its ISP slot, with a caption, who can see it and the AI-generated label; the browser window is shown and screen-recorded; the posted video's id is found and the post logged to posts.jsonl. Use when asked to upload / post / 上传 / 发 a video to TikTok, or to test the upload flow. NOT for logging the account in or its status (secrets-manager), NOT for the video's numbers afterwards (fetch-tiktok-stats) and NOT for the official Content Posting API.
+description: Post one mp4 to the TikTok account the secrets-manager skill logged in — its earliest imported active account — through TikTok Studio's upload page in that account's own Camoufox profile on its ISP slot, with a caption, who can see it, the AI-generated label and the promotion disclosure; the browser window is shown and screen-recorded; the posted video's id is found and the post logged to posts.jsonl. Use when asked to upload / post / 上传 / 发 a video to TikTok, or to test the upload flow. NOT for logging the account in or its status (secrets-manager), NOT for the video's numbers afterwards (fetch-tiktok-stats) and NOT for the official Content Posting API.
 ---
 
 # Upload a TikTok video
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/skills/upload-tiktok-video/scripts/upload-tiktok-video.mjs" <video.mp4> \
-  [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--ai-generated]
+  [--username <name>] [--caption <text>] [--visibility everyone|friends|only-me] [--aigc] \
+  [--promotion your-brand|branded-content|your-brand,branded-content]
 ```
 
 - `--username`: post as that account of the store; it must be `active`. Default below.
 - `--caption`: the description, hashtags included (`"my words #tag #other"`). Default empty.
 - `--visibility`: who can see the post. Default `everyone`.
-- `--ai-generated`: turn on TikTok's "AI-generated content" label (under "Show more").
+- `--aigc`: turn on TikTok's "AI-generated content" label (under "Show more").
+- `--promotion`: turn on "Disclose post content" (under "Show more") and tick `your-brand` (the
+  account promotes itself), `branded-content` (a paid partnership with another brand; posting it
+  agrees to TikTok's Branded Content Policy), or both, comma-separated.
 
 Launch it in the background and reread the log; a post takes a few minutes, most of it waiting for
 the video to show on the profile.
@@ -37,8 +41,8 @@ have the profile open at the same time (a fetch-tiktok-mentions run using the sa
    copyright and For You eligibility, an account setting). Both show only on a profile's first
    few visits.
 4. Replaces the prefilled description (the file name) with the caption, typed key by key.
-5. Sets who can see the post, and the AI-generated label when asked (it turns on at once, no
-   confirmation).
+5. Sets who can see the post, the AI-generated label and the promotion disclosure when asked
+   (each turns on at once, no confirmation).
 6. Presses Post, confirming "Post now" if TikTok asks, and waits to leave the upload page.
 7. Opens the account's profile and finds the new video by its create time, through the same
    page-signed API calls fetch-tiktok-stats uses, every 5 s, moved randomly by up to 1.5 s, for up to five minutes.
@@ -49,7 +53,7 @@ Under `~/.local/share/creator/tiktok/<username>/`, one directory per account (`C
 overrides `~/.local/share/creator/tiktok`):
 
 - `posts.jsonl`: one line per post,
-  `{ at, username, file, caption, visibility, aiGenerated, videoId, url, recording }`.
+  `{ at, username, file, caption, visibility, aigc, promotion, videoId, url, recording }`.
   `videoId` is null when the video had not reached the profile in time.
 - `recordings/<ts>.mov`: the screen recording of the run, also on failure. Watch it
   first when a step fails: TikTok Studio's page changes, and the selectors with it.
@@ -62,5 +66,4 @@ Recording needs macOS's Screen Recording permission for the terminal running `sw
 
 ## Not here
 
-Music from TikTok's commercial library, the "promotes a brand" disclosure, scheduling, and the
-Content Posting API.
+Music from TikTok's commercial library, scheduling, and the Content Posting API.
