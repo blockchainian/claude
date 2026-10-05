@@ -1,5 +1,5 @@
 // ABOUTME: Tests the pure part of open-tiktok-account.mjs: arg parsing, with TikTok Studio's home as the
-// ABOUTME: default page and the window always shown.
+// ABOUTME: default page and the window always shown; a named account opens in any status.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
