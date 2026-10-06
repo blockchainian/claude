@@ -158,7 +158,9 @@ terminal color). Type is Baskerville for Latin and
 Songti SC for Chinese. Inline `\(..\)` / `\[..\]` LaTeX is typeset by KaTeX (loaded from the CDN, so rendering
 needs network). Chinese **bold** — the source's term emphasis and the translator's highlights — is set in a
 gothic (黑体) face a step brighter than the body (`--bold-factor`, default 1.25), because Songti's bold is nearly
-invisible; chapter openers and headings match. Picture-type (image) equations from an EPUB share one scale: a block
+invisible; chapter openers and headings match. 黑体 glyphs sit about 0.05em higher than Songti's, so bold Chinese
+runs are nudged down onto Songti's line. A quotation or epigraph (Markdown `> `) sets its Chinese upright (Songti has
+no italic; Chrome would slant it mechanically) and its Latin in Baskerville italic. Picture-type (image) equations from an EPUB share one scale: a block
 (display) one is centered at its pixel width times `--eq-scale` (default 0.6), an inline one sits in the line at its
 pixel width times `--inline-scale` (default 0.33, about body-text size). A Markdown rule (`---`, a scene break in the source) is set as blank space between the
 paragraphs, never as a drawn line. CJK closing punctuation right after inline math, inline code or an inline image is bound to
@@ -167,16 +169,28 @@ it, so a line never opens with ，or 。. A block figure and the caption paragra
 is never left alone at a page bottom; a long one still splits, with only its last lines moving. Inline code is set in
 KaTeX's typewriter face, the same as `\mathtt`. A paragraph with hard line breaks (aligned rows) has no first-line
 indent, and a continued line keeps its leading ideographic spaces (a staircase). Chapter openers carry the
-第N章 label, the title and a drop cap (left off when the first paragraph opens with a bold label or a digit, as in
-an answers section, or is too short to wrap round it); body pages carry the chapter title as running head and a folio (roman in
+第N章 label, the title and a drop cap on the first paragraph after any epigraph (left off when that paragraph opens
+with a bold number label or a digit, as in an answers section, or is under about a line; a paragraph opening with a
+bold phrase gets a bold cap). Every paragraph is indented 2em except a drop-cap one, so a list section's first item
+lines up with the rest; body pages carry the chapter title as running head and a folio (roman in
 front matter, arabic from chapter 1). Every 目录 row is a link to its section, and the bookmarks are flat:
 Cover, 目录, one per section. Sections without a
 translation yet are skipped with a warning, so a partial book renders at any time.
 
 Then look, do not assume: render the cover, the 目录, one chapter opener and one body page to PNG
 (`pdftoppm -r 45`) and check that the header is masked on openers, folios restart at chapter 1, and 目录 page
-numbers match the bookmarks (pikepdf: the 目录 page's `/Annots` links point at the same pages). Open the PDF for
-the user.
+numbers match the bookmarks (pikepdf: the 目录 page's `/Annots` links point at the same pages). Then run the
+format check on the PDF:
+
+```bash
+"$SKILL_DIR/scripts/format_check.py" <book.pdf> > <work>/format-check.txt
+```
+
+It reads only the PDF and lists, per page: sections whose opening prose has no drop cap (or a cap on a number
+label, or a plain cap on a bold opener), slanted Chinese, bold Chinese sitting off Songti's line, loosely spaced
+lines (justification stretching the gaps round a long unbreakable Latin run), exercise numbers pushed right of the
+indent by an inline marker image, and list sections whose first item sits at the margin. Loose lines are reported
+for information; the others are layout defects to fix before handing the book over. Open the PDF for the user.
 
 ## 5. Fix any equations the guard flags
 

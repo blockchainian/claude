@@ -115,6 +115,33 @@ def test_render_units(rd):
     check("no drop cap after a leading image then a bold label", not dropcap('<p><img class="infig" src="a.png"> <strong>2.</strong> ' + "习题" * 60 + "</p>"))
     check("no drop cap when the first paragraph opens with a digit", not dropcap("<p>7 " + "正文" * 60 + "</p>"))
     check("no drop cap on a very short first paragraph", not dropcap("<p>短。</p>" + prose))
+    # A one-sentence opener just over a line still wraps the two-line cap; 60 characters skipped many sections.
+    check("drop cap on a one-line-plus opening sentence", dropcap("<p>算法的概念是所有计算机程序设计的基础，因此我们应当从仔细分析这一概念开始。</p>"))
+    check("a formula's LaTeX source does not count toward the length", not dropcap("<p>令 ROW 与 \\(\\mathtt{BASEROW}[i]\\) 相同。</p>" + prose))
+    check("css clears the block after a capped paragraph", ".body-text:not(.no-dropcap) > p:first-of-type + * { clear: left; }" in style)
+    # place_images marks a paragraph leading into a figure <p class="keep">; it is still the first paragraph.
+    check("drop cap judged on a first paragraph that carries a class", dropcap('<p class="keep">' + "正文" * 30 + "</p><p>短。</p>"))
+    # A bold key phrase opening prose is not an answer label: it gets the cap, set bold to match the phrase.
+    bold_open = '<p><strong><span class="cjkb">取自</span> n <span class="cjkb">个对象的组合</span></strong>，是从集合中选出不同元素而不计次序的各种选法，对五个对象每次取三个。</p>'
+    check("drop cap on prose that opens with a bold phrase", dropcap(bold_open))
+    check("a bold-phrase opener marks the cap bold", "boldcap" in rd.section_html(sec, "标题", bold_open))
+    check("a plain opener does not mark the cap bold", "boldcap" not in rd.section_html(sec, "标题", prose))
+    # An epigraph (blockquote) before the text: the cap goes on the first top-level paragraph, as the CSS selects it.
+    check("drop cap judged on the paragraph after an epigraph", dropcap("<blockquote><p>短题词。</p></blockquote>" + prose))
+    check("css sets a bold-phrase cap in the bold face", ".body-text.boldcap > p:first-of-type::first-letter" in style)
+    # Chinese books indent every paragraph; only a drop-cap paragraph starts flush, so a list section's first item
+    # (an answer "1.", an index entry) lines up with the rest.
+    check("css starts only a drop-cap paragraph flush", ".body-text:not(.no-dropcap) > p:first-of-type { text-indent: 0" in style
+          and ".body-text > p:first-of-type { text-indent: 0" not in style)
+    # Songti has no italic: an italic blockquote is mechanically slanted Chinese. Latin keeps its italic face.
+    bq = style.split("\nblockquote {")[1].split("}")[0]
+    check("css sets blockquote Chinese upright", "font-style: italic" not in bq and "QuoteLatin" in bq, bq)
+    check("css maps blockquote Latin to Baskerville italic", '@font-face { font-family: "QuoteLatin"; src: local("Baskerville-Italic")' in style)
+    # 黑体 glyphs sit about 0.05em higher on the baseline than Songti's: bold Chinese runs are nudged down to match.
+    bbody = rd.nudge_bold_cjk("<p>正文<strong>粗体 AB 字</strong>，<em>强调</em>。</p>")
+    check("bold Chinese runs wrapped for the baseline nudge", '<strong><span class="cjkb">粗体</span> AB <span class="cjkb">字</span></strong>' in bbody
+          and '<em><span class="cjkb">强调</span></em>' in bbody, bbody)
+    check("css nudges bold Chinese down", ".cjkb { vertical-align: -0.05em; }" in style)
     check("css keeps a figure and its caption on one page", ".figcap { break-inside: avoid" in style)
     check("css gates the drop cap on the body-text class", ".body-text:not(.no-dropcap) > p:first-of-type::first-letter" in style)
     toc = rd.contents_html([(sec, "标题")], {"04": "1"})
