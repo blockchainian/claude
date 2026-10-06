@@ -159,7 +159,7 @@ def md_to_html(md_text, codes=None):
     body = re.sub(r"((?:  |<br\s*/?>)\n)(\u3000+)", lambda m: m.group(1) + "&#12288;" * len(m.group(2)), body)
     body = MATH_RE.sub(stash, body)
     body = re.sub(r"^>[ \t]?(@@MATH\d+@@)[ \t]*$", r"\1", body, flags=re.M)  # unwrap a math-only blockquote line
-    out = markdown.markdown(body, extensions=["smarty", "tables"], output_format="html")
+    out = markdown.markdown(body, extensions=["smarty", "tables", "sane_lists"], output_format="html")
     for i, raw in enumerate(code_vault):
         marker = f"@@CODE{i}@@"
         out = out.replace(f"<p>{marker}</p>", raw).replace(marker, raw)
