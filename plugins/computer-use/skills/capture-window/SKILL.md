@@ -1,11 +1,14 @@
 ---
 name: capture-window
-description: Capture one macOS app's front window to a PNG and look at it, leaving every other window on the user's screen untouched. Use whenever you need to see a desktop app — VS Code, iTerm, a native app — to check a theme, a layout or what the user is pointing at. NOT for iOS screens (mobile:ios-take-screenshot) or web pages (claude-in-chrome).
+description: Claude-only. Capture one macOS app's front window to a PNG and look at it, leaving every other window on the user's screen untouched. Use in Claude Code whenever you need to see a desktop app — VS Code, iTerm, a native app — to check a theme, a layout or what the user is pointing at. NOT for iOS screens (mobile:ios-take-screenshot) or web pages (claude-in-chrome).
 ---
 
 # Capture a window
 
-computer-use screenshots hide every app outside the session allowlist, so the
+This skill is Claude-only. It addresses Claude's computer-use capture behavior;
+it is intentionally excluded from the Codex marketplace.
+
+Claude's computer-use screenshots hide every app outside the session allowlist, so the
 user's browser and other windows vanish. This captures only the named app's
 window with `screencapture -l`; nothing else is hidden, raised or focused.
 
