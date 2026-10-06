@@ -392,7 +392,7 @@ class Manager {
   async startThread(client, { cwd, name, sandbox, claudeTools, record }) {
     const params = { cwd, approvalPolicy: "on-request", sandbox, serviceName: "codex-manager", ephemeral: false };
     if (sandbox === "workspace-write") params.config = { "sandbox_workspace_write.network_access": true };
-    if (claudeTools) params.config = { ...params.config, "mcp_servers.claude": claudeToolsServer() };
+    if (claudeTools) params.config = { ...params.config, "mcp_servers.claude-client": claudeToolsServer() };
     const started = await client.request("thread/start", params);
     const threadId = started.thread.id;
     if (name) await client.request("thread/name/set", { threadId, name });

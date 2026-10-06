@@ -101,7 +101,7 @@
       "category": "Developer Tools"
     },
     {
-      "name": "claude-client",
+      "name": "claude",
       "source": {
         "source": "local",
         "path": "./plugins/codex"

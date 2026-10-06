@@ -20,13 +20,13 @@ test("the marketplace lists every plugin in the repository", async () => {
 test("the Codex marketplace exposes the selected plugins and Claude client", async () => {
   const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
   assert.equal(marketplace.name, "blockchainian");
-  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel", "secrets", "claude-client"]);
+  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel", "secrets", "claude"]);
 
   for (const entry of marketplace.plugins) {
     assert.equal(entry.source.source, "local");
-    assert.equal(entry.source.path, `./plugins/${entry.name === "claude-client" ? "codex" : entry.name}`);
+    assert.equal(entry.source.path, `./plugins/${entry.name === "claude" ? "codex" : entry.name}`);
     assert.deepEqual(entry.policy, { installation: "AVAILABLE", authentication: "ON_USE" });
-    const manifest = entry.name === "claude-client" ? ".codex-plugin" : ".claude-plugin";
+    const manifest = entry.name === "claude" ? ".codex-plugin" : ".claude-plugin";
     const plugin = JSON.parse(await readFile(`${entry.source.path}/${manifest}/plugin.json`, "utf8"));
     assert.equal(plugin.name, entry.name);
   }
@@ -40,10 +40,10 @@ test("Claude client packages only Codex's communication server and excludes Clau
     `${root}/.mcp.json`,
   ].map(async (file) => JSON.parse(await readFile(file, "utf8"))));
   assert.equal(claude.name, "codex");
-  assert.equal(codex.name, "claude-client");
+  assert.equal(codex.name, "claude");
   assert.equal(codex.version, claude.version);
-  assert.deepEqual(Object.keys(codex.mcpServers), ["claude"]);
-  assert.deepEqual(codex.mcpServers.claude, {
+  assert.deepEqual(Object.keys(codex.mcpServers), ["claude-client"]);
+  assert.deepEqual(codex.mcpServers["claude-client"], {
     command: "node",
     args: ["codex-manager/manager.mjs", "claude"],
     cwd: "./",

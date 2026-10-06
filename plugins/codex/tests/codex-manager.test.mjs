@@ -282,7 +282,7 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     assert.equal(start.serviceName, "codex-manager");
     assert.deepEqual(start.config, {
       "sandbox_workspace_write.network_access": true,
-      "mcp_servers.claude": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
+      "mcp_servers.claude-client": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
     });
     assert.equal(start.dynamicTools, undefined);
     assert.deepEqual(JSON.parse(await readFile(path.join(home.home, "threads", "thread-A.json"), "utf8")), { sessionId: session, pid: mcp.child.pid });
@@ -420,7 +420,7 @@ test("notify_claude and ask_claude reach the Claude session that supervises the 
   const tools = new ToolsChild(home.home);
   try {
     const init = await tools.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "codex-mcp-client", version: "0" } });
-    assert.equal(init.result.serverInfo.name, "claude");
+    assert.equal(init.result.serverInfo.name, "claude-client");
     const listedTools = await tools.request("tools/list", {});
     assert.deepEqual(listedTools.result.tools.map((tool) => [tool.name, tool.inputSchema.required]), [["notify_claude", ["text"]], ["ask_claude", ["text"]]]);
 

@@ -3,14 +3,14 @@
 A community extension of the [official codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc)
 that lets Claude run codex threads on the shared local app-server daemon as
 supervised workers. Claude installs it as `codex`; Codex installs the communication
-client as `claude-client`. The Claude plugin adds one
+client as `claude`. The Claude plugin adds one
 MCP server, `codex-manager`: Claude starts a thread, gives it follow-up
 prompts, answers its questions and approval requests, interrupts it, lists
 what is running, asks it for a code review, and gets woken when it finishes
 or has something to say. Codex reaches Claude through two tools,
 `notify_claude` and `ask_claude`, served by an MCP server this plugin ships.
 Threads Claude starts get that server with the thread; sessions Claude
-attaches to get it from the installed `claude-client` plugin (see Install).
+attaches to get it from the installed `claude` plugin (see Install).
 
 The [feature](../feature/README.md) plugin's `/feature:ship` uses it as the
 backend lane: one thread per workstream, each in its own worktree, with
@@ -39,10 +39,10 @@ please open an issue.
 
 ```sh
 codex plugin marketplace add blockchainian/claude
-codex plugin add claude-client@blockchainian
+codex plugin add claude@blockchainian
 ```
 
-The plugin registers the `claude` MCP server with `ask_claude` and
+The plugin registers the `claude-client` MCP server with `ask_claude` and
 `notify_claude`. It starts `node codex-manager/manager.mjs claude` from its installed
 directory, so no absolute script path or manual global MCP entry is needed.
 Claude's Stop hook is excluded from the Codex installation.
@@ -60,7 +60,7 @@ client plugin is not installed.
 
 The plugin's tool timeout is 360 seconds, longer than the default 300-second
 supervisor reply timeout. If `CODEX_MANAGER_ASK_TIMEOUT` is raised, configure
-`plugins."claude-client@blockchainian".mcp_servers.claude.tool_timeout_sec`
+`plugins."claude@blockchainian".mcp_servers.claude-client.tool_timeout_sec`
 to exceed it.
 
 Requirements: [codex CLI](https://github.com/openai/codex) ≥ 0.144, logged in,
@@ -70,7 +70,7 @@ with its app-server daemon running (`codex agents` starts one).
 
 | Tool | Does |
 |---|---|
-| `start(cwd, prompt, name?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access, the `claude` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. |
+| `start(cwd, prompt, name?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access, the `claude-client` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. |
 | `attach(thread)` | Take over a session that is already running elsewhere (the codex TUI, say), found by its thread id or exact name. `thread/resume` with nothing but the id subscribes to it, so its settings stay as its own client set them. After that `send`, `reply`, `interrupt`, `list` and the await command work on it. |
 | `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule); the result says which happened. |
 | `reply(threadId, text, callId?)` | Answer what the thread is waiting for: the text becomes the result of its `ask_claude` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
