@@ -5,11 +5,33 @@ description: Fetch every X/Twitter post that mentions an app over a date range i
 
 # Fetch X mentions
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
 Run from the repo root.
 
 ```
 node \
-  "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/fetch-x-mentions.mjs" \
+  "$SKILL_DIR/scripts/fetch-x-mentions.mjs" \
   <slug> "<query>" [since] [until] [--daily-limit <n>] [--refill [<n>]]
 ```
 
@@ -28,45 +50,58 @@ node \
   deduplicated by id, newest first once a run completes.
 - `tweets.out.json`: `{ query, dailyLimit, days: { "YYYY-MM-DD": { count, oldest, refill } } }`.
 
-## Config
+## Environment Variables
 
-Accounts come from the secrets-manager store (`~/.config/secrets-manager/secrets.sqlite`) — the single
-source. Fill it with the secrets-manager skill (`secrets-manager import x` then the verify-x.mjs command below); each account is its
-own rate bucket. `SECRETS_DB` overrides the store path.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
 
-`~/.config/intel/.env` holds only request config:
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `X_BEARER` | X web-client bearer token | Yes | `~/.config/intel/.env` |
+| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
+| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
+| `RESIDENTIAL_PROXY_URL` | Default residential proxy | One proxy source required | `~/.config/intel/.env` |
+| `X_PROXY_URLS` | Comma-separated proxies aligned to account row order | Alternative to the default proxy | `~/.config/intel/.env` |
+| `HTTPS_PROXY` | Default proxy when RESIDENTIAL_PROXY_URL is unset | Alternative to RESIDENTIAL_PROXY_URL | `~/.config/intel/.env` |
+| `SECRETS_MANAGER_STATE_PATH` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
+| `SECRETS_DB` | SQLite account-store path; overrides the directory setting | No | `~/.config/intel/.env` |
 
-- `RESIDENTIAL_PROXY_URL`, or `X_PROXY_URLS` aligned to the accounts by row order.
-- `X_SEARCH_QUERY_ID`, `X_BEARER`, `X_TID_*`: captured from x.com; re-extract when X answers 404 or the
-  transaction-id check fails. The script comments say where each comes from.
+Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.config/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
+
+Provision accounts with `secrets-manager import x`, then run `verify-x.mjs` below; each account has its own rate bucket.
+
+`verify-x.mjs` specifically requires `RESIDENTIAL_PROXY_URL` when verifying tokens.
 
 ## Failures
 
 - `failed after N attempts` is the proxy, not a ban; rerun. A ban is `SearchTimeline 401/403` with a body.
 - `Cannot find package 'undici'` in a fresh worktree:
-  `npm install --prefix "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts"`.
+  `npm install --prefix "$SKILL_DIR/scripts"`.
 
 ## Test
 
 ```
-node --test "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/tests/fetch-x-mentions.test.mjs"
+node --test "$SKILL_DIR/tests/fetch-x-mentions.test.mjs"
 ```
 
 Archive paths are relative to the working directory, run from the repo root that owns the archive.
 
 Log the account in with the `secrets` plugin’s `secrets-manager login x`.
 
-`~/.config/intel/.env` loads automatically without replacing existing environment values.
-Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
-`X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
-`RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.
-Only keys needed by this script are required. Missing required keys report this config path.
-
-Setup: `npm install --prefix "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts"`.
+Setup: `npm install --prefix "$SKILL_DIR/scripts"`.
 
 Verify vendor tokens into stored ct0 pairs after importing X accounts:
 ```sh
-node "${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/verify-x.mjs" [--select USER]... [--all] [--concurrency N]
+node "$SKILL_DIR/scripts/verify-x.mjs" [--select USER]... [--all] [--concurrency N]
 ```
 Writes the existing secrets store; defaults to rows with a token but no ct0.
 A rejected token is expired; a valid pair is active. Request config is ~/.config/intel/.env.
+
+## Shared account prerequisite
+
+Use the existing secrets-manager CLI and store to provision or log in accounts.
+It need not be installed as a Codex plugin to run its CLI. If the CLI, required
+account, proxy or browser profile is missing, report the prerequisite; do not
+create a second store or switch to a host browser profile.

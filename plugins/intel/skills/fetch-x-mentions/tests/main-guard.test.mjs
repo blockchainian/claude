@@ -2,7 +2,7 @@
 // ABOUTME: plugin cache is reached through one (~/.claude may be a symlink).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -23,13 +23,15 @@ test("each script's main runs when the script is reached through a symlink", () 
   const home = mkdtempSync(join(tmpdir(), "main-guard-"));
   const link = join(home, "skills");
   symlinkSync(skills, link);
-  // Dummy config so a script's load-time env checks pass and only the main guard is under test.
-  mkdirSync(join(home, ".config", "intel"), { recursive: true });
-  writeFileSync(join(home, ".config", "intel", ".env"), ["RESIDENTIAL_PROXY_URL=http://proxy.invalid:1", "X_BEARER=x", "X_SEARCH_QUERY_ID=x", "X_USER_QUERY_ID=x", "X_USER_TWEETS_QID=x", "X_TID_VERIFICATION=x", "X_TID_FRAME=x", "X_TID_ROW=0", "X_TID_INDICES=0", "ISP_PROXY_URL=http://proxy.invalid:1", "ISP_PROXY_COUNT=1", ""].join("\n"));
+  const fixtureEnv = {
+    RESIDENTIAL_PROXY_URL: "http://proxy.invalid:1", X_BEARER: "x", X_SEARCH_QUERY_ID: "x",
+    X_USER_QUERY_ID: "x", X_USER_TWEETS_QID: "x", X_TID_VERIFICATION: "x", X_TID_FRAME: "x",
+    X_TID_ROW: "0", X_TID_INDICES: "0", ISP_PROXY_URL: "http://proxy.invalid:1", ISP_PROXY_COUNT: "1",
+  };
   for (const rel of scripts) {
-    const r = spawnSync(process.execPath, [join(link, rel)], {
+    const r = spawnSync(process.execPath, [...process.execArgv, join(link, rel)], {
       encoding: "utf8",
-      env: { ...process.env, HOME: home, SECRETS_MANAGER_STATE_PATH: home, SECRETS_DB: join(home, "none.sqlite") },
+      env: { ...process.env, ...fixtureEnv, SECRETS_MANAGER_STATE_PATH: home, SECRETS_DB: join(home, "none.sqlite") },
       timeout: 20000,
     });
     assert.ok(r.stderr.trim().length > 0, `${rel}: main did not run (no stderr)`);

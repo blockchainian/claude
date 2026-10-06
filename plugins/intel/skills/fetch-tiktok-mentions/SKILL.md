@@ -5,6 +5,28 @@ description: Fetch a brand's TikTok videos from hashtag pages, user pages and ke
 
 # Fetch TikTok mentions
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
 Hashtag pages, user profiles, keyword searches, comments and video files.
 TikTok has no "everything about a brand" view, so coverage is the union of the sources you give.
 Everything is fetched anonymously except keyword searches and user timelines, which go through
@@ -14,7 +36,7 @@ Run from the repo root.
 
 ```
 node \
-  "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/scripts/fetch-tiktok-mentions.mjs" \
+  "$SKILL_DIR/scripts/fetch-tiktok-mentions.mjs" \
   <slug> [--hashtag <name>]... [--user <handle>]... [--keyword <words>]... \
   [--hashtag-min-plays <n>] \
   [--source-limit <n>] [--comment-limit <n>] [--sessions <n>] [--rate <n>] [--concurrency <n>] [--out <dir>] [--no-comments] [--no-download]
@@ -45,13 +67,13 @@ Invented example (Demo Fun):
 
 ```
 node \
-  "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/scripts/fetch-tiktok-mentions.mjs" \
+  "$SKILL_DIR/scripts/fetch-tiktok-mentions.mjs" \
   demofun --hashtag demofun --hashtag demodotfun --user demo.fun --keyword "demo fun"
 ```
 
 Every run does three things: collects every source (a hashtag through four sessions at once, see below; new videos are
 added, held ones get fresh stats), fetches comments for the videos whose comments are not
-complete, and downloads the videos without a file. Launch it in the background and reread the
+complete, and downloads the videos without a file. Use the host-specific long-command instructions above; read the
 log. **Rerun the same command until it exits 0.**
 
 The default rate is 20 requests/s per anonymous session. Tune `--rate` and `--concurrency`
@@ -125,14 +147,20 @@ answer is held against the IP: the slot's next session opens after a one-minute 
 Video files are fetched inside the session too: `item/detail/` gives a fresh play address, signed
 for the session's IP, and the page's `fetch()` pulls the bytes, four files at a time per session.
 
-## Config
+## Environment Variables
 
-- `~/.config/intel/.env`: `ISP_PROXY_URL` (the pool's base url) and `ISP_PROXY_COUNT`
-  (slot n is the base port + n, one fixed IP each).
-- `SECRETS_MANAGER_STATE_PATH` (default `~/.config/secrets-manager`): where the account's store
-  and browser profile are.
-- First use in a checkout: `npm install --prefix "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/scripts"`. The Camoufox
-  browser is the one secrets-manager installs (`npx camoufox-js fetch`).
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `~/.config/intel/.env` |
+| `ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `~/.config/intel/.env` |
+| `SECRETS_MANAGER_STATE_PATH` | Account-store and browser-profile directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
+| `TIKTOK_VIDEOS_DIR` | Video output directory; default ~/.local/share/tiktok | No | `~/.config/intel/.env` |
+
+Account credentials, login sessions and browser profiles stay in the existing Secrets Manager store; do not copy them into `.env`.
+
+First use in a checkout: `npm install --prefix "$SKILL_DIR/scripts"`. Use the Camoufox browser installed by secrets-manager (`npx camoufox-js fetch`).
 
 ## Failures
 
@@ -147,15 +175,16 @@ for the session's IP, and the page's `fetch()` pulls the bytes, four files at a 
 ## Test
 
 ```
-node --test "${CLAUDE_PLUGIN_ROOT}/skills/fetch-tiktok-mentions/tests/fetch-tiktok-mentions.test.mjs"
+node --test "$SKILL_DIR/tests/fetch-tiktok-mentions.test.mjs"
 ```
 
 Archive paths are relative to the working directory, run from the repo root that owns the archive.
 
 Log the account in with the `secrets` plugin’s `secrets-manager login tiktok`.
 
-`~/.config/intel/.env` loads automatically without replacing existing environment values.
-Keys: `X_BEARER`, `X_SEARCH_QUERY_ID`, `X_USER_QUERY_ID`, `X_USER_TWEETS_QID`,
-`X_TID_VERIFICATION`, `X_TID_FRAME`, `X_TID_ROW`, `X_TID_INDICES`,
-`RESIDENTIAL_PROXY_URL`, `X_PROXY_URLS`, `ISP_PROXY_URL`, `ISP_PROXY_COUNT`.
-Only keys needed by this script are required. Missing required keys report this config path.
+## Shared account prerequisite
+
+Use the existing secrets-manager CLI and store to provision or log in accounts.
+It need not be installed as a Codex plugin to run its CLI. If the CLI, required
+account, proxy or browser profile is missing, report the prerequisite; do not
+create a second store or switch to a host browser profile.

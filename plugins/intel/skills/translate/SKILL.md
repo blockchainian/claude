@@ -14,6 +14,37 @@ description: >
 
 # Translate — an EPUB book into a Chinese PDF in the same format
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
+| `CHROME` | Chrome executable path; omit to use installed Chrome/Chromium | No | Shell environment before running the command; no automatic `.env` loading |
+
+The translator uses the existing Codex CLI login; no API key is required.
+
 The book's sections drive everything: each section (from the EPUB's OPF spine and nav/ncx) is one Luna call, and
 the finished sections are typeset into one book that copies the source's page size, chapter openers, running
 heads, roman/arabic folios and cover image.
@@ -21,7 +52,6 @@ heads, roman/arabic folios and cover image.
 extract.mjs takes an EPUB (`.epub`); it does not read PDFs. If you only have the book as a PDF, get its EPUB with
 the download-book skill first.
 
-`${CLAUDE_PLUGIN_ROOT}` below is this plugin's root; this skill lives at `${CLAUDE_PLUGIN_ROOT}/skills/translate`.
 Work lives in `<book dir>/.translate/<slug>/` (hidden, resumable); the deliverable is
 `<title-slug>.pdf` in the user's `~/Documents` — the book's main title (the part before a `:`/`：` subtitle)
 lowercased with every run of non-alphanumerics turned into one dash, e.g. `Addiction by Design: Machine
@@ -34,7 +64,7 @@ own folder is not writable
 ## Setup (automatic, idempotent)
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/setup.sh"
+"$SKILL_DIR/scripts/setup.sh"
 ```
 
 Installs `poppler` (pdftotext) and `uv` when missing (extract/translate are Node scripts, Node >= 18.18, no npm packages;
@@ -45,7 +75,7 @@ is present. Luna runs on the user's ChatGPT plan through `codex`; when its quota
 ## 1. Extract
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.mjs" <book.epub>
+"$SKILL_DIR/scripts/extract.mjs" <book.epub>
 ```
 
 Extraction walks the EPUB's OPF spine (order) and nav/ncx (titles), keeping each section as a cleaned XHTML
@@ -54,7 +84,7 @@ files fold into the next chapter, the cover comes from the OPF, and the page siz
 468x680pt, a 6.5x9.4in trade book). Add `--keep-images` to carry figures and image equations through.
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/extract.mjs" <book.epub> --keep-images
+"$SKILL_DIR/scripts/extract.mjs" <book.epub> --keep-images
 ```
 
 Prints one line per section (`id kind title: words`) and the work dir. Kinds: `contents` and `skip` (Cover,
@@ -90,11 +120,12 @@ choice (e.g. a coined term with two accepted renderings); otherwise decide and n
 ## 3. Translate (background, parallel)
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/translate.mjs" <work> --glossary <work>/glossary.md \
+"$SKILL_DIR/scripts/translate.mjs" <work> --glossary <work>/glossary.md \
   > <work>/translate.log 2>&1
 ```
 
-Run it with `run_in_background`. Defaults: `gpt-6-luna`, effort `low`, Fast service tier (`priority`), 20
+Run it using the host-specific long-command instructions above. Both hosts call the
+same logged-in `codex exec` CLI; do not replace it with host agents. Defaults: `gpt-6-luna`, effort `low`, Fast service tier (`priority`), 20
 sections in flight, one no-tool `codex exec` per section in a private `CODEX_HOME`. Measured: a 250-page trade
 book (27 sections of 1.5–3.5k words) is back in about a minute, a 380-page book (54 sections, up to 12k
 words) in about five; 7–15k input and 2–4k output tokens per section. Each answer is checked (starts with `# title`, at least 0.9 Chinese
@@ -105,7 +136,7 @@ narrows).
 While it runs, preview any finished section as its own PDF (own page numbers, no cover):
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/render.py" <work> --only 04
+"$SKILL_DIR/scripts/render.py" <work> --only 04
 ```
 
 Read one finished chapter against the source before the rest lands: wrong register, a dropped paragraph or a
@@ -115,7 +146,7 @@ is assembled.
 ## 4. Render the book
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/translate/scripts/render.py" <work> --title "<中文书名>"
+"$SKILL_DIR/scripts/render.py" <work> --title "<中文书名>"
 ```
 
 Writes `<title-slug>.pdf` in `~/Documents`: the cover (the EPUB's cover image rendered full-bleed), a

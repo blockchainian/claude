@@ -119,6 +119,9 @@ test("planning fetches missing days, and with --refill n the gaps refilled at mo
   assert.equal(planDays(progress, "2026-03-01", "2026-03-06", 2).length, 4);
 });
 
+// The pure paging tests use a synthetic query id, never personal configuration.
+process.env.X_SEARCH_QUERY_ID = "fixture-search-query";
+
 const tw = (id, iso) => ({ id, created_at: new Date(iso).toUTCString() });
 
 test("a first fetch records count and oldest, and no refill field", () => {

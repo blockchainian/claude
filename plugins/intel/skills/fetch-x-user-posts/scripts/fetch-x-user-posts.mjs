@@ -41,6 +41,9 @@ import {
   untilInstant,
 } from "../../fetch-x-mentions/scripts/fetch-x-mentions.mjs";
 
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) loadEnvFile();
+
 const PAGE = 20; // tweets per SearchTimeline page
 const DEFAULT_MAX_PAGES = 500; // 10000 posts per stream (20/page) — a guard, not an expected cap
 const DEFAULT_MAX_TRIES = 3; // attempts a still-incomplete stream gets before it is accepted as-is
@@ -692,4 +695,4 @@ async function main() {
   );
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+if (isMain) await main();

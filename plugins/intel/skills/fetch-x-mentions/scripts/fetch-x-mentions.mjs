@@ -42,6 +42,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) loadEnvFile();
+
 let ProxyAgent;
 try { ({ ProxyAgent } = await import("undici")); }
 catch (e) {
@@ -910,4 +913,4 @@ async function main() {
   );
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+if (isMain) await main();

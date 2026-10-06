@@ -5,6 +5,32 @@ description: Turn a scraped App Store reviews JSON into a concise, data-driven C
 
 # Analyze App Store Reviews
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
+## Environment Variables
+
+No skill-specific environment variables or `.env` file are required.
+
 Turn one app's scraped reviews into a short, **evidence-only** analysis: what users
 love, what they hate, and what they ask for — each ranked by how often it actually
 appears, every claim backed by the data. The output reads in one pass and hides
@@ -28,7 +54,7 @@ claim from the data, drop it.
 ### 1. Ground with deterministic stats (script)
 
 ```
-"${CLAUDE_PLUGIN_ROOT}/skills/analyze-appstore-reviews/scripts/stats.mjs" \
+"$SKILL_DIR/scripts/stats.mjs" \
   <reviews.json> --dump-dir <scratch>
 ```
 
@@ -42,7 +68,8 @@ them as-is.
 Read the whole of `neg.txt`, `mid.txt`, `pos.txt`. **Do not sample.** Reading every
 review is what grounds themes in what people actually said, instead of guessing from
 keywords. For a large dataset, delegate the reading to a subagent and keep only the
-themes.
+themes. Use Claude Code's Agent tool or Codex's `spawn_agent` (`fork_turns: "none"`),
+with explicit input paths and the reading brief; collect the result before counting.
 
 ### 3. Count themes with review-level keyword hits
 
@@ -97,7 +124,7 @@ echo '{"out_dir":"<app>/images","charts":[
   {"type":"bar","file":"<app>-likes.png","title":"最喜欢什么（4–5★）","labels":[...],"values":[...],"color":"#1baf7a"},
   {"type":"bar","file":"<app>-dislikes.png","title":"最不喜欢什么（1–3★）","labels":[...],"values":[...],"color":"#eb6834"},
   {"type":"bar","file":"<app>-feature-requests.png","title":"Top 5 功能请求","labels":[...],"values":[...],"color":"#2a78d6"}
-]}' | "${CLAUDE_PLUGIN_ROOT}/skills/analyze-appstore-reviews/scripts/render_charts.py" /dev/stdin
+]}' | "$SKILL_DIR/scripts/render_charts.py" /dev/stdin
 ```
 
 Charts are transparent with dual-mode gray text (work in dark and light mode) and
@@ -106,10 +133,12 @@ section: `![最喜欢什么](images/<app>-likes.png)`.
 
 ### 7. Adversarial review before shipping
 
-Spawn an adversarial subagent: independently recompute the distribution and every
+Spawn an adversarial subagent with Claude Code's Agent tool or Codex's
+`spawn_agent` (`fork_turns: "none"`), giving it explicit artifact paths and this brief: independently recompute the distribution and every
 theme count with its own method, verify each quote exists and is accurate, check the
 top-5 ordering, and hunt cherry-picked quotes and star-vs-text contamination. Apply
-the valid findings to `analysis.md`; then tell the user what it actually caught.
+the valid findings to `analysis.md` after collecting its final result (Codex uses
+`wait_agent`); then tell the user what it actually caught.
 
 ### 8. Ship
 

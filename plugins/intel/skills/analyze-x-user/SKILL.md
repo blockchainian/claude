@@ -5,6 +5,36 @@ description: Profile ONE X/Twitter account from its own timeline (tweets.jsonl +
 
 # Analyze X user (single account)
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
+
+The shared `analyze-x-mentions` labeler uses this setting for its existing Codex login. No X credentials are needed to analyze an existing timeline archive.
+
 One account's own timeline → `profile.md`: who this account is, what they talk about most, which
 tokens and people they push, how and when they post, and what motivates them — read from their
 own posts, no aggregation across accounts. Deterministic stats come from the archive; the kind,
@@ -22,8 +52,8 @@ own posts (what kind, about which asset, which way, with what stake), not an app
 - **Output**, in the same dir: `profile.md` + `images/`, `profile.json` (deterministic stats) and
   `labels.jsonl` (one line per post, committed so a rerun only labels new posts).
 
-Every command runs from the repo root; `S="${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-user/scripts"`,
-`T="${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-mentions/scripts"` (the shared labeler) below. `U=docs/intel/x/kols/<user>`.
+Every command runs from the repo root; `S="$SKILL_DIR/scripts"`,
+`T="$SKILL_DIR/../analyze-x-mentions/scripts"` (the shared labeler) below. `U=docs/intel/x/kols/<user>`.
 
 ## Procedure
 
@@ -188,7 +218,8 @@ commit, push. `clean.json`, the chunks and `labelsN.json` are scratch.
 ## Batch note
 
 This skill profiles **one** account. To profile a roster, run it per account (a subagent each,
-a bounded pool) — but that is the expensive downstream step, not part of fetching. Do not fan
+a bounded pool using Claude Code's Agent tool or Codex's `spawn_agent` and
+`wait_agent`, with explicit file paths and a distinct output directory per account) — but that is the expensive downstream step, not part of fetching. Do not fan
 labeling out to a whole roster without being asked.
 
 ## Requirements
@@ -199,7 +230,7 @@ labeling out to a whole roster without being asked.
 ## Tests
 
 ```
-node --test "${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-user/tests/test_profile_user.mjs" "${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-user/tests/test_reps.mjs"
+node --test "$SKILL_DIR/tests/test_profile_user.mjs" "$SKILL_DIR/tests/test_reps.mjs"
 ```
 
 Archive paths are relative to the working directory, run from the repo root that owns the archive.

@@ -17,6 +17,34 @@ description: >
 
 # Digest — highlights from any source, stored and searchable
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `DIGESTS_DIR` | Digest storage and work directory; default ~/Documents/digests | No | Shell environment before running the command; no automatic `.env` loading |
+
 A source URL after `/digest` is fetched, read, and turned into a highlights
 draft — that is the default. Two keywords instead select a store command.
 
@@ -33,16 +61,13 @@ The store is `~/Documents/digests/` (override with
 `index.md`. Drafts stage in `.work/<slug>/` until saved. (The store holds
 articles, episodes, videos and papers alike.)
 
-`${CLAUDE_PLUGIN_ROOT}` below is this plugin's root; this skill lives at
-`${CLAUDE_PLUGIN_ROOT}/skills/digest`.
-
 ## Setup (automatic, idempotent)
 
 Run once at the start; it installs only what is missing and is a no-op when
 everything is present, so it is safe to run every time.
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
+"$SKILL_DIR/scripts/setup.sh"
 ```
 
 It ensures `uv` (runs the trafilatura article extractor and the PDF scripts
@@ -54,7 +79,7 @@ for PDFs). Typesetting a highlights PDF also needs Google Chrome.
 1. **Fetch.**
 
    ```bash
-   "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/fetch_source.py" "<url>"
+   "$SKILL_DIR/scripts/fetch_source.py" "<url>"
    ```
 
    It prints JSON with `slug`, `transcript` (the text file path), `draft`,
@@ -75,13 +100,13 @@ for PDFs). Typesetting a highlights PDF also needs Google Chrome.
    - If `audio_url` is **non-null** (the page links audio, or the URL itself was
      an audio file) and the text is thin, transcribe the audio with the
      `transcribe` skill. It is long-running (model download on first use,
-     then faster than realtime), so run it in the **background** and end the
-     turn; its completion re-invokes you. A subagent runs it in the foreground
-     instead, because nothing wakes a subagent when a background job exits:
+     then faster than realtime), so follow the host-specific long-command
+     instructions in Runtime and paths. Wait for completion before reading
+     the transcript; a subagent awaits its own command before returning:
 
      ```bash
-     "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/setup.sh"
-     "${CLAUDE_PLUGIN_ROOT}/skills/transcribe/scripts/transcribe-audio.mjs" \
+     "$SKILL_DIR/../transcribe/scripts/setup.sh"
+     "$SKILL_DIR/../transcribe/scripts/transcribe-audio.mjs" \
        "<audio_url>" "<transcript path>"
      ```
 
@@ -120,7 +145,7 @@ own page size.
 1. **Split.**
 
    ```bash
-   "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/pdf_highlights.py" split "<file.pdf or url>"
+   "$SKILL_DIR/scripts/pdf_highlights.py" split "<file.pdf or url>"
    ```
 
    It prints JSON: `work` (the work dir), `unit`, `page_size`, and `chapters`,
@@ -140,16 +165,16 @@ own page size.
    index, copyright page) or has a near-zero `chars`; a skipped chapter simply
    gets no highlights file, and `render` ignores it.
 
-   Then dispatch the content chapters with the Agent tool: **one fresh
-   general-purpose subagent per chapter — not a fork** (each subagent needs only
+   Then dispatch the content chapters with Claude Code's Agent tool or Codex's
+   `spawn_agent` (`fork_turns: "none"`): **one fresh subagent per chapter** (each subagent needs only
    its own chapter, never this conversation). Launch several in one message so
    they run at once; for a long book keep each batch to about 6–8 subagents and
    launch the next batch when the first returns. Give every subagent a prompt
    that contains, filled in for its chapter:
    - the absolute paths to read (`<work>/<text>`) and to write
      (`<work>/<highlights>`), the chapter `title`, and the `unit`;
-   - this instruction: *Read all of the text file in chunks (Read tool,
-     offset/limit, ~45000 chars each — do not skim the middle), then write the
+   - this instruction: *Read all of the text file in chunks (the host's file-reading tool,
+     bounded chunks of ~45000 chars — do not skim the middle), then write the
      highlights file: a `# <title>` line followed by themed `## ` sections. No
      frontmatter, no TL;DR. Write in the language of the PDF. Reply only `done`,
      or the error if you could not write the file.*
@@ -157,7 +182,8 @@ own page size.
      section below, both copied verbatim — together they are the whole brief the
      subagent writes to, since it cannot see this skill.
 
-   When the subagents return, verify every expected `<work>/<highlights>` exists
+   In Claude Code collect Agent results; in Codex use `wait_agent` and collect
+   each child's final result. When the subagents return, verify every expected `<work>/<highlights>` exists
    and is non-empty (`ls -l`); re-dispatch any that are missing or empty before
    rendering.
 
@@ -184,7 +210,7 @@ own page size.
 3. **Render.**
 
    ```bash
-   "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/pdf_highlights.py" render "<work>"
+   "$SKILL_DIR/scripts/pdf_highlights.py" render "<work>"
    ```
 
    It typesets every chapter that has a highlights file into
@@ -276,7 +302,7 @@ take-aways to it.
 ### save (no input) — store the highlights
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" save "<draft path>"
+"$SKILL_DIR/scripts/store.mjs" save "<draft path>"
 ```
 
 Save the draft from the digest run in this session (no draft in the session →
@@ -298,17 +324,17 @@ file. Steps:
    `<stored.md>`. No draft this session → find the item with `search`/`list`.
 2. **See what's already there:**
    ```bash
-   "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" takeaway "<stored.md>" --list
+   "$SKILL_DIR/scripts/store.mjs" takeaway "<stored.md>" --list
    ```
 3. **For each take-away in `<input>`** (strip any leading `1.`/`-`), decide:
    - **Overlaps an existing item** (same point, reworded or extended) → revise
      that item in place, merging the sharper wording:
      ```bash
-     "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" takeaway "<stored.md>" --revise <n> "<text>"
+     "$SKILL_DIR/scripts/store.mjs" takeaway "<stored.md>" --revise <n> "<text>"
      ```
    - **New point** → append it:
      ```bash
-     "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" takeaway "<stored.md>" --add "<text>"
+     "$SKILL_DIR/scripts/store.mjs" takeaway "<stored.md>" --add "<text>"
      ```
 
 Judging overlap is yours — the script only edits the list. `--add`/`--revise`
@@ -318,8 +344,8 @@ call. Multiple `save <input>` calls accumulate into the same section.
 ## search
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" search "<query>"
-"${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/store.mjs" list
+"$SKILL_DIR/scripts/store.mjs" search "<query>"
+"$SKILL_DIR/scripts/store.mjs" list
 ```
 
 The query is a case-insensitive regex over the whole file, frontmatter included,

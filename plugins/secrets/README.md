@@ -1,20 +1,44 @@
 # secrets
 
-Local plaintext account credentials and browser sessions, outside the repository. The
+Shared by Claude Code and Codex: local plaintext account credentials and browser sessions, outside the repository. The
 `secrets-manager` skill imports Google, X and TikTok credentials, drives Camoufox logins,
 and lets external adapters define app login, verification, account setup and credential exports.
 
-## Setup
+## Install
 
-Install `secrets@blockchainian`, then after every install or update run:
+Claude Code:
 
-```sh
-"${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/setup.sh"
-"${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/setup.sh" --check
+```text
+/plugin marketplace add blockchainian/claude
+/plugin install secrets@blockchainian
 ```
 
-Setup runs npm install, fetches Camoufox and writes a two-line launcher at
-`~/.local/bin/secrets-manager` pointing at this install. Add `~/.local/bin` to PATH.
+Codex:
+
+```sh
+codex plugin marketplace add blockchainian/claude
+codex plugin add secrets@blockchainian
+```
+
+Start a new session after installing or updating. Both hosts load the same
+`secrets-manager` skill, CLI and adapter interface. Each install has its own npm
+dependencies; both read the same existing state at `~/.config/secrets-manager`.
+Installing in another host does not create or migrate accounts. Close a profile's
+browser before opening the same account from another host.
+
+## Setup
+
+Install `secrets@blockchainian`. Set `SKILL_DIR` to the absolute directory containing
+the installed secrets-manager `SKILL.md`, then after every install or update run:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
+"$SKILL_DIR/scripts/setup.sh"
+"$SKILL_DIR/scripts/setup.sh" --check
+```
+
+Setup runs npm install and fetches Camoufox. Invoke `node "$SKILL_DIR/scripts/cli.mjs"`
+directly from the installed skill; setup does not install a global launcher.
 Node with `node:sqlite` support is required; headed macOS window placement uses Swift.
 State defaults to `~/.config/secrets-manager` (`SECRETS_MANAGER_STATE_PATH` overrides it).
 `~/.config/secrets-manager/.env` loads without overriding existing environment values:
@@ -117,6 +141,11 @@ password minting and session saves; the engine registers a successful alias acco
 a thrown error leaves status unchanged and fails the command.
 
 The kit provides:
+
+- `NeedsHuman`: the same error class the engine uses. Throw it when the current
+  step requires human action; the message must say what action is needed. App
+  login retries stop on this error. It does not itself pause a browser or resume
+  the interrupted hook: those behaviors belong to the calling flow.
 
 - `clickFirst(page, texts, timeout = 15000, misses = [])`, `hasLsKey(page, substr)`, `hasCookie(page, name)`,
   `gotoWithRetry(page, url)` (also under `kit.page`). Click timeouts append `{text, reason}`

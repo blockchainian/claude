@@ -75,6 +75,9 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) loadEnvFile();
+
 const START_URL = "https://www.tiktok.com/explore";
 const API = "https://www.tiktok.com/api/";
 // The signatures TikTok's page script adds to a request; a new request gets its own.
@@ -847,4 +850,4 @@ async function main() {
   );
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+if (isMain) await main();

@@ -12,6 +12,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fetchAppReviews } from "./fetch-app-reviews.mjs";
+import { loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
+
+loadEnvFile();
 
 const MAX_PASSES = 6;
 const APPS = join("docs", "intel", "reviews", "apps.json"); // run from the repo root
