@@ -124,6 +124,7 @@ node --test skills/digest/tests/*.mjs
 uv run skills/digest/tests/test_pdf_highlights.py
 node --test skills/translate/tests/*.mjs
 uv run skills/translate/tests/test_render.py
+uv run skills/translate/tests/test_lint_md.py
 node --test skills/find-domain-names/tests/check.test.mjs
 node --test skills/download-book/tests/*.mjs
 node --test skills/case-study/tests/*.mjs

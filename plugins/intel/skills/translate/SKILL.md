@@ -147,6 +147,20 @@ Read one finished chapter against the source before the rest lands: wrong regist
 glossary miss is cheaper to fix by editing the glossary and rerunning `--force --only` now than after the book
 is assembled.
 
+When every section is back, lint the Markdown before rendering:
+
+```bash
+"$SKILL_DIR/scripts/lint_md.py" <work> [id ...]
+```
+
+It lists, per section and line: a block image token (a figure, a display equation) the translation lost or one it
+invented; an inline tag left open (one unclosed `<code>` turns every later section into code and hides its
+math from KaTeX); Markdown, a Unicode sub/superscript or an image token inside `\(..\)`; unbalanced math
+delimiters; and math variables left as text (`*n*`, `<em>k</em>`, `<sub>`). Fix each in the Markdown. A section
+with many "unconverted math" hits had its LaTeX conversion skipped by the translator: retranslate it with
+`translate.mjs <work> --force --only <id> --effort medium`. An inline symbol image turned into LaTeX is correct
+and not reported.
+
 ## 4. Render the book
 
 ```bash
