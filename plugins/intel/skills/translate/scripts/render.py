@@ -135,7 +135,7 @@ def md_to_html(md_text):
     body = re.sub(r"((?:  |<br\s*/?>)\n)(\u3000+)", lambda m: m.group(1) + "&#12288;" * len(m.group(2)), body)
     body = MATH_RE.sub(stash, body)
     body = re.sub(r"^>[ \t]?(@@MATH\d+@@)[ \t]*$", r"\1", body, flags=re.M)  # unwrap a math-only blockquote line
-    out = markdown.markdown(body, extensions=["smarty"], output_format="html")
+    out = markdown.markdown(body, extensions=["smarty", "tables"], output_format="html")
     out = NOBREAK_RE.sub(lambda m: m.group(0) if m.group(1).startswith("@@MATH") and vault[int(m.group(2))].startswith("\\[")
                          else f'<span class="nb">{m.group(0)}</span>', out)
     for i, raw in enumerate(vault):
@@ -275,6 +275,12 @@ strong, b {{ font-family: {hei}; font-weight: 700; color: {bold}; }}
 section {{ break-before: page; overflow-x: clip; overflow-clip-margin: 6pt; }}
 img, table, pre, .katex-display {{ max-width: 100%; }}
 pre {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
+/* A pipe table (an EPUB <table> the translator wrote as Markdown): compact, centred, ruled above and below. */
+table {{ border-collapse: collapse; margin: 6pt auto; font-size: 0.85em; line-height: 1.4;
+  border-top: 0.6pt solid var(--fg); border-bottom: 0.6pt solid var(--fg); break-inside: auto; }}
+th, td {{ padding: 1pt 5pt; vertical-align: top; }}
+thead th {{ border-bottom: 0.4pt solid var(--fg); font-weight: normal; }}
+td p, th p {{ text-indent: 0; }}
 /* Code is set in KaTeX's typewriter face (loaded by the KaTeX CSS) at the size KaTeX's mathtt renders, so `ROW`
    and a mathtt BASEROW on one line are the same monospace font. */
 code, pre {{ font-family: KaTeX_Typewriter, Menlo, monospace; font-size: 1em; }}

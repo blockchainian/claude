@@ -178,6 +178,9 @@ def test_math_units(rd):
     check("\\mbox (unsupported by KaTeX) rewritten to \\text", rd.repair_math("\\(\\mathrm{IS\\mbox{-}GOAL}\\)") == "\\(\\mathrm{IS\\text{-}GOAL}\\)")
     check("blockquote markers stripped from multi-line display", "\n>" not in rd.repair_math("\\[\n> a\\\\\n> b\n> \\]"))
     check("\\\\[2pt] array row-skip inside a display is not corrupted", rd.repair_math("\\[a\\\\[2pt]b\\]") == "\\[a\\\\[2pt]b\\]")
+    # A pipe table (the translator's form of an EPUB <table>) is typeset as a table, math in its cells intact.
+    _, tb = rd.md_to_html("# T\n\n**表 1**\n\n| \\(i\\): | 0 | 1 |\n|---|---:|---:|\n| `NAME(i)`: | — | `a` |\n")
+    check("pipe table becomes <table>, its math intact", "<table>" in tb and "<td" in tb and "\\(i\\)" in tb and "&mdash;" not in tb, tb)
     _, bq = rd.md_to_html("# T\n\n> \\[\n> a\\Rightarrow b\n> \\]\n")
     check("math-only blockquote unwrapped (no <blockquote>)", "<blockquote>" not in bq and "\\[" in bq and "\n>" not in bq, bq)
     # CJK closing punctuation right after inline math or inline code must never start a line: the pair is bound
