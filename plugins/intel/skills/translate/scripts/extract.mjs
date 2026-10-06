@@ -113,7 +113,7 @@ export function classify(title, chapter, seenChapter) {
   if (/\bcover\b/.test(t)) return "cover";
   if (t === "contents" || t === "table of contents") return "contents";
   if (["index", "notes", "endnotes", "references", "bibliography", "works cited", "further reading",
-    "copyright", "title page", "half title", "also by", "about the author", "about this ebook"].includes(t)) return "skip";
+    "copyright", "title page", "half title", "also by", "about this ebook"].includes(t)) return "skip";
   if (chapter !== null) return "chapter";
   return seenChapter ? "back" : "front";
 }
@@ -476,14 +476,13 @@ export function epubFragment(z, href, work, keepImages, counter) {
   return [body, imgs, counter];
 }
 
-const PART_STEM = /^part\d*$/i;
 const EPUB_SKIP_STEM = /^(cover|titlepage|halftitle|title|copyright|toc|nav|ncx|index|bibliography)\d*$/i;
 // A book's terminal back-matter opens with one of these; once past the last chapter it and every spine file
 // after it (continuations that carry no nav title of their own included) are skipped rather than translated.
 const BACKMATTER_START = /^(notes|endnotes|references|bibliography|works cited|further reading|index)\b/i;
 // A conclusion-like closing section, the answers to exercises and an appendix are real content: each opens its own
 // section rather than folding into the last chapter.
-const OWN_BACK_SECTION = /^(conclusion|epilogue|afterword|postscript|coda|answers|solutions|appendix)\b/i;
+const OWN_BACK_SECTION = /^(conclusion|epilogue|afterword|postscript|coda|answers|solutions|appendix|about the author|colophon)\b/i;
 // One translation call handles a section of up to about this many words; a longer one (a whole chapter of a
 // textbook) is split at its numbered subsection headings.
 const MAX_SECTION_WORDS = 15000;
@@ -528,7 +527,9 @@ export function splitSubsections(sec, wordsOf) {
  * that PDF extraction destroys (bold vectors, sub/superscripts, prose emphasis). Part-divider files are folded
  * into the head of the next chapter. Writes the same work-dir layout as the PDF path, with source_kind=epub. */
 export function extractEpub(source, work, keepImages, pageSize) {
-  const z = new ZipFile(source);
+  const archive = new ZipFile(source);
+  const fragments = new Map();
+  const z = { read: href => fragments.has(href) ? Buffer.from(fragments.get(href)) : archive.read(href) };
   const cont = fromstring(z.read("META-INF/container.xml"));
   let opfPath;
   for (const el of iterElements(cont)) if (el.tag === "rootfile") { opfPath = el.attrs["full-path"]; break; }
@@ -565,6 +566,42 @@ export function extractEpub(source, work, keepImages, pageSize) {
     if (el.tag === "itemref" && el.attrs.idref !== undefined && Object.hasOwn(manifest, el.attrs.idref)) spine.push(el.attrs.idref);
   }
   const titles = epubTitles(z, navHref, ncxHref);
+  // An appendix can share a spine file with a chapter. Split sibling sections before grouping files.
+  for (let i = 0; i < spine.length; i++) {
+    const item = manifest[spine[i]];
+    if (!item.media.startsWith("application/xhtml")) continue;
+    const raw = z.read(item.href).toString("utf8");
+    const body = raw.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    if (!body) continue;
+    const cuts = [];
+    let depth = 0;
+    for (const m of body[1].matchAll(/<\/?section\b[^>]*>/gi)) {
+      if (m[0].startsWith("</")) depth--;
+      else {
+        if (depth === 0 && m.index > 0 && /(?:data-type|epub:type)=["']appendix["']/i.test(m[0])) cuts.push(m.index);
+        depth++;
+      }
+    }
+    if (!cuts.length) continue;
+    const pieces = [0, ...cuts].map((at, n, starts) => body[1].slice(at, starts[n + 1]));
+    fragments.set(item.href, `<html><body>${pieces[0]}</body></html>`);
+    const ids = pieces.slice(1).map((piece, n) => {
+      const id = `${spine[i]}-appendix-${n}`;
+      const href = posixJoin(dirnameOf(item.href), `${stemOf(item.href)}-appendix-${n}.xhtml`);
+      manifest[id] = { ...item, href };
+      fragments.set(href, `<html><body>${piece}</body></html>`);
+      return id;
+    });
+    spine.splice(i + 1, 0, ...ids);
+  }
+  const titleOf = (href) => {
+    const raw = z.read(href).toString("utf8");
+    if (/<(?:section|nav)\b[^>]*(?:data-type|epub:type)=["'](?:titlepage|copyright-page|toc)["']/i.test(raw)) {
+      return /(?:data-type|epub:type)=["']toc["']/i.test(raw) ? "Contents" : "Title Page";
+    }
+    const heading = epubFirstHeading(z, href);
+    return heading && /^appendix\b/i.test(heading) ? heading : titles[path.posix.basename(href)] || heading || stemOf(href);
+  };
 
   fs.mkdirSync(path.join(work, "text"), { recursive: true });
   if (keepImages) fs.mkdirSync(path.join(work, "images"), { recursive: true });
@@ -599,9 +636,9 @@ export function extractEpub(source, work, keepImages, pageSize) {
     const item = manifest[idref];
     if (!item.media.startsWith("application/xhtml")) return null;
     const base = path.posix.basename(item.href);
-    const stitle = titles[base] || epubFirstHeading(z, item.href) || stemOf(base);
+    const stitle = titleOf(item.href);
     let [chap] = parseTitle(stitle);
-    if (chap === null && !(PART_STEM.test(stemOf(base)) || PART_TITLE.test(stitle)) && PART_TITLE_RE.test(stitle)) {
+    if (chap === null && !(PART_TITLE.test(stitle)) && PART_TITLE_RE.test(stitle)) {
       chap = chapterFromHeadings(epubHeadings(z, item.href))[0];
     }
     return chap;
@@ -620,9 +657,9 @@ export function extractEpub(source, work, keepImages, pageSize) {
     const href = item.href;
     const stem = stemOf(path.posix.basename(href));
     const navTitled = Object.hasOwn(titles, path.posix.basename(href));
-    if (skipping && !navTitled) continue;
+    if (skipping && !navTitled && !epubFirstHeading(z, href)) continue;
     skipping = false;
-    const stitle = titles[path.posix.basename(href)] || epubFirstHeading(z, href) || stem;
+    const stitle = titleOf(href);
     if (pos > lastChapterPos && BACKMATTER_START.test(pyStrip(stitle))) {
       inBackmatter = true;
       continue;
@@ -630,7 +667,7 @@ export function extractEpub(source, work, keepImages, pageSize) {
     if (/^(?:[ivxlcdm]+|\d+)$/i.test(pyStrip(stitle))) continue; // a bare page number/roman: a series-ad or filler page
     let [chapter, clean] = parseTitle(stitle);
     let isSubsection = /^\s*\d+(?:\.\d+)+/.test(stitle); // 1.1, 2.10 … a subsection, not a chapter
-    const isPart = PART_STEM.test(stem) || /^\s*part\b/i.test(stitle);
+    const isPart = PART_TITLE.test(stitle);
     if (EPUB_SKIP_STEM.test(stem)) { skipping = true; continue; }
     if (chapter === null && !isPart && PART_TITLE_RE.test(stitle)) {
       // First chapter of a part: this opener file's nav title is the PART name, so the chapter number and

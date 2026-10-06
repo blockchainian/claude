@@ -79,7 +79,7 @@ is present. Luna runs on the user's ChatGPT plan through `codex`; when its quota
 
 Extraction walks the EPUB's OPF spine (order) and nav/ncx (titles), keeping each section as a cleaned XHTML
 fragment whose `<strong>`, `<em>`, `<sub>`, `<sup>` tags the translator turns into correct LaTeX; part-divider
-files fold into the next chapter, the cover comes from the OPF, and the page size is `--page-size WxH` (default
+files identified by their titles fold into the next chapter; numbered `part` filenames carry no structural meaning, the cover comes from the OPF, and the page size is `--page-size WxH` (default
 468x680pt, a 6.5x9.4in trade book). Add `--keep-images` to carry figures and image equations through.
 
 ```bash
@@ -92,7 +92,8 @@ the 目录 is regenerated), `front` (preface, introduction — roman folios), `c
 1), `back` (acknowledgments, appendix, letters; a Conclusion/Epilogue/Afterword, the Answers to Exercises and each
 Appendix open their own back section). A section over 15,000 words (a textbook chapter, the answers) is split at
 its numbered subsection headings ("1.2.1. …", "Section 1.2.1"), one section each, titled by the heading; a
-heading with no body of its own leads the next section. `images.json` records each image's EPUB file name as
+heading with no body of its own leads the next section. Sibling appendix sections within a spine file are split into their own sections. About the Author and Colophon
+open separate back sections. `images.json` records each image's EPUB file name as
 `src`, so a recurring glyph (a marker, a symbol) can be found by name.
 Once the book's terminal back-matter starts (Notes/References/Bibliography/Index) past the last chapter, it and
 every spine file after it (continuations with no nav title of their own included) is skipped, so endnotes and
