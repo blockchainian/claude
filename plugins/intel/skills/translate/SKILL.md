@@ -190,7 +190,8 @@ pixel width times `--inline-scale` (default 0.33, about body-text size). A Markd
 paragraphs, never as a drawn line. CJK closing punctuation right after inline math, inline code or an inline image is bound to
 it, so a line never opens with ，or 。. A block figure and the caption paragraph right after it (`**图 N.**`, `**表 N**`, `**Fig.**`,
 `**Table**`) are never split by a page break. The paragraph right before a block figure is kept with it, so a lead-in ("如下：")
-is never left alone at a page bottom; a long one still splits, with only its last lines moving. Inline code is set in
+is never left alone at a page bottom; a long one still splits, with only its last lines moving. Ordered lists retain their starting numbers across paragraph, quotation and bullet-list interruptions.
+Inline code is set in
 KaTeX's typewriter face, the same as `\mathtt`. A paragraph with hard line breaks (aligned rows) has no first-line
 indent, and a continued line keeps its leading ideographic spaces (a staircase). Chapter openers carry the
 第N章 label, the title and a drop cap on the first paragraph after any epigraph (left off when that paragraph opens
