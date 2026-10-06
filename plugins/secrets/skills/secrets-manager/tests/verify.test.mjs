@@ -143,3 +143,23 @@ test("an adapter app's restricted session is kept too", async () => {
   assert.equal(await main(["verify", "beta", "--all"], io()), 0);
   assert.equal(store.getSession(db, "beta", "g@mail.com").status, "restricted");
 });
+
+
+test("an active check preserves ready but failures can invalidate it", () => {
+  assert.equal(nextStatus("ready", "active"), "ready");
+  for (const result of ["expired", "restricted", "escalated"]) assert.equal(nextStatus("ready", result), result);
+});
+
+test("verify selects ready app sessions by default and preserves setup after an active check", async () => {
+  store.upsertAccount(db, "g@mail.com", "pw", null);
+  for (const app of ["alpha", "beta"]) {
+    store.saveSession(db, app, "g@mail.com", [], []);
+    store.setSessionStatus(db, app, "g@mail.com", "ready");
+  }
+  const o = io();
+  assert.equal(await main(["verify", "alpha"], o), 0);
+  assert.equal(store.getSession(db, "alpha", "g@mail.com").status, "ready");
+  assert.equal(o.text(), "g@mail.com: active (kept ready)");
+  assert.equal(await main(["verify", "beta"], io()), 0);
+  assert.equal(store.getSession(db, "beta", "g@mail.com").status, "expired");
+});

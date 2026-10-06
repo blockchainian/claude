@@ -462,3 +462,263 @@ test("login <app> never retries an account the app restricted, even with --all",
   assert.equal(await main(["login", "alpha", "--all"], o), 0);
   assert.ok(o.text().includes("skip a@x.com: alpha status restricted"));
 });
+
+
+test("ready sessions are usable for export and skipped by default login without a browser", async () => {
+  writeGoogleFile("a@x.com:pw:SECRET:\n");
+  store.upsertAccount(db, "a@x.com", "pw", "SECRET");
+  store.setAccountStatus(db, "a@x.com", "ready");
+  store.saveSession(db, "beta", "a@x.com", [{ name: "auth-refresh-token", value: "READY" }], []);
+  store.setSessionStatus(db, "beta", "a@x.com", "ready");
+  assert.equal(needsRefresh(db, "beta", "a@x.com"), false);
+  assert.equal(loginSkipReason("ready", "beta"), null);
+  assert.equal(loginSkipReason("ready", "google"), null);
+  const login = io();
+  assert.equal(await main(["login", "beta"], login), 0);
+  assert.deepEqual(login.out, ["a@x.com: beta up to date, skipping"]);
+  const output = io();
+  assert.equal(await main(["export", "beta", "--select", "a@x.com"], output), 0);
+  assert.deepEqual(output.out.map(JSON.parse), [{ app: "beta", email: "a@x.com", refresh_token: "READY" }]);
+  assert.equal(store.getSession(db, "beta", "a@x.com").status, "ready");
+});
+
+
+// Runtime fixture modules stay in the temporary state directory; these hooks never open a browser.
+function setupAdapter(hook, setupFlags = {}) {
+  const path = join(base, "setup-adapter.mjs");
+  writeFileSync(path, `export default kit => {
+    let running = 0, peak = 0;
+    return [{
+      name: 'alpha', domain: 'alpha.example', startUrl: 'https://alpha.example/',
+      entryTexts: ['Login'], signIn: async () => {}, ready: async () => true,
+      setup: ${hook}, setupFlags: ${JSON.stringify(setupFlags)},
+    }];
+  };`);
+  process.env.SECRETS_MANAGER_ADAPTERS = path;
+}
+
+function setupSession(email, status, cookies = []) {
+  store.upsertAccount(db, email, "pw", null);
+  store.saveSession(db, "alpha", email, cookies, []);
+  store.setSessionStatus(db, "alpha", email, status);
+}
+
+test("setup parses the same flags as verify and requires one app", () => {
+  const flags = ["alpha", "--select", "a@x.com", "--select", "b@x.com", "--all", "--concurrency", "2", "--headed", "--rotate-proxy"];
+  assert.deepEqual(parseCli(["setup", ...flags]).opts, parseCli(["verify", ...flags]).opts);
+  assert.throws(() => parseCli(["setup"]), /Usage/);
+  assert.throws(() => parseCli(["setup", "alpha", "beta"]), /Usage/);
+});
+
+test("setup succeeds for active sessions; --all adds ready and --select narrows", async () => {
+  setupAdapter("async ({ session }) => ({ summary: `configured from ${session.status}`, state: { from: session.status } })");
+  for (const status of ["new", "active", "ready", "expired", "restricted", "escalated"]) setupSession(`${status}@x.com`, status);
+  store.upsertAccount(db, "missing@x.com", "pw", null);
+  // As with verify, an app session needs an imported account to be selected.
+  store.saveSession(db, "alpha", "orphan@x.com", [], []);
+  const output = io();
+  assert.equal(await main(["setup", "alpha"], output), 0);
+  assert.deepEqual(output.out, ["active@x.com: configured from active"]);
+  assert.equal(store.getSession(db, "alpha", "active@x.com").status, "ready");
+  const skipped = io();
+  assert.equal(await main(["setup", "alpha", "--select", "ready@x.com"], skipped), 0);
+  assert.ok(!skipped.text().includes("configured"));
+  const all = io();
+  assert.equal(await main(["setup", "alpha", "--all", "--select", "active@x.com", "--select", "ready@x.com", "--select", "expired@x.com"], all), 0);
+  assert.deepEqual(all.out, ["active@x.com: configured from ready", "ready@x.com: configured from ready"]);
+  for (const status of ["new", "expired", "restricted", "escalated"]) assert.equal(store.getSession(db, "alpha", `${status}@x.com`).status, status);
+  assert.equal(store.getSession(db, "alpha", "orphan@x.com").status, "active");
+});
+
+test("setup throws per account, preserves failed rows and continues with exit 1", async () => {
+  setupAdapter("async ({ email }) => { if (email.startsWith('bad')) throw new Error('setup failed'); return { summary: 'configured', state: { configured: true } }; }");
+  setupSession("bad-active@x.com", "active");
+  setupSession("bad-ready@x.com", "ready");
+  setupSession("good@x.com", "active");
+  const before = db.prepare("SELECT * FROM alpha WHERE email LIKE 'bad%' ORDER BY email").all();
+  const output = io();
+  assert.equal(await main(["setup", "alpha", "--all"], output), 1);
+  assert.deepEqual(output.err, ["bad-active@x.com: setup failed", "bad-ready@x.com: setup failed"]);
+  assert.deepEqual(output.out, ["good@x.com: configured"]);
+  assert.deepEqual(db.prepare("SELECT * FROM alpha WHERE email LIKE 'bad%' ORDER BY email").all(), before);
+  assert.equal(store.getSession(db, "alpha", "good@x.com").status, "ready");
+});
+
+test("setup NeedsHuman escalates the session while plain errors preserve status and state", async () => {
+  setupAdapter("async ({ email }) => { if (email.startsWith('human')) throw new kit.NeedsHuman('finish by hand'); throw new Error('setup failed'); }");
+  for (const [email, status] of [["human@x.com", "active"], ["plain@x.com", "ready"]]) {
+    setupSession(email, status);
+    db.prepare("UPDATE alpha SET state = ? WHERE email = ?").run(JSON.stringify({ wallet: "existing" }), email);
+  }
+  const before = db.prepare("SELECT * FROM alpha ORDER BY email").all();
+  const output = io();
+  assert.equal(await main(["setup", "alpha", "--all"], output), 1);
+  assert.deepEqual(output.err, ["human@x.com: escalated: finish by hand", "plain@x.com: setup failed"]);
+  assert.deepEqual(output.out, []);
+  const after = db.prepare("SELECT * FROM alpha ORDER BY email").all();
+  assert.deepEqual({ ...after[0], updated_at: before[0].updated_at }, { ...before[0], status: "escalated" });
+  assert.deepEqual(after[1], before[1]);
+});
+
+test("setup fails explicitly without a hook even when there are no sessions", async () => {
+  const output = io();
+  assert.equal(await main(["setup", "alpha"], output), 1);
+  assert.deepEqual(output.err, ["alpha has no setup hook"]);
+  assert.deepEqual(output.out, []);
+});
+
+test("setup rejects missing or empty summaries without changing status", async () => {
+  setupAdapter("async ({ session }) => ({ summary: session.cookies[0].value, state: null })");
+  for (const [i, value] of [undefined, null, 7, "", "   "].entries()) setupSession(`bad${i}@x.com`, "active", [{ name: "summary", value }]);
+  const output = io();
+  assert.equal(await main(["setup", "alpha"], output), 1);
+  assert.equal(output.err.length, 5);
+  assert.ok(output.err.every(line => line.endsWith(": invalid setup summary")));
+  assert.deepEqual(output.out, []);
+  assert.ok(db.prepare("SELECT status FROM alpha").all().every(row => row.status === "active"));
+});
+
+test("setup passes the hook context and honors concurrency", async () => {
+  setupAdapter(`async ({ db, email, session, opts, io }) => {
+    if (kit.store.getSession(db, 'alpha', email).status !== 'active' || session.email !== email ||
+        !opts.headed || !opts['rotate-proxy'] || opts.concurrency !== 2 || typeof io.log !== 'function') throw new Error('bad context');
+    peak = Math.max(peak, ++running);
+    await new Promise(resolve => setImmediate(resolve));
+    running--;
+    return { summary: 'configured (peak ' + peak + ')', state: { peak } };
+  }`);
+  for (const email of ["a@x.com", "b@x.com", "c@x.com", "d@x.com"]) setupSession(email, "active");
+  const output = io();
+  assert.equal(await main(["setup", "alpha", "--concurrency", "2", "--headed", "--rotate-proxy"], output), 0);
+  assert.equal(output.out.length, 4);
+  assert.ok(output.out.every(line => line.endsWith(": configured (peak 2)")));
+  assert.ok(db.prepare("SELECT status FROM alpha").all().every(row => row.status === "ready"));
+});
+
+
+for (const state of [null, false, 0, "wallet", [1, null], { wallet: { id: "test" }, steps: [true] }]) {
+  test(`setup stores JSON state ${JSON.stringify(state)} and ready in one write; get parses it`, async () => {
+    setupAdapter(`async () => ({ summary: 'configured', state: ${JSON.stringify(state)} })`);
+    setupSession("a@x.com", "active");
+    // A trigger rejects an intermediate ready row, proving state and status arrive together.
+    db.exec(`CREATE TRIGGER require_state BEFORE UPDATE ON alpha
+      WHEN NEW.status = 'ready' AND NEW.state IS NULL
+      BEGIN SELECT RAISE(ABORT, 'ready needs setup state'); END`);
+    const output = io();
+    assert.equal(await main(["setup", "alpha", "--select", "a@x.com"], output), 0);
+    assert.deepEqual(output.out, ["a@x.com: configured"]);
+    assert.deepEqual(output.err, []);
+    const row = db.prepare("SELECT * FROM alpha").get();
+    assert.equal(row.status, "ready");
+    assert.equal(row.state, JSON.stringify(state));
+    const got = io();
+    assert.equal(await main(["get", "alpha", "--select", "a@x.com"], got), 0);
+    assert.deepEqual(JSON.parse(got.text()).state, state);
+  });
+}
+
+for (const [label, result, error] of [
+  ["undefined result", "undefined", "result"],
+  ["null result", "null", "result"],
+  ["old string contract", "'configured'", "result"],
+  ["array result", "[]", "result"],
+  ["missing summary", "({ state: null })", "summary"],
+  ["multiline summary", "({ summary: 'line\\nline', state: null })", "summary"],
+  ["carriage return summary", "({ summary: 'line\\rline', state: null })", "summary"],
+  ["missing state", "({ summary: 'configured' })", "state"],
+  ["undefined state", "({ summary: 'configured', state: undefined })", "state"],
+  ["function state", "({ summary: 'configured', state: () => {} })", "state"],
+  ["symbol state", "({ summary: 'configured', state: Symbol('state') })", "state"],
+  ["BigInt state", "({ summary: 'configured', state: { id: 1n } })", "state"],
+  ["circular state", "(() => { const state = {}; state.self = state; return { summary: 'configured', state }; })()", "state"],
+  ["toJSON returns undefined", "({ summary: 'configured', state: { toJSON: () => undefined } })", "state"],
+  ["toJSON throws", "({ summary: 'configured', state: { toJSON: () => { throw new Error('cannot encode'); } } })", "state"],
+]) {
+  test(`setup rejects ${label} without storing anything or changing status`, async () => {
+    setupAdapter(`async () => ${result}`);
+    setupSession("active@x.com", "active");
+    setupSession("ready@x.com", "ready");
+    db.prepare("UPDATE alpha SET state = ? WHERE email = 'ready@x.com'").run('{"previous":true}');
+    const before = db.prepare("SELECT * FROM alpha ORDER BY email").all();
+    const output = io();
+    assert.equal(await main(["setup", "alpha", "--all"], output), 1);
+    assert.deepEqual(output.out, []);
+    assert.equal(output.err.length, 2);
+    assert.ok(output.err.every(line => line.endsWith(`: invalid setup ${error}`)), output.errText());
+    assert.deepEqual(db.prepare("SELECT * FROM alpha ORDER BY email").all(), before);
+  });
+}
+
+test("a failed setup write preserves both state and status", async () => {
+  setupAdapter("async () => ({ summary: 'configured', state: { wallet: 'new' } })");
+  setupSession("a@x.com", "active");
+  db.exec(`CREATE TRIGGER reject_setup BEFORE UPDATE ON alpha
+    BEGIN SELECT RAISE(ABORT, 'write rejected'); END`);
+  const before = db.prepare("SELECT * FROM alpha").get();
+  const output = io();
+  assert.equal(await main(["setup", "alpha"], output), 1);
+  assert.match(output.errText(), /write rejected/);
+  assert.deepEqual(output.out, []);
+  assert.deepEqual(db.prepare("SELECT * FROM alpha").get(), before);
+});
+
+const appSetupFlags = {
+  "follow-lowest-ranked": { type: "boolean", description: "Follow the lowest ranked account." },
+  "wallet-name": { type: "string", description: "Name of the wallet to create." },
+};
+
+test("setup app flags reach opts with their declared types", async () => {
+  setupAdapter(`async ({ opts }) => ({ summary: 'configured', state: {
+    follow: opts['follow-lowest-ranked'], wallet: opts['wallet-name'], headed: opts.headed
+  } })`, appSetupFlags);
+  setupSession("a@x.com", "active");
+  const output = io();
+  assert.equal(await main(["setup", "alpha", "--follow-lowest-ranked", "--wallet-name", "test wallet", "--headed"], output), 0, output.errText());
+  assert.deepEqual(store.getSession(db, "alpha", "a@x.com").state, { follow: true, wallet: "test wallet", headed: true });
+});
+
+test("setup flags belong only to their app and do not extend other commands", async () => {
+  setupAdapter("async () => { throw new Error('hook must not run'); }", appSetupFlags);
+  const path = join(base, "other-adapter.mjs");
+  writeFileSync(path, `export default () => [{ name: 'beta', domain: 'beta.example', startUrl: 'https://beta.example/',
+    entryTexts: ['Login'], signIn: async () => {}, ready: async () => true,
+    setup: async () => { throw new Error('hook must not run'); } }];`);
+  process.env.SECRETS_MANAGER_ADAPTERS += ':' + path;
+  setupSession("a@x.com", "active");
+  for (const args of [["setup", "beta"], ["login", "alpha"], ["verify", "alpha"]]) {
+    const output = io();
+    assert.equal(await main([...args, "--follow-lowest-ranked"], output), 1);
+    assert.match(output.errText(), /Unknown option.*follow-lowest-ranked/);
+    assert.doesNotMatch(output.errText(), /hook must not run/);
+    assert.equal(store.getSession(db, "alpha", "a@x.com").status, "active");
+  }
+});
+
+test("setup help and unknown flags list app descriptions before the hook runs", async () => {
+  setupAdapter("async () => { throw new Error('hook must not run'); }", appSetupFlags);
+  setupSession("a@x.com", "active");
+  for (const flag of ["--help", "--follow-lowest-rankd", "--unknown"]) {
+    const output = io();
+    assert.equal(await main(["setup", "alpha", flag], output), flag === "--help" ? 0 : 1);
+    const text = flag === "--help" ? output.text() : output.errText();
+    assert.match(text, /setup <app>.*\[app flags\]/);
+    for (const [name, { description }] of Object.entries(appSetupFlags)) {
+      assert.ok(text.includes('--' + name), text);
+      assert.ok(text.includes(description), text);
+    }
+    if (flag !== "--help") assert.match(text, /Unknown option/);
+    assert.doesNotMatch(text, /hook must not run/);
+    assert.equal(store.getSession(db, "alpha", "a@x.com").status, "active");
+  }
+});
+
+for (const state of [null, false, 0, "wallet", [1, null], { wallet: { id: "previous" } }]) {
+  test(`setup hook receives parsed previous state ${JSON.stringify(state)}`, async () => {
+    setupAdapter("async ({ session }) => ({ summary: 'configured', state: { previous: session.state } })");
+    setupSession("a@x.com", "active");
+    if (state !== null) store.saveSetupState(db, "alpha", "a@x.com", state);
+    const output = io();
+    assert.equal(await main(["setup", "alpha", "--all"], output), 0, output.errText());
+    assert.deepEqual(store.getSession(db, "alpha", "a@x.com").state, { previous: state });
+  });
+}

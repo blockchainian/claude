@@ -18,11 +18,10 @@ import { installBlocklist } from "./traffic.mjs";
 import * as windowPlace from "./window-place.mjs";
 import { gotoWithRetry } from "./page-helpers.mjs";
 import { filterState } from "./state.mjs";
-export { filterState };
-export { gotoWithRetry } from "./page-helpers.mjs";
-
 import { NeedsHuman } from "./errors.mjs";
 export { NeedsHuman } from "./errors.mjs";
+export { filterState };
+export { gotoWithRetry } from "./page-helpers.mjs";
 
 // Google restricted the account (the banned-account speedbump). A terminal dead end: no human can
 // clear it, so the caller marks the account restricted (never retried) rather than escalated.

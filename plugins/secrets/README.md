@@ -2,7 +2,7 @@
 
 Shared by Claude Code and Codex: local plaintext account credentials and browser sessions, outside the repository. The
 `secrets-manager` skill imports Google, X and TikTok credentials, drives Camoufox logins,
-and lets external adapters define app login, verification and credential exports.
+and lets external adapters define app login, verification, account setup and credential exports.
 
 ## Install
 
@@ -13,10 +13,10 @@ Claude Code:
 /plugin install secrets@blockchainian
 ```
 
-Codex (use `--ref codex` until this branch merges):
+Codex:
 
 ```sh
-codex plugin marketplace add blockchainian/claude --ref codex
+codex plugin marketplace add blockchainian/claude
 codex plugin add secrets@blockchainian
 ```
 
@@ -53,10 +53,11 @@ TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
 | `login <google\|x\|tiktok\|app>` | Store a browser session. |
 | `login <app> --by-email` | Call an adapter's email hook. |
 | `verify <google\|x\|tiktok\|app>` | Check each account is still usable and persist its status. |
+| `setup <app>` | Prepare logged-in accounts through the adapter hook and mark them `ready`. |
 | `setup-2fa` | Enroll Google TOTP, turn on 2-Step, mint an app password. |
 | `sms <balance\|prices\|number>` | Manage verification SMS. |
 | `whoami <x\|app> --select CREDENTIAL [--json]` | Identify a credential without reading or changing stored accounts. |
-| `export <app> [--select EMAIL]...` | Print active-session credentials as JSONL. |
+| `export <app> [--select EMAIL]...` | Print active or ready session credentials as JSONL. |
 | `get <app> --select ID...` | Read stored sessions. |
 | `set-status <app> <status> --select ID...` | Set session status. |
 | `list [--json]` | List accounts and all stored app tables. |
@@ -68,7 +69,41 @@ as described in the skill.
 `verify google|x|tiktok` are builtin checks; any other target calls the adapter's `verify` hook.
 Deriving a ct0 for a vendor X auth_token stays in intel's `fetch-x-mentions/scripts/verify-x.mjs`.
 
-`export` prints one JSON line per selected active session:
+`setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy] [app flags]`
+selects imported accounts with `active` app sessions; `--all` adds `ready` sessions for a rerun.
+The hook receives `{db, email, session, opts, io}` and resolves to `{summary, state}`.
+`summary` must be a nonempty one-line string; `state` is any JSON-serialisable app-specific
+value, including `null`, but not `undefined`. Success stores the state as JSON in
+`state` and status `ready` in one write, then prints `<email>: <summary>`. A throw or
+invalid result, summary or state prints `<email>: <message>` to stderr, writes nothing,
+keeps status and prior setup state, and exits 1 while other accounts continue.
+A missing hook fails with `<app> has no setup hook`.
+
+Adapters may declare `setupFlags`, an object mapping kebab-case flag names to
+`{type: "boolean" | "string", description: string}`. Descriptions must be nonempty;
+engine global flag names and `help` are reserved. For example:
+
+```js
+setupFlags: {
+  "follow-lowest-ranked": { type: "boolean", description: "Follow the lowest ranked account." },
+}
+```
+
+Only `setup <app>` accepts that app's flags; other apps, commands and unknown flags
+fail before the setup hook runs or a browser opens. Values reach the hook under their
+original names, e.g. `opts["follow-lowest-ranked"] === true`. `setup <app> --help`
+and flag errors list the app's flags with descriptions. The hook's `session.state`
+is already parsed JSON from the previous setup, or `null` when absent.
+
+`ready` means logged in and app setup done, a step above `active`. Default verification and
+credential export accept both. Re-login and an `active` verification result preserve `ready`
+because setup lives server-side; expired/restricted results still invalidate usability.
+Old Google and app tables are widened on open, preserving rows; only app setup promotes to `ready`.
+App tables have a nullable `state TEXT` column containing JSON. Existing stores add it
+on open with guarded, idempotent `ALTER TABLE ... ADD COLUMN`, without rebuilding for this
+column. `get <app> --select EMAIL` shows parsed `state`; re-login leaves it untouched.
+
+`export` prints one JSON line per selected active or ready session:
 `{"app":"<app>","email":"<email>",...fields}`. Credential values are printed in clear.
 A null hook result prints `<email>\tmissing` to stderr; stdout contains only JSONL for jq.
 An adapter without the hook fails with `<app> has no credentials hook`.
@@ -91,6 +126,8 @@ An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files
 | `attempts` | Optional positive retry count, default 1. |
 | `byEmail(ctx)` | Optional password signup/login through a Gmail plus-alias. |
 | `verify(ctx)` | Optional hook returning `active`, `restricted` or `expired`. |
+| `setupFlags` | Optional object of kebab-case names to `{type: "boolean" \| "string", description: string}`; nonempty descriptions, no global flag names or `help`. Accepted only by this app’s `setup` command. |
+| `setup({db, email, session, opts, io})` | Optional async hook returning `{summary, state}`: a nonempty one-line string and JSON-serialisable app state (not `undefined`); throws `kit.NeedsHuman` to mark the session `escalated`. Other errors preserve status; every failure preserves setup state and exits 1. The engine stores JSON `state` and `ready` together on success. |
 | `bannedResponse({url, status, body})` | Optional; called during `login <app>` for every app-domain response with status >= 400. A non-empty reason means the app banned the account: its session row is recorded `restricted` (created if absent), the Google account is untouched, and `login <app>` never retries it. |
 | `whoami({credential})` | Optional async hook returning `{email: string}`; credential type is app-specific. Missing or ambiguous identity throws. |
 | `credentials(session)` | Optional `(session) => Record<string, string> \| null`; returns usable credential fields. |
@@ -118,7 +155,7 @@ The kit provides:
 - `aliasFor(baseEmail, tag)` (required tag), `mintAppPassword(cred, {name, ...})`
   (required name).
 - `withProfile(key, {headed = false, rotate = false, proxyUrl = config.proxyFor(key, {rotate}),
-  blockAssets = true, record = false}, fn)` opens a persistent Camoufox browser for a `byEmail` or `verify`
+  blockAssets = true, record = false}, fn)` opens a persistent Camoufox browser for a `byEmail`, `verify` or `setup`
   hook. It reuses the engine's profile directory, proxy, stored fingerprint, traffic blocking,
   headed diagnostics and cleanup; a headless run with `record` saves page videos under the
   account's debug dir. Calls `fn(context, page)`, returns its result,
@@ -140,7 +177,7 @@ The kit provides:
   newer than the click (`sinceEpoch` in seconds), then checks Spam after the inbox timeout.
   Returns `{otp, from, subject, to, folder}`, or the same metadata with
   `{securityAlert: true, otp: null}` for a Security Alert, or `null` on timeout.
-- `store`: `openDb`, `getSession`, `saveSession`, `setSessionStatus`, `listAccounts`,
+- `store`: `openDb`, `getSession`, `saveSession`, `saveSetupState`, `setSessionStatus`, `listAccounts`,
   `sessionsForAccount`, `STATUS_*` and the remaining store exports.
 - `config`: `dbPath`, `statePath`, `defaultProxy`, `proxyFor` and the remaining config exports.
 - `credentials`: `loadCredentials(dir)`, `setAppPassword(dir, email, appPassword)`,
@@ -154,7 +191,7 @@ Configure `~/.config/secrets-manager/config.json`:
 ```
 
 `SECRETS_MANAGER_ADAPTERS` overrides it with colon-separated absolute paths. No config
-and no override means zero adapters. Unknown login/verify/export targets fail with loaded
+and no override means zero adapters. Unknown login/verify/setup/export targets fail with loaded
 names; duplicate names or invalid modules fail startup and identify the module path.
 `validate` takes module paths directly and exits 0 printing names or 1 reporting the error.
 Existing app tables retain their names and remain visible through list/get without adapters.

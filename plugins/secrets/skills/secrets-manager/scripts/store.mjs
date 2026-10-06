@@ -6,20 +6,22 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-// One status vocabulary for every table (google identities, app sessions, x logins):
+// Shared status vocabulary (ready is used by app setup; builtins have no setup hooks):
 //   new        imported, no login run has recorded an outcome yet
-//   active     usable
+//   active     logged in and usable
+//   ready      logged in and app setup done
 //   expired    session/token no longer valid, re-login needed
 //   restricted banned or blocked by the app
 //   escalated  needs a human to resolve
 export const STATUS_NEW = "new";
 export const STATUS_ACTIVE = "active";
+export const STATUS_READY = "ready";
 export const STATUS_EXPIRED = "expired";
 export const STATUS_RESTRICTED = "restricted";
 export const STATUS_ESCALATED = "escalated";
-export const STATUSES = new Set([STATUS_NEW, STATUS_ACTIVE, STATUS_EXPIRED, STATUS_RESTRICTED, STATUS_ESCALATED]);
+export const STATUSES = new Set([STATUS_NEW, STATUS_ACTIVE, STATUS_READY, STATUS_EXPIRED, STATUS_RESTRICTED, STATUS_ESCALATED]);
 
-const STATUS_CHECK = "CHECK (status IN ('new','active','expired','restricted','escalated'))";
+const STATUS_CHECK = "CHECK (status IN ('new','active','ready','expired','restricted','escalated'))";
 
 // Tables that are not app-session tables, excluded when listing apps.
 const NON_APP_TABLES = new Set(["google", "x", "tiktok"]);
@@ -55,16 +57,18 @@ export function openDb(path) {
   }
   db.exec(readFileSync(SCHEMA_PATH, "utf8"));
   migrateGoogleStatus(db);
+  for (const app of listApps(db)) {
+    migrateAppStatus(db, app);
+    migrateAppSetupState(db, app);
+  }
   return db;
 }
 
-// The `status` CHECK originally omitted 'new'. CREATE TABLE IF NOT EXISTS never alters an existing
-// table, so a store created before 'new' still rejects it. Widen the live google table's CHECK by
-// rebuilding it inside a transaction, preserving every row. A fresh database already carries the
-// widened CHECK from schema.sql, so the guard makes this a no-op there.
+// CREATE TABLE IF NOT EXISTS cannot widen an old CHECK. Rebuild only stores missing 'new' or
+// 'ready', preserving their rows; fresh and already-migrated tables stay untouched.
 function migrateGoogleStatus(db) {
   const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='google'").get();
-  if (!row || row.sql.includes("'new'")) return;
+  if (!row || (row.sql.includes("'new'") && row.sql.includes("'ready'"))) return;
   db.exec("BEGIN");
   try {
     db.exec(`CREATE TABLE google_migrate (
@@ -89,6 +93,41 @@ function migrateGoogleStatus(db) {
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
+  }
+}
+
+// Apps carry their own CHECK, even when their adapter is no longer installed. Widen each stored
+// table on open so setup can write ready without a constraint failure after doing server-side work.
+function migrateAppStatus(db, table) {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table);
+  if (row.sql.includes("'ready'")) return;
+  db.exec("BEGIN");
+  try {
+    db.exec(`CREATE TABLE "${table}_migrate" (
+      email TEXT PRIMARY KEY,
+      cookies TEXT NOT NULL,
+      local_storage TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' ${STATUS_CHECK},
+      state TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`);
+    const state = db.prepare(`PRAGMA table_info("${table}")`).all().some(c => c.name === "state") ? "state" : "NULL";
+    db.exec(`INSERT INTO "${table}_migrate" SELECT email, cookies, local_storage, status, ${state}, created_at, updated_at FROM "${table}"`);
+    db.exec(`DROP TABLE "${table}"`);
+    db.exec(`ALTER TABLE "${table}_migrate" RENAME TO "${table}"`);
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+// Adding setup state needs no rebuild, so existing indexes and rows stay intact. Guard the
+// ALTER because every open visits stored apps, including ones without an installed adapter.
+function migrateAppSetupState(db, table) {
+  if (!db.prepare(`PRAGMA table_info("${table}")`).all().some(c => c.name === "state")) {
+    db.exec(`ALTER TABLE "${table}" ADD COLUMN state TEXT`);
   }
 }
 
@@ -147,6 +186,7 @@ export function ensureAppTable(db, app) {
        cookies TEXT NOT NULL,
        local_storage TEXT NOT NULL,
        status TEXT NOT NULL DEFAULT 'active' ${STATUS_CHECK},
+       state TEXT,
        created_at TEXT NOT NULL,
        updated_at TEXT NOT NULL
      )`,
@@ -171,7 +211,8 @@ export function listApps(db) {
     .filter((name) => hasEmailColumn(db, name));
 }
 
-// Store a freshly exported (account, app) login state, marking it active.
+// Store a fresh login state. Setup lives server-side, so refreshing tokens must not erase ready
+// or state; neither setup field is replaced by the login export.
 export function saveSession(db, app, email, cookies, localStorage) {
   const table = ensureAppTable(db, app);
   const ts = now();
@@ -181,7 +222,7 @@ export function saveSession(db, app, email, cookies, localStorage) {
      ON CONFLICT(email) DO UPDATE SET
        cookies = excluded.cookies,
        local_storage = excluded.local_storage,
-       status = excluded.status,
+       status = CASE WHEN "${table}".status = 'ready' THEN 'ready' ELSE excluded.status END,
        updated_at = excluded.updated_at`,
   ).run(email, JSON.stringify(cookies), JSON.stringify(localStorage), STATUS_ACTIVE, ts, ts);
 }
@@ -197,7 +238,22 @@ export function getSession(db, app, email) {
     updated_at: row.updated_at,
     cookies: JSON.parse(row.cookies),
     local_storage: JSON.parse(row.local_storage),
+    state: row.state === null ? null : JSON.parse(row.state),
   };
+}
+
+// Validate before writing so a bad hook state cannot promote an account or erase prior setup.
+// A single UPDATE keeps the app-specific state and readiness verdict inseparable.
+export function saveSetupState(db, app, email, state) {
+  let json;
+  try { json = JSON.stringify(state); }
+  catch (e) { throw new Error("invalid setup state", { cause: e }); }
+  if (json === undefined) throw new Error("invalid setup state");
+  const table = ensureAppTable(db, app);
+  const { changes } = db
+    .prepare(`UPDATE "${table}" SET state = ?, status = ?, updated_at = ? WHERE email = ?`)
+    .run(json, STATUS_READY, now(), email);
+  if (changes === 0) throw new Error(`${email} has no ${app} session`);
 }
 
 export function setSessionStatus(db, app, email, status) {
