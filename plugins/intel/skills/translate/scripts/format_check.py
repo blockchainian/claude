@@ -154,8 +154,9 @@ def kind(text, span):
 
 
 def quoted(pageno, block):
-    """True for an epigraph: its lines are slanted, or all inset from both edges of the column."""
-    return any(slanted(pageno, l) for l in block) or all(
+    """True for an epigraph: its lines are slanted, or it has two or more lines, all inset from both edges of the
+    column (a single short line at the indent is as likely a one-line paragraph)."""
+    return any(slanted(pageno, l) for l in block) or len(block) > 1 and all(
         l["bbox"][0] >= margin + 12 and l["bbox"][2] <= right - 12 for l in block)
 
 

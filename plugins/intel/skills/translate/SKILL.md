@@ -170,7 +170,7 @@ is never left alone at a page bottom; a long one still splits, with only its las
 KaTeX's typewriter face, the same as `\mathtt`. A paragraph with hard line breaks (aligned rows) has no first-line
 indent, and a continued line keeps its leading ideographic spaces (a staircase). Chapter openers carry the
 第N章 label, the title and a drop cap on the first paragraph after any epigraph (left off when that paragraph opens
-with a bold number label or a digit, as in an answers section, or is under about a line; a paragraph opening with a
+with a bold number label or a digit, as in an answers section, or is a stub of a few characters; a paragraph opening with a
 bold phrase gets a bold cap). Every paragraph is indented 2em except a drop-cap one, so a list section's first item
 lines up with the rest; body pages carry the chapter title as running head and a folio (roman in
 front matter, arabic from chapter 1). Every 目录 row is a link to its section, and the bookmarks are flat:
