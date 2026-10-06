@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-const DEFAULT_ROOT = path.join(os.homedir(), ".claude", "retros");
+const DEFAULT_ROOT = path.join(process.env.FEATURE_STATE_DIR || path.join(os.homedir(), ".local", "state", "feature"), "retros");
 const PROG = "efficacy.mjs";
 const USAGE = `usage: ${PROG} [-h] [--root ROOT]\n`;
 const HELP =
@@ -14,7 +14,7 @@ const HELP =
   "\nBest-effort efficacy analysis for /feature:retro fixes.\n" +
   "\noptions:\n" +
   "  -h, --help   show this help message and exit\n" +
-  "  --root ROOT  retros dir (default ~/.claude/retros)\n";
+  "  --root ROOT  retros dir (default $FEATURE_STATE_DIR/retros, else ~/.local/state/feature/retros)\n";
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
