@@ -70,6 +70,11 @@ check("an italic single letter outside math (unconverted variable) is reported",
 out = lint([("<p>x</p>", "# 标题\n\n设 \\(x 未闭合。\n")])
 check("unbalanced math delimiters are reported", "unbalanced \\(" in out, out)
 
+out = lint([("<p>⟦CODE:c1⟧</p>", "# 标题\n\n⟦CODE:c1⟧\n\n```\n\\(unclosed <sup>\n```\n")])
+check("protected code and fenced contents are not missing or math", "0 problems" in out, out)
+out = lint([("<p>⟦CODE:c1⟧ ⟦CODE:c1⟧</p>", "# 标题\n\n⟦CODE:c1⟧ ⟦CODE:c9⟧")])
+check("missing and unknown code tokens are reported", "missing ⟦CODE:c1⟧" in out and "unknown ⟦CODE:c9⟧" in out, out)
+
 if fails:
     print(f"\n{len(fails)} failures")
     sys.exit(1)

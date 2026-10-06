@@ -127,9 +127,10 @@ test("luna returns a titled Chinese translation (e2e)", { skip: !process.env.TRA
 });
 
 test("answer preserves placeholder multiplicities and numeric sup marker set", () => {
-  const src = '<p>⟦IMG:e1⟧ ⟦IMG:e1⟧ ⟦IMG:e2⟧ <sup class="note">12</sup><sup>21</sup></p>';
-  const good = '# 标题\n\n正文 ⟦IMG:e2⟧ ⟦IMG:e1⟧ ⟦IMG:e1⟧ <sup>21</sup><sup>12</sup>';
+  const src = '<p>⟦CODE:c1⟧ ⟦IMG:e1⟧ ⟦IMG:e1⟧ ⟦IMG:e2⟧ <sup class="note">12</sup><sup>21</sup></p>';
+  const good = '# 标题\n\n正文 ⟦CODE:c1⟧ ⟦IMG:e2⟧ ⟦IMG:e1⟧ ⟦IMG:e1⟧ <sup>21</sup><sup>12</sup>';
   assert.equal(tr.checkOutput(good, 1, src), null);
+  assert.match(tr.checkOutput(good.replace('⟦CODE:c1⟧', ''), 1, src), /missing.*⟦CODE:c1⟧/);
   assert.match(tr.checkOutput(good.replace('⟦IMG:e1⟧ ', ''), 1, src), /missing.*⟦IMG:e1⟧/);
   assert.match(tr.checkOutput(good + ' ⟦IMG:e2⟧', 1, src), /extra.*⟦IMG:e2⟧/);
   assert.match(tr.checkOutput(good.replace('<sup>12</sup>', ''), 1, src), /missing.*<sup>12<\/sup>/);
