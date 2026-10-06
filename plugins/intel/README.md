@@ -96,7 +96,7 @@ audio leg and `digest` for the notes.
 
 ## Configuration
 
-Intel uses `~/.config/intel/.env` for file-based request settings and API keys, shared by both hosts and all checkouts. Create the directory, copy this plugin’s `.env.example` there as `.env`, and fill in only the values needed by the skills you use. Each skill’s **Environment Variables** section lists its settings and source; the data root defaults to `~/.local/share/intel` and the output root to `~/Documents`. Account credentials and login sessions stay in Secrets Manager.
+Intel uses `~/.config/intel/.env` for file-based request settings and API keys, shared by both hosts and all checkouts. Create the directory, copy this plugin’s `.env.example` there as `.env`, and fill in only the values needed by the skills you use. Each skill’s **Environment Variables** section lists its settings and source; the output root (`INTEL_OUTPUT_DIR`) defaults to `~/Documents`, the state root (`INTEL_STATE_DIR`: fetched archives, labels, work directories, rate limits) to `~/.local/state/intel`, and the data root (`INTEL_DATA_DIR`: deletable browser profiles and scratch files) to `~/.local/share/intel`. Account credentials and login sessions stay in Secrets Manager.
 
 ## Requirements
 

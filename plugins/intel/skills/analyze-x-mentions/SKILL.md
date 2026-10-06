@@ -27,7 +27,7 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
-Data paths below show the default `~/.local/share/intel` root; replace it with the configured `INTEL_DATA_DIR` when set. Expand `~` to the absolute home path in JSON arguments.
+Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the default `~/Documents` output root; replace it with the configured `INTEL_OUTPUT_DIR` when set. Expand `~` to the absolute home path in JSON arguments.
 
 ## Environment Variables
 
@@ -46,17 +46,17 @@ bug, the number, the date.
 
 ## Input & output
 
-- **Input**: `~/.local/share/intel/x/<slug>/tweets.jsonl` as written by
+- **Input**: `~/.local/state/intel/x/<slug>/tweets.jsonl` as written by
   `$SKILL_DIR/../fetch-x-mentions/scripts/fetch-x-mentions.mjs`
   (one tweet per line with `id, author, text, created_at, likes, replies, lang, url`;
   `clean.mjs` dedups by id). Run
   on a finished archive; pass `--since/--until` to analyze a window of it. The doc
   title states the window.
-- **Output**, next to the input: `~/.local/share/intel/x/<slug>/reception.md` + `images/`;
-  `~/.local/share/intel/x/<slug>/labels.jsonl`, one line per post (`id, about, sentiment, topic,
+- **Output**: `~/Documents/x/<slug>/reception.md` + `images/`; and, next to the input,
+  `~/.local/state/intel/x/<slug>/labels.jsonl`, one line per post (`id, about, sentiment, topic,
   feature, point, request, interest`), committed, so the next run labels only the
   posts it has not seen and any window can be reported from the store without
-  agents; and one shared `~/.local/share/intel/x/vocab.json` (`{topics, features, interests}`)
+  agents; and one shared `~/.local/state/intel/x/vocab.json` (`{topics, features, interests}`)
   for every app, the vocabulary seen so far, which seeds the next run's prompt
   and grows after every run on any app (the apps overlap heavily; one list stays
   maintained, one per app goes stale). A windowed run writes
@@ -108,7 +108,7 @@ labels in step 3.
 ### 3. Label the posts that have no label yet
 
 ```
-node $S/chunk.mjs <clean.json> --size 1500 --out <scratch> --labels ~/.local/share/intel/x/<slug>/labels.jsonl [--since D] [--until D]
+node $S/chunk.mjs <clean.json> --size 1500 --out <scratch> --labels ~/.local/state/intel/x/<slug>/labels.jsonl [--since D] [--until D]
 ```
 
 Only posts missing from `labels.jsonl` (and inside the window, if given) are
@@ -127,7 +127,7 @@ bounded parallel pool (about 20 in flight). The rules, fields and answer schema 
 scripts):
 
 ```
-node $S/run-labels.mjs --facts <scratch>/app-facts.md --vocab ~/.local/share/intel/x/vocab.json --out <scratch> <scratch>/chunk*.json
+node $S/run-labels.mjs --facts <scratch>/app-facts.md --vocab ~/.local/state/intel/x/vocab.json --out <scratch> <scratch>/chunk*.json
 ```
 
 Each call runs in a private `CODEX_HOME` (the login copied, no user config,
@@ -243,7 +243,7 @@ same text (the script embeds them). Then fold the chunks into the store and grow
 the vocabulary:
 
 ```
-node $S/merge-labels.mjs ~/.local/share/intel/x/<slug>/labels.jsonl <scratch> --vocab ~/.local/share/intel/x/vocab.json [--rename topic:old=new ...]
+node $S/merge-labels.mjs ~/.local/state/intel/x/<slug>/labels.jsonl <scratch> --vocab ~/.local/state/intel/x/vocab.json [--rename topic:old=new ...]
 ```
 
 It folds the chunk files into `labels.jsonl` by id (a relabeled id overwrites),
@@ -258,7 +258,7 @@ app, seeds its prompt from it.
 ### 4. Aggregate and verify (script)
 
 ```
-node $S/aggregate.mjs <clean.json> <scratch> --labels ~/.local/share/intel/x/<slug>/labels.jsonl [--since D] [--until D] [--top 300]
+node $S/aggregate.mjs <clean.json> <scratch> --labels ~/.local/state/intel/x/<slug>/labels.jsonl [--since D] [--until D] [--top 300]
 ```
 
 Prints how many window posts have a label (re-run any chunk whose noise share is
@@ -276,7 +276,7 @@ never from a labeler's paraphrase, and link it as
 ### 5. Charts (script)
 
 ```
-echo '{"out_dir":"~/.local/share/intel/x/<slug>/images","charts":[
+echo '{"out_dir":"~/Documents/x/<slug>/images","charts":[
   {"type":"bar","file":"<slug>-hot-topics.png","title":"热点话题（提及条数）","labels":[...],"values":[...],"color":"#2a78d6"},
   {"type":"daily","file":"<slug>-daily-volume.png","title":"每日提及量与当天事件","days":["09-02",...],"values":[...],"events":{"09-10":"App Store 下架"}},
   (a window longer than ~3 months uses months as days: `<slug>-monthly-volume.png`, "每月提及量与当月事件", "days":["2025-01",...])
@@ -355,7 +355,7 @@ Rules:
 
 ### 7. Ship
 
-Return the paths to `reception.md`, `images/` and `labels.jsonl` under the configured data root.
+Return the paths to `reception.md` and `images/` under the output root and `labels.jsonl` under the state root.
 `clean.json`, the chunks, `labelsN.json` and `summaryN.txt` are scratch.
 
 ## Requirements
@@ -369,4 +369,4 @@ Return the paths to `reception.md`, `images/` and `labels.jsonl` under the confi
 node --test "$SKILL_DIR/tests/test_analyze_tweets.mjs"
 ```
 
-Archive paths below show the default Intel data root; use the configured `INTEL_DATA_DIR` when set.
+Archive paths below show the default Intel state root; use the configured `INTEL_STATE_DIR` when set.

@@ -51,14 +51,14 @@ heads, roman/arabic folios and cover image.
 extract.mjs takes an EPUB (`.epub`); it does not read PDFs. If you only have the book as a PDF, get its EPUB with
 the download-book skill first.
 
-Work lives in `<book dir>/.translate/<slug>/` (hidden, resumable); the deliverable is
-`<title-slug>.pdf` in the user's `~/Documents` — the book's main title (the part before a `:`/`：` subtitle)
-lowercased with every run of non-alphanumerics turned into one dash, e.g. `Addiction by Design: Machine
-Gambling in Las Vegas` → `addiction-by-design.pdf` (no language suffix); an already-Chinese title falls back to
-the work dir's slug. (When `~/Documents` is not writable, it falls back next to the work dir.) When the book's
-own folder is not writable
-(macOS keeps this process out of some folders, e.g. `~/Downloads`), `extract.mjs` copies the book to
-`~/Documents/translate/<slug>/`; it says so on stderr. Never leave other copies next to the book.
+The book is usually the download-book skill's EPUB in `~/Documents/books/`. Work lives in
+`~/.local/state/intel/translate/<slug>/` (`<INTEL_STATE_DIR>/translate/<slug>/` when set; resumable, and the
+translated Markdown in it is costly to redo, so keep it); the deliverable is `<title-slug>.pdf` in
+`~/Documents/translate/` (`<INTEL_OUTPUT_DIR>/translate/` when set) — the book's main title (the part before a
+`:`/`：` subtitle) lowercased with every run of non-alphanumerics turned into one dash, e.g. `Addiction by Design:
+Machine Gambling in Las Vegas` → `addiction-by-design.pdf` (no language suffix); an already-Chinese title falls
+back to the work dir's slug. Scratch files go under `~/.local/share/intel/tmp/translate/` and are removed when
+each run ends. Nothing is written next to the book.
 
 ## Setup (automatic, idempotent)
 
@@ -172,7 +172,7 @@ and not reported.
 "$SKILL_DIR/scripts/render.py" <work> --title "<中文书名>"
 ```
 
-Writes `<title-slug>.pdf` in `~/Documents`: the cover (the EPUB's cover image rendered full-bleed), a
+Writes `<title-slug>.pdf` in `~/Documents/translate/`: the cover (the EPUB's cover image rendered full-bleed), a
 目录 with folios, then every translated section. Page size is the one set at extract (`--page-size`). Colors
 default to a dark reading page: the background follows the iTerm2
 default profile's dark-mode background when iTerm2 is installed (else near-black), the text is `#6e7f7a`, a

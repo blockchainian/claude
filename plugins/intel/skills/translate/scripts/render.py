@@ -8,9 +8,11 @@
 #
 # Usage: render.py <work dir> [--out <book.pdf>] [--only 04] [--title <中文书名>] [--bg iterm|#rrggbb --fg #6e7f7a|iterm] [--font-size 9.25]
 # Without --only: the whole book (cover + 目录 + every translated section) to --out (default
-# <title-slug>.pdf in ~/Documents). With --only: one section to <work>/pdf/<id>-<slug>.pdf for a quick look,
+# <title-slug>.pdf in <INTEL_OUTPUT_DIR>/translate/). With --only: one section to <work>/pdf/<id>-<slug>.pdf for a quick look,
 # no cover or contents.
 import argparse
+import atexit
+import functools
 import html
 import json
 import os
@@ -505,6 +507,22 @@ def page_colors(opt):
     return resolve(opt.bg, 0), resolve(opt.fg, 1)
 
 
+@functools.cache
+def intel_paths():
+    """The Intel output, state and data roots, as resolved by the plugin's one path helper."""
+    script = Path(__file__).resolve().parents[2] / "fetch-x-mentions" / "scripts" / "env.mjs"
+    return {k: Path(v) for k, v in json.loads(subprocess.check_output(["node", str(script)], text=True)).items()}
+
+
+def scratch_dir(skill, prefix):
+    """A scratch dir under <INTEL_DATA_DIR>/tmp/<skill>/, removed when the process exits."""
+    parent = intel_paths()["data"] / "tmp" / skill
+    parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
+    atexit.register(shutil.rmtree, tmp, True)
+    return tmp
+
+
 def paint_background(pdf, page, bg, masked_top=0):
     """Underlay one page with the background color; masked_top > 0 also covers that much of the top margin
     over the content (the running head on an opener page)."""
@@ -556,7 +574,7 @@ def render(work, opt):
     style = css(meta["page_size"], bg, fg, [(s["id"], t, s["kind"]) for s, t, _ in ready], opt.font_size, bold)
     title = opt.title or meta["title"]
     chrome = chrome_binary()
-    tmp = Path(tempfile.mkdtemp(prefix="render-"))
+    tmp = scratch_dir("translate", "render-")
 
     def document(parts):
         return (f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>{html.escape(title)}</title>'
@@ -625,17 +643,12 @@ def title_slug(title):
 
 
 def default_out(meta, work):
-    """<title-slug>.pdf in the user's ~/Documents, or next to the work dir when Documents is not writable.
-    An already-Chinese or empty title falls back to the work dir's slug name."""
+    """<INTEL_OUTPUT_DIR>/translate/<title-slug>.pdf. An already-Chinese or empty title falls back to the work
+    dir's slug name."""
     name = (title_slug(meta.get("title")) or work.name) + ".pdf"
-    docs = Path.home() / "Documents"
-    try:
-        docs.mkdir(parents=True, exist_ok=True)
-        docs.joinpath(".translate-write-test").touch()
-        docs.joinpath(".translate-write-test").unlink()
-        return docs / name
-    except (PermissionError, OSError):
-        return work.parent / name
+    out = intel_paths()["output"] / "translate"
+    out.mkdir(parents=True, exist_ok=True)
+    return out / name
 
 
 def build_cover(meta, work, bg, chrome, tmp):

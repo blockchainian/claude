@@ -5,10 +5,10 @@
 // Usage: extract.mjs <book.epub> [--work <dir>] [--keep-images] [--page-size WxH]
 // Writes <work>/sections.json and <work>/text/<id>-<slug>.xhtml; prints one line per section.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
+import { loadEnvFile, stateDir } from "../../fetch-x-mentions/scripts/env.mjs";
 
 export const IMG_TOKEN = "⟦IMG:{}⟧"; // placeholder for a figure/equation stored as an image, kept verbatim through translation
 export const IMG_TOKEN_RE = /⟦IMG:[^⟧]+⟧/g;
@@ -159,21 +159,12 @@ function dirnameOf(p) {
   return p.includes("/") ? path.posix.dirname(p) : "";
 }
 
-/** <book dir>/.translate/<slug>, or ~/Documents/translate/<slug> when the book's folder is not writable
- * (macOS keeps this process out of some folders); the book is copied there so every later step can read it. */
+/** <INTEL_STATE_DIR>/translate/<slug>: the work dir outlives the run, since its translated Markdown is costly to
+ * redo and may be hand-edited. */
 export function defaultWork(book) {
-  let work = path.join(path.dirname(book), ".translate", slugify(stemOf(book)));
-  try {
-    fs.mkdirSync(work, { recursive: true });
-    return [work, book];
-  } catch {
-    work = path.join(os.homedir(), "Documents", "translate", slugify(stemOf(book)));
-    fs.mkdirSync(work, { recursive: true });
-    const copy = path.join(work, path.basename(book));
-    if (!fs.existsSync(copy)) fs.writeFileSync(copy, fs.readFileSync(book));
-    process.stderr.write(`${path.dirname(book)} is not writable: working in ${work} on a copy of the book\n`);
-    return [work, copy];
-  }
+  const work = path.join(stateDir(), "translate", slugify(stemOf(book)));
+  fs.mkdirSync(work, { recursive: true });
+  return work;
 }
 
 // --- zip reading (an EPUB is a zip of XHTML/OPF/NCX; entries are stored or deflated) ---
@@ -806,6 +797,7 @@ export function parseArgs(argv) {
 }
 
 export function main(argv) {
+  loadEnvFile();
   const args = parseArgs(argv);
   const source = path.resolve(args.book);
   if (suffixOf(source).toLowerCase() !== ".epub") {
@@ -818,7 +810,7 @@ export function main(argv) {
     work = path.resolve(args.work);
     fs.mkdirSync(work, { recursive: true });
   } else {
-    [work] = defaultWork(source);
+    work = defaultWork(source);
   }
 
   const pageSize = args.pageSize.toLowerCase().split("x").map((x) => {

@@ -1,6 +1,6 @@
 ---
 name: fetch-app-reviews
-description: Fetch every App Store written review of an iOS app across all storefronts into ~/.local/share/intel/reviews/<name>.json, rotating a residential-proxy exit per request, resumable per storefront — or of every app in ~/.local/share/intel/reviews/apps.json. Use when asked to fetch / 抓 / 拉 an app's App Store reviews or refresh the reviews dataset. NOT for reading the reviews (analyze-appstore-reviews) and NOT for X mentions (fetch-x-mentions).
+description: Fetch every App Store written review of an iOS app across all storefronts into ~/.local/state/intel/reviews/<name>.json, rotating a residential-proxy exit per request, resumable per storefront — or of every app in ~/.local/state/intel/reviews/apps.json. Use when asked to fetch / 抓 / 拉 an app's App Store reviews or refresh the reviews dataset. NOT for reading the reviews (analyze-appstore-reviews) and NOT for X mentions (fetch-x-mentions).
 ---
 
 # Fetch App Store reviews
@@ -27,7 +27,7 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
-Archives are written under `INTEL_DATA_DIR/reviews/`, independent of the working directory.
+Archives are written under `INTEL_STATE_DIR/reviews/`, independent of the working directory.
 
 One app:
 
@@ -39,7 +39,7 @@ node \
 - `appleId` is the numeric App Store id, e.g. 6741115427.
 - `name` is the output slug; omitted, it is derived from the store name.
 
-Every app in `~/.local/share/intel/reviews/apps.json` (the crypto-app leaderboard: rank, name, appId, ratings), bottom rank first:
+Every app in `~/.local/state/intel/reviews/apps.json` (the crypto-app leaderboard: rank, name, appId, ratings), bottom rank first:
 
 ```
 node \
@@ -52,7 +52,7 @@ retries incomplete apps for up to 6 passes.
 
 ## Output
 
-`~/.local/share/intel/reviews/<name>.json`: `{ appId, appName, updatedAt, complete, countriesDone, count, reviews }`.
+`~/.local/state/intel/reviews/<name>.json`: `{ appId, appName, updatedAt, complete, countriesDone, count, reviews }`.
 `complete` is true only when every storefront reached a confirmed end.
 
 ## Environment Variables
@@ -61,7 +61,7 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `INTEL_DATA_DIR` | Data root; default ~/.local/share/intel, with reviews under reviews/ | No | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with reviews under reviews/ | No | `~/.config/intel/.env` |
 | `RESIDENTIAL_PROXY_URL` | Rotating residential proxy | Yes | `~/.config/intel/.env` |
 
 Each request opens a fresh proxy connection to rotate the exit IP.

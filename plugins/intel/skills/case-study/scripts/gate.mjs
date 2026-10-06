@@ -14,8 +14,8 @@
 //        gate.mjs gnews "<name>" [<from> <to>]    Google News articles for the name, asked for month by month
 //        gate.mjs stats                   calls and failures per command since the log began
 // gdelt and gnews print one JSON article per line, oldest first, and keep what they fetched in
-// ~/.local/share/intel/case-studies/<gdelt|gnews>/<name>/: articles.jsonl and, beside it, articles.out.json with the days held.
-// State (pace files, slot locks, the log) lives in ~/.cache/case-study-limits, shared with fetch-x-posts. Settings come
+// <INTEL_STATE_DIR>/case-study/news/<gdelt|gnews>/<name>/: articles.jsonl and, beside it, articles.out.json with the days held.
+// State (pace files, slot locks, the log) lives in <INTEL_STATE_DIR>/limits, shared with fetch-x-posts. Settings come
 // from the .env file env.mjs finds: ISP_PROXY_URL (one URL; the ten ports after its own are the exits; without it every
 // request goes direct), RESIDENTIAL_PROXY_URL (Google News asked again through it when an exit is refused),
 // BIGQUERY_PROJECT_ID (the Google Cloud project the BigQuery queries run in).

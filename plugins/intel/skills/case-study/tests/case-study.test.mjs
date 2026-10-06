@@ -9,7 +9,7 @@ import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const tmp = mkdtempSync(join(tmpdir(), 'case-study-'))
-process.env.INTEL_OUTPUT_DIR = join(tmp, 'store')
+process.env.INTEL_STATE_DIR = join(tmp, 'store')
 const cs = await import('../scripts/case-study.mjs')
 
 const out = join(tmp, 'pdf', 'jane-doe.pdf')
@@ -26,7 +26,7 @@ before(() => {
 after(() => rmSync(tmp, { recursive: true, force: true }))
 
 test('init scaffolds the work dir under the store and keeps an existing sources.json', () => {
-  assert.equal(work, join(tmp, 'store', 'case-studies', 'jane-doe'))
+  assert.equal(work, join(tmp, 'store', 'case-study', 'work', 'jane-doe'))
   assert.ok(['drafts', 'book', 'notes', 'raw', 'review'].every(d => statSync(join(work, d)).isDirectory()))
   assert.deepEqual(json(work, 'sources.json'), {})
   const saved = json(work, 'chapters.json')
@@ -482,7 +482,7 @@ test('codex runs the fixer prompt of a chapter on a Codex model, in the work dir
   assert.ok(argv.includes('exec') && argv.includes('--json') && argv.includes('--skip-git-repo-check'), 'one-shot, machine-readable, outside a repo')
   assert.deepEqual(argv.slice(argv.indexOf('-m'), argv.indexOf('-m') + 2), ['-m', 'gpt-6-luna'])
   assert.ok(argv.some(a => a.includes('model_reasoning_effort=high')), 'the fixer reasons at high effort')
-  assert.ok(argv.some(a => a.includes('writable_roots') && a.includes('case-study-limits')), 'the gate script keeps its pacing files outside the work directory')
+  assert.ok(argv.includes(`sandbox_workspace_write.writable_roots=${JSON.stringify([join(tmp, 'store', 'limits')])}`), 'the sandbox may write the same limits directory the gate script uses')
   assert.equal(argv.at(-1), 'You are a fixer. Your chapter file: drafts/04.md (NN = 04).', 'the prompt is the saved one')
   const events = [
     { type: 'item.completed', item: { type: 'agent_message', text: 'first' } },

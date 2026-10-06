@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pyDumps, pyStrip } from "./extract.mjs";
+import { loadEnvFile, tmpDir } from "../../fetch-x-mentions/scripts/env.mjs";
 
 export const RULES = `You are a professional literary translator (English -> Simplified Chinese) working on a published
 non-fiction book. Everything you need is in the message: do not run commands, do not read or write files.
@@ -193,40 +194,45 @@ function runProcess(cmd, args, input, env, timeoutMs) {
 }
 
 export async function runCodex(prompt, model, effort, serviceTier, { events = null, timeout = 3600, tries = 2, rules = RULES } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "translate-"));
-  const instructions = path.join(dir, "instructions.md");
-  fs.writeFileSync(instructions, rules);
-  const last = path.join(dir, "last.txt");
-  const home = codexHome(dir, model, effort, instructions, serviceTier);
-  const args = codexArgs(dir, last);
-  const t0 = Date.now();
-  let err = null;
-  let r = null;
-  let ok = false;
-  for (let i = 0; i < tries; i++) {
-    try {
-      r = await runProcess("codex", args, prompt, { ...process.env, CODEX_HOME: home }, timeout * 1000);
-    } catch (e) {
-      if (e.code !== "ETIMEDOUT") throw e;
-      err = `codex exec timed out after ${timeout}s`;
-      continue;
+  const dir = fs.mkdtempSync(path.join(tmpDir("translate"), "codex-"));
+  // The scratch dir holds a copy of the Codex login, so it goes as soon as the call ends.
+  try {
+    const instructions = path.join(dir, "instructions.md");
+    fs.writeFileSync(instructions, rules);
+    const last = path.join(dir, "last.txt");
+    const home = codexHome(dir, model, effort, instructions, serviceTier);
+    const args = codexArgs(dir, last);
+    const t0 = Date.now();
+    let err = null;
+    let r = null;
+    let ok = false;
+    for (let i = 0; i < tries; i++) {
+      try {
+        r = await runProcess("codex", args, prompt, { ...process.env, CODEX_HOME: home }, timeout * 1000);
+      } catch (e) {
+        if (e.code !== "ETIMEDOUT") throw e;
+        err = `codex exec timed out after ${timeout}s`;
+        continue;
+      }
+      if (events) fs.writeFileSync(events, r.stdout);
+      if (r.returncode === 0 && fs.existsSync(last)) { ok = true; break; }
+      err = `codex exec exited ${r.returncode}: ${r.stderr.slice(-2000)}`;
     }
-    if (events) fs.writeFileSync(events, r.stdout);
-    if (r.returncode === 0 && fs.existsSync(last)) { ok = true; break; }
-    err = `codex exec exited ${r.returncode}: ${r.stderr.slice(-2000)}`;
-  }
-  if (!ok) throw new Error(err);
-  let usage = null;
-  for (const line of r.stdout.split(/\r?\n/)) {
-    let ev;
-    try {
-      ev = JSON.parse(line);
-    } catch {
-      continue;
+    if (!ok) throw new Error(err);
+    let usage = null;
+    for (const line of r.stdout.split(/\r?\n/)) {
+      let ev;
+      try {
+        ev = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (ev && ev.type === "turn.completed") usage = ev.usage ?? null;
     }
-    if (ev && ev.type === "turn.completed") usage = ev.usage ?? null;
+    return [fs.readFileSync(last, "utf8"), usage, Math.round((Date.now() - t0) / 1000)];
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
-  return [fs.readFileSync(last, "utf8"), usage, Math.round((Date.now() - t0) / 1000)];
 }
 
 function stemOf(file) {
@@ -325,6 +331,7 @@ async function runPool(tasks, jobs, start, onDone) {
 }
 
 export async function main(argv) {
+  loadEnvFile();
   const opt = parseArgs(argv);
   const work = path.resolve(opt.work);
   const [meta, allSections] = loadSections(work);

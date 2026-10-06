@@ -28,7 +28,7 @@ background completion wakes either host. On timeout, preserve diagnostics and re
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
 Fetch the posts one search returns and print them — as opposed to `fetch-x-mentions` and
-`fetch-x-user-posts`, which fetch everything over a date range and save it under `~/.local/share/intel/x/`.
+`fetch-x-user-posts`, which fetch everything over a date range and save it under `~/.local/state/intel/x/`.
 Give it any X search query; it prints a small number of posts and writes no file. The request
 (x-client-transaction-id, the account list, the SearchTimeline url, the proxy) is imported from
 `fetch-x-mentions`, with request settings loaded from this script's own directory.
@@ -62,7 +62,7 @@ views, quoted, in_reply_to`), in X's order, deduplicated by id.
 
 ## Account rotation
 
-Many processes may run at once. They share `~/.cache/case-study-limits/fetch-x-posts.sqlite`
+Many processes may run at once. They share `~/.local/state/intel/limits/fetch-x-posts.sqlite`
 (`accounts`: when each may start its next request and until when it is paused; `requests`: a log
 of every request):
 
@@ -102,7 +102,7 @@ Requires Node.js 22.13+ for `node:sqlite`.
 
 - `@user answered 403, marked bad`: the stored ct0 no longer matches the session (X error 353) or
   the account is locked. Run `intel verify-x.mjs --all` with the secrets-manager skill, then put the accounts back:
-  `sqlite3 ~/.cache/case-study-limits/fetch-x-posts.sqlite "update accounts set paused_until=0, bad=null"`.
+  `sqlite3 ~/.local/state/intel/limits/fetch-x-posts.sqlite "update accounts set paused_until=0, bad=null"`.
 - `all N accounts are paused`: wait for the reset it names.
 - `failed after N attempts` is the proxy, not a ban; rerun.
 - `SearchTimeline 400` mentioning the operation/features means X redeployed; update

@@ -1,6 +1,6 @@
 ---
 name: fetch-x-user-posts
-description: Fetch an X/Twitter account's own posts and replies over a date range into ~/.local/share/intel/x/kols/<user>/tweets.jsonl and replies.jsonl — the authenticated SearchTimeline `from:<user>` paged chronologically, sharded across X accounts through the residential proxy, resumable, for a batch of usernames at once. Use when asked to fetch / 抓 / 拉 one or many accounts' own timelines (e.g. a KOL roster's past-year posts). NOT for posts that mention an app (use fetch-x-mentions), NOT for a few of an account's posts without saving them (use fetch-x-posts) and NOT for reading the archive (analyze-x-user).
+description: Fetch an X/Twitter account's own posts and replies over a date range into ~/.local/state/intel/x/kols/<user>/tweets.jsonl and replies.jsonl — the authenticated SearchTimeline `from:<user>` paged chronologically, sharded across X accounts through the residential proxy, resumable, for a batch of usernames at once. Use when asked to fetch / 抓 / 拉 one or many accounts' own timelines (e.g. a KOL roster's past-year posts). NOT for posts that mention an app (use fetch-x-mentions), NOT for a few of an account's posts without saving them (use fetch-x-posts) and NOT for reading the archive (analyze-x-user).
 ---
 
 # Fetch X users
@@ -33,7 +33,7 @@ names; it writes one folder per user. The auth core (x-client-transaction-id, th
 the SearchTimeline request, page parsing, retry/quota handling, cross-account draining) is
 imported from `fetch-x-mentions`, with request settings loaded from this script's own directory.
 
-Run from any working directory; data paths are under `INTEL_DATA_DIR`.
+Run from any working directory; data paths are under `INTEL_STATE_DIR`.
 
 ```
 node \
@@ -68,7 +68,7 @@ across all accounts at once. Run it using the host-specific long-command instruc
 
 ## Output
 
-Per user, under `~/.local/share/intel/x/kols/<user>/` (lowercased):
+Per user, under `~/.local/state/intel/x/kols/<user>/` (lowercased):
 
 - `tweets.jsonl`: the account's own posts, one per line — `from:<user> -filter:replies
   -filter:nativeretweets` (own posts and self-threads, not replies to others, not retweets).
@@ -133,7 +133,7 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 | `X_USER_QUERY_ID` | UserByScreenName operation ID for the existence pre-check | No; enables pre-check | `~/.config/intel/.env` |
 | `X_TIMELINE_QUERY_ID` | UserTweetsAndReplies operation ID for the timeline fallback | No; enables timeline fallback | `~/.config/intel/.env` |
 | `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
-| `INTEL_DATA_DIR` | Data root; default ~/.local/share/intel, with X archives under x/ | No | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with X archives under x/ | No | `~/.config/intel/.env` |
 | `SECRETS_DATA_DIR` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
 
 Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.config/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
@@ -152,7 +152,7 @@ Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager s
 node --test "$SKILL_DIR/tests/fetch-x-user-posts.test.mjs"
 ```
 
-Archive paths below show the default Intel data root; use the configured `INTEL_DATA_DIR` when set.
+Archive paths below show the default Intel state root; use the configured `INTEL_STATE_DIR` when set.
 
 Setup shared X client: `npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`.
 

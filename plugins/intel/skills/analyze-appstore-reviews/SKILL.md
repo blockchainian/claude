@@ -45,7 +45,7 @@ claim from the data, drop it.
 - **Input**: a reviews JSON whose `reviews[]` items carry `rating` (1–5), `title`,
   `body`, `date`, `country`, and optionally `developerResponseBody`. This is the
   App Store scraper's shape.
-- **Output**, next to the input as `<app>/analysis.md` + `<app>/images/`:
+- **Output**, in `~/Documents/reviews/<app>/` (the `INTEL_OUTPUT_DIR` root when set; expand `~` to the absolute home path in JSON): `analysis.md` + `images/`:
   - `analysis.md` — concise **Chinese** doc (structure below).
   - four charts — rating distribution, likes, dislikes, top feature requests.
 
@@ -119,7 +119,7 @@ Build a spec and render. Chinese labels; one horizontal bar chart per ranked sec
 (likes `#1baf7a`, dislikes `#eb6834`, requests `#2a78d6`) plus a rating chart:
 
 ```
-echo '{"out_dir":"<app>/images","charts":[
+echo '{"out_dir":"~/Documents/reviews/<app>/images","charts":[
   {"type":"rating","file":"<app>-rating-distribution.png","title":"评分分布：两极分化","values":[C1,C2,C3,C4,C5]},
   {"type":"bar","file":"<app>-likes.png","title":"最喜欢什么（4–5★）","labels":[...],"values":[...],"color":"#1baf7a"},
   {"type":"bar","file":"<app>-dislikes.png","title":"最不喜欢什么（1–3★）","labels":[...],"values":[...],"color":"#eb6834"},

@@ -1,4 +1,4 @@
-import { requireEnv, loadEnvFile, dataDir } from "../../fetch-x-mentions/scripts/env.mjs";
+import { requireEnv, loadEnvFile, stateDir } from "../../fetch-x-mentions/scripts/env.mjs";
 // ABOUTME: Fetches a brand's TikTok videos from hashtag pages, user pages and keyword searches, each video's
 // ABOUTME: comments and its video file, through Camoufox sessions on the ISP proxy pool, resumable.
 //
@@ -7,7 +7,7 @@ import { requireEnv, loadEnvFile, dataDir } from "../../fetch-x-mentions/scripts
 //     <slug> [--hashtag <name>]... [--user <handle>]... [--keyword <words>]... \
 //     [--hashtag-min-plays <n>] \
 //     [--source-limit <n>] [--comment-limit <n>] [--sessions <n>] [--rate <n>] [--concurrency <n>] [--out <dir>] [--no-comments] [--no-download]
-//   <slug> names the output dir <INTEL_DATA_DIR>/tiktok/<slug>/ (under INTEL_DATA_DIR); --out names another one. The sources are remembered in
+//   <slug> names the output dir <INTEL_STATE_DIR>/tiktok/<slug>/ (under INTEL_STATE_DIR); --out names another one. The sources are remembered in
 //   videos.out.json, so a rerun needs only the slug; sources given again are added to the saved ones.
 //   --hashtag-min-plays drops a hashtag page's videos below that many plays (default 10000); a
 //   user's videos and a keyword's results have no floor. Videos with a non-English caption are
@@ -50,7 +50,7 @@ import { requireEnv, loadEnvFile, dataDir } from "../../fetch-x-mentions/scripts
 //   ISP_PROXY_COUNT  how many slots the pool has (default 1).
 //   SECRETS_DATA_DIR  where the secrets-manager store and profiles are (default ~/.config/secrets-manager).
 //
-// Output under <INTEL_DATA_DIR>/tiktok/<slug>/, or the --out directory:
+// Output under <INTEL_STATE_DIR>/tiktok/<slug>/, or the --out directory:
 //   videos.jsonl          one video per line, TikTok's full item plus a `sources` array of the
 //                         hashtag / user pages and keyword searches that surfaced it; deduplicated
 //                         by id, newest first.
@@ -64,7 +64,7 @@ import { requireEnv, loadEnvFile, dataDir } from "../../fetch-x-mentions/scripts
 //     Per run and source: `fetched` videos TikTok returned, `kept` those at or above the play
 //     floor and in English, `new` those kept and not held before, `pulls` how often the source was paged.
 // Video files are too big for git, so they live outside the repo, shared by every slug:
-//   ~/.local/share/intel/tiktok/<id>.mp4. INTEL_DATA_DIR overrides the root; tiktok/ is appended.
+//   ~/.local/state/intel/tiktok/<id>.mp4. INTEL_STATE_DIR overrides the root; tiktok/ is appended.
 //   A run collects every source, then fetches comments for the videos whose comments are not
 //   complete and downloads the videos without a file. Rerun the same command to resume.
 
@@ -186,7 +186,7 @@ export function parseArgs(argv) {
     else if (a.startsWith("--")) throw new Error(`Unknown option ${a}`);
     else positional.push(a);
   }
-  return { slug: positional[0], sources, dir: join(dataDir(), "tiktok", positional[0] ?? ""), ...out };
+  return { slug: positional[0], sources, dir: join(stateDir(), "tiktok", positional[0] ?? ""), ...out };
 }
 
 // The query params of a request the page itself sent, without its signatures, or null when the
@@ -426,7 +426,7 @@ export async function downloadVideo(unit, dir, { call, fetchBytes, write }) {
 
 // Where video files are kept: outside the repo, so they outlive a checkout or worktree.
 export function videosDir(env = process.env) {
-  return join(dataDir(env), "tiktok");
+  return join(stateDir(env), "tiktok");
 }
 
 // A proxy url as the browser's { server, username, password }.

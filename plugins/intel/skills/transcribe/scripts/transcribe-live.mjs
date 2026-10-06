@@ -4,11 +4,11 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
 import * as base from "./transcribe-audio.mjs";
+import { loadEnvFile, tmpDir } from "../../fetch-x-mentions/scripts/env.mjs";
 
 const SEG_RE = /seg(\d+)\.wav$/;
 const PROG = "transcribe-live.mjs";
@@ -90,7 +90,8 @@ export async function runLive(src, outTxt, seconds = 30, maxMinutes = null, onTe
   const prefix = base.whisperPrefix();
   const stream = resolveStream(src);
 
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), "tmp"));
+  loadEnvFile();
+  const work = fs.mkdtempSync(path.join(tmpDir("transcribe"), "live-"));
   const segDir = path.join(work, "seg");
   fs.mkdirSync(segDir);
   outTxt = path.normalize(String(outTxt));
@@ -144,6 +145,7 @@ export async function runLive(src, outTxt, seconds = 30, maxMinutes = null, onTe
   } finally {
     process.off("SIGINT", onSigint);
     if (running()) ff.kill("SIGTERM");
+    fs.rmSync(work, { recursive: true, force: true });
   }
 
   const textAll = fs.readFileSync(outTxt, "utf8");

@@ -11,7 +11,7 @@ parser.add_argument("--apps", required=True, help="comma-separated archive slugs
 args = parser.parse_args()
 _paths_script = Path(__file__).resolve().parents[2] / "fetch-x-mentions" / "scripts" / "env.mjs"
 _paths = json.loads(subprocess.check_output(["node", str(_paths_script)], text=True))
-ROOT = str(Path(_paths["data"]) / "x")
+ROOT = str(Path(_paths["state"]) / "x")
 SC = args.scratch
 APPS = [slug.strip() for slug in args.apps.split(",") if slug.strip()]
 if not APPS or any("/" in slug or slug in (".", "..") for slug in APPS):

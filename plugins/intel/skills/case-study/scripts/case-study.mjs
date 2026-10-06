@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ABOUTME: Scaffolds a case-study work dir under ~/Documents/case-studies and checks it before rendering.
+// ABOUTME: Scaffolds a case-study work dir under the Intel state root and checks it before rendering.
 // ABOUTME: init writes chapters.json + sources.json; book strips the chapters' source marks; check verifies the chapters, the book text and sources.
 //
 // Usage: case-study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
@@ -654,11 +654,11 @@ function layer(work, folder, ids) {
 // The fixer runs on a Codex model: the fix is a bounded edit under findings a script lists, and the pilot on
 // brooke-monk chapter 04 showed gpt-6-luna applies them as Sonnet does at a fraction of the cost. The prompt is
 // the one creator.mjs gives a fixer, saved to review/fix-NN.prompt.txt by the agent that runs this command.
-// The gate script paces its Google calls through files in ~/.cache/case-study-limits, which the Codex sandbox
+// The gate script paces its Google calls through files in the Intel limits directory, which the Codex sandbox
 // must be allowed to write.
 export function codexCommand(work, chapter, model) {
   const prompt = readFileSync(join(work, 'review', `fix-${chapter}.prompt.txt`), 'utf8')
-  const limits = join(homedir(), '.cache', 'case-study-limits')
+  const limits = caseStudyPaths().state
   return ['codex', 'exec', '--skip-git-repo-check', '--json', '-m', model, '-c', 'model_reasoning_effort=high',
     '-c', `sandbox_workspace_write.writable_roots=${JSON.stringify([limits])}`, prompt]
 }

@@ -31,7 +31,7 @@ calls and failures per command.
     article with the words, and there is no title.
 - Both news commands have no cap: a year of a known name is hundreds of
   lines. Save the output to a file and count the domains before opening any.
-  What they fetched is kept under `~/.local/share/intel/case-studies/`, a folder per
+  What they fetched is kept under `~/.local/state/intel/case-study/news/`, a folder per
   name, so asking again for days already held costs nothing.
 - Reddit: `$G chrome reddit search "<query>" -f yaml`, `$G chrome reddit read <post id>`.
 

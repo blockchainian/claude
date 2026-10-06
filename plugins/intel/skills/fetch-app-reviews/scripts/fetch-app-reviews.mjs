@@ -1,4 +1,4 @@
-import { requireEnv, loadEnvFile, dataDir } from "../../fetch-x-mentions/scripts/env.mjs";
+import { requireEnv, loadEnvFile, stateDir } from "../../fetch-x-mentions/scripts/env.mjs";
 // ABOUTME: Fetches all App Store written reviews for an Apple app across storefronts,
 // ABOUTME: rotating a fresh residential-proxy exit IP per request, resumable per storefront.
 import { realpathSync } from "node:fs";
@@ -12,7 +12,7 @@ import { realpathSync } from "node:fs";
 //   new exit IP per CONNECTION, not per request, so a reused undici tunnel pins one IP —
 //   getJson therefore builds and closes a fresh ProxyAgent for every request, which is what
 //   actually rotates the IP and defeats Apple's per-IP throttling.
-// - Writes <INTEL_DATA_DIR>/reviews/<appName>.json as { appId, appName, updatedAt, complete,
+// - Writes <INTEL_STATE_DIR>/reviews/<appName>.json as { appId, appName, updatedAt, complete,
 //   countriesDone, count, reviews }, checkpointing after each storefront. `complete` is
 //   true only when every storefront reached a confirmed real end.
 // - Per-storefront completion (countriesDone) carries across runs, so a retry only
@@ -105,7 +105,7 @@ const COUNTRIES = [
   "pe",
 ];
 
-const reviewsDir = () => join(dataDir(), "reviews");
+const reviewsDir = () => join(stateDir(), "reviews");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function proxyConfig() {
@@ -266,7 +266,7 @@ async function fetchCountry(appId, appName, cc, byId) {
 }
 
 // Fetches every reachable written review for one app and writes it to
-// <INTEL_DATA_DIR>/reviews/<appName>.json, checkpointing after each storefront.
+// <INTEL_STATE_DIR>/reviews/<appName>.json, checkpointing after each storefront.
 export async function fetchAppReviews(appId, appNameOverride, opts = {}) {
   const appName = await resolveAppName(appId, appNameOverride);
 

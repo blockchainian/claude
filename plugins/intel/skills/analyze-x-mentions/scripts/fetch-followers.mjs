@@ -1,14 +1,14 @@
 // ABOUTME: Bulk-fetch follower + lifetime-tweet counts for high-volume authors via api.fxtwitter.com
 // ABOUTME: (no auth), so the bot filter can apply the followers-vs-views / followers-vs-volume rules.
-import { dataDir, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
+import { stateDir, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
 import { join } from "node:path";
 loadEnvFile();
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const app = process.argv[2];
 const MINPOSTS = 50, CONC = 8;
-const tweetsPath = join(dataDir(), "x", app, "tweets.jsonl");
-const outPath = join(dataDir(), "x", app, "followers.json");
+const tweetsPath = join(stateDir(), "x", app, "tweets.jsonl");
+const outPath = join(stateDir(), "x", app, "followers.json");
 
 const n = {};
 for (const line of readFileSync(tweetsPath, "utf8").split("\n")) {

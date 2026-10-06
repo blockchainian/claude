@@ -9,9 +9,9 @@ import { after, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const root = mkdtempSync(join(tmpdir(), 'gate-'))
-const state = join(root, 'cache', 'case-study-limits')
+const state = join(root, 'limits')
 mkdirSync(state, {recursive: true})
-process.env.INTEL_DATA_DIR = root
+process.env.INTEL_STATE_DIR = root
 process.env.ISP_PROXY_URL = '' // the machine's .env must not reach the tests
 const gate = await import('../scripts/gate.mjs')
 after(() => rmSync(root, { recursive: true, force: true }))
@@ -331,7 +331,7 @@ test('the command prints its usage without arguments and runs through a symlink'
   const r = spawnSync(process.execPath, [script], { encoding: 'utf8' })
   assert.equal(r.status, 2)
   assert.match(r.stderr, /Usage: gate.mjs read/)
-  const stats = spawnSync(process.execPath, [script, 'stats'], { encoding: 'utf8', env: { ...process.env, INTEL_DATA_DIR: root } })
+  const stats = spawnSync(process.execPath, [script, 'stats'], { encoding: 'utf8', env: { ...process.env, INTEL_STATE_DIR: root } })
   assert.equal(stats.status, 0)
   assert.equal(JSON.parse(stats.stdout)['read:jina'], 2)
 })
