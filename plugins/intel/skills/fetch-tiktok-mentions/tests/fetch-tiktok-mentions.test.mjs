@@ -476,8 +476,8 @@ test("lanes share one queue, each through its own session", async () => {
 
 test("video files live outside the repo, in ~/.local/share/tiktok unless overridden", () => {
   assert.equal(videosDir({}), join(homedir(), ".local", "share", "tiktok"));
-  assert.equal(videosDir({ TIKTOK_VIDEOS_DIR: "/data/tt" }), "/data/tt");
-  assert.equal(videosDir({ TIKTOK_VIDEOS_DIR: "~/tt" }), join(homedir(), "tt"));
+  assert.equal(videosDir({ INTEL_TIKTOK_VIDEO_DIR: "/data/tt" }), "/data/tt");
+  assert.equal(videosDir({ INTEL_TIKTOK_VIDEO_DIR: "~/tt" }), join(homedir(), "tt"));
 });
 
 test("a source keeps only the videos at or above its play floor", () => {
@@ -624,7 +624,7 @@ function storeWith(rows) {
     ).run(username, slot, status);
   }
   db.close();
-  return { SECRETS_MANAGER_STATE_PATH: dir };
+  return { INTEL_SECRETS_STATE_DIR: dir };
 }
 
 test("the account is the store's first active TikTok login, with its profile and ISP slot", () => {
@@ -632,10 +632,10 @@ test("the account is the store's first active TikTok login, with its profile and
   assert.deepEqual(loadAccount(env), {
     username: "bob",
     slot: 10,
-    profile: join(env.SECRETS_MANAGER_STATE_PATH, "profiles", "bob"),
+    profile: join(env.INTEL_SECRETS_STATE_DIR, "profiles", "bob"),
   });
   assert.equal(loadAccount(storeWith([["al", 2, "expired"]])), null);
-  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: mkdtempSync(join(tmpdir(), "tiktok-nostore-")) }), null);
+  assert.equal(loadAccount({ INTEL_SECRETS_STATE_DIR: mkdtempSync(join(tmpdir(), "tiktok-nostore-")) }), null);
 });
 
 test("an account whose session is gone is marked expired, so the next run does not pick it", () => {

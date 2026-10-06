@@ -82,7 +82,7 @@ Per user, under `docs/intel/x/kols/<user>/` (lowercased):
 ## Existence pre-check and the timeline fallback
 
 Before fetching a handle's timeline, the run resolves it once with `UserByScreenName`
-(`X_USER_QUERY_ID`) and reads its profile: existence, `privacy.protected`, `tweet_counts.tweets`
+(`INTEL_X_USER_QUERY_ID`) and reads its profile: existence, `privacy.protected`, `tweet_counts.tweets`
 (lifetime posts) and `created_at`. Each is settled without spending a search when it plainly has
 nothing to fetch:
 
@@ -91,9 +91,9 @@ nothing to fetch:
 - **never-posted** (lifetime 0): streams zeroed.
 - **exists**: fetched by search as usual; the profile (`id`, `lifetime`, `created`) is stored.
 
-A handle already fully fetched is not re-resolved. Resolution is skipped if `X_USER_QUERY_ID` is unset.
+A handle already fully fetched is not re-resolved. Resolution is skipped if `INTEL_X_USER_QUERY_ID` is unset.
 
-**Timeline fallback (`X_USER_TWEETS_QID`).** X search does not return some live accounts — brand-new
+**Timeline fallback (`INTEL_X_TIMELINE_QUERY_ID`).** X search does not return some live accounts — brand-new
 or search-deboosted ones — so `from:<user>` comes back empty even though they posted. When a live
 handle whose profile shows posts (`lifetime > 0`) is empty in search, the run fetches its real
 timeline directly (`UserTweetsAndReplies` by id, not search-gated), pages back to `since`, and
@@ -124,19 +124,16 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `X_BEARER` | X web-client bearer token | Yes | `~/.config/intel/.env` |
-| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
-| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_USER_QUERY_ID` | UserByScreenName operation ID for the existence pre-check | No; enables pre-check | `~/.config/intel/.env` |
-| `X_USER_TWEETS_QID` | UserTweetsAndReplies operation ID for the timeline fallback | No; enables timeline fallback | `~/.config/intel/.env` |
-| `RESIDENTIAL_PROXY_URL` | Default residential proxy | One proxy source required | `~/.config/intel/.env` |
-| `X_PROXY_URLS` | Comma-separated proxies aligned to account row order | Alternative to the default proxy | `~/.config/intel/.env` |
-| `HTTPS_PROXY` | Default proxy when RESIDENTIAL_PROXY_URL is unset | Alternative to RESIDENTIAL_PROXY_URL | `~/.config/intel/.env` |
-| `SECRETS_MANAGER_STATE_PATH` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
-| `SECRETS_DB` | SQLite account-store path; overrides the directory setting | No | `~/.config/intel/.env` |
+| `INTEL_X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
+| `INTEL_X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
+| `INTEL_X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
+| `INTEL_X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
+| `INTEL_X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
+| `INTEL_X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
+| `INTEL_X_USER_QUERY_ID` | UserByScreenName operation ID for the existence pre-check | No; enables pre-check | `~/.config/intel/.env` |
+| `INTEL_X_TIMELINE_QUERY_ID` | UserTweetsAndReplies operation ID for the timeline fallback | No; enables timeline fallback | `~/.config/intel/.env` |
+| `INTEL_RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
+| `INTEL_SECRETS_STATE_DIR` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
 
 Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.config/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
 
@@ -144,7 +141,7 @@ Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager s
 
 - `failed after N attempts` is the proxy, not a ban; rerun.
 - `SearchTimeline 400` mentioning the operation/features means X redeployed; update
-  `X_SEARCH_QUERY_ID` / `FEATURES` in `fetch-x-mentions`.
+  `INTEL_X_SEARCH_QUERY_ID` / `FEATURES` in `fetch-x-mentions`.
 - `Cannot find package 'undici'` in a fresh worktree:
   `npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`.
 

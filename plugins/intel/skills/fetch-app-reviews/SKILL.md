@@ -61,7 +61,6 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `RESIDENTIAL_PROXY_URL` | Rotating residential proxy | Yes, unless HTTPS_PROXY is set | `~/.config/intel/.env` |
-| `HTTPS_PROXY` | Proxy when RESIDENTIAL_PROXY_URL is unset | Alternative to RESIDENTIAL_PROXY_URL | `~/.config/intel/.env` |
+| `INTEL_RESIDENTIAL_PROXY_URL` | Rotating residential proxy | Yes | `~/.config/intel/.env` |
 
 Each request opens a fresh proxy connection to rotate the exit IP.

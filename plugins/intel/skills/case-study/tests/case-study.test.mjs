@@ -9,7 +9,7 @@ import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const tmp = mkdtempSync(join(tmpdir(), 'case-study-'))
-process.env.CASE_STUDIES_DIR = join(tmp, 'store')
+process.env.INTEL_CASE_STUDY_DIR = join(tmp, 'store')
 const cs = await import('../scripts/case-study.mjs')
 
 const out = join(tmp, 'pdf', 'jane-doe.pdf')

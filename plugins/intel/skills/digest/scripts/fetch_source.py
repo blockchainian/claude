@@ -16,7 +16,7 @@ from urllib.parse import urljoin, urlparse
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126 Safari/537.36")
 
-ROOT = Path(os.environ.get("DIGESTS_DIR",
+ROOT = Path(os.environ.get("INTEL_DIGEST_DIR",
                            Path.home() / "Documents" / "digests"))
 WORK = ROOT / ".work"
 

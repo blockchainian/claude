@@ -33,8 +33,8 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `NAMECHEAP_API_USER` | Namecheap account username | Yes | `~/.config/intel/.env` |
-| `NAMECHEAP_API_KEY` | Namecheap API key | Yes | `~/.config/intel/.env` |
+| `INTEL_NAMECHEAP_USERNAME` | Namecheap account username | Yes | `~/.config/intel/.env` |
+| `INTEL_NAMECHEAP_API_KEY` | Namecheap API key | Yes | `~/.config/intel/.env` |
 
 Brainstorm a brand name and hand back only the ones you can actually register.
 The naming taste is fixed (below); the one thing that changes per run is the

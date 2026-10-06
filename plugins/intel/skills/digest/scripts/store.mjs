@@ -135,7 +135,7 @@ function today() {
 // --- the store itself ---
 
 export function resolveRoot(env = process.env) {
-  return pyPath(env.DIGESTS_DIR ?? pyJoin(pyJoin(homedir(), "Documents"), "digests"));
+  return pyPath(env.INTEL_DIGEST_DIR ?? pyJoin(pyJoin(homedir(), "Documents"), "digests"));
 }
 
 export const ROOT = resolveRoot();

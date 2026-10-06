@@ -56,23 +56,20 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `X_BEARER` | X web-client bearer token | Yes | `~/.config/intel/.env` |
-| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
-| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
-| `RESIDENTIAL_PROXY_URL` | Default residential proxy | One proxy source required | `~/.config/intel/.env` |
-| `X_PROXY_URLS` | Comma-separated proxies aligned to account row order | Alternative to the default proxy | `~/.config/intel/.env` |
-| `HTTPS_PROXY` | Default proxy when RESIDENTIAL_PROXY_URL is unset | Alternative to RESIDENTIAL_PROXY_URL | `~/.config/intel/.env` |
-| `SECRETS_MANAGER_STATE_PATH` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
-| `SECRETS_DB` | SQLite account-store path; overrides the directory setting | No | `~/.config/intel/.env` |
+| `INTEL_X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
+| `INTEL_X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
+| `INTEL_X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
+| `INTEL_X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
+| `INTEL_X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
+| `INTEL_X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
+| `INTEL_RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
+| `INTEL_SECRETS_STATE_DIR` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
 
 Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.config/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
 
 Provision accounts with `secrets-manager import x`, then run `verify-x.mjs` below; each account has its own rate bucket.
 
-`verify-x.mjs` specifically requires `RESIDENTIAL_PROXY_URL` when verifying tokens.
+`verify-x.mjs` specifically requires `INTEL_RESIDENTIAL_PROXY_URL` when verifying tokens.
 
 ## Failures
 

@@ -46,9 +46,9 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 // Without an account a keyword is not collected and a user's timeline stays one page.
 //
 // Config:
-//   ISP_PROXY_URL    the ISP pool's base url; slot n of the pool is the base port + n, one fixed IP each.
-//   ISP_PROXY_COUNT  how many slots the pool has (default 1).
-//   SECRETS_MANAGER_STATE_PATH  where the secrets-manager store and profiles are (default ~/.config/secrets-manager).
+//   INTEL_ISP_PROXY_URL    the ISP pool's base url; slot n of the pool is the base port + n, one fixed IP each.
+//   INTEL_ISP_PROXY_COUNT  how many slots the pool has (default 1).
+//   INTEL_SECRETS_STATE_DIR  where the secrets-manager store and profiles are (default ~/.config/secrets-manager).
 //
 // Output under docs/intel/tiktok/<slug>/, or the --out directory:
 //   videos.jsonl          one video per line, TikTok's full item plus a `sources` array of the
@@ -64,7 +64,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 //     Per run and source: `fetched` videos TikTok returned, `kept` those at or above the play
 //     floor and in English, `new` those kept and not held before, `pulls` how often the source was paged.
 // Video files are too big for git, so they live outside the repo, shared by every slug:
-//   ~/.local/share/tiktok/<id>.mp4. TIKTOK_VIDEOS_DIR overrides the directory.
+//   ~/.local/share/tiktok/<id>.mp4. INTEL_TIKTOK_VIDEO_DIR overrides the directory.
 //   A run collects every source, then fetches comments for the videos whose comments are not
 //   complete and downloads the videos without a file. Rerun the same command to resume.
 
@@ -426,7 +426,7 @@ export async function downloadVideo(unit, dir, { call, fetchBytes, write }) {
 
 // Where video files are kept: outside the repo, so they outlive a checkout or worktree.
 export function videosDir(env = process.env) {
-  const dir = env.TIKTOK_VIDEOS_DIR || "~/.local/share/tiktok";
+  const dir = env.INTEL_TIKTOK_VIDEO_DIR || "~/.local/share/tiktok";
   return dir.startsWith("~") ? join(homedir(), dir.slice(1)) : resolve(dir);
 }
 
@@ -552,7 +552,7 @@ export function usesAccount(source, hasAccount) {
   return source.kind === "keyword" || (source.kind === "user" && hasAccount);
 }
 
-const storeDir = (env) => env.SECRETS_MANAGER_STATE_PATH || join(homedir(), ".config", "secrets-manager");
+const storeDir = (env) => env.INTEL_SECRETS_STATE_DIR || join(homedir(), ".config", "secrets-manager");
 
 // The TikTok account the secrets-manager skill logged in: the store's first active login, with the
 // browser profile it lives in and the ISP slot it logged in from. Null when the store has none.
@@ -599,8 +599,8 @@ async function openAccountSession(account) {
 // A session: Camoufox on one ISP slot, on tiktok.com, with the page's request template captured.
 // Media, images and fonts are not loaded and audio is muted. `launch` adds to the browser's options.
 async function openSessionOn(slot, rate, launch) {
-  if (!process.env.ISP_PROXY_URL) throw new Error("No ISP_PROXY_URL in ~/.config/intel/.env.");
-  const proxyUrl = ispProxyAt(process.env.ISP_PROXY_URL, slot);
+  if (!process.env.INTEL_ISP_PROXY_URL) throw new Error("No INTEL_ISP_PROXY_URL in ~/.config/intel/.env.");
+  const proxyUrl = ispProxyAt(process.env.INTEL_ISP_PROXY_URL, slot);
   const { Camoufox } = await import("camoufox-js");
   const browser = await Camoufox({
     headless: true,
@@ -683,7 +683,7 @@ async function loadJsonl(path) {
 
 const jsonl = (rows) => (rows.length ? rows.map((r) => JSON.stringify(r)).join("\n") + "\n" : "");
 
-const ispCount = () => Math.max(1, Number(process.env.ISP_PROXY_COUNT) || 1);
+const ispCount = () => Math.max(1, Number(process.env.INTEL_ISP_PROXY_COUNT) || 1);
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -706,7 +706,7 @@ async function main() {
     );
     process.exit(1);
   }
-  requireEnv("ISP_PROXY_URL");
+  requireEnv("INTEL_ISP_PROXY_URL");
   const log = (line) => process.stderr.write(line + "\n");
   await mkdir(join(dir, "comments"), { recursive: true });
   await mkdir(videosDir(), { recursive: true });
