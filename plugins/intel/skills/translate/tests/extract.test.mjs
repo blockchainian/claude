@@ -378,3 +378,10 @@ test("a listing split by numeric callouts remains one protected block", () => {
   extractSections(work, epub);
   assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(path.join(work, "codeblocks.json"), "utf8"))), ['a\n b (1)\n c\n']);
 });
+
+test("a standalone appendix after body whitespace remains one section", () => {
+  const work = tmpDir(), epub = path.join(work, "b.epub");
+  makeEpub(epub, {"c.xhtml": '<h1>1. Logs</h1><p>body</p>', "a.xhtml": '\n<section data-type="appendix"><h1>Appendix A</h1><p>appendix</p></section>'},
+    ["c.xhtml", "a.xhtml"], {"c.xhtml": "1. Logs", "a.xhtml": "Appendix A"});
+  assert.deepEqual(extractSections(work, epub).map(s => [s.title, s.words]), [["Logs", 3], ["Appendix A", 3]]);
+});
