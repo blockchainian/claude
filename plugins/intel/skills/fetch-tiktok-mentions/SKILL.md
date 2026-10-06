@@ -155,7 +155,7 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 | --- | --- | --- | --- |
 | `ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `~/.config/intel/.env` |
 | `ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `~/.config/intel/.env` |
-| `SECRETS_DATA_DIR` | Account-store and browser-profile directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
+| `SECRETS_STATE_DIR` | Account-store and browser-profile directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
 | `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with videos under tiktok/ | No | `~/.config/intel/.env` |
 
 Account credentials, login sessions and browser profiles stay in the existing Secrets Manager store; do not copy them into `.env`.

@@ -1,4 +1,4 @@
-import { requireEnv, loadEnvFile, stateDir } from "../../fetch-x-mentions/scripts/env.mjs";
+import { requireEnv, loadEnvFile, stateDir, secretsStateDir } from "../../fetch-x-mentions/scripts/env.mjs";
 // ABOUTME: Fetches a brand's TikTok videos from hashtag pages, user pages and keyword searches, each video's
 // ABOUTME: comments and its video file, through Camoufox sessions on the ISP proxy pool, resumable.
 //
@@ -48,7 +48,7 @@ import { requireEnv, loadEnvFile, stateDir } from "../../fetch-x-mentions/script
 // Config:
 //   ISP_PROXY_URL    the ISP pool's base url; slot n of the pool is the base port + n, one fixed IP each.
 //   ISP_PROXY_COUNT  how many slots the pool has (default 1).
-//   SECRETS_DATA_DIR  where the secrets-manager store and profiles are (default ~/.config/secrets-manager).
+//   SECRETS_STATE_DIR  where the secrets-manager store and profiles are (default ~/.local/state/secrets-manager).
 //
 // Output under <INTEL_STATE_DIR>/tiktok/<slug>/, or the --out directory:
 //   videos.jsonl          one video per line, TikTok's full item plus a `sources` array of the
@@ -70,7 +70,6 @@ import { requireEnv, loadEnvFile, stateDir } from "../../fetch-x-mentions/script
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -551,7 +550,7 @@ export function usesAccount(source, hasAccount) {
   return source.kind === "keyword" || (source.kind === "user" && hasAccount);
 }
 
-const storeDir = (env) => env.SECRETS_DATA_DIR || join(homedir(), ".config", "secrets-manager");
+const storeDir = (env) => secretsStateDir(env);
 
 // The TikTok account the secrets-manager skill logged in: the store's first active login, with the
 // browser profile it lives in and the ISP slot it logged in from. Null when the store has none.

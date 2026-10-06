@@ -92,9 +92,9 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 | `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
 | `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
 | `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
-| `SECRETS_DATA_DIR` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
+| `SECRETS_STATE_DIR` | Account-store directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
 
-Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.config/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
+Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.local/state/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
 
 Requires Node.js 22.13+ for `node:sqlite`.
 

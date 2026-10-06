@@ -14,7 +14,7 @@ Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hos
 | `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
 | `CREATOR_STATE_DIR` | State root; default ~/.local/state/creator, with each account's posts.jsonl and stats.jsonl under tiktok/<username>/ | Optional | ~/.config/creator/.env |
 | `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with each account's screen recordings under tiktok/<username>/recordings/ | Optional | ~/.config/creator/.env |
-| `SECRETS_DATA_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
+| `SECRETS_STATE_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
 
 Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
 
@@ -53,8 +53,8 @@ Requires Node.js 22.13+ with `node:sqlite`. Keep the full creator plugin install
 all four skills import the upload skill's runtime by sibling-relative paths and use that install.
 The browser flows run in Camoufox scripts without Claude Workflow, Claude API, or MCP browser
 tools. Camoufox itself is fetched by the secrets plugin's setup.
-Both hosts read the same existing secrets-manager state, by default `~/.config/secrets-manager`;
-set `SECRETS_DATA_DIR` explicitly if yours is elsewhere. The store, logged-in profiles,
+Both hosts read the same existing secrets-manager state, by default `~/.local/state/secrets-manager`;
+set `SECRETS_STATE_DIR` explicitly if yours is elsewhere. The store, logged-in profiles,
 ISP slots must already be provisioned through secrets-manager. Creator’s ISP pool is configured separately at `~/.config/creator/.env` and must match the login pool.
 Creator does not install secrets-manager or create/migrate its accounts; use the existing
 secrets-manager setup when those prerequisites are missing. Never open the same account profile

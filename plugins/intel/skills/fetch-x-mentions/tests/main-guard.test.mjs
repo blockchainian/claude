@@ -31,7 +31,7 @@ test("each script's main runs when the script is reached through a symlink", () 
   for (const rel of scripts) {
     const r = spawnSync(process.execPath, [...process.execArgv, join(link, rel)], {
       encoding: "utf8",
-      env: { ...process.env, ...fixtureEnv, SECRETS_DATA_DIR: home },
+      env: { ...process.env, ...fixtureEnv, SECRETS_STATE_DIR: home },
       timeout: 20000,
     });
     assert.ok(r.stderr.trim().length > 0, `${rel}: main did not run (no stderr)`);

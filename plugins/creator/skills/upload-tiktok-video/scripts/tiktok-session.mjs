@@ -9,7 +9,7 @@
 // Config (~/.config/creator/.env, loaded automatically):
 //   ISP_PROXY_URL               the ISP pool's base url; slot n is the base port + n.
 //   BROWSER_DISPLAY            the display a headed window goes on, any part of its name (else the main one).
-//   SECRETS_DATA_DIR  where the store and profiles are (default ~/.config/secrets-manager).
+//   SECRETS_STATE_DIR  where the store and profiles are (default ~/.local/state/secrets-manager).
 //   CREATOR_STATE_DIR          where the post log and stats go, one directory per account
 //                               (root default ~/.local/state/creator; tiktok/ is appended).
 //   CREATOR_DATA_DIR           where screen recordings go, one directory per account
@@ -33,7 +33,7 @@ const MOVE_SCRIPT = fileURLToPath(new URL("./moveWindows.swift", import.meta.url
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export const storeDir = (env = process.env) => env.SECRETS_DATA_DIR || join(homedir(), ".config", "secrets-manager");
+export const storeDir = (env = process.env) => env.SECRETS_STATE_DIR || join(homedir(), ".local", "state", "secrets-manager");
 
 export const dataDir = (env = process.env) => join(env.CREATOR_DATA_DIR || join(homedir(), ".local", "share", "creator"), "tiktok");
 

@@ -64,9 +64,9 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 | `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
 | `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
 | `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with X archives under x/ | No | `~/.config/intel/.env` |
-| `SECRETS_DATA_DIR` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
+| `SECRETS_STATE_DIR` | Account-store directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
 
-Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.config/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
+Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.local/state/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
 
 Provision accounts with `secrets-manager import x`, then run `verify-x.mjs` below; each account has its own rate bucket.
 

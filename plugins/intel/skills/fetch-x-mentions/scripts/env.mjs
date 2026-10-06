@@ -32,6 +32,10 @@ export function tmpDir(skill, env = process.env) {
   mkdirSync(dir, { recursive: true });
   return dir;
 }
+// The secrets-manager plugin's account store and logged-in browser profiles.
+export function secretsStateDir(env = process.env) {
+  return expandUser(env.SECRETS_STATE_DIR || join(homedir(), '.local', 'state', 'secrets-manager'));
+}
 // Pace files, slot locks, account cooldowns and the gate log, shared by case-study and fetch-x-posts.
 export function limitsDir(env = process.env) {
   return join(stateDir(env), 'limits');

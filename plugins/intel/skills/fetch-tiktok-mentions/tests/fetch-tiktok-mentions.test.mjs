@@ -624,7 +624,7 @@ function storeWith(rows) {
     ).run(username, slot, status);
   }
   db.close();
-  return { SECRETS_DATA_DIR: dir };
+  return { SECRETS_STATE_DIR: dir };
 }
 
 test("the account is the store's first active TikTok login, with its profile and ISP slot", () => {
@@ -632,10 +632,10 @@ test("the account is the store's first active TikTok login, with its profile and
   assert.deepEqual(loadAccount(env), {
     username: "bob",
     slot: 10,
-    profile: join(env.SECRETS_DATA_DIR, "profiles", "bob"),
+    profile: join(env.SECRETS_STATE_DIR, "profiles", "bob"),
   });
   assert.equal(loadAccount(storeWith([["al", 2, "expired"]])), null);
-  assert.equal(loadAccount({ SECRETS_DATA_DIR: mkdtempSync(join(tmpdir(), "tiktok-nostore-")) }), null);
+  assert.equal(loadAccount({ SECRETS_STATE_DIR: mkdtempSync(join(tmpdir(), "tiktok-nostore-")) }), null);
 });
 
 test("an account whose session is gone is marked expired, so the next run does not pick it", () => {

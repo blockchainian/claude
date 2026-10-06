@@ -29,8 +29,8 @@ const setAdapters = paths => {
 };
 beforeEach(() => {
   previousHome = process.env.HOME;
-  process.env.SECRETS_DATA_DIR = mkdtempSync(join(tmpdir(), "sm-verify-"));
-  process.env.HOME = process.env.SECRETS_DATA_DIR;
+  process.env.SECRETS_STATE_DIR = mkdtempSync(join(tmpdir(), "sm-verify-"));
+  process.env.HOME = process.env.SECRETS_STATE_DIR;
   setAdapters([fileURLToPath(new URL("./fixtures/adapters.mjs", import.meta.url))]);
   db = store.openDb(config.dbPath());
   realChecks = Object.fromEntries(Object.entries(BUILTIN_CHECKS).map(([k, v]) => [k, v.check]));
@@ -39,7 +39,7 @@ afterEach(() => {
   if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
   for (const [k, check] of Object.entries(realChecks)) BUILTIN_CHECKS[k].check = check;
   db.close();
-  delete process.env.SECRETS_DATA_DIR;
+  delete process.env.SECRETS_STATE_DIR;
 });
 
 const status = (table, key, id) => db.prepare(`SELECT status FROM ${table} WHERE ${key} = ?`).get(id).status;

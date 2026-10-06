@@ -1,11 +1,10 @@
 // Verify vendor X tokens into ct0 pairs in the existing secrets store.
 import { realpathSync } from "node:fs";
 import { DatabaseSync } from 'node:sqlite';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { requireEnv, loadEnvFile } from './env.mjs';
+import { requireEnv, loadEnvFile, secretsStateDir } from './env.mjs';
 import { provisionPair } from './fetch-x-mentions.mjs';
 
 export async function verifyX(db, opts, { provision = provisionPair, dispatcher, io = console } = {}) {
@@ -48,8 +47,7 @@ export async function main(argv) {
     const {ProxyAgent}=await import('undici');
     const token=u.username ? `Basic ${Buffer.from(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`).toString('base64')}` : null;
     dispatcher=new ProxyAgent(token ? {uri:`${u.protocol}//${u.host}`,token} : `${u.protocol}//${u.host}`);
-    const state=process.env.SECRETS_DATA_DIR || join(homedir(),'.config/secrets-manager');
-    db=new DatabaseSync(join(state,'secrets.sqlite'));
+    db=new DatabaseSync(join(secretsStateDir(),'secrets.sqlite'));
     return await verifyX(db,values,{dispatcher});
   } catch (e) { console.error(e.message); return 1; }
   finally { db?.close(); await dispatcher?.close(); }

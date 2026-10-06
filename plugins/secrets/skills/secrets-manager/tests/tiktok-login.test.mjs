@@ -11,15 +11,19 @@ import { spawnSync } from "node:child_process";
 import { sessionCookies, loginProxy, signInTiktok, TiktokLoginError } from "../scripts/tiktok-login.mjs";
 import * as tiktok from "../scripts/tiktok-login.mjs";
 
-let previousStatePath;
+const ROOTS = ["SECRETS_STATE_DIR", "SECRETS_DATA_DIR"];
+let previous;
 beforeEach(() => {
-  previousStatePath = process.env.SECRETS_DATA_DIR;
-  process.env.SECRETS_DATA_DIR = mkdtempSync(join(tmpdir(), "tiktok-login-"));
+  previous = ROOTS.map((key) => process.env[key]);
+  const dir = mkdtempSync(join(tmpdir(), "tiktok-login-"));
+  for (const key of ROOTS) process.env[key] = dir;
 });
 afterEach(() => {
-  rmSync(process.env.SECRETS_DATA_DIR, { recursive: true, force: true });
-  if (previousStatePath === undefined) delete process.env.SECRETS_DATA_DIR;
-  else process.env.SECRETS_DATA_DIR = previousStatePath;
+  rmSync(process.env.SECRETS_STATE_DIR, { recursive: true, force: true });
+  ROOTS.forEach((key, i) => {
+    if (previous[i] === undefined) delete process.env[key];
+    else process.env[key] = previous[i];
+  });
 });
 
 const cookie = (name, domain, value = "v") => ({ name, value, domain, path: "/" });

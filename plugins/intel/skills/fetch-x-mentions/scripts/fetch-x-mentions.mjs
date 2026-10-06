@@ -1,4 +1,4 @@
-import { requireEnv, loadEnvFile, stateDir } from "./env.mjs";
+import { requireEnv, loadEnvFile, stateDir, secretsStateDir } from "./env.mjs";
 // ABOUTME: Fetches X/Twitter mentions of an app over a date range, one authenticated GraphQL
 // ABOUTME: SearchTimeline per day, sharded across accounts through the residential proxy, resumable.
 //
@@ -19,7 +19,7 @@ import { requireEnv, loadEnvFile, stateDir } from "./env.mjs";
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/fetch-x-mentions.mjs \
 //     alpha '(@alpha OR to:alpha OR "alpha app" OR alpha.family) -filter:nativeretweets' 2024-12-13 2026-09-21
 //
-// Accounts come from the secrets-manager store (~/.config/secrets-manager/secrets.sqlite): active X rows,
+// Accounts come from the secrets-manager store (~/.local/state/secrets-manager/secrets.sqlite): active X rows,
 // each its own X rate bucket, so N accounts ~= N x throughput. The state directory identifies the store.
 // Config (~/.config/intel/.env):
 //   RESIDENTIAL_PROXY_URL Proxy every request routes through.
@@ -38,7 +38,6 @@ import { realpathSync } from "node:fs";
 import { appendFile, readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -324,8 +323,7 @@ function makeDispatcher(url) {
 // The credential store secrets-manager fills: active X accounts with a live auth_token + ct0.
 // Returns null when the store or its table is absent, so loadAccounts can fall back to the env.
 function loadAccountsFromStore() {
-  const stateDir = process.env.SECRETS_DATA_DIR || join(homedir(), ".config", "secrets-manager");
-  const path = join(stateDir, "secrets.sqlite");
+  const path = join(secretsStateDir(), "secrets.sqlite");
   let rows;
   try {
     const db = new DatabaseSync(path, { readOnly: true });
@@ -351,13 +349,13 @@ function loadAccountsFromStore() {
 }
 
 // One account: { label, authToken, ct0, dispatcher }; the label prefixes its log lines. The single
-// source of accounts is the secrets-manager store (~/.config/secrets-manager/secrets.sqlite); SECRETS_DATA_DIR
+// source of accounts is the secrets-manager store (~/.local/state/secrets-manager/secrets.sqlite); SECRETS_STATE_DIR
 // overrides its path.
 export function loadAccounts() {
   const accounts = loadAccountsFromStore();
   if (!accounts) {
     throw new Error(
-      "No active X accounts in the store (~/.config/secrets-manager/secrets.sqlite). Import credential " +
+      "No active X accounts in the store (~/.local/state/secrets-manager/secrets.sqlite). Import credential " +
         "files and run intel fetch-x-mentions/scripts/verify-x.mjs first.",
     );
   }

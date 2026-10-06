@@ -55,7 +55,7 @@ test("loadAccount reads the secrets-manager store, names the profile and gives t
   insert.run("second", 3, "active", "2026-10-04T00:00:00Z", "2026-10-04T00:00:00Z");
   insert.run("first", 9, "active", "2026-10-02T00:00:00Z", "2026-10-04T00:00:00Z");
   db.close();
-  assert.deepEqual(loadAccount({ SECRETS_DATA_DIR: state }), {
+  assert.deepEqual(loadAccount({ SECRETS_STATE_DIR: state }), {
     username: "first",
     status: "active",
     slot: 9,
@@ -71,16 +71,16 @@ test("loadAccount takes a named account", () => {
   insert.run("first", 9, "2026-10-02T00:00:00Z", "2026-10-04T00:00:00Z");
   insert.run("other", 3, "2026-10-04T00:00:00Z", "2026-10-04T00:00:00Z");
   db.close();
-  assert.equal(loadAccount({ SECRETS_DATA_DIR: state }, "other").slot, 3);
+  assert.equal(loadAccount({ SECRETS_STATE_DIR: state }, "other").slot, 3);
   const again = new DatabaseSync(join(state, "secrets.sqlite"));
   again.exec("UPDATE tiktok SET status = 'restricted' WHERE username = 'other'");
   again.close();
-  assert.equal(loadAccount({ SECRETS_DATA_DIR: state }, "other"), null);
-  assert.equal(loadAccount({ SECRETS_DATA_DIR: state }, "other", { anyStatus: true }).status, "restricted");
+  assert.equal(loadAccount({ SECRETS_STATE_DIR: state }, "other"), null);
+  assert.equal(loadAccount({ SECRETS_STATE_DIR: state }, "other", { anyStatus: true }).status, "restricted");
 });
 
 test("loadAccount is null when there is no store", () => {
-  assert.equal(loadAccount({ SECRETS_DATA_DIR: join(tmpdir(), "no-such-store") }), null);
+  assert.equal(loadAccount({ SECRETS_STATE_DIR: join(tmpdir(), "no-such-store") }), null);
 });
 
 test("loadAccount is null when the readable store has no usable account", (t) => {
@@ -90,14 +90,14 @@ test("loadAccount is null when the readable store has no usable account", (t) =>
   db.exec("CREATE TABLE tiktok (username TEXT, status TEXT, isp_slot INTEGER, created_at TEXT)");
   db.exec("INSERT INTO tiktok VALUES ('inactive', 'expired', 1, '2026-10-04'), ('no-slot', 'active', NULL, '2026-10-04')");
   db.close();
-  assert.equal(loadAccount({ SECRETS_DATA_DIR: state }), null);
+  assert.equal(loadAccount({ SECRETS_STATE_DIR: state }), null);
 });
 
 test("loadAccount preserves database open errors", (t) => {
   const state = mkdtempSync(join(tmpdir(), "creator-store-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
   mkdirSync(join(state, "secrets.sqlite"));
-  assert.throws(() => loadAccount({ SECRETS_DATA_DIR: state }), {
+  assert.throws(() => loadAccount({ SECRETS_STATE_DIR: state }), {
     code: "ERR_SQLITE_ERROR",
     message: /unable to open database file|disk I\/O error/,
   });
@@ -107,7 +107,7 @@ test("loadAccount preserves corrupt database errors", (t) => {
   const state = mkdtempSync(join(tmpdir(), "creator-store-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
   writeFileSync(join(state, "secrets.sqlite"), "not a SQLite database");
-  assert.throws(() => loadAccount({ SECRETS_DATA_DIR: state }), {
+  assert.throws(() => loadAccount({ SECRETS_STATE_DIR: state }), {
     code: "ERR_SQLITE_ERROR",
     message: "file is not a database",
   });
@@ -118,7 +118,7 @@ test("loadAccount preserves schema errors", (t) => {
   t.after(() => rmSync(state, { recursive: true, force: true }));
   const db = new DatabaseSync(join(state, "secrets.sqlite"));
   db.close();
-  assert.throws(() => loadAccount({ SECRETS_DATA_DIR: state }), {
+  assert.throws(() => loadAccount({ SECRETS_STATE_DIR: state }), {
     code: "ERR_SQLITE_ERROR",
     message: "no such table: tiktok",
   });
@@ -209,8 +209,8 @@ test('Creator reads its own dotenv while retaining the shared account-state dire
   const moduleUrl = new URL('../scripts/tiktok-session.mjs', import.meta.url).href;
   const code = `const {displayName,dataDir,storeDir}=await import(${JSON.stringify(moduleUrl)}); if(displayName()!=='own-display'||dataDir()!=='/tmp/creator-fixture/tiktok') throw Error('wrong config source'); console.log(storeDir());`;
   const env = { ...process.env, HOME: home };
-  for (const key of ['BROWSER_DISPLAY','CREATOR_DATA_DIR','SECRETS_DATA_DIR']) delete env[key];
+  for (const key of ['BROWSER_DISPLAY','CREATOR_DATA_DIR','SECRETS_STATE_DIR']) delete env[key];
   const result = spawnSync(process.execPath, [...process.execArgv, '--input-type=module', '-e', code], { env, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), join(home, '.config', 'secrets-manager'));
+  assert.equal(result.stdout.trim(), join(home, '.local', 'state', 'secrets-manager'));
 });
