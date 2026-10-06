@@ -13,7 +13,8 @@ Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hos
 | --- | --- | --- | --- |
 | `ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
 | `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
-| `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with TikTok data under tiktok/ | Optional | ~/.config/creator/.env |
+| `CREATOR_STATE_DIR` | State root; default ~/.local/state/creator, with each account's posts.jsonl and stats.jsonl under tiktok/<username>/ | Optional | ~/.config/creator/.env |
+| `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with each account's screen recordings under tiktok/<username>/recordings/ | Optional | ~/.config/creator/.env |
 | `SECRETS_DATA_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
 
 Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
@@ -93,13 +94,12 @@ have the profile open at the same time (a fetch-tiktok-mentions run using the sa
 
 ## Output
 
-Under `~/.local/share/creator/tiktok/<username>/`, one directory per account (`CREATOR_DATA_DIR`
-overrides `~/.local/share/creator/tiktok`):
+One directory per account:
 
-- `posts.jsonl`: one line per post,
+- `~/.local/state/creator/tiktok/<username>/posts.jsonl` (`CREATOR_STATE_DIR` overrides the root): one line per post,
   `{ at, username, file, caption, visibility, aigc, promotion, sound, videoId, url, recording }`.
   `videoId` is null when the video had not reached the profile in time.
-- `recordings/upload-<ts>.mov`: the screen recording of a `--headed` run, also on failure. When a
+- `~/.local/share/creator/tiktok/<username>/recordings/upload-<ts>.mov` (`CREATOR_DATA_DIR` overrides the root): the screen recording of a `--headed` run, also on failure. When a
   step fails, rerun with `--headed` and watch it first.
 
 ## Setup

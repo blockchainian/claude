@@ -10,7 +10,7 @@
 //
 // The read is anonymous: a fresh Camoufox browser, not the account's profile, on the account's ISP
 // slot. TikTok gives an anonymous viewer the first page of a profile (about 35 videos), newest first.
-// Each run appends one row per video to <CREATOR_DATA_DIR>/<username>/stats.jsonl:
+// Each run appends one row per video to <CREATOR_STATE_DIR>/tiktok/<username>/stats.jsonl:
 //   { at, username, videoId, createTime, playCount, diggCount, commentCount, shareCount, collectCount }
 // Run it on a schedule to build the time series.
 
@@ -18,7 +18,7 @@ import { appendFileSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { accountDir, accountVideos, browserFlag, checkBrowserFlags, loadAccount, openBrowser, recordingPath } from "../../upload-tiktok-video/scripts/tiktok-session.mjs";
+import { accountStateDir, accountVideos, browserFlag, checkBrowserFlags, loadAccount, openBrowser, recordingPath } from "../../upload-tiktok-video/scripts/tiktok-session.mjs";
 
 const START_URL = "https://www.tiktok.com/explore";
 const COUNTERS = ["playCount", "diggCount", "commentCount", "shareCount", "collectCount"];
@@ -59,8 +59,8 @@ async function main() {
   try {
     const { items } = await accountVideos(page, await template(), username);
     const rows = statsRows(username, items, new Date().toISOString());
-    const out = join(accountDir(username), "stats.jsonl");
-    mkdirSync(accountDir(username), { recursive: true });
+    const out = join(accountStateDir(username), "stats.jsonl");
+    mkdirSync(accountStateDir(username), { recursive: true });
     if (rows.length) appendFileSync(out, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
     for (const r of rows) {
       console.log(`${r.videoId}  plays ${r.playCount}  likes ${r.diggCount}  comments ${r.commentCount}  shares ${r.shareCount}  saves ${r.collectCount}`);

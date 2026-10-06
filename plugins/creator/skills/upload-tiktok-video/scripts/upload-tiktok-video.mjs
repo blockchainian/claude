@@ -21,7 +21,7 @@
 // <CREATOR_DATA_DIR>/<username>/recordings/upload-<ts>.mov. A logged-out profile stops the run: log the
 // account in again with secrets-manager's `login tiktok`; the store is never written here.
 //
-// Each post appends a line to <CREATOR_DATA_DIR>/<username>/posts.jsonl:
+// Each post appends a line to <CREATOR_STATE_DIR>/tiktok/<username>/posts.jsonl:
 //   { at, username, file, caption, visibility, aigc, promotion, sound, videoId, url, recording }
 // videoId is null when the video had not reached the profile when the run gave up looking.
 
@@ -29,7 +29,7 @@ import { appendFileSync, existsSync, mkdirSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { accountDir, accountVideos, browserFlag, callApi, captureTemplate, checkBrowserFlags, loadAccount, openBrowser, recordingPath, signedIn } from "./tiktok-session.mjs";
+import { accountStateDir, accountVideos, browserFlag, callApi, captureTemplate, checkBrowserFlags, loadAccount, openBrowser, recordingPath, signedIn } from "./tiktok-session.mjs";
 
 const UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?from=webapp";
 const UPLOAD_TIMEOUT_MS = 300000; // the file upload, from choosing it to TikTok's "Uploaded"
@@ -248,7 +248,7 @@ async function main() {
   const startedS = Math.floor(Date.now() / 1000) - CLOCK_SKEW_S;
   const recordTo = recordingPath(account.username, "upload");
   const { context, page, close } = await openBrowser({ headed: args.headed, withSound: args.withSound, slot: account.slot, profile: account.profile, recordTo, url: UPLOAD_URL });
-  const dir = accountDir(account.username);
+  const dir = accountStateDir(account.username);
   process.once("SIGINT", () => close().then(() => process.exit(130)));
 
   try {
