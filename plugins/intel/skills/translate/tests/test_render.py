@@ -123,6 +123,8 @@ def test_render_units(rd):
     check("drop cap judged on a first paragraph that carries a class", dropcap('<p class="keep">' + "正文" * 30 + "</p><p>短。</p>"))
     # The capped paragraph clears the float, so even a one-line lead-in ("若 x 是任意实数，我们记") takes the cap.
     check("drop cap on a short one-line lead-in", dropcap("<p>若 \\(x\\) 是任意实数，我们记</p>" + prose))
+    check("no drop cap on a bold table or figure caption", not dropcap("<p><strong>表 1</strong> 标准子程序和计算机程序分析中常用的量（40 位十进制）</p>")
+          and not dropcap('<p><strong><span class="cjkb">图</span> 3</strong> 一棵树的各个部分与它们之间的连接方式</p>'))
     # A bold key phrase opening prose is not an answer label: it gets the cap, set bold to match the phrase.
     bold_open = '<p><strong><span class="cjkb">取自</span> n <span class="cjkb">个对象的组合</span></strong>，是从集合中选出不同元素而不计次序的各种选法，对五个对象每次取三个。</p>'
     check("drop cap on prose that opens with a bold phrase", dropcap(bold_open))

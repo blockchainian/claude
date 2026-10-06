@@ -329,7 +329,9 @@ p.keep {{ break-after: avoid; }}  /* a lead-in paragraph stays with the figure i
 FIRST_P_RE = re.compile(r"<p(?:\s[^>]*)?>(.*?)</p>", re.S)  # also <p class="keep">
 BLOCKQUOTE_RE = re.compile(r"<blockquote>.*?</blockquote>", re.S)
 LEADING_IMG_RE = re.compile(r"^(\s|<img\b[^>]*>)*")
-BOLD_LABEL_RE = re.compile(r"<(?:strong|b)>\s*[A-Za-z]?\d")  # "**1.**", "**E1.**": an exercise or answer number
+BOLD_RE = re.compile(r"<(strong|b)>(.*?)</\1>", re.S)
+# A bold number label: "**1.**", "**E1.**" (an exercise or answer), "**表 1**", "**图 3**", "**Table 2**" (a caption).
+LABEL_TEXT_RE = re.compile(r"\s*([A-Za-z]?\d|(表|图|Table|Fig\.?)\s*\d)")
 MATH_SRC_RE = re.compile(r"\\\(.*?\\\)|\\\[.*?\\\]", re.S)
 DROPCAP_MIN_CHARS = 10  # the block after a capped paragraph clears the float, so only a stub is left uncapped
 
@@ -345,10 +347,11 @@ def first_paragraph_head(body):
 def wants_dropcap(body):
     """A drop cap suits a section that opens with prose, including prose that opens with a bold key phrase. Not
     when its first paragraph opens with a bold number label (an answers or exercises section: "**1.** ...",
-    possibly after a ▶ marker image) or a digit, where the cap would land on the number, nor on a stub of a few
+    possibly after a ▶ marker image; a table or figure caption: "**表 1**") or a digit, where the cap would land on the number, nor on a stub of a few
     characters."""
     head = first_paragraph_head(body)
-    if head is None or BOLD_LABEL_RE.match(head) or head[:1].isdigit():
+    bold = BOLD_RE.match(head) if head else None
+    if head is None or bold and LABEL_TEXT_RE.match(re.sub(r"<[^>]+>", "", bold.group(2))) or head[:1].isdigit():
         return False
     text = MATH_SRC_RE.sub("x", re.sub(r"<[^>]+>", "", head))  # a formula's LaTeX source sets far shorter
     return len(text.strip()) >= DROPCAP_MIN_CHARS
