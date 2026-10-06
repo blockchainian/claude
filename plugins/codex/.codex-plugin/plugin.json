@@ -1,6 +1,6 @@
 {
-  "name": "claude-client",
-  "version": "0.18.4",
+  "name": "claude",
+  "version": "0.18.5",
   "description": "Communicate with the Claude session supervising this Codex thread through ask_claude and notify_claude.",
   "author": {
     "name": "blockchainian"
@@ -10,7 +10,7 @@
   "repository": "https://github.com/blockchainian/claude",
   "hooks": "./hooks/codex.json",
   "mcpServers": {
-    "claude": {
+    "claude-client": {
       "command": "node",
       "args": ["codex-manager/manager.mjs", "claude"],
       "cwd": "./",

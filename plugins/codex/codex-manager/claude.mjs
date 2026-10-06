@@ -72,7 +72,7 @@ export async function runClaude(version) {
   const handle = async ({ id, method, params = {} }) => {
     if (method === "notifications/cancelled") return cancelled.add(params.requestId);
     if (id === undefined) return undefined;
-    if (method === "initialize") return reply(id, { result: { protocolVersion: params.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "claude", version } } });
+    if (method === "initialize") return reply(id, { result: { protocolVersion: params.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "claude-client", version } } });
     if (method === "ping") return reply(id, { result: {} });
     if (method === "tools/list") return reply(id, { result: { tools: TOOLS } });
     if (method === "tools/call") return reply(id, { result: await callTool(params, () => cancelled.delete(id)) });

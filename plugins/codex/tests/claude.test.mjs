@@ -10,8 +10,8 @@ import test from "node:test";
 test("the packaged Claude client starts without a Claude host and delivers real MCP notifications", { timeout: 10_000 }, async () => {
   const root = path.resolve("plugins/codex");
   const manifest = JSON.parse(await readFile(path.join(root, ".codex-plugin/plugin.json"), "utf8"));
-  const server = manifest.mcpServers.claude;
-  const state = await mkdtemp(path.join(os.tmpdir(), "claude-client-"));
+  const server = manifest.mcpServers["claude-client"];
+  const state = await mkdtemp(path.join(os.tmpdir(), "claude-"));
   const child = spawn(server.command, server.args, {
     cwd: path.resolve(root, server.cwd),
     env: { ...process.env, CLAUDE_CODE_SESSION_ID: "", CODEX_MANAGER_STATE_DIR: state },
@@ -45,8 +45,8 @@ test("the packaged Claude client starts without a Claude host and delivers real 
   }
   const deadline = setTimeout(() => child.kill(), 8_000);
   try {
-    const initialized = await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "claude-client-test", version: "1" } });
-    assert.equal(initialized.result.serverInfo.name, "claude");
+    const initialized = await request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "claude-test", version: "1" } });
+    assert.equal(initialized.result.serverInfo.name, "claude-client");
     assert.equal(initialized.result.serverInfo.version, manifest.version);
     child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
     const listed = await request("tools/list", {});
