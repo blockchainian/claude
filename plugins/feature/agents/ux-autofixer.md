@@ -1,7 +1,7 @@
 ---
 name: ux-autofixer
 description: Fix the review and probe findings the orchestrator routed to the UX lane — each committed in the UX lane's worktree for the orchestrator to merge — and return a flat-JSON status. Use for the UX half of the fix round while codex fixes the backend findings in parallel.
-model: fable
+model: claude-opus-5-5
 effort: medium
 tools: Bash, Read, Edit, Write, Glob, Grep
 ---
