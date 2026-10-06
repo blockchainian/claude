@@ -11,8 +11,9 @@ Close a profile’s browser before opening that same account from another host.
 
 Resolve `SKILL_DIR` from the absolute directory containing this loaded `SKILL.md`,
 not the project working directory. Set it in every shell call. Run the CLI directly
-from this skill; no global command is installed. All state lives under `SECRETS_DATA_DIR` (default
-`~/.config/secrets-manager`); the residential proxy from `~/.config/secrets-manager/.env` is required for every
+from this skill; no global command is installed. Accounts, credential files and logged-in profiles live under `SECRETS_STATE_DIR` (default
+`~/.local/state/secrets-manager`), debug captures and scratch under `SECRETS_DATA_DIR` (default
+`~/.local/share/secrets-manager`); the residential proxy from `~/.config/secrets-manager/.env` is required for every
 browser command (the home IP is never used).
 
 ## Setup (after every plugin install or update)
@@ -41,7 +42,7 @@ case, e.g. `SAMSUNG`; unset means the main display; `displayOrigin.swift`), move
 (`moveWindows.swift`, needs Accessibility trust) and record them (`recordWindows.swift`, needs Screen Recording
 permission), both through `swift`. Headless Google sign-ins (`login`, `setup-2fa`, app-password
 minting) save a Playwright page video per page, OAuth popup included, under
-`~/.config/secrets-manager/debug/<email>/rec-<ts>/`.
+`~/.local/share/secrets-manager/debug/<email>/rec-<ts>/`.
 
 ## New account flow
 
@@ -315,7 +316,8 @@ its app statuses. Existing app tables remain readable even without their adapter
 
 ## State
 
-`SECRETS_DATA_DIR` (default `~/.config/secrets-manager`), outside the repo, plaintext:
+`SECRETS_STATE_DIR` (default `~/.local/state/secrets-manager`), outside the repo, plaintext; debug captures go under
+`SECRETS_DATA_DIR` (default `~/.local/share/secrets-manager`) instead:
 
 - `secrets.sqlite` — tables `google` (accounts), `x` (accounts + tokens), `tiktok` (accounts +
   cookies + ISP slot), and one per app
@@ -350,7 +352,8 @@ Copy the plugin’s `.env.example` to `~/.config/secrets-manager/.env`; shell va
 | `CAPTCHA_RESOLVER_MODEL` | Captcha vision resolver model; default gpt-6-sol | Optional | ~/.config/secrets-manager/.env |
 | `CAPTCHA_RESOLVER_MODEL_EFFORT` | Resolver reasoning effort; default low | Optional | ~/.config/secrets-manager/.env |
 | `CAPTCHA_RESOLVER_MODEL_TIER` | Resolver service tier; default fast | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_DATA_DIR` | Account and browser-state directory | Optional | ~/.config/secrets-manager/.env |
+| `SECRETS_STATE_DIR` | Accounts, credential files and logged-in browser profiles; default ~/.local/state/secrets-manager | Optional | ~/.config/secrets-manager/.env |
+| `SECRETS_DATA_DIR` | Debug captures and scratch files; default ~/.local/share/secrets-manager | Optional | ~/.config/secrets-manager/.env |
 
 `CODEX_HOME` is the Codex CLI’s own optional login-directory setting and keeps its official name. Probe variables describe the whole diagnostic run, not an individual resolver response.
 

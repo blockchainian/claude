@@ -151,13 +151,13 @@ beforeEach(() => {
   base = mkdtempSync(join(tmpdir(), "sm-cli-"));
   process.env.HOME = base;
   setAdapters([fileURLToPath(new URL("./fixtures/adapters.mjs", import.meta.url))]);
-  process.env.SECRETS_DATA_DIR = base;
+  process.env.SECRETS_STATE_DIR = base;
   db = store.openDb(config.dbPath());
 });
 afterEach(() => {
   if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
   db.close();
-  delete process.env.SECRETS_DATA_DIR;
+  delete process.env.SECRETS_STATE_DIR;
 });
 
 const writeGoogleFile = (text) => {

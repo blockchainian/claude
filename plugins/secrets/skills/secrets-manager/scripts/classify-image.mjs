@@ -3,8 +3,9 @@
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync, existsSync } from "node:fs";
-import { tmpdir, homedir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
+import { tmpDir } from "./config.mjs";
 
 // Run codex exec with the prompt on stdin (the positional-prompt form hangs when stdin is a pipe).
 // Resolves on a clean exit, rejects on non-zero, timeout, or spawn error. Never leaves a child behind.
@@ -93,7 +94,7 @@ function codexHome(dir) {
 // Never throws.
 export async function classifyImage(image, { object, gridN, timeoutMs = 60000 } = {}) {
   if (!object || !gridN) return null;
-  const dir = mkdtempSync(join(tmpdir(), "grid-"));
+  const dir = mkdtempSync(join(tmpDir(), "grid-"));
   try {
     const home = codexHome(dir);
     if (!home) return null;
@@ -152,7 +153,7 @@ export function buildTextPrompt() {
 // the transcribed characters, or null on any failure (no codex login, timeout, unreadable) so the
 // caller can fall back to the human. Mirrors classifyImage; never throws.
 export async function readImageText(image, { timeoutMs = 60000 } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "captcha-"));
+  const dir = mkdtempSync(join(tmpDir(), "captcha-"));
   try {
     const home = codexHome(dir);
     if (!home) return null;

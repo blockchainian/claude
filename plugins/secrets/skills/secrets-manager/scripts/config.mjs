@@ -1,7 +1,7 @@
 // ABOUTME: Resolves the local state directory and proxy the skill reads and writes on the Mac.
-// ABOUTME: Everything lives under SECRETS_DATA_DIR (default ~/.config/secrets-manager).
+// ABOUTME: Accounts and profiles live under SECRETS_STATE_DIR, debug captures and scratch under SECRETS_DATA_DIR.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
@@ -19,9 +19,14 @@ function expandUser(p) {
   return p.startsWith("~") ? join(homedir(), p.slice(1)) : resolve(p);
 }
 
-// The root of all local state: the store, credential files, browser profiles and debug captures.
+// The root of what must never be lost: the store, credential files and logged-in browser profiles.
 export function statePath() {
-  return expandUser(process.env.SECRETS_DATA_DIR || "~/.config/secrets-manager");
+  return expandUser(process.env.SECRETS_STATE_DIR || "~/.local/state/secrets-manager");
+}
+
+// The root of what may be deleted at any time: debug captures and scratch files.
+export function dataPath() {
+  return expandUser(process.env.SECRETS_DATA_DIR || "~/.local/share/secrets-manager");
 }
 
 // The SQLite file holding the Google accounts, every app's sessions and the x table.
@@ -34,7 +39,14 @@ export const credentialsDir = (app) => join(statePath(), app);
 export const profileDirFor = (key) => join(statePath(), "profiles", key);
 
 // Where a failed login step dumps a screenshot and page state for inspection.
-export const debugDir = () => join(statePath(), "debug");
+export const debugDir = () => join(dataPath(), "debug");
+
+// Scratch files of one call, removed when it ends.
+export function tmpDir() {
+  const dir = join(dataPath(), "tmp");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 // Residential proxy applied to every account.
 export function defaultProxy() {

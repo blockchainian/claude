@@ -110,7 +110,7 @@ MIT
 
 ## Plugin environment naming
 
-Shared request settings have no plugin prefix (`RESIDENTIAL_PROXY_URL`, `X_BEARER_TOKEN`). Plugin data, output, configuration and state directories keep their owner (`INTEL_DATA_DIR`, `INTEL_OUTPUT_DIR`, `SECRETS_DATA_DIR`, `PROXY_CONFIG_DIR`, `CODEX_MANAGER_STATE_DIR`); all consumers refer to `SECRETS_DATA_DIR` for the shared credential store. Service names stay in settings such as `NAMECHEAP_API_KEY`, and the daemon target stays in `CODEX_DAEMON_SOCKET`. Names use uppercase snake case, `_DIR` for directories and `_ID` for identifiers. Timeout/interval values are in seconds as documented. Upstream CLI/host/MCP variables retain their required names. Internal shell variables and target-project application settings are not plugin configuration.
+Shared request settings have no plugin prefix (`RESIDENTIAL_PROXY_URL`, `X_BEARER_TOKEN`). Plugin data, output, configuration and state directories keep their owner (`INTEL_DATA_DIR`, `INTEL_STATE_DIR`, `INTEL_OUTPUT_DIR`, `SECRETS_STATE_DIR`, `PROXY_CONFIG_DIR`, `CODEX_MANAGER_STATE_DIR`); all consumers refer to `SECRETS_STATE_DIR` for the shared credential store. Service names stay in settings such as `NAMECHEAP_API_KEY`, and the daemon target stays in `CODEX_DAEMON_SOCKET`. Names use uppercase snake case, `_DIR` for directories and `_ID` for identifiers. Timeout/interval values are in seconds as documented. Upstream CLI/host/MCP variables retain their required names. Internal shell variables and target-project application settings are not plugin configuration.
 
 ## Plugin directories
 

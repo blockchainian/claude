@@ -22,7 +22,7 @@ codex plugin add secrets@blockchainian
 
 Start a new session after installing or updating. Both hosts load the same
 `secrets-manager` skill, CLI and adapter interface. Each install has its own npm
-dependencies; both read the same existing state at `~/.config/secrets-manager`.
+dependencies; both read the same existing state at `~/.local/state/secrets-manager`.
 Installing in another host does not create or migrate accounts. Close a profile's
 browser before opening the same account from another host.
 
@@ -40,7 +40,8 @@ SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
 Setup runs npm install and fetches Camoufox. Invoke `node "$SKILL_DIR/scripts/cli.mjs"`
 directly from the installed skill; setup does not install a global launcher.
 Node with `node:sqlite` support is required; headed macOS window placement uses Swift.
-State defaults to `~/.config/secrets-manager` (`SECRETS_DATA_DIR` overrides it).
+Accounts and profiles default to `~/.local/state/secrets-manager` (`SECRETS_STATE_DIR` overrides it); debug captures
+and scratch to `~/.local/share/secrets-manager` (`SECRETS_DATA_DIR`).
 `~/.config/secrets-manager/.env` loads without overriding existing environment values:
 `RESIDENTIAL_PROXY_URL`, optional `HERO_SMS_API_KEY`, and
 TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.

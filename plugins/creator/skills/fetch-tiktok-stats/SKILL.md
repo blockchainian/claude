@@ -15,7 +15,7 @@ Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hos
 | `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
 | `CREATOR_STATE_DIR` | State root; default ~/.local/state/creator, with each account's posts.jsonl and stats.jsonl under tiktok/<username>/ | Optional | ~/.config/creator/.env |
 | `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with each account's screen recordings under tiktok/<username>/recordings/ | Optional | ~/.config/creator/.env |
-| `SECRETS_DATA_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
+| `SECRETS_STATE_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
 
 Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
 
@@ -29,7 +29,7 @@ Keep the full creator plugin installed: all four skills use its
 
 Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
 and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
-shared across both hosts at `~/.config/secrets-manager` (`SECRETS_DATA_DIR` explicitly
+shared across both hosts at `~/.local/state/secrets-manager` (`SECRETS_STATE_DIR` explicitly
 overrides it), including TikTok account rows, ISP slots and browser profiles.
 Configure `ISP_PROXY_URL` in `~/.config/creator/.env` or the process environment. Creator reads this
 store; use secrets-manager to provision or log in an account if it is missing. Installing

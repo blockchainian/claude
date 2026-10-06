@@ -1,4 +1,4 @@
-// ABOUTME: Tests state-path resolution (one root env var, fixed sub-paths) and the sticky
+// ABOUTME: Tests state- and data-path resolution (one env var per root, fixed sub-paths) and the sticky
 // ABOUTME: per-account proxy derivation. No browser, no network.
 
 import { test, afterEach } from "node:test";
@@ -10,28 +10,31 @@ import { tmpdir } from "node:os";
 import * as config from "../scripts/config.mjs";
 
 afterEach(() => {
+  delete process.env.SECRETS_STATE_DIR;
   delete process.env.SECRETS_DATA_DIR;
   delete process.env.RESIDENTIAL_PROXY_URL;
   delete process.env.ENVFILE_TEST_A;
   delete process.env.ENVFILE_TEST_B;
 });
 
-test("default state path is ~/.config/secrets-manager", () => {
+test("default roots are ~/.local/state/secrets-manager and ~/.local/share/secrets-manager", () => {
   assert.equal(basename(config.statePath()), "secrets-manager");
-  assert.equal(basename(dirname(config.statePath())), ".config");
+  assert.equal(basename(dirname(config.statePath())), "state");
+  assert.equal(basename(dirname(config.dataPath())), "share");
 });
 
-test("every path hangs off the state root", () => {
-  process.env.SECRETS_DATA_DIR = "/tmp/sm";
+test("accounts and profiles hang off the state root, debug captures off the data root", () => {
+  process.env.SECRETS_STATE_DIR = "/tmp/sm";
+  process.env.SECRETS_DATA_DIR = "/tmp/smd";
   assert.equal(config.dbPath(), "/tmp/sm/secrets.sqlite");
   assert.equal(config.credentialsDir("google"), "/tmp/sm/google");
   assert.equal(config.credentialsDir("x"), "/tmp/sm/x");
   assert.equal(config.profileDirFor("a@x.com"), join("/tmp/sm/profiles", "a@x.com"));
-  assert.equal(config.debugDir(), "/tmp/sm/debug");
+  assert.equal(config.debugDir(), "/tmp/smd/debug");
 });
 
 test("a ~ state path expands to the home directory", () => {
-  process.env.SECRETS_DATA_DIR = "~/sm";
+  process.env.SECRETS_STATE_DIR = "~/sm";
   assert.ok(!config.statePath().startsWith("~"));
   assert.ok(config.statePath().endsWith("/sm"));
 });
