@@ -25,6 +25,7 @@ import markdown
 import pikepdf
 
 from code_blocks import CODE_CONTENT_RE, CODE_TOKEN_RE
+from openers import opening_paragraph
 from PIL import Image
 
 ROMAN = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii", "xiv", "xv", "xvi",
@@ -325,11 +326,11 @@ p:has(br) {{ text-indent: 0; }}  /* hard line breaks set aligned rows (number ta
 .nbp {{ font-family: Baskerville, "Songti SC", serif; }}
 /* Chinese books indent every paragraph; only a drop-cap paragraph starts flush, so a list section's first item (an
    answer "1.", an index entry) lines up with the items below it. */
-.body-text:not(.no-dropcap) > p:first-of-type {{ text-indent: 0; }}
-.body-text:not(.no-dropcap) > p:first-of-type::first-letter {{ float: left; font-size: 2.6em; line-height: 0.85; padding: 3pt 4pt 0 0; }}
+.body-text:not(.no-dropcap) > p.dropcap {{ text-indent: 0; }}
+.body-text:not(.no-dropcap) > p.dropcap::first-letter {{ float: left; font-size: 2.6em; line-height: 0.85; padding: 3pt 4pt 0 0; }}
 /* A capped paragraph of a single line would let the two-line cap hang into the next block; clear it instead. */
-.body-text:not(.no-dropcap) > p:first-of-type + * {{ clear: left; }}
-.body-text.boldcap > p:first-of-type::first-letter {{ font-family: {hei}; font-weight: 700; color: {bold}; }}
+.body-text:not(.no-dropcap) > p.dropcap + * {{ clear: left; }}
+.body-text.boldcap > p.dropcap::first-letter {{ font-family: {hei}; font-weight: 700; color: {bold}; }}
 /* 黑体 glyphs sit about 0.05em higher on the baseline than Songti's; nudge_bold_cjk wraps bold Chinese runs so they
    line up with the text around them. */
 .cjkb {{ vertical-align: -0.05em; }}
@@ -362,8 +363,6 @@ p.keep {{ break-after: avoid; }}  /* a lead-in paragraph stays with the figure i
 """
 
 
-FIRST_P_RE = re.compile(r"<p(?:\s[^>]*)?>(.*?)</p>", re.S)  # also <p class="keep">
-BLOCKQUOTE_RE = re.compile(r"<blockquote>.*?</blockquote>", re.S)
 # Leading marker images, bare or in a box that hangs them in the indent (<span ...><img ...></span>), or a ▶ / ▸
 # marker character in such a box (an EPUB that sets the marker as text).
 LEADING_IMG_RE = re.compile(r"^(\s|<img\b[^>]*>|<span\b[^>]*>\s*(?:<img\b[^>]*>|[▶▸])\s*</span>)*")
@@ -376,10 +375,10 @@ ENTRY_RE = re.compile(r"(表|图|算法|定理|Table|Fig\.?|Algorithm|Theorem)\s
 
 def first_paragraph_head(body):
     """The opening of the section's first top-level paragraph, after any leading marker image: the paragraph
-    CSS's `.body-text > p:first-of-type` selects, so one inside an epigraph blockquote does not count. None
+    CSS marks with `.dropcap`; captions and paragraphs inside an epigraph do not count. None
     when the section has no paragraph."""
-    m = FIRST_P_RE.search(BLOCKQUOTE_RE.sub("", body))
-    return LEADING_IMG_RE.sub("", m.group(1), count=1) if m else None
+    paragraph = opening_paragraph(body)
+    return LEADING_IMG_RE.sub("", paragraph["head"], count=1) if paragraph else None
 
 
 def wants_dropcap(body):
@@ -403,11 +402,20 @@ def body_classes(body):
 
 
 def section_html(s, title, body):
+    classes = body_classes(body)
+    if wants_dropcap(body):
+        p = opening_paragraph(body)
+        tag = body[p["start"]:p["inner"]]
+        if re.search(r'\bclass=["\']', tag):
+            tag = re.sub(r'(\bclass=["\'])([^"\']*)', r'\1\2 dropcap', tag)
+        else:
+            tag = tag[:-1] + ' class="dropcap">'
+        body = body[:p["start"]] + tag + body[p["inner"]:]
     cls = ["body" if s["kind"] != "front" else "front"]
     label = f'<div class="label">{html.escape(s["label"])}</div>' if s.get("label") else ""
     return (f'<section class="{" ".join(cls)}" style="page: s{s["id"]}" id="s{s["id"]}">'
             f'<div class="opener">{label}<h1>{html.escape(title)}<span class="mk">⟦S{s["id"]}⟧</span></h1></div>'
-            f'<div class="{body_classes(body)}">{body}</div></section>')
+            f'<div class="{classes}">{body}</div></section>')
 
 
 def contents_html(entries, folios):
