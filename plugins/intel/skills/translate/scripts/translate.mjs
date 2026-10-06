@@ -36,6 +36,7 @@ Output Markdown only:
 - Some text carries image placeholders of the form ⟦IMG:key⟧ standing for a figure or equation stored as
   an image. Copy every ⟦IMG:...⟧ token EXACTLY as written, in the same place relative to the surrounding
   words. Never translate, renumber, merge, or drop one, and never invent new ones.
+- Keep every numeric <sup>N</sup> marker as <sup>N</sup>, with its original number.
 - Follow the glossary exactly when one is given.
 `;
 
@@ -51,7 +52,7 @@ Math (the important part) -- convert inline math to correct LaTeX inside \\( ...
 - <em><strong>x</strong></em> (bold italic) = a vector or matrix -> \\(\\mathbf{x}\\) (uppercase too, e.g. matrix \\(\\mathbf{A}\\)).
 - a sans-serif capital (a tensor) -> \\(\\mathsf{A}\\).
 - <em>x</em> (plain italic) = a scalar -> \\(x\\).
-- <sub>i</sub> = subscript -> _{i};  <sup>2</sup> = superscript -> ^{2}. Keep superscript vs subscript straight,
+- <sub>i</sub> = subscript -> _{i};  <sup>n</sup> = superscript -> ^{n}. Keep superscript vs subscript straight,
   do not flip them (e.g. the L2 norm is \\(L^{2}\\) with a superscript; the norm selector is \\(\\|\\mathbf{x}\\|_2\\)).
 - a transpose mark (superscript T or the character ⊤) -> ^{\\top}; never drop it.
 - ℝ (often <span class="font3">ℝ</span>) -> \\(\\mathbb{R}\\); × -> \\times; ⊙ -> \\odot; ∈ -> \\in.
@@ -63,7 +64,7 @@ LaTeX that must parse (a renderer typesets it; malformed LaTeX prints as red err
 - No Markdown inside math: write **bold** and function names as text OUTSIDE the \\( \\), not within it.
 - A currency dollar sign inside math is \\$ (a bare $ is read as a math delimiter): \\(\\$100\\), or just write it as text.
 - An image placeholder ⟦IMG:...⟧ is NEVER valid inside \\( \\) or \\[ \\]. If a symbol (e.g. an accented q̂) is only
-  available as an image, write it as LaTeX instead (\\(\\hat{q}\\)); keep ⟦IMG⟧ tokens for real figures, outside math.
+  available as an image, keep its placeholder outside math; do not replace or drop it.
 
 Emphasis and structure:
 - <strong> around a word or term, and <em> used for prose emphasis (neither being a math variable) -> Chinese
@@ -85,6 +86,7 @@ Output Markdown only:
 - Proper nouns: company and product names stay in English; people are 中文译名（English Name）the first time.
 - Book and publication titles: 《中文译名》(English Title) the first time.
 - Numbers, money and units stay as in the source. Put one space between Chinese and Latin letters or digits.
+- Keep every numeric <sup>N</sup> marker as <sup>N</sup>, with its original number.
 - Follow the glossary exactly when one is given.
 `;
 
@@ -109,9 +111,24 @@ export function cjkCount(s) {
  * floor is 0.6 Chinese characters per English word: Chinese is more compact, and sections dense with names,
  * citations or math (a notation table, a bibliography, a history section) legitimately fall well under parity —
  * 0.9 kept false-rejecting complete translations. A real truncation lands far below 0.6, so it is still caught. */
-export function checkOutput(md, words) {
+export function checkOutput(md, words, source = "") {
   if (!pyStrip(md).startsWith("# ")) return "does not start with '# title'";
   if (words && cjkCount(md) < 0.6 * words) return `too short: ${cjkCount(md)} Chinese characters for ${words} English words`;
+  const tokens = text => text.match(/⟦(?:IMG|CODE):[^⟧]+⟧/g) || [];
+  const counts = values => {
+    const out = new Map();
+    for (const value of values) out.set(value, (out.get(value) || 0) + 1);
+    return out;
+  };
+  const notes = text => [...new Set([...text.matchAll(/<sup\b[^>]*>\s*(\d+)\s*<\/sup>/gi)].map(m => `<sup>${m[1]}</sup>`))];
+  const missing = [], extra = [];
+  for (const [before, after] of [[counts(tokens(source)), counts(tokens(md))], [counts(notes(source)), counts(notes(md))]]) {
+    for (const key of new Set([...before.keys(), ...after.keys()])) {
+      const delta = (before.get(key) || 0) - (after.get(key) || 0);
+      for (let n = 0; n < Math.abs(delta); n++) (delta > 0 ? missing : extra).push(key);
+    }
+  }
+  if (missing.length || extra.length) return `protected tokens mismatch: missing [${missing.join(", ")}]; extra [${extra.join(", ")}]`;
   return null;
 }
 
@@ -224,7 +241,7 @@ export async function translateOne(work, meta, section, opt) {
   let md, usage, seconds;
   for (const attempt of [1, 2]) {
     [md, usage, seconds] = await runCodex(prompt, opt.model, opt.effort, opt.serviceTier, { events, rules });
-    problem = checkOutput(md, section.words);
+    problem = checkOutput(md, section.words, text);
     if (!problem) break;
   }
   if (problem) {
