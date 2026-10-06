@@ -75,7 +75,8 @@ export function transcribeSegment(prefix, wav, work) {
   const outDir = path.join(String(work), "out_" + path.basename(wav, path.extname(wav)));
   fs.mkdirSync(outDir, { recursive: true });
   const cmd = base.buildCmd(prefix, wav, outDir);
-  const res = spawnSync(cmd[0], cmd.slice(1), { stdio: ["inherit", "ignore", "ignore"] });
+  // Keep JSON on stdout, but expose the runner's diagnostics on stderr.
+  const res = spawnSync(cmd[0], cmd.slice(1), { stdio: ["inherit", "ignore", "inherit"] });
   if (res.error) throw res.error;
   if (res.status !== 0) throw new base.CalledProcessError(cmd, res.status ?? res.signal);
   const produced = base.txtFilesIn(outDir);

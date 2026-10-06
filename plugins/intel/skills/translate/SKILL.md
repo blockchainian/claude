@@ -41,7 +41,6 @@ process state before retrying. Use the current host's image/file tools to inspec
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
-| `CHROME` | Chrome executable path; omit to use installed Chrome/Chromium | No | Shell environment before running the command; no automatic `.env` loading |
 
 The translator uses the existing Codex CLI login; no API key is required.
 

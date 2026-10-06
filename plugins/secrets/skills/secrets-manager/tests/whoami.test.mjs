@@ -1,16 +1,23 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 
 import { main, parseCli } from "../scripts/cli.mjs";
 import { validateAdapter } from "../scripts/adapter.mjs";
 
 let base;
 let previous;
+let previousHome;
+const setAdapters = paths => {
+  const dir = join(homedir(), ".config", "secrets-manager");
+  mkdirSync(dir, {recursive: true});
+  writeFileSync(join(dir, "config.json"), JSON.stringify({adapters: paths}));
+};
 beforeEach(() => {
-  previous = [process.env.SECRETS_MANAGER_STATE_PATH, process.env.SECRETS_MANAGER_ADAPTERS];
+  previousHome = process.env.HOME;
+  previous = [process.env.SECRETS_DATA_DIR];
   base = mkdtempSync(join(tmpdir(), "sm-whoami-"));
   const adapter = join(base, "adapter.mjs");
   writeFileSync(adapter, `export default () => [{
@@ -27,11 +34,13 @@ beforeEach(() => {
     name: 'beta', domain: 'beta.example', startUrl: 'https://beta.example/',
     entryTexts: ['Login'], signIn: async () => {}, ready: async () => true
   }];`);
-  process.env.SECRETS_MANAGER_STATE_PATH = join(base, "absent-state");
-  process.env.SECRETS_MANAGER_ADAPTERS = adapter;
+  process.env.SECRETS_DATA_DIR = join(base, "absent-state");
+  process.env.HOME = base;
+  setAdapters([adapter]);
 });
 afterEach(() => {
-  for (const [i, key] of ['SECRETS_MANAGER_STATE_PATH', 'SECRETS_MANAGER_ADAPTERS'].entries()) {
+  if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+  for (const [i, key] of ['SECRETS_DATA_DIR'].entries()) {
     if (previous[i] === undefined) delete process.env[key];
     else process.env[key] = previous[i];
   }
@@ -59,7 +68,7 @@ test("whoami resolves an external credential without creating local state", asyn
   assert.equal(await main(['whoami', 'alpha', '--select', 'refresh'], io), 0);
   assert.deepEqual(io.out, ['user@example.com']);
   assert.deepEqual(io.err, []);
-  assert.equal(existsSync(process.env.SECRETS_MANAGER_STATE_PATH), false);
+  assert.equal(existsSync(process.env.SECRETS_DATA_DIR), false);
 });
 
 test("whoami emits app and email as JSON", async () => {
@@ -74,7 +83,7 @@ test("whoami rejects unknown apps and adapters without a hook", async () => {
     assert.equal(await main(['whoami', app, '--select', 'refresh'], io), 1);
     assert.deepEqual(io.out, []);
     assert.match(io.err[0], app === 'beta' ? /beta has no whoami hook/ : /unknown adapter/);
-    assert.equal(existsSync(process.env.SECRETS_MANAGER_STATE_PATH), false);
+    assert.equal(existsSync(process.env.SECRETS_DATA_DIR), false);
   }
 });
 

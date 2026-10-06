@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import * as config from "../scripts/config.mjs";
 
 afterEach(() => {
-  delete process.env.SECRETS_MANAGER_STATE_PATH;
+  delete process.env.SECRETS_DATA_DIR;
   delete process.env.RESIDENTIAL_PROXY_URL;
   delete process.env.ENVFILE_TEST_A;
   delete process.env.ENVFILE_TEST_B;
@@ -22,7 +22,7 @@ test("default state path is ~/.config/secrets-manager", () => {
 });
 
 test("every path hangs off the state root", () => {
-  process.env.SECRETS_MANAGER_STATE_PATH = "/tmp/sm";
+  process.env.SECRETS_DATA_DIR = "/tmp/sm";
   assert.equal(config.dbPath(), "/tmp/sm/secrets.sqlite");
   assert.equal(config.credentialsDir("google"), "/tmp/sm/google");
   assert.equal(config.credentialsDir("x"), "/tmp/sm/x");
@@ -31,7 +31,7 @@ test("every path hangs off the state root", () => {
 });
 
 test("a ~ state path expands to the home directory", () => {
-  process.env.SECRETS_MANAGER_STATE_PATH = "~/sm";
+  process.env.SECRETS_DATA_DIR = "~/sm";
   assert.ok(!config.statePath().startsWith("~"));
   assert.ok(config.statePath().endsWith("/sm"));
 });
@@ -83,4 +83,12 @@ test("proxyFor returns the base when rotating", () => {
 test("proxyFor is null without env", () => {
   delete process.env.RESIDENTIAL_PROXY_URL;
   assert.equal(config.proxyFor("a@x.com"), null);
+});
+
+test('dotenv parsing preserves quoted secrets and ignores inline comments', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'sm-dotenv-')), '.env');
+  writeFileSync(file, 'ENVFILE_TEST_A="fixture#key" # comment\nENVFILE_TEST_B=plain # comment\n');
+  config.loadEnvFile(file);
+  assert.equal(process.env.ENVFILE_TEST_A, 'fixture#key');
+  assert.equal(process.env.ENVFILE_TEST_B, 'plain');
 });

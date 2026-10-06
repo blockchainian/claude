@@ -140,8 +140,9 @@ def make_epub_book(path):
 
 def test_render_e2e(rd):
     chrome = None
-    for c in [os.environ.get("CHROME"), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-              shutil.which("google-chrome"), shutil.which("chromium")]:
+    for c in ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+              "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+              "/Applications/Chromium.app/Contents/MacOS/Chromium", shutil.which("google-chrome"), shutil.which("chrome"), shutil.which("chromium")]:
         if c and Path(c).exists():
             chrome = c
     if not chrome or not shutil.which("pdftotext"):

@@ -23,10 +23,10 @@ function stubPage(url, pages = null) {
 }
 
 beforeEach(() => {
-  process.env.SECRETS_MANAGER_STATE_PATH = mkdtempSync(join(tmpdir(), "debug-"));
+  process.env.SECRETS_DATA_DIR = mkdtempSync(join(tmpdir(), "debug-"));
 });
 afterEach(() => {
-  delete process.env.SECRETS_MANAGER_STATE_PATH;
+  delete process.env.SECRETS_DATA_DIR;
 });
 
 test("capture writes the screenshot and facts", async () => {
@@ -61,7 +61,7 @@ test("startScreenRecording returns null without a browser pid", () => {
 });
 
 test("stopScreenRecording waits for the recorder to finalize after SIGINT", async () => {
-  const marker = join(process.env.SECRETS_MANAGER_STATE_PATH, "finalized");
+  const marker = join(process.env.SECRETS_DATA_DIR, "finalized");
   const script = `process.on("SIGINT", () => setTimeout(() => { require("fs").writeFileSync(${JSON.stringify(marker)}, "x"); process.exit(0); }, 400)); console.log("recording"); setInterval(() => {}, 1000);`;
   const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "ignore"] });
   await new Promise((r) => child.stdout.once("data", r));

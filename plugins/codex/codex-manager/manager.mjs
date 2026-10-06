@@ -30,7 +30,7 @@ const APPROVALS = {
 };
 // Codex gives up on a tool call after its own timeout, so that one has to outlast the wait for Claude's answer.
 const TOOL_TIMEOUT_MARGIN_SECONDS = 60;
-const FORWARDED_ENV = ["CODEX_MANAGER_HOME", "CODEX_MANAGER_ASK_TIMEOUT"];
+const FORWARDED_ENV = ["CODEX_MANAGER_STATE_DIR", "CODEX_MANAGER_ASK_TIMEOUT"];
 
 /** How codex launches the server that carries notify_claude and ask_claude, as an mcp_servers entry. */
 function claudeToolsServer() {
@@ -558,7 +558,7 @@ async function runMcp() {
   const plugin = JSON.parse(await readFile(pluginManifestPath, "utf8"));
   const sessionId = await resolveSessionId();
   const store = new SessionStore(sessionId);
-  const manager = new Manager(store, daemonSocketPath(process.env.CODEX_MANAGER_DAEMON_SOCKET), plugin.version);
+  const manager = new Manager(store, daemonSocketPath(process.env.CODEX_DAEMON_SOCKET), plugin.version);
   log(`session ${sessionId}, state in ${store.dir}`);
   const parents = parentProcesses();
   if (manager.listening()) manager.connect().catch((error) => log(`adoption deferred: ${error.message}`));

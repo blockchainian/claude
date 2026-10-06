@@ -179,8 +179,8 @@ outlive the Claude session: a running turn finishes on its own, and the daemon
 unloads an idle, unsubscribed thread after `thread_unload_delay_secs`.
 
 The daemon is reached over `~/.codex/app-server-control/app-server-control.sock`
-(override with `CODEX_MANAGER_DAEMON_SOCKET`; state root with
-`CODEX_MANAGER_HOME`).
+(override with `CODEX_DAEMON_SOCKET`; state root with
+`CODEX_MANAGER_STATE_DIR`).
 
 ## Design
 
@@ -225,3 +225,14 @@ abandoned calls, and threads nobody supervises.
 ## License
 
 MIT
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `CODEX_MANAGER_STATE_DIR` | Manager state; default ~/.claude/codex-manager | Optional | Shell environment |
+| `CODEX_DAEMON_SOCKET` | Daemon Unix socket path | Optional | Shell environment |
+| `CODEX_MANAGER_SESSIONS_DIR` | Claude sessions; default ~/.claude/sessions | Optional | Shell environment |
+| `CODEX_MANAGER_ASK_TIMEOUT` | Supervisor reply timeout; default 300 seconds | Optional | Shell environment |
+
+`CODEX_HOME` and host-provided `CLAUDE_CODE_SESSION_ID` retain their upstream names.

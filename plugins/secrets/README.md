@@ -40,7 +40,7 @@ SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
 Setup runs npm install and fetches Camoufox. Invoke `node "$SKILL_DIR/scripts/cli.mjs"`
 directly from the installed skill; setup does not install a global launcher.
 Node with `node:sqlite` support is required; headed macOS window placement uses Swift.
-State defaults to `~/.config/secrets-manager` (`SECRETS_MANAGER_STATE_PATH` overrides it).
+State defaults to `~/.config/secrets-manager` (`SECRETS_DATA_DIR` overrides it).
 `~/.config/secrets-manager/.env` loads without overriding existing environment values:
 `RESIDENTIAL_PROXY_URL`, optional `HERO_SMS_API_KEY`, and
 TikTok's `ISP_PROXY_URL` / `ISP_PROXY_COUNT`. No env file ships in this plugin.
@@ -190,8 +190,7 @@ Configure `~/.config/secrets-manager/config.json`:
 {"adapters": ["/absolute/path/adapters.mjs"]}
 ```
 
-`SECRETS_MANAGER_ADAPTERS` overrides it with colon-separated absolute paths. No config
-and no override means zero adapters. Unknown login/verify/setup/export targets fail with loaded
+No config means zero adapters. Unknown login/verify/setup/export targets fail with loaded
 names; duplicate names or invalid modules fail startup and identify the module path.
 `validate` takes module paths directly and exits 0 printing names or 1 reporting the error.
 Existing app tables retain their names and remain visible through list/get without adapters.
@@ -201,3 +200,7 @@ The plugin owns fixed google/x/tiktok schema and creates app session tables on f
 
 Run `npm run test:secrets` from the marketplace root. The offline suite uses invented
 fixture adapters and exercises every hook; live browser selectors require headed checks.
+
+## Environment Variables
+
+Runtime configuration is `~/.config/secrets-manager/.env`; start from this plugin’s empty `.env.example`. The skill’s **Environment Variables** table lists the settings. Account rows, credential files and browser profiles remain in the existing state directory.

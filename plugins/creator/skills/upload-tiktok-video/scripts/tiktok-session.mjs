@@ -6,12 +6,12 @@
 // slot (a fixed IP), English locale, timezone from the exit IP. To TikTok that is the same device the
 // account signed in on. The store is only read; logging in and account status belong to secrets-manager.
 //
-// Config (SECRETS_MANAGER_STATE_PATH/.env, the secrets-manager's own, loaded automatically):
+// Config (~/.config/creator/.env, loaded automatically):
 //   ISP_PROXY_URL               the ISP pool's base url; slot n is the base port + n.
-//   CAMOUFOX_DISPLAY            the display a headed window goes on, any part of its name (else the main one).
-//   SECRETS_MANAGER_STATE_PATH  where the store and profiles are (default ~/.config/secrets-manager).
-//   CREATOR_TIKTOK_DIR           where posts, stats and recordings go, one directory per account
-//                               (default ~/.local/share/creator/tiktok).
+//   BROWSER_DISPLAY            the display a headed window goes on, any part of its name (else the main one).
+//   SECRETS_DATA_DIR  where the store and profiles are (default ~/.config/secrets-manager).
+//   CREATOR_DATA_DIR           where posts, stats and recordings go, one directory per account
+//                               (root default ~/.local/share/creator; tiktok/ is appended).
 
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
@@ -31,15 +31,15 @@ const MOVE_SCRIPT = fileURLToPath(new URL("./moveWindows.swift", import.meta.url
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export const storeDir = (env = process.env) => env.SECRETS_MANAGER_STATE_PATH || join(homedir(), ".config", "secrets-manager");
+export const storeDir = (env = process.env) => env.SECRETS_DATA_DIR || join(homedir(), ".config", "secrets-manager");
 
-export const dataDir = (env = process.env) => env.CREATOR_TIKTOK_DIR || join(homedir(), ".local", "share", "creator", "tiktok");
+export const dataDir = (env = process.env) => join(env.CREATOR_DATA_DIR || join(homedir(), ".local", "share", "creator"), "tiktok");
 
 // Where one account's posts, stats and recordings go.
 export const accountDir = (username, env = process.env) => join(dataDir(env), username);
 
-// The secrets-manager's .env carries the ISP pool; a value already in the environment wins.
-const envFile = join(storeDir(), ".env");
+// Creator's .env carries the ISP pool; a value already in the environment wins.
+const envFile = join(homedir(), ".config", "creator", ".env");
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 // The account to act as: the one named `username` (any case), else the earliest imported, ties
@@ -114,9 +114,9 @@ export function findPid(parentPid = process.pid, ps = execFileSync("ps", ["-Ao",
   return null;
 }
 
-// The display a headed window goes on: CAMOUFOX_DISPLAY in the secrets-manager's .env, any part of
+// The display a headed window goes on: BROWSER_DISPLAY in Creator's .env, any part of
 // the display's name in any case (e.g. SAMSUNG), shared with its headed logins; empty means the main display.
-export const displayName = (env = process.env) => env.CAMOUFOX_DISPLAY ?? "";
+export const displayName = (env = process.env) => env.BROWSER_DISPLAY ?? "";
 
 // Move the windows of the Camoufox `pid` that are off the display onto it, through the Accessibility
 // API. macOS only and best-effort: resolves either way, never rejects.
@@ -153,7 +153,7 @@ export function recordingPath(username, kind, at = new Date(), env = process.env
 
 // Camoufox on the account's ISP slot at `url`. With `profile` it is the account's own browser
 // profile and fingerprint, signed in or not; without, an anonymous browser. `headed` shows the
-// window on the CAMOUFOX_DISPLAY display (moved there, as are the windows it opens later) and, given
+// window on the BROWSER_DISPLAY display (moved there, as are the windows it opens later) and, given
 // `recordTo`, screen-records it; `withSound` unmutes it. Returns
 // { context, page, template, close }: `template()` resolves to the base of signed API calls, and
 // `close()` saves the recording and closes the browser.

@@ -3,7 +3,8 @@
 // ABOUTME: One markdown file per item under items/, rebuilt index.md.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { outputDir, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
+loadEnvFile();
 import { fileURLToPath } from "node:url";
 
 // --- pathlib-compatible helpers: paths are kept as the user typed them (no
@@ -135,7 +136,7 @@ function today() {
 // --- the store itself ---
 
 export function resolveRoot(env = process.env) {
-  return pyPath(env.DIGESTS_DIR ?? pyJoin(pyJoin(homedir(), "Documents"), "digests"));
+  return pyJoin(outputDir(env), "digests");
 }
 
 export const ROOT = resolveRoot();

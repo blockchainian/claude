@@ -15,12 +15,13 @@ test('validate all required fields and optional hooks', () => {
  for (const name of ['', 'bad-name', [], 'google', 'x', 'tiktok']) assert.throws(() => validateAdapter({...base,name}));
  for (const hook of ['signIn','ready','signedInUrl','byEmail','verify','credentials']) assert.throws(() => validateAdapter({...base,[hook]:1}));
 });
-test('loader handles absence, config, env override, duplicates, and import errors', async () => {
+test('loader handles absence, config, duplicates, and import errors', async () => {
  const dir = mkdtempSync(join(tmpdir(),'adapter-')), configPath = join(dir,'config.json');
- assert.deepEqual(await loadAdapters({configPath,env:{}}), []);
+ assert.deepEqual(await loadAdapters({configPath}), []);
  writeFileSync(configPath,JSON.stringify({adapters:[fixture]}));
- assert.deepEqual((await loadAdapters({configPath,env:{}})).map(a=>a.name), ['alpha','beta']);
- assert.deepEqual(await loadAdapters({configPath,env:{SECRETS_MANAGER_ADAPTERS:''}}), []);
+ assert.deepEqual((await loadAdapters({configPath})).map(a=>a.name), ['alpha','beta']);
+ writeFileSync(configPath,JSON.stringify({adapters:[]}));
+ assert.deepEqual(await loadAdapters({configPath}), []);
  await assert.rejects(loadAdapters({paths:[fixture,fixture]}), /duplicate adapter name/);
  const bad = join(dir,'bad.mjs'); writeFileSync(bad,'throw new Error("import failure")');
  await assert.rejects(loadAdapters({paths:[bad]}), e => e.message.includes(bad) && e.message.includes('import failure'));

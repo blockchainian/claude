@@ -104,3 +104,9 @@ npm run validate      # the marketplace and plugin manifests
 ## License
 
 MIT
+
+## Plugin environment naming
+
+Shared request settings have no plugin prefix (`RESIDENTIAL_PROXY_URL`, `X_BEARER_TOKEN`). Plugin data, output, configuration and state directories keep their owner (`INTEL_DATA_DIR`, `INTEL_OUTPUT_DIR`, `SECRETS_DATA_DIR`, `PROXY_CONFIG_DIR`, `CODEX_MANAGER_STATE_DIR`); all consumers refer to `SECRETS_DATA_DIR` for the shared credential store. Service names stay in settings such as `NAMECHEAP_API_KEY`, and the daemon target stays in `CODEX_DAEMON_SOCKET`. Names use uppercase snake case, `_DIR` for directories and `_ID` for identifiers. Timeout/interval values are in seconds as documented. Upstream CLI/host/MCP variables retain their required names. Internal shell variables and target-project application settings are not plugin configuration.
+
+File-based configuration lives outside the checkout: Intel at `~/.config/intel/.env`, Secrets at `~/.config/secrets-manager/.env`, and Creator at `~/.config/creator/.env`. Each has one empty plugin-root `.env.example`. Creator’s configuration is independent while its accounts and browser profiles remain in Secrets Manager. Other plugins’ optional settings remain shell/MCP settings as documented in their environment tables.

@@ -1,6 +1,6 @@
 ---
 name: fetch-x-mentions
-description: Fetch every X/Twitter post that mentions an app over a date range into docs/intel/x/<slug>/tweets.jsonl — one authenticated search per UTC day, sharded across X accounts through the residential proxy, resumable. Use when asked to fetch / 抓 / 拉 an app's X mentions, extend an existing archive to today, or refill its gap days. NOT for a few posts on a search query without saving them (use fetch-x-posts), NOT for reading the archive (analyze-x-mentions, analyze-x-users) and NOT for one-off lookups (/x).
+description: Fetch every X/Twitter post that mentions an app over a date range into ~/.local/share/intel/x/<slug>/tweets.jsonl — one authenticated search per UTC day, sharded across X accounts through the residential proxy, resumable. Use when asked to fetch / 抓 / 拉 an app's X mentions, extend an existing archive to today, or refill its gap days. NOT for a few posts on a search query without saving them (use fetch-x-posts), NOT for reading the archive (analyze-x-mentions, analyze-x-users) and NOT for one-off lookups (/x).
 ---
 
 # Fetch X mentions
@@ -27,7 +27,7 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
-Run from the repo root.
+Run from any working directory; data paths are under `INTEL_DATA_DIR`.
 
 ```
 node \
@@ -35,7 +35,7 @@ node \
   <slug> "<query>" [since] [until] [--daily-limit <n>] [--refill [<n>]]
 ```
 
-- `slug` names the output dir `docs/intel/x/<slug>/`.
+- `slug` names the output dir `~/.local/share/intel/x/<slug>/`.
 - `query` is X search syntax, e.g. `'(@alpha OR to:alpha OR "alpha app" OR alpha.family) -filter:nativeretweets'`.
   Keep to `@handle`, `to:handle`, `"phrase"` and domain terms; a bare brand word is mostly noise.
 - `since`/`until` are UTC days, `until` exclusive; `since` defaults to 2025-09-20, `until` to today.
@@ -56,17 +56,15 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `X_BEARER` | X web-client bearer token | Yes | `~/.config/intel/.env` |
+| `X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
 | `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
 | `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
 | `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
 | `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
 | `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
-| `RESIDENTIAL_PROXY_URL` | Default residential proxy | One proxy source required | `~/.config/intel/.env` |
-| `X_PROXY_URLS` | Comma-separated proxies aligned to account row order | Alternative to the default proxy | `~/.config/intel/.env` |
-| `HTTPS_PROXY` | Default proxy when RESIDENTIAL_PROXY_URL is unset | Alternative to RESIDENTIAL_PROXY_URL | `~/.config/intel/.env` |
-| `SECRETS_MANAGER_STATE_PATH` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
-| `SECRETS_DB` | SQLite account-store path; overrides the directory setting | No | `~/.config/intel/.env` |
+| `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
+| `INTEL_DATA_DIR` | Data root; default ~/.local/share/intel, with X archives under x/ | No | `~/.config/intel/.env` |
+| `SECRETS_DATA_DIR` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
 
 Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.config/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
 
@@ -86,7 +84,7 @@ Provision accounts with `secrets-manager import x`, then run `verify-x.mjs` belo
 node --test "$SKILL_DIR/tests/fetch-x-mentions.test.mjs"
 ```
 
-Archive paths are relative to the working directory, run from the repo root that owns the archive.
+Archive paths below show the default Intel data root; use the configured `INTEL_DATA_DIR` when set.
 
 Log the account in with the `secrets` plugin’s `secrets-manager login x`.
 

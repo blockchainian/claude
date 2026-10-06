@@ -27,6 +27,8 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
+Data paths below show the default `~/.local/share/intel` root; replace it with the configured `INTEL_DATA_DIR` when set. Expand `~` to the absolute home path in JSON arguments.
+
 ## Environment Variables
 
 No skill-specific environment variables or `.env` file are required.
@@ -40,13 +42,13 @@ self-review checks quotes and overclaims before the doc ships.
 
 ## Input & output
 
-- **Input**: `docs/intel/x/<slug>/tweets.jsonl` and `docs/intel/x/<slug>/labels.jsonl`
+- **Input**: `~/.local/share/intel/x/<slug>/tweets.jsonl` and `~/.local/share/intel/x/<slug>/labels.jsonl`
   as left by `analyze-x-mentions` (every clean post labeled: `about, sentiment, topic, interest`).
   Run `analyze-x-mentions` first if `labels.jsonl` is missing or behind the archive.
-- **Output**: `docs/intel/x/<slug>/users.md` and two charts in
-  `docs/intel/x/<slug>/images/<slug>-users-*.png`.
+- **Output**: `~/.local/share/intel/x/<slug>/users.md` and two charts in
+  `~/.local/share/intel/x/<slug>/images/<slug>-users-*.png`.
 
-Every command runs from the repo root; `S="$SKILL_DIR/scripts"`,
+Commands may run from any working directory; `S="$SKILL_DIR/scripts"`,
 `T="$SKILL_DIR/../analyze-x-mentions/scripts"` below.
 
 > **Run steps 3 and 6 inline — do not spawn subagents for them.** The motivation read
@@ -63,13 +65,13 @@ Every command runs from the repo root; `S="$SKILL_DIR/scripts"`,
 ### 1. Clean (analyze-x-mentions script)
 
 ```
-node $T/clean.mjs docs/intel/x/<slug>/tweets.jsonl --out <scratch>/clean.json
+node $T/clean.mjs ~/.local/share/intel/x/<slug>/tweets.jsonl --out <scratch>/clean.json
 ```
 
 ### 2. Profile the accounts (script)
 
 ```
-node $S/profile-authors.mjs <scratch>/clean.json --labels docs/intel/x/<slug>/labels.jsonl --out <scratch> --team <official,handles,founder>
+node $S/profile-authors.mjs <scratch>/clean.json --labels ~/.local/share/intel/x/<slug>/labels.jsonl --out <scratch> --team <official,handles,founder>
 ```
 
 Per account: posts, active days, span, engagement (likes + reposts + replies + quotes),
@@ -116,7 +118,7 @@ is fast; do the roles one after another rather than fanning out.
 ### 4. Charts (analyze-x-mentions script)
 
 ```
-echo '{"out_dir":"docs/intel/x/<slug>/images","charts":[
+echo '{"out_dir":"~/.local/share/intel/x/<slug>/images","charts":[
   {"type":"grouped","file":"<slug>-users-segments.png","title":"各类用户占账号 / 推文 / 互动的比例（%）",
    "labels":["社交闲聊 / 蹭热度","普通用户 / 一次性提及",...],
    "series":[{"name":"%账号","values":[...],"color":"#2a78d6"},{"name":"%推文","values":[...],"color":"#1baf7a"},{"name":"%互动","values":[...],"color":"#eb6834"}]},
@@ -183,7 +185,7 @@ Rules:
 ### 6. Adversarial review, inline
 
 Read `$SKILL_DIR/review-prompt.md` and follow it exactly, reviewing the
-doc yourself — inline, not by spawning a subagent. Check `docs/intel/x/<slug>/users.md`
+doc yourself — inline, not by spawning a subagent. Check `~/.local/share/intel/x/<slug>/users.md`
 against `<scratch>/app-facts.md`, `<scratch>/authors.json`, `<scratch>/role_stats.json` and
 `<scratch>/reps/*.jsonl`: verify every `/status/<id>` (id exists, handle matches), every
 number against the stats, and every claim against a quote. Apply every MUST-FIX and
@@ -191,7 +193,7 @@ SHOULD-FIX; a NIT only when it is a one-line change.
 
 ### 7. Ship
 
-`git add` `users.md` and the two images only, commit, push. `clean.json`, `authors.json`,
+Return the paths to `users.md` and the two images under the configured data root. `clean.json`, `authors.json`,
 `role_stats.json` and `reps/` are scratch.
 
 ## Requirements
@@ -205,11 +207,11 @@ SHOULD-FIX; a NIT only when it is a one-line change.
 node --test "$SKILL_DIR/tests/test_profile_authors.mjs"
 ```
 
-Archive paths are relative to the working directory, run from the repo root that owns the archive.
+Archives are read from `INTEL_DATA_DIR/x/`, independent of the working directory.
 
 Build the CRM from the owning archive root (cwd) with explicit inputs:
 ```sh
 python3 "$SKILL_DIR/scripts/build-crm.py" --scratch <analysis-dir> --apps <comma-separated-archive-slugs>
 ```
 The analysis directory contains crm/followers.json and each slug's authors.json.
-Output remains docs/intel/x/crm.sqlite under cwd.
+Output is `INTEL_DATA_DIR/x/crm.sqlite`, default `~/.local/share/intel/x/crm.sqlite`.

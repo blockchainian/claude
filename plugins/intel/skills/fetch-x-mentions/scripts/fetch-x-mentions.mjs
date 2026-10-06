@@ -1,11 +1,11 @@
-import { requireEnv, loadEnvFile } from "./env.mjs";
+import { requireEnv, loadEnvFile, dataDir } from "./env.mjs";
 // ABOUTME: Fetches X/Twitter mentions of an app over a date range, one authenticated GraphQL
 // ABOUTME: SearchTimeline per day, sharded across accounts through the residential proxy, resumable.
 //
 // Usage (config from ~/.config/intel/.env loaded automatically):
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/fetch-x-mentions.mjs \
 //     <slug> "<query>" [sinceYYYY-MM-DD] [untilYYYY-MM-DD] [--daily-limit <n>] [--refill [<n>]]
-//   <slug> names the output dir docs/intel/x/<slug>/ holding tweets.jsonl and tweets.out.json.
+//   <slug> names the output dir <INTEL_DATA_DIR>/x/<slug>/ holding tweets.jsonl and tweets.out.json.
 //   --daily-limit caps how many tweets one day may yield (default 1000, rounded up to whole
 //   pages of 20). Days that hit the cap are truncated, newest tweets first.
 //   --refill [n] also re-fetches the gap days: those recorded with 0 tweets, or cut at a page
@@ -20,11 +20,10 @@ import { requireEnv, loadEnvFile } from "./env.mjs";
 //     alpha '(@alpha OR to:alpha OR "alpha app" OR alpha.family) -filter:nativeretweets' 2024-12-13 2026-09-21
 //
 // Accounts come from the secrets-manager store (~/.config/secrets-manager/secrets.sqlite): active X rows,
-// each its own X rate bucket, so N accounts ~= N x throughput. SECRETS_DB overrides the path.
+// each its own X rate bucket, so N accounts ~= N x throughput. The state directory identifies the store.
 // Config (~/.config/intel/.env):
-//   RESIDENTIAL_PROXY_URL Proxy every request routes through (or X_PROXY_URLS).
-//   X_PROXY_URLS          Comma-separated, aligned to the store accounts by row order (one exit each).
-//   X_SEARCH_QUERY_ID / X_BEARER / X_TID_*  anti-bot ingredients; refresh if X starts returning 404.
+//   RESIDENTIAL_PROXY_URL Proxy every request routes through.
+//   X_SEARCH_QUERY_ID / X_BEARER_TOKEN / X_TID_*  anti-bot ingredients; refresh if X starts returning 404.
 //
 // tweets.jsonl holds one tweet per line; each has a `sources` array of which query term(s)
 // surfaced it (@handle / to:handle / "phrase" / domain). Fetched days are appended as they
@@ -311,7 +310,7 @@ export function duration(ms) {
 function makeDispatcher(url) {
   if (!url) {
     throw new Error(
-      "No proxy set. Add RESIDENTIAL_PROXY_URL (or X_PROXY_URLS) to ~/.config/intel/.env.",
+      "No proxy set. Add RESIDENTIAL_PROXY_URL to ~/.config/intel/.env.",
     );
   }
   const u = new URL(url);
@@ -322,20 +321,11 @@ function makeDispatcher(url) {
   return new ProxyAgent(token ? { uri, token } : uri);
 }
 
-function proxyList() {
-  const proxies = (process.env.X_PROXY_URLS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const fallbackProxy = process.env.RESIDENTIAL_PROXY_URL || process.env.HTTPS_PROXY;
-  return { proxies, fallbackProxy };
-}
-
 // The credential store secrets-manager fills: active X accounts with a live auth_token + ct0.
 // Returns null when the store or its table is absent, so loadAccounts can fall back to the env.
 function loadAccountsFromStore() {
-  const stateDir = process.env.SECRETS_MANAGER_STATE_PATH || join(homedir(), ".config", "secrets-manager");
-  const path = process.env.SECRETS_DB || join(stateDir, "secrets.sqlite");
+  const stateDir = process.env.SECRETS_DATA_DIR || join(homedir(), ".config", "secrets-manager");
+  const path = join(stateDir, "secrets.sqlite");
   let rows;
   try {
     const db = new DatabaseSync(path, { readOnly: true });
@@ -351,17 +341,17 @@ function loadAccountsFromStore() {
     return null;
   }
   if (!rows.length) return null;
-  const { proxies, fallbackProxy } = proxyList();
-  return rows.map((r, i) => ({
+  const proxy = requireEnv("RESIDENTIAL_PROXY_URL");
+  return rows.map((r) => ({
     label: r.username,
     authToken: r.auth_token,
     ct0: r.ct0,
-    dispatcher: makeDispatcher(proxies[i] || proxies[0] || fallbackProxy),
+    dispatcher: makeDispatcher(proxy),
   }));
 }
 
 // One account: { label, authToken, ct0, dispatcher }; the label prefixes its log lines. The single
-// source of accounts is the secrets-manager store (~/.config/secrets-manager/secrets.sqlite); SECRETS_DB
+// source of accounts is the secrets-manager store (~/.config/secrets-manager/secrets.sqlite); SECRETS_DATA_DIR
 // overrides its path.
 export function loadAccounts() {
   const accounts = loadAccountsFromStore();
@@ -395,7 +385,7 @@ export async function verifyAuth(acct) {
 export async function provisionPair(authToken, dispatcher) {
   const boot = await fetch(searchUrl("twitter"), {
     dispatcher,
-    headers: { authorization: `Bearer ${requireEnv("X_BEARER")}`, cookie: `auth_token=${authToken}`, "User-Agent": UA },
+    headers: { authorization: `Bearer ${requireEnv("X_BEARER_TOKEN")}`, cookie: `auth_token=${authToken}`, "User-Agent": UA },
   });
   await boot.text();
   let ct0;
@@ -412,7 +402,7 @@ const searchPath = () => `/i/api/graphql/${requireEnv("X_SEARCH_QUERY_ID")}/Sear
 
 function headers(acct) {
   return {
-    authorization: `Bearer ${requireEnv("X_BEARER")}`,
+    authorization: `Bearer ${requireEnv("X_BEARER_TOKEN")}`,
     "x-csrf-token": acct.ct0,
     cookie: `auth_token=${acct.authToken}; ct0=${acct.ct0}`,
     "x-twitter-auth-type": "OAuth2Session",
@@ -837,10 +827,10 @@ async function main() {
   const until = untilArg || new Date().toISOString().slice(0, 10);
   const terms = parseQueryTerms(query);
 
-  requireEnv("X_BEARER");
+  requireEnv("X_BEARER_TOKEN");
   requireEnv("X_SEARCH_QUERY_ID");
   const accounts = loadAccounts();
-  const outDir = join("docs", "intel", "x", slug); // run from the repo root
+  const outDir = join(dataDir(), "x", slug); // run from the repo root
   await mkdir(outDir, { recursive: true });
   const logPath = join(outDir, "tweets.jsonl");
   const progressPath = join(outDir, "tweets.out.json");

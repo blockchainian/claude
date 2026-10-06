@@ -40,7 +40,7 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # fake gh: `pr checks <ref> --json name,state,bucket` reports pending for the first two calls,
 # then a terminal state (success or failure, per FAKE_GH_MODE). Every other invocation fails, so
 # the fallback `gh run list`/`gh run view` path is exercised by a separate stub per test.
-FAKE_GH="$SANDBOX/fake-gh.sh"
+FAKE_GH="$SANDBOX/gh"
 cat >"$FAKE_GH" <<'SH'
 #!/bin/bash
 set -u
@@ -66,8 +66,8 @@ chmod +x "$FAKE_GH"
 
 run_watch() { # <ref> [out-file] — prints stdout; stderr to $ERR_FILE; sets RC
   ERR_FILE=$(mktemp)
-  OUT=$(GH="$FAKE_GH" FAKE_GH_STATE_DIR="$STATE_DIR" FAKE_GH_MODE="$MODE" \
-    WATCH_TIMEOUT_S=10 WATCH_INTERVAL_S=0 \
+  OUT=$(PATH="$SANDBOX:$PATH" FAKE_GH_STATE_DIR="$STATE_DIR" FAKE_GH_MODE="$MODE" \
+    CI_TIMEOUT=10 CI_INTERVAL=0 \
     "$SCRIPTS_DIR/watch-ci.sh" "$@" 2>"$ERR_FILE")
   RC=$?
 }
@@ -108,7 +108,7 @@ assert_json "pending-then-failure verdict shape" "$OUT" \
 # ---------- missing ref argument ----------
 
 ERR_FILE=$(mktemp)
-GH="$FAKE_GH" "$SCRIPTS_DIR/watch-ci.sh" >/dev/null 2>"$ERR_FILE"
+PATH="$SANDBOX:$PATH" "$SCRIPTS_DIR/watch-ci.sh" >/dev/null 2>"$ERR_FILE"
 RC=$?
 [ "$RC" -eq 2 ] && report "missing ref argument exits 2" pass ||
   report "missing ref argument exits 2" fail "rc=$RC"

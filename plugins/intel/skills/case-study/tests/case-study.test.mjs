@@ -9,7 +9,7 @@ import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const tmp = mkdtempSync(join(tmpdir(), 'case-study-'))
-process.env.CASE_STUDIES_DIR = join(tmp, 'store')
+process.env.INTEL_OUTPUT_DIR = join(tmp, 'store')
 const cs = await import('../scripts/case-study.mjs')
 
 const out = join(tmp, 'pdf', 'jane-doe.pdf')
@@ -26,7 +26,7 @@ before(() => {
 after(() => rmSync(tmp, { recursive: true, force: true }))
 
 test('init scaffolds the work dir under the store and keeps an existing sources.json', () => {
-  assert.equal(work, join(tmp, 'store', 'jane-doe'))
+  assert.equal(work, join(tmp, 'store', 'case-studies', 'jane-doe'))
   assert.ok(['drafts', 'book', 'notes', 'raw', 'review'].every(d => statSync(join(work, d)).isDirectory()))
   assert.deepEqual(json(work, 'sources.json'), {})
   const saved = json(work, 'chapters.json')

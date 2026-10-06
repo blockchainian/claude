@@ -54,7 +54,7 @@ export async function checkX({ row, opts = {} }) {
   const res = await fetch(url, {
     dispatcher,
     headers: {
-      authorization: `Bearer ${requireEnv("X_BEARER")}`,
+      authorization: `Bearer ${requireEnv("X_BEARER_TOKEN")}`,
       "x-csrf-token": row.ct0,
       cookie: `auth_token=${row.auth_token}; ct0=${row.ct0}`,
       "x-twitter-auth-type": "OAuth2Session",
@@ -83,7 +83,7 @@ export async function whoamiX({ credential }, { fetchImpl = fetch, dispatcher, q
     throw new Error('X whoami: expected a 40-hex auth_token');
   }
   const url = viewerUrl(queryId ?? requireEnv('X_VIEWER_QUERY_ID'));
-  const headers = { authorization: `Bearer ${bearer ?? requireEnv('X_BEARER')}`,
+  const headers = { authorization: `Bearer ${bearer ?? requireEnv('X_BEARER_TOKEN')}`,
     cookie: `auth_token=${credential}`, 'User-Agent': UA };
   const ownedDispatcher = dispatcher === undefined && fetchImpl === fetch;
   if (ownedDispatcher) dispatcher = xDispatcher(config.proxyFor('whoami-x'));
