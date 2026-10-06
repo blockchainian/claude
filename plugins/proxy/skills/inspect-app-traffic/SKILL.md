@@ -37,9 +37,9 @@ Where this document writes `$CAP` or `$PROXY_DATA_DIR`, paste the actual value
 — read it out of the JSON a previous command printed and type it in full, or run the whole
 sequence as one command.
 
-All scripts print JSON on stdout — parse stdout, act on it. The hub and the per-capture flow
-files live under `$PROXY_DATA_DIR` (default `/tmp/proxy`); point it at a durable directory to keep
-captures across a reboot.
+All scripts print JSON on stdout — parse stdout, act on it. The per-capture flow
+files live under `$PROXY_DATA_DIR` (default `~/.local/share/proxy`), the running hub and the
+capture registry under `$PROXY_STATE_DIR` (default `~/.local/state/proxy`).
 
 ## 0. Setup (skip if already set up)
 

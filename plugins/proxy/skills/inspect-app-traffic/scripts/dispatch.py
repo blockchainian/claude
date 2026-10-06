@@ -8,16 +8,12 @@ from pathlib import Path
 from mitmproxy import http, io
 
 
-def _root() -> Path:
-    return Path(os.environ.get("PROXY_DATA_DIR") or "/tmp/proxy")
-
-
 def _captures_dir() -> Path:
-    return _root() / "captures"
+    return Path(os.environ.get("PROXY_STATE_DIR") or Path.home() / ".local/state/proxy") / "captures"
 
 
 def _cap_file(cap_id: str) -> Path:
-    return _root() / "cap" / f"{cap_id}.mitm"
+    return Path(os.environ.get("PROXY_DATA_DIR") or Path.home() / ".local/share/proxy") / "cap" / f"{cap_id}.mitm"
 
 
 # cap_id -> (file object, FlowWriter, host regex, started_at)
