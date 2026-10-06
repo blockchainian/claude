@@ -49,25 +49,21 @@ The browser profile persists at `~/.cache/secrets-manager/profiles/download-book
 
 ## Run
 
-Run the bundled script with a book title:
+Run the bundled script with a book title and the file to save it to:
 
 ```sh
-"$SKILL_DIR/scripts/anna-archive-links.mjs" "Pride and Prejudice"
+"$SKILL_DIR/scripts/anna-archive-links.mjs" "Pride and Prejudice" --out ~/Downloads/"Pride and Prejudice.epub"
 ```
 
-The script searches the first EPUB results page, reads download counts embedded in that page (using the metadata endpoint only when a count is missing), selects the highest count, calls the fast download API, and resolves a slow download link. For the slow link it prefers a "slightly faster but with waitlist" server (these download at megabytes per second after a short queue) over the "no waitlist" servers (immediate but throttled to tens of KB/s), polling the waitlist entry until its direct link appears and falling back to a no-waitlist server if the queue does not clear in time. It prints JSON with the selected record and any links found. The script itself does not fetch the book file. A run takes about 90 seconds — the browser check plus the slow server's queue.
+The script searches the first EPUB results page, reads download counts embedded in that page (using the metadata endpoint only when a count is missing), selects the highest count, calls the fast download API, and resolves a slow download link. For the slow link it prefers a "slightly faster but with waitlist" server (these download at megabytes per second after a short queue) over the "no waitlist" servers (immediate but throttled to tens of KB/s), polling the waitlist entry until its direct link appears and falling back to a no-waitlist server if the queue does not clear in time. It prints JSON with the selected record, any links found and, with `--out`, the `download` result. Without `--out` it only finds the links. Finding the links takes about 90 seconds — the browser check plus the slow server's queue.
 
 Confirm the selected `title` matches the book the user asked for. The script picks the highest download count on the results page, which can be a different book when the query is loose; if it mismatches, re-run with a tighter query (add the author, edition, or subtitle) before downloading.
 
 ## Download
 
-Once a link is found, download the book to `~/Downloads` automatically, without asking the user to approve it. Prefer the `fast.url` when the fast API returned one; otherwise use `slow.url`. Name the file from the book title with a `.epub` extension. For example:
+Download the book to `~/Downloads` automatically, without asking the user to approve it: pass `--out ~/Downloads/"<Title>.epub"`, naming the file from the book title. Run it in the background; a slow download can take many minutes.
 
-```sh
-curl -fL --retry 2 -o ~/Downloads/"<Title>.epub" "<fast.url or slow.url>"
-```
-
-The waitlist server usually downloads at megabytes per second, so a `slow.url` finishes in seconds; still run it in the background and report the saved path when it finishes. Verify the result is an EPUB (`file` reports a Zip/EPUB, not HTML) — an HTML result means the link was an error or captcha page, which is unavailable.
+With `--out` the script tries `fast.url` first, then `slow.url`, then every other slow entry on the detail page (waitlist servers first), resolving each only when the link before it answered 429 ("too many downloads at the same time from the same IP"). Any other HTTP failure stops it. It writes through a `.part` file and keeps the file only when it is an EPUB (a Zip), so an HTML error page is never saved. The JSON's `download` holds `path`, the `url` used and the `refused` links, or an `error`. When every link answers 429, another download from this IP (often the user's own browser) is still running: report that and retry after it finishes.
 
 To turn the downloaded EPUB into a Chinese PDF, pass it to the `translate` skill, which reads the EPUB directly.
 
