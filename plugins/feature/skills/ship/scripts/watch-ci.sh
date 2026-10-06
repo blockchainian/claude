@@ -3,9 +3,8 @@
 # ABOUTME: makes one background launch + one read instead of many foreground `gh pr checks` polls.
 set -u
 
-GH=${GH:-gh}
-WATCH_TIMEOUT_S=${WATCH_TIMEOUT_S:-600}
-WATCH_INTERVAL_S=${WATCH_INTERVAL_S:-15}
+FEATURE_CI_TIMEOUT_SECONDS=${FEATURE_CI_TIMEOUT_SECONDS:-300}
+FEATURE_CI_INTERVAL_SECONDS=${FEATURE_CI_INTERVAL_SECONDS:-5}
 
 usage="usage: watch-ci.sh <pr-number|branch|commit-sha> [out-file]"
 REF=${1:-}
@@ -21,7 +20,7 @@ log() { printf '%s\n' "$*" >&2; }
 # non-zero only if the ref could not be resolved to a PR or a workflow run at all.
 fetch_checks() {
   local ref=$1 raw
-  if raw=$("$GH" pr checks "$ref" --json name,state,bucket 2>/dev/null); then
+  if raw=$(gh pr checks "$ref" --json name,state,bucket 2>/dev/null); then
     uv run --quiet --no-project python - "$raw" <<'PY'
 import json, sys
 checks = json.loads(sys.argv[1])
@@ -37,13 +36,13 @@ PY
     # `gh run list -c` matches only the full 40-char head SHA, so a short SHA or "HEAD" never
     # matches — resolve to the full SHA first (falling back to the raw ref if git can't).
     full_sha=$(git rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null || true)
-    run_id=$("$GH" run list -c "${full_sha:-$ref}" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
+    run_id=$(gh run list -c "${full_sha:-$ref}" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
   else
-    run_id=$("$GH" run list -b "$ref" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
+    run_id=$(gh run list -b "$ref" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
   fi
   [ -n "$run_id" ] && [ "$run_id" != null ] || return 1
 
-  raw=$("$GH" run view "$run_id" --json jobs 2>/dev/null) || return 1
+  raw=$(gh run view "$run_id" --json jobs 2>/dev/null) || return 1
   uv run --quiet --no-project python - "$raw" <<'PY'
 import json, sys
 jobs = json.loads(sys.argv[1])["jobs"]
@@ -95,13 +94,13 @@ PY
 }
 
 START=$(date +%s)
-INTERVAL=$WATCH_INTERVAL_S
+INTERVAL=$FEATURE_CI_INTERVAL_SECONDS
 CHECKS='[]'
 STATE=timeout
 
 while :; do
   ELAPSED=$(($(date +%s) - START))
-  if [ "$ELAPSED" -ge "$WATCH_TIMEOUT_S" ]; then
+  if [ "$ELAPSED" -ge "$FEATURE_CI_TIMEOUT_SECONDS" ]; then
     STATE=timeout
     break
   fi
@@ -120,12 +119,10 @@ while :; do
 
   log "polling $REF: $(checks_progress "$CHECKS")"
 
-  REMAINING=$((WATCH_TIMEOUT_S - ELAPSED))
+  REMAINING=$((FEATURE_CI_TIMEOUT_SECONDS - ELAPSED))
   SLEEP=$INTERVAL
   [ "$SLEEP" -gt "$REMAINING" ] && SLEEP=$REMAINING
   sleep "$SLEEP"
-  INTERVAL=$((INTERVAL * 2))
-  [ "$INTERVAL" -gt 60 ] && INTERVAL=60
 done
 
 FINAL_ELAPSED=$(($(date +%s) - START))
