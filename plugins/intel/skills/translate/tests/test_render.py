@@ -71,6 +71,9 @@ def test_render_units(rd):
         check("EPUB inline image sized from intrinsic width x inline_scale, height unclamped",
               'class="infig plate"' in scaled and "width:13.2pt" in scaled and "max-height:none" in scaled, scaled)
         check("non-EPUB inline image keeps the 1.4em clamp (no inline size)", "style=" not in out.split("5_2")[0].rsplit("<img", 1)[1], out)
+        bound = rd.place_images("<p>得出 ⟦IMG:5_2⟧。）后 ⟦IMG:5_1⟧，再</p>", work, images, "#c9c4b8", "#000409", 0.6, 0.33)
+        check("inline image + CJK punctuation bound together, block figure not",
+              bound.count('class="nb"') == 1 and '<span class="nb"><img class="infig plate"' in bound and "。）</span>" in bound, bound)
         check("unknown placeholder dropped, not left raw", rd.place_images("a⟦IMG:zz⟧b", work, images, "#c9c4b8", "#000409") == "ab")
     check("roman folios", [rd.folio_for(i, None) for i in range(3)] == ["i", "ii", "iii"])
     check("roman folio past the table falls back to arabic (long front matter)",
@@ -121,6 +124,12 @@ def test_math_units(rd):
     check("\\\\[2pt] array row-skip inside a display is not corrupted", rd.repair_math("\\[a\\\\[2pt]b\\]") == "\\[a\\\\[2pt]b\\]")
     _, bq = rd.md_to_html("# T\n\n> \\[\n> a\\Rightarrow b\n> \\]\n")
     check("math-only blockquote unwrapped (no <blockquote>)", "<blockquote>" not in bq and "\\[" in bq and "\n>" not in bq, bq)
+    # CJK closing punctuation right after inline math or inline code must never start a line: the pair is bound
+    # in a no-break span (the math itself stays breakable inside; see the e2e line-start check).
+    _, nb = rd.md_to_html("# T\n\n设 \\(x_{1}\\)，都可以；令 `PTR`。然后 \\(y\\) 与 \\[z\\]。\n")
+    check("inline math + CJK punctuation bound together", '<span class="nb">\\(x_{1}\\)，</span>' in nb, nb)
+    check("inline code + CJK punctuation bound together", '<span class="nb"><code>PTR</code>。</span>' in nb, nb)
+    check("math not followed by punctuation, and display math, left unwrapped", nb.count('class="nb"') == 2, nb)
     _, fw = rd.md_to_html("# T\n\n设 \\(x=1\\）在……\n")
     check("mis-typed full-width close delimiter fixed", "\\(x=1\\)" in fw, fw)
 
@@ -201,6 +210,25 @@ def test_render_e2e(rd):
         opt = SimpleNamespace(only=meta["sections"][1]["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=12, eq_scale=0.6, bold_factor=1.25)
         rd.render(work, opt)
         check("single-section preview written", any((work / "pdf").glob("*.pdf")))
+        # CJK closing punctuation after inline math or code must not wrap to the start of a line. Many paragraphs
+        # with every prefix length put the math at every position in the line, so some land at a line end.
+        chap = next(s for s in meta["sections"] if s["kind"] == "chapter")
+        paras = "\n\n".join("正" * n + "\\(x_{1}+y\\)，" + "文" * 30 + "`PTR`。" + "字" * 20 for n in range(1, 45))
+        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text("# 标点译\n\n" + paras + "\n")
+        rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
+        prev = next((work / "pdf").glob(f"{chap['id']}-*.pdf"))
+        lines = [ln.strip() for ln in subprocess.run(["pdftotext", str(prev), "-"], capture_output=True, text=True).stdout.splitlines()]
+        starts = [ln for ln in lines if ln and ln[0] in "，。、；：！？"]
+        check("no line starts with CJK punctuation after inline math or code", not starts, f"{len(starts)}: {starts[:3]}")
+        # Binding the punctuation must not stop a long inline formula from wrapping inside itself (a no-break
+        # formula wider than the column would overflow and be clipped).
+        long_eq = "+".join(f"\\mathrm{{w{i:02d}}}" for i in range(1, 61))
+        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text(f"# 长式译\n\n设 \\({long_eq}\\)，于是。\n")
+        rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
+        text = subprocess.run(["pdftotext", str(prev), "-"], capture_output=True, text=True).stdout
+        line_of = lambda w: next((i for i, ln in enumerate(text.splitlines()) if w in ln), -1)
+        check("a long inline formula followed by punctuation still wraps inside", 0 <= line_of("w01") < line_of("w60"), text[:900].replace(chr(10), " | "))
+        check("the wrapped formula's punctuation stays on its last line", "，" in text.splitlines()[line_of("w60")] if line_of("w60") >= 0 else False, text[:900].replace(chr(10), " | "))
         # Last, because it corrupts a section's md: an equation KaTeX cannot parse (an undefined command) renders
         # as red source; the render must fail on it rather than ship it silently.
         chap = next(s for s in meta["sections"] if s["kind"] == "chapter")
