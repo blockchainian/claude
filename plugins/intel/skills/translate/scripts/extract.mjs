@@ -95,14 +95,15 @@ export function slugify(title) {
   return s.slice(0, 40) || "section";
 }
 
-/** '1. Getting Started' / 'Chapter One: Getting Started' -> [1, 'Getting Started']; else [null, title]. */
+/** '1. Getting Started' / 'Chapter One: Getting Started' / 'Chapter 7—Searching' -> [1, 'Getting Started']; else
+ * [null, title]. */
 export function parseTitle(title) {
   const t = pyStrip(title);
   let m = t.match(/^(\d+)[.:\s]+\s*(.+)$/);
   if (m) return [parseInt(m[1], 10), pyStrip(m[2])];
-  m = t.match(/^chapter\s+([a-z\- ]+?)[.:\s]+(.+)$/i);
+  m = t.match(/^chapter\s+([a-z\- ]+?)[.:\s—–]+(.+)$/i);
   if (m && Object.hasOwn(NUMBER_WORDS, pyStrip(m[1]).toLowerCase())) return [NUMBER_WORDS[pyStrip(m[1]).toLowerCase()], pyStrip(m[2])];
-  m = t.match(/^chapter\s+(\d+)[.:\s]+(.+)$/i);
+  m = t.match(/^chapter\s+(\d+)[.:\s—–]+(.+)$/i);
   if (m) return [parseInt(m[1], 10), pyStrip(m[2])];
   return [null, t];
 }

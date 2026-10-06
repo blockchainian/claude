@@ -116,6 +116,11 @@ describe("titles and numbers", () => {
     assert.deepEqual(ex.parseTitle("Chapter Twelve: SEO"), [12, "SEO"]);
   });
 
+  test("parse 'Chapter 7—X' (an em or en dash after the number)", () => {
+    assert.deepEqual(ex.parseTitle("Chapter 7—Combinatorial Searching"), [7, "Combinatorial Searching"]);
+    assert.deepEqual(ex.parseTitle("Chapter Seven – Combinatorial Searching"), [7, "Combinatorial Searching"]);
+  });
+
   test("an ebook vendor's boilerplate page is skipped", () => {
     assert.equal(ex.classify("About This eBook", null, false), "skip");
   });
