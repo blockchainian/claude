@@ -114,13 +114,15 @@ def test_render_units(rd):
     check("no drop cap when the first paragraph opens with a bold label", not dropcap("<p><strong>1.</strong> " + "答案" * 60 + "</p>"))
     check("no drop cap after a leading image then a bold label", not dropcap('<p><img class="infig" src="a.png"> <strong>2.</strong> ' + "习题" * 60 + "</p>"))
     check("no drop cap when the first paragraph opens with a digit", not dropcap("<p>7 " + "正文" * 60 + "</p>"))
-    check("no drop cap on a very short first paragraph", not dropcap("<p>短。</p>" + prose))
+    check("drop cap even on a two-character opening stub", dropcap("<p>数列</p>" + prose))
+    check("no drop cap on an index entry label", not dropcap("<p>算法 1.1E</p><p>算法 1.1F</p>"))
+    check("no drop cap on an image-only first paragraph", not dropcap('<p><img class="infig" src="a.png"></p>' + prose))
     # A one-sentence opener just over a line still wraps the two-line cap; 60 characters skipped many sections.
     check("drop cap on a one-line-plus opening sentence", dropcap("<p>算法的概念是所有计算机程序设计的基础，因此我们应当从仔细分析这一概念开始。</p>"))
-    check("a formula's LaTeX source does not count toward the length", not dropcap("<p>令 \\(\\mathtt{BASEROW}[i]\\)。</p>" + prose))
     check("css clears the block after a capped paragraph", ".body-text:not(.no-dropcap) > p:first-of-type + * { clear: left; }" in style)
     # place_images marks a paragraph leading into a figure <p class="keep">; it is still the first paragraph.
-    check("drop cap judged on a first paragraph that carries a class", dropcap('<p class="keep">' + "正文" * 30 + "</p><p>短。</p>"))
+    check("drop cap judged on a first paragraph that carries a class", dropcap('<p class="keep">' + "正文" * 30 + "</p><p>短。</p>")
+          and not dropcap('<p class="keep"><strong>1.</strong> 答</p><p>' + "正文" * 30 + "</p>"))
     # The capped paragraph clears the float, so even a one-line lead-in ("若 x 是任意实数，我们记") takes the cap.
     check("drop cap on a short one-line lead-in", dropcap("<p>若 \\(x\\) 是任意实数，我们记</p>" + prose))
     check("no drop cap on a bold table or figure caption", not dropcap("<p><strong>表 1</strong> 标准子程序和计算机程序分析中常用的量（40 位十进制）</p>")
