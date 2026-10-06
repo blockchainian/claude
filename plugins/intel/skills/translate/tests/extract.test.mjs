@@ -116,6 +116,10 @@ describe("titles and numbers", () => {
     assert.deepEqual(ex.parseTitle("Chapter Twelve: SEO"), [12, "SEO"]);
   });
 
+  test("an ebook vendor's boilerplate page is skipped", () => {
+    assert.equal(ex.classify("About This eBook", null, false), "skip");
+  });
+
   test("parse plain title", () => {
     assert.deepEqual(ex.parseTitle("Preface: Traction Trumps Everything"), [null, "Preface: Traction Trumps Everything"]);
   });
@@ -194,6 +198,8 @@ describe("fragments and images", () => {
     assert.equal(Object.keys(imgs).length, 1);
     assert.equal(n, 1);
     assert.ok(fs.existsSync(path.join(work, "images", "e1.png")));
+    // The EPUB's own file name is kept, so a book script can find a recurring glyph (a marker, a symbol) by name.
+    assert.equal(imgs.e1.src, "i");
   });
 });
 
@@ -259,6 +265,49 @@ describe("section grouping", () => {
     assert.ok(concl && byFile[concl.file].includes("CONCLUSIONBODY") && byFile[concl.file].includes("CONCLCONT"));
     assert.ok(!byFile[ch1.file].includes("CONCLUSIONBODY"));
     assert.ok(!Object.values(byFile).join("").includes("INDEXTERM"));
+  });
+
+  test("answers and appendices open their own back sections; an index's untitled continuation is skipped", () => {
+    const work = tmpDir();
+    const epub = path.join(work, "b.epub");
+    makeEpub(epub,
+      { "c1.xhtml": "<p>only chapter body</p>", "ans.xhtml": "<p>ANSWERBODY 1. yes</p>",
+        "ans2.xhtml": "<p>ANSCONT 2. no</p>", "appa.xhtml": "<p>APPENDIXBODY a table</p>",
+        "index.xhtml": "<p>INDEXTERM 3, 9</p>", "indexa.xhtml": "<p>INDEXCONT 10, 11</p>" },
+      ["c1.xhtml", "ans.xhtml", "ans2.xhtml", "appa.xhtml", "index.xhtml", "indexa.xhtml"],
+      { "c1.xhtml": "1. Only", "ans.xhtml": "Answers to Exercises", "appa.xhtml": "Appendix A. Tables", "index.xhtml": "Index and Glossary" });
+    const secs = extractSections(work, epub);
+    const text = (s) => fs.readFileSync(path.join(work, s.file), "utf8");
+    assert.deepEqual(secs.map((s) => [s.kind, s.title]),
+      [["chapter", "Only"], ["back", "Answers to Exercises"], ["back", "Appendix A. Tables"]]);
+    assert.ok(text(secs[1]).includes("ANSWERBODY") && text(secs[1]).includes("ANSCONT"));
+    assert.ok(!text(secs[0]).includes("ANSWERBODY"));
+    assert.ok(!secs.map(text).join("").includes("INDEXCONT"));
+  });
+
+  test("a section too long for one translation call splits at its numbered subsection headings", () => {
+    const work = tmpDir();
+    const epub = path.join(work, "b.epub");
+    const words = (tag, n) => `<p>${(tag + " ").repeat(n)}</p>`;
+    makeEpub(epub,
+      { "c1.xhtml": "<h2>Chapter One. Basics</h2>" + words("intro", 50) + "<h3>1.1. Alpha</h3>" + words("alpha", 9000) +
+          "<h4>1.1.1. Beta&#8217;s</h4>" + words("beta", 9000) + "<h3>1.2. Gamma</h3><h4>1.2.1. Delta</h4>" + words("delta", 100),
+        "ans.xhtml": "<h2>Answers to Exercises</h2><h3>Section 1.1</h3>" + words("ans", 9000) + "<h4>Section 1.1.1</h4>" + words("ansb", 9000) },
+      ["c1.xhtml", "ans.xhtml"],
+      { "c1.xhtml": "Chapter One. Basics", "ans.xhtml": "Answers to Exercises" });
+    const secs = extractSections(work, epub);
+    assert.deepEqual(secs.map((s) => [s.kind, s.chapter, s.label, s.title]), [
+      ["chapter", 1, "第一章", "Basics"],
+      ["chapter", 1, null, "1.1 Alpha"],
+      ["chapter", 1, null, "1.1.1 Beta’s"],
+      ["chapter", 1, null, "1.2.1 Delta"], // "1.2 Gamma" has no body of its own: dropped, not an empty section
+      ["back", null, null, "Answers to Exercises: Section 1.1"],
+      ["back", null, null, "Answers to Exercises: Section 1.1.1"],
+    ]);
+    const text = (s) => fs.readFileSync(path.join(work, s.file), "utf8");
+    assert.ok(text(secs[1]).includes("alpha") && !text(secs[1]).includes("beta"));
+    assert.ok(text(secs[3]).includes("1.2. Gamma"), "a dropped heading-only section's heading leads the next one");
+    assert.ok(secs[1].words >= 9000 && secs[1].words < 9010, String(secs[1].words));
   });
 
   test("sections.json carries the render contract: epub kind, float page size, cover, words", () => {

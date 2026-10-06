@@ -89,10 +89,15 @@ files fold into the next chapter, the cover comes from the OPF, and the page siz
 Prints one line per section (`id kind title: words`) and the work dir. Kinds: `contents` and `skip` (Cover,
 Index, Notes, References/Bibliography, copyright/title pages: not translated; the cover comes from the OPF and
 the 目录 is regenerated), `front` (preface, introduction — roman folios), `chapter` (第N章, arabic folios from
-1), `back` (acknowledgments, appendix, letters; a Conclusion/Epilogue/Afterword opens its own back section).
+1), `back` (acknowledgments, appendix, letters; a Conclusion/Epilogue/Afterword, the Answers to Exercises and each
+Appendix open their own back section). A section over 15,000 words (a textbook chapter, the answers) is split at
+its numbered subsection headings ("1.2.1. …", "Section 1.2.1"), one section each, titled by the heading; a
+heading with no body of its own leads the next section. `images.json` records each image's EPUB file name as
+`src`, so a recurring glyph (a marker, a symbol) can be found by name.
 Once the book's terminal back-matter starts (Notes/References/Bibliography/Index) past the last chapter, it and
 every spine file after it (continuations with no nav title of their own included) is skipped, so endnotes and
-the index never fold into the last chapter.
+the index never fold into the last chapter. An untitled spine file right after a skipped one (an index's
+continuation) is skipped too.
 
 Pass `--keep-images` for books whose figures and equations are stored as images (e.g. a textbook): each
 section's text then carries an `⟦IMG:key⟧` placeholder at every image's position (block images on their own
