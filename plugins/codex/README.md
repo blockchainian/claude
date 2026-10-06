@@ -45,7 +45,7 @@ codex plugin add claude@blockchainian
 The plugin registers the `claude-client` MCP server with `ask_claude` and
 `notify_claude`. It starts `node codex-manager/manager.mjs claude` from its installed
 directory, so no absolute script path or manual global MCP entry is needed.
-Claude's Stop hook is excluded from the Codex installation.
+Claude's PostToolUse, Stop and SubagentStop hooks are excluded from the Codex installation.
 
 Start or resume a Codex session after installation, then have Claude `attach`
 its thread id or name. Installation makes the tools available; `attach` associates
@@ -147,13 +147,21 @@ the last session to claim a thread has it. The tools server looks the thread up
 there, refuses when there is no record or that manager is no longer running,
 and otherwise writes into that session's directory: the inbox event, and for
 `ask_claude` the open question, which `reply` answers with a file the tools
-server is polling for. `state.json` stays the manager's alone to write.
+server is polling for. The manager and ownership hook serialize `state.json`
+edits under a shared lock.
 
 `--timeout` exits 124 with no output when nothing arrives. The plugin's Stop
 hook (`codex-manager pending`) is the fallback: when Claude tries to stop with
 undelivered events, the hook blocks once and hands them over. `await` and the
-hook take events under a per-thread lock, so an event is delivered once even
-when both are reading.
+hook have separate cursors and take events under a per-thread lock, so each
+reader delivers an event once.
+
+PostToolUse records the starting agent as each thread's `owner` after `start`,
+`attach` or `review`: `agent_id` for a subagent, otherwise `main`. This hook is
+silent and best effort, and skips a busy state lock. Stop checks only `main`
+threads and threads without an owner; SubagentStop runs the same `pending`
+check only for its own `agent_id`. All threads still share the session store,
+and attaching an already owned thread preserves its owner.
 
 Only an `await` process wakes Claude after it has stopped, so the hook also
 blocks while a thread's turn is running and no `await` is waiting on it, and
@@ -169,9 +177,10 @@ daemon replays any request that was still waiting for an answer.
 ~/.claude/codex-manager/
   threads/<codex-thread-id>.json   the supervising Claude session and its manager's pid
   <claude-session-id>/
-    state.json                          threads: id, name, cwd, turnId, lastStatus, waiting (held approvals), attached, review (out file)
+    state.json                          threads: id, owner, name, cwd, turnId, lastStatus, waiting (held approvals), attached, review (out file)
     <codex-thread-id>.jsonl             the inbox, appended by the manager and the tools server
-    <codex-thread-id>.cursor            byte offset of delivered events, written by await/pending only
+    <codex-thread-id>.cursor            byte offset of events delivered by await
+    <codex-thread-id>.pending.cursor    byte offset of events delivered by Stop/SubagentStop
     <codex-thread-id>.await.<pid>       an await process waiting on the thread, removed when it exits
     <codex-thread-id>.ask.<call>.json   a question codex is waiting on, written by the tools server
     <codex-thread-id>.reply.<call>.json its answer, written by reply and taken by the tools server

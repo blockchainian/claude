@@ -20,6 +20,7 @@ const usage = `usage:
   manager.mjs mcp                                   serve Claude's codex tools over stdio
   manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
   manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
+  manager.mjs owner                                 PostToolUse hook: record the thread's starting agent
   manager.mjs claude                                serve notify_claude and ask_claude to codex over stdio
   manager.mjs whoami                                print the resolved Claude session id`;
 
@@ -90,7 +91,31 @@ async function runAwait(options) {
   }
 }
 
-// --- pending (Stop hook) -----------------------------------------------------
+// --- ownership (PostToolUse hook) ---------------------------------------------
+
+async function runOwner() {
+  try {
+    const hook = JSON.parse(await readStdin());
+    if (!hook?.session_id || hook.hook_event_name !== "PostToolUse" || !/^mcp__plugin_codex_codex-manager__(start|attach|review)$/.test(hook.tool_name)) return 0;
+    if (hook.tool_response?.isError) return 0;
+    const content = Array.isArray(hook.tool_response) ? hook.tool_response : hook.tool_response?.content;
+    if (!Array.isArray(content)) return 0;
+    const result = content.filter((item) => item.type === "text").map((item) => JSON.parse(item.text)).find((item) => typeof item?.threadId === "string" && item.threadId);
+    if (!result) return 0;
+    const store = new SessionStore(hook.session_id);
+    if (!store.exists()) return 0;
+    store.updateState((state) => {
+      const thread = state.threads.find((thread) => thread.id === result.threadId);
+      if (!thread || thread.owner !== undefined) return false;
+      thread.owner = hook.agent_id ?? "main";
+    }, { wait: false });
+  } catch {
+    // Ownership is best effort; unrecorded threads remain the main Stop hook's responsibility.
+  }
+  return 0;
+}
+
+// --- pending (Stop and SubagentStop hooks) ------------------------------------
 
 async function runPending() {
   let hook;
@@ -100,23 +125,30 @@ async function runPending() {
     return 0;
   }
   if (!hook?.session_id) return 0;
+  const owner = hook.hook_event_name === "SubagentStop" ? hook.agent_id : "main";
+  if (!owner) return 0;
   const store = new SessionStore(hook.session_id);
   if (!store.exists()) return 0;
+  const owns = (thread) => (thread?.owner ?? "main") === owner;
+  const state = store.readState();
+  const threads = state.threads.filter(owns);
+  const byId = new Map(state.threads.map((thread) => [thread.id, thread]));
   const sections = [];
   for (const threadId of store.threadIds()) {
+    if (!owns(byId.get(threadId))) continue;
     const lines = store.claim(threadId, "pending");
     if (lines.length) sections.push(`codex thread ${threadId}:\n${lines.join("\n")}`);
   }
   // A held ask is nudged once per stop; when the hook itself caused this stop, only new events count.
   if (!hook.stop_hook_active) {
-    for (const thread of store.readState().threads) {
+    for (const thread of threads) {
       for (const waiting of [...(thread.waiting ?? []), ...store.asks(thread.id)]) {
         sections.push(`codex thread ${thread.id} is waiting for reply since ${new Date(waiting.since).toISOString()} (${waiting.kind} ${waiting.callId}): ${waiting.text}`);
       }
     }
   }
   // Only an await process wakes Claude once it has stopped, and starting one lifts this block, so it holds on every stop.
-  for (const thread of store.readState().threads) {
+  for (const thread of threads) {
     if (thread.lastStatus !== "inProgress" || store.awaiting(thread.id).length) continue;
     sections.push(`codex thread ${thread.id} is running and nothing is waiting for it. Run this with run_in_background before you stop:\n${awaitCommand(thread.id)}`);
   }
@@ -135,20 +167,13 @@ class Manager {
     this.version = version;
     this.client = undefined;
     this.connecting = undefined;
-    this.cachedState = undefined;
     this.lastMessages = new Map();
     this.held = new Map();
     this.reconnectAttempt = 0;
   }
 
   state() {
-    if (!this.cachedState) this.cachedState = this.store.readState();
-    return this.cachedState;
-  }
-
-  writeState(state) {
-    this.store.writeState(state);
-    this.cachedState = undefined;
+    return this.store.readState();
   }
 
   owns(threadId) {
@@ -162,13 +187,13 @@ class Manager {
   }
 
   updateThread(threadId, patch) {
-    const state = this.state();
-    const index = state.threads.findIndex((thread) => thread.id === threadId);
-    if (index === -1) {
-      state.threads.push({ id: threadId, ...patch });
-      this.supervise(threadId);
-    } else state.threads[index] = { ...state.threads[index], ...patch };
-    this.writeState(state);
+    this.store.updateState((state) => {
+      const index = state.threads.findIndex((thread) => thread.id === threadId);
+      if (index === -1) {
+        state.threads.push({ id: threadId, ...patch });
+        this.supervise(threadId);
+      } else state.threads[index] = { ...state.threads[index], ...patch };
+    });
   }
 
   /** Points the thread's notify_claude and ask_claude calls at this session. */
@@ -182,9 +207,9 @@ class Manager {
   }
 
   dropThread(threadId) {
-    const state = this.state();
-    state.threads = state.threads.filter((thread) => thread.id !== threadId);
-    this.writeState(state);
+    this.store.updateState((state) => {
+      state.threads = state.threads.filter((thread) => thread.id !== threadId);
+    });
   }
 
   connected() {
@@ -614,6 +639,7 @@ export async function main(argv) {
   if (command === "mcp") return runMcp();
   if (command === "await") return runAwait(options);
   if (command === "pending") return runPending();
+  if (command === "owner") return runOwner();
   if (command === "claude") return runClaude(JSON.parse(await readFile(pluginManifestPath, "utf8")).version);
   if (command === "whoami") {
     process.stdout.write(`${await resolveSessionId()}\n`);

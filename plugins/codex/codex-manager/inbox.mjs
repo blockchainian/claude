@@ -87,6 +87,23 @@ export class SessionStore {
     renameSync(temporary, target);
   }
 
+  /** Serializes state edits by the manager and ownership hook; the hook skips a busy lock. */
+  updateState(update, { wait = true } = {}) {
+    const lock = path.join(this.dir, "state.json.lock");
+    if (!this.acquire(lock, wait ? 40 : 1)) {
+      if (wait) throw new Error("codex-manager state is locked");
+      return false;
+    }
+    try {
+      const state = this.readState();
+      if (update(state) === false) return false;
+      this.writeState(state);
+      return true;
+    } finally {
+      rmSync(lock, { recursive: true, force: true });
+    }
+  }
+
   append(threadId, event) {
     mkdirSync(this.dir, { recursive: true });
     appendFileSync(this.inboxPath(threadId), `${JSON.stringify({ ts: Date.now(), ...event })}\n`);
@@ -141,9 +158,9 @@ export class SessionStore {
     }
   }
 
-  acquire(lock) {
+  acquire(lock, attempts = 40) {
     mkdirSync(this.dir, { recursive: true });
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
         mkdirSync(lock);
         return true;
@@ -154,7 +171,7 @@ export class SessionStore {
         } catch {
           // lock vanished between the failed mkdir and the stat; retry
         }
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+        if (attempt + 1 < attempts) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
       }
     }
     return false;
