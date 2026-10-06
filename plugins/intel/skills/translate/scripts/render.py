@@ -47,6 +47,10 @@ KATEX_HEAD = (
     "document.querySelectorAll('.katex').forEach(function(k){if(/#cc0000/i.test(k.innerHTML))bad.push(k);});"  # and
     "bad.forEach(function(e){var m=document.createElement('span');m.className='mk';"  # inline red (undefined cmd) ones;
     "m.textContent='\\u27e6KERR\\u27e7';e.parentNode.insertBefore(m,e.nextSibling);});"  # mark now, not in fonts.ready
+    "document.querySelectorAll('.nb').forEach(function(n){var t=n.lastChild,h=n.querySelector('.katex-html');"  # math
+    "if(!h||!t||t.nodeType!==3)return;var b=h.querySelectorAll(':scope>.base');if(!b.length)return;"  # + punctuation:
+    "var p=document.createElement('span');p.className='nbp';p.textContent=t.textContent;"  # move the punctuation
+    "b[b.length-1].appendChild(p);t.remove();n.className='nbm';});"  # into the formula's last no-break atom
     "document.fonts.ready.then(function(){"
     "var col=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--eqcol-w'))||1e9;"
     "document.querySelectorAll('.katex-display').forEach(function(d){var w=0;"
@@ -88,6 +92,10 @@ def iterm_colors():
 
 
 MATH_RE = re.compile(r"\\\[.*?\\\]|\\\(.*?\\\)", re.S)
+# Inline math or inline code followed by CJK closing punctuation. render wraps each pair in a .nb span so the
+# punctuation can never wrap to the start of the next line (a CJK line must not open with ，or 。).
+CJK_CLOSE = "，。、；：！？）」』》〉】〕…—”’"
+NOBREAK_RE = re.compile(rf"(@@MATH(\d+)@@|<code>[^<]*</code>)[{CJK_CLOSE}]+")
 
 
 def repair_math(raw):
@@ -125,12 +133,14 @@ def md_to_html(md_text):
     body = MATH_RE.sub(stash, body)
     body = re.sub(r"^>[ \t]?(@@MATH\d+@@)[ \t]*$", r"\1", body, flags=re.M)  # unwrap a math-only blockquote line
     out = markdown.markdown(body, extensions=["smarty"], output_format="html")
+    out = NOBREAK_RE.sub(lambda m: m.group(0) if m.group(1).startswith("@@MATH") and vault[int(m.group(2))].startswith("\\[")
+                         else f'<span class="nb">{m.group(0)}</span>', out)
     for i, raw in enumerate(vault):
         out = out.replace(f"@@MATH{i}@@", html.escape(raw))
     return title, out
 
 
-IMG_TOKEN_RE = re.compile(r"⟦IMG:([^⟧]+)⟧")
+IMG_TOKEN_RE = re.compile(rf"⟦IMG:([^⟧]+)⟧([{CJK_CLOSE}]*)")  # with any CJK punctuation right after it
 
 
 def is_line_art(im):
@@ -188,7 +198,7 @@ def place_images(body_html, work, images, fg, bg, eq_scale=None, inline_scale=No
     def repl(m):
         meta = images.get(m.group(1))
         if not meta:
-            return ""
+            return m.group(2)
         src = work / "images" / meta["file"]
         rc = src.with_suffix(".rc.png")
         try:
@@ -200,10 +210,11 @@ def place_images(body_html, work, images, fg, bg, eq_scale=None, inline_scale=No
         if meta.get("block"):
             width = scaled_width(src, eq_scale) if eq_scale else ""
             style = f' style="{width}"' if width else ""
-            return f'</p><figure class="fig{plate}"><img{style} src="{uri}"></figure><p>'
+            return f'</p><figure class="fig{plate}"><img{style} src="{uri}"></figure><p>{m.group(2)}'
         width = scaled_width(src, inline_scale) if inline_scale else ""
         style = f' style="{width};height:auto;max-height:none"' if width else ""
-        return f'<img class="infig{plate}"{style} src="{uri}">'
+        img = f'<img class="infig{plate}"{style} src="{uri}">'
+        return f'<span class="nb">{img}{m.group(2)}</span>' if m.group(2) else img  # punctuation never opens a line
     return IMG_TOKEN_RE.sub(repl, body_html)
 
 
@@ -241,6 +252,11 @@ pre {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
 .opener h1 {{ font-family: {hei}; font-weight: 700; color: {bold}; font-size: 22pt; letter-spacing: 2pt; margin: 0; line-height: 1.5; }}
 .mk {{ font-size: 1pt; color: transparent; letter-spacing: 0; white-space: nowrap; font-family: Baskerville, "Songti SC", serif; }}
 p {{ margin: 0; text-indent: 2em; text-align: justify; }}
+/* Inline math/code + its CJK closing punctuation: no break between them (inline code is short). After KaTeX
+   runs, KATEX_HEAD moves a formula's punctuation into its last atom (.nbp) and lifts the nowrap (.nbm), so a long
+   formula keeps its own break points and only its last atom is bound to the punctuation. */
+.nb {{ white-space: nowrap; }}
+.nbp {{ font-family: Baskerville, "Songti SC", serif; }}
 .body-text > p:first-of-type {{ text-indent: 0; }}
 .body-text:not(.no-dropcap) > p:first-of-type::first-letter {{ float: left; font-size: 2.6em; line-height: 0.85; padding: 3pt 4pt 0 0; }}
 h2 {{ font-family: {hei}; font-size: 11pt; font-weight: 700; color: {bold}; margin: 18pt 0 6pt; break-after: avoid; }}
