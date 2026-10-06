@@ -334,3 +334,29 @@ describe("section grouping", () => {
     assert.equal(meta.sections[0].file, "text/01-one.xhtml");
   });
 });
+
+test("Calibre part stems use content titles and preserve appendix and colophon", () => {
+  const work = tmpDir(), epub = path.join(work, "b.epub");
+  const files = {
+    "Text/part0000.xhtml": '<section data-type="titlepage"><h1>B</h1><p>EXCLUDE</p></section>',
+    "Text/part0001.xhtml": '<section data-type="copyright-page"><h1>B</h1><p>EXCLUDE</p></section>',
+    "Text/part0002.xhtml": '<h1>Preface</h1><p>preface</p>',
+    "Text/part0003.xhtml": '<section data-type="chapter"><h1>Chapter 1. Logs</h1><p>chapter</p></section><section data-type="appendix"><h1>Appendix A. References</h1><p>appendix</p></section>',
+    "Text/part0004.xhtml": '<h1>About the Author</h1><p>author</p>',
+    "Text/part0005.xhtml": '<h1>Colophon</h1><p>colophon</p>',
+  };
+  makeEpub(epub, files, Object.keys(files), {"Text/part0002.xhtml": "Preface", "Text/part0003.xhtml": "1. Logs"});
+  const secs = extractSections(work, epub);
+  assert.deepEqual(secs.map(s => [s.kind, s.title]), [["front", "Preface"], ["chapter", "Logs"],
+    ["back", "Appendix A. References"], ["back", "About the Author"], ["back", "Colophon"]]);
+  assert.ok(!fs.readFileSync(path.join(work, secs[1].file), "utf8").includes("appendix"));
+});
+
+test("a titled Part divider folds into the next chapter", () => {
+  const work = tmpDir(), epub = path.join(work, "b.epub");
+  makeEpub(epub, {"divider.xhtml": "<h1>Part II</h1><p>divider</p>", "part0004.xhtml": "<h1>Chapter 2. Next</h1><p>body</p>"},
+    ["divider.xhtml", "part0004.xhtml"], {"divider.xhtml": "Part II", "part0004.xhtml": "2. Next"});
+  const secs = extractSections(work, epub);
+  assert.equal(secs.length, 1);
+  assert.ok(fs.readFileSync(path.join(work, secs[0].file), "utf8").includes("divider"));
+});
