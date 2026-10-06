@@ -80,6 +80,9 @@ def test_render_units(rd):
         check("block figure + caption kept together in one no-break block",
               cap.count('<div class="figcap"><figure') == 2 and "一棵树。</p></div>" in cap and "两棵树。</p></div>" in cap, cap)
         check("a figure followed by ordinary prose is not wrapped", cap.count("figcap") == 2 and "<p>后文。</p>" in cap, cap)
+        lead = rd.place_images("<p>长段。</p>\n<p>如下：</p>\n<p>⟦IMG:5_1⟧</p>\n<p>后文。</p>", work, images, "#c9c4b8", "#000409", 0.6, 0.33)
+        check("the paragraph right before a block figure keeps with it, no empty paragraphs left",
+              '<p class="keep">如下：</p>' in lead and lead.count("keep") == 1 and "<p></p>" not in lead, lead)
         check("unknown placeholder dropped, not left raw", rd.place_images("a⟦IMG:zz⟧b", work, images, "#c9c4b8", "#000409") == "ab")
     check("roman folios", [rd.folio_for(i, None) for i in range(3)] == ["i", "ii", "iii"])
     check("roman folio past the table falls back to arabic (long front matter)",
@@ -236,6 +239,42 @@ def test_render_e2e(rd):
         line_of = lambda w: next((i for i, ln in enumerate(text.splitlines()) if w in ln), -1)
         check("a long inline formula followed by punctuation still wraps inside", 0 <= line_of("w01") < line_of("w60"), text[:900].replace(chr(10), " | "))
         check("the wrapped formula's punctuation stays on its last line", "，" in text.splitlines()[line_of("w60")] if line_of("w60") >= 0 else False, text[:900].replace(chr(10), " | "))
+        # A short paragraph leading into a block figure ("如下：", "**9、10、11。**") must not be left alone at a page
+        # bottom while its figure moves to the next page. Fillers of every length put the lead at every position.
+        from PIL import Image, ImageDraw
+        (work / "images").mkdir(exist_ok=True)
+        imgs = {}
+        for k in range(1, 25):  # one distinct image per figure, so each placement is its own image in the PDF
+            fig = Image.new("RGB", (400, 300), "white"); ImageDraw.Draw(fig).rectangle((10, 10, 390, 290), outline="black", width=3)
+            ImageDraw.Draw(fig).rectangle((20, 20, 20 + k * 10, 40), fill="black")
+            fig.save(work / "images" / f"f{k}.png")
+            imgs[f"f{k}"] = {"file": f"f{k}.png", "w": 0, "h": 0, "block": True}
+        (work / "images.json").write_text(json.dumps(imgs))
+        blocks = "".join("正文" * (k * 23) + f"\n\n引{k:02d}如下：\n\n⟦IMG:f{k}⟧\n\n" for k in range(1, 25))
+        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text("# 引图译\n\n" + blocks)
+        rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
+        pages = subprocess.run(["pdftotext", str(prev), "-"], capture_output=True, text=True).stdout.split("\f")
+        leads = [pg.count("如下：") for pg in pages]
+        listed = subprocess.run(["pdfimages", "-list", str(prev)], capture_output=True, text=True).stdout.splitlines()[2:]
+        figs = [0] * len(pages)
+        for ln in listed:
+            figs[int(ln.split()[0]) - 1] += 1
+        orphans = [i + 1 for i in range(len(pages)) if leads[i] != figs[i]]
+        check("a short lead-in paragraph never ends a page without its figure", not orphans and sum(figs) == 24,
+              f"pages {orphans}; leads {leads}; figures {figs}")
+        # A long lead-in paragraph must still split across pages (only its last lines go with the figure), not be
+        # pushed whole to the next page leaving a large gap.
+        blocks = "".join("正文" * (k * 23) + f"\n\n长{k:02d}" + "文" * 300 + f"尾{k:02d}。\n\n⟦IMG:f{k}⟧\n\n" for k in range(1, 25))
+        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text("# 长引译\n\n" + blocks)
+        rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
+        pages = subprocess.run(["pdftotext", str(prev), "-"], capture_output=True, text=True).stdout.split("\f")
+        page_of = lambda w: next(i for i, pg in enumerate(pages) if w in pg)
+        split = [k for k in range(1, 25) if page_of(f"长{k:02d}") != page_of(f"尾{k:02d}")]
+        listed = subprocess.run(["pdfimages", "-list", str(prev)], capture_output=True, text=True).stdout.splitlines()[2:]
+        fig_pages = sorted(int(ln.split()[0]) - 1 for ln in listed)
+        check("a long lead-in paragraph still splits across a page break", len(split) >= 3, str(split))
+        check("a split long lead-in paragraph ends on its figure's page", all(page_of(f"尾{k:02d}") in fig_pages for k in split), f"{split} {fig_pages}")
+        (work / "images.json").unlink()
         # Last, because it corrupts a section's md: an equation KaTeX cannot parse (an undefined command) renders
         # as red source; the render must fail on it rather than ship it silently.
         chap = next(s for s in meta["sections"] if s["kind"] == "chapter")
