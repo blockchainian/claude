@@ -9,10 +9,10 @@ import { after, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const root = mkdtempSync(join(tmpdir(), 'gate-'))
-const state = join(root, 'cache')
-mkdirSync(state)
-process.env.INTEL_CASE_STUDY_DIR = root
-process.env.INTEL_ISP_PROXY_URL = '' // the machine's .env must not reach the tests
+const state = join(root, 'cache', 'case-study-limits')
+mkdirSync(state, {recursive: true})
+process.env.INTEL_DATA_DIR = root
+process.env.ISP_PROXY_URL = '' // the machine's .env must not reach the tests
 const gate = await import('../scripts/gate.mjs')
 after(() => rmSync(root, { recursive: true, force: true }))
 
@@ -150,7 +150,7 @@ test('gdelt reads the running day again every time, keeps the years done before 
   assert.throws(() => gate.gdelt(['nobody'], '2024-01-01', '2025-12-31', failing), error => error instanceof gate.QuotaUsedUp && /free BigQuery quota/.test(error.message)
     && error.held.map(a => a.url).join() === 'https://h.example/held')
   assert.deepEqual(JSON.parse(readFileSync(join(data, 'gdelt', 'nobody', 'articles.out.json'), 'utf8')).covered, [['2024-01-01', '2024-12-31']], 'the year read before the failure is kept')
-  assert.throws(() => gate.gdelt(['nobody'], '2025-01-01', '2025-12-31', { ...options, project: '' }), /INTEL_BIGQUERY_PROJECT_ID/)
+  assert.throws(() => gate.gdelt(['nobody'], '2025-01-01', '2025-12-31', { ...options, project: '' }), /BIGQUERY_PROJECT_ID/)
   assert.throws(() => gate.gdelt(['https://api.gdeltproject.org/api/v2/doc/doc?query=x'], undefined, undefined, options), /name/)
   assert.throws(() => gate.gdelt([], '2025-01-01', '2025-12-31', options), /name/)
   assert.throws(() => gate.gdelt(Array.from({ length: 101 }, (_, i) => `name ${i}`), '2025-01-01', '2025-12-31', options), /100/)
@@ -331,7 +331,7 @@ test('the command prints its usage without arguments and runs through a symlink'
   const r = spawnSync(process.execPath, [script], { encoding: 'utf8' })
   assert.equal(r.status, 2)
   assert.match(r.stderr, /Usage: gate.mjs read/)
-  const stats = spawnSync(process.execPath, [script, 'stats'], { encoding: 'utf8', env: { ...process.env, INTEL_CASE_STUDY_DIR: root } })
+  const stats = spawnSync(process.execPath, [script, 'stats'], { encoding: 'utf8', env: { ...process.env, INTEL_DATA_DIR: root } })
   assert.equal(stats.status, 0)
   assert.equal(JSON.parse(stats.stdout)['read:jina'], 2)
 })

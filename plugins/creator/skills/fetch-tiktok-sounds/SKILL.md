@@ -11,10 +11,10 @@ Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hos
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `CREATOR_ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
-| `CREATOR_BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
-| `CREATOR_DATA_DIR` | Posts, stats and recording output | Optional | ~/.config/creator/.env |
-| `CREATOR_SECRETS_STATE_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
+| `ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
+| `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
+| `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with TikTok data under tiktok/ | Optional | ~/.config/creator/.env |
+| `SECRETS_DATA_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
 
 Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
 
@@ -28,9 +28,9 @@ Keep the full creator plugin installed: all four skills use its
 
 Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
 and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
-shared across both hosts at `~/.config/secrets-manager` (`CREATOR_SECRETS_STATE_DIR` explicitly
+shared across both hosts at `~/.config/secrets-manager` (`SECRETS_DATA_DIR` explicitly
 overrides it), including TikTok account rows, ISP slots and browser profiles.
-Configure `CREATOR_ISP_PROXY_URL` in `~/.config/creator/.env` or the process environment. Creator reads this
+Configure `ISP_PROXY_URL` in `~/.config/creator/.env` or the process environment. Creator reads this
 store; use secrets-manager to provision or log in an account if it is missing. Installing
 creator in another host does not create or migrate accounts.
 
@@ -75,5 +75,5 @@ it needs a signed-in account: the account's Camoufox profile is opened on its IS
 else may have the profile open at the same time. Every sound on this list is cleared for use in
 any post on TikTok, promotional ones included; the clearance does not extend to other platforms.
 
-Needs the upload-tiktok-video skill's `npm ci` and `CREATOR_ISP_PROXY_URL` in the secrets-manager's
+Needs the upload-tiktok-video skill's `npm ci` and `ISP_PROXY_URL` in the secrets-manager's
 `.env`.

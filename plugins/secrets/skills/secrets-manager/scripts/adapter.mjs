@@ -100,14 +100,11 @@ export function validateAdapter(adapter) {
   return adapter;
 }
 
-export async function loadAdapters({ configPath = config.configJsonPath(), env = process.env, paths } = {}) {
+export async function loadAdapters({ configPath = config.configJsonPath(), paths } = {}) {
   if (paths === undefined) {
-    if (env.SECRETS_ADAPTER_FILES !== undefined) paths = env.SECRETS_ADAPTER_FILES ? env.SECRETS_ADAPTER_FILES.split(':') : [];
-    else {
-      let text;
-      try { text = readFileSync(configPath, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-      paths = text === undefined ? [] : JSON.parse(text).adapters;
-    }
+    let text;
+    try { text = readFileSync(configPath, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    paths = text === undefined ? [] : JSON.parse(text).adapters;
   }
   if (!Array.isArray(paths)) throw new Error(`${configPath}: adapters must be an array`);
   const adapters = [];

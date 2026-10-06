@@ -122,8 +122,8 @@ async function metric(base, md5) {
 
 export async function readMemberKey(configPath = join(homedir(), '.config', 'intel', '.env')) {
   const config = parseEnv(await readFile(configPath, 'utf8'));
-  const key = config.INTEL_ANNA_ARCHIVE_KEY;
-  if (!key?.trim()) throw new Error(`请在 ${configPath} 配置 INTEL_ANNA_ARCHIVE_KEY`);
+  const key = config.ANNA_ARCHIVE_SECRET_KEY;
+  if (!key?.trim()) throw new Error(`请在 ${configPath} 配置 ANNA_ARCHIVE_SECRET_KEY`);
   return key;
 }
 
@@ -205,7 +205,7 @@ async function slowUrl(base, md5, detailHtml, savedSlowHtml) {
 
 function args(argv) {
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('用法：node <anna-archive-links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件]\n会员密钥从 ~/.config/intel/.env 的 INTEL_ANNA_ARCHIVE_KEY 读取，不读取环境变量。');
+    console.log('用法：node <anna-archive-links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件]\n会员密钥从 ~/.config/intel/.env 的 ANNA_ARCHIVE_SECRET_KEY 读取，不读取环境变量。');
     process.exit(0);
   }
   const options = { baseUrl: DEFAULT_BASE };

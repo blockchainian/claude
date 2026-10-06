@@ -3,8 +3,8 @@
 
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,17 +21,25 @@ const io = () => {
   return { log: (s) => out.push(s), error: (s) => err.push(s), text: () => out.join("\n"), errText: () => err.join("\n") };
 };
 
+let previousHome;
+const setAdapters = paths => {
+  const dir = join(homedir(), ".config", "secrets-manager");
+  mkdirSync(dir, {recursive: true});
+  writeFileSync(join(dir, "config.json"), JSON.stringify({adapters: paths}));
+};
 beforeEach(() => {
-  process.env.SECRETS_ADAPTER_FILES = fileURLToPath(new URL("./fixtures/adapters.mjs", import.meta.url));
-  process.env.SECRETS_STATE_DIR = mkdtempSync(join(tmpdir(), "sm-verify-"));
+  previousHome = process.env.HOME;
+  process.env.SECRETS_DATA_DIR = mkdtempSync(join(tmpdir(), "sm-verify-"));
+  process.env.HOME = process.env.SECRETS_DATA_DIR;
+  setAdapters([fileURLToPath(new URL("./fixtures/adapters.mjs", import.meta.url))]);
   db = store.openDb(config.dbPath());
   realChecks = Object.fromEntries(Object.entries(BUILTIN_CHECKS).map(([k, v]) => [k, v.check]));
 });
 afterEach(() => {
+  if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
   for (const [k, check] of Object.entries(realChecks)) BUILTIN_CHECKS[k].check = check;
   db.close();
-  delete process.env.SECRETS_STATE_DIR;
-  delete process.env.SECRETS_ADAPTER_FILES;
+  delete process.env.SECRETS_DATA_DIR;
 });
 
 const status = (table, key, id) => db.prepare(`SELECT status FROM ${table} WHERE ${key} = ?`).get(id).status;

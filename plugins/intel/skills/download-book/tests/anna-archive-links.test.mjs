@@ -42,19 +42,19 @@ test('the script runs when invoked through a symlinked directory', () => {
 test('the member key comes from the dotenv file, ignoring process environment', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'anna-config-'));
   const configPath = join(dir, '.env');
-  const previous = process.env.INTEL_ANNA_ARCHIVE_KEY;
-  process.env.INTEL_ANNA_ARCHIVE_KEY = 'ignored-environment-value';
+  const previous = process.env.ANNA_ARCHIVE_SECRET_KEY;
+  process.env.ANNA_ARCHIVE_SECRET_KEY = 'ignored-environment-value';
   try {
-    writeFileSync(configPath, 'INTEL_ANNA_ARCHIVE_KEY="file-key#literal" # comment\n');
+    writeFileSync(configPath, 'ANNA_ARCHIVE_SECRET_KEY="file-key#literal" # comment\n');
     assert.equal(await readMemberKey(configPath), 'file-key#literal');
-    writeFileSync(configPath, 'INTEL_ANNA_ARCHIVE_KEY=""\n');
-    await assert.rejects(readMemberKey(configPath), /配置 INTEL_ANNA_ARCHIVE_KEY/);
+    writeFileSync(configPath, 'ANNA_ARCHIVE_SECRET_KEY=""\n');
+    await assert.rejects(readMemberKey(configPath), /配置 ANNA_ARCHIVE_SECRET_KEY/);
     writeFileSync(configPath, 'OTHER_KEY=value\n');
-    await assert.rejects(readMemberKey(configPath), /配置 INTEL_ANNA_ARCHIVE_KEY/);
+    await assert.rejects(readMemberKey(configPath), /配置 ANNA_ARCHIVE_SECRET_KEY/);
     await assert.rejects(readMemberKey(join(dir, 'missing')), { code: 'ENOENT' });
   } finally {
-    if (previous === undefined) delete process.env.INTEL_ANNA_ARCHIVE_KEY;
-    else process.env.INTEL_ANNA_ARCHIVE_KEY = previous;
+    if (previous === undefined) delete process.env.ANNA_ARCHIVE_SECRET_KEY;
+    else process.env.ANNA_ARCHIVE_SECRET_KEY = previous;
     rmSync(dir, { recursive: true });
   }
 });

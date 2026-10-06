@@ -1,6 +1,7 @@
 # ABOUTME: Build a local SQLite CRM of the accounts posting about our apps, ranked by post count,
 # ABOUTME: with profile (fxtwitter), per-app role/counts, sample posts, and a real/fake verdict.
-import json, sqlite3, statistics, os
+import json, sqlite3, statistics, os, subprocess
+from pathlib import Path
 from collections import defaultdict, Counter
 
 import argparse
@@ -8,12 +9,14 @@ parser = argparse.ArgumentParser(description="Build the archive CRM from analyze
 parser.add_argument("--scratch", required=True, help="analysis scratch directory")
 parser.add_argument("--apps", required=True, help="comma-separated archive slugs")
 args = parser.parse_args()
-ROOT = os.getcwd()
+_paths_script = Path(__file__).resolve().parents[2] / "fetch-x-mentions" / "scripts" / "env.mjs"
+_paths = json.loads(subprocess.check_output(["node", str(_paths_script)], text=True))
+ROOT = str(Path(_paths["data"]) / "x")
 SC = args.scratch
 APPS = [slug.strip() for slug in args.apps.split(",") if slug.strip()]
 if not APPS or any("/" in slug or slug in (".", "..") for slug in APPS):
     parser.error("--apps requires valid archive slugs")
-DB = f"{ROOT}/docs/intel/x/crm.sqlite"
+DB = f"{ROOT}/crm.sqlite"
 TOP_PER_APP = 1000
 POSTS_PER_USER_APP = 15
 
@@ -33,7 +36,7 @@ apps_of = defaultdict(set)
 
 for app in APPS:
     cnt = Counter()
-    for line in open(f"{ROOT}/docs/intel/x/{app}/tweets.jsonl"):
+    for line in open(f"{ROOT}/{app}/tweets.jsonl"):
         try: d = json.loads(line)
         except: continue
         a = d.get("author")
@@ -47,10 +50,10 @@ for app in APPS:
         apps_of[a].add(app)
     # labels for sentiment/topic
     lab = {}
-    for line in open(f"{ROOT}/docs/intel/x/{app}/labels.jsonl"):
+    for line in open(f"{ROOT}/{app}/labels.jsonl"):
         try: l = json.loads(line); lab[l["id"]] = l
         except: pass
-    for line in open(f"{ROOT}/docs/intel/x/{app}/tweets.jsonl"):
+    for line in open(f"{ROOT}/{app}/tweets.jsonl"):
         try: d = json.loads(line)
         except: continue
         a = d.get("author")

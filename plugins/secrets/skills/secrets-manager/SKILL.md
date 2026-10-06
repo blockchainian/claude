@@ -11,7 +11,7 @@ Close a profile’s browser before opening that same account from another host.
 
 Resolve `SKILL_DIR` from the absolute directory containing this loaded `SKILL.md`,
 not the project working directory. Set it in every shell call. Run the CLI directly
-from this skill; no global command is installed. All state lives under `SECRETS_STATE_DIR` (default
+from this skill; no global command is installed. All state lives under `SECRETS_DATA_DIR` (default
 `~/.config/secrets-manager`); the residential proxy from `~/.config/secrets-manager/.env` is required for every
 browser command (the home IP is never used).
 
@@ -31,13 +31,12 @@ Configure external adapters in `~/.config/secrets-manager/config.json`:
 {"adapters": ["/absolute/path/adapters.mjs"]}
 ```
 
-`SECRETS_ADAPTER_FILES` (colon-separated absolute paths) overrides that file.
 Run `node "$SKILL_DIR/scripts/cli.mjs" validate /absolute/path/adapters.mjs` to check the real kit contract.
-Without a config file or override, no app adapters are loaded; other commands still work.
+Without a config file, no app adapters are loaded; other commands still work.
 See the plugin README's Adapter interface for every field and kit helper.
 
 Pinned: Camoufox v152.0.4-beta.30, camoufox-js 0.12.0, playwright-core 1.60.0. Headed runs open the window on the
-display `SECRETS_BROWSER_DISPLAY` names in `~/.config/secrets-manager/.env` (any part of its name, any
+display `BROWSER_DISPLAY` names in `~/.config/secrets-manager/.env` (any part of its name, any
 case, e.g. `SAMSUNG`; unset means the main display; `displayOrigin.swift`), move OAuth popups there
 (`moveWindows.swift`, needs Accessibility trust) and record them (`recordWindows.swift`, needs Screen Recording
 permission), both through `swift`. Headless Google sign-ins (`login`, `setup-2fa`, app-password
@@ -108,7 +107,7 @@ The Google sign-in is one graph traversal, not a set of flag-gated modes. A sing
 whole sign-in graph — password, TOTP, and the phone step (always driven with a rented HeroSMS
 number) — handling whatever challenge appears, in any order, without restarting. The reCAPTCHA is
 met by clicking the real widget's checkbox (it often passes outright). When Google shows the image
-grid instead, a headless run has a vision model (`codex exec`, `SECRETS_CAPTCHA_RESOLVER_MODEL`) name the tiles holding
+grid instead, a headless run has a vision model (`codex exec`, `CAPTCHA_RESOLVER_MODEL`) name the tiles holding
 the requested object (bus, crosswalk, …) and clicks them and Verify, handling both the static
 "select all squares" and the dynamic "verify once none left" grids, 3x3 and 4x4; the same model reads
 the password-page text CAPTCHA off its image. A headed run never uses the vision model: it shows the
@@ -203,7 +202,7 @@ not unit-tested, and the enrollment dialog's selectors drift.
 
 Rents temporary phone numbers from HeroSMS to receive Google's verification SMS, so a login that
 hits Google's phone step does not need a number handed in by a person. HeroSMS speaks the
-SMS-Activate protocol; the key is `SECRETS_HERO_SMS_API_KEY` in `~/.config/secrets-manager/.env`. Three verbs:
+SMS-Activate protocol; the key is `HERO_SMS_API_KEY` in `~/.config/secrets-manager/.env`. Three verbs:
 
 - **balance** — the account balance (`getBalance`), free.
 - **prices** — the countries offering a Google (`go`) number in stock at or under `--max-price`
@@ -238,8 +237,8 @@ verification does not undo app setup.
 - **x** — one GraphQL `Viewer` call with the stored `auth_token` + `ct0` through the residential
   proxy (no browser, no `x-client-transaction-id`). The handle it names matching the row is
   `active`; auth errors 32/89/215 `expired`; 64 (suspended) `restricted`; 326 (locked, a person
-  must unlock it) `escalated`; a token signing in as another handle throws. Needs `SECRETS_X_BEARER_TOKEN` and
-  `SECRETS_X_VIEWER_QUERY_ID`; a 404 means the queryId is stale — re-read it from the `main.<hash>.js` that
+  must unlock it) `escalated`; a token signing in as another handle throws. Needs `X_BEARER_TOKEN` and
+  `X_VIEWER_QUERY_ID`; a 404 means the queryId is stale — re-read it from the `main.<hash>.js` that
   x.com/home serves a signed-in account (`queryId:"…",operationName:"Viewer"`).
 - **tiktok** — opens the account's profile on its own ISP slot and reads the handle tiktok.com's
   explore page names: the account is `active`, no one `expired`, TikTok's ban text `restricted`.
@@ -296,7 +295,7 @@ with an error on stderr; credentials are redacted from errors.
 `auth_token`, automatically obtains `ct0`, then queries GraphQL Viewer through the
 residential proxy. No local account, stored ct0 or browser is needed. Stdout is
 `@username`, or `{"app":"x","username":"..."}` with `--json`; it does not promise
-an email. Requires `SECRETS_X_BEARER_TOKEN`, `SECRETS_X_VIEWER_QUERY_ID` and `SECRETS_RESIDENTIAL_PROXY_URL`.
+an email. Requires `X_BEARER_TOKEN`, `X_VIEWER_QUERY_ID` and `RESIDENTIAL_PROXY_URL`.
 Expired, restricted, locked or inconclusive sessions fail without changing local state.
 
 ### export
@@ -316,7 +315,7 @@ its app statuses. Existing app tables remain readable even without their adapter
 
 ## State
 
-`SECRETS_STATE_DIR` (default `~/.config/secrets-manager`), outside the repo, plaintext:
+`SECRETS_DATA_DIR` (default `~/.config/secrets-manager`), outside the repo, plaintext:
 
 - `secrets.sqlite` — tables `google` (accounts), `x` (accounts + tokens), `tiktok` (accounts +
   cookies + ISP slot), and one per app
@@ -333,26 +332,25 @@ its app statuses. Existing app tables remain readable even without their adapter
   (the "device" the site sees).
 - `debug/<id>/<step>-<ts>/` — screenshot + `info.txt` of a failed step.
 
+The reCAPTCHA diagnostic writes `recaptcha-test.json` under `SECRETS_DATA_DIR/debug/`; it has no separate label or output setting.
+
 ## Environment Variables
 
 Copy the plugin’s `.env.example` to `~/.config/secrets-manager/.env`; shell values take precedence.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `SECRETS_RESIDENTIAL_PROXY_URL` | Residential login proxy | For related feature | ~/.config/secrets-manager/.env |
-| `SECRETS_ISP_PROXY_URL` | Fixed ISP proxy pool | For related feature | ~/.config/secrets-manager/.env |
-| `SECRETS_ISP_PROXY_COUNT` | Pool slot count; default 1 | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_HERO_SMS_API_KEY` | HeroSMS key for phone rentals | For related feature | ~/.config/secrets-manager/.env |
-| `SECRETS_X_BEARER_TOKEN` | X web-client bearer token | For related feature | ~/.config/secrets-manager/.env |
-| `SECRETS_X_VIEWER_QUERY_ID` | X Viewer operation ID | For related feature | ~/.config/secrets-manager/.env |
-| `SECRETS_BROWSER_DISPLAY` | Headed browser display | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_CAPTCHA_RESOLVER_MODEL` | Captcha vision resolver model; default gpt-6-sol | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_CAPTCHA_RESOLVER_MODEL_EFFORT` | Resolver reasoning effort; default low | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_CAPTCHA_RESOLVER_MODEL_TIER` | Resolver service tier; default fast | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_STATE_DIR` | Account and browser-state directory | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_ADAPTER_FILES` | Colon-separated adapter module file paths; omitted uses config.json, empty disables adapters | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_RECAPTCHA_PROBE_LABEL` | Diagnostic run label; default HEAD | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_RECAPTCHA_PROBE_RESULT_FILE` | Diagnostic JSON result file | Optional | ~/.config/secrets-manager/.env |
+| `RESIDENTIAL_PROXY_URL` | Residential login proxy | For related feature | ~/.config/secrets-manager/.env |
+| `ISP_PROXY_URL` | Fixed ISP proxy pool | For related feature | ~/.config/secrets-manager/.env |
+| `ISP_PROXY_COUNT` | Pool slot count; default 1 | Optional | ~/.config/secrets-manager/.env |
+| `HERO_SMS_API_KEY` | HeroSMS key for phone rentals | For related feature | ~/.config/secrets-manager/.env |
+| `X_BEARER_TOKEN` | X web-client bearer token | For related feature | ~/.config/secrets-manager/.env |
+| `X_VIEWER_QUERY_ID` | X Viewer operation ID | For related feature | ~/.config/secrets-manager/.env |
+| `BROWSER_DISPLAY` | Headed browser display | Optional | ~/.config/secrets-manager/.env |
+| `CAPTCHA_RESOLVER_MODEL` | Captcha vision resolver model; default gpt-6-sol | Optional | ~/.config/secrets-manager/.env |
+| `CAPTCHA_RESOLVER_MODEL_EFFORT` | Resolver reasoning effort; default low | Optional | ~/.config/secrets-manager/.env |
+| `CAPTCHA_RESOLVER_MODEL_TIER` | Resolver service tier; default fast | Optional | ~/.config/secrets-manager/.env |
+| `SECRETS_DATA_DIR` | Account and browser-state directory | Optional | ~/.config/secrets-manager/.env |
 
 `CODEX_HOME` is the Codex CLI’s own optional login-directory setting and keeps its official name. Probe variables describe the whole diagnostic run, not an individual resolver response.
 

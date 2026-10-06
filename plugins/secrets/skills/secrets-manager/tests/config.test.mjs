@@ -10,8 +10,8 @@ import { tmpdir } from "node:os";
 import * as config from "../scripts/config.mjs";
 
 afterEach(() => {
-  delete process.env.SECRETS_STATE_DIR;
-  delete process.env.SECRETS_RESIDENTIAL_PROXY_URL;
+  delete process.env.SECRETS_DATA_DIR;
+  delete process.env.RESIDENTIAL_PROXY_URL;
   delete process.env.ENVFILE_TEST_A;
   delete process.env.ENVFILE_TEST_B;
 });
@@ -22,7 +22,7 @@ test("default state path is ~/.config/secrets-manager", () => {
 });
 
 test("every path hangs off the state root", () => {
-  process.env.SECRETS_STATE_DIR = "/tmp/sm";
+  process.env.SECRETS_DATA_DIR = "/tmp/sm";
   assert.equal(config.dbPath(), "/tmp/sm/secrets.sqlite");
   assert.equal(config.credentialsDir("google"), "/tmp/sm/google");
   assert.equal(config.credentialsDir("x"), "/tmp/sm/x");
@@ -31,7 +31,7 @@ test("every path hangs off the state root", () => {
 });
 
 test("a ~ state path expands to the home directory", () => {
-  process.env.SECRETS_STATE_DIR = "~/sm";
+  process.env.SECRETS_DATA_DIR = "~/sm";
   assert.ok(!config.statePath().startsWith("~"));
   assert.ok(config.statePath().endsWith("/sm"));
 });
@@ -48,14 +48,14 @@ test("loadEnvFile sets unset keys only", () => {
 });
 
 test("proxy defaults to null without env, else reads it", () => {
-  delete process.env.SECRETS_RESIDENTIAL_PROXY_URL;
+  delete process.env.RESIDENTIAL_PROXY_URL;
   assert.equal(config.defaultProxy(), null);
-  process.env.SECRETS_RESIDENTIAL_PROXY_URL = "http://host:1";
+  process.env.RESIDENTIAL_PROXY_URL = "http://host:1";
   assert.equal(config.defaultProxy(), "http://host:1");
 });
 
 test("proxyFor injects a sticky sessid after the username", () => {
-  process.env.SECRETS_RESIDENTIAL_PROXY_URL = "http://customer-acct-cc-US:pw@proxy.example:7777";
+  process.env.RESIDENTIAL_PROXY_URL = "http://customer-acct-cc-US:pw@proxy.example:7777";
   const url = config.proxyFor("a@x.com");
   assert.ok(url.startsWith("http://customer-acct-cc-US-sessid-"));
   assert.ok(url.includes("-sesstime-10"));
@@ -63,25 +63,25 @@ test("proxyFor injects a sticky sessid after the username", () => {
 });
 
 test("proxyFor is deterministic per account", () => {
-  process.env.SECRETS_RESIDENTIAL_PROXY_URL = "http://customer-acct:pw@h:1";
+  process.env.RESIDENTIAL_PROXY_URL = "http://customer-acct:pw@h:1";
   assert.equal(config.proxyFor("a@x.com"), config.proxyFor("a@x.com"));
   assert.notEqual(config.proxyFor("a@x.com"), config.proxyFor("b@x.com"));
 });
 
 test("proxyFor leaves a proxy using another username convention or an existing sessid untouched", () => {
-  process.env.SECRETS_RESIDENTIAL_PROXY_URL = "http://user:pw@h:1";
+  process.env.RESIDENTIAL_PROXY_URL = "http://user:pw@h:1";
   assert.equal(config.proxyFor("a@x.com"), "http://user:pw@h:1");
-  process.env.SECRETS_RESIDENTIAL_PROXY_URL = "http://customer-acct-sessid-x:pw@h:1";
+  process.env.RESIDENTIAL_PROXY_URL = "http://customer-acct-sessid-x:pw@h:1";
   assert.equal(config.proxyFor("a@x.com"), "http://customer-acct-sessid-x:pw@h:1");
 });
 
 test("proxyFor returns the base when rotating", () => {
-  process.env.SECRETS_RESIDENTIAL_PROXY_URL = "http://customer-acct:pw@h:1";
+  process.env.RESIDENTIAL_PROXY_URL = "http://customer-acct:pw@h:1";
   assert.equal(config.proxyFor("a@x.com", { rotate: true }), "http://customer-acct:pw@h:1");
 });
 
 test("proxyFor is null without env", () => {
-  delete process.env.SECRETS_RESIDENTIAL_PROXY_URL;
+  delete process.env.RESIDENTIAL_PROXY_URL;
   assert.equal(config.proxyFor("a@x.com"), null);
 });
 

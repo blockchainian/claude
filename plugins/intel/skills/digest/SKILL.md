@@ -43,7 +43,7 @@ process state before retrying. Use the current host's image/file tools to inspec
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `INTEL_DIGEST_DIR` | Digest storage and work directory; default ~/Documents/digests | No | Shell environment before running the command; no automatic `.env` loading |
+| `INTEL_OUTPUT_DIR` | Output root; default ~/Documents, with digests under digests/ | No | ~/.config/intel/.env |
 
 A source URL after `/digest` is fetched, read, and turned into a highlights
 draft — that is the default. Two keywords instead select a store command.
@@ -57,7 +57,7 @@ draft — that is the default. Two keywords instead select a store command.
 | `search` query (regex ok) | Search everything saved |
 
 The store is `~/Documents/digests/` (override with
-`INTEL_DIGEST_DIR`). Items live in `items/<slug>.md`, listed in
+`INTEL_OUTPUT_DIR`, then append `digests/`). Items live in `items/<slug>.md`, listed in
 `index.md`. Drafts stage in `.work/<slug>/` until saved. (The store holds
 articles, episodes, videos and papers alike.)
 

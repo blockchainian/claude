@@ -9,7 +9,7 @@ export function managerHome(env = process.env) {
   return env.CODEX_MANAGER_STATE_DIR || path.join(os.homedir(), ".claude", "codex-manager");
 }
 
-export const askTimeoutSeconds = (env = process.env) => Number(env.CODEX_MANAGER_REPLY_TIMEOUT_SECONDS) > 0 ? Number(env.CODEX_MANAGER_REPLY_TIMEOUT_SECONDS) : 300;
+export const askTimeoutSeconds = (env = process.env) => Number(env.CODEX_MANAGER_ASK_TIMEOUT) > 0 ? Number(env.CODEX_MANAGER_ASK_TIMEOUT) : 300;
 
 function supervisorPath(threadId, env) {
   return path.join(managerHome(env), "threads", `${threadId}.json`);

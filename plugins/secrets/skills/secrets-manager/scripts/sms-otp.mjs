@@ -77,7 +77,7 @@ export function affordableCountries(prices, service, maxPrice, blacklist = []) {
 
 function requireKey() {
   const key = config.heroSmsKey();
-  if (!key) throw new Error("No HeroSMS key. Add SECRETS_HERO_SMS_API_KEY to ~/.config/secrets-manager/.env.");
+  if (!key) throw new Error("No HeroSMS key. Add HERO_SMS_API_KEY to ~/.config/secrets-manager/.env.");
   return key;
 }
 

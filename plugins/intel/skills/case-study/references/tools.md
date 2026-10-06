@@ -31,7 +31,7 @@ calls and failures per command.
     article with the words, and there is no title.
 - Both news commands have no cap: a year of a known name is hundreds of
   lines. Save the output to a file and count the domains before opening any.
-  What they fetched is kept under `~/.local/share/case-study/`, a folder per
+  What they fetched is kept under `~/.local/share/intel/case-studies/`, a folder per
   name, so asking again for days already held costs nothing.
 - Reddit: `$G chrome reddit search "<query>" -f yaml`, `$G chrome reddit read <post id>`.
 
@@ -186,16 +186,16 @@ The gate and `wayback.mjs` read them from Intel’s `~/.config/intel/.env`.
 Nothing has to be exported in the shell. A value that starts with `~/` is
 under the home directory.
 
-- `INTEL_ISP_PROXY_URL`: the proxy, one URL; the ten ports after its own are the
+- `ISP_PROXY_URL`: the proxy, one URL; the ten ports after its own are the
   exits. Without it the gate reads direct, with one exit's share of the
   limits.
-- `INTEL_RESIDENTIAL_PROXY_URL`: the rotating residential proxy `wayback` reads the
+- `RESIDENTIAL_PROXY_URL`: the rotating residential proxy `wayback` reads the
   archive's captures through, one URL; without it `wayback` stops with an
-  error. The capture lists go through `INTEL_ISP_PROXY_URL`. `gnews` asks Google News
-  through an `INTEL_ISP_PROXY_URL` exit and again through this proxy when Google
+  error. The capture lists go through `ISP_PROXY_URL`. `gnews` asks Google News
+  through an `ISP_PROXY_URL` exit and again through this proxy when Google
   refuses the exit.
 The X-post fetching command locates its sibling script inside the installed Intel plugin; no script-path variable is needed.
-- `INTEL_BIGQUERY_PROJECT_ID`: the Google Cloud project `$G gdelt` runs its BigQuery
+- `BIGQUERY_PROJECT_ID`: the Google Cloud project `$G gdelt` runs its BigQuery
   queries in, with the `bq` command logged in (`gcloud auth login`). Without
   it, or once the project's free 1 TiB of queries for the month is used,
   `$G gdelt` fails: GDELT is then a gap.

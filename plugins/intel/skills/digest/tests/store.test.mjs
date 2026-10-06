@@ -1,5 +1,5 @@
 // ABOUTME: Tests the highlights store CLI: save, list, search and take-aways against a scratch
-// ABOUTME: INTEL_DIGEST_DIR, plus the default location and the frontmatter parser.
+// ABOUTME: INTEL_OUTPUT_DIR, plus the default location and the frontmatter parser.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -15,7 +15,7 @@ function makeStore() {
   const root = mkdtempSync(join(tmpdir(), "store-test-"));
   const run = (...args) => {
     const res = spawnSync(process.execPath, [script, ...args], {
-      env: { ...process.env, INTEL_DIGEST_DIR: root },
+      env: { ...process.env, INTEL_OUTPUT_DIR: root },
       encoding: "utf-8",
     });
     return { code: res.status, stdout: res.stdout, stderr: res.stderr };
@@ -26,7 +26,7 @@ function makeStore() {
     writeFileSync(path, text, "utf-8");
     return path;
   };
-  return { root, items: join(root, "items"), run, draft };
+  return { root: join(root, "digests"), items: join(root, "digests", "items"), run, draft };
 }
 
 const ARTICLE = `---
@@ -47,8 +47,8 @@ describe("store location", () => {
     assert.equal(resolveRoot({}), join(homedir(), "Documents", "digests"));
   });
 
-  test("INTEL_DIGEST_DIR overrides the default", () => {
-    assert.equal(resolveRoot({ INTEL_DIGEST_DIR: "/tmp/elsewhere/" }), "/tmp/elsewhere");
+  test("INTEL_OUTPUT_DIR overrides the default", () => {
+    assert.equal(resolveRoot({ INTEL_OUTPUT_DIR: "/tmp/elsewhere/" }), "/tmp/elsewhere/digests");
   });
 });
 

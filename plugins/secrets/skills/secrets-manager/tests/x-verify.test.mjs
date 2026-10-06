@@ -34,7 +34,7 @@ test("a suspended account is restricted and a locked one is escalated, whatever 
 });
 
 test("responses that do not tell are thrown, not guessed", () => {
-  assert.throws(() => classifyViewer({ status: 404, body: null }, "zoe"), /SECRETS_X_VIEWER_QUERY_ID/);
+  assert.throws(() => classifyViewer({ status: 404, body: null }, "zoe"), /X_VIEWER_QUERY_ID/);
   assert.throws(() => classifyViewer({ status: 429, body: null }, "zoe"), /HTTP 429/);
   assert.throws(() => classifyViewer({ status: 200, body: signedIn("someoneelse") }, "zoe"), /@someoneelse/);
   assert.throws(() => classifyViewer({ status: 200, body: { data: {} } }, "zoe"), /inconclusive/);

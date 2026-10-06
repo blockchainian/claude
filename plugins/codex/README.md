@@ -44,7 +44,7 @@ tool_timeout_sec = 360
 default_tools_approval_mode = "approve"
 ```
 
-`tool_timeout_sec` has to be longer than `CODEX_MANAGER_REPLY_TIMEOUT_SECONDS`, or codex
+`tool_timeout_sec` has to be longer than `CODEX_MANAGER_ASK_TIMEOUT`, or codex
 gives up on `ask_claude` before the manager's own answer arrives. A session
 picks the server up when it is started or resumed, so one that was already
 open has to be reopened. In a session no Claude supervises, both tools fail at
@@ -118,7 +118,7 @@ Claude. Four kinds of event arrive:
   Claude answers with `reply` and one of the listed decisions.
 
 An ask or approval that Claude does not answer within
-`CODEX_MANAGER_REPLY_TIMEOUT_SECONDS` seconds (default 300) is answered for it: asks get
+`CODEX_MANAGER_ASK_TIMEOUT` seconds (default 300) is answered for it: asks get
 "proceed on your own judgment", approvals get `decline`. While something is
 waiting, every tool result carries an `attention` list and the Stop hook
 nudges once per stop. When the turn ends or a new one starts the daemon aborts
@@ -179,7 +179,7 @@ outlive the Claude session: a running turn finishes on its own, and the daemon
 unloads an idle, unsubscribed thread after `thread_unload_delay_secs`.
 
 The daemon is reached over `~/.codex/app-server-control/app-server-control.sock`
-(override with `CODEX_MANAGER_SOCKET_FILE`; state root with
+(override with `CODEX_DAEMON_SOCKET`; state root with
 `CODEX_MANAGER_STATE_DIR`).
 
 ## Design
@@ -231,8 +231,8 @@ MIT
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `CODEX_MANAGER_STATE_DIR` | Manager state; default ~/.claude/codex-manager | Optional | Shell environment |
-| `CODEX_MANAGER_SOCKET_FILE` | Daemon Unix socket path | Optional | Shell environment |
+| `CODEX_DAEMON_SOCKET` | Daemon Unix socket path | Optional | Shell environment |
 | `CODEX_MANAGER_SESSIONS_DIR` | Claude sessions; default ~/.claude/sessions | Optional | Shell environment |
-| `CODEX_MANAGER_REPLY_TIMEOUT_SECONDS` | Supervisor reply timeout; default 300 seconds | Optional | Shell environment |
+| `CODEX_MANAGER_ASK_TIMEOUT` | Supervisor reply timeout; default 300 seconds | Optional | Shell environment |
 
 `CODEX_HOME` and host-provided `CLAUDE_CODE_SESSION_ID` retain their upstream names.

@@ -120,7 +120,7 @@ test("planning fetches missing days, and with --refill n the gaps refilled at mo
 });
 
 // The pure paging tests use a synthetic query id, never personal configuration.
-process.env.INTEL_X_SEARCH_QUERY_ID = "fixture-search-query";
+process.env.X_SEARCH_QUERY_ID = "fixture-search-query";
 
 const tw = (id, iso) => ({ id, created_at: new Date(iso).toUTCString() });
 
@@ -248,8 +248,8 @@ test("accounts are read from the store and labelled by username", () => {
       "(?, ?, ?, ?, 'active'), (?, ?, ?, ?, 'active'), (?, ?, ?, ?, 'restricted')",
   ).run("a@e", "alice", "a1", "c1", "b@e", "bob", "a2", "c2", "c@e", "carol", "a3", "c3");
   db.close();
-  process.env.INTEL_SECRETS_STATE_DIR = join(dbPath, "..");
-  process.env.INTEL_RESIDENTIAL_PROXY_URL = "http://u:p@proxy.test:8080";
+  process.env.SECRETS_DATA_DIR = join(dbPath, "..");
+  process.env.RESIDENTIAL_PROXY_URL = "http://u:p@proxy.test:8080";
   // Only the two active accounts are read, ordered by username; the restricted one is skipped.
   assert.deepEqual(
     loadAccounts().map((a) => a.label),

@@ -378,7 +378,7 @@ const SMS_DEFAULT_MAX_PRICE = 0.05;
 // under --max-price, cheapest first; `number` rents one (cheapest affordable country by default,
 // or --country N), waits for the code, then closes the activation — or cancels for a refund if no
 // code arrives. `number` spends money, so it is a dry run unless --yes is given, and --max-price is
-// clamped to $0.10. Needs SECRETS_HERO_SMS_API_KEY in ~/.config/secrets-manager/.env.
+// clamped to $0.10. Needs HERO_SMS_API_KEY in ~/.config/secrets-manager/.env.
 async function runSms(_db, opts, io) {
   const [verb] = opts.positional;
   assertOneOf("sms verb", verb, ["balance", "prices", "number"]);

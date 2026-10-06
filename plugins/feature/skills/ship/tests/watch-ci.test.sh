@@ -67,7 +67,7 @@ chmod +x "$FAKE_GH"
 run_watch() { # <ref> [out-file] — prints stdout; stderr to $ERR_FILE; sets RC
   ERR_FILE=$(mktemp)
   OUT=$(PATH="$SANDBOX:$PATH" FAKE_GH_STATE_DIR="$STATE_DIR" FAKE_GH_MODE="$MODE" \
-    FEATURE_CI_TIMEOUT_SECONDS=10 FEATURE_CI_INTERVAL_SECONDS=0 \
+    CI_TIMEOUT=10 CI_INTERVAL=0 \
     "$SCRIPTS_DIR/watch-ci.sh" "$@" 2>"$ERR_FILE")
   RC=$?
 }
