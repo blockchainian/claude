@@ -2,6 +2,12 @@
 
 See the user's macOS desktop from Claude Code without disturbing it.
 
+## Hosts
+
+This plugin is Claude-only. `capture-window` addresses Claude's computer-use
+capture behavior, which hides windows outside the session allowlist. It is
+intentionally excluded from the Codex marketplace.
+
 ## Skills
 
 | Skill | What it does |
