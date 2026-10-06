@@ -84,12 +84,18 @@ def test_render_units(rd):
         lead = rd.place_images("<p>长段。</p>\n<p>如下：</p>\n<p>⟦IMG:5_1⟧</p>\n<p>后文。</p>", work, images, "#c9c4b8", "#000409", 0.6, 0.33)
         check("the paragraph right before a block figure keeps with it, no empty paragraphs left",
               '<p class="keep">如下：</p>' in lead and lead.count("keep") == 1 and "<p></p>" not in lead, lead)
+        # A book whose figures are grayscale screenshots (a UI design book) keeps every image as is, on a plate.
+        shot = rd.place_images("<p>⟦IMG:5_1⟧</p>", work, images, "#c9c4b8", "#000409", 0.6, 0.33, recolor=False)
+        check("recolor=False keeps grayscale line art on a white plate, no recoloured copy",
+              '<figure class="fig plate">' in shot and "5_1.png" in shot and "5_1.rc.png" not in shot, shot)
         check("unknown placeholder dropped, not left raw", rd.place_images("a⟦IMG:zz⟧b", work, images, "#c9c4b8", "#000409") == "ab")
     check("roman folios", [rd.folio_for(i, None) for i in range(3)] == ["i", "ii", "iii"])
     check("roman folio past the table falls back to arabic (long front matter)",
           rd.roman_folio(len(rd.ROMAN) - 1) == str(len(rd.ROMAN)) and rd.folio_for(len(rd.ROMAN) + 5, None) == str(len(rd.ROMAN) + 6),
           f"{rd.roman_folio(len(rd.ROMAN) - 1)} / {rd.folio_for(len(rd.ROMAN) + 5, None)}")
     style = rd.css([427.6, 660], "#181a1d", "#e1ddd5", [("03", "前言", "front"), ("04", "第一章", "chapter")])
+    check("a plate's padding stays inside max-width (a wide figure is not clipped on the right)",
+          re.search(r"\.fig\.plate img \{[^}]*box-sizing: border-box", style) and re.search(r"\.infig\.plate \{[^}]*box-sizing: border-box", style))
     check("css page size and colors", "size: 427.6pt 660pt" in style and "--bg: #181a1d" in style and "Baskerville" in style)
     check("css front roman, body arabic", '@page s03 { @top-center { content: "前言"' in style and "counter(page, lower-roman)" in style.split("@page s03")[1].split("}}")[0]
           and "content: counter(page);" in style.split("@page s04")[1].split("} }")[0])
