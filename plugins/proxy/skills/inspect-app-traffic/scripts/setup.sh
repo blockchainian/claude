@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-CONFDIR="${MITMPROXY_CONFDIR:-$HOME/.mitmproxy}"
+CONFDIR="${PROXY_CONFIG_DIR:-$HOME/.mitmproxy}"
 CA_PEM="$CONFDIR/mitmproxy-ca-cert.pem"
 
 have_mitmdump=false

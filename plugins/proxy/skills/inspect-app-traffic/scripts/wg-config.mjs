@@ -98,7 +98,7 @@ function expandUser(p) {
 }
 
 function defaultConf() {
-  return expandUser((process.env.MITMPROXY_CONFDIR ?? "~/.mitmproxy") + "/wireguard.conf");
+  return expandUser((process.env.PROXY_CONFIG_DIR ?? "~/.mitmproxy") + "/wireguard.conf");
 }
 
 const PROG = basename(process.argv[1] || "wg-config.mjs");

@@ -63,7 +63,7 @@ Exit 0 on success, 1 on failure, 2 on bad arguments.`;
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 
 export function outRoot() {
-  return process.env.PROXY_DIR || "/tmp/proxy";
+  return process.env.PROXY_CAPTURE_DIR || "/tmp/proxy";
 }
 
 export function hubDir() {
