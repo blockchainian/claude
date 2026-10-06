@@ -27,7 +27,7 @@ In Claude Code:
 
 - **One shared hub.** A single long-lived mitmdump serves the HTTP proxy and, when asked,
   WireGuard, on the fixed port 8080. The browser needs only one Zero Omega profile; the phone
-  one tunnel. The hub records everything routed to it into one flow file under `PROXY_CAPTURE_DIR`
+  one tunnel. The hub records everything routed to it into one flow file under `PROXY_DATA_DIR`
   (default `/tmp/proxy`).
 - **Captures are views, not processes.** `start` notes the moment and the target hosts; the
   readers show only that capture's window, scoped to its hosts. Two agents capturing two apps
@@ -69,5 +69,5 @@ capture.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `PROXY_CAPTURE_DIR` | Capture output; default /tmp/proxy | Optional | Shell environment |
+| `PROXY_DATA_DIR` | Capture output; default /tmp/proxy | Optional | Shell environment |
 | `PROXY_CONFIG_DIR` | mitmproxy certificates/config; default ~/.mitmproxy | Optional | Shell environment |

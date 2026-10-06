@@ -4,9 +4,9 @@
 //
 // Usage: wayback.mjs fetch <out dir> <url>... [--from <file with one url per line>]
 //        wayback.mjs curve <out dir> <profile url>...     (every address the profile has had)
-// Captures go through the proxy in INTEL_RESIDENTIAL_PROXY_URL (from the .env file env.mjs finds), one URL that gives every
+// Captures go through the proxy in RESIDENTIAL_PROXY_URL (from the .env file env.mjs finds), one URL that gives every
 // connection another household address, which the archive counts apart; without it the run stops with an error. The
-// capture lists go through INTEL_ISP_PROXY_URL, else direct. A request that fails, or that
+// capture lists go through ISP_PROXY_URL, else direct. A request that fails, or that
 // the archive answers with 429, is asked for again; when it keeps failing the run stops with an error. fetch prints one JSON line per url (url, status, file). curve prints one JSON line per capture (date,
 // value, text, url, file): value is the count when it could be read, text is the page's own wording when it is
 // rounded or in another language, and both are null when the page shows no count.
@@ -268,7 +268,7 @@ export async function curve(addresses, proxy, out, { perMinute = LIST_PER_MINUTE
 // lists asked at the residential rate through the ISP exits were answered 429 until the run stopped (2026-10). The
 // captures go only through the residential proxy: from one address the archive answers 429 to nearly every one.
 export function routes(residential, isp) {
-  if (!residential) throw new Error('INTEL_RESIDENTIAL_PROXY_URL is not set: the archive captures are read only through the residential proxy')
+  if (!residential) throw new Error('RESIDENTIAL_PROXY_URL is not set: the archive captures are read only through the residential proxy')
   return { proxy: residential, perMinute: RESIDENTIAL_PER_MINUTE, listProxy: isp, listPerMinute: LIST_PER_MINUTE }
 }
 
@@ -292,8 +292,8 @@ async function main(argv) {
     console.error(USAGE)
     process.exit(2)
   }
-  const residential = (process.env.INTEL_RESIDENTIAL_PROXY_URL || '').trim()
-  const isp = (process.env.INTEL_ISP_PROXY_URL || '').trim() || null
+  const residential = (process.env.RESIDENTIAL_PROXY_URL || '').trim()
+  const isp = (process.env.ISP_PROXY_URL || '').trim() || null
   let route
   try {
     route = routes(residential, isp)

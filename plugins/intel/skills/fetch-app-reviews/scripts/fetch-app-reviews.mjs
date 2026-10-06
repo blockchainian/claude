@@ -1,4 +1,4 @@
-import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
+import { requireEnv, loadEnvFile, dataDir } from "../../fetch-x-mentions/scripts/env.mjs";
 // ABOUTME: Fetches all App Store written reviews for an Apple app across storefronts,
 // ABOUTME: rotating a fresh residential-proxy exit IP per request, resumable per storefront.
 import { realpathSync } from "node:fs";
@@ -8,11 +8,11 @@ import { realpathSync } from "node:fs";
 //
 // - <appleId>  numeric App Store id, e.g. 6741115427
 // - [appName]  output slug; if omitted it is derived from the app's store name
-// - Reads INTEL_RESIDENTIAL_PROXY_URL from the env file. A rotating proxy endpoint hands out a
+// - Reads RESIDENTIAL_PROXY_URL from the env file. A rotating proxy endpoint hands out a
 //   new exit IP per CONNECTION, not per request, so a reused undici tunnel pins one IP —
 //   getJson therefore builds and closes a fresh ProxyAgent for every request, which is what
 //   actually rotates the IP and defeats Apple's per-IP throttling.
-// - Writes docs/intel/reviews/<appName>.json as { appId, appName, updatedAt, complete,
+// - Writes <INTEL_DATA_DIR>/reviews/<appName>.json as { appId, appName, updatedAt, complete,
 //   countriesDone, count, reviews }, checkpointing after each storefront. `complete` is
 //   true only when every storefront reached a confirmed real end.
 // - Per-storefront completion (countriesDone) carries across runs, so a retry only
@@ -105,14 +105,14 @@ const COUNTRIES = [
   "pe",
 ];
 
-const REVIEWS_DIR = join("docs", "intel", "reviews"); // run from the repo root
+const reviewsDir = () => join(dataDir(), "reviews");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function proxyConfig() {
-  const url = process.env.INTEL_RESIDENTIAL_PROXY_URL;
+  const url = process.env.RESIDENTIAL_PROXY_URL;
   if (!url) {
     throw new Error(
-      "INTEL_RESIDENTIAL_PROXY_URL is required in ~/.config/intel/.env.",
+      "RESIDENTIAL_PROXY_URL is required in ~/.config/intel/.env.",
     );
   }
   const u = new URL(url);
@@ -266,10 +266,11 @@ async function fetchCountry(appId, appName, cc, byId) {
 }
 
 // Fetches every reachable written review for one app and writes it to
-// docs/intel/reviews/<appName>.json, checkpointing after each storefront.
+// <INTEL_DATA_DIR>/reviews/<appName>.json, checkpointing after each storefront.
 export async function fetchAppReviews(appId, appNameOverride, opts = {}) {
   const appName = await resolveAppName(appId, appNameOverride);
 
+  const REVIEWS_DIR = reviewsDir();
   await mkdir(REVIEWS_DIR, { recursive: true });
   const outPath = join(REVIEWS_DIR, `${appName}.json`);
 

@@ -120,7 +120,7 @@ test("pending stays silent without state and blocks once on unread events", asyn
 class McpChild {
   constructor(home, socketPath, env = {}, command = "mcp") {
     this.child = spawn(process.execPath, [manager, command], {
-      env: { ...process.env, CLAUDE_CODE_SESSION_ID: session, CODEX_MANAGER_STATE_DIR: home, CODEX_MANAGER_SESSIONS_DIR: path.join(home, "sessions"), CODEX_MANAGER_SOCKET_FILE: socketPath, ...env },
+      env: { ...process.env, CLAUDE_CODE_SESSION_ID: session, CODEX_MANAGER_STATE_DIR: home, CODEX_MANAGER_SESSIONS_DIR: path.join(home, "sessions"), CODEX_DAEMON_SOCKET: socketPath, ...env },
       stdio: ["pipe", "pipe", "pipe"]
     });
     this.stderr = "";
@@ -498,7 +498,7 @@ test("an unanswered ask times out with a proceed-on-your-own answer", { timeout:
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
   const { mcp } = await startedThread(home, daemon, script);
-  const tools = new ToolsChild(home.home, { CODEX_MANAGER_REPLY_TIMEOUT_SECONDS: "1" });
+  const tools = new ToolsChild(home.home, { CODEX_MANAGER_ASK_TIMEOUT: "1" });
   try {
     const answer = await tools.tool("ask_claude", "thread-A", "call-slow", "?");
     assert.equal(answer.isError, false, answer.text);
@@ -764,7 +764,7 @@ test("an unanswered approval times out with decline", { timeout: 20_000 }, async
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
-  const mcp = new McpChild(home.home, daemon.socketPath, { CODEX_MANAGER_REPLY_TIMEOUT_SECONDS: "1" });
+  const mcp = new McpChild(home.home, daemon.socketPath, { CODEX_MANAGER_ASK_TIMEOUT: "1" });
   try {
     await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
     await mcp.call("start", { cwd: ".", prompt: "work" });
@@ -1163,7 +1163,7 @@ test("requests the daemon sends for an attached session are left to the client i
   script.threads = sessionsOnDaemon();
   script.resumeTurns = [{ id: "turn-live", status: "inProgress", items: [] }];
   const daemon = await fakeDaemon(script.handler);
-  const env = { CODEX_MANAGER_REPLY_TIMEOUT_SECONDS: "1" };
+  const env = { CODEX_MANAGER_ASK_TIMEOUT: "1" };
   const mcp = await mcpChild(home, daemon, env);
   let restarted = false;
   const inbox = path.join(home.dir, "thread-5.jsonl");

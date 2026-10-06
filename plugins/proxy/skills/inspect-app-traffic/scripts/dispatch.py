@@ -9,7 +9,7 @@ from mitmproxy import http, io
 
 
 def _root() -> Path:
-    return Path(os.environ.get("PROXY_CAPTURE_DIR") or "/tmp/proxy")
+    return Path(os.environ.get("PROXY_DATA_DIR") or "/tmp/proxy")
 
 
 def _captures_dir() -> Path:

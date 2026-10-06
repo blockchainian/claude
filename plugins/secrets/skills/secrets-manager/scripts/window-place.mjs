@@ -1,4 +1,4 @@
-// ABOUTME: Puts an account's Camoufox windows on one display, SECRETS_BROWSER_DISPLAY (else the main one): the main
+// ABOUTME: Puts an account's Camoufox windows on one display, BROWSER_DISPLAY (else the main one): the main
 // ABOUTME: window opens there, popups are moved there. Best-effort and macOS-only; any failure is a no-op.
 
 import { execFileSync } from "node:child_process";
@@ -12,9 +12,9 @@ const MOVE_SCRIPT = fileURLToPath(new URL("./moveWindows.swift", import.meta.url
 const DISPLAY_SCRIPT = fileURLToPath(new URL("./displayOrigin.swift", import.meta.url));
 const BROWSER_DOC = "chrome://browser/content/browser.xhtml";
 
-// The display the windows go on: SECRETS_BROWSER_DISPLAY in the secrets-manager's .env, any part of the
+// The display the windows go on: BROWSER_DISPLAY in the secrets-manager's .env, any part of the
 // display's name in any case (e.g. SAMSUNG); empty means the main display.
-export const displayName = (env = process.env) => env.SECRETS_BROWSER_DISPLAY ?? "";
+export const displayName = (env = process.env) => env.BROWSER_DISPLAY ?? "";
 
 // The main camoufox process for this profile (not the gpu/plugin child processes).
 export function findPid(profileDir) {

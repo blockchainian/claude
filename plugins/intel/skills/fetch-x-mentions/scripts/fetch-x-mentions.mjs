@@ -1,11 +1,11 @@
-import { requireEnv, loadEnvFile } from "./env.mjs";
+import { requireEnv, loadEnvFile, dataDir } from "./env.mjs";
 // ABOUTME: Fetches X/Twitter mentions of an app over a date range, one authenticated GraphQL
 // ABOUTME: SearchTimeline per day, sharded across accounts through the residential proxy, resumable.
 //
 // Usage (config from ~/.config/intel/.env loaded automatically):
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/fetch-x-mentions.mjs \
 //     <slug> "<query>" [sinceYYYY-MM-DD] [untilYYYY-MM-DD] [--daily-limit <n>] [--refill [<n>]]
-//   <slug> names the output dir docs/intel/x/<slug>/ holding tweets.jsonl and tweets.out.json.
+//   <slug> names the output dir <INTEL_DATA_DIR>/x/<slug>/ holding tweets.jsonl and tweets.out.json.
 //   --daily-limit caps how many tweets one day may yield (default 1000, rounded up to whole
 //   pages of 20). Days that hit the cap are truncated, newest tweets first.
 //   --refill [n] also re-fetches the gap days: those recorded with 0 tweets, or cut at a page
@@ -22,8 +22,8 @@ import { requireEnv, loadEnvFile } from "./env.mjs";
 // Accounts come from the secrets-manager store (~/.config/secrets-manager/secrets.sqlite): active X rows,
 // each its own X rate bucket, so N accounts ~= N x throughput. The state directory identifies the store.
 // Config (~/.config/intel/.env):
-//   INTEL_RESIDENTIAL_PROXY_URL Proxy every request routes through.
-//   INTEL_X_SEARCH_QUERY_ID / INTEL_X_BEARER_TOKEN / X_TID_*  anti-bot ingredients; refresh if X starts returning 404.
+//   RESIDENTIAL_PROXY_URL Proxy every request routes through.
+//   X_SEARCH_QUERY_ID / X_BEARER_TOKEN / X_TID_*  anti-bot ingredients; refresh if X starts returning 404.
 //
 // tweets.jsonl holds one tweet per line; each has a `sources` array of which query term(s)
 // surfaced it (@handle / to:handle / "phrase" / domain). Fetched days are appended as they
@@ -54,10 +54,10 @@ catch (e) {
 // ---- x-client-transaction-id header, required on X GraphQL/REST API calls ----
 //
 // The ingredients are captured from a real x.com browser session and go stale on X redeploy:
-//   INTEL_X_TID_VERIFICATION  <meta name="twitter-site-verification"> content
-//   INTEL_X_TID_FRAME         'd' of the SELECTED loading-x-anim frame (frames[keyBytes[5]%4], 2nd path)
-//   INTEL_X_TID_ROW           first int from ondemand.s "(n[NN],16)" matches
-//   INTEL_X_TID_INDICES       the remaining ints from those matches (comma-separated)
+//   X_TID_VERIFICATION  <meta name="twitter-site-verification"> content
+//   X_TID_FRAME         'd' of the SELECTED loading-x-anim frame (frames[keyBytes[5]%4], 2nd path)
+//   X_TID_ROW           first int from ondemand.s "(n[NN],16)" matches
+//   X_TID_INDICES       the remaining ints from those matches (comma-separated)
 // The math below mirrors X's client (as implemented by the x-client-transaction-id project).
 
 const KEYWORD = "obfiowerehiring";
@@ -174,18 +174,18 @@ function animate(frameRow, targetTime) {
 let cache = null;
 function init() {
   if (cache) return cache;
-  const VERIFICATION = requireEnv("INTEL_X_TID_VERIFICATION");
-  const FRAME_D = requireEnv("INTEL_X_TID_FRAME");
-  const ROW_INDEX = Number(requireEnv("INTEL_X_TID_ROW"));
-  const KEY_BYTE_INDICES = requireEnv("INTEL_X_TID_INDICES")
+  const VERIFICATION = requireEnv("X_TID_VERIFICATION");
+  const FRAME_D = requireEnv("X_TID_FRAME");
+  const ROW_INDEX = Number(requireEnv("X_TID_ROW"));
+  const KEY_BYTE_INDICES = requireEnv("X_TID_INDICES")
     .split(",")
     .map(Number)
     .filter((n) => Number.isInteger(n));
   const missing = [];
-  if (!VERIFICATION) missing.push("INTEL_X_TID_VERIFICATION");
-  if (!FRAME_D) missing.push("INTEL_X_TID_FRAME");
-  if (!Number.isInteger(ROW_INDEX)) missing.push("INTEL_X_TID_ROW");
-  if (!KEY_BYTE_INDICES.length) missing.push("INTEL_X_TID_INDICES");
+  if (!VERIFICATION) missing.push("X_TID_VERIFICATION");
+  if (!FRAME_D) missing.push("X_TID_FRAME");
+  if (!Number.isInteger(ROW_INDEX)) missing.push("X_TID_ROW");
+  if (!KEY_BYTE_INDICES.length) missing.push("X_TID_INDICES");
   if (missing.length) {
     throw new Error(
       `x-client-transaction-id needs ${missing.join(", ")} in ~/.config/intel/.env ` +
@@ -208,7 +208,7 @@ function init() {
   const frameRow = arr[rowIndex];
   if (!frameRow) {
     throw new Error(
-      `INTEL_X_TID_FRAME has no row ${rowIndex}; re-extract the selected animation frame.`,
+      `X_TID_FRAME has no row ${rowIndex}; re-extract the selected animation frame.`,
     );
   }
   cache = { keyBytes, animationKey: animate(frameRow, frameTime / TOTAL_TIME) };
@@ -310,7 +310,7 @@ export function duration(ms) {
 function makeDispatcher(url) {
   if (!url) {
     throw new Error(
-      "No proxy set. Add INTEL_RESIDENTIAL_PROXY_URL to ~/.config/intel/.env.",
+      "No proxy set. Add RESIDENTIAL_PROXY_URL to ~/.config/intel/.env.",
     );
   }
   const u = new URL(url);
@@ -324,7 +324,7 @@ function makeDispatcher(url) {
 // The credential store secrets-manager fills: active X accounts with a live auth_token + ct0.
 // Returns null when the store or its table is absent, so loadAccounts can fall back to the env.
 function loadAccountsFromStore() {
-  const stateDir = process.env.INTEL_SECRETS_STATE_DIR || join(homedir(), ".config", "secrets-manager");
+  const stateDir = process.env.SECRETS_DATA_DIR || join(homedir(), ".config", "secrets-manager");
   const path = join(stateDir, "secrets.sqlite");
   let rows;
   try {
@@ -341,7 +341,7 @@ function loadAccountsFromStore() {
     return null;
   }
   if (!rows.length) return null;
-  const proxy = requireEnv("INTEL_RESIDENTIAL_PROXY_URL");
+  const proxy = requireEnv("RESIDENTIAL_PROXY_URL");
   return rows.map((r) => ({
     label: r.username,
     authToken: r.auth_token,
@@ -351,7 +351,7 @@ function loadAccountsFromStore() {
 }
 
 // One account: { label, authToken, ct0, dispatcher }; the label prefixes its log lines. The single
-// source of accounts is the secrets-manager store (~/.config/secrets-manager/secrets.sqlite); INTEL_SECRETS_STATE_DIR
+// source of accounts is the secrets-manager store (~/.config/secrets-manager/secrets.sqlite); SECRETS_DATA_DIR
 // overrides its path.
 export function loadAccounts() {
   const accounts = loadAccountsFromStore();
@@ -385,7 +385,7 @@ export async function verifyAuth(acct) {
 export async function provisionPair(authToken, dispatcher) {
   const boot = await fetch(searchUrl("twitter"), {
     dispatcher,
-    headers: { authorization: `Bearer ${requireEnv("INTEL_X_BEARER_TOKEN")}`, cookie: `auth_token=${authToken}`, "User-Agent": UA },
+    headers: { authorization: `Bearer ${requireEnv("X_BEARER_TOKEN")}`, cookie: `auth_token=${authToken}`, "User-Agent": UA },
   });
   await boot.text();
   let ct0;
@@ -398,11 +398,11 @@ export async function provisionPair(authToken, dispatcher) {
   return { ok, ct0 };
 }
 
-const searchPath = () => `/i/api/graphql/${requireEnv("INTEL_X_SEARCH_QUERY_ID")}/SearchTimeline`;
+const searchPath = () => `/i/api/graphql/${requireEnv("X_SEARCH_QUERY_ID")}/SearchTimeline`;
 
 function headers(acct) {
   return {
-    authorization: `Bearer ${requireEnv("INTEL_X_BEARER_TOKEN")}`,
+    authorization: `Bearer ${requireEnv("X_BEARER_TOKEN")}`,
     "x-csrf-token": acct.ct0,
     cookie: `auth_token=${acct.authToken}; ct0=${acct.ct0}`,
     "x-twitter-auth-type": "OAuth2Session",
@@ -417,7 +417,7 @@ function headers(acct) {
 }
 
 export function searchUrl(query, cursor) {
-  requireEnv("INTEL_X_SEARCH_QUERY_ID");
+  requireEnv("X_SEARCH_QUERY_ID");
   const variables = {
     rawQuery: query,
     count: PAGE,
@@ -429,7 +429,7 @@ export function searchUrl(query, cursor) {
     variables: JSON.stringify(variables),
     features: JSON.stringify(FEATURES),
   });
-  return `${GQL}/${requireEnv("INTEL_X_SEARCH_QUERY_ID")}/SearchTimeline?${params.toString()}`;
+  return `${GQL}/${requireEnv("X_SEARCH_QUERY_ID")}/SearchTimeline?${params.toString()}`;
 }
 
 // Parse the query into labelled matchers so each tweet can record which term(s) surfaced it.
@@ -605,7 +605,7 @@ export async function getPage(
       // don't silently loop.
       throw new Error(
         `SearchTimeline ${res.status}: ${text.slice(0, 300)}\n` +
-          "If this mentions the operation/features, update INTEL_X_SEARCH_QUERY_ID / FEATURES.",
+          "If this mentions the operation/features, update X_SEARCH_QUERY_ID / FEATURES.",
       );
     }
     // A transient: an empty 404, an edge/proxy block, or a 5xx. Retry through a fresh exit.
@@ -827,10 +827,10 @@ async function main() {
   const until = untilArg || new Date().toISOString().slice(0, 10);
   const terms = parseQueryTerms(query);
 
-  requireEnv("INTEL_X_BEARER_TOKEN");
-  requireEnv("INTEL_X_SEARCH_QUERY_ID");
+  requireEnv("X_BEARER_TOKEN");
+  requireEnv("X_SEARCH_QUERY_ID");
   const accounts = loadAccounts();
-  const outDir = join("docs", "intel", "x", slug); // run from the repo root
+  const outDir = join(dataDir(), "x", slug); // run from the repo root
   await mkdir(outDir, { recursive: true });
   const logPath = join(outDir, "tweets.jsonl");
   const progressPath = join(outDir, "tweets.out.json");

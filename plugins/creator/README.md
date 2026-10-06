@@ -10,10 +10,10 @@ Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hos
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `CREATOR_ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
-| `CREATOR_BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
-| `CREATOR_DATA_DIR` | Posts, stats and recording output | Optional | ~/.config/creator/.env |
-| `CREATOR_SECRETS_STATE_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
+| `ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
+| `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
+| `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with TikTok data under tiktok/ | Optional | ~/.config/creator/.env |
+| `SECRETS_DATA_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
 
 Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
 
@@ -34,7 +34,7 @@ Account credentials, sessions and profiles remain in Secrets Manager; Creator co
 
 Every skill but `open-tiktok-account` runs its browser hidden. `--headed` shows it and screen-records it to the account's
 `recordings/`, for debugging a flow that TikTok's page changes broke; `--with-sound` also unmutes
-it. A shown window goes on the display `CREATOR_BROWSER_DISPLAY` names in `~/.config/creator/.env`
+it. A shown window goes on the display `BROWSER_DISPLAY` names in `~/.config/creator/.env`
 (any part of its name, e.g. `SAMSUNG`; unset means the main display), as secrets-manager's headed
 logins do; moving it needs the Accessibility permission for the terminal running `swift`.
 
@@ -53,7 +53,7 @@ all four skills import the upload skill's runtime by sibling-relative paths and 
 The browser flows run in Camoufox scripts without Claude Workflow, Claude API, or MCP browser
 tools. Camoufox itself is fetched by the secrets plugin's setup.
 Both hosts read the same existing secrets-manager state, by default `~/.config/secrets-manager`;
-set `CREATOR_SECRETS_STATE_DIR` explicitly if yours is elsewhere. The store, logged-in profiles,
+set `SECRETS_DATA_DIR` explicitly if yours is elsewhere. The store, logged-in profiles,
 ISP slots must already be provisioned through secrets-manager. Creator’s ISP pool is configured separately at `~/.config/creator/.env` and must match the login pool.
 Creator does not install secrets-manager or create/migrate its accounts; use the existing
 secrets-manager setup when those prerequisites are missing. Never open the same account profile

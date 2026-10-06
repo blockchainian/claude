@@ -16,8 +16,9 @@ from urllib.parse import urljoin, urlparse
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126 Safari/537.36")
 
-ROOT = Path(os.environ.get("INTEL_DIGEST_DIR",
-                           Path.home() / "Documents" / "digests"))
+_paths_script = Path(__file__).resolve().parents[2] / "fetch-x-mentions" / "scripts" / "env.mjs"
+_paths = json.loads(subprocess.check_output(["node", str(_paths_script)], text=True))
+ROOT = Path(_paths["output"]) / "digests"
 WORK = ROOT / ".work"
 
 # Path segments that name no particular episode, so cannot identify one.

@@ -3,7 +3,7 @@
 // ABOUTME: ratio, cadence, posting hours, who it talks to, the assets and links it pushes, engagement, labels.
 //
 // Usage: profile-user.mjs <user-dir> [--labels <labels.jsonl>] [--out <dir>]
-//        <user-dir> is docs/intel/x/kols/<user>/ holding tweets.jsonl and replies.jsonl.
+//        <user-dir> is <INTEL_DATA_DIR>/x/kols/<user>/ holding tweets.jsonl and replies.jsonl.
 //        Writes <out>/profile.json (default the user dir) and prints the summary a profile.md is
 //        written from. --labels folds in the kol-spec labels: kind, topic, asset with stance, interest.
 //

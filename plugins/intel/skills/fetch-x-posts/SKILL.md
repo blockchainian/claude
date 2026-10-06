@@ -28,7 +28,7 @@ background completion wakes either host. On timeout, preserve diagnostics and re
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
 Fetch the posts one search returns and print them — as opposed to `fetch-x-mentions` and
-`fetch-x-user-posts`, which fetch everything over a date range and save it under `docs/intel/x/`.
+`fetch-x-user-posts`, which fetch everything over a date range and save it under `~/.local/share/intel/x/`.
 Give it any X search query; it prints a small number of posts and writes no file. The request
 (x-client-transaction-id, the account list, the SearchTimeline url, the proxy) is imported from
 `fetch-x-mentions`, with request settings loaded from this script's own directory.
@@ -85,14 +85,14 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `INTEL_X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
-| `INTEL_X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
-| `INTEL_X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
-| `INTEL_X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
-| `INTEL_X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
-| `INTEL_X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
-| `INTEL_RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
-| `INTEL_SECRETS_STATE_DIR` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
+| `X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
+| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
+| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
+| `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
+| `SECRETS_DATA_DIR` | Account-store directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
 
 Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.config/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
 
@@ -106,7 +106,7 @@ Requires Node.js 22.13+ for `node:sqlite`.
 - `all N accounts are paused`: wait for the reset it names.
 - `failed after N attempts` is the proxy, not a ban; rerun.
 - `SearchTimeline 400` mentioning the operation/features means X redeployed; update
-  `INTEL_X_SEARCH_QUERY_ID` / `FEATURES` in `fetch-x-mentions`.
+  `X_SEARCH_QUERY_ID` / `FEATURES` in `fetch-x-mentions`.
 - `Cannot find package 'undici'` in a fresh worktree:
   `npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`.
 

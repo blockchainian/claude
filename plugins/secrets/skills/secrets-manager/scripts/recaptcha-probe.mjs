@@ -1,7 +1,7 @@
 // ABOUTME: Live 实测 probe — drives Google's real reCAPTCHA v2 demo widget (same api2/anchor + bframe
 // ABOUTME: DOM as the sign-in path) headless and times the changed waits. No account, read-only.
-import { writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { debugDir } from "./config.mjs";
 import { join } from "node:path";
 import {
   withProfile,
@@ -11,11 +11,11 @@ import {
   pollForState,
 } from "./login.mjs";
 
-// Where to drop the machine-readable timing summary. Override with SECRETS_RECAPTCHA_PROBE_RESULT_FILE for a known location.
-const OUT = process.env.SECRETS_RECAPTCHA_PROBE_RESULT_FILE || join(tmpdir(), "recaptcha-probe-result.json");
+// Diagnostics belong to the existing Secrets debug directory.
+const OUT = join(debugDir(), "recaptcha-test.json");
 const cred = { email: "recaptcha-demo-probe" };
 const now = () => Date.now();
-const result = { startedAt: new Date().toISOString(), head: process.env.SECRETS_RECAPTCHA_PROBE_LABEL || "HEAD", steps: {} };
+const result = { startedAt: new Date().toISOString(), steps: {} };
 
 try {
   await withProfile(cred.email, { headed: false }, async (_context, page) => {
@@ -53,5 +53,6 @@ try {
 }
 
 result.finishedAt = new Date().toISOString();
+mkdirSync(debugDir(), { recursive: true });
 writeFileSync(OUT, JSON.stringify(result, null, 2));
 console.log("PROBE DONE\n" + JSON.stringify(result, null, 2));

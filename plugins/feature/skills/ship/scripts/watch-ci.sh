@@ -3,8 +3,8 @@
 # ABOUTME: makes one background launch + one read instead of many foreground `gh pr checks` polls.
 set -u
 
-FEATURE_CI_TIMEOUT_SECONDS=${FEATURE_CI_TIMEOUT_SECONDS:-300}
-FEATURE_CI_INTERVAL_SECONDS=${FEATURE_CI_INTERVAL_SECONDS:-5}
+CI_TIMEOUT=${CI_TIMEOUT:-300}
+CI_INTERVAL=${CI_INTERVAL:-5}
 
 usage="usage: watch-ci.sh <pr-number|branch|commit-sha> [out-file]"
 REF=${1:-}
@@ -94,13 +94,13 @@ PY
 }
 
 START=$(date +%s)
-INTERVAL=$FEATURE_CI_INTERVAL_SECONDS
+INTERVAL=$CI_INTERVAL
 CHECKS='[]'
 STATE=timeout
 
 while :; do
   ELAPSED=$(($(date +%s) - START))
-  if [ "$ELAPSED" -ge "$FEATURE_CI_TIMEOUT_SECONDS" ]; then
+  if [ "$ELAPSED" -ge "$CI_TIMEOUT" ]; then
     STATE=timeout
     break
   fi
@@ -119,7 +119,7 @@ while :; do
 
   log "polling $REF: $(checks_progress "$CHECKS")"
 
-  REMAINING=$((FEATURE_CI_TIMEOUT_SECONDS - ELAPSED))
+  REMAINING=$((CI_TIMEOUT - ELAPSED))
   SLEEP=$INTERVAL
   [ "$SLEEP" -gt "$REMAINING" ] && SLEEP=$REMAINING
   sleep "$SLEEP"

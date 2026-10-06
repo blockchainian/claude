@@ -11,13 +11,13 @@ const tmp = mkdtempSync(join(tmpdir(), 'env-'))
 after(() => rmSync(tmp, { recursive: true, force: true }))
 
 test('parseEnv reads KEY=value lines, drops quotes, skips comments and blank lines', () => {
-  assert.deepEqual(parseEnv('# proxy\nINTEL_ISP_PROXY_URL="http://u:p@h:8001"\n\nexport INTEL_CASE_STUDY_DIR=/x/y \nbad line\n'),
-    { INTEL_ISP_PROXY_URL: 'http://u:p@h:8001', INTEL_CASE_STUDY_DIR: '/x/y' })
+  assert.deepEqual(parseEnv('# proxy\nISP_PROXY_URL="http://u:p@h:8001"\n\nexport INTEL_OUTPUT_DIR=/x/y \nbad line\n'),
+    { ISP_PROXY_URL: 'http://u:p@h:8001', INTEL_OUTPUT_DIR: '/x/y' })
 })
 
 test('parseEnv puts a value that starts with ~/ under the home directory', () => {
-  assert.deepEqual(parseEnv('INTEL_CASE_STUDY_DIR=~/x/y\nQUOTED="~/z"\nINTEL_ISP_PROXY_URL=http://h/~/a\nBARE=~\n'),
-    { INTEL_CASE_STUDY_DIR: join(homedir(), 'x/y'), QUOTED: join(homedir(), 'z'), INTEL_ISP_PROXY_URL: 'http://h/~/a', BARE: '~' })
+  assert.deepEqual(parseEnv('INTEL_OUTPUT_DIR=~/x/y\nQUOTED="~/z"\nISP_PROXY_URL=http://h/~/a\nBARE=~\n'),
+    { INTEL_OUTPUT_DIR: join(homedir(), 'x/y'), QUOTED: join(homedir(), 'z'), ISP_PROXY_URL: 'http://h/~/a', BARE: '~' })
 })
 
 test('loadEnv takes the first file that exists and never overrides a variable already set', () => {
@@ -31,7 +31,8 @@ test('loadEnv takes the first file that exists and never overrides a variable al
   assert.deepEqual(ENV_FILES, [join(homedir(), '.config', 'intel', '.env')])
 })
 
-test('one root override groups work, fetched data and limit state without changing default locations', () => {
-  assert.deepEqual(caseStudyPaths({INTEL_CASE_STUDY_DIR:'/tmp/research'}), {work:'/tmp/research',data:'/tmp/research/data',state:'/tmp/research/cache'})
-  assert.deepEqual(caseStudyPaths({}), {work:join(homedir(),'Documents','case-studies'),data:join(homedir(),'.local','share','case-study'),state:join(homedir(),'.cache','case-study-limits')})
+test('data and output roots are independent, with existing default rate state', () => {
+  assert.deepEqual(caseStudyPaths({INTEL_DATA_DIR:'/tmp/data',INTEL_OUTPUT_DIR:'/tmp/output'}), {work:'/tmp/output/case-studies',data:'/tmp/data/case-studies',state:'/tmp/data/cache/case-study-limits'})
+  assert.deepEqual(caseStudyPaths({}), {work:join(homedir(),'Documents','case-studies'),data:join(homedir(),'.local','share','intel','case-studies'),state:join(homedir(),'.cache','case-study-limits')})
+  assert.equal(caseStudyPaths({INTEL_OUTPUT_DIR:'/tmp/output'}).data, join(homedir(),'.local','share','intel','case-studies'))
 })

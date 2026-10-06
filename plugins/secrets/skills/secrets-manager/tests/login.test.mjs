@@ -211,23 +211,23 @@ test("oauthSurface returns null once the app session lands with no Google page c
 });
 
 test("oauthSurface fails when neither a Google page nor the app session appears", async () => {
-  process.env.SECRETS_STATE_DIR = mkdtempSync(join(tmpdir(), "login-"));
+  process.env.SECRETS_DATA_DIR = mkdtempSync(join(tmpdir(), "login-"));
   try {
     const page = pageForOauth();
     const adapter = { name: "app", domain: "app.example", ready: async () => false };
     await assert.rejects(oauthSurface(page, adapter, "user@example.com"), /app: Google sign-in never opened/);
     assert.equal(page.waits.length, 30);
-    const captures = readdirSync(join(process.env.SECRETS_STATE_DIR, "debug", "user@example.com"));
+    const captures = readdirSync(join(process.env.SECRETS_DATA_DIR, "debug", "user@example.com"));
     assert.match(captures[0], /^app-oauth-not-opened-/);
   } finally {
-    delete process.env.SECRETS_STATE_DIR;
+    delete process.env.SECRETS_DATA_DIR;
   }
 });
 
 test("oauthSurface does not read the app session while the page is off the app's domain", async () => {
   // The session check reads storage on whatever origin the page is on, so a same-tab hop through an
   // auth provider must not be read as the app's own session.
-  process.env.SECRETS_STATE_DIR = mkdtempSync(join(tmpdir(), "login-"));
+  process.env.SECRETS_DATA_DIR = mkdtempSync(join(tmpdir(), "login-"));
   try {
     let readyCalls = 0;
     const page = pageForOauth({ url: "https://auth.provider.example/oauth" });
@@ -235,7 +235,7 @@ test("oauthSurface does not read the app session while the page is off the app's
     await assert.rejects(oauthSurface(page, adapter, "user@example.com"), /Google sign-in never opened/);
     assert.equal(readyCalls, 0);
   } finally {
-    delete process.env.SECRETS_STATE_DIR;
+    delete process.env.SECRETS_DATA_DIR;
   }
 });
 

@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { parseEnv as parseDotEnv } from 'node:util'
 import { join } from 'node:path'
+import { dataDir, outputDir, caseStudyStateDir } from '../../fetch-x-mentions/scripts/env.mjs'
 
 export const ENV_FILES = [join(homedir(), '.config', 'intel', '.env')]
 
@@ -20,12 +21,11 @@ export function loadEnv(files = ENV_FILES, env = process.env) {
   return file
 }
 
-// A configured root groups working files, fetched data and rate-limit state. Existing defaults stay in place.
+// Fetched data and final work use separate roots; shared rate-limit state stays outside outputs.
 export function caseStudyPaths(env = process.env) {
-  const root = env.INTEL_CASE_STUDY_DIR
   return {
-    work: root || join(homedir(), 'Documents', 'case-studies'),
-    data: root ? join(root, 'data') : join(homedir(), '.local', 'share', 'case-study'),
-    state: root ? join(root, 'cache') : join(homedir(), '.cache', 'case-study-limits'),
+    work: join(outputDir(env), 'case-studies'),
+    data: join(dataDir(env), 'case-studies'),
+    state: caseStudyStateDir(env),
   }
 }

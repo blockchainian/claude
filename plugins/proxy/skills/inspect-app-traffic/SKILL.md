@@ -33,12 +33,12 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 Use the actual installed path, not the caller's working directory or a host-specific
 plugin environment variable. If the loaded path is unavailable, stop and report it.
 Shell variables may not persist between tool calls; repeat the assignment in each call.
-Where this document writes `$CAP` or `$PROXY_CAPTURE_DIR`, paste the actual value
+Where this document writes `$CAP` or `$PROXY_DATA_DIR`, paste the actual value
 — read it out of the JSON a previous command printed and type it in full, or run the whole
 sequence as one command.
 
 All scripts print JSON on stdout — parse stdout, act on it. The hub and the per-capture flow
-files live under `$PROXY_CAPTURE_DIR` (default `/tmp/proxy`); point it at a durable directory to keep
+files live under `$PROXY_DATA_DIR` (default `/tmp/proxy`); point it at a durable directory to keep
 captures across a reboot.
 
 ## 0. Setup (skip if already set up)
@@ -104,7 +104,7 @@ If the browser shows `NET::ERR_CERT_AUTHORITY_INVALID` or an HSTS block, the CA 
 
 ```bash
 "$SKILL_DIR/scripts/capture.mjs" start --label pump --hosts pump.fun --wireguard
-"$SKILL_DIR/scripts/wg-config.mjs" --qr "$PROXY_CAPTURE_DIR/pump-qr.png"
+"$SKILL_DIR/scripts/wg-config.mjs" --qr "$PROXY_DATA_DIR/pump-qr.png"
 ```
 
 `start --wireguard` brings the hub up serving WireGuard too; `wg-config.mjs` prints the client
@@ -147,7 +147,7 @@ current host's connected Chrome tools driving it. Either way, enable Zero Omega 
 read the capture's own file directly with mitmproxy's flow language:
 
 ```bash
-mitmdump -q -nr "$PROXY_CAPTURE_DIR/cap/$CAP.mitm" '~u /api/trade & ~s' --set flow_detail=3 2>/dev/null
+mitmdump -q -nr "$PROXY_DATA_DIR/cap/$CAP.mitm" '~u /api/trade & ~s' --set flow_detail=3 2>/dev/null
 ```
 
 A WebSocket flow is written to the capture's file when it closes, so read its frames after

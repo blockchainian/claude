@@ -44,11 +44,11 @@ export async function main(argv) {
     const {values,positionals}=parseArgs({args:argv,options:{select:{type:'string',multiple:true},all:{type:'boolean'},concurrency:{type:'string'}},allowPositionals:true});
     if (positionals.length) throw new Error('Usage: verify-x.mjs [--select USER]... [--all] [--concurrency N]');
     loadEnvFile();
-    const url=requireEnv('INTEL_RESIDENTIAL_PROXY_URL'), u=new URL(url);
+    const url=requireEnv('RESIDENTIAL_PROXY_URL'), u=new URL(url);
     const {ProxyAgent}=await import('undici');
     const token=u.username ? `Basic ${Buffer.from(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`).toString('base64')}` : null;
     dispatcher=new ProxyAgent(token ? {uri:`${u.protocol}//${u.host}`,token} : `${u.protocol}//${u.host}`);
-    const state=process.env.INTEL_SECRETS_STATE_DIR || join(homedir(),'.config/secrets-manager');
+    const state=process.env.SECRETS_DATA_DIR || join(homedir(),'.config/secrets-manager');
     db=new DatabaseSync(join(state,'secrets.sqlite'));
     return await verifyX(db,values,{dispatcher});
   } catch (e) { console.error(e.message); return 1; }

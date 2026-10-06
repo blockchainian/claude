@@ -1,6 +1,6 @@
 ---
 name: fetch-tiktok-mentions
-description: Fetch a brand's TikTok videos from hashtag pages, user pages and keyword searches into docs/intel/tiktok/<slug>/ — full video metadata (videos.jsonl), each video's comments with replies (comments/<id>.jsonl) and the video files (~/.local/share/tiktok/<id>.mp4, outside the repo) — through anonymous Camoufox sessions on the ISP proxy pool, plus the logged-in TikTok account of the secrets-manager store for keyword search and full user timelines, with play-count floors, every hashtag pulled by four sessions at once, deduplicated by video id, resumable. Use when asked to fetch / 抓 / 拉 TikTok videos, comments or video files for a brand, hashtag, account or search keyword, or to add a new run to an existing TikTok archive. NOT for logging the TikTok account in (secrets-manager `login tiktok`), NOT for X (fetch-x-mentions, fetch-x-user-posts) and NOT for reading the archive.
+description: Fetch a brand's TikTok videos from hashtag pages, user pages and keyword searches into ~/.local/share/intel/tiktok/<slug>/ — full video metadata (videos.jsonl), each video's comments with replies (comments/<id>.jsonl) and the video files (~/.local/share/intel/tiktok/<id>.mp4, outside the repo) — through anonymous Camoufox sessions on the ISP proxy pool, plus the logged-in TikTok account of the secrets-manager store for keyword search and full user timelines, with play-count floors, every hashtag pulled by four sessions at once, deduplicated by video id, resumable. Use when asked to fetch / 抓 / 拉 TikTok videos, comments or video files for a brand, hashtag, account or search keyword, or to add a new run to an existing TikTok archive. NOT for logging the TikTok account in (secrets-manager `login tiktok`), NOT for X (fetch-x-mentions, fetch-x-user-posts) and NOT for reading the archive.
 ---
 
 # Fetch TikTok mentions
@@ -32,7 +32,7 @@ TikTok has no "everything about a brand" view, so coverage is the union of the s
 Everything is fetched anonymously except keyword searches and user timelines, which go through
 the logged-in account (see "The account").
 
-Run from the repo root.
+Run from any working directory; data paths are under `INTEL_DATA_DIR`.
 
 ```
 node \
@@ -42,8 +42,8 @@ node \
   [--source-limit <n>] [--comment-limit <n>] [--sessions <n>] [--rate <n>] [--concurrency <n>] [--out <dir>] [--no-comments] [--no-download]
 ```
 
-- `slug` names the output dir `docs/intel/tiktok/<slug>/`. `--out <dir>` writes to that directory
-  instead (the run then need not start from the repo root).
+- `slug` names the output dir `~/.local/share/intel/tiktok/<slug>/`. `--out <dir>` writes to that directory
+  instead.
 - `--hashtag` and `--user` are repeatable; a name, `#tag` / `@handle`, or the tiktok.com url all work.
   The sources are saved, so a rerun needs only the slug; sources given later are added.
 - `--keyword` is repeatable too: the words of one TikTok video search (quote several words). The
@@ -107,7 +107,7 @@ sessions share the slot.
 
 ## Output
 
-Under `docs/intel/tiktok/<slug>/`, or the `--out` directory:
+Under `~/.local/share/intel/tiktok/<slug>/`, or the `--out` directory:
 
 - `videos.jsonl`: one video per line, TikTok's full item (`id, desc, createTime, author, stats,
   challenges, music, textExtra, video, ...`) plus `sources`, the pages that surfaced it
@@ -121,8 +121,8 @@ Under `docs/intel/tiktok/<slug>/`, or the `--out` directory:
   Per run and source: `fetched` videos TikTok returned, `kept` those at or above the play floor and in English,
   `new` those kept and not held before, `pulls` how often the source was paged.
 
-Video files are not in the repo: `~/.local/share/tiktok/<videoId>.mp4`, one copy shared by every
-slug, so they survive a deleted worktree. `INTEL_TIKTOK_VIDEO_DIR` overrides the directory. Photo posts
+Video files are not in the repo: `~/.local/share/intel/tiktok/<videoId>.mp4`, one copy shared by every
+slug, so they survive a deleted worktree. `INTEL_DATA_DIR` overrides the root, with videos under `tiktok/`. Photo posts
 have no video file. A video TikTok no longer has is logged `gone` and asked for again next run
 (the refusal is often temporary); it does not make the run exit non-zero.
 
@@ -153,10 +153,10 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `INTEL_ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `~/.config/intel/.env` |
-| `INTEL_ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `~/.config/intel/.env` |
-| `INTEL_SECRETS_STATE_DIR` | Account-store and browser-profile directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
-| `INTEL_TIKTOK_VIDEO_DIR` | Video output directory; default ~/.local/share/tiktok | No | `~/.config/intel/.env` |
+| `ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `~/.config/intel/.env` |
+| `ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `~/.config/intel/.env` |
+| `SECRETS_DATA_DIR` | Account-store and browser-profile directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
+| `INTEL_DATA_DIR` | Data root; default ~/.local/share/intel, with videos under tiktok/ | No | `~/.config/intel/.env` |
 
 Account credentials, login sessions and browser profiles stay in the existing Secrets Manager store; do not copy them into `.env`.
 
@@ -178,7 +178,7 @@ First use in a checkout: `npm install --prefix "$SKILL_DIR/scripts"`. Use the Ca
 node --test "$SKILL_DIR/tests/fetch-tiktok-mentions.test.mjs"
 ```
 
-Archive paths are relative to the working directory, run from the repo root that owns the archive.
+Archive paths below show the default Intel data root; use the configured `INTEL_DATA_DIR` when set.
 
 Log the account in with the `secrets` plugin’s `secrets-manager login tiktok`.
 
