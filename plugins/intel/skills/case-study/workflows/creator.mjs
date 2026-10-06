@@ -6,7 +6,7 @@ export const meta = {
   phases: [
     { title: 'Scout', detail: 'one scout per source type, picking press from the news lists fetched before the workflow; the two numbers agents start at once', model: 'sonnet' },
     { title: 'Read', detail: 'readers in batches of 8 sources, 2 for videos and podcast episodes, which start first', model: 'sonnet' },
-    { title: 'Write', detail: 'one writer per chapter, as soon as the reading is merged: the text the reader gets, with its source marks', model: 'claude-opus-4-8' },
+    { title: 'Write', detail: 'one writer per chapter, as soon as the reading is merged: the text the reader gets, with its source marks', model: 'claude-opus-5-5' },
     { title: 'Book', detail: 'one agent strips the marks from the chapters and writes the introduction and the reasoning chapter from them' },
   ],
 }
@@ -95,7 +95,7 @@ log(`read stage merged: ${mergedRead}`)
 
 phase('Write')
 // A writer's chapter is the text the reader gets. Eight at once on the session's model have run into the plan's quota.
-const WRITER = { model: 'claude-opus-4-8', effort: 'high', agentType: 'general-purpose' }
+const WRITER = { model: 'claude-opus-5-5', effort: 'high', agentType: 'general-purpose' }
 allSettled(await Promise.all(FROM_NOTES.map(file => settled(
   `${COMMON}\nYou are a chapter writer. Follow ${S}/briefs/write.md. Your chapter file: drafts/${file}.md (see the chapter table in the type file).`,
   { label: `write:${file}`, phase: 'Write', ...WRITER }))), FROM_NOTES.map(file => `drafts/${file}.md`), 'Write')
