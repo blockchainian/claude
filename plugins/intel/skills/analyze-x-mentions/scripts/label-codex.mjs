@@ -7,12 +7,13 @@
 // Defaults to the Fast service tier ("priority": 1.5x speed, 2x price, still ~1/10 the cost of gpt-6-sol);
 // pass --service-tier standard to opt out. An unsupported tier silently downgrades to standard.
 // Writes labelsN.json (N from the chunk file name) plus labelsN.events.jsonl and prints one line of usage.
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, existsSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
-import { tmpdir, homedir } from "node:os";
+import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import * as mentions from "./mentions-spec.mjs";
+import { loadEnvFile, tmpDir } from "../../fetch-x-mentions/scripts/env.mjs";
 
 // A spec module exports RULES, FIELDS, SCHEMA, fields(vocab), VOCAB and isNoise; the mentions spec is the default.
 export const loadSpec = (path) => (path ? import(pathToFileURL(path).href) : Promise.resolve(mentions));
@@ -90,32 +91,38 @@ export function codexHome(dir, { model, effort, instructions, serviceTier }) {
 }
 
 export function runCodex(prompt, { model = "gpt-6-luna", effort = "low", serviceTier = "priority", events, timeoutMs = 3_600_000, tries = 2, spec = mentions }) {
-  const dir = mkdtempSync(join(tmpdir(), "label-codex-"));
-  const schema = join(dir, "schema.json");
-  const instructions = join(dir, "instructions.md");
-  const last = join(dir, "last.txt");
-  writeFileSync(schema, JSON.stringify(spec.SCHEMA));
-  writeFileSync(instructions, spec.RULES);
-  const home = codexHome(dir, { model, effort, instructions, serviceTier });
-  const args = [
-    "exec", "--ignore-rules", "--skip-git-repo-check", "--ephemeral", "-C", dir, "-s", "read-only",
-    ...OFF.flatMap((f) => ["--disable", f]), "--output-schema", schema, "--json", "-o", last, "-",
-  ];
-  const t0 = Date.now();
-  let r;
-  for (let i = 1; i <= tries; i++) {
-    r = spawnSync("codex", args, { input: prompt, encoding: "utf8", maxBuffer: 1 << 28, timeout: timeoutMs, env: { ...process.env, CODEX_HOME: home } });
-    if (events) writeFileSync(events, r.stdout ?? "");
-    if (r.status === 0) break;
-    if (i === tries) throw new Error(`codex exec ${r.signal ? `killed by ${r.signal} after ${timeoutMs} ms` : `exited ${r.status}`}: ${(r.stderr ?? "").slice(-2000)}`);
+  const dir = mkdtempSync(join(tmpDir("analyze-x-mentions"), "label-codex-"));
+  // The scratch dir holds a copy of the Codex login, so it goes as soon as the call ends.
+  try {
+    const schema = join(dir, "schema.json");
+    const instructions = join(dir, "instructions.md");
+    const last = join(dir, "last.txt");
+    writeFileSync(schema, JSON.stringify(spec.SCHEMA));
+    writeFileSync(instructions, spec.RULES);
+    const home = codexHome(dir, { model, effort, instructions, serviceTier });
+    const args = [
+      "exec", "--ignore-rules", "--skip-git-repo-check", "--ephemeral", "-C", dir, "-s", "read-only",
+      ...OFF.flatMap((f) => ["--disable", f]), "--output-schema", schema, "--json", "-o", last, "-",
+    ];
+    const t0 = Date.now();
+    let r;
+    for (let i = 1; i <= tries; i++) {
+      r = spawnSync("codex", args, { input: prompt, encoding: "utf8", maxBuffer: 1 << 28, timeout: timeoutMs, env: { ...process.env, CODEX_HOME: home } });
+      if (events) writeFileSync(events, r.stdout ?? "");
+      if (r.status === 0) break;
+      if (i === tries) throw new Error(`codex exec ${r.signal ? `killed by ${r.signal} after ${timeoutMs} ms` : `exited ${r.status}`}: ${(r.stderr ?? "").slice(-2000)}`);
+    }
+    const lines = r.stdout.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const turn = lines.find((l) => l.type === "turn.completed");
+    const tools = lines.filter((l) => l.type === "item.completed" && l.item?.type !== "agent_message" && l.item?.type !== "reasoning").length;
+    return { message: readFileSync(last, "utf8"), usage: turn?.usage, tools, seconds: Math.round((Date.now() - t0) / 1000) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  const lines = r.stdout.split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const turn = lines.find((l) => l.type === "turn.completed");
-  const tools = lines.filter((l) => l.type === "item.completed" && l.item?.type !== "agent_message" && l.item?.type !== "reasoning").length;
-  return { message: readFileSync(last, "utf8"), usage: turn?.usage, tools, seconds: Math.round((Date.now() - t0) / 1000) };
 }
 
 async function main() {
+  loadEnvFile();
   const args = process.argv.slice(2);
   const input = args.find((a) => !a.startsWith("--") && !["--facts", "--vocab", "--out", "--model", "--effort", "--service-tier", "--max-passes", "--spec"].includes(args[args.indexOf(a) - 1]));
   const opt = (k, d = null) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);

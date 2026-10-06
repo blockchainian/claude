@@ -58,7 +58,7 @@ draft — that is the default. Two keywords instead select a store command.
 
 The store is `~/Documents/digests/` (override with
 `INTEL_OUTPUT_DIR`, then append `digests/`). Items live in `items/<slug>.md`, listed in
-`index.md`. Drafts stage in `.work/<slug>/` until saved. (The store holds
+`index.md`. Drafts stage in `~/.local/state/intel/digest/<slug>/` (`INTEL_STATE_DIR`) until saved. (The store holds
 articles, episodes, videos and papers alike.)
 
 ## Setup (automatic, idempotent)
@@ -214,8 +214,7 @@ own page size.
    ```
 
    It typesets every chapter that has a highlights file into
-   `<source>-highlights.pdf` next to the source (in the work dir when the
-   source was a URL or its folder is not writable), prints that path, and
+   `<source>-highlights.pdf` in the store (`~/Documents/digests/`), prints that path, and
    writes the combined `<work>/draft.md`. `--out`, `--bg`, `--fg` and
    `--font-size` override the defaults, which are the translate skill's.
    Re-run it after editing any chapter's file.

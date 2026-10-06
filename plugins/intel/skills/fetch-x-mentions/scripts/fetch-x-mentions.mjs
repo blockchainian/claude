@@ -1,11 +1,11 @@
-import { requireEnv, loadEnvFile, dataDir } from "./env.mjs";
+import { requireEnv, loadEnvFile, stateDir } from "./env.mjs";
 // ABOUTME: Fetches X/Twitter mentions of an app over a date range, one authenticated GraphQL
 // ABOUTME: SearchTimeline per day, sharded across accounts through the residential proxy, resumable.
 //
 // Usage (config from ~/.config/intel/.env loaded automatically):
 //   node ${CLAUDE_PLUGIN_ROOT}/skills/fetch-x-mentions/scripts/fetch-x-mentions.mjs \
 //     <slug> "<query>" [sinceYYYY-MM-DD] [untilYYYY-MM-DD] [--daily-limit <n>] [--refill [<n>]]
-//   <slug> names the output dir <INTEL_DATA_DIR>/x/<slug>/ holding tweets.jsonl and tweets.out.json.
+//   <slug> names the output dir <INTEL_STATE_DIR>/x/<slug>/ holding tweets.jsonl and tweets.out.json.
 //   --daily-limit caps how many tweets one day may yield (default 1000, rounded up to whole
 //   pages of 20). Days that hit the cap are truncated, newest tweets first.
 //   --refill [n] also re-fetches the gap days: those recorded with 0 tweets, or cut at a page
@@ -830,7 +830,7 @@ async function main() {
   requireEnv("X_BEARER_TOKEN");
   requireEnv("X_SEARCH_QUERY_ID");
   const accounts = loadAccounts();
-  const outDir = join(dataDir(), "x", slug); // run from the repo root
+  const outDir = join(stateDir(), "x", slug); // run from the repo root
   await mkdir(outDir, { recursive: true });
   const logPath = join(outDir, "tweets.jsonl");
   const progressPath = join(outDir, "tweets.out.json");

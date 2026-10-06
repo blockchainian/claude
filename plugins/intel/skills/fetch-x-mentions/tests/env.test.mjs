@@ -68,3 +68,18 @@ test('importing a shared client never loads its sibling dotenv file', () => {
  const result=spawnSync(process.execPath,[...process.execArgv,'--input-type=module','-e',code],{encoding:'utf8'});
  assert.equal(result.status,0,result.stderr);
 });
+
+test('plugin roots default under the home directory and each has its own override', async () => {
+ const {dataDir,stateDir,outputDir,tmpDir,limitsDir}=await import('../scripts/env.mjs');
+ const {homedir}=await import('node:os');
+ assert.equal(dataDir({}),join(homedir(),'.local/share/intel'));
+ assert.equal(stateDir({}),join(homedir(),'.local/state/intel'));
+ assert.equal(outputDir({}),join(homedir(),'Documents'));
+ assert.equal(limitsDir({}),join(homedir(),'.local/state/intel/limits'));
+ const root=mkdtempSync(join(tmpdir(),'intel-roots-'));
+ const env={INTEL_DATA_DIR:join(root,'d'),INTEL_STATE_DIR:'~/s',INTEL_OUTPUT_DIR:join(root,'o')};
+ assert.equal(stateDir(env),join(homedir(),'s'));
+ assert.equal(limitsDir(env),join(homedir(),'s/limits'));
+ assert.equal(tmpDir('translate',env),join(root,'d/tmp/translate'));
+ assert.ok(spawnSync('test',['-d',join(root,'d/tmp/translate')]).status===0);
+});

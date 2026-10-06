@@ -408,7 +408,12 @@ def main():
     check("PDF caption format check regressions", formatter.returncode == 0, formatter.stdout + formatter.stderr)
     test_render_import()
     test_compiles_clean()
+    roots = Path(tempfile.mkdtemp()).resolve()
+    for key in ("OUTPUT", "STATE", "DATA"):
+        os.environ[f"INTEL_{key}_DIR"] = str(roots / key.lower())
     rd = load("render")
+    check("default_out: the PDF goes to <INTEL_OUTPUT_DIR>/translate/",
+          rd.default_out({"title": "Zero to One"}, Path("/tmp/x/work")) == roots / "output" / "translate" / "zero-to-one.pdf")
     test_render_units(rd)
     test_math_units(rd)
     test_render_e2e(rd)

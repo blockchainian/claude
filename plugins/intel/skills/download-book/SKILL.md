@@ -1,6 +1,6 @@
 ---
 name: download-book
-description: Search Anna's Archive for EPUB books, compare result download counts, extract fast and slow download links, and download the selected book to ~/Downloads. Use when asked to find a book's download options, inspect this site's EPUB search results, or download a book.
+description: Search Anna's Archive for EPUB books, compare result download counts, extract fast and slow download links, and download the selected book to ~/Documents/books. Use when asked to find a book's download options, inspect this site's EPUB search results, or download a book.
 ---
 
 # Download Book
@@ -45,14 +45,14 @@ The site sits behind DDoS-Guard, which serves a captcha to headless browsers and
 npm install --prefix "$SKILL_DIR/scripts"
 ```
 
-The browser profile persists at `~/.cache/secrets-manager/profiles/download-book`. One Chrome window serves every run: the first run opens it, each run works in a background tab of its own (it does not take the focus) and closes that tab when it finishes, and the window closes by itself a minute after the last tab. Several books can be looked up at once, one run per book; do not use the window meanwhile.
+The browser profile persists at `~/.local/share/intel/download-book/profile` (under `INTEL_DATA_DIR` when set); deleting it only costs the next run a browser check. One Chrome window serves every run: the first run opens it, each run works in a background tab of its own (it does not take the focus) and closes that tab when it finishes, and the window closes by itself a minute after the last tab. Several books can be looked up at once, one run per book; do not use the window meanwhile.
 
 ## Run
 
 Run the bundled script with a book title and the file to save it to:
 
 ```sh
-"$SKILL_DIR/scripts/anna-archive-links.mjs" "Pride and Prejudice" --out ~/Downloads/"Pride and Prejudice.epub"
+"$SKILL_DIR/scripts/anna-archive-links.mjs" "Pride and Prejudice" --out ~/Documents/books/"Pride and Prejudice.epub"
 ```
 
 The script searches the first EPUB results page, reads download counts embedded in that page (using the metadata endpoint only when a count is missing), selects the highest count, calls the fast download API, and resolves a slow download link. For the slow link it prefers a "slightly faster but with waitlist" server (these download at megabytes per second after a short queue) over the "no waitlist" servers (immediate but throttled to tens of KB/s), polling the waitlist entry until its direct link appears and falling back to a no-waitlist server if the queue does not clear in time. It prints JSON with the selected record, any links found and, with `--out`, the `download` result. Without `--out` it only finds the links. Finding the links takes about 90 seconds — the browser check plus the slow server's queue.
@@ -61,7 +61,7 @@ Confirm the selected `title` matches the book the user asked for. The script pic
 
 ## Download
 
-Download the book to `~/Downloads` automatically, without asking the user to approve it: pass `--out ~/Downloads/"<Title>.epub"`, naming the file from the book title. Run it in the background; a slow download can take many minutes.
+Download the book to `~/Documents/books` (`<INTEL_OUTPUT_DIR>/books` when set) automatically, without asking the user to approve it: pass `--out ~/Documents/books/"<Title>.epub"`, naming the file from the book title. Run it in the background; a slow download can take many minutes.
 
 With `--out` the script tries `fast.url` first, then `slow.url`, then every other slow entry on the detail page (waitlist servers first), resolving each only when the link before it answered 429 ("too many downloads at the same time from the same IP"). Any other HTTP failure stops it. It writes through a `.part` file and keeps the file only when it is an EPUB (a Zip), so an HTML error page is never saved. The JSON's `download` holds `path`, the `url` used and the `refused` links, or an `error`. When every link answers 429, another download from this IP (often the user's own browser) is still running: report that and retry after it finishes.
 

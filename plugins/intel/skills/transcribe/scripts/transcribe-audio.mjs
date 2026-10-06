@@ -4,9 +4,9 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnvFile, tmpDir } from "../../fetch-x-mentions/scripts/env.mjs";
 
 export const MODEL = "mlx-community/whisper-large-v3-turbo";
 export const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
@@ -113,21 +113,26 @@ export function main(argv = process.argv.slice(2)) {
   }
   const src = argv[0];
   const outTxt = path.normalize(argv[1]);
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), "tmp"));
-  const audio = getAudio(src, work);
-  // Keep our stdout clean for the JSON; whisper's chatter goes to stderr.
-  const cmd = buildCmd(whisperPrefix(), audio, work);
-  const res = spawnSync(cmd[0], cmd.slice(1), { stdio: ["inherit", 2, "inherit"] });
-  if (res.error) throw res.error;
-  if (res.status !== 0) throw new CalledProcessError(cmd, res.status ?? res.signal);
-  const produced = txtFilesIn(work);
-  if (produced.length === 0) throw new SystemExit("transcription produced no .txt output");
-  const text = fs.readFileSync(produced[0], "utf8");
-  fs.mkdirSync(path.dirname(path.resolve(outTxt)), { recursive: true });
-  fs.writeFileSync(outTxt, text, "utf8");
-  const words = countWords(text);
-  console.log(JSON.stringify({ transcript: outTxt, words, thin: words < 1500, source: src },
-    null, 2));
+  loadEnvFile();
+  const work = fs.mkdtempSync(path.join(tmpDir("transcribe"), "audio-"));
+  try {
+    const audio = getAudio(src, work);
+    // Keep our stdout clean for the JSON; whisper's chatter goes to stderr.
+    const cmd = buildCmd(whisperPrefix(), audio, work);
+    const res = spawnSync(cmd[0], cmd.slice(1), { stdio: ["inherit", 2, "inherit"] });
+    if (res.error) throw res.error;
+    if (res.status !== 0) throw new CalledProcessError(cmd, res.status ?? res.signal);
+    const produced = txtFilesIn(work);
+    if (produced.length === 0) throw new SystemExit("transcription produced no .txt output");
+    const text = fs.readFileSync(produced[0], "utf8");
+    fs.mkdirSync(path.dirname(path.resolve(outTxt)), { recursive: true });
+    fs.writeFileSync(outTxt, text, "utf8");
+    const words = countWords(text);
+    console.log(JSON.stringify({ transcript: outTxt, words, thin: words < 1500, source: src },
+      null, 2));
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
 }
 
 /** Python's `if __name__ == "__main__"`: true when this module is the entry script. */

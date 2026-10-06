@@ -1,6 +1,6 @@
 ---
 name: analyze-x-user
-description: Profile ONE X/Twitter account from its own timeline (tweets.jsonl + replies.jsonl left by fetch-x-user-posts) into ~/.local/share/intel/x/kols/<user>/profile.md — who the account is, what it talks about most, the tokens and people it pushes, its posting behaviour and interests, read from its own posts. Labels each post with the analyze-x-mentions labeler, then writes a single-account profile. Use when asked to profile / 画像 one KOL from their fetched timeline. NOT for the accounts mentioning an app (use analyze-x-users) and NOT for fetching the posts (use fetch-x-user-posts).
+description: Profile ONE X/Twitter account from its own timeline (tweets.jsonl + replies.jsonl left by fetch-x-user-posts) into ~/Documents/x/kols/<user>/profile.md — who the account is, what it talks about most, the tokens and people it pushes, its posting behaviour and interests, read from its own posts. Labels each post with the analyze-x-mentions labeler, then writes a single-account profile. Use when asked to profile / 画像 one KOL from their fetched timeline. NOT for the accounts mentioning an app (use analyze-x-users) and NOT for fetching the posts (use fetch-x-user-posts).
 ---
 
 # Analyze X user (single account)
@@ -27,7 +27,7 @@ must await their own commands before returning. Do not repeatedly poll logs or a
 background completion wakes either host. On timeout, preserve diagnostics and report the
 process state before retrying. Use the current host's image/file tools to inspect artifacts.
 
-Data paths below show the default `~/.local/share/intel` root; replace it with the configured `INTEL_DATA_DIR` when set. Expand `~` to the absolute home path in JSON arguments.
+Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the default `~/Documents` output root; replace it with the configured `INTEL_OUTPUT_DIR` when set. Expand `~` to the absolute home path in JSON arguments.
 
 ## Environment Variables
 
@@ -50,12 +50,12 @@ own posts (what kind, about which asset, which way, with what stake), not an app
 
 ## Input & output
 
-- **Input**: `~/.local/share/intel/x/kols/<user>/tweets.jsonl` and `.../replies.jsonl` from `fetch-x-user-posts`.
-- **Output**, in the same dir: `profile.md` + `images/`, `profile.json` (deterministic stats) and
-  `labels.jsonl` (one line per post, committed so a rerun only labels new posts).
+- **Input**: `~/.local/state/intel/x/kols/<user>/tweets.jsonl` and `.../replies.jsonl` from `fetch-x-user-posts`.
+- **Output**: `profile.md` + `images/` in `~/Documents/x/kols/<user>/`; next to the input, `profile.json`
+  (deterministic stats) and `labels.jsonl` (one line per post, committed so a rerun only labels new posts).
 
 Commands may run from any working directory; `S="$SKILL_DIR/scripts"`,
-`T="$SKILL_DIR/../analyze-x-mentions/scripts"` (the shared labeler) below. `U=~/.local/share/intel/x/kols/<user>`.
+`T="$SKILL_DIR/../analyze-x-mentions/scripts"` (the shared labeler) below. `U=~/.local/state/intel/x/kols/<user>` (the archive), `O=~/Documents/x/kols/<user>` (the doc).
 
 ## Procedure
 
@@ -75,7 +75,7 @@ label tallies. This is the objective backbone; read it before writing anything.
 
 The labeler machinery (`clean.mjs`, `chunk.mjs`, `run-labels.mjs`, `merge-labels.mjs`, gpt-6-luna
 through `codex exec`) is `analyze-x-mentions`'s; the prompt is not. `$S/kol-spec.mjs` holds this
-skill's rules, fields and answer schema, and `~/.local/share/intel/x/kols/vocab.json` its own vocabulary
+skill's rules, fields and answer schema, and `~/.local/state/intel/x/kols/vocab.json` its own vocabulary
 (topics and interests seen across accounts; assets stay per account). Fields per post:
 
 - `about` — has content of its own (a view, a call, a trade, a story) vs gm / emoji / one word
@@ -103,8 +103,8 @@ the spec.
 Run the labeler and merge into this account's store:
 
 ```
-node $T/run-labels.mjs --spec $S/kol-spec.mjs --facts <scratch>/account-facts.md --vocab ~/.local/share/intel/x/kols/vocab.json --out <scratch> <scratch>/chunk*.json
-node $T/merge-labels.mjs $U/labels.jsonl <scratch> --spec $S/kol-spec.mjs --vocab ~/.local/share/intel/x/kols/vocab.json
+node $T/run-labels.mjs --spec $S/kol-spec.mjs --facts <scratch>/account-facts.md --vocab ~/.local/state/intel/x/kols/vocab.json --out <scratch> <scratch>/chunk*.json
+node $T/merge-labels.mjs $U/labels.jsonl <scratch> --spec $S/kol-spec.mjs --vocab ~/.local/state/intel/x/kols/vocab.json
 ```
 
 Chunks of 500 keep the wall time near one chunk (about 5 min) since the pool runs 20 in flight; skip labeling entirely for an account
@@ -127,11 +127,11 @@ list in the script). About 1200 lines for a 3000-post account; no subagent, no s
 
 ### 4. Charts (analyze-x-mentions script)
 
-Five PNGs into `$U/images/`, values from `profile.json` and `labels.jsonl` (the topic groups are
+Five PNGs into `$O/images/`, values from `profile.json` and `labels.jsonl` (the topic groups are
 the ones the doc uses, summed over `labels.jsonl`, not over the top-15 list in `profile.json`):
 
 ```
-echo '{"out_dir":"~/.local/share/intel/x/kols/<user>/images","charts":[
+echo '{"out_dir":"~/Documents/x/kols/<user>/images","charts":[
   {"type":"bar","file":"<user>-kinds.png","title":"帖子类型","labels":["闲聊","分析",...],"values":[...],"color":"#2a78d6"},
   {"type":"bar","file":"<user>-topics.png","title":"聊什么","labels":["<grouped topic>",...],"values":[...],"color":"#2a78d6"},
   {"type":"bar","file":"<user>-interests.png","title":"利益","labels":["X 创作者分成","返佣链接",...],"values":[...],"color":"#eb6834"},
@@ -207,14 +207,14 @@ project / token; say plainly when a stake is absent)
 Rules:
 - Quote line is exactly `> @<user>：[text](url)`, link on the text, verbatim, Chinese posts in
   Chinese. Every claim carries its number or its quote. "有返佣" needs a referral post; "广告 /
-  sponsored" only when a post says so. A follower count comes from `~/.local/share/intel/x/crm-followers.json`.
+  sponsored" only when a post says so. A follower count comes from `~/.local/state/intel/x/crm-followers.json`.
 - No method / model / process narration except the 可信度 line.
-- Before shipping: `node $S/check-quotes.mjs $U/profile.md $U` must report 0 bad (id exists,
+- Before shipping: `node $S/check-quotes.mjs $O/profile.md $U` must report 0 bad (id exists,
   handle matches, quote is a verbatim substring). Fix the doc, never the check.
 
 ### 6. Ship
 
-Return the paths to `$U/profile.md`, `$U/profile.json`, `$U/labels.jsonl`, `$U/images` and the vocabulary file. `clean.json`, the chunks and `labelsN.json` are scratch.
+Return the paths to `$O/profile.md`, `$O/images`, `$U/profile.json`, `$U/labels.jsonl` and the vocabulary file. `clean.json`, the chunks and `labelsN.json` are scratch.
 
 ## Batch note
 
@@ -226,7 +226,7 @@ labeling out to a whole roster without being asked.
 ## Requirements
 
 - Node ≥ 20; the shared `analyze-x-mentions` labeler (`chunk.mjs`, `run-labels.mjs`, `merge-labels.mjs`,
-  `clean.mjs`) and `render_charts.py` (`uv`, matplotlib); `$S/kol-spec.mjs` and `~/.local/share/intel/x/kols/vocab.json`.
+  `clean.mjs`) and `render_charts.py` (`uv`, matplotlib); `$S/kol-spec.mjs` and `~/.local/state/intel/x/kols/vocab.json`.
 
 ## Tests
 
@@ -234,6 +234,6 @@ labeling out to a whole roster without being asked.
 node --test "$SKILL_DIR/tests/test_profile_user.mjs" "$SKILL_DIR/tests/test_reps.mjs"
 ```
 
-Archive paths below show the default Intel data root; use the configured `INTEL_DATA_DIR` when set.
+Archive paths below show the default Intel state root; use the configured `INTEL_STATE_DIR` when set.
 
 Pass `--apps <comma-separated archive slugs>` to reps.mjs for app sections; default is empty.

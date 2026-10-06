@@ -1,4 +1,4 @@
-import { requireEnv, loadEnvFile, caseStudyStateDir } from "../../fetch-x-mentions/scripts/env.mjs";
+import { requireEnv, loadEnvFile, limitsDir } from "../../fetch-x-mentions/scripts/env.mjs";
 // ABOUTME: Searches X with the account pool of the secrets-manager store: one SearchTimeline query,
 // ABOUTME: printed as JSON lines; accounts rotate machine-wide through a shared state file.
 //
@@ -14,7 +14,7 @@ import { requireEnv, loadEnvFile, caseStudyStateDir } from "../../fetch-x-mentio
 //
 // The request itself (headers, x-client-transaction-id, query id, bearer, proxy, accounts) is the
 // fetch-x-mentions client, configured through ~/.config/intel/.env. This file adds the rotation: the state
-// in ~/.cache/case-study-limits/fetch-x-posts.sqlite holds, per account, when its next request may start
+// in <INTEL_STATE_DIR>/limits/fetch-x-posts.sqlite holds, per account, when its next request may start
 // and until when it is paused, plus a log of every request (table `requests`).
 
 import { mkdirSync, realpathSync } from "node:fs";
@@ -26,7 +26,7 @@ import { DatabaseSync } from "node:sqlite";
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) loadEnvFile();
 
-const STATE_PATH = join(caseStudyStateDir(), "fetch-x-posts.sqlite");
+const STATE_PATH = join(limitsDir(), "fetch-x-posts.sqlite");
 
 const DEFAULT_LIMIT = 40;
 export const GAP_MS = 3200; // between two requests on one account: the 3 seconds asked for, plus margin

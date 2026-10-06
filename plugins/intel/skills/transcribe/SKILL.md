@@ -62,6 +62,10 @@ model (~1.5GB) is not fetched here: mlx-whisper downloads it on the first
 transcription and caches it, so it self-installs once. `setup.sh --check` reports
 what is present or missing without installing anything.
 
+A transcript asked for by the user goes to `~/Documents/transcripts/<name>.txt` (`<INTEL_OUTPUT_DIR>/transcripts/`
+when set); another skill passes its own path. Downloaded audio and segments are scratch under
+`~/.local/share/intel/tmp/transcribe/`, removed when the run ends.
+
 ## Batch — a finite file or URL
 
 ```bash

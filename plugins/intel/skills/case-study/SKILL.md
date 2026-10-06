@@ -59,10 +59,10 @@ they are sent the absolute paths of the files below and read them themselves.
 | `RESIDENTIAL_PROXY_URL` | Residential proxy for news and archive requests | When needed | ~/.config/intel/.env |
 | `ISP_PROXY_URL` | ISP proxy pool | When needed | ~/.config/intel/.env |
 | `BIGQUERY_PROJECT_ID` | Google Cloud project ID for GDELT BigQuery queries | For GDELT | ~/.config/intel/.env |
-| `INTEL_DATA_DIR` | Fetched-data root; default ~/.local/share/intel, with case-studies/ | Optional | ~/.config/intel/.env |
-| `INTEL_OUTPUT_DIR` | Output root; default ~/Documents, with case-studies/ | Optional | ~/.config/intel/.env |
+| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with work directories under case-study/work/, fetched news under case-study/news/ and rate limits under limits/ | Optional | ~/.config/intel/.env |
+| `INTEL_OUTPUT_DIR` | Output root; default ~/Documents, with the PDFs under case-studies/ | Optional | ~/.config/intel/.env |
 
-A configured root keeps research work at that root, fetched data in `data/`, and limit state in `cache/`. When unset, existing default directories remain unchanged. The skill workflow remains Claude-only.
+The skill workflow remains Claude-only.
 
 ## Arguments
 
@@ -70,8 +70,8 @@ A configured root keeps research work at that root, fetched data in `data/`, and
 |---|---|
 | the subject | A name, a handle, or a profile URL. Exactly one. |
 | `--type` | `creator` (default). `brand` is not supported yet: say so and stop. |
-| `--apply-to` | A product whose own accounts and creator program the reasoning chapter also covers, described in a sentence or two without its name. Without it, the text in `~/.cache/secrets-manager/profiles/case-study/apply-to.txt`; with no such file, the chapter covers a person only. |
-| `--out` | The PDF path. Required. |
+| `--apply-to` | A product whose own accounts and creator program the reasoning chapter also covers, described in a sentence or two without its name. Without it, the text in `~/.config/intel/case-study-apply-to.txt`; with no such file, the chapter covers a person only. |
+| `--out` | The PDF path. Required; use `<INTEL_OUTPUT_DIR>/case-studies/<slug>.pdf` (default `~/Documents/case-studies/<slug>.pdf`) unless the user names another. |
 | `--lang` | The language of the study. Default: the language the user is writing in. |
 
 More than one subject, or a request to pick subjects, is outside this skill:
@@ -92,8 +92,8 @@ ask for one name.
    The cover shows the name and, under it, the subject's accounts: each a
    link with its platform's logo. Without `--account` that is the profile URL;
    give `--account` once per account when the subject grew on more than one
-   (the account they grew on first). The title is the PDF's document title. It prints the work directory (`~/Documents/case-studies/<slug>/`; override
-   the output root with `INTEL_OUTPUT_DIR`).
+   (the account they grew on first). The title is the PDF's document title. It prints the work directory (`~/.local/state/intel/case-study/work/<slug>/`; override
+   the state root with `INTEL_STATE_DIR`).
    An existing work directory is reused: sources and chapters already there are
    kept.
 

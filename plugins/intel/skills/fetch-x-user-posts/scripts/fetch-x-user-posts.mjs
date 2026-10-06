@@ -1,4 +1,4 @@
-import { requireEnv, loadEnvFile, dataDir } from "../../fetch-x-mentions/scripts/env.mjs";
+import { requireEnv, loadEnvFile, stateDir } from "../../fetch-x-mentions/scripts/env.mjs";
 // ABOUTME: Fetches one X/Twitter account's own posts and replies over a date range, paging the
 // ABOUTME: authenticated SearchTimeline `from:<user>` chronologically, sharded across accounts, resumable per user.
 //
@@ -15,7 +15,7 @@ import { requireEnv, loadEnvFile, dataDir } from "../../fetch-x-mentions/scripts
 // the way analyze-x-users reuses analyze-x-mentions's scripts. This script only adds the per-user,
 // two-stream (own posts vs replies) timeline logic on top.
 //
-// Output, per user, under <INTEL_DATA_DIR>/x/kols/<user>/ (lowercased):
+// Output, per user, under <INTEL_STATE_DIR>/x/kols/<user>/ (lowercased):
 //   tweets.jsonl   one own post per line (from:<user> -filter:replies -filter:nativeretweets)
 //   replies.jsonl  one reply per line     (from:<user> filter:replies)
 //     each line: id, author, author_name, author_followers, author_verified, text, created_at,
@@ -505,7 +505,7 @@ async function main() {
   requireEnv("X_BEARER_TOKEN");
   requireEnv("X_SEARCH_QUERY_ID");
   const accounts = loadAccounts();
-  const dirOf = (user) => join(dataDir(), "x", "kols", user);
+  const dirOf = (user) => join(stateDir(), "x", "kols", user);
   const progressByUser = {};
   for (const user of users) {
     progressByUser[user] = openProgress(
@@ -691,7 +691,7 @@ async function main() {
   if (unsettled) process.exitCode = 1; // streams still worth another attempt; rerun to continue
   console.log(
     `fetch-x-user-posts: ${complete}/${users.length} users fully complete, ${unsettled} stream(s) ` +
-      `still worth a retry -> <INTEL_DATA_DIR>/x/kols/ (rerun until it exits 0)`,
+      `still worth a retry -> <INTEL_STATE_DIR>/x/kols/ (rerun until it exits 0)`,
   );
 }
 

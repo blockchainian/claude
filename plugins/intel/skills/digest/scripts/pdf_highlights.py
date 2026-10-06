@@ -19,7 +19,6 @@ import importlib.util
 import json
 import re
 import sys
-import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -118,16 +117,9 @@ def split(source, by):
 
 
 def default_out(pdf_path, work):
-    """<source>-highlights.pdf next to the source, or in the work dir when the source's folder is not writable
-    (or the source was downloaded into the work dir)."""
-    target = pdf_path.with_name(pdf_path.stem + "-highlights.pdf")
-    try:
-        probe = target.parent / ".digest-write-test"
-        probe.touch()
-        probe.unlink()
-        return target
-    except OSError:
-        return work / target.name
+    """<source>-highlights.pdf in the digest store under <INTEL_OUTPUT_DIR>/digests/."""
+    fs.ROOT.mkdir(parents=True, exist_ok=True)
+    return fs.ROOT / (pdf_path.stem + "-highlights.pdf")
 
 
 def write_draft(work, meta, ready):
@@ -201,7 +193,7 @@ def render(work, opt):
 
     style = rd.css(meta["page_size"], bg, fg, [(s["id"], t, s["kind"]) for s, t, _ in sections],
                    opt.font_size, rd.brighten(fg, opt.bold_factor)) + ch.CSS + LINK_CSS
-    tmp = Path(tempfile.mkdtemp(prefix="highlights-"))
+    tmp = rd.scratch_dir("digest", "highlights-")
     html_path, typeset = tmp / "highlights.html", tmp / "highlights.pdf"
     html_path.write_text(
         f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>{html.escape(meta["title"])}</title>'

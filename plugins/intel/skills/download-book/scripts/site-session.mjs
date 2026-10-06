@@ -3,11 +3,13 @@
 import { spawn } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const PROFILE_DIR = join(homedir(), '.cache', 'secrets-manager', 'profiles', 'download-book');
+import { dataDir } from '../../fetch-x-mentions/scripts/env.mjs';
+
+// The site's cookies only spare the next run a browser check, so the profile is deletable data.
+const profileDir = () => join(dataDir(), 'download-book', 'profile');
 // The site's own pages mention DDoS-Guard in script comments; only the challenge page carries these markers.
 const CHALLENGE = /<title>\s*DDoS-Guard\s*<\/title>|\/\.well-known\/ddos-guard\/(js-challenge|ddg-captcha-page)\//i;
 const CHALLENGE_TIMEOUT = 45_000;
@@ -54,7 +56,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // The port the shared Chrome listens on for other runs: Chrome writes it into its profile when it starts.
 function debugPort() {
-  try { return readFileSync(join(PROFILE_DIR, 'DevToolsActivePort'), 'utf8').split('\n')[0].trim() || null; }
+  try { return readFileSync(join(profileDir(), 'DevToolsActivePort'), 'utf8').split('\n')[0].trim() || null; }
   catch { return null; }
 }
 
@@ -86,7 +88,7 @@ export async function untilIdle(tabs, { idle = IDLE_MS, every = 5_000, now = Dat
 // The shared Chrome, headed (DDoS-Guard serves a captcha to headless browsers), open to other runs on a port of its
 // own choosing. It runs in a process of its own, which outlives the run that started it and closes it when idle.
 async function keepChrome() {
-  const context = await playwright().launchPersistentContext(PROFILE_DIR, {
+  const context = await playwright().launchPersistentContext(profileDir(), {
     headless: false,
     channel: 'chrome',
     chromiumSandbox: true,

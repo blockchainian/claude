@@ -3,11 +3,9 @@
 // ABOUTME: Reads credentials from the plugin user-config dotenv file, auto-detects the caller IP, prints a table.
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { parseEnv } from "node:util";
 
-const CONFIG_PATH = join(homedir(), ".config", "intel", ".env");
+import { envPath } from "../../fetch-x-mentions/scripts/env.mjs";
 const ENDPOINT = "https://api.namecheap.com/xml.response";
 const TLDS = ["xyz", "ai", "fun"];
 
@@ -43,7 +41,7 @@ export function classify(r) {
   return { status: "available-premium", price };
 }
 
-export function loadCreds(configPath = CONFIG_PATH) {
+export function loadCreds(configPath = envPath) {
   const config = parseEnv(readFileSync(configPath, "utf8"));
   const apiUser = config.NAMECHEAP_USERNAME;
   const apiKey = config.NAMECHEAP_API_KEY;

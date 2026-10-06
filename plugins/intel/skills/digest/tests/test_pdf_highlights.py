@@ -178,7 +178,7 @@ def test_render(ph, work, tmp):
     meta_path.write_text(json.dumps(meta))
 
     default = ph.default_out(Path(json.loads((work / "chapters.json").read_text())["pdf"]), work)
-    check("default output sits next to the source", default == tmp / "small-book-highlights.pdf", str(default))
+    check("default output goes to the digest store", default == tmp / "store" / "digests" / "small-book-highlights.pdf", str(default))
 
 
 def test_charts(charts):
@@ -215,6 +215,8 @@ def main():
         return
     tmp = Path(tempfile.mkdtemp()).resolve()
     os.environ["INTEL_OUTPUT_DIR"] = str(tmp / "store")
+    os.environ["INTEL_STATE_DIR"] = str(tmp / "state")
+    os.environ["INTEL_DATA_DIR"] = str(tmp / "data")
     ph = load("pdf_highlights")
     work = test_split(ph, tmp)
     test_render(ph, work, tmp)

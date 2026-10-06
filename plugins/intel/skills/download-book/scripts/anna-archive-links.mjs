@@ -3,14 +3,14 @@
 // ABOUTME: All site requests go through a headed Chrome session that passes the DDoS-Guard check.
 
 import { createWriteStream, realpathSync } from 'node:fs';
-import { open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { parseEnv } from 'node:util';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { isChallenge, openSession } from './site-session.mjs';
+import { envPath, loadEnvFile } from '../../fetch-x-mentions/scripts/env.mjs';
 
 const DEFAULT_BASE = 'https://annas-archive.pk';
 const MD5_LINK = /^\/md5\/([0-9a-f]{32})\/?$/;
@@ -122,7 +122,7 @@ async function metric(base, md5) {
   return data.downloads_total;
 }
 
-export async function readMemberKey(configPath = join(homedir(), '.config', 'intel', '.env')) {
+export async function readMemberKey(configPath = envPath) {
   const config = parseEnv(await readFile(configPath, 'utf8'));
   const key = config.ANNA_ARCHIVE_SECRET_KEY;
   if (!key?.trim()) throw new Error(`请在 ${configPath} 配置 ANNA_ARCHIVE_SECRET_KEY`);
@@ -240,6 +240,7 @@ export async function downloadFirst(resolvers, out, fetchFile = fetch) {
     }
     if (!response.ok) throw new Error(`下载返回 HTTP ${response.status}`);
     const part = `${out}.part`;
+    await mkdir(dirname(out), { recursive: true });
     try {
       await pipeline(Readable.fromWeb(response.body), createWriteStream(part));
       if (!(await isEpub(part))) throw new Error('下载的文件不是 EPUB（可能是错误页）');
@@ -310,6 +311,7 @@ async function run(options) {
 }
 
 async function main() {
+  loadEnvFile();
   try { await run(args(process.argv.slice(2))); }
   finally { await (await session)?.close(); }
 }
