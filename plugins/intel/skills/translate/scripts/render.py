@@ -331,7 +331,7 @@ BLOCKQUOTE_RE = re.compile(r"<blockquote>.*?</blockquote>", re.S)
 LEADING_IMG_RE = re.compile(r"^(\s|<img\b[^>]*>)*")
 BOLD_LABEL_RE = re.compile(r"<(?:strong|b)>\s*[A-Za-z]?\d")  # "**1.**", "**E1.**": an exercise or answer number
 MATH_SRC_RE = re.compile(r"\\\(.*?\\\)|\\\[.*?\\\]", re.S)
-DROPCAP_MIN_CHARS = 30  # the 2.6em cap spans two lines; a first paragraph under about a line cannot wrap round it
+DROPCAP_MIN_CHARS = 10  # the block after a capped paragraph clears the float, so only a stub is left uncapped
 
 
 def first_paragraph_head(body):
@@ -345,8 +345,8 @@ def first_paragraph_head(body):
 def wants_dropcap(body):
     """A drop cap suits a section that opens with prose, including prose that opens with a bold key phrase. Not
     when its first paragraph opens with a bold number label (an answers or exercises section: "**1.** ...",
-    possibly after a ▶ marker image) or a digit, where the cap would land on the number, nor when the paragraph
-    is too short for the next line to wrap round the cap."""
+    possibly after a ▶ marker image) or a digit, where the cap would land on the number, nor on a stub of a few
+    characters."""
     head = first_paragraph_head(body)
     if head is None or BOLD_LABEL_RE.match(head) or head[:1].isdigit():
         return False
