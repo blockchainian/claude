@@ -111,9 +111,9 @@ test('nothing reviews or fixes a chapter: the introduction and the reasoning cha
   assert.deepEqual(labels(calls, 'merge:'), ['merge:read'])
 })
 
-test('writers run on Opus 4.8 at high effort, and each agent is told its share of the caps', async () => {
+test('writers run on Opus 5.5 at high effort, and each agent is told its share of the caps', async () => {
   const { calls } = await run(ARGS)
-  assert.ok(calls.filter(c => c.label.startsWith('write:')).every(c => c.model === 'claude-opus-4-8' && c.effort === 'high'), 'a writer\'s chapter is the text the reader gets')
+  assert.ok(calls.filter(c => c.label.startsWith('write:')).every(c => c.model === 'claude-opus-5-5' && c.effort === 'high'), 'a writer\'s chapter is the text the reader gets')
   assert.ok(calls.find(c => c.label === 'read:01').prompt.includes('1/39 share'))
 })
 
