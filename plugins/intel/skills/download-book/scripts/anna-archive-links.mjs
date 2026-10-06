@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// ABOUTME: Finds the most downloaded EPUB on one Anna's Archive search page and its download links.
+// ABOUTME: Finds the most downloaded EPUB on one Anna's Archive search page and its download links, and with --out downloads it.
 // ABOUTME: All site requests go through a headed Chrome session that passes the DDoS-Guard check.
 
-import { realpathSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { createWriteStream, realpathSync } from 'node:fs';
+import { open, readFile, rename, rm } from 'node:fs/promises';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { parseEnv } from 'node:util';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -152,12 +154,18 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const isNoWaitlist = anchor => (anchor.li?.text ?? '').toLowerCase().includes('no waitlist');
 
 // The waitlist servers ("slightly faster but with waitlist") download at megabytes per second after a
-// ~50s server-side queue; the "no waitlist" servers are immediate but throttled to tens of KB/s. Prefer
-// the first waitlist server, keeping the first no-waitlist one as a fallback that always yields a link.
-export function selectSlowPaths(anchors, md5) {
+// ~50s server-side queue; the "no waitlist" servers are immediate but throttled to tens of KB/s. Lists the
+// waitlist servers first, then the no-waitlist ones, each in page order.
+export function orderSlowPaths(anchors, md5) {
   const paths = anchors.filter(anchor => SLOW_LINK.exec(anchor.href)?.[1] === md5);
-  const primary = paths.find(anchor => !isNoWaitlist(anchor)) ?? paths[0] ?? null;
-  const fallback = paths.find(anchor => isNoWaitlist(anchor) && anchor.href !== primary?.href) ?? null;
+  return [...paths.filter(anchor => !isNoWaitlist(anchor)), ...paths.filter(isNoWaitlist)];
+}
+
+// Prefers the first waitlist server, keeping the first no-waitlist one as a fallback that always yields a link.
+export function selectSlowPaths(anchors, md5) {
+  const paths = orderSlowPaths(anchors, md5);
+  const primary = paths[0] ?? null;
+  const fallback = paths.find(anchor => isNoWaitlist(anchor) && anchor !== primary) ?? null;
   return { primary, fallback };
 }
 
@@ -187,8 +195,7 @@ async function resolveSlow(base, entryHref, deadline) {
   return { entry, status: last.status, body: last.body };
 }
 
-async function slowUrl(base, md5, detailHtml, savedSlowHtml) {
-  const detail = detailHtml ?? checkedHtml(await get(`${base}/md5/${md5}`), '详情页');
+async function slowUrl(base, md5, detail, savedSlowHtml) {
   const { primary, fallback } = selectSlowPaths(parseLinks(detail).anchors, md5);
   if (!primary) return { error: '详情页没有慢速下载入口' };
   // A saved slow page means the live entry is blocked, so do not sit through the queue: try live once.
@@ -210,13 +217,52 @@ async function slowUrl(base, md5, detailHtml, savedSlowHtml) {
   return { entry: result.entry, status: result.status, error };
 }
 
+async function isEpub(path) {
+  const file = await open(path);
+  try {
+    const { buffer, bytesRead } = await file.read(Buffer.alloc(4), 0, 4, 0);
+    return bytesRead === 4 && buffer.equals(Buffer.from('PK\x03\x04'));
+  } finally { await file.close(); }
+}
+
+// Downloads from the first link not refused with 429 (too many downloads at once from this IP). Each resolver
+// runs only after the link before it was refused, because resolving a slow entry means sitting through its queue.
+export async function downloadFirst(resolvers, out, fetchFile = fetch) {
+  const refused = [];
+  for (const resolve of resolvers) {
+    const url = await resolve();
+    if (!url) continue;
+    const response = await fetchFile(url);
+    if (response.status === 429) {
+      refused.push(url);
+      await response.body?.cancel();
+      continue;
+    }
+    if (!response.ok) throw new Error(`下载返回 HTTP ${response.status}`);
+    const part = `${out}.part`;
+    try {
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(part));
+      if (!(await isEpub(part))) throw new Error('下载的文件不是 EPUB（可能是错误页）');
+      await rename(part, out);
+    } finally { await rm(part, { force: true }); }
+    return { path: out, url, refused };
+  }
+  throw new Error(refused.length ? `${refused.length} 个链接都返回 429（这个 IP 同时下载太多）` : '没有可用的下载链接');
+}
+
+// Download order: the fast link, the slow link already resolved, then every other slow entry on the detail page.
+function downloadResolvers(base, detail, md5, fast, slow) {
+  const others = orderSlowPaths(parseLinks(detail).anchors, md5).map(anchor => new URL(anchor.href, base).href).filter(entry => entry !== slow.entry);
+  return [() => fast.url, () => slow.url, ...others.map(entry => async () => (await resolveSlow(base, entry, Date.now() + SLOW_WAIT_MS)).url)];
+}
+
 function args(argv) {
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('用法：node <anna-archive-links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件]\n会员密钥从 ~/.config/intel/.env 的 ANNA_ARCHIVE_SECRET_KEY 读取，不读取环境变量。');
+    console.log('用法：node <anna-archive-links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件] [--out 文件]\n给出 --out 时下载到该文件：某个链接返回 429 就换下一个链接。\n会员密钥从 ~/.config/intel/.env 的 ANNA_ARCHIVE_SECRET_KEY 读取，不读取环境变量。');
     process.exit(0);
   }
   const options = { baseUrl: DEFAULT_BASE };
-  const keys = { '--search-html': 'searchHtml', '--detail-html': 'detailHtml', '--slow-html': 'slowHtml', '--base-url': 'baseUrl' };
+  const keys = { '--search-html': 'searchHtml', '--detail-html': 'detailHtml', '--slow-html': 'slowHtml', '--base-url': 'baseUrl', '--out': 'out' };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] in keys) {
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`${argv[i]} 缺少值`);
@@ -248,13 +294,19 @@ async function run(options) {
     }
   }));
   const winner = ids.reduce((best, md5) => counts.get(md5) > counts.get(best) || (counts.get(md5) === counts.get(best) && md5 > best) ? md5 : best);
-  const detailHtml = options.detailHtml ? await readFile(options.detailHtml, 'utf8') : null;
+  // A detail page that fails to load costs only the slow links; the fast link does not need it.
+  const detail = options.detailHtml
+    ? await readFile(options.detailHtml, 'utf8')
+    : await get(`${base}/md5/${winner}`).then(page => checkedHtml(page, '详情页'), error => error);
   const savedSlowHtml = options.slowHtml ? await readFile(options.slowHtml, 'utf8') : null;
   const [fast, slow] = await Promise.all([
     fastUrl(base, winner).catch(error => ({ error: error.message })),
-    slowUrl(base, winner, detailHtml, savedSlowHtml).catch(error => ({ error: error.message })),
+    detail instanceof Error ? { error: detail.message } : slowUrl(base, winner, detail, savedSlowHtml).catch(error => ({ error: error.message })),
   ]);
-  console.log(JSON.stringify({ title: records.get(winner).title, md5: winner, downloads_total: counts.get(winner), compared: records.size, detail_url: `${base}/md5/${winner}`, fast, slow }, null, 2));
+  const download = options.out
+    ? await downloadFirst(downloadResolvers(base, detail instanceof Error ? '' : detail, winner, fast, slow), options.out).catch(error => ({ error: error.message }))
+    : undefined;
+  console.log(JSON.stringify({ title: records.get(winner).title, md5: winner, downloads_total: counts.get(winner), compared: records.size, detail_url: `${base}/md5/${winner}`, fast, slow, download }, null, 2));
 }
 
 async function main() {
