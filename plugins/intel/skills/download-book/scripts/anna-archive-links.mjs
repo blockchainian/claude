@@ -164,14 +164,21 @@ export function selectSlowPaths(anchors, md5) {
 const SLOW_POLL_MS = 8_000;
 const SLOW_WAIT_MS = 130_000;
 
+// The entry first redirects to itself with a bare "?" before serving the waitlist page; a redirect anywhere else is refused.
+export function leftEntry(entry, landed) {
+  const from = new URL(entry);
+  const to = new URL(landed);
+  return from.origin !== to.origin || from.pathname !== to.pathname;
+}
+
 // Polls an entry until its direct link appears (the waitlist page reveals it only after the queue),
 // or the deadline passes. Returns the link, a redirect error, or the last response for the caller to judge.
 async function resolveSlow(base, entryHref, deadline) {
   const entry = new URL(entryHref, base).href;
   let last = { status: 0, body: '' };
   do {
-    const { status, redirected, body } = await get(entry, false);
-    if (redirected) return { entry, error: '入口发生跳转，未跟随' };
+    const { status, url: landed, body } = await get(entry);
+    if (leftEntry(entry, landed)) return { entry, error: '入口跳转到别处，未跟随' };
     last = { status, body };
     const url = status === 200 ? directUrl(body) : null;
     if (url) return { entry, status, source: 'live', url };
