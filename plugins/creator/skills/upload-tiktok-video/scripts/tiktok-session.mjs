@@ -6,7 +6,7 @@
 // slot (a fixed IP), English locale, timezone from the exit IP. To TikTok that is the same device the
 // account signed in on. The store is only read; logging in and account status belong to secrets-manager.
 //
-// Config (CREATOR_SECRETS_STATE_DIR/.env, Creator's own, loaded automatically):
+// Config (~/.config/creator/.env, loaded automatically):
 //   CREATOR_ISP_PROXY_URL               the ISP pool's base url; slot n is the base port + n.
 //   CREATOR_BROWSER_DISPLAY            the display a headed window goes on, any part of its name (else the main one).
 //   CREATOR_SECRETS_STATE_DIR  where the store and profiles are (default ~/.config/secrets-manager).

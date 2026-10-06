@@ -350,7 +350,7 @@ Copy the plugin’s `.env.example` to `~/.config/secrets-manager/.env`; shell va
 | `SECRETS_CAPTCHA_RESOLVER_MODEL_EFFORT` | Resolver reasoning effort; default low | Optional | ~/.config/secrets-manager/.env |
 | `SECRETS_CAPTCHA_RESOLVER_MODEL_TIER` | Resolver service tier; default fast | Optional | ~/.config/secrets-manager/.env |
 | `SECRETS_STATE_DIR` | Account and browser-state directory | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_ADAPTER_FILES` | Colon-separated absolute adapter module file paths | Optional | ~/.config/secrets-manager/.env |
+| `SECRETS_ADAPTER_FILES` | Colon-separated adapter module file paths; omitted uses config.json, empty disables adapters | Optional | ~/.config/secrets-manager/.env |
 | `SECRETS_RECAPTCHA_PROBE_LABEL` | Diagnostic run label; default HEAD | Optional | ~/.config/secrets-manager/.env |
 | `SECRETS_RECAPTCHA_PROBE_RESULT_FILE` | Diagnostic JSON result file | Optional | ~/.config/secrets-manager/.env |
 

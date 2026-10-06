@@ -41,3 +41,12 @@ In Codex, use the `agents-sdk` skill to build agents or MCP servers; the Claude
 slash commands are convenience entry points and are not duplicated as skills.
 `web-perf` additionally requires a configured Chrome DevTools MCP server; the
 five bundled Cloudflare servers do not provide browser performance tools.
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Wrangler/REST authentication | For token-based authentication | Shell environment |
+| `CLOUDFLARE_ACCOUNT_ID` | Target Cloudflare account ID | For account-scoped operations | Shell or project Wrangler config |
+
+MCP authentication is managed by the host connection; plugin MCP configuration does not inject an API token. Worker application secrets belong to the target project.

@@ -104,3 +104,9 @@ npm run validate      # the marketplace and plugin manifests
 ## License
 
 MIT
+
+## Plugin environment naming
+
+Plugin-owned settings use `PLUGIN_NAME_SETTING` in uppercase snake case. Use `_DIR` for directories, `_FILE` for one file, `_FILES` for file lists, `_SECONDS` for durations, and `_ID` for identifiers. Upstream CLI/host/MCP variables keep their required names (`CODEX_HOME`, `CLAUDE_CODE_SESSION_ID`, `XCODEBUILDMCP_*`, `NO_UI`). Internal shell variables and target-project application settings are not plugin configuration.
+
+File-based configuration lives outside the checkout: Intel at `~/.config/intel/.env`, Secrets at `~/.config/secrets-manager/.env`, and Creator at `~/.config/creator/.env`. Each has one empty plugin-root `.env.example`. Creator’s configuration is independent while its accounts and browser profiles remain in Secrets Manager. Other plugins’ optional settings remain shell/MCP settings as documented in their environment tables.
