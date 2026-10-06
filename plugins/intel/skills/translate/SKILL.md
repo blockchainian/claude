@@ -105,7 +105,9 @@ line, inline symbols within the line), the images are copied into `<work>/images
 `<work>/images.json`. The translator is told to keep the placeholders verbatim, and `render.py` puts the images
 back — block ones as centered figures, inline ones in the line. Line art (equations, diagrams) is recoloured to
 the page foreground on a transparent background so it blends into the dark page like the body text; a colour
-figure keeps a white plate (inverting a photo would ruin it). Without the flag, extraction is text-only. Use the
+figure keeps a white plate (inverting a photo would ruin it). Line art is judged by colour alone, so a book whose
+figures are grayscale screenshots or photos (a UI design book) renders with `render.py --no-recolor`, which keeps
+every image as is on a white plate. Without the flag, extraction is text-only. Use the
 flag only when images matter.
 
 Check the listing before spending calls: a section with suspiciously few or many words, or a title parsed wrong,

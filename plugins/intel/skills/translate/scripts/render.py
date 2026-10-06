@@ -205,14 +205,16 @@ def recolor_line_art(src, fg, bg, dest):
     return True
 
 
-def place_images(body_html, work, images, fg, bg, eq_scale=None, inline_scale=None):
+def place_images(body_html, work, images, fg, bg, eq_scale=None, inline_scale=None, recolor=True):
     """Replace ⟦IMG:key⟧ placeholders with the extracted images. Line art (equations, diagrams) is recoloured
     to foreground ink on the opaque page colour so it blends into the dark page; a colour figure keeps a white
     plate (inverting a photo would ruin it). Block images become their own centred figure; inline ones sit in
     the line. With eq_scale set (EPUB build), every block figure is sized to its intrinsic width times eq_scale,
     so equations render at one consistent scale instead of at each raw crop's pixel size; with inline_scale set,
     every inline image is sized the same way (its own factor, so an in-line formula matches the body text) instead
-    of being clamped to the line height, which squashes every formula to one height whatever its content."""
+    of being clamped to the line height, which squashes every formula to one height whatever its content.
+    With recolor off, every image keeps its own pixels on a white plate: a book whose figures are grayscale
+    screenshots would otherwise have them taken for line art and inverted."""
     def scaled_width(src, scale):
         try:
             return f"width:{Image.open(src).size[0] * scale:.1f}pt;max-width:100%"
@@ -226,7 +228,7 @@ def place_images(body_html, work, images, fg, bg, eq_scale=None, inline_scale=No
         src = work / "images" / meta["file"]
         rc = src.with_suffix(".rc.png")
         try:
-            line = recolor_line_art(src, fg, bg, rc)
+            line = recolor and recolor_line_art(src, fg, bg, rc)
         except Exception:
             line = False
         uri = (rc if line else src).resolve().as_uri()
@@ -313,9 +315,9 @@ em {{ font-family: {hei}; font-weight: 700; font-style: normal; color: {bold}; }
 .fig img {{ max-width: 100%; height: auto; }}
 .figcap {{ break-inside: avoid; }}  /* a figure and its caption stay on one page */
 p.keep {{ break-after: avoid; }}  /* a lead-in paragraph stays with the figure it introduces */
-.fig.plate img {{ background: #fff; padding: 4pt 6pt; border-radius: 3pt; }}
+.fig.plate img {{ background: #fff; padding: 4pt 6pt; border-radius: 3pt; box-sizing: border-box; }}
 .infig {{ max-height: 1.4em; width: auto; vertical-align: middle; }}
-.infig.plate {{ background: #fff; padding: 0 2pt; border-radius: 2pt; }}
+.infig.plate {{ background: #fff; padding: 0 2pt; border-radius: 2pt; box-sizing: border-box; }}
 .contents .opener {{ margin-bottom: {round(h * 0.05)}pt; }}
 .toc {{ font-size: 9.5pt; }}
 .toc .e {{ display: flex; align-items: baseline; margin: 0 0 9pt; }}
@@ -494,7 +496,7 @@ def render(work, opt):
                 epub = meta.get("source_kind") == "epub"
                 eq_scale = getattr(opt, "eq_scale", 0.6) if epub else None
                 inline_scale = getattr(opt, "inline_scale", 0.33) if epub else None
-                body = place_images(body, work, images, fg, bg, eq_scale, inline_scale)
+                body = place_images(body, work, images, fg, bg, eq_scale, inline_scale, getattr(opt, "recolor", True))
             ready.append((s, title_zh, nudge_bold_cjk(body)))
         else:
             print(f"skip {s['id']} {s['title']}: not translated yet", file=sys.stderr)
@@ -654,6 +656,7 @@ def main():
     add_style_args(ap)
     ap.add_argument("--eq-scale", type=float, default=0.6, help="EPUB build: block (display) equation images render at their intrinsic width times this (default 0.6), so all equations share one scale")
     ap.add_argument("--inline-scale", type=float, default=0.33, help="EPUB build: inline images (in-line formulas, the ▶ marker) render at their intrinsic width times this (default 0.33, about body-text size for 28px-per-em formula crops)")
+    ap.add_argument("--no-recolor", dest="recolor", action="store_false", help="keep every image as is on a white plate instead of recolouring black-on-white line art to the page colours (for books whose figures are grayscale screenshots or photos)")
     opt = ap.parse_args()
     render(Path(opt.work).resolve(), opt)
 
