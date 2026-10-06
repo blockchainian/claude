@@ -72,7 +72,7 @@ describe("hub captures", () => {
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "capture-test-"));
-    for (const k of ["PROXY_DATA_DIR", "TMPDIR"]) {
+    for (const k of ["PROXY_DATA_DIR", "PROXY_STATE_DIR", "TMPDIR"]) {
       saved[k] = process.env[k];
       process.env[k] = tmp;
     }

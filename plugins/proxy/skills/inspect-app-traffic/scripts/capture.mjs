@@ -33,6 +33,7 @@ import {
   statSync, writeFileSync,
 } from "node:fs";
 import { createServer, createConnection } from "node:net";
+import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -62,20 +63,26 @@ Exit 0 on success, 1 on failure, 2 on bad arguments.`;
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 
-export function outRoot() {
-  return process.env.PROXY_DATA_DIR || "/tmp/proxy";
+// Captured flows are deletable data; the running hub and the capture registry are state, since losing them
+// mid-run leaves a hub nobody can find or a capture nobody can stop.
+export function dataRoot() {
+  return process.env.PROXY_DATA_DIR || join(homedir(), ".local", "share", "proxy");
+}
+
+export function stateRoot() {
+  return process.env.PROXY_STATE_DIR || join(homedir(), ".local", "state", "proxy");
 }
 
 export function hubDir() {
-  return join(outRoot(), "hub");
+  return join(stateRoot(), "hub");
 }
 
 export function capturesDir() {
-  return join(outRoot(), "captures");
+  return join(stateRoot(), "captures");
 }
 
 export function capDir() {
-  return join(outRoot(), "cap");
+  return join(dataRoot(), "cap");
 }
 
 export function capFile(capId) {
@@ -87,7 +94,7 @@ export function hubMetaPath() {
 }
 
 export function hubLock() {
-  return join(process.env.TMPDIR || "/tmp", "proxy-hub.json");
+  return join(stateRoot(), "hub.json");
 }
 
 export const HUB_PORT = 8080;
