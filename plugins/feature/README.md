@@ -40,7 +40,7 @@ ship, the plan template and memory.
 | Agent | Model | What it does |
 |---|---|---|
 | `ux-implementer` | Fable medium | Implement one UX workstream in the checkout its brief names (the session tree or its own worktree), commit after every step, return flat JSON |
-| `ux-autofixer` | Fable medium | Fix the PR threads labelled `claude-code-ux` in the UX lane's worktree, push, reply, resolve |
+| `ux-autofixer` | Opus 5.5 medium | Fix the PR threads labelled `claude-code-ux` in the UX lane's worktree, push, reply, resolve |
 | `ux-verifier` | Sonnet low | Drive a scripted UI scenario (browse or iOS simulator) and return a verdict with evidence paths |
 
 ## Hooks
