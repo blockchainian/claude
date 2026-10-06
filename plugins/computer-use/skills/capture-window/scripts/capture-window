@@ -1,0 +1,20 @@
+#!/bin/bash
+# ABOUTME: Captures one app's front window to a PNG without hiding, raising or touching any other window.
+# ABOUTME: Usage: capture-window <app name> <out.png>
+set -euo pipefail
+app=${1:?usage: capture-window <app name> <out.png>}
+out=${2:?usage: capture-window <app name> <out.png>}
+# Front-most on-screen, normal-layer window owned by the app (CGWindowList is ordered front to back).
+id=$(swift - "$app" <<'SWIFT'
+import CoreGraphics
+let app = CommandLine.arguments[1]
+let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
+for w in windows where (w[kCGWindowOwnerName as String] as? String) == app && (w[kCGWindowLayer as String] as? Int) == 0 {
+  print(w[kCGWindowNumber as String] as! Int)
+  break
+}
+SWIFT
+)
+[ -n "$id" ] || { echo "capture-window: no on-screen window for '$app'" >&2; exit 1; }
+screencapture -x -o -l"$id" "$out"
+echo "$out"

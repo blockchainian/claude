@@ -86,6 +86,14 @@
         "name": "blockchainian"
       },
       "source": "./plugins/creator"
+    },
+    {
+      "name": "computer-use",
+      "description": "See the user's desktop without disturbing it: capture one app's window to a PNG while every other window stays where it is.",
+      "author": {
+        "name": "blockchainian"
+      },
+      "source": "./plugins/computer-use"
     }
   ]
 }

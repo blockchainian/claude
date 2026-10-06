@@ -1,0 +1,14 @@
+{
+  "name": "computer-use",
+  "version": "0.1.0",
+  "description": "See the user's desktop without disturbing it: capture one app's window to a PNG while every other window stays where it is.",
+  "author": {
+    "name": "blockchainian"
+  },
+  "license": "MIT",
+  "keywords": [
+    "macos",
+    "screenshot",
+    "window"
+  ]
+}
