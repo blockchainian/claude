@@ -68,6 +68,6 @@ Or from the marketplace root: `npm run test:web`.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| None | Local browser and analysis tools | No plugin settings required | — |
+| `WEB_DATA_DIR` | Root for heap-snapshot-leaks' throwaway Chrome profile; default ~/.local/share/web | Optional | Shell environment |
 
 Application-specific variables belong to the target project, not this plugin.

@@ -36,10 +36,11 @@ unavailable, stop and report it before running a script.
 
    ```
    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-     --remote-debugging-port=9222 --user-data-dir=/tmp/leakchrome
+     --remote-debugging-port=9222 \
+     --user-data-dir="${WEB_DATA_DIR:-$HOME/.local/share/web}/heap-snapshot-leaks/profile"
    ```
 
-   A separate `--user-data-dir` keeps it off your normal profile. The capture
+   A separate `--user-data-dir` keeps it off your normal profile; it is throwaway data, safe to delete. The capture
    script connects without an `Origin` header, so `--remote-allow-origins` is not
    needed. Confirm the tab is visible: `capture-heap-snapshot.mjs --list`.
    That profile carries no logins: if the page under test is behind one, log in
