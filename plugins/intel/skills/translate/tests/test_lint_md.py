@@ -26,12 +26,12 @@ def lint(sections, images=None):
     with tempfile.TemporaryDirectory() as d:
         work = Path(d)
         (work / "text").mkdir()
-        (work / "md").mkdir()
+        (work / "translated").mkdir()
         meta = {"sections": []}
         for i, (src, md) in enumerate(sections, 1):
             sid = f"{i:02d}"
             (work / "text" / f"{sid}-s.xhtml").write_text(src)
-            (work / "md" / f"{sid}-s.md").write_text(md)
+            (work / "translated" / f"{sid}-s.md").write_text(md)
             meta["sections"].append({"id": sid, "title": "S", "file": f"text/{sid}-s.xhtml"})
         (work / "sections.json").write_text(json.dumps(meta))
         if images:

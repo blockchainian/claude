@@ -487,7 +487,7 @@ def render(work, opt):
 
     ready = []
     for s in sections:
-        md_path = work / "md" / (Path(s["file"]).stem + ".md")
+        md_path = work / "translated" / (Path(s["file"]).stem + ".md")
         if md_path.exists():
             title_zh, body = md_to_html(md_path.read_text())
             if images:
