@@ -130,6 +130,9 @@ def md_to_html(md_text):
         vault.append(repair_math(m.group(0)))
         return f"@@MATH{len(vault) - 1}@@"
 
+    # A line continued after a hard break ("  " or <br>) keeps its leading ideographic spaces (a staircase or an
+    # aligned row); Markdown strips them, so they go in as entities.
+    body = re.sub(r"((?:  |<br\s*/?>)\n)(\u3000+)", lambda m: m.group(1) + "&#12288;" * len(m.group(2)), body)
     body = MATH_RE.sub(stash, body)
     body = re.sub(r"^>[ \t]?(@@MATH\d+@@)[ \t]*$", r"\1", body, flags=re.M)  # unwrap a math-only blockquote line
     out = markdown.markdown(body, extensions=["smarty"], output_format="html")
@@ -257,11 +260,15 @@ strong, b {{ font-family: {hei}; font-weight: 700; color: {bold}; }}
 section {{ break-before: page; overflow-x: clip; overflow-clip-margin: 6pt; }}
 img, table, pre, .katex-display {{ max-width: 100%; }}
 pre {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
+/* Code is set in KaTeX's typewriter face (loaded by the KaTeX CSS) at the size \mathtt renders, so `ROW` and
+   \(\mathtt{{BASEROW}}\) on one line are the same monospace font. */
+code, pre {{ font-family: KaTeX_Typewriter, Menlo, monospace; font-size: 1em; }}
 .opener {{ padding-top: {round(h * 0.2)}pt; text-align: center; margin-bottom: {round(h * 0.07)}pt; }}
 .opener .label {{ font-family: {hei}; font-weight: 700; color: {bold}; font-size: 9pt; letter-spacing: 3pt; margin-bottom: 14pt; }}
 .opener h1 {{ font-family: {hei}; font-weight: 700; color: {bold}; font-size: 22pt; letter-spacing: 2pt; margin: 0; line-height: 1.5; }}
 .mk {{ font-size: 1pt; color: transparent; letter-spacing: 0; white-space: nowrap; font-family: Baskerville, "Songti SC", serif; }}
 p {{ margin: 0; text-indent: 2em; text-align: justify; }}
+p:has(br) {{ text-indent: 0; }}  /* hard line breaks set aligned rows (number tables): no first-line indent */
 /* Inline math/code + its CJK closing punctuation: no break between them (inline code is short). After KaTeX
    runs, KATEX_HEAD moves a formula's punctuation into its last atom (.nbp) and lifts the nowrap (.nbm), so a long
    formula keeps its own break points and only its last atom is bound to the punctuation. */

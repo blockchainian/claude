@@ -7,6 +7,7 @@
 # ABOUTME: render of a small generated EPUB with cover and bookmarks. extract/translate are tested in the .mjs files.
 import importlib.util
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -140,6 +141,11 @@ def test_math_units(rd):
     check("inline math + CJK punctuation bound together", '<span class="nb">\\(x_{1}\\)，</span>' in nb, nb)
     check("inline code + CJK punctuation bound together", '<span class="nb"><code>PTR</code>。</span>' in nb, nb)
     check("math not followed by punctuation, and display math, left unwrapped", nb.count('class="nb"') == 2, nb)
+    # A hard-broken staircase ("1 A" / "　　2 A" / "　　　　3 A") keeps the ideographic-space indent of each continued
+    # line (Markdown would strip it); a paragraph's own leading ideographic spaces are left to Markdown.
+    _, st = rd.md_to_html("# T\n\n`1 A`  \n\u3000\u3000`2 A`  \n\u3000\u3000\u3000\u3000`3 A`\n\n\u3000\u3000正文。\n")
+    check("hard-broken lines keep their ideographic-space indent",
+          "<br>\n&#12288;&#12288;<code>2 A</code>" in st and "<br>\n&#12288;&#12288;&#12288;&#12288;<code>3 A</code>" in st and "<p>正文。</p>" in st, st)
     _, fw = rd.md_to_html("# T\n\n设 \\(x=1\\）在……\n")
     check("mis-typed full-width close delimiter fixed", "\\(x=1\\)" in fw, fw)
 
@@ -239,6 +245,17 @@ def test_render_e2e(rd):
         line_of = lambda w: next((i for i, ln in enumerate(text.splitlines()) if w in ln), -1)
         check("a long inline formula followed by punctuation still wraps inside", 0 <= line_of("w01") < line_of("w60"), text[:900].replace(chr(10), " | "))
         check("the wrapped formula's punctuation stays on its last line", "，" in text.splitlines()[line_of("w60")] if line_of("w60") >= 0 else False, text[:900].replace(chr(10), " | "))
+        # Inline code and KaTeX \\mathtt are one monospace face (KaTeX_Typewriter), not two side by side; and a paragraph
+        # with hard line breaks (aligned rows) gets no first-line indent, so its rows start at one x.
+        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text(
+            "# 等宽译\n\n令 `ROW` 与 \\(\\mathtt{BASEROW}[i]\\) 相同。\n\n甲一二三  \n乙四五六  \n丙七八九\n\n" + "正文。" * 40 + "\n")
+        rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
+        fonts = subprocess.run(["pdffonts", str(prev)], capture_output=True, text=True).stdout
+        mono = [ln.split()[0] for ln in fonts.splitlines()[2:] if re.search(r"Typewriter|Menlo|Courier|Mono|Monaco", ln)]
+        check("inline code and \\mathtt share one monospace font", len(mono) == 1 and "KaTeX_Typewriter" in mono[0], str(mono))
+        bbox = subprocess.run(["pdftotext", "-bbox", str(prev), "-"], capture_output=True, text=True).stdout
+        xs = [float(x) for w in ("甲", "乙", "丙") for x in re.findall(rf'xMin="([\d.]+)"[^>]*>{w}', bbox)[:1]]
+        check("hard-broken rows start at one x (no first-line indent)", len(xs) == 3 and max(xs) - min(xs) < 1, str(xs))
         # A short paragraph leading into a block figure ("如下：", "**9、10、11。**") must not be left alone at a page
         # bottom while its figure moves to the next page. Fillers of every length put the lead at every position.
         from PIL import Image, ImageDraw
