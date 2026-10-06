@@ -45,7 +45,7 @@ The site sits behind DDoS-Guard, which serves a captcha to headless browsers and
 npm install --prefix "$SKILL_DIR/scripts"
 ```
 
-The browser profile persists at `~/.cache/secrets-manager/profiles/download-book`. One Chrome window serves every run: the first run opens it, each run works in a tab of its own and closes that tab when it finishes, and the window closes by itself a minute after the last tab. Several books can be looked up at once, one run per book; do not use the window meanwhile.
+The browser profile persists at `~/.cache/secrets-manager/profiles/download-book`. One Chrome window serves every run: the first run opens it, each run works in a background tab of its own (it does not take the focus) and closes that tab when it finishes, and the window closes by itself a minute after the last tab. Several books can be looked up at once, one run per book; do not use the window meanwhile.
 
 ## Run
 

@@ -94,9 +94,22 @@ async function keepChrome() {
     args: ['--disable-blink-features=AutomationControlled', '--remote-debugging-port=0'],
     ignoreDefaultArgs: ['--enable-automation', '--disable-extensions', '--disable-component-extensions-with-background-pages', '--disable-popup-blocking', '--disable-component-update', '--disable-default-apps'],
   });
-  context.on('close', () => process.exit(0));
+  // Exit only after context.close() has let Chrome finish its shutdown: exiting while it still runs kills it, and
+  // the next start then shows the "Restore pages?" bubble.
   await untilIdle(() => context.pages().length);
   await context.close();
+}
+
+/** Opens a tab without bringing Chrome to the front: a plain newPage() takes the focus from the app in use. */
+async function backgroundTab(context, cdp) {
+  const created = cdp.send('Target.createTarget', { url: 'about:blank', background: true });
+  // Other runs open tabs in the same Chrome at the same time, so the tab is matched by its target id.
+  const isOurs = async page => {
+    const session = await context.newCDPSession(page);
+    try { return (await session.send('Target.getTargetInfo')).targetInfo.targetId === (await created).targetId; }
+    finally { await session.detach(); }
+  };
+  return context.waitForEvent('page', { predicate: isOurs });
 }
 
 /** Opens a tab of the shared Chrome on the site's origin, so in-page fetches are same-origin. Closing the session closes the tab only. */
@@ -108,7 +121,7 @@ export async function openSession(origin) {
     start: () => spawn(process.execPath, [fileURLToPath(import.meta.url), 'keep'], { detached: true, stdio: 'ignore' }).unref(),
     wait: () => sleep(500),
   });
-  const page = await browser.contexts()[0].newPage();
+  const page = await backgroundTab(browser.contexts()[0], await browser.newBrowserCDPSession());
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
   return { ...sessionFor(page), close: async () => { await page.close(); await browser.close(); } };
 }
