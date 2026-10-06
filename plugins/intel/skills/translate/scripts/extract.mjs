@@ -590,7 +590,7 @@ export function extractEpub(source, work, keepImages, pageSize) {
     for (const m of body[1].matchAll(/<\/?section\b[^>]*>/gi)) {
       if (m[0].startsWith("</")) depth--;
       else {
-        if (depth === 0 && m.index > 0 && /(?:data-type|epub:type)=["']appendix["']/i.test(m[0])) cuts.push(m.index);
+        if (depth === 0 && pyStrip(body[1].slice(0, m.index)) && /(?:data-type|epub:type)=["']appendix["']/i.test(m[0])) cuts.push(m.index);
         depth++;
       }
     }
@@ -648,7 +648,6 @@ export function extractEpub(source, work, keepImages, pageSize) {
     // lastChapterPos drifts and the back-matter latch arms on the wrong file.
     const item = manifest[idref];
     if (!item.media.startsWith("application/xhtml")) return null;
-    const base = path.posix.basename(item.href);
     const stitle = titleOf(item.href);
     let [chap] = parseTitle(stitle);
     if (chap === null && !(PART_TITLE.test(stitle)) && PART_TITLE_RE.test(stitle)) {
