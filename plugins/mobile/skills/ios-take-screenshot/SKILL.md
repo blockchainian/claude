@@ -54,16 +54,17 @@ Run this one command and read the three values out of its output:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-TMP="${TMPDIR:-/tmp}"
-SLICE_DIR="$(mktemp -d "${TMP%/}/ios-screenshot.XXXXXX")"
-OUT_ROOT="${IOS_SCREENSHOT_DIR:-${TMP%/}/ios-screenshots}/$RUN_ID"
+SCRATCH="${MOBILE_DATA_DIR:-$HOME/.local/share/mobile}/tmp/ios-take-screenshot"
+mkdir -p "$SCRATCH"
+SLICE_DIR="$(mktemp -d "$SCRATCH/slices.XXXXXX")"
+OUT_ROOT="${MOBILE_OUTPUT_DIR:-$HOME/Documents}/ios-screenshots/$RUN_ID"
 mkdir -p "$SLICE_DIR" "$OUT_ROOT"
 printf 'RUN_ID=%s\nSLICE_DIR=%s\nOUT_ROOT=%s\n' "$RUN_ID" "$SLICE_DIR" "$OUT_ROOT"
 ```
 
-The stitched PNG goes where the caller asks, via `--out`. `IOS_SCREENSHOT_DIR` only
-takes effect if it is set in the shell that runs this command, so to use it, make
-`IOS_SCREENSHOT_DIR=/some/dir` the first line of that same command. `RUN_ID` gives each run its own
+The stitched PNG goes where the caller asks, via `--out`. `MOBILE_OUTPUT_DIR` (default
+`~/Documents`) only takes effect if it is set in the shell that runs this command, so to use it,
+make `MOBILE_OUTPUT_DIR=/some/dir` the first line of that same command. `RUN_ID` gives each run its own
 subdirectory under it, so two sessions capturing the same screen cannot overwrite each
 other, and it is also the name under which this run claims its simulator.
 
@@ -76,9 +77,8 @@ $OUT_ROOT/<app-slug>/<screen-slug>.png
 Report the full path when you finish — a run-scoped directory is only useful to later tools
 if they are told where it is. A path given in the request always wins over the default.
 
-Set `IOS_SCREENSHOT_DIR` to the session's scratchpad directory when your system prompt names
-one, and to a durable directory for screens worth keeping. With neither, the root falls under
-`$TMPDIR`, which macOS clears.
+Slices are scratch under `$MOBILE_DATA_DIR/tmp/ios-take-screenshot/` (default
+`~/.local/share/mobile/...`); remove `$SLICE_DIR` once the stitch is written.
 
 Several agents can share the artifact library. Device use is exclusive per UDID:
 `claim-simulator.mjs` atomically holds one device for one `RUN_ID`, and
@@ -228,8 +228,9 @@ Then claim it for this run, so no other agent drives it while you capture:
 
 Exit 0 means it is yours. Exit 3 means another run holds it, and the message says which
 run and for how long. Decide: wait and claim again, or abort and pick another simulator.
-Never `--steal` unless you know that run is dead. The claim is a file under `TMPDIR`, so
-it is visible to every session of the same user; releasing it is part of cleanup.
+Never `--steal` unless you know that run is dead. The claim is a file under
+`$MOBILE_STATE_DIR/locks` (default `~/.local/state/mobile/locks`), so it is visible to every
+session of the same user; releasing it is part of cleanup.
 
 This plugin enables `XCODEBUILDMCP_DISABLE_SESSION_DEFAULTS=true`. Pass the claimed
 `simulatorId` on every simulator/UI tool call, and `bundleId` on launch/stop calls;

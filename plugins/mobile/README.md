@@ -162,5 +162,8 @@ Changes in this fork:
 | `XCODEBUILDMCP_ENABLED_WORKFLOWS` | Enabled upstream MCP workflows | Fixed by the plugin | `.mcp.json` |
 | `XCODEBUILDMCP_DISABLE_SESSION_DEFAULTS` | Explicit target selection for parallel calls | Fixed to `true` | `.mcp.json` |
 | `NO_UI` | Disable Appium MCP’s default interactive UI | Fixed to `true` | `.mcp.json` |
+| `MOBILE_OUTPUT_DIR` | Root for screenshots; default ~/Documents, with ios-screenshots/<run>/ | Optional | Shell environment |
+| `MOBILE_STATE_DIR` | Root for device claims; default ~/.local/state/mobile, with locks/ | Optional | Shell environment |
+| `MOBILE_DATA_DIR` | Root for scratch slices, traces and memgraphs; default ~/.local/share/mobile, with tmp/<skill>/ | Optional | Shell environment |
 
-These are upstream server variables, not user-configurable Mobile settings; their official names must be preserved. No plugin API key or dotenv file is required.
+The `XCODEBUILDMCP_*` and `NO_UI` rows are upstream server variables, not user-configurable Mobile settings; their official names must be preserved. No plugin API key or dotenv file is required.

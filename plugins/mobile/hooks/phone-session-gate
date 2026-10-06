@@ -22,7 +22,9 @@ DELETED = re.compile(r"Session (\S+) deleted successfully")
 
 
 def lock_dir() -> Path:
-    return Path(os.environ.get("TMPDIR") or "/tmp")
+    state = Path(os.environ.get("MOBILE_STATE_DIR") or Path.home() / ".local/state/mobile")
+    (state / "locks").mkdir(parents=True, exist_ok=True)
+    return state / "locks"
 
 
 def lock_path(udid: str) -> Path:

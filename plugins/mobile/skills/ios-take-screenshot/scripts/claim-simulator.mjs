@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // ABOUTME: Holds one simulator or phone for one capture run via a claim file per UDID under
-// ABOUTME: TMPDIR, so two agents never drive the same target at once; --release drops it.
+// ABOUTME: MOBILE_STATE_DIR, so two agents never drive the same target at once; --release drops it.
 //
 // Hold one simulator or phone for one capture run, so two agents never drive it at once.
 //
 // XcodeBuildMCP calls must explicitly name the claimed simulator; do not
 // change shared session defaults. On a phone, WebDriverAgent
 // serves one session, so a second Appium session ends the first one's mid-run.
-// The lock is a file per UDID under TMPDIR, which every session of the same user
+// The lock is a file per UDID under $MOBILE_STATE_DIR/locks, which every session of the same user
 // shares. A claim on a UDID another run holds exits 3 and says who holds it and
 // for how long; the later agent decides whether to wait or abort. Pass --steal only for a run
 // you know is dead. --release drops a claim this run holds.
@@ -15,6 +15,7 @@
 // Prints JSON. Exit 0 claimed or released, 2 bad arguments, 3 held by another run.
 
 import fs from "node:fs";
+import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -26,7 +27,7 @@ const DESCRIPTION = `Hold one simulator or phone for one capture run, so two age
 XcodeBuildMCP calls must explicitly name the claimed simulator; do not
 change shared session defaults. On a phone, WebDriverAgent
 serves one session, so a second Appium session ends the first one's mid-run.
-The lock is a file per UDID under TMPDIR, which every session of the same user
+The lock is a file per UDID under $MOBILE_STATE_DIR/locks, which every session of the same user
 shares. A claim on a UDID another run holds exits 3 and says who holds it and
 for how long; the later agent decides whether to wait or abort. Pass --steal only for a run
 you know is dead. --release drops a claim this run holds.
@@ -114,8 +115,11 @@ function parseArgs(argv) {
   return args;
 }
 
+// The claims are state: deleting one mid-run lets a second agent drive the same target.
 export function lockPath(udid) {
-  return pyPath(`${process.env.TMPDIR || "/tmp"}/ios-screenshot-lock.${udid}.json`);
+  const dir = `${process.env.MOBILE_STATE_DIR || `${os.homedir()}/.local/state/mobile`}/locks`;
+  fs.mkdirSync(dir, { recursive: true });
+  return pyPath(`${dir}/ios-screenshot-lock.${udid}.json`);
 }
 
 export function readClaim(lockFile) {

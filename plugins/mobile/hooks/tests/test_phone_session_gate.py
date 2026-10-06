@@ -39,7 +39,7 @@ def hook(event: str, tool_input: dict, tmp: str, response=None, caller="caller-a
     if response is not None:
         payload["tool_response"] = response
     r = subprocess.run([str(HOOK)], input=json.dumps(payload), capture_output=True,
-                       text=True, env={**os.environ, "TMPDIR": tmp}, check=False)
+                       text=True, env={**os.environ, "MOBILE_STATE_DIR": tmp}, check=False)
     if r.returncode != 0:
         raise AssertionError(f"hook exited {r.returncode}: {r.stderr}")
     return json.loads(r.stdout) if r.stdout.strip() else {}
@@ -56,7 +56,7 @@ def create(udid: str | None = None) -> dict:
 
 
 def lock(tmp: str) -> dict:
-    return json.loads((Path(tmp) / f"ios-screenshot-lock.{PHONE}.json").read_text())
+    return json.loads((Path(tmp) / "locks" / f"ios-screenshot-lock.{PHONE}.json").read_text())
 
 
 def main() -> int:
@@ -101,7 +101,7 @@ def main() -> int:
             failures.append(f"create on an unclaimed phone was not sent to claim: {d} {why!r}")
 
         subprocess.run([str(CLAIM), PHONE, "--run", "run-a"], check=True,
-                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                       capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
         out = hook("PreToolUse", create(PHONE), tmp)
         if out:
             failures.append(f"create on a claimed, idle phone was not allowed: {out}")
@@ -120,12 +120,12 @@ def main() -> int:
         # Reclaims must preserve the existing Appium connection and its age.
         held_before = lock(tmp)
         subprocess.run([str(CLAIM), PHONE, "--run", "run-a"], check=True,
-                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                       capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
         if lock(tmp) != held_before:
             failures.append("reclaim erased session state or changed its age")
         for flag in ("--release",):
             result = subprocess.run([str(CLAIM), PHONE, "--run", "run-a", flag],
-                                    capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                                    capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
             if result.returncode != 3 or lock(tmp) != held_before:
                 failures.append(f"{flag} cleared a live phone session")
         if decision(hook("PreToolUse", {"action": "delete"}, tmp))[0] != "deny":
@@ -141,7 +141,7 @@ def main() -> int:
              {"content": [{"type": "text", "text": "Something else happened"}]})
         if lock(tmp) != held_before:
             failures.append("unconfirmed delete cleared a claim")
-        second = Path(tmp) / "ios-screenshot-lock.other-phone.json"
+        second = Path(tmp) / "locks" / "ios-screenshot-lock.other-phone.json"
         second.write_text(json.dumps({"run": "run-b", "session": "other-session"}))
         hook("PostToolUse", {"action": "delete", "sessionId": SESSION}, tmp,
              {"content": [{"type": "text", "text": f"Session {SESSION} deleted successfully."}]})
@@ -170,7 +170,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run([str(CLAIM), PHONE, "--run", "run-a"], check=True,
-                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                       capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
         hook("PreToolUse", create(PHONE), tmp)
         if decision(hook("PreToolUse", create(PHONE), tmp, caller="caller-b", call="call-b"))[0] != "deny":
             failures.append("second create passed while first was in progress")
@@ -191,7 +191,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run([str(CLAIM), PHONE, "--run", "run-a"], check=True,
-                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                       capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
         with ThreadPoolExecutor(max_workers=8) as executor:
             results = list(executor.map(lambda i: hook("PreToolUse", create(PHONE), tmp,
                                                       caller=f"caller-{i}", call=f"call-{i}"), range(8)))
@@ -199,7 +199,7 @@ def main() -> int:
             failures.append("simultaneous creates did not yield exactly one reservation")
         old = lock(tmp)["pending"]
         subprocess.run([str(CLAIM), PHONE, "--run", "new", "--steal"], check=True,
-                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                       capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
         hook("PreToolUse", create(PHONE), tmp, caller="new-caller", call="new-call")
         current = lock(tmp)
         hook("PostToolUse", create(PHONE), tmp,
@@ -212,7 +212,7 @@ def main() -> int:
              caller="new-caller", call="new-call")
         if "pending" in lock(tmp):
             failures.append("nested tool error did not release its reservation")
-        claim_file = Path(tmp) / f"ios-screenshot-lock.{PHONE}.json"
+        claim_file = Path(tmp) / "locks" / f"ios-screenshot-lock.{PHONE}.json"
         claim_file.write_text("{unfinished")
         if decision(hook("PreToolUse", create(PHONE), tmp))[0] != "deny":
             failures.append("corrupt claim allowed a create")
@@ -221,7 +221,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run([str(CLAIM), PHONE, "--run", "run-a"], check=True,
-                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                       capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
         hook("PreToolUse", create(PHONE), tmp)
         hook("PostToolUseFailure", create(PHONE), tmp)
         if "pending" in lock(tmp):
@@ -234,7 +234,7 @@ def main() -> int:
     # A shared MCP process must not let main/sibling agents drive a child's session.
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run([str(CLAIM), PHONE, "--run", "run-a"], check=True,
-                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                       capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
         prepare_tool = "mcp__appium_mcp__appium_prepare_ios_real_device"
         if hook("PreToolUse", {"udid": PHONE}, tmp, agent="child-a", tool=prepare_tool):
             failures.append("claimed preparation by its first agent was denied")
@@ -282,9 +282,9 @@ def main() -> int:
         if decision(hook("PreToolUse", create(PHONE), tmp, agent="child-b"))[0] != "deny":
             failures.append("failed create freed the task ownership")
         subprocess.run([str(CLAIM), PHONE, "--run", "run-a", "--release"], check=True,
-                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                       capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
         subprocess.run([str(CLAIM), PHONE, "--run", "run-b"], check=True,
-                       capture_output=True, env={**os.environ, "TMPDIR": tmp})
+                       capture_output=True, env={**os.environ, "MOBILE_STATE_DIR": tmp})
         if hook("PreToolUse", create(PHONE), tmp, agent="child-b"):
             failures.append("next agent could not take over after task release")
 
