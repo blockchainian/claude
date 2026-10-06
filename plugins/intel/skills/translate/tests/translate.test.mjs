@@ -125,3 +125,14 @@ test("luna returns a titled Chinese translation (e2e)", { skip: !process.env.TRA
   assert.ok(md.includes("牵引力"), md.slice(0, 200));
   assert.ok(usage && usage.output_tokens > 0 && seconds >= 0);
 });
+
+test("answer preserves placeholder multiplicities and numeric sup marker set", () => {
+  const src = '<p>⟦IMG:e1⟧ ⟦IMG:e1⟧ ⟦IMG:e2⟧ <sup class="note">12</sup><sup>21</sup></p>';
+  const good = '# 标题\n\n正文 ⟦IMG:e2⟧ ⟦IMG:e1⟧ ⟦IMG:e1⟧ <sup>21</sup><sup>12</sup>';
+  assert.equal(tr.checkOutput(good, 1, src), null);
+  assert.match(tr.checkOutput(good.replace('⟦IMG:e1⟧ ', ''), 1, src), /missing.*⟦IMG:e1⟧/);
+  assert.match(tr.checkOutput(good + ' ⟦IMG:e2⟧', 1, src), /extra.*⟦IMG:e2⟧/);
+  assert.match(tr.checkOutput(good.replace('<sup>12</sup>', ''), 1, src), /missing.*<sup>12<\/sup>/);
+  assert.match(tr.checkOutput(good + '<sup>30</sup>', 1, src), /extra.*<sup>30<\/sup>/);
+  assert.equal(tr.checkOutput(good + '<sup>12</sup>', 1, src), null);
+});

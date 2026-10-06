@@ -135,9 +135,9 @@ Run it using the host-specific long-command instructions above. Both hosts call 
 same logged-in `codex exec` CLI; do not replace it with host agents. Defaults: `gpt-6-luna`, effort `low`, Fast service tier (`priority`), 20
 sections in flight, one no-tool `codex exec` per section in a private `CODEX_HOME`. Measured: a 250-page trade
 book (27 sections of 1.5–3.5k words) is back in about a minute, a 380-page book (54 sections, up to 12k
-words) in about five; 7–15k input and 2–4k output tokens per section. Each answer is checked (starts with `# title`, at least 0.9 Chinese
-characters per English word) and retried once; a section that still fails is kept as `<id>.rejected.md` and
-reported as `FAILED`. Rerunning skips sections whose `.md` exists (`--force` redoes them, `--only 04,05`
+words) in about five; 7–15k input and 2–4k output tokens per section. Each answer is checked (starts with `# title`, at least 0.6 Chinese
+characters per English word, identical placeholder counts and numeric `<sup>N</sup>` marker sets) and retried once; a section that still fails is kept as `<id>.rejected.md` and
+reported as `FAILED`, listing missing or extra protected tokens. Rerunning skips sections whose `.md` exists (`--force` redoes them, `--only 04,05`
 narrows).
 
 While it runs, preview any finished section as its own PDF (own page numbers, no cover):
