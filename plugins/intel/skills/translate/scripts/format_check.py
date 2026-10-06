@@ -146,6 +146,7 @@ for pg, nums in off.items():
 # under the title says how the section opens; a span at >= 23pt is the drop cap. An epigraph (slanted, or inset
 # 2em from both edges of the column) comes before the text and is skipped.
 def kind(text, span):
+    text = text.lstrip("▶▸ ")  # a ▶ marker set as text, hung in front of an exercise number
     if re.match(r"(\d+\.(?!\d)|表\s*\d|图\s*\d|算法\s*\d)", text):
         return "label"  # an answer "1.", "表 1", "算法 1.1E"
     if text[:1].isdigit():
