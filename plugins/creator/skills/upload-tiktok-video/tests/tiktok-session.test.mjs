@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { accountDir, apiUrl, browserFlag, browserPrefs, dataDir, displayName, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, recordingPath, stopRecording, templateFrom } from "../scripts/tiktok-session.mjs";
+import { accountDir, accountStateDir, apiUrl, browserFlag, browserPrefs, dataDir, displayName, findPid, ispProxyAt, loadAccount, pickAccount, proxyDict, recordingPath, stateDir, stopRecording, templateFrom } from "../scripts/tiktok-session.mjs";
 
 const row = (username, status, isp_slot, created_at) => ({ username, status, isp_slot, created_at });
 
@@ -180,6 +180,11 @@ test("recordingPath names a run's recording by its skill and time, under the acc
 test("dataDir defaults under ~/.local/share and follows CREATOR_DATA_DIR", () => {
   assert.equal(dataDir({}), join(homedir(), ".local", "share", "creator", "tiktok"));
   assert.equal(dataDir({ CREATOR_DATA_DIR: "/x" }), "/x/tiktok");
+});
+
+test("accountStateDir keeps each account's post log and stats under ~/.local/state, following CREATOR_STATE_DIR", () => {
+  assert.equal(stateDir({}), join(homedir(), ".local", "state", "creator", "tiktok"));
+  assert.equal(accountStateDir("me", { CREATOR_STATE_DIR: "/s", CREATOR_DATA_DIR: "/x" }), "/s/tiktok/me");
 });
 
 test("accountDir keeps each account's data in its own directory under dataDir", () => {

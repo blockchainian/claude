@@ -10,7 +10,9 @@
 //   ISP_PROXY_URL               the ISP pool's base url; slot n is the base port + n.
 //   BROWSER_DISPLAY            the display a headed window goes on, any part of its name (else the main one).
 //   SECRETS_DATA_DIR  where the store and profiles are (default ~/.config/secrets-manager).
-//   CREATOR_DATA_DIR           where posts, stats and recordings go, one directory per account
+//   CREATOR_STATE_DIR          where the post log and stats go, one directory per account
+//                               (root default ~/.local/state/creator; tiktok/ is appended).
+//   CREATOR_DATA_DIR           where screen recordings go, one directory per account
 //                               (root default ~/.local/share/creator; tiktok/ is appended).
 
 import { execFile, execFileSync, spawn } from "node:child_process";
@@ -35,8 +37,13 @@ export const storeDir = (env = process.env) => env.SECRETS_DATA_DIR || join(home
 
 export const dataDir = (env = process.env) => join(env.CREATOR_DATA_DIR || join(homedir(), ".local", "share", "creator"), "tiktok");
 
-// Where one account's posts, stats and recordings go.
+export const stateDir = (env = process.env) => join(env.CREATOR_STATE_DIR || join(homedir(), ".local", "state", "creator"), "tiktok");
+
+// Where one account's screen recordings go: debugging aids, deletable.
 export const accountDir = (username, env = process.env) => join(dataDir(env), username);
+
+// Where one account's post log and stats series go: records that cannot be fetched again.
+export const accountStateDir = (username, env = process.env) => join(stateDir(env), username);
 
 // Creator's .env carries the ISP pool; a value already in the environment wins.
 const envFile = join(homedir(), ".config", "creator", ".env");

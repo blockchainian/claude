@@ -12,7 +12,8 @@ Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hos
 | --- | --- | --- | --- |
 | `ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
 | `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
-| `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with TikTok data under tiktok/ | Optional | ~/.config/creator/.env |
+| `CREATOR_STATE_DIR` | State root; default ~/.local/state/creator, with each account's posts.jsonl and stats.jsonl under tiktok/<username>/ | Optional | ~/.config/creator/.env |
+| `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with each account's screen recordings under tiktok/<username>/recordings/ | Optional | ~/.config/creator/.env |
 | `SECRETS_DATA_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
 
 Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
@@ -57,9 +58,10 @@ set `SECRETS_DATA_DIR` explicitly if yours is elsewhere. The store, logged-in pr
 ISP slots must already be provisioned through secrets-manager. Creator’s ISP pool is configured separately at `~/.config/creator/.env` and must match the login pool.
 Creator does not install secrets-manager or create/migrate its accounts; use the existing
 secrets-manager setup when those prerequisites are missing. Never open the same account profile
-in both hosts at once. Data goes to
-`~/.local/share/creator/tiktok/<username>/`, one directory per account (`CREATOR_DATA_DIR`
-overrides the parent). Recording uses
+in both hosts at once. The post log and stats go to
+`~/.local/state/creator/tiktok/<username>/` and screen recordings to
+`~/.local/share/creator/tiktok/<username>/recordings/`, one directory per account
+(`CREATOR_STATE_DIR` and `CREATOR_DATA_DIR` override the roots). Recording uses
 ScreenCaptureKit through `swift` and needs the Screen Recording permission.
 
 Use the host's shell execution tool for the scripts; retain the process/session handle and
