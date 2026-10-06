@@ -1,6 +1,6 @@
 ---
 name: secrets-manager
-description: Manage local plaintext credentials and browser sessions, import Google/X/TikTok accounts, log in through external app adapters, check that accounts are still usable (verify), provision Google 2FA, and export app credentials.
+description: Manage local plaintext credentials and browser sessions, import Google/X/TikTok accounts, log in through external app adapters, check that accounts are still usable (verify), prepare app accounts (setup), provision Google 2FA, and export app credentials.
 ---
 
 # Secrets manager
@@ -51,12 +51,14 @@ A fresh Google account signs into the apps your adapters define. Run each step s
 1. `node "$SKILL_DIR/scripts/cli.mjs" import google <file>`.
 2. `node "$SKILL_DIR/scripts/cli.mjs" login google --select <email>`.
 3. `node "$SKILL_DIR/scripts/cli.mjs" login <app> --select <email>` for each required adapter.
+4. `node "$SKILL_DIR/scripts/cli.mjs" setup <app> --select <email>` for adapters with a setup hook.
 
 Every Google sign-in (`login google`, `login <app>`, `setup-2fa`) runs headed by default, so a person
 at the window clears any CAPTCHA: the headless vision solver's misses get accounts banned.
-`--headless` opts out. `login x|tiktok` and `verify` stay headless unless `--headed`.
+`--headless` opts out. `login x|tiktok`, `verify` and `setup` stay headless unless `--headed`.
 
-Done means Google and every required app session are active; `list` shows their status.
+Done means Google is `active` and required app sessions are `ready` when their adapters have
+a setup hook, otherwise `active`; `list` shows their status.
 
 Every step reuses the account's one profile, so an app step never re-does Google. When a step
 fails it records a status that says how to proceed:
@@ -81,13 +83,14 @@ import <google|x|tiktok> [file...]
 login <google|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headless] [--rotate-proxy]
 login <x|tiktok> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
 login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
-verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
+verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed] [--rotate-proxy]
+setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy] [app flags]
 setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
 sms <balance|prices|number> [--country N] [--max-price X] [--yes]
 whoami <x|app> --select CREDENTIAL [--json]
 export <app> [--select EMAIL]...
 get <app> --select ID...
-set-status <app> <active|expired|restricted|escalated> --select ID...
+set-status <app> <active|ready|expired|restricted|escalated> --select ID...
 list [--json]
 ```
 
@@ -95,7 +98,7 @@ IDs are emails for Google-backed accounts and usernames for X and TikTok. `--sel
 the named IDs (repeatable); `--all` includes accounts that are already fine; `--limit N` caps the
 run; `--rotate-proxy` uses a rotating proxy exit instead of the account's sticky one. `--concurrency N`
 (default 1 = sequential) drives up to N accounts at once — it applies to every per-account command
-(`login google|x|app`, `login <app> --by-email`, `verify`, `setup-2fa`). Each
+(`login google|x|app`, `login <app> --by-email`, `verify`, `setup`, `setup-2fa`). Each
 account has its own profile, sticky exit and DB row, so the flows never collide, and DB and
 credential-file writes are synchronous so parallel workers never clobber each other; a headed run
 opens N browser windows and a held-open debug window holds its slot until closed, so with N accounts
@@ -156,7 +159,8 @@ its file and line number.
   lands on the dashboard from the sign-in page itself and nothing more is done.
 - **adapter apps** — sign into Google when needed, then drive the adapter's Google OAuth
   flow and store its scoped cookies and localStorage. Default: missing or expired sessions;
-  `--all` refreshes every selected account. An account whose app session is `restricted` is
+  `--all` refreshes every selected account; re-saving a `ready` session keeps `ready` because
+  setup lives server-side. An account whose app session is `restricted` is
   never retried; an adapter's `bannedResponse` hook records that verdict when the app refuses a
   banned account at sign-in.
 - **x** — password login through a real Camoufox browser (X blocks the headless onboarding API):
@@ -218,13 +222,14 @@ through the residential proxy.
 ### verify
 
 Checks that each selected account is still usable and persists the result. By default only
-`active` accounts are checked; `--all` checks every one. `google`, `x` and `tiktok` are builtin
+`active` and `ready` accounts are checked; `--all` checks every one. `google`, `x` and `tiktok` are builtin
 checks; any other target calls the adapter's `verify({db, email, session, opts, io})` hook, which
 returns `active`, `restricted` or `expired`. A check that cannot tell (network error, 429, a stale
 queryId, an unexpected page) throws: the status is left unchanged and the command exits 1.
 An `expired` result never overwrites `restricted` or `escalated` — a banned or person-blocked
 account's token is usually dead too — and is logged as `expired (kept restricted)`; any other
-result is written.
+result is written. A check returning `active` for a `ready` session keeps `ready`; login
+verification does not undo app setup.
 
 - **google** — opens the account's own profile on its sticky residential exit and reads where
   myaccount.google.com leaves it: the dashboard or setup wizard is `active`, Google's marketing or
@@ -241,6 +246,39 @@ result is written.
 
 Neither browser check ever signs in. Deriving a ct0 for a vendor X `auth_token` stays in the
 intel plugin's `fetch-x-mentions/scripts/verify-x.mjs`.
+
+### setup
+
+`setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy] [app flags]`
+prepares each selected logged-in account through the adapter's optional
+`setup({db, email, session, opts, io})` hook. Like adapter verification, it selects imported
+accounts holding an app session: by default only `active`; `--all` also includes `ready`
+for a setup rerun. Other statuses are excluded even with `--all`.
+The hook resolves to `{summary, state}`: `summary` is a nonempty one-line string; `state`
+is any JSON-serialisable app-specific value, including `null`, but not `undefined`. Success
+stores JSON in `state` and marks the session `ready` (logged in and setup done) in one
+write, then prints `<email>: <summary>`. Throwing `kit.NeedsHuman` marks the app session
+`escalated` and prints `<email>: escalated: <message>` to stderr without saving setup state.
+Other throws or invalid results, summaries or states leave status and prior setup state
+unchanged and print `<email>: <message>` to stderr. Any failure makes the command exit 1;
+other selected accounts still run, up to `--concurrency` (default 1).
+An adapter without the hook fails with `<app> has no setup hook`.
+
+Adapters may declare `setupFlags`, an object mapping kebab-case flag names to
+`{type: "boolean" | "string", description: string}`. Descriptions must be nonempty;
+engine global flag names and `help` are reserved. For example:
+
+```js
+setupFlags: {
+  "follow-lowest-ranked": { type: "boolean", description: "Follow the lowest ranked account." },
+}
+```
+
+Only `setup <app>` accepts that app's flags; other apps, commands and unknown flags
+fail before the setup hook runs or a browser opens. Values reach the hook under their
+original names, e.g. `opts["follow-lowest-ranked"] === true`. `setup <app> --help`
+and flag errors list the app's flags with descriptions. The hook's `session.state`
+is already parsed JSON from the previous setup, or `null` when absent.
 
 ### whoami
 
@@ -264,7 +302,7 @@ Expired, restricted, locked or inconclusive sessions fail without changing local
 ### export
 
 `export <app> [--select EMAIL]...` calls `adapter.credentials(session)` for each selected
-account with an active app session. The hook returns `Record<string, string> | null`.
+account with an `active` or `ready` app session. The hook returns `Record<string, string> | null`.
 Each object prints one JSON line to stdout: `{"app":"<app>","email":"<email>",...fields}`.
 Credential values are printed in clear; callers decide how to use them. A null result prints
 `<email>\tmissing` to stderr. Stdout contains only JSON lines, so it pipes cleanly into jq.
@@ -282,9 +320,14 @@ its app statuses. Existing app tables remain readable even without their adapter
 
 - `secrets.sqlite` — tables `google` (accounts), `x` (accounts + tokens), `tiktok` (accounts +
   cookies + ISP slot), and one per app
-  (cookies, localStorage, status per account). Status everywhere:
-  `active | expired | restricted | escalated` (restricted = banned by the app, escalated = needs a
-  human). `scripts/schema.sql` has the fixed tables; app tables are created on first save.
+  (cookies, localStorage, status, nullable `state TEXT` per account). `state` holds
+  JSON from the app setup hook; `get <app> --select EMAIL` returns it parsed. Re-login leaves
+  it untouched. Existing app tables gain the column on open with a guarded, idempotent
+  `ALTER TABLE ... ADD COLUMN`, without rebuilding for this column. Status vocabulary:
+  `new | active | ready | expired | restricted | escalated` (`new` = imported, `active` = logged
+  in, `ready` = logged in and app setup done, restricted = banned by the app, escalated = needs a
+  human). Only app sessions become `ready` through setup; builtins do not have setup hooks.
+  `scripts/schema.sql` has the fixed tables; app tables are created on first save.
 - `google/*.txt`, `x/*.txt`, `tiktok/*.txt` — credential files.
 - `profiles/<id>/` — one persistent Camoufox profile per Google email / X username / TikTok username / plus-alias
   (the "device" the site sees).

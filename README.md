@@ -51,8 +51,7 @@ codex plugin add intel@blockchainian
 codex plugin add secrets@blockchainian
 ```
 
-The Codex catalog contains these eight plugins only. Before this PR merges, add
-`--ref codex` to the marketplace command; for a local checkout, run
+The Codex catalog contains these eight plugins. For a local checkout, run
 `codex plugin marketplace add .` from its root. Start a new session after installing.
 These commands were verified with Codex CLI 0.160.0.
 

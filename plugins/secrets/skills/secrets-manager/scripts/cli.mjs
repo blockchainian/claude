@@ -3,13 +3,14 @@ import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { loadAdapters } from "./adapter.mjs";
+import { loadAdapters, OPTIONS } from "./adapter.mjs";
 import * as config from "./config.mjs";
 import { runWithConcurrency } from "./concurrency.mjs";
 import { loadCredentials, parseLine, setAppPassword, setTotpSecret } from "./credentials.mjs";
 import * as sms from "./sms-otp.mjs";
 import * as store from "./store.mjs";
 import { BUILTIN_CHECKS, CHECK_RESULTS, nextStatus } from "./verify.mjs";
+import { NeedsHuman } from "./errors.mjs";
 // --- credential file parsing -------------------------------------------------
 
 // X accounts arrive from a vendor in a few colon-separated shapes (6 or 8 fields, and the
@@ -140,8 +141,8 @@ function runImport(db, opts, io) {
 
 // --- login -------------------------------------------------------------------
 
-// Apps that need a fresh session: never seen, or explicitly marked expired. Skips active (still
-// good), restricted and escalated (won't retry until cleared).
+// Apps that need a fresh session: never seen, or explicitly marked expired. Skips active and ready
+// (still good), restricted and escalated (won't retry until cleared).
 export function needsRefresh(db, app, email) {
   const session = store.getSession(db, app, email);
   return session === null || session.status === store.STATUS_EXPIRED;
@@ -459,7 +460,7 @@ async function runVerify(db, opts, io) {
   const [target] = opts.positional;
   const spec = BUILTIN_CHECKS[target] ?? adapterCheck(target);
   const allowed = spec.results ?? CHECK_RESULTS;
-  const rows = pick(spec.rows(db).filter(r => r.status === store.STATUS_ACTIVE || opts.all), spec.id, opts);
+  const rows = pick(spec.rows(db).filter(r => [store.STATUS_ACTIVE, store.STATUS_READY].includes(r.status) || opts.all), spec.id, opts);
   if (!rows.length) { io.log(`no ${spec.label} active accounts to check`); return 0; }
   const results = await runWithConcurrency(rows, opts.concurrency, async row => {
     const id = spec.id(row);
@@ -471,6 +472,42 @@ async function runVerify(db, opts, io) {
       io.log(stored === status ? `${id}: ${status}` : `${id}: ${status} (kept ${stored})`);
       return false;
     } catch (e) { io.error(`${id}: ${e.message}`); return true; }
+  });
+  return results.some(Boolean) ? 1 : 0;
+}
+
+// --- setup -------------------------------------------------------------------
+
+// Setup needs a live app session. Ready rows only join an explicit --all rerun;
+// NeedsHuman escalates the session, while other failures leave its status unchanged.
+async function runSetup(db, opts, io) {
+  const [app] = opts.positional;
+  const adapter = getAdapter(app);
+  if (!adapter.setup) throw new Error(`${app} has no setup hook`);
+  const sessions = store.listAccounts(db).flatMap(account => {
+    const session = store.getSession(db, app, account.email);
+    return session ? [session] : [];
+  });
+  const rows = pick(sessions.filter(session => session.status === store.STATUS_ACTIVE ||
+    (opts.all && session.status === store.STATUS_READY)), session => session.email, opts);
+  if (!rows.length) { io.log(`no ${app} active sessions to set up`); return 0; }
+  const results = await runWithConcurrency(rows, opts.concurrency, async session => {
+    const email = session.email;
+    try {
+      const result = await adapter.setup({ db, email, session, opts, io });
+      if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("invalid setup result");
+      const { summary, state } = result;
+      if (typeof summary !== "string" || !summary.trim() || /[\r\n\u2028\u2029]/.test(summary)) throw new Error("invalid setup summary");
+      store.saveSetupState(db, app, email, state);
+      io.log(`${email}: ${summary}`);
+      return false;
+    } catch (e) {
+      if (e instanceof NeedsHuman) {
+        store.setSessionStatus(db, app, email, store.STATUS_ESCALATED);
+        io.error(`${email}: escalated: ${e.message}`);
+      } else io.error(`${email}: ${e.message}`);
+      return true;
+    }
   });
   return results.some(Boolean) ? 1 : 0;
 }
@@ -504,7 +541,7 @@ function runExport(db, opts, io) {
   if (!adapter.credentials) throw new Error(`${app} has no credentials hook`);
   for (const account of pick(store.listAccounts(db), (a) => a.email, opts)) {
     const session = store.getSession(db, app, account.email);
-    if (!session || session.status !== store.STATUS_ACTIVE) continue;
+    if (!session || ![store.STATUS_ACTIVE, store.STATUS_READY].includes(session.status)) continue;
     const fields = adapter.credentials(session);
     if (fields === null) io.error(`${account.email}\tmissing`);
     else io.log(JSON.stringify({ app, email: account.email, ...fields }));
@@ -582,28 +619,13 @@ function runList(db, opts, io) {
 
 // --- CLI ---------------------------------------------------------------------
 
-const OPTIONS = {
-  all: { type: "boolean" },
-  "by-email": { type: "boolean" },
-  concurrency: { type: "string" },
-  country: { type: "string" },
-  headed: { type: "boolean" },
-  headless: { type: "boolean" },
-  json: { type: "boolean" },
-  limit: { type: "string" },
-  "max-price": { type: "string" },
-  "mint-app-password": { type: "boolean" },
-  select: { type: "string", multiple: true },
-  "rotate-proxy": { type: "boolean" },
-  yes: { type: "boolean" },
-};
-
 const COMMANDS = {
   whoami: { positional: [1, 1] },
   validate: { positional: [1, Infinity] },
   import: { run: runImport, positional: [1, Infinity] },
   login: { run: runLogin, positional: [1, 1] },
   verify: { run: runVerify, positional: [1, 1] },
+  setup: { run: runSetup, positional: [1, 1] },
   "setup-2fa": { run: runSetup2fa, positional: [0, 0] },
   sms: { run: runSms, positional: [1, 1] },
   export: { run: runExport, positional: [1, 1] },
@@ -617,20 +639,39 @@ const USAGE = `Usage: secrets-manager <command> [options]
   login <google|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headless] [--rotate-proxy]
   login <x|tiktok> [--select ID]... [--all] [--limit N] [--concurrency N] [--headed] [--rotate-proxy]
   login <app> --by-email [--mint-app-password] [--select EMAIL]... [--headed]
-  verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed]
+  verify <google|x|tiktok|app> [--select ID]... [--all] [--concurrency N] [--headed] [--rotate-proxy]
+  setup <app> [--select EMAIL]... [--all] [--concurrency N] [--headed] [--rotate-proxy] [app flags]
   setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
   whoami <x|app> --select CREDENTIAL [--json]
   export <app> [--select EMAIL]...
   get <app> --select ID...
-  set-status <app> <active|expired|restricted|escalated> --select ID...
+  set-status <app> <active|ready|expired|restricted|escalated> --select ID...
   list [--json]`;
 
-export function parseCli(argv) {
+function setupUsage(adapter) {
+  const flags = Object.entries(adapter?.setupFlags ?? {}).map(([name, flag]) =>
+    `  --${name}${flag.type === "string" ? " VALUE" : ""}  ${flag.description}`);
+  return [USAGE.split("\n").find(line => line.startsWith("  setup <app>")),
+    ...(flags.length ? [`${adapter.name} flags:`, ...flags] : [])].join("\n");
+}
+
+export function parseCli(argv, setupAdapter) {
   const [command, ...rest] = argv;
   const spec = COMMANDS[command];
   if (!spec) throw new Error(USAGE);
-  const { values, positionals } = parseArgs({ args: rest, options: OPTIONS, allowPositionals: true });
+  let options = OPTIONS;
+  if (command === "setup") {
+    const flags = Object.fromEntries(Object.entries(setupAdapter?.setupFlags ?? {}).map(([name, flag]) => [name, { type: flag.type }]));
+    options = { ...OPTIONS, help: { type: "boolean" }, ...flags };
+  }
+  let values, positionals;
+  try {
+    ({ values, positionals } = parseArgs({ args: rest, options, allowPositionals: true }));
+  } catch (e) {
+    if (command === "setup") throw new Error(`${e.message}\n${setupUsage(setupAdapter)}`, { cause: e });
+    throw e;
+  }
   const [min, max] = spec.positional;
   if (positionals.length < min || positionals.length > max) throw new Error(USAGE);
   if (command === "whoami") {
@@ -658,16 +699,25 @@ export function parseCli(argv) {
 export async function main(argv, io = console) {
   let parsed;
   try {
-    parsed = parseCli(argv);
+    if (argv[0] === "setup") {
+      // Only discovery is permissive: strict parsing with the selected app's schema must finish
+      // before opening the store or calling a hook that may launch a browser.
+      adapters = await loadAdapters();
+      APP_ADAPTERS = adapters.map(a => a.name);
+      const { positionals } = parseArgs({ args: argv.slice(1), options: OPTIONS, allowPositionals: true, strict: false });
+      if (!positionals.length) throw new Error(USAGE);
+      parsed = parseCli(argv, getAdapter(positionals[0]));
+    } else parsed = parseCli(argv);
   } catch (e) {
     io.error(e.message);
     return 1;
   }
   let db;
   try {
-    adapters = await loadAdapters(parsed.command === "validate" ? { paths: parsed.opts.positional.map(p => resolve(p)) } : {});
+    if (parsed.command !== "setup") adapters = await loadAdapters(parsed.command === "validate" ? { paths: parsed.opts.positional.map(p => resolve(p)) } : {});
     APP_ADAPTERS = adapters.map(a => a.name);
     SESSION_TABLES = [...APP_ADAPTERS, ...Object.keys(USERNAME_TABLES)];
+    if (parsed.command === "setup" && parsed.opts.help) { io.log(setupUsage(getAdapter(parsed.opts.positional[0]))); return 0; }
     if (parsed.command === "validate") { io.log(APP_ADAPTERS.join(", ")); return 0; }
     if (parsed.command === "whoami") return await runWhoami(parsed.opts, io);
     db = store.openDb(config.dbPath());

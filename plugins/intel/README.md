@@ -15,16 +15,16 @@ Claude Workflow implementation and is excluded by Intel's Codex manifest.
 /plugin marketplace add blockchainian/claude
 /plugin install intel@blockchainian
 
-# Codex (use --ref codex until this branch merges)
-codex plugin marketplace add blockchainian/claude --ref codex
+# Codex
+codex plugin marketplace add blockchainian/claude
 codex plugin add intel@blockchainian
 ```
 
 Start a new session after installation. Resolve script paths from the absolute
 loaded `SKILL.md` directory in each shell call. Both hosts use the same scripts,
 archives and existing secrets-manager store. Account
-provisioning uses the external secrets-manager CLI; this does not add the secrets
-plugin to the Codex catalog or migrate account state. Download-book continues to
+provisioning uses the secrets-manager skill in the Secrets plugin, available in both
+hosts; installing Intel does not migrate account state. Download-book continues to
 launch its own headed Chrome through its existing Playwright script.
 
 ## Skills
@@ -83,7 +83,7 @@ launch its own headed Chrome through its existing Playwright script.
 - **`fetch-app-reviews`** — archive written App Store reviews across storefronts.
 
 Archive paths are relative to the working directory; run from the repo root that owns the archive. X/TikTok accounts are logged in
-with the secrets plugin's `secrets-manager login x|tiktok`.
+through the secrets-manager skill in the Secrets plugin.
 
 ## Why they live together
 

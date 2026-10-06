@@ -1,2 +1,2 @@
-// A shared error identity lets external adapters signal a step requiring human action.
+// A login challenge or app setup step needs a person to finish it.
 export class NeedsHuman extends Error {}
