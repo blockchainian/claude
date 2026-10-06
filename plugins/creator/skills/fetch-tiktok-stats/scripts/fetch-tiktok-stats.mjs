@@ -10,7 +10,7 @@
 //
 // The read is anonymous: a fresh Camoufox browser, not the account's profile, on the account's ISP
 // slot. TikTok gives an anonymous viewer the first page of a profile (about 35 videos), newest first.
-// Each run appends one row per video to <CREATOR_TIKTOK_DIR>/<username>/stats.jsonl:
+// Each run appends one row per video to <CREATOR_DATA_DIR>/<username>/stats.jsonl:
 //   { at, username, videoId, createTime, playCount, diggCount, commentCount, shareCount, collectCount }
 // Run it on a schedule to build the time series.
 
