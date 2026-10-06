@@ -190,6 +190,11 @@ describe("fragments and images", () => {
     assert.equal(ex.imgInline(b2, b2.indexOf("<img")), true);
   });
 
+  test("an image the EPUB marks class=\"inline\" is inline even between punctuation", () => {
+    const b3 = '<p>Pr(<em>Y</em> = <img class="inline" src="die.jpg"/>) = 1/5</p>';
+    assert.equal(ex.imgInline(b3, b3.indexOf("<img")), true);
+  });
+
   // epubFragment keeps the math/emphasis tags and turns each <img> into an ⟦IMG⟧ placeholder.
   test("epubFragment keeps tags and placeholders the image", () => {
     const work = tmpDir();

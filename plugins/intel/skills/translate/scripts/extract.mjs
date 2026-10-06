@@ -414,11 +414,13 @@ export function chapterFromHeadings(headings) {
 
 const BLOCK_TAG = /<\/?(?:p|div|li|ul|ol|table|tr|td|section|figure|figcaption|h[1-6]|br|blockquote)\b[^>]*>/i;
 
-/** An <img> is inline (a symbol within a line of text) only when a word character sits right before or after
- * it WITHIN THE SAME block element; a display equation alone in its own <p>/<div> is a block. Looking only up
- * to the nearest block boundary avoids picking up text from a neighbouring paragraph. */
+/** An <img> is inline (a symbol within a line of text) when the EPUB marks it class="inline", or when a word
+ * character sits right before or after it WITHIN THE SAME block element; a display equation alone in its own
+ * <p>/<div> is a block. Looking only up to the nearest block boundary avoids picking up text from a
+ * neighbouring paragraph. */
 export function imgInline(body, pos) {
   const end = body.indexOf(">", pos) + 1;
+  if (/\sclass="(?:[^"]*\s)?inline(?:\s[^"]*)?"/.test(body.slice(pos, end))) return true;
   const leftParts = body.slice(Math.max(0, pos - 240), pos).split(BLOCK_TAG);
   const left = leftParts[leftParts.length - 1].replace(/<[^>]+>/g, "").replace(new RegExp(`${WS}+$`), "");
   const right = body.slice(end, end + 240).split(BLOCK_TAG)[0].replace(/<[^>]+>/g, "").replace(new RegExp(`^${WS}+`), "");
