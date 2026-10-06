@@ -76,7 +76,7 @@ test("await prints unread lines, advances the cursor, and times out on silence",
     await mkdir(home.dir, { recursive: true });
     const inbox = path.join(home.dir, "thread-1.jsonl");
     await writeFile(inbox, '{"kind":"notify","text":"first"}\n{"kind":"completed","status":"completed"}\n');
-    const env = { CODEX_MANAGER_HOME: home.home };
+    const env = { CODEX_MANAGER_STATE_DIR: home.home };
     const first = await run(["await", "--thread", "thread-1"], { env });
     assert.equal(first.code, 0, first.stderr);
     assert.equal(first.stdout, '{"kind":"notify","text":"first"}\n{"kind":"completed","status":"completed"}\n');
@@ -97,7 +97,7 @@ test("await prints unread lines, advances the cursor, and times out on silence",
 test("pending stays silent without state and blocks once on unread events", async () => {
   const home = await tempHome();
   try {
-    const env = { CODEX_MANAGER_HOME: home.home };
+    const env = { CODEX_MANAGER_STATE_DIR: home.home };
     const hookInput = JSON.stringify({ session_id: session, stop_hook_active: false });
     const nothing = await run(["pending"], { env, stdin: hookInput });
     assert.equal(nothing.code, 0);
@@ -120,7 +120,7 @@ test("pending stays silent without state and blocks once on unread events", asyn
 class McpChild {
   constructor(home, socketPath, env = {}, command = "mcp") {
     this.child = spawn(process.execPath, [manager, command], {
-      env: { ...process.env, CLAUDE_CODE_SESSION_ID: session, CODEX_MANAGER_HOME: home, CODEX_MANAGER_SESSIONS_DIR: path.join(home, "sessions"), CODEX_MANAGER_DAEMON_SOCKET: socketPath, ...env },
+      env: { ...process.env, CLAUDE_CODE_SESSION_ID: session, CODEX_MANAGER_STATE_DIR: home, CODEX_MANAGER_SESSIONS_DIR: path.join(home, "sessions"), CODEX_MANAGER_SOCKET_FILE: socketPath, ...env },
       stdio: ["pipe", "pipe", "pipe"]
     });
     this.stderr = "";
@@ -236,7 +236,7 @@ test("mcp initialize provides thread lifecycle instructions before tools are loa
   const home = await tempHome();
   try {
     const response = await run(["mcp"], {
-      env: { CODEX_MANAGER_HOME: home.home },
+      env: { CODEX_MANAGER_STATE_DIR: home.home },
       stdin: `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })}\n`
     });
     assert.equal(response.code, 0, response.stderr);
@@ -282,7 +282,7 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     assert.equal(start.serviceName, "codex-manager");
     assert.deepEqual(start.config, {
       "sandbox_workspace_write.network_access": true,
-      "mcp_servers.claude": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_HOME: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
+      "mcp_servers.claude": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
     });
     assert.equal(start.dynamicTools, undefined);
     assert.deepEqual(JSON.parse(await readFile(path.join(home.home, "threads", "thread-A.json"), "utf8")), { sessionId: session, pid: mcp.child.pid });
@@ -440,7 +440,7 @@ test("notify_claude and ask_claude reach the Claude session that supervises the 
     assert.deepEqual(listed.json.threads[0].waiting, [{ kind: "ask", callId: "call-ask", since: listed.json.threads[0].waiting[0].since, text: "tests or implementation?" }]);
     assert.equal(listed.json.attention.length, 1);
     assert.match(listed.json.attention[0], /thread-A/);
-    const hook = await run(["pending"], { env: { CODEX_MANAGER_HOME: home.home }, stdin: JSON.stringify({ session_id: session, stop_hook_active: false }) });
+    const hook = await run(["pending"], { env: { CODEX_MANAGER_STATE_DIR: home.home }, stdin: JSON.stringify({ session_id: session, stop_hook_active: false }) });
     assert.match(JSON.parse(hook.stdout).reason, /thread-A is waiting for reply .*tests or implementation\?/);
     assert.equal(answered, false);
 
@@ -498,7 +498,7 @@ test("an unanswered ask times out with a proceed-on-your-own answer", { timeout:
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
   const { mcp } = await startedThread(home, daemon, script);
-  const tools = new ToolsChild(home.home, { CODEX_MANAGER_ASK_TIMEOUT: "1" });
+  const tools = new ToolsChild(home.home, { CODEX_MANAGER_REPLY_TIMEOUT_SECONDS: "1" });
   try {
     const answer = await tools.tool("ask_claude", "thread-A", "call-slow", "?");
     assert.equal(answer.isError, false, answer.text);
@@ -605,7 +605,7 @@ test("approval requests are forwarded to Claude and answered by decision; timeou
 test("pending blocks once for an unanswered ask and not again while the stop hook is active", async () => {
   const home = await tempHome();
   try {
-    const env = { CODEX_MANAGER_HOME: home.home };
+    const env = { CODEX_MANAGER_STATE_DIR: home.home };
     await mkdir(home.dir, { recursive: true });
     await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 1, threads: [{ id: "thread-C", lastStatus: "inProgress", waiting: [{ kind: "ask", callId: "c", since: 1, text: "which one?" }] }] }));
     await writeFile(path.join(home.dir, `thread-C.await.${process.pid}`), "");
@@ -636,7 +636,7 @@ test("after /clear gives Claude a new session id, await and pending still read t
     const listed = await mcp.call("list", {});
     assert.equal(listed.isError, false, listed.text);
 
-    const env = { CODEX_MANAGER_HOME: home.home, CLAUDE_CODE_SESSION_ID: cleared };
+    const env = { CODEX_MANAGER_STATE_DIR: home.home, CLAUDE_CODE_SESSION_ID: cleared };
     await appendFile(path.join(home.dir, "thread-A.jsonl"), '{"kind":"completed","status":"completed"}\n');
     const awaited = await run(["await", "--thread", "thread-A", "--timeout", "3"], { env });
     assert.equal(awaited.code, 0, awaited.stderr);
@@ -655,7 +655,7 @@ test("after /clear gives Claude a new session id, await and pending still read t
 test("pending blocks while a running thread has no await, however often Claude stops", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   try {
-    const env = { CODEX_MANAGER_HOME: home.home };
+    const env = { CODEX_MANAGER_STATE_DIR: home.home };
     const stop = (active) => run(["pending"], { env, stdin: JSON.stringify({ session_id: session, stop_hook_active: active }) });
     const command = `node ${JSON.stringify(manager)} await --thread thread-R`;
     await mkdir(home.dir, { recursive: true });
@@ -764,7 +764,7 @@ test("an unanswered approval times out with decline", { timeout: 20_000 }, async
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
-  const mcp = new McpChild(home.home, daemon.socketPath, { CODEX_MANAGER_ASK_TIMEOUT: "1" });
+  const mcp = new McpChild(home.home, daemon.socketPath, { CODEX_MANAGER_REPLY_TIMEOUT_SECONDS: "1" });
   try {
     await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
     await mcp.call("start", { cwd: ".", prompt: "work" });
@@ -1163,7 +1163,7 @@ test("requests the daemon sends for an attached session are left to the client i
   script.threads = sessionsOnDaemon();
   script.resumeTurns = [{ id: "turn-live", status: "inProgress", items: [] }];
   const daemon = await fakeDaemon(script.handler);
-  const env = { CODEX_MANAGER_ASK_TIMEOUT: "1" };
+  const env = { CODEX_MANAGER_REPLY_TIMEOUT_SECONDS: "1" };
   const mcp = await mcpChild(home, daemon, env);
   let restarted = false;
   const inbox = path.join(home.dir, "thread-5.jsonl");
