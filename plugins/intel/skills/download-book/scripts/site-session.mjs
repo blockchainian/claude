@@ -18,7 +18,7 @@ const IDLE_MS = 60_000;
 // Runs inside the page: fetch with the browser's cookies and TLS fingerprint.
 async function pageFetch([url, follow]) {
   const response = await fetch(url, { redirect: follow ? 'follow' : 'manual' });
-  return { status: response.status, redirected: response.type === 'opaqueredirect', body: await response.text() };
+  return { status: response.status, url: response.url, body: await response.text() };
 }
 
 export function isChallenge(body) {

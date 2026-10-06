@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseLinks, selectSlowPaths, readMemberKey } from '../scripts/anna-archive-links.mjs';
+import { parseLinks, selectSlowPaths, readMemberKey, leftEntry } from '../scripts/anna-archive-links.mjs';
 
 const MD5 = '26f03228f2f3ee0f980ae56f9bd97844';
 const fixture = `<ul class="list-inside mb-4 ml-1">
@@ -29,6 +29,18 @@ test('selectSlowPaths falls back to the first entry when no waitlist labels exis
   const { primary, fallback } = selectSlowPaths(parseLinks(only).anchors, MD5);
   assert.ok(primary.href.endsWith('/0/8'), 'primary falls back to the only entry');
   assert.equal(fallback, null, 'no separate fallback when the only entry is already primary');
+});
+
+test('leftEntry accepts the slow entry redirecting to itself with a bare query', () => {
+  const entry = `https://annas-archive.pk/slow_download/${MD5}/0/0`;
+  assert.equal(leftEntry(entry, `${entry}?`), false);
+  assert.equal(leftEntry(entry, entry), false);
+});
+
+test('leftEntry rejects a redirect to another path or origin', () => {
+  const entry = `https://annas-archive.pk/slow_download/${MD5}/0/0`;
+  assert.equal(leftEntry(entry, 'https://annas-archive.pk/account/'), true);
+  assert.equal(leftEntry(entry, `https://example.com/slow_download/${MD5}/0/0`), true);
 });
 
 test('the script runs when invoked through a symlinked directory', () => {
