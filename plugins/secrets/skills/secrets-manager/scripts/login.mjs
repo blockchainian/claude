@@ -1764,7 +1764,7 @@ export async function exportApp(page, db, adapter, cred, { assist = false } = {}
 // Open one account's persistent Camoufox profile and run `fn(context, page)` inside it, closing
 // the browser afterwards. Shared by the login flow and any read-only probe (e.g.
 // check-restricted); the profile carries the account's Google + app sessions, so a probe reuses
-// them without signing in again. The window opens on the CAMOUFOX_DISPLAY display when headed.
+// them without signing in again. The window opens on the SECRETS_BROWSER_DISPLAY display when headed.
 // `rotate` uses a rotating proxy exit instead of the account's sticky one. Refuses to launch
 // without the residential proxy: every login from the bare home IP gets that IP flagged.
 // Whether a failed headed run should keep the window open for a person. A headless run never can. A
@@ -1800,7 +1800,7 @@ export async function withProfile(key, { headed = false, rotate = false, proxyUr
   const profile = config.profileDirFor(key);
   mkdirSync(profile, { recursive: true });
   if (!proxyUrl) {
-    throw new Error("No proxy set. Add RESIDENTIAL_PROXY_URL to ~/.config/secrets-manager/.env; never log in from the home IP.");
+    throw new Error("No proxy set. Add SECRETS_RESIDENTIAL_PROXY_URL to ~/.config/secrets-manager/.env; never log in from the home IP.");
   }
   await assertExitUp(proxyUrl);
   const videoDir = record && !headed ? debug.videoDir(key) : null;

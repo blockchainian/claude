@@ -41,8 +41,8 @@ test("storeWindowPosition replaces an unreadable xulstore.json", () => {
   assert.deepEqual(read(dir), { [DOC]: { "main-window": { screenX: "10", screenY: "20" } } });
 });
 
-test("displayName is CAMOUFOX_DISPLAY, or empty for the main display", () => {
-  assert.equal(displayName({ CAMOUFOX_DISPLAY: "SAMSUNG" }), "SAMSUNG");
+test("displayName is SECRETS_BROWSER_DISPLAY, or empty for the main display", () => {
+  assert.equal(displayName({ SECRETS_BROWSER_DISPLAY: "SAMSUNG" }), "SAMSUNG");
   assert.equal(displayName({}), "");
 });
 

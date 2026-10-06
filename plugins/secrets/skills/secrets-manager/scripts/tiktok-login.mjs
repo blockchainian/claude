@@ -39,13 +39,13 @@ export function sessionCookies(cookies) {
 }
 
 // The ISP pool slot a login runs on and its proxy url: the slot the account already holds, else the
-// pool's last one. The pool is the fetch-tiktok-mentions skill's (ISP_PROXY_URL, ISP_PROXY_COUNT).
+// pool's last one. The pool is the fetch-tiktok-mentions skill's (SECRETS_ISP_PROXY_URL, SECRETS_ISP_PROXY_COUNT).
 export function loginProxy(env, slot = null) {
-  if (!env.ISP_PROXY_URL) {
-    throw new Error("No ISP_PROXY_URL in ~/.config/secrets-manager/.env; never log in from the home IP.");
+  if (!env.SECRETS_ISP_PROXY_URL) {
+    throw new Error("No SECRETS_ISP_PROXY_URL in ~/.config/secrets-manager/.env; never log in from the home IP.");
   }
-  slot ??= Math.max(1, Number(env.ISP_PROXY_COUNT) || 1);
-  return { slot, url: ispProxyAt(env.ISP_PROXY_URL, slot) };
+  slot ??= Math.max(1, Number(env.SECRETS_ISP_PROXY_COUNT) || 1);
+  return { slot, url: ispProxyAt(env.SECRETS_ISP_PROXY_URL, slot) };
 }
 
 // TikTok can wipe input typed before its script takes over, so fill only empty fields and preserve
