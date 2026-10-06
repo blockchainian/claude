@@ -174,7 +174,7 @@ daemon replays any request that was still waiting for an answer.
 ## State
 
 ```
-~/.claude/codex-manager/
+~/.local/state/codex-manager/
   threads/<codex-thread-id>.json   the supervising Claude session and its manager's pid
   <claude-session-id>/
     state.json                          threads: id, owner, name, cwd, turnId, lastStatus, waiting (held approvals), attached, review (out file)
@@ -252,7 +252,7 @@ MIT
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `CODEX_MANAGER_STATE_DIR` | Manager state; default ~/.claude/codex-manager | Optional | Shell environment |
+| `CODEX_MANAGER_STATE_DIR` | Manager state; default ~/.local/state/codex-manager | Optional | Shell environment |
 | `CODEX_DAEMON_SOCKET` | Daemon Unix socket path | Optional | Shell environment |
 | `CODEX_MANAGER_SESSIONS_DIR` | Claude sessions; default ~/.claude/sessions | Optional | Shell environment |
 | `CODEX_MANAGER_ASK_TIMEOUT` | Supervisor reply timeout; default 300 seconds | Optional | Shell environment |
