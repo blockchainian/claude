@@ -13,13 +13,13 @@ import * as tiktok from "../scripts/tiktok-login.mjs";
 
 let previousStatePath;
 beforeEach(() => {
-  previousStatePath = process.env.SECRETS_MANAGER_STATE_PATH;
-  process.env.SECRETS_MANAGER_STATE_PATH = mkdtempSync(join(tmpdir(), "tiktok-login-"));
+  previousStatePath = process.env.SECRETS_DATA_DIR;
+  process.env.SECRETS_DATA_DIR = mkdtempSync(join(tmpdir(), "tiktok-login-"));
 });
 afterEach(() => {
-  rmSync(process.env.SECRETS_MANAGER_STATE_PATH, { recursive: true, force: true });
-  if (previousStatePath === undefined) delete process.env.SECRETS_MANAGER_STATE_PATH;
-  else process.env.SECRETS_MANAGER_STATE_PATH = previousStatePath;
+  rmSync(process.env.SECRETS_DATA_DIR, { recursive: true, force: true });
+  if (previousStatePath === undefined) delete process.env.SECRETS_DATA_DIR;
+  else process.env.SECRETS_DATA_DIR = previousStatePath;
 });
 
 const cookie = (name, domain, value = "v") => ({ name, value, domain, path: "/" });

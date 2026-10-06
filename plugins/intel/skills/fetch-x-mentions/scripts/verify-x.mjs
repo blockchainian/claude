@@ -48,8 +48,8 @@ export async function main(argv) {
     const {ProxyAgent}=await import('undici');
     const token=u.username ? `Basic ${Buffer.from(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`).toString('base64')}` : null;
     dispatcher=new ProxyAgent(token ? {uri:`${u.protocol}//${u.host}`,token} : `${u.protocol}//${u.host}`);
-    const state=process.env.SECRETS_MANAGER_STATE_PATH || join(homedir(),'.config/secrets-manager');
-    db=new DatabaseSync(process.env.SECRETS_DB || join(state,'secrets.sqlite'));
+    const state=process.env.SECRETS_DATA_DIR || join(homedir(),'.config/secrets-manager');
+    db=new DatabaseSync(join(state,'secrets.sqlite'));
     return await verifyX(db,values,{dispatcher});
   } catch (e) { console.error(e.message); return 1; }
   finally { db?.close(); await dispatcher?.close(); }

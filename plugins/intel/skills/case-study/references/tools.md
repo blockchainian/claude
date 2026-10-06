@@ -31,7 +31,7 @@ calls and failures per command.
     article with the words, and there is no title.
 - Both news commands have no cap: a year of a known name is hundreds of
   lines. Save the output to a file and count the domains before opening any.
-  What they fetched is kept under `~/.local/share/case-study/`, a folder per
+  What they fetched is kept under `~/.local/share/intel/case-studies/`, a folder per
   name, so asking again for days already held costs nothing.
 - Reddit: `$G chrome reddit search "<query>" -f yaml`, `$G chrome reddit read <post id>`.
 
@@ -182,8 +182,7 @@ Every post on X — a search, an account's own posts, a thread — comes from
 
 ## The machine's settings
 
-The gate and `wayback.mjs` read them from a `.env` file: `scripts/.env` next
-to the scripts, else `~/.cache/secrets-manager/profiles/case-study/.env`.
+The gate and `wayback.mjs` read them from Intel’s `~/.config/intel/.env`.
 Nothing has to be exported in the shell. A value that starts with `~/` is
 under the home directory.
 
@@ -195,9 +194,8 @@ under the home directory.
   error. The capture lists go through `ISP_PROXY_URL`. `gnews` asks Google News
   through an `ISP_PROXY_URL` exit and again through this proxy when Google
   refuses the exit.
-- `FETCH_X_POSTS`: the fetch-x-posts script (X search on an account pool).
-  Without it `$G fetch-x-posts` is unavailable: X search is then a gap.
-- `GDELT_BQ_PROJECT`: the Google Cloud project `$G gdelt` runs its BigQuery
+The X-post fetching command locates its sibling script inside the installed Intel plugin; no script-path variable is needed.
+- `BIGQUERY_PROJECT_ID`: the Google Cloud project `$G gdelt` runs its BigQuery
   queries in, with the `bq` command logged in (`gcloud auth login`). Without
   it, or once the project's free 1 TiB of queries for the month is used,
   `$G gdelt` fails: GDELT is then a gap.

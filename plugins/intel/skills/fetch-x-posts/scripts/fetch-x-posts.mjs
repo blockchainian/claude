@@ -1,4 +1,4 @@
-import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
+import { requireEnv, loadEnvFile, caseStudyStateDir } from "../../fetch-x-mentions/scripts/env.mjs";
 // ABOUTME: Searches X with the account pool of the secrets-manager store: one SearchTimeline query,
 // ABOUTME: printed as JSON lines; accounts rotate machine-wide through a shared state file.
 //
@@ -26,7 +26,7 @@ import { DatabaseSync } from "node:sqlite";
 const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) loadEnvFile();
 
-const STATE_PATH = join(homedir(), ".cache", "case-study-limits", "fetch-x-posts.sqlite");
+const STATE_PATH = join(caseStudyStateDir(), "fetch-x-posts.sqlite");
 
 const DEFAULT_LIMIT = 40;
 export const GAP_MS = 3200; // between two requests on one account: the 3 seconds asked for, plus margin
@@ -221,7 +221,7 @@ async function search(found, { query, limit, product }) {
   // The client reads its config when it loads, so the env file comes first. Values already in
   // the environment (exported variables) win.
   loadEnvFile();
-  requireEnv("X_BEARER");
+  requireEnv("X_BEARER_TOKEN");
   requireEnv("X_SEARCH_QUERY_ID");
   const { loadAccounts, fetchAs, searchUrl } = await import("../../fetch-x-mentions/scripts/fetch-x-mentions.mjs");
   const accounts = new Map((await loadPool(loadAccounts)).map((a) => [a.label, a]));

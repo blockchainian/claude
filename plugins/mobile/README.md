@@ -154,3 +154,13 @@ Changes in this fork:
 - Added the `simulator-management` and `device` workflows, which upstream does
   not enable: simulator location, appearance, statusbar, keyboard and erase
   control, plus build, install, launch, and test on physical devices.
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `XCODEBUILDMCP_ENABLED_WORKFLOWS` | Enabled upstream MCP workflows | Fixed by the plugin | `.mcp.json` |
+| `XCODEBUILDMCP_DISABLE_SESSION_DEFAULTS` | Explicit target selection for parallel calls | Fixed to `true` | `.mcp.json` |
+| `NO_UI` | Disable Appium MCP’s default interactive UI | Fixed to `true` | `.mcp.json` |
+
+These are upstream server variables, not user-configurable Mobile settings; their official names must be preserved. No plugin API key or dotenv file is required.

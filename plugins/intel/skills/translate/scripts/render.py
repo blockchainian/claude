@@ -62,11 +62,12 @@ def brighten(hexcolor, factor):
 
 
 def chrome_binary():
-    for c in [os.environ.get("CHROME"), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-              shutil.which("google-chrome"), shutil.which("chromium"), shutil.which("chromium-browser")]:
+    for c in ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+              "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+              "/Applications/Chromium.app/Contents/MacOS/Chromium", shutil.which("google-chrome"), shutil.which("chrome"), shutil.which("chromium"), shutil.which("chromium-browser")]:
         if c and Path(c).exists():
             return c
-    sys.exit("Chrome not found: set CHROME=/path/to/chrome")
+    sys.exit("Chrome not found: install Google Chrome, Chrome for Testing, or Chromium")
 
 
 def iterm_colors():

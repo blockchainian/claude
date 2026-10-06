@@ -29,7 +29,7 @@ import {
 // Offline URL fixtures do not depend on the user’s request configuration.
 process.env.X_SEARCH_QUERY_ID = "fixture-search-query";
 process.env.X_USER_QUERY_ID = "fixture-user-query";
-process.env.X_USER_TWEETS_QID = "fixture-timeline-query";
+process.env.X_TIMELINE_QUERY_ID = "fixture-timeline-query";
 
 test("a handle is stripped of @, url and path, lowercased, and validated", () => {
   assert.equal(normHandle("@Vali_ETH"), "vali_eth");

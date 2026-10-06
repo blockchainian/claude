@@ -144,8 +144,9 @@ describe("e2e whisper smoke", { skip: e2eSkip }, () => {
     makeClip(clip, 1);
     const out = path.join(tmp, "t.txt");
     const res = spawnSync(process.execPath, [path.join(scriptsDir, "transcribe-audio.mjs"),
-      clip, out], { encoding: "utf8" });
-    assert.equal(res.status, 0, res.stderr.slice(-300));
+      clip, out], { encoding: "utf8", timeout: 120_000 });
+    assert.ifError(res.error);
+    assert.equal(res.status, 0, res.stderr);
     assert.ok(fs.statSync(out).isFile(), "wrote out.txt");
     const js = JSON.parse(res.stdout);
     assert.equal(js.transcript, out, res.stdout.slice(-200));
@@ -158,11 +159,12 @@ describe("e2e whisper smoke", { skip: e2eSkip }, () => {
     makeClip(longClip, 5);
     const out = path.join(tmp, "live.txt");
     const res = spawnSync(process.execPath, [path.join(scriptsDir, "transcribe-live.mjs"),
-      longClip, out, "--segment-seconds", "2"], { encoding: "utf8" });
-    assert.equal(res.status, 0, res.stderr.slice(-400));
+      longClip, out, "--segment-seconds", "2"], { encoding: "utf8", timeout: 120_000 });
+    assert.ifError(res.error);
+    assert.equal(res.status, 0, res.stderr);
     assert.ok(fs.statSync(out).isFile(), "wrote out.txt");
     const js = JSON.parse(res.stdout);
     assert.equal(js.transcript, out, res.stdout.slice(-200));
-    assert.ok((js.chunks ?? 0) >= 1, res.stdout.slice(-200));
+    assert.equal(js.chunks, 3, res.stdout);
   });
 });

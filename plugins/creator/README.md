@@ -4,6 +4,19 @@ Run creator accounts on TikTok from Claude Code or Codex. See
 [installation](../../README.md#codex). The accounts, their
 credentials, browser profiles and status live in the secrets plugin's `secrets-manager` store; this plugin only reads it.
 
+## Environment Variables
+
+Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hosts and all worktrees use this file. Existing shell values take precedence.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
+| `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
+| `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with TikTok data under tiktok/ | Optional | ~/.config/creator/.env |
+| `SECRETS_DATA_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
+
+Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
+
 ## Skills
 
 - **`upload-tiktok-video`** — post one mp4 to the store's earliest imported `active` TikTok
@@ -21,7 +34,7 @@ credentials, browser profiles and status live in the secrets plugin's `secrets-m
 
 Every skill but `open-tiktok-account` runs its browser hidden. `--headed` shows it and screen-records it to the account's
 `recordings/`, for debugging a flow that TikTok's page changes broke; `--with-sound` also unmutes
-it. A shown window goes on the display `CAMOUFOX_DISPLAY` names in the secrets-manager's `.env`
+it. A shown window goes on the display `BROWSER_DISPLAY` names in `~/.config/creator/.env`
 (any part of its name, e.g. `SAMSUNG`; unset means the main display), as secrets-manager's headed
 logins do; moving it needs the Accessibility permission for the terminal running `swift`.
 
@@ -40,12 +53,12 @@ all four skills import the upload skill's runtime by sibling-relative paths and 
 The browser flows run in Camoufox scripts without Claude Workflow, Claude API, or MCP browser
 tools. Camoufox itself is fetched by the secrets plugin's setup.
 Both hosts read the same existing secrets-manager state, by default `~/.config/secrets-manager`;
-set `SECRETS_MANAGER_STATE_PATH` explicitly if yours is elsewhere. The store, logged-in profiles,
-ISP slots and `ISP_PROXY_URL` in its `.env` must already be provisioned through secrets-manager.
+set `SECRETS_DATA_DIR` explicitly if yours is elsewhere. The store, logged-in profiles,
+ISP slots must already be provisioned through secrets-manager. Creator’s ISP pool is configured separately at `~/.config/creator/.env` and must match the login pool.
 Creator does not install secrets-manager or create/migrate its accounts; use the existing
 secrets-manager setup when those prerequisites are missing. Never open the same account profile
 in both hosts at once. Data goes to
-`~/.local/share/creator/tiktok/<username>/`, one directory per account (`CREATOR_TIKTOK_DIR`
+`~/.local/share/creator/tiktok/<username>/`, one directory per account (`CREATOR_DATA_DIR`
 overrides the parent). Recording uses
 ScreenCaptureKit through `swift` and needs the Screen Recording permission.
 

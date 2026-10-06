@@ -1,4 +1,4 @@
-import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
+import { requireEnv, loadEnvFile, dataDir } from "../../fetch-x-mentions/scripts/env.mjs";
 // ABOUTME: Fetches one X/Twitter account's own posts and replies over a date range, paging the
 // ABOUTME: authenticated SearchTimeline `from:<user>` chronologically, sharded across accounts, resumable per user.
 //
@@ -15,7 +15,7 @@ import { requireEnv, loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs"
 // the way analyze-x-users reuses analyze-x-mentions's scripts. This script only adds the per-user,
 // two-stream (own posts vs replies) timeline logic on top.
 //
-// Output, per user, under docs/intel/x/kols/<user>/ (lowercased):
+// Output, per user, under <INTEL_DATA_DIR>/x/kols/<user>/ (lowercased):
 //   tweets.jsonl   one own post per line (from:<user> -filter:replies -filter:nativeretweets)
 //   replies.jsonl  one reply per line     (from:<user> filter:replies)
 //     each line: id, author, author_name, author_followers, author_verified, text, created_at,
@@ -91,7 +91,7 @@ export function userUrl(name) {
 
 function userHeaders(acct) {
   return {
-    authorization: `Bearer ${requireEnv("X_BEARER")}`,
+    authorization: `Bearer ${requireEnv("X_BEARER_TOKEN")}`,
     "x-csrf-token": acct.ct0,
     cookie: `auth_token=${acct.authToken}; ct0=${acct.ct0}`,
     "x-twitter-auth-type": "OAuth2Session",
@@ -135,8 +135,8 @@ export async function resolveUser(acct, name, fetchPage = getPage) {
 
 // --- UserTweetsAndReplies: the account's real timeline, by user id, for handles X search won't
 // return (new or search-deboosted accounts). Not search, so it is not subject to search visibility.
-const UTAR_QID = process.env.X_USER_TWEETS_QID;
-const utarPath = () => `/i/api/graphql/${requireEnv("X_USER_TWEETS_QID")}/UserTweetsAndReplies`;
+const UTAR_QID = process.env.X_TIMELINE_QUERY_ID;
+const utarPath = () => `/i/api/graphql/${requireEnv("X_TIMELINE_QUERY_ID")}/UserTweetsAndReplies`;
 
 export function userTimelineUrl(userId, cursor) {
   const variables = { userId, count: 40, includePromotedContent: false, withCommunity: true, withVoice: true };
@@ -148,7 +148,7 @@ export function userTimelineUrl(userId, cursor) {
 
 function timelineHeaders(acct) {
   return {
-    authorization: `Bearer ${requireEnv("X_BEARER")}`,
+    authorization: `Bearer ${requireEnv("X_BEARER_TOKEN")}`,
     "x-csrf-token": acct.ct0,
     cookie: `auth_token=${acct.authToken}; ct0=${acct.ct0}`,
     "x-twitter-auth-type": "OAuth2Session",
@@ -502,10 +502,10 @@ async function main() {
     process.exit(1);
   }
 
-  requireEnv("X_BEARER");
+  requireEnv("X_BEARER_TOKEN");
   requireEnv("X_SEARCH_QUERY_ID");
   const accounts = loadAccounts();
-  const dirOf = (user) => join("docs", "intel", "x", "kols", user);
+  const dirOf = (user) => join(dataDir(), "x", "kols", user);
   const progressByUser = {};
   for (const user of users) {
     progressByUser[user] = openProgress(
@@ -691,7 +691,7 @@ async function main() {
   if (unsettled) process.exitCode = 1; // streams still worth another attempt; rerun to continue
   console.log(
     `fetch-x-user-posts: ${complete}/${users.length} users fully complete, ${unsettled} stream(s) ` +
-      `still worth a retry -> docs/intel/x/kols/ (rerun until it exits 0)`,
+      `still worth a retry -> <INTEL_DATA_DIR>/x/kols/ (rerun until it exits 0)`,
   );
 }
 

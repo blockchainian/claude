@@ -28,7 +28,7 @@ mock.module(require.resolve('camoufox-js'), {namedExports: {Camoufox: async opti
   close:async()=>{context.closed=true;}};
  contexts.push(context);return context;
 }}});
-process.env.SECRETS_MANAGER_STATE_PATH = mkdtempSync(join(tmpdir(),'profile-probe-'));
+process.env.SECRETS_DATA_DIR = mkdtempSync(join(tmpdir(),'profile-probe-'));
 process.env.RESIDENTIAL_PROXY_URL = 'http://user:pass@proxy.example:8080';
 const {kit, loadAdapters} = await import('../../scripts/adapter.mjs');
 const [adapter] = await loadAdapters({paths:[fileURLToPath(new URL('./email-adapters.mjs',import.meta.url))]});

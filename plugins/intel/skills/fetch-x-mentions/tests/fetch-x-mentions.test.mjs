@@ -237,7 +237,7 @@ test("sorting dedups by id and orders newest first", () => {
 });
 
 test("accounts are read from the store and labelled by username", () => {
-  const dbPath = join(mkdtempSync(join(tmpdir(), "fxm-")), "s.sqlite");
+  const dbPath = join(mkdtempSync(join(tmpdir(), "fxm-")), "secrets.sqlite");
   const db = new DatabaseSync(dbPath);
   // The secrets-manager schema: a `status` enum, no `active`/`id` column.
   db.exec(
@@ -248,7 +248,7 @@ test("accounts are read from the store and labelled by username", () => {
       "(?, ?, ?, ?, 'active'), (?, ?, ?, ?, 'active'), (?, ?, ?, ?, 'restricted')",
   ).run("a@e", "alice", "a1", "c1", "b@e", "bob", "a2", "c2", "c@e", "carol", "a3", "c3");
   db.close();
-  process.env.SECRETS_DB = dbPath;
+  process.env.SECRETS_DATA_DIR = join(dbPath, "..");
   process.env.RESIDENTIAL_PROXY_URL = "http://u:p@proxy.test:8080";
   // Only the two active accounts are read, ordered by username; the restricted one is skipped.
   assert.deepEqual(

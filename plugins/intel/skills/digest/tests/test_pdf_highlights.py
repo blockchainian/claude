@@ -101,8 +101,9 @@ def test_split(ph, tmp):
 
 def test_render(ph, work, tmp):
     chrome = None
-    for c in [os.environ.get("CHROME"), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-              shutil.which("google-chrome"), shutil.which("chromium")]:
+    for c in ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+              "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+              "/Applications/Chromium.app/Contents/MacOS/Chromium", shutil.which("google-chrome"), shutil.which("chrome"), shutil.which("chromium")]:
         if c and Path(c).exists():
             chrome = c
     if not chrome:
@@ -213,7 +214,7 @@ def main():
         print("SKIP: all (pdftotext missing; run setup.sh)")
         return
     tmp = Path(tempfile.mkdtemp()).resolve()
-    os.environ["DIGESTS_DIR"] = str(tmp / "store")
+    os.environ["INTEL_OUTPUT_DIR"] = str(tmp / "store")
     ph = load("pdf_highlights")
     work = test_split(ph, tmp)
     test_render(ph, work, tmp)

@@ -62,9 +62,9 @@ test("Namecheap credentials use a local dotenv file with quotes and comments", (
   const dir = mkdtempSync(join(tmpdir(), "namecheap-env-"));
   const config = join(dir, ".env");
   try {
-    writeFileSync(config, 'NAMECHEAP_API_USER="fixture-user" # comment\nNAMECHEAP_API_KEY="fixture#key"\n');
+    writeFileSync(config, 'NAMECHEAP_USERNAME="fixture-user" # comment\nNAMECHEAP_API_KEY="fixture#key"\n');
     assert.deepEqual(loadCreds(config), { apiUser: "fixture-user", apiKey: "fixture#key" });
-    writeFileSync(config, 'NAMECHEAP_API_USER="fixture-user"\n');
+    writeFileSync(config, 'NAMECHEAP_USERNAME="fixture-user"\n');
     assert.throws(() => loadCreds(config), /NAMECHEAP_API_KEY/);
     assert.throws(() => loadCreds(join(dir, "missing")), { code: "ENOENT" });
   } finally { rmSync(dir, { recursive: true }); }

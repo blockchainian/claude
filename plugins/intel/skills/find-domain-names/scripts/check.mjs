@@ -45,10 +45,10 @@ export function classify(r) {
 
 export function loadCreds(configPath = CONFIG_PATH) {
   const config = parseEnv(readFileSync(configPath, "utf8"));
-  const apiUser = config.NAMECHEAP_API_USER;
+  const apiUser = config.NAMECHEAP_USERNAME;
   const apiKey = config.NAMECHEAP_API_KEY;
   if (!apiUser?.trim() || !apiKey?.trim()) {
-    throw new Error(`Missing NAMECHEAP_API_USER / NAMECHEAP_API_KEY in ${configPath}`);
+    throw new Error(`Missing NAMECHEAP_USERNAME / NAMECHEAP_API_KEY in ${configPath}`);
   }
   return { apiUser, apiKey };
 }

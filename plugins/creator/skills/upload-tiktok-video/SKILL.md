@@ -5,6 +5,19 @@ description: Post one mp4 to the TikTok account the secrets-manager skill logged
 
 # Upload a TikTok video
 
+## Environment Variables
+
+Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hosts and all worktrees use this file. Existing shell values take precedence.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
+| `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
+| `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with TikTok data under tiktok/ | Optional | ~/.config/creator/.env |
+| `SECRETS_DATA_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
+
+Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
+
 ## Runtime and paths
 
 Works in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory containing the
@@ -15,9 +28,9 @@ Keep the full creator plugin installed: all four skills use its
 
 Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
 and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
-shared across both hosts at `~/.config/secrets-manager` (`SECRETS_MANAGER_STATE_PATH` explicitly
-overrides it), including its `.env`, TikTok account rows, ISP slots and browser profiles.
-`ISP_PROXY_URL` must be configured there or in the process environment. Creator reads this
+shared across both hosts at `~/.config/secrets-manager` (`SECRETS_DATA_DIR` explicitly
+overrides it), including TikTok account rows, ISP slots and browser profiles.
+Configure `ISP_PROXY_URL` in `~/.config/creator/.env` or the process environment. Creator reads this
 store; use secrets-manager to provision or log in an account if it is missing. Installing
 creator in another host does not create or migrate accounts.
 
@@ -80,7 +93,7 @@ have the profile open at the same time (a fetch-tiktok-mentions run using the sa
 
 ## Output
 
-Under `~/.local/share/creator/tiktok/<username>/`, one directory per account (`CREATOR_TIKTOK_DIR`
+Under `~/.local/share/creator/tiktok/<username>/`, one directory per account (`CREATOR_DATA_DIR`
 overrides `~/.local/share/creator/tiktok`):
 
 - `posts.jsonl`: one line per post,
@@ -98,7 +111,7 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 (cd "$SKILL_DIR/scripts" && npm ci)
 ```
 
-Camoufox is fetched by the secrets plugin's setup. `ISP_PROXY_URL` comes from the secrets-manager's `.env`.
+Camoufox is fetched by the secrets plugin's setup. `ISP_PROXY_URL` comes from `~/.config/creator/.env`.
 Recording needs macOS's Screen Recording permission for the terminal running `swift`.
 
 ## Not here
