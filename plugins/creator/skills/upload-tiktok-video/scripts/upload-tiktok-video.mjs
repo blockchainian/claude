@@ -18,10 +18,10 @@
 //
 // The account (the named one, else the store's earliest imported active one) is opened as its
 // own profile on its own ISP slot (see tiktok-session.mjs). A --headed run is recorded to
-// <CREATOR_TIKTOK_DIR>/<username>/recordings/upload-<ts>.mov. A logged-out profile stops the run: log the
+// <CREATOR_DATA_DIR>/<username>/recordings/upload-<ts>.mov. A logged-out profile stops the run: log the
 // account in again with secrets-manager's `login tiktok`; the store is never written here.
 //
-// Each post appends a line to <CREATOR_TIKTOK_DIR>/<username>/posts.jsonl:
+// Each post appends a line to <CREATOR_DATA_DIR>/<username>/posts.jsonl:
 //   { at, username, file, caption, visibility, aigc, promotion, sound, videoId, url, recording }
 // videoId is null when the video had not reached the profile when the run gave up looking.
 

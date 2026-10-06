@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 // ABOUTME: Tests the pure parts of tiktok-session.mjs: the account pick, the store lookup, proxies,
 // ABOUTME: the request template, the browser pid lookup, stopping a recording and the data directory.
 
@@ -54,7 +55,7 @@ test("loadAccount reads the secrets-manager store, names the profile and gives t
   insert.run("second", 3, "active", "2026-10-04T00:00:00Z", "2026-10-04T00:00:00Z");
   insert.run("first", 9, "active", "2026-10-02T00:00:00Z", "2026-10-04T00:00:00Z");
   db.close();
-  assert.deepEqual(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), {
+  assert.deepEqual(loadAccount({ CREATOR_SECRETS_STATE_DIR: state }), {
     username: "first",
     status: "active",
     slot: 9,
@@ -70,16 +71,16 @@ test("loadAccount takes a named account", () => {
   insert.run("first", 9, "2026-10-02T00:00:00Z", "2026-10-04T00:00:00Z");
   insert.run("other", 3, "2026-10-04T00:00:00Z", "2026-10-04T00:00:00Z");
   db.close();
-  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }, "other").slot, 3);
+  assert.equal(loadAccount({ CREATOR_SECRETS_STATE_DIR: state }, "other").slot, 3);
   const again = new DatabaseSync(join(state, "secrets.sqlite"));
   again.exec("UPDATE tiktok SET status = 'restricted' WHERE username = 'other'");
   again.close();
-  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }, "other"), null);
-  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }, "other", { anyStatus: true }).status, "restricted");
+  assert.equal(loadAccount({ CREATOR_SECRETS_STATE_DIR: state }, "other"), null);
+  assert.equal(loadAccount({ CREATOR_SECRETS_STATE_DIR: state }, "other", { anyStatus: true }).status, "restricted");
 });
 
 test("loadAccount is null when there is no store", () => {
-  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: join(tmpdir(), "no-such-store") }), null);
+  assert.equal(loadAccount({ CREATOR_SECRETS_STATE_DIR: join(tmpdir(), "no-such-store") }), null);
 });
 
 test("loadAccount is null when the readable store has no usable account", (t) => {
@@ -89,14 +90,14 @@ test("loadAccount is null when the readable store has no usable account", (t) =>
   db.exec("CREATE TABLE tiktok (username TEXT, status TEXT, isp_slot INTEGER, created_at TEXT)");
   db.exec("INSERT INTO tiktok VALUES ('inactive', 'expired', 1, '2026-10-04'), ('no-slot', 'active', NULL, '2026-10-04')");
   db.close();
-  assert.equal(loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), null);
+  assert.equal(loadAccount({ CREATOR_SECRETS_STATE_DIR: state }), null);
 });
 
 test("loadAccount preserves database open errors", (t) => {
   const state = mkdtempSync(join(tmpdir(), "creator-store-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
   mkdirSync(join(state, "secrets.sqlite"));
-  assert.throws(() => loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), {
+  assert.throws(() => loadAccount({ CREATOR_SECRETS_STATE_DIR: state }), {
     code: "ERR_SQLITE_ERROR",
     message: /unable to open database file|disk I\/O error/,
   });
@@ -106,7 +107,7 @@ test("loadAccount preserves corrupt database errors", (t) => {
   const state = mkdtempSync(join(tmpdir(), "creator-store-"));
   t.after(() => rmSync(state, { recursive: true, force: true }));
   writeFileSync(join(state, "secrets.sqlite"), "not a SQLite database");
-  assert.throws(() => loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), {
+  assert.throws(() => loadAccount({ CREATOR_SECRETS_STATE_DIR: state }), {
     code: "ERR_SQLITE_ERROR",
     message: "file is not a database",
   });
@@ -117,7 +118,7 @@ test("loadAccount preserves schema errors", (t) => {
   t.after(() => rmSync(state, { recursive: true, force: true }));
   const db = new DatabaseSync(join(state, "secrets.sqlite"));
   db.close();
-  assert.throws(() => loadAccount({ SECRETS_MANAGER_STATE_PATH: state }), {
+  assert.throws(() => loadAccount({ CREATOR_SECRETS_STATE_DIR: state }), {
     code: "ERR_SQLITE_ERROR",
     message: "no such table: tiktok",
   });
@@ -153,8 +154,8 @@ test("findPid picks the Camoufox main process this process launched, with or wit
   assert.equal(findPid(51, ps), null);
 });
 
-test("displayName is the secrets-manager's CAMOUFOX_DISPLAY, or empty for the main display", () => {
-  assert.equal(displayName({ CAMOUFOX_DISPLAY: "SAMSUNG" }), "SAMSUNG");
+test("displayName is the secrets-manager's CREATOR_BROWSER_DISPLAY, or empty for the main display", () => {
+  assert.equal(displayName({ CREATOR_BROWSER_DISPLAY: "SAMSUNG" }), "SAMSUNG");
   assert.equal(displayName({}), "");
 });
 
@@ -173,16 +174,16 @@ test("browserFlag reads --headed and --with-sound into the options", () => {
 
 test("recordingPath names a run's recording by its skill and time, under the account", () => {
   const at = new Date("2026-10-05T01:20:23.996Z");
-  assert.equal(recordingPath("me", "upload", at, { CREATOR_TIKTOK_DIR: "/x" }), "/x/me/recordings/upload-2026-10-05T01-20-23-996Z.mov");
+  assert.equal(recordingPath("me", "upload", at, { CREATOR_DATA_DIR: "/x" }), "/x/me/recordings/upload-2026-10-05T01-20-23-996Z.mov");
 });
 
-test("dataDir defaults under ~/.local/share and follows CREATOR_TIKTOK_DIR", () => {
+test("dataDir defaults under ~/.local/share and follows CREATOR_DATA_DIR", () => {
   assert.equal(dataDir({}), join(homedir(), ".local", "share", "creator", "tiktok"));
-  assert.equal(dataDir({ CREATOR_TIKTOK_DIR: "/x" }), "/x");
+  assert.equal(dataDir({ CREATOR_DATA_DIR: "/x" }), "/x");
 });
 
 test("accountDir keeps each account's data in its own directory under dataDir", () => {
-  assert.equal(accountDir("me", { CREATOR_TIKTOK_DIR: "/x" }), "/x/me");
+  assert.equal(accountDir("me", { CREATOR_DATA_DIR: "/x" }), "/x/me");
   assert.equal(accountDir("me", {}), join(dataDir({}), "me"));
 });
 
@@ -192,4 +193,19 @@ test("stopRecording waits for the recorder to exit and leaves no timer holding t
   assert.equal(await stopRecording({ child, path: "/x.mov" }), "/x.mov");
   assert.equal(child.exitCode, 0);
   assert.ok(!process.getActiveResourcesInfo().includes("Timeout"), "a timer is still pending");
+});
+
+test('Creator reads its own dotenv while retaining the shared account-state directory', () => {
+  const home = mkdtempSync(join(tmpdir(), 'creator-config-'));
+  mkdirSync(join(home, '.config', 'creator'), { recursive: true });
+  mkdirSync(join(home, '.config', 'secrets-manager'), { recursive: true });
+  writeFileSync(join(home, '.config', 'creator', '.env'), 'CREATOR_BROWSER_DISPLAY=own-display\nCREATOR_DATA_DIR=/tmp/creator-fixture\n');
+  writeFileSync(join(home, '.config', 'secrets-manager', '.env'), 'CREATOR_BROWSER_DISPLAY=wrong-display\n');
+  const moduleUrl = new URL('../scripts/tiktok-session.mjs', import.meta.url).href;
+  const code = `const {displayName,dataDir,storeDir}=await import(${JSON.stringify(moduleUrl)}); if(displayName()!=='own-display'||dataDir()!=='/tmp/creator-fixture') throw Error('wrong config source'); console.log(storeDir());`;
+  const env = { ...process.env, HOME: home };
+  for (const key of ['CREATOR_BROWSER_DISPLAY','CREATOR_DATA_DIR','CREATOR_SECRETS_STATE_DIR']) delete env[key];
+  const result = spawnSync(process.execPath, [...process.execArgv, '--input-type=module', '-e', code], { env, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), join(home, '.config', 'secrets-manager'));
 });
