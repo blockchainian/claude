@@ -17,18 +17,42 @@ test("the marketplace lists every plugin in the repository", async () => {
   }
 });
 
-test("the Codex marketplace exposes only the eight selected plugins", async () => {
+test("the Codex marketplace exposes the selected plugins and Claude client", async () => {
   const marketplace = JSON.parse(await readFile(".agents/plugins/marketplace.json", "utf8"));
   assert.equal(marketplace.name, "blockchainian");
-  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel", "secrets"]);
+  assert.deepEqual(marketplace.plugins.map(({ name }) => name), ["cloudflare", "web", "proxy", "creator", "render", "mobile", "intel", "secrets", "claude-client"]);
 
   for (const entry of marketplace.plugins) {
     assert.equal(entry.source.source, "local");
-    assert.equal(entry.source.path, `./plugins/${entry.name}`);
+    assert.equal(entry.source.path, `./plugins/${entry.name === "claude-client" ? "codex" : entry.name}`);
     assert.deepEqual(entry.policy, { installation: "AVAILABLE", authentication: "ON_USE" });
-    const plugin = JSON.parse(await readFile(`${entry.source.path}/.claude-plugin/plugin.json`, "utf8"));
+    const manifest = entry.name === "claude-client" ? ".codex-plugin" : ".claude-plugin";
+    const plugin = JSON.parse(await readFile(`${entry.source.path}/${manifest}/plugin.json`, "utf8"));
     assert.equal(plugin.name, entry.name);
   }
+});
+
+test("Claude client packages only Codex's communication server and excludes Claude hooks", async () => {
+  const root = "plugins/codex";
+  const [claude, codex, mcp] = await Promise.all([
+    `${root}/.claude-plugin/plugin.json`,
+    `${root}/.codex-plugin/plugin.json`,
+    `${root}/.mcp.json`,
+  ].map(async (file) => JSON.parse(await readFile(file, "utf8"))));
+  assert.equal(claude.name, "codex");
+  assert.equal(codex.name, "claude-client");
+  assert.equal(codex.version, claude.version);
+  assert.deepEqual(Object.keys(codex.mcpServers), ["claude"]);
+  assert.deepEqual(codex.mcpServers.claude, {
+    command: "node",
+    args: ["codex-manager/manager.mjs", "claude"],
+    cwd: "./",
+    tool_timeout_sec: 360,
+    default_tools_approval_mode: "approve",
+  });
+  assert.deepEqual(mcp.mcpServers["codex-manager"].args, ["${CLAUDE_PLUGIN_ROOT}/codex-manager/manager.mjs", "mcp"]);
+  const hooks = JSON.parse(await readFile(`${root}/${codex.hooks}`, "utf8"));
+  assert.deepEqual(hooks.hooks, {});
 });
 
 test("Render keeps OAuth clients and edit hooks scoped to their host", async () => {

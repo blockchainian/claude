@@ -2,20 +2,23 @@
 
 A community extension of the [official codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc)
 that lets Claude run codex threads on the shared local app-server daemon as
-supervised workers. It ships under the same `codex` plugin name and adds one
+supervised workers. Claude installs it as `codex`; Codex installs the communication
+client as `claude-client`. The Claude plugin adds one
 MCP server, `codex-manager`: Claude starts a thread, gives it follow-up
 prompts, answers its questions and approval requests, interrupts it, lists
 what is running, asks it for a code review, and gets woken when it finishes
 or has something to say. Codex reaches Claude through two tools,
 `notify_claude` and `ask_claude`, served by an MCP server this plugin ships.
 Threads Claude starts get that server with the thread; sessions Claude
-attaches to need it in codex's own config (see Install).
+attaches to get it from the installed `claude-client` plugin (see Install).
 
 The [feature](../feature/README.md) plugin's `/feature:ship` uses it as the
 backend lane: one thread per workstream, each in its own worktree, with
 Claude merging behind the plan's check command.
 
 ## Install
+
+### Claude Code — manage Codex
 
 ```
 /plugin marketplace add blockchainian/claude
@@ -32,23 +35,33 @@ plugin. Installing both is supported — installed-plugin identity is
 formally documented behavior; if the combination misbehaves in your setup,
 please open an issue.
 
-To let sessions you opened yourself talk back to the Claude session that
-attached them, add the server to `~/.codex/config.toml` once. The marketplace
-clone is the path that stays put across plugin updates:
+### Codex — communicate with Claude
 
-```toml
-[mcp_servers.claude]
-command = "node"
-args = ["/Users/you/.claude/plugins/marketplaces/blockchainian/plugins/codex/codex-manager/manager.mjs", "claude"]
-tool_timeout_sec = 360
-default_tools_approval_mode = "approve"
+```sh
+codex plugin marketplace add blockchainian/claude
+codex plugin add claude-client@blockchainian
 ```
 
-`tool_timeout_sec` has to be longer than `CODEX_MANAGER_ASK_TIMEOUT`, or codex
-gives up on `ask_claude` before the manager's own answer arrives. A session
-picks the server up when it is started or resumed, so one that was already
-open has to be reopened. In a session no Claude supervises, both tools fail at
-once and say so.
+The plugin registers the `claude` MCP server with `ask_claude` and
+`notify_claude`. It starts `node codex-manager/manager.mjs claude` from its installed
+directory, so no absolute script path or manual global MCP entry is needed.
+Claude's Stop hook is excluded from the Codex installation.
+
+Start or resume a Codex session after installation, then have Claude `attach`
+its thread id or name. Installation makes the tools available; `attach` associates
+the thread with its supervising Claude session. Without a supervisor, both tools
+fail immediately with an explicit message.
+
+For an installation previously configured by hand, verify the plugin's tools
+first, then remove the corresponding `[mcp_servers.claude]` entry from
+`~/.codex/config.toml` so the global entry does not override the plugin's server.
+Threads Claude creates through `start` still receive their communication server directly, including when the
+client plugin is not installed.
+
+The plugin's tool timeout is 360 seconds, longer than the default 300-second
+supervisor reply timeout. If `CODEX_MANAGER_ASK_TIMEOUT` is raised, configure
+`plugins."claude-client@blockchainian".mcp_servers.claude.tool_timeout_sec`
+to exceed it.
 
 Requirements: [codex CLI](https://github.com/openai/codex) ≥ 0.144, logged in,
 with its app-server daemon running (`codex agents` starts one).
