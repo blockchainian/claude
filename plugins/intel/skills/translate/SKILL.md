@@ -158,10 +158,12 @@ terminal color). Type is Baskerville for Latin and
 Songti SC for Chinese. Inline `\(..\)` / `\[..\]` LaTeX is typeset by KaTeX (loaded from the CDN, so rendering
 needs network). Chinese **bold** — the source's term emphasis and the translator's highlights — is set in a
 gothic (黑体) face a step brighter than the body (`--bold-factor`, default 1.25), because Songti's bold is nearly
-invisible; chapter openers and headings match. Picture-type (image) equations are centered at `--fig-width`% of
-the column (default 60). A Markdown rule (`---`, a scene break in the source) is set as blank space between the
+invisible; chapter openers and headings match. Picture-type (image) equations from an EPUB share one scale: a block
+(display) one is centered at its pixel width times `--eq-scale` (default 0.6), an inline one sits in the line at its
+pixel width times `--inline-scale` (default 0.33, about body-text size). A Markdown rule (`---`, a scene break in the source) is set as blank space between the
 paragraphs, never as a drawn line. Chapter openers carry the
-第N章 label, the title and a drop cap; body pages carry the chapter title as running head and a folio (roman in
+第N章 label, the title and a drop cap (left off when the first paragraph opens with a bold label or a digit, as in
+an answers section, or is too short to wrap round it); body pages carry the chapter title as running head and a folio (roman in
 front matter, arabic from chapter 1). Every 目录 row is a link to its section, and the bookmarks are flat:
 Cover, 目录, one per section. Sections without a
 translation yet are skipped with a warning, so a partial book renders at any time.

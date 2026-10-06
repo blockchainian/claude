@@ -171,12 +171,20 @@ def recolor_line_art(src, fg, bg, dest):
     return True
 
 
-def place_images(body_html, work, images, fg, bg, eq_scale=None):
+def place_images(body_html, work, images, fg, bg, eq_scale=None, inline_scale=None):
     """Replace ⟦IMG:key⟧ placeholders with the extracted images. Line art (equations, diagrams) is recoloured
     to foreground ink on the opaque page colour so it blends into the dark page; a colour figure keeps a white
     plate (inverting a photo would ruin it). Block images become their own centred figure; inline ones sit in
     the line. With eq_scale set (EPUB build), every block figure is sized to its intrinsic width times eq_scale,
-    so equations render at one consistent scale instead of at each raw crop's pixel size."""
+    so equations render at one consistent scale instead of at each raw crop's pixel size; with inline_scale set,
+    every inline image is sized the same way (its own factor, so an in-line formula matches the body text) instead
+    of being clamped to the line height, which squashes every formula to one height whatever its content."""
+    def scaled_width(src, scale):
+        try:
+            return f"width:{Image.open(src).size[0] * scale:.1f}pt;max-width:100%"
+        except Exception:
+            return ""
+
     def repl(m):
         meta = images.get(m.group(1))
         if not meta:
@@ -190,14 +198,12 @@ def place_images(body_html, work, images, fg, bg, eq_scale=None):
         uri = (rc if line else src).resolve().as_uri()
         plate = "" if line else " plate"
         if meta.get("block"):
-            style = ""
-            if eq_scale:
-                try:
-                    style = f' style="width:{Image.open(src).size[0] * eq_scale:.1f}pt;max-width:100%"'
-                except Exception:
-                    style = ""
+            width = scaled_width(src, eq_scale) if eq_scale else ""
+            style = f' style="{width}"' if width else ""
             return f'</p><figure class="fig{plate}"><img{style} src="{uri}"></figure><p>'
-        return f'<img class="infig{plate}" src="{uri}">'
+        width = scaled_width(src, inline_scale) if inline_scale else ""
+        style = f' style="{width};height:auto;max-height:none"' if width else ""
+        return f'<img class="infig{plate}"{style} src="{uri}">'
     return IMG_TOKEN_RE.sub(repl, body_html)
 
 
@@ -236,7 +242,7 @@ pre {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
 .mk {{ font-size: 1pt; color: transparent; letter-spacing: 0; white-space: nowrap; font-family: Baskerville, "Songti SC", serif; }}
 p {{ margin: 0; text-indent: 2em; text-align: justify; }}
 .body-text > p:first-of-type {{ text-indent: 0; }}
-.body-text > p:first-of-type::first-letter {{ float: left; font-size: 2.6em; line-height: 0.85; padding: 3pt 4pt 0 0; }}
+.body-text:not(.no-dropcap) > p:first-of-type::first-letter {{ float: left; font-size: 2.6em; line-height: 0.85; padding: 3pt 4pt 0 0; }}
 h2 {{ font-family: {hei}; font-size: 11pt; font-weight: 700; color: {bold}; margin: 18pt 0 6pt; break-after: avoid; }}
 h3 {{ font-family: {hei}; font-size: 10.5pt; font-weight: 700; color: {bold}; margin: 12pt 0 4pt; break-after: avoid; }}
 hr {{ border: 0; height: 0; margin: 1.2em 0; break-after: avoid; }}  /* a scene break (Markdown ---): blank space, never the browser's inset light border */
@@ -261,12 +267,30 @@ em {{ font-family: {hei}; font-weight: 700; font-style: normal; color: {bold}; }
 """
 
 
+FIRST_P_RE = re.compile(r"<p>(.*?)</p>", re.S)
+LEADING_IMG_RE = re.compile(r"^(\s|<img\b[^>]*>)*")
+DROPCAP_MIN_CHARS = 60  # the 2.6em cap spans two lines; a shorter first paragraph cannot wrap round it
+
+
+def wants_dropcap(body):
+    """A drop cap suits a section that opens with prose. Not when its first paragraph opens with a bold label
+    (an answers or exercises section: "**1.** ...", possibly after a ▶ marker image) or a digit, where the cap
+    would land on the number, nor when the paragraph is too short for the next lines to wrap round the cap."""
+    m = FIRST_P_RE.search(body)
+    if not m:
+        return False
+    head = LEADING_IMG_RE.sub("", m.group(1), count=1)
+    if head.startswith(("<strong", "<b>")) or head[:1].isdigit():
+        return False
+    return len(re.sub(r"<[^>]+>", "", m.group(1)).strip()) >= DROPCAP_MIN_CHARS
+
+
 def section_html(s, title, body):
     cls = ["body" if s["kind"] != "front" else "front"]
     label = f'<div class="label">{html.escape(s["label"])}</div>' if s.get("label") else ""
     return (f'<section class="{" ".join(cls)}" style="page: s{s["id"]}" id="s{s["id"]}">'
             f'<div class="opener">{label}<h1>{html.escape(title)}<span class="mk">⟦S{s["id"]}⟧</span></h1></div>'
-            f'<div class="body-text">{body}</div></section>')
+            f'<div class="body-text{"" if wants_dropcap(body) else " no-dropcap"}">{body}</div></section>')
 
 
 def contents_html(entries, folios):
@@ -386,8 +410,10 @@ def render(work, opt):
         if md_path.exists():
             title_zh, body = md_to_html(md_path.read_text())
             if images:
-                eq_scale = getattr(opt, "eq_scale", 0.6) if meta.get("source_kind") == "epub" else None
-                body = place_images(body, work, images, fg, bg, eq_scale)
+                epub = meta.get("source_kind") == "epub"
+                eq_scale = getattr(opt, "eq_scale", 0.6) if epub else None
+                inline_scale = getattr(opt, "inline_scale", 0.33) if epub else None
+                body = place_images(body, work, images, fg, bg, eq_scale, inline_scale)
             ready.append((s, title_zh, body))
         else:
             print(f"skip {s['id']} {s['title']}: not translated yet", file=sys.stderr)
@@ -546,6 +572,7 @@ def main():
     ap.add_argument("--title", help="Chinese book title for the PDF metadata")
     add_style_args(ap)
     ap.add_argument("--eq-scale", type=float, default=0.6, help="EPUB build: block (display) equation images render at their intrinsic width times this (default 0.6), so all equations share one scale")
+    ap.add_argument("--inline-scale", type=float, default=0.33, help="EPUB build: inline images (in-line formulas, the ▶ marker) render at their intrinsic width times this (default 0.33, about body-text size for 28px-per-em formula crops)")
     opt = ap.parse_args()
     render(Path(opt.work).resolve(), opt)
 

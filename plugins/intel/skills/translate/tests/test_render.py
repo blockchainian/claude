@@ -65,6 +65,12 @@ def test_render_units(rd):
         out = rd.place_images("<p>ascent in ⟦IMG:5_1⟧ where ⟦IMG:5_2⟧ is</p>", work, images, "#c9c4b8", "#000409")
         check("line-art equation is recoloured, no white plate", '<figure class="fig">' in out and "5_1.rc.png" in out and (work / "images" / "5_1.rc.png").exists())
         check("colour figure keeps a white plate", 'class="infig plate"' in out and "5_2.png" in out)
+        # EPUB build: an inline formula image is sized from its own pixels (width x inline_scale, in pt) like a block
+        # figure, not clamped to a fixed 1.4em height that squashes every formula to one height whatever its content.
+        scaled = rd.place_images("<p>where ⟦IMG:5_2⟧ is</p>", work, images, "#c9c4b8", "#000409", 0.6, 0.33)
+        check("EPUB inline image sized from intrinsic width x inline_scale, height unclamped",
+              'class="infig plate"' in scaled and "width:13.2pt" in scaled and "max-height:none" in scaled, scaled)
+        check("non-EPUB inline image keeps the 1.4em clamp (no inline size)", "style=" not in out.split("5_2")[0].rsplit("<img", 1)[1], out)
         check("unknown placeholder dropped, not left raw", rd.place_images("a⟦IMG:zz⟧b", work, images, "#c9c4b8", "#000409") == "ab")
     check("roman folios", [rd.folio_for(i, None) for i in range(3)] == ["i", "ii", "iii"])
     check("roman folio past the table falls back to arabic (long front matter)",
@@ -87,6 +93,16 @@ def test_render_units(rd):
     sec = {"id": "04", "kind": "chapter", "label": "第一章"}
     frag = rd.section_html(sec, "标题", "<p>x</p>")
     check("section carries marker, label, named page", "⟦S04⟧" in frag and "第一章" in frag and 'page: s04' in frag)
+    # The floated 2.6em drop cap belongs on prose: on a first paragraph that opens with a bold label ("**1.** ...",
+    # also after a leading ▶ image), a digit, or that is too short to wrap round it, it breaks the layout.
+    dropcap = lambda body: "no-dropcap" not in rd.section_html(sec, "标题", body).split('class="body-text', 1)[1].split(">", 1)[0]
+    prose = "<p>" + "正文" * 60 + "</p>"
+    check("drop cap kept on a long prose opening paragraph", dropcap(prose))
+    check("no drop cap when the first paragraph opens with a bold label", not dropcap("<p><strong>1.</strong> " + "答案" * 60 + "</p>"))
+    check("no drop cap after a leading image then a bold label", not dropcap('<p><img class="infig" src="a.png"> <strong>2.</strong> ' + "习题" * 60 + "</p>"))
+    check("no drop cap when the first paragraph opens with a digit", not dropcap("<p>7 " + "正文" * 60 + "</p>"))
+    check("no drop cap on a very short first paragraph", not dropcap("<p>短。</p>" + prose))
+    check("css gates the drop cap on the body-text class", ".body-text:not(.no-dropcap) > p:first-of-type::first-letter" in style)
     toc = rd.contents_html([(sec, "标题")], {"04": "1"})
     check("contents row", "⟦TOC⟧" in toc and '<span class="pg">1</span>' in toc)
 
