@@ -260,8 +260,8 @@ strong, b {{ font-family: {hei}; font-weight: 700; color: {bold}; }}
 section {{ break-before: page; overflow-x: clip; overflow-clip-margin: 6pt; }}
 img, table, pre, .katex-display {{ max-width: 100%; }}
 pre {{ white-space: pre-wrap; overflow-wrap: anywhere; }}
-/* Code is set in KaTeX's typewriter face (loaded by the KaTeX CSS) at the size \mathtt renders, so `ROW` and
-   \(\mathtt{{BASEROW}}\) on one line are the same monospace font. */
+/* Code is set in KaTeX's typewriter face (loaded by the KaTeX CSS) at the size KaTeX's mathtt renders, so `ROW`
+   and a mathtt BASEROW on one line are the same monospace font. */
 code, pre {{ font-family: KaTeX_Typewriter, Menlo, monospace; font-size: 1em; }}
 .opener {{ padding-top: {round(h * 0.2)}pt; text-align: center; margin-bottom: {round(h * 0.07)}pt; }}
 .opener .label {{ font-family: {hei}; font-weight: 700; color: {bold}; font-size: 9pt; letter-spacing: 3pt; margin-bottom: 14pt; }}
