@@ -44,11 +44,13 @@ if have codex && [ -f "${CODEX_HOME:-$HOME/.codex}/auth.json" ]; then
 else
   missing+=("codex (npm i -g @openai/codex, then codex login)")
 fi
-CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
-if [ -x "$CHROME" ] || have google-chrome || have chromium; then
+if [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] ||
+   [ -x "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" ] ||
+   [ -x "/Applications/Chromium.app/Contents/MacOS/Chromium" ] ||
+   have google-chrome || have chrome || have chromium || have chromium-browser; then
   present+=("chrome")
 else
-  missing+=("chrome (set CHROME=/path/to/chrome)")
+  missing+=("Google Chrome, Chrome for Testing, or Chromium")
 fi
 
 echo "present: ${present[*]:-none}"

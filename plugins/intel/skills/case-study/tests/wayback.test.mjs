@@ -162,8 +162,8 @@ test('the capture lists go through the ISP proxy at its own rate, the captures t
 })
 
 test('without the residential proxy there is no route for the captures', () => {
-  assert.throws(() => wb.routes('', 'http://isp.example:2'), /RESIDENTIAL_PROXY_URL/)
-  assert.throws(() => wb.routes('', null), /RESIDENTIAL_PROXY_URL/)
+  assert.throws(() => wb.routes('', 'http://isp.example:2'), /INTEL_RESIDENTIAL_PROXY_URL/)
+  assert.throws(() => wb.routes('', null), /INTEL_RESIDENTIAL_PROXY_URL/)
 })
 
 test('a list the archive refuses or cannot give does not cost the rows of the others: they are kept, and what is missing is named', async () => {

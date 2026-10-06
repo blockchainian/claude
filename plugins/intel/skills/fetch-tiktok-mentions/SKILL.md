@@ -122,7 +122,7 @@ Under `docs/intel/tiktok/<slug>/`, or the `--out` directory:
   `new` those kept and not held before, `pulls` how often the source was paged.
 
 Video files are not in the repo: `~/.local/share/tiktok/<videoId>.mp4`, one copy shared by every
-slug, so they survive a deleted worktree. `TIKTOK_VIDEOS_DIR` overrides the directory. Photo posts
+slug, so they survive a deleted worktree. `INTEL_TIKTOK_VIDEO_DIR` overrides the directory. Photo posts
 have no video file. A video TikTok no longer has is logged `gone` and asked for again next run
 (the refusal is often temporary); it does not make the run exit non-zero.
 
@@ -153,10 +153,10 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `~/.config/intel/.env` |
-| `ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `~/.config/intel/.env` |
-| `SECRETS_MANAGER_STATE_PATH` | Account-store and browser-profile directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
-| `TIKTOK_VIDEOS_DIR` | Video output directory; default ~/.local/share/tiktok | No | `~/.config/intel/.env` |
+| `INTEL_ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `~/.config/intel/.env` |
+| `INTEL_ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `~/.config/intel/.env` |
+| `INTEL_SECRETS_STATE_DIR` | Account-store and browser-profile directory; default ~/.config/secrets-manager | No | `~/.config/intel/.env` |
+| `INTEL_TIKTOK_VIDEO_DIR` | Video output directory; default ~/.local/share/tiktok | No | `~/.config/intel/.env` |
 
 Account credentials, login sessions and browser profiles stay in the existing Secrets Manager store; do not copy them into `.env`.
 

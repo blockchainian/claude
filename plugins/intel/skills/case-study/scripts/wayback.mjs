@@ -4,10 +4,9 @@
 //
 // Usage: wayback.mjs fetch <out dir> <url>... [--from <file with one url per line>]
 //        wayback.mjs curve <out dir> <profile url>...     (every address the profile has had)
-// Captures go through the proxy in RESIDENTIAL_PROXY_URL (from the .env file env.mjs finds), one URL that gives every
+// Captures go through the proxy in INTEL_RESIDENTIAL_PROXY_URL (from the .env file env.mjs finds), one URL that gives every
 // connection another household address, which the archive counts apart; without it the run stops with an error. The
-// capture lists go through ISP_PROXY_URL, else direct, through the HTTPS_PROXY / HTTP_PROXY of the environment when
-// one is set (NO_PROXY is honoured). A request that fails, or that
+// capture lists go through INTEL_ISP_PROXY_URL, else direct. A request that fails, or that
 // the archive answers with 429, is asked for again; when it keeps failing the run stops with an error. fetch prints one JSON line per url (url, status, file). curve prints one JSON line per capture (date,
 // value, text, url, file): value is the count when it could be read, text is the page's own wording when it is
 // rounded or in another language, and both are null when the page shows no count.
@@ -69,20 +68,8 @@ export class Throttled extends Error {
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-function bypassed(hostname) {
-  // True when the environment's NO_PROXY names this host (a name, a parent domain, or `*`).
-  const list = (process.env.NO_PROXY || process.env.no_proxy || '').split(',').map(s => s.trim()).filter(Boolean)
-  return list.some(entry => entry === '*' || hostname === entry.replace(/^\./, '') || hostname.endsWith('.' + entry.replace(/^\./, '')))
-}
-
-function proxyFor(proxy, target) {
-  // The proxy URL a request goes through: the one given, or the environment's for a direct request.
-  if (proxy) return new URL(proxy)
-  if (bypassed(target.hostname)) return null
-  const env = target.protocol === 'https:'
-    ? process.env.HTTPS_PROXY || process.env.https_proxy
-    : process.env.HTTP_PROXY || process.env.http_proxy
-  return env ? new URL(env) : null
+function proxyFor(proxy) {
+  return proxy ? new URL(proxy) : null
 }
 
 const proxyAuth = proxy => (proxy.username ? { 'Proxy-Authorization': 'Basic ' + Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64') } : {})
@@ -281,7 +268,7 @@ export async function curve(addresses, proxy, out, { perMinute = LIST_PER_MINUTE
 // lists asked at the residential rate through the ISP exits were answered 429 until the run stopped (2026-10). The
 // captures go only through the residential proxy: from one address the archive answers 429 to nearly every one.
 export function routes(residential, isp) {
-  if (!residential) throw new Error('RESIDENTIAL_PROXY_URL is not set: the archive captures are read only through the residential proxy')
+  if (!residential) throw new Error('INTEL_RESIDENTIAL_PROXY_URL is not set: the archive captures are read only through the residential proxy')
   return { proxy: residential, perMinute: RESIDENTIAL_PER_MINUTE, listProxy: isp, listPerMinute: LIST_PER_MINUTE }
 }
 
@@ -305,8 +292,8 @@ async function main(argv) {
     console.error(USAGE)
     process.exit(2)
   }
-  const residential = (process.env.RESIDENTIAL_PROXY_URL || '').trim()
-  const isp = (process.env.ISP_PROXY_URL || '').trim() || null
+  const residential = (process.env.INTEL_RESIDENTIAL_PROXY_URL || '').trim()
+  const isp = (process.env.INTEL_ISP_PROXY_URL || '').trim() || null
   let route
   try {
     route = routes(residential, isp)

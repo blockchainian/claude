@@ -33,6 +33,9 @@ import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { loadEnv, caseStudyPaths } from './env.mjs'
+
+loadEnv()
 
 const PAGE_SIZE = [427.92, 660.0] // the book format digest's render typesets
 const ARCHIVE_HOSTS = new Set(['web.archive.org', 'archive.org'])
@@ -58,7 +61,7 @@ const CHART = /^```chart[ \t]*\n[\s\S]*?\n```[ \t]*$/gm // a figure block the re
 const DATE = /(?:19|20)\d\d\s*年(?:\s*\d+\s*月)?(?:\s*\d+\s*日)?|\d+\s*月(?:\s*\d+\s*日)?|\d+\s*日|(?:19|20)\d\d(?:-\d\d){0,2}/g
 const SERIES = 5 // a paragraph with this many figures besides its dates recites a series
 
-const root = () => process.env.CASE_STUDIES_DIR || join(homedir(), 'Documents', 'case-studies')
+const root = () => caseStudyPaths().work
 const read = path => readFileSync(path, 'utf8')
 const write = (path, text) => writeFileSync(path, text, 'utf8')
 const dump = value => JSON.stringify(value, null, 2)

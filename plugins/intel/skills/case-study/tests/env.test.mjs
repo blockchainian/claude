@@ -5,19 +5,19 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
-import { ENV_FILES, loadEnv, parseEnv } from '../scripts/env.mjs'
+import { ENV_FILES, loadEnv, parseEnv, caseStudyPaths } from '../scripts/env.mjs'
 
 const tmp = mkdtempSync(join(tmpdir(), 'env-'))
 after(() => rmSync(tmp, { recursive: true, force: true }))
 
 test('parseEnv reads KEY=value lines, drops quotes, skips comments and blank lines', () => {
-  assert.deepEqual(parseEnv('# proxy\nISP_PROXY_URL="http://u:p@h:8001"\n\nexport FETCH_X_POSTS=/x/y.mjs \nbad line\n'),
-    { ISP_PROXY_URL: 'http://u:p@h:8001', FETCH_X_POSTS: '/x/y.mjs' })
+  assert.deepEqual(parseEnv('# proxy\nINTEL_ISP_PROXY_URL="http://u:p@h:8001"\n\nexport INTEL_CASE_STUDY_DIR=/x/y \nbad line\n'),
+    { INTEL_ISP_PROXY_URL: 'http://u:p@h:8001', INTEL_CASE_STUDY_DIR: '/x/y' })
 })
 
 test('parseEnv puts a value that starts with ~/ under the home directory', () => {
-  assert.deepEqual(parseEnv('FETCH_X_POSTS=~/x/y.mjs\nQUOTED="~/z"\nISP_PROXY_URL=http://h/~/a\nBARE=~\n'),
-    { FETCH_X_POSTS: join(homedir(), 'x/y.mjs'), QUOTED: join(homedir(), 'z'), ISP_PROXY_URL: 'http://h/~/a', BARE: '~' })
+  assert.deepEqual(parseEnv('INTEL_CASE_STUDY_DIR=~/x/y\nQUOTED="~/z"\nINTEL_ISP_PROXY_URL=http://h/~/a\nBARE=~\n'),
+    { INTEL_CASE_STUDY_DIR: join(homedir(), 'x/y'), QUOTED: join(homedir(), 'z'), INTEL_ISP_PROXY_URL: 'http://h/~/a', BARE: '~' })
 })
 
 test('loadEnv takes the first file that exists and never overrides a variable already set', () => {
@@ -28,5 +28,10 @@ test('loadEnv takes the first file that exists and never overrides a variable al
   assert.equal(loadEnv([a, b], env), b)
   assert.deepEqual(env, { ONE: 'b', TWO: 'shell' })
   assert.equal(loadEnv([a], env), null, 'no file is fine')
-  assert.ok(ENV_FILES[0].endsWith('/scripts/.env') && ENV_FILES[1].endsWith('/secrets-manager/profiles/case-study/.env'))
+  assert.deepEqual(ENV_FILES, [join(homedir(), '.config', 'intel', '.env')])
+})
+
+test('one root override groups work, fetched data and limit state without changing default locations', () => {
+  assert.deepEqual(caseStudyPaths({INTEL_CASE_STUDY_DIR:'/tmp/research'}), {work:'/tmp/research',data:'/tmp/research/data',state:'/tmp/research/cache'})
+  assert.deepEqual(caseStudyPaths({}), {work:join(homedir(),'Documents','case-studies'),data:join(homedir(),'.local','share','case-study'),state:join(homedir(),'.cache','case-study-limits')})
 })

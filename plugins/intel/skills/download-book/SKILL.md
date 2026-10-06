@@ -33,7 +33,7 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `ANNA_ARCHIVE_SECRET_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `~/.config/intel/.env` |
+| `INTEL_ANNA_ARCHIVE_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `~/.config/intel/.env` |
 
 ## Setup (once)
 

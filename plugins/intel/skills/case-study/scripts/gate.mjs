@@ -7,7 +7,7 @@
 //        gate.mjs wayback <args...>       this skill's wayback.mjs, one run at a time
 //        gate.mjs chrome <args...>        opencli <args...>, at most CHROME_SLOTS at once; Google searches paced
 //        gate.mjs yt <args...>            yt-dlp <args...> (Chrome cookies added for YouTube), at most YT_SLOTS at once
-//        gate.mjs fetch-x-posts <args...> the fetch-x-posts script named by FETCH_X_POSTS: X search on an account pool, one JSON post per line
+//        gate.mjs fetch-x-posts <args...> the sibling fetch-x-posts script: X search on an account pool, one JSON post per line
 //        gate.mjs ytsearch "<query>" "<name>"...   YouTube search, only the videos whose title, channel or description has one of the names
 //        gate.mjs ytuploads <channel url>          every upload of a YouTube channel with its exact date and plays, one JSON video per line, oldest first
 //        gate.mjs gdelt "<name>"... [<from> <to>]  news articles GDELT found the names in (BigQuery), up to 100 names, dates YYYY-MM-DD
@@ -16,20 +16,20 @@
 // gdelt and gnews print one JSON article per line, oldest first, and keep what they fetched in
 // ~/.local/share/case-study/<gdelt|gnews>/<name>/: articles.jsonl and, beside it, articles.out.json with the days held.
 // State (pace files, slot locks, the log) lives in ~/.cache/case-study-limits, shared with fetch-x-posts. Settings come
-// from the .env file env.mjs finds: ISP_PROXY_URL (one URL; the ten ports after its own are the exits; without it every
-// request goes direct), RESIDENTIAL_PROXY_URL (Google News asked again through it when an exit is refused),
-// FETCH_X_POSTS (the fetch-x-posts script) and GDELT_BQ_PROJECT (the Google Cloud project the BigQuery queries run in).
+// from the .env file env.mjs finds: INTEL_ISP_PROXY_URL (one URL; the ten ports after its own are the exits; without it every
+// request goes direct), INTEL_RESIDENTIAL_PROXY_URL (Google News asked again through it when an exit is refused),
+// INTEL_BIGQUERY_PROJECT_ID (the Google Cloud project the BigQuery queries run in).
 import { spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadEnv } from './env.mjs'
+import { loadEnv, caseStudyPaths } from './env.mjs'
 
 loadEnv()
 
-export const STATE = process.env.CASE_STUDY_LIMITS || join(homedir(), '.cache', 'case-study-limits')
-export const DATA = process.env.CASE_STUDY_DATA || join(homedir(), '.local', 'share', 'case-study')
+export const STATE = caseStudyPaths().state
+export const DATA = caseStudyPaths().data
 const HERE = dirname(fileURLToPath(import.meta.url))
 const WAYBACK = join(HERE, 'wayback.mjs')
 const JINA_GAP = 3.5 // seconds between requests on one exit: Jina allows 20 a minute per IP without a key
@@ -54,7 +54,7 @@ const sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0,
 const now = () => Date.now() / 1000
 
 // The ten exits of the proxy: the ten ports after the URL's own (which is the rotating entry).
-export function proxies(base = process.env.ISP_PROXY_URL) {
+export function proxies(base = process.env.INTEL_ISP_PROXY_URL) {
   if (!base) return []
   return Array.from({ length: EXITS }, (_, n) => base.replace(/:(\d+)$/, (_, port) => `:${Number(port) + n + 1}`))
 }
@@ -346,11 +346,11 @@ WHERE _PARTITIONTIME >= @from AND _PARTITIONTIME < @to`
 // collected the article. A query costs what the days it reads cost, whatever the number of names, so only the days a
 // name lacks are read, a year at a time, with every name that lacks them in the same query. A day is held once it has
 // ended: today is read again each time.
-export function gdelt(names, from, to, { data = DATA, state = STATE, project = process.env.GDELT_BQ_PROJECT, now = new Date(), call = args => run('bq', args, { maxBuffer: OUTPUT_MAX }) } = {}) {
+export function gdelt(names, from, to, { data = DATA, state = STATE, project = process.env.INTEL_BIGQUERY_PROJECT_ID, now = new Date(), call = args => run('bq', args, { maxBuffer: OUTPUT_MAX }) } = {}) {
   if (!names.length) throw Error('give the name to look for: gate.mjs gdelt "<name>"... [<from> <to>]')
   if (names.length > GDELT_NAMES) throw Error(`at most ${GDELT_NAMES} names in one call`)
   const [start, end, yesterday] = dayRange(from, to, GDELT_START, now)
-  if (!project) throw Error('GDELT_BQ_PROJECT (the Google Cloud project the BigQuery queries run in) is not set in the .env file')
+  if (!project) throw Error('INTEL_BIGQUERY_PROJECT_ID (the Google Cloud project the BigQuery queries run in) is not set in the .env file')
   mkdirSync(state, { recursive: true })
   return withLock(join(state, 'gdelt.lock'), () => {
     const kept = [...new Map(names.map(name => archive('gdelt', name, data)).map(a => [a.key, a])).values()]
@@ -385,7 +385,7 @@ export function gdelt(names, from, to, { data = DATA, state = STATE, project = p
 // left after following its redirects, seen once in 2026-10 for an article's page) or it fails, asked again through the
 // residential proxy. Google refuses an address it has seen too often, so neither goes direct
 // unless no proxy is set.
-export async function gnewsRequest(url, form, { exits = proxies(), residential = (process.env.RESIDENTIAL_PROXY_URL || '').trim(), curl = args => runAsync('curl', args) } = {}) {
+export async function gnewsRequest(url, form, { exits = proxies(), residential = (process.env.INTEL_RESIDENTIAL_PROXY_URL || '').trim(), curl = args => runAsync('curl', args) } = {}) {
   const routes = [exits.length ? exits[Math.floor(Math.random() * exits.length)] : null, ...(residential ? [residential] : [])]
   let answer
   for (const proxy of routes) {
@@ -635,8 +635,7 @@ function main(argv) {
     log('yt', r.gateStatus, args.at(-1) || '')
     process.exit(r.status ?? 1)
   } else if (command === 'fetch-x-posts') {
-    const script = process.env.FETCH_X_POSTS
-    if (!script) { console.error('gate.mjs fetch-x-posts: FETCH_X_POSTS (the fetch-x-posts.mjs script) is not set in the .env file'); process.exit(2) }
+    const script = join(HERE, '../../fetch-x-posts/scripts/fetch-x-posts.mjs')
     const code = passthrough('node', [script, ...args])
     log('fetch-x-posts', code === 0 ? 'ok' : 'FAILED', args[0] || '')
     process.exit(code)

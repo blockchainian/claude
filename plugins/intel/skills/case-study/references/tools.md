@@ -182,22 +182,20 @@ Every post on X — a search, an account's own posts, a thread — comes from
 
 ## The machine's settings
 
-The gate and `wayback.mjs` read them from a `.env` file: `scripts/.env` next
-to the scripts, else `~/.cache/secrets-manager/profiles/case-study/.env`.
+The gate and `wayback.mjs` read them from Intel’s `~/.config/intel/.env`.
 Nothing has to be exported in the shell. A value that starts with `~/` is
 under the home directory.
 
-- `ISP_PROXY_URL`: the proxy, one URL; the ten ports after its own are the
+- `INTEL_ISP_PROXY_URL`: the proxy, one URL; the ten ports after its own are the
   exits. Without it the gate reads direct, with one exit's share of the
   limits.
-- `RESIDENTIAL_PROXY_URL`: the rotating residential proxy `wayback` reads the
+- `INTEL_RESIDENTIAL_PROXY_URL`: the rotating residential proxy `wayback` reads the
   archive's captures through, one URL; without it `wayback` stops with an
-  error. The capture lists go through `ISP_PROXY_URL`. `gnews` asks Google News
-  through an `ISP_PROXY_URL` exit and again through this proxy when Google
+  error. The capture lists go through `INTEL_ISP_PROXY_URL`. `gnews` asks Google News
+  through an `INTEL_ISP_PROXY_URL` exit and again through this proxy when Google
   refuses the exit.
-- `FETCH_X_POSTS`: the fetch-x-posts script (X search on an account pool).
-  Without it `$G fetch-x-posts` is unavailable: X search is then a gap.
-- `GDELT_BQ_PROJECT`: the Google Cloud project `$G gdelt` runs its BigQuery
+The X-post fetching command locates its sibling script inside the installed Intel plugin; no script-path variable is needed.
+- `INTEL_BIGQUERY_PROJECT_ID`: the Google Cloud project `$G gdelt` runs its BigQuery
   queries in, with the `bq` command logged in (`gcloud auth login`). Without
   it, or once the project's free 1 TiB of queries for the month is used,
   `$G gdelt` fails: GDELT is then a gap.

@@ -50,7 +50,18 @@ they are sent the absolute paths of the files below and read them themselves.
 | `briefs/write.md` | chapter writers | One chapter of the book, from the notes, with its source marks |
 | `briefs/book.md` | the writer of the introduction and the reasoning chapter | The two chapters that rest on the others |
 | `workflows/creator.mjs` | you | The stages below as a workflow script |
-| `scripts/gate.mjs` | every agent, through the commands in `references/tools.md` | The machine-wide gate: queues, paces and retries every third-party call; its settings (`ISP_PROXY_URL`, `FETCH_X_POSTS`, `GDELT_BQ_PROJECT`) come from a `.env` file, see the end of `references/tools.md` |
+| `scripts/gate.mjs` | every agent, through the commands in `references/tools.md` | The machine-wide gate: queues, paces and retries every third-party call; its settings (`INTEL_ISP_PROXY_URL`, `INTEL_BIGQUERY_PROJECT_ID`) come from a `.env` file, see the end of `references/tools.md` |
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `INTEL_RESIDENTIAL_PROXY_URL` | Residential proxy for news and archive requests | When needed | ~/.config/intel/.env |
+| `INTEL_ISP_PROXY_URL` | ISP proxy pool | When needed | ~/.config/intel/.env |
+| `INTEL_BIGQUERY_PROJECT_ID` | Google Cloud project ID for GDELT BigQuery queries | For GDELT | ~/.config/intel/.env |
+| `INTEL_CASE_STUDY_DIR` | One root for working files, data and cache | Optional | ~/.config/intel/.env |
+
+A configured root keeps research work at that root, fetched data in `data/`, and limit state in `cache/`. When unset, existing default directories remain unchanged. The skill workflow remains Claude-only.
 
 ## Arguments
 
@@ -81,7 +92,7 @@ ask for one name.
    link with its platform's logo. Without `--account` that is the profile URL;
    give `--account` once per account when the subject grew on more than one
    (the account they grew on first). The title is the PDF's document title. It prints the work directory (`~/Documents/case-studies/<slug>/`; override
-   the root with `CASE_STUDIES_DIR`).
+   the root with `INTEL_CASE_STUDY_DIR`).
    An existing work directory is reused: sources and chapters already there are
    kept.
 

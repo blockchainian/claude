@@ -8,7 +8,7 @@ import { realpathSync } from "node:fs";
 //
 // - <appleId>  numeric App Store id, e.g. 6741115427
 // - [appName]  output slug; if omitted it is derived from the app's store name
-// - Reads RESIDENTIAL_PROXY_URL from the env file. A rotating proxy endpoint hands out a
+// - Reads INTEL_RESIDENTIAL_PROXY_URL from the env file. A rotating proxy endpoint hands out a
 //   new exit IP per CONNECTION, not per request, so a reused undici tunnel pins one IP —
 //   getJson therefore builds and closes a fresh ProxyAgent for every request, which is what
 //   actually rotates the IP and defeats Apple's per-IP throttling.
@@ -109,10 +109,10 @@ const REVIEWS_DIR = join("docs", "intel", "reviews"); // run from the repo root
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function proxyConfig() {
-  const url = process.env.RESIDENTIAL_PROXY_URL || process.env.HTTPS_PROXY;
+  const url = process.env.INTEL_RESIDENTIAL_PROXY_URL;
   if (!url) {
     throw new Error(
-      "RESIDENTIAL_PROXY_URL (or HTTPS_PROXY) is required in ~/.config/intel/.env.",
+      "INTEL_RESIDENTIAL_PROXY_URL is required in ~/.config/intel/.env.",
     );
   }
   const u = new URL(url);
