@@ -116,6 +116,9 @@ def test_render_units(rd):
     check("no drop cap after a hung marker span then a bold label",
           not dropcap('<p><span style="display: inline-block; width: 1.2em; margin-left: -1.2em; text-indent: 0">'
                       '<img class="infig" src="a.png"></span> <strong>3.</strong> ' + "习题" * 60 + "</p>"))
+    check("no drop cap after a hung text marker (▶) then a bold label",
+          not dropcap('<p><span style="display: inline-block; width: 1.2em; margin-left: -1.2em; text-indent: 0">'
+                      '▶</span><strong>4.</strong> ' + "习题" * 60 + "</p>"))
     check("no drop cap when the first paragraph opens with a digit", not dropcap("<p>7 " + "正文" * 60 + "</p>"))
     check("drop cap even on a two-character opening stub", dropcap("<p>数列</p>" + prose))
     check("no drop cap on an index entry label", not dropcap("<p>算法 1.1E</p><p>算法 1.1F</p>"))
