@@ -63,3 +63,11 @@ uv run skills/check-web-design/tests/test_check_design.py
 ```
 
 Or from the marketplace root: `npm run test:web`.
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| None | Local browser and analysis tools | No plugin settings required | — |
+
+Application-specific variables belong to the target project, not this plugin.

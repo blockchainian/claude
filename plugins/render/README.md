@@ -51,3 +51,11 @@ The Claude agent and edit hook remain Claude-specific. Codex CLI may import the
 status command as a generated skill; the shared entry point is `render-monitor`. In Codex,
 use `render-monitor` to check status and `render-blueprints` to validate
 `render.yaml` explicitly; validation does not run automatically after edits.
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `RENDER_API_KEY` | CLI or manual MCP bearer authentication | For API-key authentication | Shell; manual MCP can reference this variable |
+
+Default MCP authentication uses host OAuth; `render login` stores a CLI login. The plugin does not load a dotenv file.
