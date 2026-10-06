@@ -112,4 +112,17 @@ MIT
 
 Shared request settings have no plugin prefix (`RESIDENTIAL_PROXY_URL`, `X_BEARER_TOKEN`). Plugin data, output, configuration and state directories keep their owner (`INTEL_DATA_DIR`, `INTEL_OUTPUT_DIR`, `SECRETS_DATA_DIR`, `PROXY_CONFIG_DIR`, `CODEX_MANAGER_STATE_DIR`); all consumers refer to `SECRETS_DATA_DIR` for the shared credential store. Service names stay in settings such as `NAMECHEAP_API_KEY`, and the daemon target stays in `CODEX_DAEMON_SOCKET`. Names use uppercase snake case, `_DIR` for directories and `_ID` for identifiers. Timeout/interval values are in seconds as documented. Upstream CLI/host/MCP variables retain their required names. Internal shell variables and target-project application settings are not plugin configuration.
 
+## Plugin directories
+
+Every skill sorts what it writes into one of four plugin roots, each with its own variable and a subdirectory per skill:
+
+| Kind | What goes there | Variable | Default |
+|---|---|---|---|
+| Output | Final results a person opens: PDFs, reports, books, screenshots, transcripts | `<PLUGIN>_OUTPUT_DIR` | `~/Documents/<skill>/` |
+| State | Anything whose loss breaks a run or costs money or time to get back: account stores, logged-in browser profiles, pace/lock/cooldown files, resumable work directories, fetched archives, LLM labels | `<PLUGIN>_STATE_DIR` | `~/.local/state/<plugin>/` |
+| Data | Anything that can be deleted at any moment without breaking a run: throwaway browser profiles, debug captures | `<PLUGIN>_DATA_DIR` | `~/.local/share/<plugin>/` |
+| Temporary | Scratch files of one run | under `<PLUGIN>_DATA_DIR` | `~/.local/share/<plugin>/tmp/<skill>/` |
+
+Configuration stays in `~/.config/<plugin>/`. Skills resolve these roots through their plugin's one path helper and never hard-code a home-relative path, `/tmp` or `$TMPDIR`. Input is whatever the caller passes; a skill that reads another skill's result reads it from that skill's root.
+
 File-based configuration lives outside the checkout: Intel at `~/.config/intel/.env`, Secrets at `~/.config/secrets-manager/.env`, and Creator at `~/.config/creator/.env`. Each has one empty plugin-root `.env.example`. Creator’s configuration is independent while its accounts and browser profiles remain in Secrets Manager. Other plugins’ optional settings remain shell/MCP settings as documented in their environment tables.
