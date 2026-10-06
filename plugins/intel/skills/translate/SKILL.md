@@ -221,7 +221,7 @@ exits 0. Never hand the user a book the guard rejected.
 `md_to_html`/`repair_math` already auto-fix the translator's common LaTeX mistakes (promote inline `\tag` to a
 display equation, escape a literal `$`, strip leaked `> ` blockquote markers, `\（`/`\）`→`\(`/`\)`, `\mbox`→`\text`),
 so what reaches the guard is the structural residual — usually 0–2 per book. Fix each by editing the section's
-Markdown in `<work>/md/` (find the failing `\(..\)`/`\[..\]` near the reported spot) and re-running step 4:
+Markdown in `<work>/translated/` (find the failing `\(..\)`/`\[..\]` near the reported spot) and re-running step 4:
 
 - **Unbalanced braces / a `\begin{aligned}` row with CJK punctuation outside `\text`** → balance the braces and
   wrap the Chinese in `\text{…}`.
@@ -235,7 +235,7 @@ re-translating; retranslate the section only if the prose itself is wrong.
 
 ## Editing after the fact
 
-The translation is plain Markdown in `<work>/md/`: fix a sentence there and rerun step 4 (seconds). Retranslate
+The translation is plain Markdown in `<work>/translated/`: fix a sentence there and rerun step 4 (seconds). Retranslate
 one section with `translate.mjs <work> --force --only <id>`. A different look (light theme, other margins) is
 `--bg/--fg` or an edit to `css()` in `render.py`.
 

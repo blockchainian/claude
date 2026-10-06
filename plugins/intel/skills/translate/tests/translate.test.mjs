@@ -87,10 +87,10 @@ describe("codex home and command", () => {
 describe("cli", () => {
   const work = path.join(tmp, "work");
   fs.mkdirSync(path.join(work, "text"), { recursive: true });
-  fs.mkdirSync(path.join(work, "md"), { recursive: true });
+  fs.mkdirSync(path.join(work, "translated"), { recursive: true });
   fs.writeFileSync(path.join(work, "text", "01-one.xhtml"), "<p>one</p>");
   fs.writeFileSync(path.join(work, "text", "02-two.xhtml"), "<p>two</p>");
-  fs.writeFileSync(path.join(work, "md", "01-one.md"), "# 一\n\n正文\n");
+  fs.writeFileSync(path.join(work, "translated", "01-one.md"), "# 一\n\n正文\n");
   fs.writeFileSync(path.join(work, "sections.json"), JSON.stringify({
     title: "T", author: "A", source_kind: "epub",
     sections: [{ id: "01", title: "One", label: "第一章", kind: "chapter", words: 1, file: "text/01-one.xhtml" },

@@ -4,7 +4,7 @@
 //
 // Usage: translate.mjs <work dir> [--only 04,05] [--jobs 20] [--model gpt-6-luna] [--effort low]
 //                      [--service-tier priority] [--glossary <file>] [--force] [--dry-run]
-// Reads <work>/sections.json; writes <work>/md/<id>-<slug>.md (+ .events.jsonl); skips sections whose .md exists.
+// Reads <work>/sections.json; writes <work>/translated/<id>-<slug>.md (+ .events.jsonl); skips sections whose .md exists.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -218,8 +218,8 @@ export async function translateOne(work, meta, section, opt) {
   const text = fs.readFileSync(path.join(work, section.file), "utf8");
   const prompt = buildPrompt(meta, section, text, opt.glossaryText);
   const rules = meta.source_kind === "epub" ? RULES_EPUB : RULES;
-  const out = path.join(work, "md", `${stemOf(section.file)}.md`);
-  const events = path.join(work, "md", `${section.id}.events.jsonl`);
+  const out = path.join(work, "translated", `${stemOf(section.file)}.md`);
+  const events = path.join(work, "translated", `${section.id}.events.jsonl`);
   let problem = null;
   let md, usage, seconds;
   for (const attempt of [1, 2]) {
@@ -228,7 +228,7 @@ export async function translateOne(work, meta, section, opt) {
     if (!problem) break;
   }
   if (problem) {
-    fs.writeFileSync(path.join(work, "md", `${section.id}.rejected.md`), md);
+    fs.writeFileSync(path.join(work, "translated", `${section.id}.rejected.md`), md);
     throw new Error(`${section.id} ${problem} (kept as ${section.id}.rejected.md)`);
   }
   fs.writeFileSync(out, pyStrip(md) + "\n");
@@ -308,13 +308,13 @@ export async function main(argv) {
   const work = path.resolve(opt.work);
   const [meta, allSections] = loadSections(work);
   let sections = allSections;
-  fs.mkdirSync(path.join(work, "md"), { recursive: true });
+  fs.mkdirSync(path.join(work, "translated"), { recursive: true });
   opt.glossaryText = opt.glossary ? fs.readFileSync(opt.glossary, "utf8") : null;
   if (opt.only) {
     const wanted = new Set(opt.only.split(","));
     sections = sections.filter((s) => wanted.has(s.id));
   }
-  const mdOf = (s) => path.join(work, "md", `${stemOf(s.file)}.md`);
+  const mdOf = (s) => path.join(work, "translated", `${stemOf(s.file)}.md`);
   const todo = sections.filter((s) => opt.force || !fs.existsSync(mdOf(s)));
   if (opt.dryRun) {
     const s = todo.length ? todo[0] : sections[0];

@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["pillow>=10"]
 # ///
-# ABOUTME: Lints the translated Markdown in <work>/md/ for translator-output defects the render guard misses or
+# ABOUTME: Lints the translated Markdown in <work>/translated/ for translator-output defects the render guard misses or
 # ABOUTME: reports late: lost or invented image tokens, unclosed inline tags, markup or images inside math, unconverted math.
 """Usage: lint_md.py <work dir> [section id ...]  -- one line per problem (kind, file:line, detail), then a summary.
 
@@ -102,7 +102,7 @@ def main():
     for s in sections:
         if not s.get("file") or (only and s["id"] not in only):
             continue
-        md_path = work / "md" / (Path(s["file"]).stem + ".md")
+        md_path = work / "translated" / (Path(s["file"]).stem + ".md")
         if md_path.exists():
             problems += lint_section(md_path.name, (work / s["file"]).read_text(), md_path.read_text(), images,
                                       lambda k: k in images and symbol_image(work, images[k]))

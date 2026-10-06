@@ -238,10 +238,10 @@ def test_render_e2e(rd):
         check("extract finds front, chapter", [s["kind"] for s in meta["sections"]] == ["front", "chapter"], str(meta["sections"]))
         check("extract kept the cover image", bool(meta.get("cover_image")) and (work / meta["cover_image"]).exists(), str(meta.get("cover_image")))
         check("extract page size default", meta["page_size"] == [468.0, 680.0], str(meta["page_size"]))
-        (work / "md").mkdir()
+        (work / "translated").mkdir()
         for s in meta["sections"]:
             if s.get("file"):
-                (work / "md" / (Path(s["file"]).stem + ".md")).write_text(f"# {s['title']}译\n\n" + ("正文。" * 400 + "\n\n") * 6)
+                (work / "translated" / (Path(s["file"]).stem + ".md")).write_text(f"# {s['title']}译\n\n" + ("正文。" * 400 + "\n\n") * 6)
         out = Path(d) / "tiny-zh.pdf"
         opt = SimpleNamespace(only=None, out=str(out), title="小书", bg="#181a1d", fg="#e1ddd5", font_size=9.25, eq_scale=0.6, bold_factor=1.25)
         rd.render(work, opt)
@@ -269,7 +269,7 @@ def test_render_e2e(rd):
         # with every prefix length put the math at every position in the line, so some land at a line end.
         chap = next(s for s in meta["sections"] if s["kind"] == "chapter")
         paras = "\n\n".join("正" * n + "\\(x_{1}+y\\)，" + "文" * 30 + "`PTR`。" + "字" * 20 for n in range(1, 45))
-        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text("# 标点译\n\n" + paras + "\n")
+        (work / "translated" / (Path(chap["file"]).stem + ".md")).write_text("# 标点译\n\n" + paras + "\n")
         rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
         prev = next((work / "pdf").glob(f"{chap['id']}-*.pdf"))
         lines = [ln.strip() for ln in subprocess.run(["pdftotext", str(prev), "-"], capture_output=True, text=True).stdout.splitlines()]
@@ -278,7 +278,7 @@ def test_render_e2e(rd):
         # Binding the punctuation must not stop a long inline formula from wrapping inside itself (a no-break
         # formula wider than the column would overflow and be clipped).
         long_eq = "+".join(f"\\mathrm{{w{i:02d}}}" for i in range(1, 61))
-        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text(f"# 长式译\n\n设 \\({long_eq}\\)，于是。\n")
+        (work / "translated" / (Path(chap["file"]).stem + ".md")).write_text(f"# 长式译\n\n设 \\({long_eq}\\)，于是。\n")
         rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
         text = subprocess.run(["pdftotext", str(prev), "-"], capture_output=True, text=True).stdout
         line_of = lambda w: next((i for i, ln in enumerate(text.splitlines()) if w in ln), -1)
@@ -286,7 +286,7 @@ def test_render_e2e(rd):
         check("the wrapped formula's punctuation stays on its last line", "，" in text.splitlines()[line_of("w60")] if line_of("w60") >= 0 else False, text[:900].replace(chr(10), " | "))
         # Inline code and KaTeX \\mathtt are one monospace face (KaTeX_Typewriter), not two side by side; and a paragraph
         # with hard line breaks (aligned rows) gets no first-line indent, so its rows start at one x.
-        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text(
+        (work / "translated" / (Path(chap["file"]).stem + ".md")).write_text(
             "# 等宽译\n\n令 `ROW` 与 \\(\\mathtt{BASEROW}[i]\\) 相同。\n\n甲一二三  \n乙四五六  \n丙七八九\n\n" + "正文。" * 40 + "\n")
         rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
         fonts = subprocess.run(["pdffonts", str(prev)], capture_output=True, text=True).stdout
@@ -307,7 +307,7 @@ def test_render_e2e(rd):
             imgs[f"f{k}"] = {"file": f"f{k}.png", "w": 0, "h": 0, "block": True}
         (work / "images.json").write_text(json.dumps(imgs))
         blocks = "".join("正文" * (k * 23) + f"\n\n引{k:02d}如下：\n\n⟦IMG:f{k}⟧\n\n" for k in range(1, 25))
-        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text("# 引图译\n\n" + blocks)
+        (work / "translated" / (Path(chap["file"]).stem + ".md")).write_text("# 引图译\n\n" + blocks)
         rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
         pages = subprocess.run(["pdftotext", str(prev), "-"], capture_output=True, text=True).stdout.split("\f")
         leads = [pg.count("如下：") for pg in pages]
@@ -321,7 +321,7 @@ def test_render_e2e(rd):
         # A long lead-in paragraph must still split across pages (only its last lines go with the figure), not be
         # pushed whole to the next page leaving a large gap.
         blocks = "".join("正文" * (k * 23) + f"\n\n长{k:02d}" + "文" * 300 + f"尾{k:02d}。\n\n⟦IMG:f{k}⟧\n\n" for k in range(1, 25))
-        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text("# 长引译\n\n" + blocks)
+        (work / "translated" / (Path(chap["file"]).stem + ".md")).write_text("# 长引译\n\n" + blocks)
         rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
         pages = subprocess.run(["pdftotext", str(prev), "-"], capture_output=True, text=True).stdout.split("\f")
         page_of = lambda w: next(i for i, pg in enumerate(pages) if w in pg)
@@ -334,7 +334,7 @@ def test_render_e2e(rd):
         # Last, because it corrupts a section's md: an equation KaTeX cannot parse (an undefined command) renders
         # as red source; the render must fail on it rather than ship it silently.
         chap = next(s for s in meta["sections"] if s["kind"] == "chapter")
-        (work / "md" / (Path(chap["file"]).stem + ".md")).write_text("# 坏公式译\n\n见 \\(\\zzbadmacro\\)。\n\n" + "正文。" * 60)
+        (work / "translated" / (Path(chap["file"]).stem + ".md")).write_text("# 坏公式译\n\n见 \\(\\zzbadmacro\\)。\n\n" + "正文。" * 60)
         try:
             rd.render(work, SimpleNamespace(only=None, out=str(Path(d) / "bad-zh.pdf"), title="小书", bg="#181a1d", fg="#e1ddd5", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
             guarded = False
