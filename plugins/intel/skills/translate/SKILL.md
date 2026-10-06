@@ -109,7 +109,9 @@ the page foreground on a transparent background so it blends into the dark page 
 figure keeps a white plate (inverting a photo would ruin it). Line art is judged by colour alone, so a book whose
 figures are grayscale screenshots or photos (a UI design book) renders with `render.py --no-recolor`, which keeps
 every image as is on a white plate. Without the flag, extraction is text-only. Use the
-flag only when images matter.
+flag only when images matter. Code listings (`<pre>`, block `<tt>`, or `<code>` with line breaks) are always
+protected as `⟦CODE:key⟧`; `codeblocks.json` stores their verbatim text. Translation sees only these tokens.
+The renderer restores smaller, wrapping monospace `<pre><code>` blocks; fenced or raw code bypasses math parsing.
 
 Check the listing before spending calls: a section with suspiciously few or many words, or a title parsed wrong,
 means a spine file was mis-grouped. A warning that chapter numbers skip or repeat means an opener was not
@@ -157,7 +159,7 @@ When every section is back, lint the Markdown before rendering:
 ```
 
 It lists, per section and line: a block image token (a figure, a display equation) the translation lost or one it
-invented; an inline tag left open (one unclosed `<code>` turns every later section into code and hides its
+invented; missing or extra code placeholders; an inline tag left open (one unclosed `<code>` turns every later section into code and hides its
 math from KaTeX); Markdown, a Unicode sub/superscript or an image token inside `\(..\)`; unbalanced math
 delimiters; and math variables left as text (`*n*`, `<em>k</em>`, `<sub>`). Fix each in the Markdown. A section
 with many "unconverted math" hits had its LaTeX conversion skipped by the translator: retranslate it with

@@ -12,6 +12,7 @@ import { inflateRawSync } from "node:zlib";
 
 export const IMG_TOKEN = "⟦IMG:{}⟧"; // placeholder for a figure/equation stored as an image, kept verbatim through translation
 export const IMG_TOKEN_RE = /⟦IMG:[^⟧]+⟧/g;
+export const PROTECTED_TOKEN_RE = /⟦(?:IMG|CODE):[^⟧]+⟧/g;
 
 export const NUMBER_WORDS = {};
 ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
@@ -432,12 +433,24 @@ export function imgInline(body, pos) {
  * replaced by an ⟦IMG:key⟧ placeholder (block on its own line, inline within the line) and the image copied
  * into <work>/images. The math and emphasis tags (strong/em/sub/sup/span) are kept for the translator. Returns
  * [fragment, {key: {file, w, h, block}}, next counter]. */
-export function epubFragment(z, href, work, keepImages, counter) {
+export function epubFragment(z, href, work, keepImages, counter, codes = {}) {
   const raw = z.read(href).toString("utf8");
   const m = raw.match(/<body[^>]*>(.*)<\/body>/is);
   let body = m ? m[1] : raw;
   body = body.replace(/<script.*?<\/script>/gis, "");
   body = body.replace(/<style.*?<\/style>/gis, "");
+  body = body.replace(/<span\b[^>]*>|<\/span>/gi, "");
+  // Numeric callouts can interrupt a Calibre code run without ending the listing.
+  body = body.replace(/(<code\b[^>]*>(?:(?!<\/code>)[\s\S])*?<br\b[^>]*>(?:(?!<\/code>)[\s\S])*?)<\/code>(\s*\(\d+\))(?:<code\b[^>]*>|(<br\b[^>]*>))/gi,
+    (match, code, callout, br) => code + callout + (br ? br + "</code>" : ""));
+  // Protect listings before whitespace and inline-tag cleaning changes their content.
+  const listing = /<pre\b[^>]*>([\s\S]*?)<\/pre>|<div\b[^>]*>\s*(?:<div\b[^>]*>\s*)?<tt\b[^>]*>([\s\S]*?)<\/tt>\s*(?:<\/div>\s*)?<\/div>|<(tt|code)\b[^>]*>((?:(?!<\/\3>)[\s\S])*?<br\b(?:(?!<\/\3>)[\s\S])*?)<\/\3>/gi;
+  body = body.replace(listing, (block, pre, tt, tag, multiline) => {
+    const rawCode = (pre ?? tt ?? multiline).replace(/<br\b[^>]*>/gi, "\n").replace(/<[^>]*>/g, "");
+    const key = `c${++counter}`;
+    codes[key] = unescapeXml(rawCode.replace(/&nbsp;/g, " ")).replace(/\u00a0/g, " ");
+    return `\n<p>⟦CODE:${key}⟧</p>\n`;
+  });
   body = body.replace(/<a\b[^>]*>(.*?)<\/a>/gis, "$1");
   body = body.replace(/<a\b[^>]*?\/>/gi, ""); // self-closing target anchors (<a id=.../>)
   const imgs = {};
@@ -469,7 +482,6 @@ export function epubFragment(z, href, work, keepImages, counter) {
   // <small> (and class="small" spans) actually shrink the rendered text, spans/anchors are noise. The math and
   // emphasis tags (strong/em/sub/sup) are kept.
   body = body.replace(/<\/?small\b[^>]*>/gi, "");
-  body = body.replace(/<span\b[^>]*>|<\/span>/gi, "");
   body = body.replace(/<a\b[^>]*>|<\/a>/gi, "");
   body = body.replace(/[ \t]+/g, " ");
   body = pyStrip(body.replace(/\n{3,}/g, "\n\n"));
@@ -607,13 +619,14 @@ export function extractEpub(source, work, keepImages, pageSize) {
   if (keepImages) fs.mkdirSync(path.join(work, "images"), { recursive: true });
   const sections = [];
   const images = {};
+  const codes = {};
   let pendingPrefix = "";
   let seenChapter = false;
   let counter = 0;
   let idx = 0;
   let cur = null; // the chapter/section being accumulated; subsections and trailing notes append to it
 
-  const wordsOf = (frag) => pySplit(frag.replace(IMG_TOKEN_RE, " ").replace(/<[^>]+>/g, " ")).length;
+  const wordsOf = (frag) => pySplit(frag.replace(PROTECTED_TOKEN_RE, " ").replace(/<[^>]+>/g, " ")).length;
 
   const emit = (sec) => {
     idx += 1;
@@ -676,7 +689,7 @@ export function extractEpub(source, work, keepImages, pageSize) {
       if (hnum !== null) { chapter = hnum; clean = htitle; isSubsection = false; }
     }
     let frag, secImgs;
-    [frag, secImgs, counter] = epubFragment(z, href, work, keepImages, counter);
+    [frag, secImgs, counter] = epubFragment(z, href, work, keepImages, counter, codes);
     if (isPart && chapter === null) { // a part divider folds into the head of the next chapter
       pendingPrefix += frag + "\n\n";
       Object.assign(images, secImgs);
@@ -736,6 +749,7 @@ export function extractEpub(source, work, keepImages, pageSize) {
   const meta = { source: String(source), source_kind: "epub", title, author,
     page_size: pageSize.map((x) => new PyFloat(x)), cover_image: coverFile, sections };
   fs.writeFileSync(path.join(work, "sections.json"), pyDumps(meta, { indent: 2, ensureAscii: false }));
+  fs.writeFileSync(path.join(work, "codeblocks.json"), pyDumps(codes, { indent: 1, ensureAscii: false }));
   if (keepImages) {
     fs.writeFileSync(path.join(work, "images.json"), pyDumps(images, { indent: 1, ensureAscii: false }));
     process.stderr.write(`kept ${Object.keys(images).length} images in ${path.join(work, "images")}\n`);

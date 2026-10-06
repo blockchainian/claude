@@ -23,6 +23,8 @@ from pathlib import Path
 
 import markdown
 import pikepdf
+
+from code_blocks import CODE_CONTENT_RE, CODE_TOKEN_RE
 from PIL import Image
 
 ROMAN = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii", "xiv", "xv", "xvi",
@@ -113,7 +115,7 @@ def repair_math(raw):
     return raw
 
 
-def md_to_html(md_text):
+def md_to_html(md_text, codes=None):
     """Section Markdown -> body HTML: the first '# ' line is the title (returned separately). Inline LaTeX
     (\\(..\\), \\[..\\]) is stashed before Markdown runs, because Markdown would treat the _ and * inside it as
     emphasis and corrupt it; the raw math is restored (HTML-escaped) for KaTeX to typeset in the browser. Along
@@ -122,6 +124,28 @@ def md_to_html(md_text):
     lines = md_text.strip().splitlines()
     title = lines[0][2:].strip() if lines and lines[0].startswith("# ") else ""
     body = "\n".join(lines[1:] if title else lines)
+    code_vault = []
+
+    def stash_code(raw):
+        code_vault.append(raw)
+        return f"@@CODE{len(code_vault) - 1}@@"
+
+    def code_region(m):
+        raw = m.group(0)
+        rendered = raw if raw.startswith("<pre") else markdown.markdown(raw, extensions=["fenced_code"])
+        if raw.startswith("`") and not raw.startswith("```"):
+            rendered = rendered.removeprefix("<p>").removesuffix("</p>")
+        return stash_code(rendered)
+
+    body = CODE_CONTENT_RE.sub(code_region, body)
+
+    def listing(m):
+        key = m.group(1)
+        if codes is None or key not in codes:
+            raise ValueError(f"missing code block: {m.group(0)}")
+        return stash_code(f"<pre><code>{html.escape(codes[key])}</code></pre>")
+
+    body = CODE_TOKEN_RE.sub(listing, body)
     body = re.sub(r"^# ", "## ", body, flags=re.M)
     body = body.replace("\\（", "\\(").replace("\\）", "\\)")  # a mis-typed full-width delimiter breaks math pairing
     vault = []
@@ -136,6 +160,9 @@ def md_to_html(md_text):
     body = MATH_RE.sub(stash, body)
     body = re.sub(r"^>[ \t]?(@@MATH\d+@@)[ \t]*$", r"\1", body, flags=re.M)  # unwrap a math-only blockquote line
     out = markdown.markdown(body, extensions=["smarty", "tables"], output_format="html")
+    for i, raw in enumerate(code_vault):
+        marker = f"@@CODE{i}@@"
+        out = out.replace(f"<p>{marker}</p>", raw).replace(marker, raw)
     out = NOBREAK_RE.sub(lambda m: m.group(0) if m.group(1).startswith("@@MATH") and vault[int(m.group(2))].startswith("\\[")
                          else f'<span class="nb">{m.group(0)}</span>', out)
     for i, raw in enumerate(vault):
@@ -284,6 +311,7 @@ td p, th p {{ text-indent: 0; }}
 /* Code is set in KaTeX's typewriter face (loaded by the KaTeX CSS) at the size KaTeX's mathtt renders, so `ROW`
    and a mathtt BASEROW on one line are the same monospace font. */
 code, pre {{ font-family: KaTeX_Typewriter, Menlo, monospace; font-size: 1em; }}
+pre {{ font-size: 0.8em; line-height: 1.4; margin: 0.6em 0; text-align: left; }}
 .opener {{ padding-top: {round(h * 0.2)}pt; text-align: center; margin-bottom: {round(h * 0.07)}pt; }}
 .opener .label {{ font-family: {hei}; font-weight: 700; color: {bold}; font-size: 9pt; letter-spacing: 3pt; margin-bottom: 14pt; }}
 .opener h1 {{ font-family: {hei}; font-weight: 700; color: {bold}; font-size: 22pt; letter-spacing: 2pt; margin: 0; line-height: 1.5; }}
@@ -491,13 +519,16 @@ def render(work, opt):
     images_path = work / "images.json"
     images = json.loads(images_path.read_text()) if images_path.exists() else {}
 
+    code_path = work / "codeblocks.json"
+    codes = json.loads(code_path.read_text()) if code_path.exists() else {}
+
     bg, fg = page_colors(opt)
 
     ready = []
     for s in sections:
         md_path = work / "translated" / (Path(s["file"]).stem + ".md")
         if md_path.exists():
-            title_zh, body = md_to_html(md_path.read_text())
+            title_zh, body = md_to_html(md_path.read_text(), codes)
             if images:
                 epub = meta.get("source_kind") == "epub"
                 eq_scale = getattr(opt, "eq_scale", 0.6) if epub else None

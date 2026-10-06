@@ -19,6 +19,7 @@ from types import SimpleNamespace
 import pikepdf
 
 HERE = Path(__file__).resolve().parent.parent / "scripts"
+sys.path.insert(0, str(HERE))
 fails = []
 
 
@@ -51,6 +52,11 @@ def test_render_units(rd):
           rd.default_out({"title": "Zero to One"}, Path("/tmp/x/work")).name == "zero-to-one.pdf")
     check("default_out: non-Latin title falls back to the work dir slug",
           rd.default_out({"title": "量子力学"}, Path("/tmp/x/quantum-mechanics")).name == "quantum-mechanics.pdf")
+    code = "  a < b\n    \\[literal\\] and \\(open"
+    _, listing = rd.md_to_html("# 代码\n\n⟦CODE:c1⟧\n", {"c1": code})
+    check("protected listing renders verbatim without math capture", '<pre><code>' + __import__('html').escape(code) + '</code></pre>' in listing, listing)
+    _, fenced = rd.md_to_html("# 代码\n\n```python\n" + code + "\n```\n\n<pre><code>\\[raw\\]</code></pre>\n")
+    check("fenced and raw code bypass math capture", "@@MATH" not in fenced and '<code class="language-python">' in fenced and '<pre><code>\\[raw\\]</code></pre>' in fenced, fenced)
     title, body = rd.md_to_html("# 章名\n\n第一段 *强调*。\n\n> 引文\n\n## 小标题\n\n第二段。\n")
     check("markdown title split off", title == "章名" and "<h1" not in body)
     check("markdown body html", "<em>强调</em>" in body and "<blockquote>" in body and "<h2>小标题</h2>" in body)
@@ -272,6 +278,13 @@ def test_render_e2e(rd):
         cover_box = [float(v) for v in pdf.pages[0].mediabox]
         check("cover page is the book page size", round(cover_box[2] - cover_box[0]) == 468 and round(cover_box[3] - cover_box[1]) == 680, str(cover_box))
         opt = SimpleNamespace(only=meta["sections"][1]["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=12, eq_scale=0.6, bold_factor=1.25)
+        chap = meta["sections"][1]
+        (work / "codeblocks.json").write_text(json.dumps({"c1": "if a < b:\n    \\[literal\\]\n    \\(unclosed"}))
+        (work / "translated" / (Path(chap["file"]).stem + ".md")).write_text("# 代码译\n\n正文。\n\n⟦CODE:c1⟧\n")
+        rd.render(work, opt)
+        code_pdf = work / "pdf" / (Path(chap["file"]).stem + ".pdf")
+        code_text = subprocess.run(["pdftotext", "-layout", str(code_pdf), "-"], capture_output=True, text=True).stdout
+        check("protected code reaches PDF with literal math delimiters", "if a < b:" in code_text and "\\[literal\\]" in code_text and "\\(unclosed" in code_text, code_text)
         rd.render(work, opt)
         check("single-section preview written", any((work / "pdf").glob("*.pdf")))
         # CJK closing punctuation after inline math or code must not wrap to the start of a line. Many paragraphs
@@ -366,6 +379,8 @@ def test_compiles_clean():
 
 
 def main():
+    lint = subprocess.run([sys.executable, str(HERE.parent / "tests" / "test_lint_md.py")], capture_output=True, text=True)
+    check("Markdown lint regressions", lint.returncode == 0, lint.stdout + lint.stderr)
     test_compiles_clean()
     rd = load("render")
     test_render_units(rd)

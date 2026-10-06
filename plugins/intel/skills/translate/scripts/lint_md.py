@@ -17,6 +17,8 @@ import re
 import sys
 from pathlib import Path
 
+from code_blocks import CODE_CONTENT_RE, CODE_TOKEN_RE
+
 IMG_RE = re.compile(r"⟦IMG:([^⟧]+)⟧")
 MATH_RE = re.compile(r"\\\((.*?)\\\)|\\\[(.*?)\\\]", re.S)
 CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
@@ -53,21 +55,29 @@ def lint_section(name, src, md, images, is_symbol):
     problems = []
     add = lambda kind, pos, detail: problems.append((kind, f"{name}:{line_of(md, pos)}", detail))
 
-    src_imgs, md_imgs = set(IMG_RE.findall(src)), IMG_RE.findall(md)
+    md_prose = CODE_CONTENT_RE.sub(blank, md)
+    src_codes = collections.Counter(CODE_TOKEN_RE.findall(src))
+    md_codes = collections.Counter(CODE_TOKEN_RE.findall(md_prose))
+    for key, count in (src_codes - md_codes).items():
+        problems.append(("code", name, f"missing ⟦CODE:{key}⟧ ({count} occurrence(s))"))
+    for key, count in (md_codes - src_codes).items():
+        problems.append(("code", name, f"unknown ⟦CODE:{key}⟧ ({count} extra occurrence(s))"))
+
+    src_imgs, md_imgs = set(IMG_RE.findall(src)), IMG_RE.findall(md_prose)
     # A block image (a figure, a display equation) must survive; an inline symbol image may rightly have become
     # LaTeX (the translator is told to write an image-only symbol such as √5 or ⌊ as LaTeX), and so may a narrow
     # symbol the extractor took for a block because it sat on its own source line.
     for key in sorted(k for k in src_imgs - set(md_imgs) if images.get(k, {}).get("block", True) and not is_symbol(k)):
         problems.append(("image", name, f"missing ⟦IMG:{key}⟧ (a block image in the source, not in the translation)"))
-    for m in IMG_RE.finditer(md):
+    for m in IMG_RE.finditer(md_prose):
         if m.group(1) not in src_imgs:
             add("image", m.start(), f"unknown ⟦IMG:{m.group(1)}⟧ (not in the source)")
 
     for opener, closer in (("\\(", "\\)"), ("\\[", "\\]")):
-        if md.count(opener) != md.count(closer):
-            add("math", 0, f"unbalanced {opener} {closer}: {md.count(opener)} open, {md.count(closer)} close")
+        if md_prose.count(opener) != md_prose.count(closer):
+            add("math", 0, f"unbalanced {opener} {closer}: {md_prose.count(opener)} open, {md_prose.count(closer)} close")
 
-    for m in MATH_RE.finditer(md):
+    for m in MATH_RE.finditer(md_prose):
         body = m.group(1) if m.group(1) is not None else m.group(2)
         snippet = m.group(0)[:50].replace("\n", " ")
         if MD_IN_MATH_RE.search(body):
@@ -77,7 +87,7 @@ def lint_section(name, src, md, images, is_symbol):
         if IMG_RE.search(body):
             add("math", m.start(), f"image in math: {snippet}")
 
-    prose = CODE_SPAN_RE.sub(blank, MATH_RE.sub(blank, md))
+    prose = CODE_SPAN_RE.sub(blank, MATH_RE.sub(blank, md_prose))
     for tag in INLINE_TAGS:
         opens = [m.start() for m in re.finditer(rf"<{tag}\b[^>]*>", prose)]
         closes = len(re.findall(rf"</{tag}>", prose))
@@ -109,7 +119,7 @@ def main():
     for kind, where, detail in problems:
         print(f"{kind:<6} {where:<52} {detail}")
     counts = collections.Counter(kind for kind, _, _ in problems)
-    print(f"\n{len(problems)} problems: " + ", ".join(f"{k} {counts[k]}" for k in ("image", "tag", "math")))
+    print(f"\n{len(problems)} problems: " + ", ".join(f"{k} {counts[k]}" for k in ("image", "code", "tag", "math")))
 
 
 if __name__ == "__main__":

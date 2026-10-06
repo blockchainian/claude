@@ -360,3 +360,21 @@ test("a titled Part divider folds into the next chapter", () => {
   assert.equal(secs.length, 1);
   assert.ok(fs.readFileSync(path.join(work, secs[0].file), "utf8").includes("divider"));
 });
+
+test("code listings are protected verbatim before XHTML whitespace cleaning", () => {
+  const work = tmpDir(), epub = path.join(work, "b.epub");
+  makeEpub(epub, {"c.xhtml": '<h1>1. Code</h1><p>prose <tt>inline</tt></p><div><tt>if x:&lt;br&gt;<br/>  print(&quot;x&quot;)<br/>    \\[literal\\]</tt></div><pre><code>  a &lt; b\n    c</code></pre><code>a<br/>  b</code>'}, ["c.xhtml"], {"c.xhtml": "1. Code"});
+  const secs = extractSections(work, epub);
+  const frag = fs.readFileSync(path.join(work, secs[0].file), "utf8");
+  assert.equal((frag.match(/⟦CODE:[^⟧]+⟧/g) || []).length, 3);
+  const codes = JSON.parse(fs.readFileSync(path.join(work, "codeblocks.json"), "utf8"));
+  assert.deepEqual(Object.values(codes), ['if x:<br>\n  print("x")\n    \\[literal\\]', '  a < b\n    c', 'a\n  b']);
+  assert.ok(frag.includes('<tt>inline</tt>') && !frag.includes('print'));
+});
+
+test("a listing split by numeric callouts remains one protected block", () => {
+  const work = tmpDir(), epub = path.join(work, "b.epub");
+  makeEpub(epub, {"c.xhtml": '<h1>1. Code</h1><span><code>a<br/> b</code></span> (1)<span><code><br/> c<br/></code></span>'}, ["c.xhtml"], {"c.xhtml": "1. Code"});
+  extractSections(work, epub);
+  assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(path.join(work, "codeblocks.json"), "utf8"))), ['a\n b (1)\n c\n']);
+});
