@@ -74,3 +74,5 @@ To turn the downloaded EPUB into a Chinese PDF, pass it to the `translate` skill
 If the browser check still fails (the script reports 未通过浏览器验证, usually a captcha), save the search results and selected detail page as HTML from your own browser, then pass `--search-html` and `--detail-html`. Pass `--slow-html` for a saved slow download page when its live entry is blocked. The saved slow page must refer to the selected MD5 record.
 
 Report missing or blocked links as unavailable. Do not infer a direct file URL from an error page; only download the file URL the script actually returned.
+
+Never download from libgen (libgen.li, libgen.rs or any other mirror), even when the fast API is out of downloads or a server fails: its files are often samples, early releases or cut-off downloads. When the fast API is out of downloads, use `slow.url`.
