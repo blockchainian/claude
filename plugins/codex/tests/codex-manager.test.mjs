@@ -9,7 +9,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { fakeDaemon, send } from "./helpers/fake-daemon.mjs";
-import { resolveSessionId } from "../codex-manager/session.mjs";
+import { parentProcesses, resolveSessionId } from "../codex-manager/session.mjs";
 
 const manager = path.resolve("plugins/codex/codex-manager/manager.mjs");
 const session = "11111111-2222-3333-4444-555555555555";
@@ -626,6 +626,8 @@ test("after /clear gives Claude a new session id, await and pending still read t
   const mcp = new McpChild(home.home, daemon.socketPath);
   const cleared = "99999999-8888-7777-6666-555555555555";
   try {
+    assert.ok(parentProcesses(mcp.child.pid).some(({ pid }) => pid === process.pid),
+      "the /clear test needs permission to run ps and read the MCP server's parent process chain");
     await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
     const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug" });
     assert.equal(started.isError, false, started.text);
