@@ -11,6 +11,8 @@ import numpy as np
 import pdfplumber
 import pymupdf
 
+from openers import CAPTION_TEXT_RE
+
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 pdf_path = sys.argv[1]
@@ -177,7 +179,7 @@ for page in pdf:
             blocks[-1].append(l)
         else:
             blocks.append([l])
-    prose = [l for blk in blocks if not quoted(page.number, blk) for l in blk]
+    prose = [l for blk in blocks if not quoted(page.number, blk) and not CAPTION_TEXT_RE.match(line_text(blk[0])) for l in blk]
     if not prose:
         continue
     first = prose[0]

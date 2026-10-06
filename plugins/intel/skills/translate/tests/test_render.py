@@ -140,7 +140,7 @@ def test_render_units(rd):
     check("no drop cap on an image-only first paragraph", not dropcap('<p><img class="infig" src="a.png"></p>' + prose))
     # A one-sentence opener just over a line still wraps the two-line cap; 60 characters skipped many sections.
     check("drop cap on a one-line-plus opening sentence", dropcap("<p>算法的概念是所有计算机程序设计的基础，因此我们应当从仔细分析这一概念开始。</p>"))
-    check("css clears the block after a capped paragraph", ".body-text:not(.no-dropcap) > p:first-of-type + * { clear: left; }" in style)
+    check("css clears the block after a capped paragraph", ".body-text:not(.no-dropcap) > p.dropcap + * { clear: left; }" in style)
     # place_images marks a paragraph leading into a figure <p class="keep">; it is still the first paragraph.
     check("drop cap judged on a first paragraph that carries a class", dropcap('<p class="keep">' + "正文" * 30 + "</p><p>短。</p>")
           and not dropcap('<p class="keep"><strong>1.</strong> 答</p><p>' + "正文" * 30 + "</p>"))
@@ -148,6 +148,11 @@ def test_render_units(rd):
     check("drop cap on a short one-line lead-in", dropcap("<p>若 \\(x\\) 是任意实数，我们记</p>" + prose))
     check("no drop cap on a bold table or figure caption", not dropcap("<p><strong>表 1</strong> 标准子程序和计算机程序分析中常用的量（40 位十进制）</p>")
           and not dropcap('<p><strong><span class="cjkb">图</span> 3</strong> 一棵树的各个部分与它们之间的连接方式</p>'))
+    opener = '<p class="keep"><strong>图　示意</strong></p><figure class="fig"><img src="a.png"></figure><blockquote><p>题词。</p></blockquote>' + prose
+    cap_html = rd.section_html(sec, "标题", opener)
+    check("caption photo epigraph opener caps prose rather than unnumbered caption", '<p class="dropcap">正文' in cap_html and '<p class="keep"><strong>图' in cap_html, cap_html)
+    classed = rd.section_html(sec, "标题", '<p class="caption">A photo</p><figure class="fig"><img src="a.png"></figure>' + prose)
+    check("source caption class is excluded from drop cap", '<p class="dropcap">正文' in classed and '<p class="caption">A photo</p>' in classed, classed)
     # A bold key phrase opening prose is not an answer label: it gets the cap, set bold to match the phrase.
     bold_open = '<p><strong><span class="cjkb">取自</span> n <span class="cjkb">个对象的组合</span></strong>，是从集合中选出不同元素而不计次序的各种选法，对五个对象每次取三个。</p>'
     check("drop cap on prose that opens with a bold phrase", dropcap(bold_open))
@@ -155,11 +160,11 @@ def test_render_units(rd):
     check("a plain opener does not mark the cap bold", "boldcap" not in rd.section_html(sec, "标题", prose))
     # An epigraph (blockquote) before the text: the cap goes on the first top-level paragraph, as the CSS selects it.
     check("drop cap judged on the paragraph after an epigraph", dropcap("<blockquote><p>短题词。</p></blockquote>" + prose))
-    check("css sets a bold-phrase cap in the bold face", ".body-text.boldcap > p:first-of-type::first-letter" in style)
+    check("css sets a bold-phrase cap in the bold face", ".body-text.boldcap > p.dropcap::first-letter" in style)
     # Chinese books indent every paragraph; only a drop-cap paragraph starts flush, so a list section's first item
     # (an answer "1.", an index entry) lines up with the rest.
-    check("css starts only a drop-cap paragraph flush", ".body-text:not(.no-dropcap) > p:first-of-type { text-indent: 0" in style
-          and ".body-text > p:first-of-type { text-indent: 0" not in style)
+    check("css starts only a drop-cap paragraph flush", ".body-text:not(.no-dropcap) > p.dropcap { text-indent: 0" in style
+          and ".body-text > p.dropcap { text-indent: 0" not in style)
     # Songti has no italic: an italic blockquote is mechanically slanted Chinese. Latin keeps its italic face.
     bq = style.split("\nblockquote {")[1].split("}")[0]
     check("css sets blockquote Chinese upright", "font-style: italic" not in bq and "QuoteLatin" in bq, bq)
@@ -170,7 +175,7 @@ def test_render_units(rd):
           and '<em><span class="cjkb">强调</span></em>' in bbody, bbody)
     check("css nudges bold Chinese down", ".cjkb { vertical-align: -0.05em; }" in style)
     check("css keeps a figure and its caption on one page", ".figcap { break-inside: avoid" in style)
-    check("css gates the drop cap on the body-text class", ".body-text:not(.no-dropcap) > p:first-of-type::first-letter" in style)
+    check("css gates the drop cap on the body-text class", ".body-text:not(.no-dropcap) > p.dropcap::first-letter" in style)
     toc = rd.contents_html([(sec, "标题")], {"04": "1"})
     check("contents row", "⟦TOC⟧" in toc and '<span class="pg">1</span>' in toc)
 
@@ -384,6 +389,8 @@ def test_compiles_clean():
 def main():
     lint = subprocess.run([sys.executable, str(HERE.parent / "tests" / "test_lint_md.py")], capture_output=True, text=True)
     check("Markdown lint regressions", lint.returncode == 0, lint.stdout + lint.stderr)
+    formatter = subprocess.run(["uv", "run", str(HERE.parent / "tests" / "test_format_check.py")], capture_output=True, text=True)
+    check("PDF caption format check regressions", formatter.returncode == 0, formatter.stdout + formatter.stderr)
     test_compiles_clean()
     rd = load("render")
     test_render_units(rd)
