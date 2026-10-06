@@ -112,7 +112,7 @@ export function classify(title, chapter, seenChapter) {
   if (/\bcover\b/.test(t)) return "cover";
   if (t === "contents" || t === "table of contents") return "contents";
   if (["index", "notes", "endnotes", "references", "bibliography", "works cited", "further reading",
-    "copyright", "title page", "half title", "also by", "about the author"].includes(t)) return "skip";
+    "copyright", "title page", "half title", "also by", "about the author", "about this ebook"].includes(t)) return "skip";
   if (chapter !== null) return "chapter";
   return seenChapter ? "back" : "front";
 }
@@ -458,7 +458,7 @@ export function epubFragment(z, href, work, keepImages, counter) {
     }
     const ext = suffixOf(imgHref) || ".png";
     fs.writeFileSync(path.join(work, "images", `${key}${ext}`), data);
-    imgs[key] = { file: `${key}${ext}`, w: 0, h: 0, block: !inline };
+    imgs[key] = { file: `${key}${ext}`, w: 0, h: 0, block: !inline, src: stemOf(imgHref) };
     const token = IMG_TOKEN.replace("{}", key);
     return inline ? token : `\n${token}\n`;
   });
@@ -478,8 +478,48 @@ const EPUB_SKIP_STEM = /^(cover|titlepage|halftitle|title|copyright|toc|nav|ncx|
 // A book's terminal back-matter opens with one of these; once past the last chapter it and every spine file
 // after it (continuations that carry no nav title of their own included) are skipped rather than translated.
 const BACKMATTER_START = /^(notes|endnotes|references|bibliography|works cited|further reading|index)\b/i;
-// A conclusion-like closing section is real content: it opens its own section rather than folding into the last chapter.
-const OWN_BACK_SECTION = /^(conclusion|epilogue|afterword|postscript|coda)\b/i;
+// A conclusion-like closing section, the answers to exercises and an appendix are real content: each opens its own
+// section rather than folding into the last chapter.
+const OWN_BACK_SECTION = /^(conclusion|epilogue|afterword|postscript|coda|answers|solutions|appendix)\b/i;
+// One translation call handles a section of up to about this many words; a longer one (a whole chapter of a
+// textbook) is split at its numbered subsection headings.
+const MAX_SECTION_WORDS = 15000;
+// A numbered subsection heading ("1.2.1. Mathematical Induction", "*1.2.11 ...") or an answers subsection
+// ("Section 1.2.1"): the split points of an over-long section.
+const SUBSECTION_HEADING_RE = /<h([2-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
+const NUMBERED_RE = /^\*?\d+(?:\.\d+)+\.?\s/;
+const ANSWER_SECTION_RE = /^section\s+\d+(?:\.\d+)*$/i;
+
+/** An over-long section split at its numbered subsection headings: the part before the first one stays the
+ * section itself (it keeps the chapter label), each subsection becomes a section of the same kind and chapter
+ * titled by its heading ("1.2.1 Mathematical Induction"; an answers subsection "Answers to Exercises: Section 1.2.1").
+ * A heading with no body of its own ("1.2 Preliminaries" right before "1.2.1 ...") leads the next section instead
+ * of making an empty one; so does a part before the first heading that has no body and no chapter label. */
+export function splitSubsections(sec, wordsOf) {
+  const cuts = [];
+  for (const m of sec.frag.matchAll(SUBSECTION_HEADING_RE)) {
+    const text = pyStrip(unescapeXml(m[2].replace(/<[^>]+>/g, "")).replace(/\s+/g, " "));
+    if (NUMBERED_RE.test(text) || ANSWER_SECTION_RE.test(text)) cuts.push({ at: m.index, end: m.index + m[0].length, text });
+  }
+  if (!cuts.length) return [sec];
+  const bodyWords = (frag) => wordsOf(frag.replace(/<h([1-6])\b[^>]*>[\s\S]*?<\/h\1>/gi, " ")); // headings aside
+  const pieces = [{ ...sec, frag: sec.frag.slice(0, cuts[0].at), own: bodyWords(sec.frag.slice(0, cuts[0].at)) }];
+  cuts.forEach((c, i) => {
+    const frag = sec.frag.slice(c.at, i + 1 < cuts.length ? cuts[i + 1].at : undefined);
+    const title = NUMBERED_RE.test(c.text) ? c.text.replace(/^(\*?\d+(?:\.\d+)+)\.?\s+/, "$1 ") : `${sec.title}: ${c.text}`;
+    pieces.push({ title, outlineTitle: c.text, chapter: sec.chapter, label: null, kind: sec.kind, frag,
+      own: bodyWords(frag) });
+  });
+  const out = [];
+  let carry = "";
+  pieces.forEach((p, i) => {
+    const last = i === pieces.length - 1;
+    if (!last && p.own === 0 && !(i === 0 && p.label)) { carry += p.frag; return; } // heading only: lead the next
+    out.push({ ...p, frag: carry + p.frag });
+    carry = "";
+  });
+  return out.map(({ own, ...p }) => p);
+}
 
 /** Split an EPUB into sections from its OPF spine (order) and nav/ncx (titles), keeping the XHTML formatting
  * that PDF extraction destroys (bold vectors, sub/superscripts, prose emphasis). Part-divider files are folded
@@ -535,14 +575,18 @@ export function extractEpub(source, work, keepImages, pageSize) {
 
   const wordsOf = (frag) => pySplit(frag.replace(IMG_TOKEN_RE, " ").replace(/<[^>]+>/g, " ")).length;
 
-  const flush = () => {
-    if (cur === null) return;
+  const emit = (sec) => {
     idx += 1;
     const sid = String(idx).padStart(2, "0");
-    const sfile = `text/${sid}-${slugify(cur.title)}.xhtml`;
-    fs.writeFileSync(path.join(work, sfile), cur.frag);
-    sections.push({ id: sid, title: cur.title, outline_title: cur.outlineTitle, chapter: cur.chapter, label: cur.label,
-      kind: cur.kind, start: 0, end: 0, file: sfile, words: wordsOf(cur.frag) });
+    const sfile = `text/${sid}-${slugify(sec.title)}.xhtml`;
+    fs.writeFileSync(path.join(work, sfile), sec.frag);
+    sections.push({ id: sid, title: sec.title, outline_title: sec.outlineTitle, chapter: sec.chapter, label: sec.label,
+      kind: sec.kind, start: 0, end: 0, file: sfile, words: wordsOf(sec.frag) });
+  };
+
+  const flush = () => {
+    if (cur === null) return;
+    for (const sec of wordsOf(cur.frag) > MAX_SECTION_WORDS ? splitSubsections(cur, wordsOf) : [cur]) emit(sec);
     cur = null;
   };
 
@@ -564,6 +608,7 @@ export function extractEpub(source, work, keepImages, pageSize) {
   let lastChapterPos = -1;
   spine.forEach((idref, i) => { if (chapterAt(idref) !== null) lastChapterPos = i; });
   let inBackmatter = false;
+  let skipping = false; // the last file was skipped (an index, a bibliography): its untitled continuations are too
 
   for (let pos = 0; pos < spine.length; pos++) {
     const item = manifest[spine[pos]];
@@ -571,6 +616,9 @@ export function extractEpub(source, work, keepImages, pageSize) {
     if (inBackmatter) continue; // the book's terminal back-matter has started — skip it and everything after
     const href = item.href;
     const stem = stemOf(path.posix.basename(href));
+    const navTitled = Object.hasOwn(titles, path.posix.basename(href));
+    if (skipping && !navTitled) continue;
+    skipping = false;
     const stitle = titles[path.posix.basename(href)] || epubFirstHeading(z, href) || stem;
     if (pos > lastChapterPos && BACKMATTER_START.test(pyStrip(stitle))) {
       inBackmatter = true;
@@ -580,7 +628,7 @@ export function extractEpub(source, work, keepImages, pageSize) {
     let [chapter, clean] = parseTitle(stitle);
     let isSubsection = /^\s*\d+(?:\.\d+)+/.test(stitle); // 1.1, 2.10 … a subsection, not a chapter
     const isPart = PART_STEM.test(stem) || /^\s*part\b/i.test(stitle);
-    if (EPUB_SKIP_STEM.test(stem)) continue;
+    if (EPUB_SKIP_STEM.test(stem)) { skipping = true; continue; }
     if (chapter === null && !isPart && PART_TITLE_RE.test(stitle)) {
       // First chapter of a part: this opener file's nav title is the PART name, so the chapter number and
       // title live in its headings ("CHAPTER 3" / "Solving Problems by Searching"). See translate-roman parts.
@@ -595,7 +643,7 @@ export function extractEpub(source, work, keepImages, pageSize) {
       continue;
     }
     const kind = classify(stitle, chapter, seenChapter);
-    if (kind === "cover" || kind === "contents" || kind === "skip") continue;
+    if (kind === "cover" || kind === "contents" || kind === "skip") { skipping = kind === "skip"; continue; }
     // A subsection (1.1 …) or a chapter's trailing notes (its Bibliographical Remarks etc.) belong under the
     // current chapter, becoming ## sub-headings, so a per-subsection-file EPUB groups into one section per
     // chapter like a per-chapter-file one. A Conclusion/Epilogue/Afterword is substantial standalone content,
@@ -615,7 +663,7 @@ export function extractEpub(source, work, keepImages, pageSize) {
   }
   flush();
 
-  const nums = sections.map((s) => s.chapter).filter((n) => n);
+  const nums = sections.filter((s) => s.label).map((s) => s.chapter); // chapter openers; split subsections share the number
   if (nums.length) { // a gap or duplicate means an opener was not recognised — the general safety net for a new EPUB layout
     const gaps = [];
     for (let n = Math.min(...nums); n <= Math.max(...nums); n++) if (!nums.includes(n)) gaps.push(n);
