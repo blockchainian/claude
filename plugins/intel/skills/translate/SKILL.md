@@ -163,7 +163,8 @@ invisible; chapter openers and headings match. Picture-type (image) equations fr
 pixel width times `--inline-scale` (default 0.33, about body-text size). A Markdown rule (`---`, a scene break in the source) is set as blank space between the
 paragraphs, never as a drawn line. CJK closing punctuation right after inline math, inline code or an inline image is bound to
 it, so a line never opens with ，or 。. A block figure and the caption paragraph right after it (`**图 N.**`, `**表 N**`, `**Fig.**`,
-`**Table**`) are never split by a page break. Chapter openers carry the
+`**Table**`) are never split by a page break. The paragraph right before a block figure is kept with it, so a lead-in ("如下：")
+is never left alone at a page bottom; a long one still splits, with only its last lines moving. Chapter openers carry the
 第N章 label, the title and a drop cap (left off when the first paragraph opens with a bold label or a digit, as in
 an answers section, or is too short to wrap round it); body pages carry the chapter title as running head and a folio (roman in
 front matter, arabic from chapter 1). Every 目录 row is a link to its section, and the bookmarks are flat:

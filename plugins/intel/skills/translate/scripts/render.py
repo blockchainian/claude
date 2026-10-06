@@ -144,6 +144,10 @@ def md_to_html(md_text):
 # place_images wraps the pair in a .figcap block that a page break cannot split.
 FIGCAP_RE = re.compile(r'(<figure class="fig[^"]*"><img[^>]*></figure>)(?:<p></p>)?\s*'
                        r'(<p><strong>\s*(?:图|表|Fig|Table)(?:(?!</p>).)*</p>)', re.S)
+EMPTY_P_RE = re.compile(r"<p>\s*</p>")
+# The paragraph right before a block figure (or figure + caption): it leads into the figure ("如下：", "**9、10、11。**")
+# and is kept with it (.keep: break-after: avoid) so it is never left alone at a page bottom.
+LEAD_P_RE = re.compile(r'<p>((?:(?!</?p>).)*)</p>(?=\s*(?:<figure class="fig|<div class="figcap">))', re.S)
 IMG_TOKEN_RE = re.compile(rf"⟦IMG:([^⟧]+)⟧([{CJK_CLOSE}]*)")  # with any CJK punctuation right after it
 
 
@@ -219,7 +223,9 @@ def place_images(body_html, work, images, fg, bg, eq_scale=None, inline_scale=No
         style = f' style="{width};height:auto;max-height:none"' if width else ""
         img = f'<img class="infig{plate}"{style} src="{uri}">'
         return f'<span class="nb">{img}{m.group(2)}</span>' if m.group(2) else img  # punctuation never opens a line
-    return FIGCAP_RE.sub(r'<div class="figcap">\1\2</div>', IMG_TOKEN_RE.sub(repl, body_html))
+    out = FIGCAP_RE.sub(r'<div class="figcap">\1\2</div>', IMG_TOKEN_RE.sub(repl, body_html))
+    out = EMPTY_P_RE.sub("", out)  # the shells left round a figure that stood alone in its paragraph
+    return LEAD_P_RE.sub(r'<p class="keep">\1</p>', out)
 
 
 def css(page_size, bg, fg, heads, font_size=9.25, bold=None):
@@ -275,6 +281,7 @@ em {{ font-family: {hei}; font-weight: 700; font-style: normal; color: {bold}; }
 .fig {{ margin: 10pt auto; text-align: center; break-inside: avoid; }}
 .fig img {{ max-width: 100%; height: auto; }}
 .figcap {{ break-inside: avoid; }}  /* a figure and its caption stay on one page */
+p.keep {{ break-after: avoid; }}  /* a lead-in paragraph stays with the figure it introduces */
 .fig.plate img {{ background: #fff; padding: 4pt 6pt; border-radius: 3pt; }}
 .infig {{ max-height: 1.4em; width: auto; vertical-align: middle; }}
 .infig.plate {{ background: #fff; padding: 0 2pt; border-radius: 2pt; }}
