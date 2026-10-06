@@ -373,6 +373,12 @@ def test_render_e2e(rd):
         check("render fails on an unparseable equation (KaTeX error guard)", guarded)
 
 
+def test_render_import():
+    with tempfile.TemporaryDirectory() as d:
+        result = subprocess.run([sys.executable, "-c", "import runpy,sys; runpy.run_path(sys.argv[1])", str(HERE / "render.py")], cwd=d, capture_output=True, text=True)
+    check("renderer loads by file path from another skill", result.returncode == 0, result.stderr)
+
+
 def test_compiles_clean():
     # Python prints a SyntaxWarning for an invalid escape (e.g. "\\m" in a non-raw string) on every run.
     import warnings
@@ -391,6 +397,7 @@ def main():
     check("Markdown lint regressions", lint.returncode == 0, lint.stdout + lint.stderr)
     formatter = subprocess.run(["uv", "run", str(HERE.parent / "tests" / "test_format_check.py")], capture_output=True, text=True)
     check("PDF caption format check regressions", formatter.returncode == 0, formatter.stdout + formatter.stderr)
+    test_render_import()
     test_compiles_clean()
     rd = load("render")
     test_render_units(rd)

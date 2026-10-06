@@ -24,6 +24,8 @@ from pathlib import Path
 import markdown
 import pikepdf
 
+# Resolve sibling helpers when another skill loads this renderer by file path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from code_blocks import CODE_CONTENT_RE, CODE_TOKEN_RE
 from openers import opening_paragraph
 from PIL import Image
