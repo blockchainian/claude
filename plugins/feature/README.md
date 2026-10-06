@@ -91,3 +91,10 @@ extractor against a hermetic fixture session).
 ## License
 
 MIT
+
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `FEATURE_CI_TIMEOUT_SECONDS` | CI waiting limit; default 300 seconds | Optional | Shell environment |
+| `FEATURE_CI_INTERVAL_SECONDS` | CI check interval; default 5 seconds | Optional | Shell environment |
