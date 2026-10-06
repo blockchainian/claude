@@ -328,7 +328,8 @@ p.keep {{ break-after: avoid; }}  /* a lead-in paragraph stays with the figure i
 
 FIRST_P_RE = re.compile(r"<p(?:\s[^>]*)?>(.*?)</p>", re.S)  # also <p class="keep">
 BLOCKQUOTE_RE = re.compile(r"<blockquote>.*?</blockquote>", re.S)
-LEADING_IMG_RE = re.compile(r"^(\s|<img\b[^>]*>)*")
+# Leading marker images, bare or in a box that hangs them in the indent (<span ...><img ...></span>).
+LEADING_IMG_RE = re.compile(r"^(\s|<img\b[^>]*>|<span\b[^>]*>\s*<img\b[^>]*>\s*</span>)*")
 BOLD_RE = re.compile(r"<(strong|b)>(.*?)</\1>", re.S)
 # A bold number label: "**1.**", "**E1.**" (an exercise or answer), "**表 1**", "**图 3**", "**Table 2**" (a caption).
 LABEL_TEXT_RE = re.compile(r"\s*([A-Za-z]?\d|(表|图|Table|Fig\.?)\s*\d)")
