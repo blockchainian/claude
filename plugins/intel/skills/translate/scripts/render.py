@@ -140,6 +140,10 @@ def md_to_html(md_text):
     return title, out
 
 
+# A block figure and the caption paragraph right after it ("**图 N.**", "**表 N**", "**Fig. N**", "**Table N**"):
+# place_images wraps the pair in a .figcap block that a page break cannot split.
+FIGCAP_RE = re.compile(r'(<figure class="fig[^"]*"><img[^>]*></figure>)(?:<p></p>)?\s*'
+                       r'(<p><strong>\s*(?:图|表|Fig|Table)(?:(?!</p>).)*</p>)', re.S)
 IMG_TOKEN_RE = re.compile(rf"⟦IMG:([^⟧]+)⟧([{CJK_CLOSE}]*)")  # with any CJK punctuation right after it
 
 
@@ -215,7 +219,7 @@ def place_images(body_html, work, images, fg, bg, eq_scale=None, inline_scale=No
         style = f' style="{width};height:auto;max-height:none"' if width else ""
         img = f'<img class="infig{plate}"{style} src="{uri}">'
         return f'<span class="nb">{img}{m.group(2)}</span>' if m.group(2) else img  # punctuation never opens a line
-    return IMG_TOKEN_RE.sub(repl, body_html)
+    return FIGCAP_RE.sub(r'<div class="figcap">\1\2</div>', IMG_TOKEN_RE.sub(repl, body_html))
 
 
 def css(page_size, bg, fg, heads, font_size=9.25, bold=None):
@@ -270,6 +274,7 @@ li {{ margin: 2pt 0; }}
 em {{ font-family: {hei}; font-weight: 700; font-style: normal; color: {bold}; }}  /* Chinese emphasis: 黑体 bold, not italic (Songti italic is illegible); math variables are KaTeX, not <em> */
 .fig {{ margin: 10pt auto; text-align: center; break-inside: avoid; }}
 .fig img {{ max-width: 100%; height: auto; }}
+.figcap {{ break-inside: avoid; }}  /* a figure and its caption stay on one page */
 .fig.plate img {{ background: #fff; padding: 4pt 6pt; border-radius: 3pt; }}
 .infig {{ max-height: 1.4em; width: auto; vertical-align: middle; }}
 .infig.plate {{ background: #fff; padding: 0 2pt; border-radius: 2pt; }}

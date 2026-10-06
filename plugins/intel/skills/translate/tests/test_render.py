@@ -74,6 +74,12 @@ def test_render_units(rd):
         bound = rd.place_images("<p>得出 ⟦IMG:5_2⟧。）后 ⟦IMG:5_1⟧，再</p>", work, images, "#c9c4b8", "#000409", 0.6, 0.33)
         check("inline image + CJK punctuation bound together, block figure not",
               bound.count('class="nb"') == 1 and '<span class="nb"><img class="infig plate"' in bound and "。）</span>" in bound, bound)
+        # A caption paragraph right after a block figure must never be split from it by a page break.
+        _, cap_md = rd.md_to_html("# T\n\n⟦IMG:5_1⟧\n\n**图 3.** 一棵树。\n\n⟦IMG:5_1⟧\n\n**图 4。**两棵树。\n\n⟦IMG:5_1⟧\n\n后文。\n")
+        cap = rd.place_images(cap_md, work, images, "#c9c4b8", "#000409", 0.6, 0.33)
+        check("block figure + caption kept together in one no-break block",
+              cap.count('<div class="figcap"><figure') == 2 and "一棵树。</p></div>" in cap and "两棵树。</p></div>" in cap, cap)
+        check("a figure followed by ordinary prose is not wrapped", cap.count("figcap") == 2 and "<p>后文。</p>" in cap, cap)
         check("unknown placeholder dropped, not left raw", rd.place_images("a⟦IMG:zz⟧b", work, images, "#c9c4b8", "#000409") == "ab")
     check("roman folios", [rd.folio_for(i, None) for i in range(3)] == ["i", "ii", "iii"])
     check("roman folio past the table falls back to arabic (long front matter)",
@@ -105,6 +111,7 @@ def test_render_units(rd):
     check("no drop cap after a leading image then a bold label", not dropcap('<p><img class="infig" src="a.png"> <strong>2.</strong> ' + "习题" * 60 + "</p>"))
     check("no drop cap when the first paragraph opens with a digit", not dropcap("<p>7 " + "正文" * 60 + "</p>"))
     check("no drop cap on a very short first paragraph", not dropcap("<p>短。</p>" + prose))
+    check("css keeps a figure and its caption on one page", ".figcap { break-inside: avoid" in style)
     check("css gates the drop cap on the body-text class", ".body-text:not(.no-dropcap) > p:first-of-type::first-letter" in style)
     toc = rd.contents_html([(sec, "标题")], {"04": "1"})
     check("contents row", "⟦TOC⟧" in toc and '<span class="pg">1</span>' in toc)
