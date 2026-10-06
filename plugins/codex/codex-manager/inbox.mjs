@@ -66,8 +66,8 @@ export class SessionStore {
     return path.join(this.dir, `${threadId}.jsonl`);
   }
 
-  cursorPath(threadId) {
-    return path.join(this.dir, `${threadId}.cursor`);
+  cursorPath(threadId, reader = "await") {
+    return path.join(this.dir, `${threadId}${reader === "await" ? "" : `.${reader}`}.cursor`);
   }
 
   readState() {
@@ -92,17 +92,17 @@ export class SessionStore {
     appendFileSync(this.inboxPath(threadId), `${JSON.stringify({ ts: Date.now(), ...event })}\n`);
   }
 
-  readCursor(threadId) {
+  readCursor(threadId, reader) {
     try {
-      return Number(readFileSync(this.cursorPath(threadId), "utf8")) || 0;
+      return Number(readFileSync(this.cursorPath(threadId, reader), "utf8")) || 0;
     } catch {
       return 0;
     }
   }
 
   /** Unread complete lines after the cursor, and the offset just past the last of them. */
-  unread(threadId) {
-    const cursor = this.readCursor(threadId);
+  unread(threadId, reader) {
+    const cursor = this.readCursor(threadId, reader);
     let text;
     try {
       text = readFileSync(this.inboxPath(threadId));
@@ -121,20 +121,20 @@ export class SessionStore {
   }
 
   /** Marks everything before `end` as delivered; only readers call this. */
-  advance(threadId, end) {
-    writeFileSync(this.cursorPath(threadId), String(end));
+  advance(threadId, end, reader) {
+    writeFileSync(this.cursorPath(threadId, reader), String(end));
   }
 
   /**
-   * Takes the unread lines and advances the cursor under a lock, so `await` and the Stop hook
-   * never deliver the same event twice. Returns [] when the lock is busy or nothing is unread.
+   * Takes the unread lines and advances the reader's cursor under a lock, so each reader
+   * delivers an event once. Returns [] when the lock is busy or nothing is unread.
    */
-  claim(threadId) {
+  claim(threadId, reader) {
     const lock = `${this.inboxPath(threadId)}.lock`;
     if (!this.acquire(lock)) return [];
     try {
-      const { lines, end } = this.unread(threadId);
-      if (lines.length) this.advance(threadId, end);
+      const { lines, end } = this.unread(threadId, reader);
+      if (lines.length) this.advance(threadId, end, reader);
       return lines;
     } finally {
       rmSync(lock, { recursive: true, force: true });

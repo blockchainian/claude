@@ -104,7 +104,7 @@ async function runPending() {
   if (!store.exists()) return 0;
   const sections = [];
   for (const threadId of store.threadIds()) {
-    const lines = store.claim(threadId);
+    const lines = store.claim(threadId, "pending");
     if (lines.length) sections.push(`codex thread ${threadId}:\n${lines.join("\n")}`);
   }
   // A held ask is nudged once per stop; when the hook itself caused this stop, only new events count.

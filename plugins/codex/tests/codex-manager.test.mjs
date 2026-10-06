@@ -94,7 +94,7 @@ test("await prints unread lines, advances the cursor, and times out on silence",
   }
 });
 
-test("pending stays silent without state and blocks once on unread events", async () => {
+test("pending stays silent without state and blocks once without consuming await events", { timeout: 15_000 }, async () => {
   const home = await tempHome();
   try {
     const env = { CODEX_MANAGER_STATE_DIR: home.home };
@@ -103,7 +103,8 @@ test("pending stays silent without state and blocks once on unread events", asyn
     assert.equal(nothing.code, 0);
     assert.equal(nothing.stdout, "");
     await mkdir(home.dir, { recursive: true });
-    await writeFile(path.join(home.dir, "thread-9.jsonl"), '{"kind":"completed","status":"failed"}\n');
+    const event = '{"kind":"completed","status":"completed","lastMessage":"finished the work"}\n';
+    await appendFile(path.join(home.dir, "thread-9.jsonl"), event);
     const blocked = await run(["pending"], { env, stdin: hookInput });
     assert.equal(blocked.code, 0, blocked.stderr);
     const decision = JSON.parse(blocked.stdout);
@@ -111,7 +112,11 @@ test("pending stays silent without state and blocks once on unread events", asyn
     assert.match(decision.reason, /thread-9/);
     assert.match(decision.reason, /"kind":"completed"/);
     const again = await run(["pending"], { env, stdin: hookInput });
+    assert.equal(again.code, 0, again.stderr);
     assert.equal(again.stdout, "");
+    const completed = await run(["await", "--thread", "thread-9", "--timeout", "1"], { env });
+    assert.equal(completed.code, 0, completed.stderr);
+    assert.equal(completed.stdout, event);
   } finally {
     await home.close();
   }

@@ -1,6 +1,6 @@
 {
   "name": "claude",
-  "version": "0.18.5",
+  "version": "0.18.6",
   "description": "Communicate with the Claude session supervising this Codex thread through ask_claude and notify_claude.",
   "author": {
     "name": "blockchainian"
