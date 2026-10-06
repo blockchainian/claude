@@ -1,5 +1,5 @@
 // ABOUTME: Tests TikTok login helpers and code submission with a minimal fake browser page.
-// ABOUTME: Covers session cookies, ISP slots, and terminal/headed codes. No browser, no network.
+// ABOUTME: Covers session cookies, ISP slots, and headed codes. No browser, no network.
 
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -8,9 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { PassThrough } from "node:stream";
-
-import { sessionCookies, loginProxy, promptEmailCode, signInTiktok, TiktokLoginError } from "../scripts/tiktok-login.mjs";
+import { sessionCookies, loginProxy, signInTiktok, TiktokLoginError } from "../scripts/tiktok-login.mjs";
 import * as tiktok from "../scripts/tiktok-login.mjs";
 
 let previousStatePath;
@@ -46,18 +44,6 @@ test("loginProxy binds a login to the pool's last slot, or the slot the account 
 
 test("loginProxy refuses to run without the ISP pool", () => {
   assert.throws(() => loginProxy({}), /ISP_PROXY_URL/);
-});
-
-test("the code prompt answers with the typed code, and with nothing once it is called off", async () => {
-  const typed = new PassThrough();
-  const answered = promptEmailCode("bob1", undefined, { input: typed, output: new PassThrough() });
-  typed.write(" 123456 \n");
-  assert.equal(await answered, "123456");
-
-  const off = new AbortController();
-  const waiting = promptEmailCode("bob1", off.signal, { input: new PassThrough(), output: new PassThrough() });
-  off.abort();
-  assert.equal(await waiting, null);
 });
 
 function codeDialog(values) {
@@ -177,7 +163,7 @@ function credentialForm({ values = ["", ""], enabled = false, wipe = false, unre
 
 async function signInWithFake({ context, page }) {
   return signInTiktok(context, page, "bob1", "password", Date.now() + 10000, {
-    readCode: async () => null,
+    headed: true,
   });
 }
 
@@ -321,19 +307,17 @@ test("codes typed in the headed dialog submit once per distinct six-digit value"
     "", "", "12345", "12345x", "1234567", "123456", "123456", "654321", "654321", "123456",
   ]);
   await signInTiktok(context, page, "bob1", "password", Date.now() + 10000, {
-    readCode: () => new Promise(() => {}),
+    headed: true,
   });
   assert.deepEqual(clicks, [
     "credentials", { name: "Verify", code: "123456" }, { name: "Verify", code: "654321" },
   ]);
 });
 
-test("a terminal code is typed and submitted without resubmitting it from the dialog", async () => {
-  const { context, page, clicks } = codeDialog(["", "", "", "123456", "123456"]);
-  await signInTiktok(context, page, "bob1", "password", Date.now() + 10000, {
-    readCode: async () => "123456",
-  });
-  assert.deepEqual(clicks, ["credentials", { name: "Verify", code: "123456" }]);
+test("headless email verification reports that a headed login is required", async () => {
+  const { context, page, clicks } = codeDialog(["", "", ""]);
+  await assert.rejects(signInTiktok(context, page, "bob1", "password", Date.now() + 10000), /run login tiktok --headed/);
+  assert.deepEqual(clicks, ["credentials"]);
 });
 
 test("sign-in keeps polling when the code dialog closes before its value is read", async () => {
@@ -344,7 +328,7 @@ test("sign-in keeps polling when the code dialog closes before its value is read
     throw new Error("Code dialog closed");
   };
   const cookies = await signInTiktok(context, page, "bob1", "password", Date.now() + 10000, {
-    readCode: () => new Promise(() => {}),
+    headed: true,
   });
   assert.deepEqual(cookies, [cookie("sessionid", ".tiktok.com")]);
   assert.equal(reads.length, 2);

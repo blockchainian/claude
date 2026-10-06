@@ -2,7 +2,10 @@
 // ABOUTME: Namecheap domains.check response — no network, real parse logic against a fixture.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCheck, classify } from "../scripts/check.mjs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseCheck, classify, loadCreds } from "../scripts/check.mjs";
 
 const ok = `<?xml version="1.0" encoding="utf-8"?>
 <ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
@@ -53,4 +56,16 @@ test("classify maps the four real states", () => {
   assert.equal(s("goldfinger.fun").price, "");
   assert.equal(s("midas.fun").status, "available-premium");
   assert.equal(s("midas.fun").price, "$1625 buy / $6500/yr");
+});
+
+test("Namecheap credentials use a local dotenv file with quotes and comments", () => {
+  const dir = mkdtempSync(join(tmpdir(), "namecheap-env-"));
+  const config = join(dir, ".env");
+  try {
+    writeFileSync(config, 'NAMECHEAP_API_USER="fixture-user" # comment\nNAMECHEAP_API_KEY="fixture#key"\n');
+    assert.deepEqual(loadCreds(config), { apiUser: "fixture-user", apiKey: "fixture#key" });
+    writeFileSync(config, 'NAMECHEAP_API_USER="fixture-user"\n');
+    assert.throws(() => loadCreds(config), /NAMECHEAP_API_KEY/);
+    assert.throws(() => loadCreds(join(dir, "missing")), { code: "ENOENT" });
+  } finally { rmSync(dir, { recursive: true }); }
 });

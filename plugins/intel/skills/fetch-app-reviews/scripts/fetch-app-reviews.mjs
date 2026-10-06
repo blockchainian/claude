@@ -22,6 +22,9 @@ import { realpathSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { join } from "node:path";
+const isMain = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) loadEnvFile();
+
 let ProxyAgent;
 try { ({ ProxyAgent } = await import("undici")); }
 catch (e) {
@@ -119,12 +122,11 @@ function proxyConfig() {
   return { uri: `${u.protocol}//${u.host}`, token };
 }
 
-const PROXY = proxyConfig(); // validated once at load
-
 // A fresh agent per request => a fresh CONNECT tunnel => a fresh residential exit IP.
 function newAgent() {
+  const proxy = proxyConfig();
   return new ProxyAgent(
-    PROXY.token ? { uri: PROXY.uri, token: PROXY.token } : PROXY.uri,
+    proxy.token ? { uri: proxy.uri, token: proxy.token } : proxy.uri,
   );
 }
 
@@ -368,6 +370,6 @@ async function main() {
   );
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain) {
   await main();
 }

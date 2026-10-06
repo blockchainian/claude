@@ -5,6 +5,32 @@ description: Profile the accounts behind an app's X/Twitter mentions — who tal
 
 # Analyze Twitter Users
 
+## Runtime and paths
+
+Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
+this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
+shell variables may not persist between calls. If the loaded path is unavailable, stop
+and report it. Keep the full intel plugin installed: sibling skills share scripts.
+Run archive commands from the repository that owns the archive; configuration and
+account stores are shared between hosts and are not migrated by installing intel.
+
+For finite long-running commands, choose a deadline before launch and retain the process
+handle and output. In Claude Code use `run_in_background` and its completion notification;
+in Codex use the shell tool's process/session handle and wait for completion. Subagents
+must await their own commands before returning. Do not repeatedly poll logs or assume a
+background completion wakes either host. On timeout, preserve diagnostics and report the
+process state before retrying. Use the current host's image/file tools to inspect artifacts.
+
+## Environment Variables
+
+No skill-specific environment variables or `.env` file are required.
+
 The accounts behind one app's X mentions → `users.md`: how the accounts split into
 behavioral segments, how much of the posts and engagement each segment owns, the
 die-hard daily promoters and whether they have a stake, and each segment's
@@ -20,18 +46,17 @@ self-review checks quotes and overclaims before the doc ships.
 - **Output**: `docs/intel/x/<slug>/users.md` and two charts in
   `docs/intel/x/<slug>/images/<slug>-users-*.png`.
 
-Every command runs from the repo root; `S="${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-users/scripts"`,
-`T="${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-mentions/scripts"` below.
+Every command runs from the repo root; `S="$SKILL_DIR/scripts"`,
+`T="$SKILL_DIR/../analyze-x-mentions/scripts"` below.
 
 > **Run steps 3 and 6 inline — do not spawn subagents for them.** The motivation read
 > and the adversarial review are done by whoever runs this skill, directly against
 > `reps/<role>.jsonl` and `authors.json`. The representative sample is small (≤ 7
 > accounts × ≤ 35 posts per role, well under 1000 posts total), so one context reads it
-> fast and far cheaper than a fan-out. This also makes the skill work identically whether
-> it runs in the main session or inside a subagent: a subagent that fans out its own
-> children then idles before they finish cannot receive their results (the child's return
-> lands on no live turn), which strands the run. If a future corpus is genuinely too large
-> to read inline, use the Workflow tool for the fan-out — never nested subagents.
+> fast and far cheaper than a fan-out. This rule applies in either host, including
+> when the skill runs inside a subagent. If a future corpus exceeds the available
+> context, use Claude Code's Workflow tool there; in Codex report the size and
+> agree on a separate bounded workflow. Never spawn nested agents.
 
 ## Procedure
 
@@ -80,7 +105,7 @@ Write `<scratch>/app-facts.md` if `analyze-x-mentions` has not left one: the app
 handles (current and former) and founder, its referral / rewards mechanics, the noise
 common in its mentions, user slang.
 
-Then read `${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-users/motivation-prompt.md` once and, following it
+Then read `$SKILL_DIR/motivation-prompt.md` once and, following it
 exactly, work through each `reps/<role>.jsonl` yourself (skip `official`) — inline, in this
 context, not by spawning a subagent. For each role produce: ranked motivations with quotes,
 a money / affiliation count, what the accounts do otherwise, one line per account, and which
@@ -157,7 +182,7 @@ Rules:
 
 ### 6. Adversarial review, inline
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-users/review-prompt.md` and follow it exactly, reviewing the
+Read `$SKILL_DIR/review-prompt.md` and follow it exactly, reviewing the
 doc yourself — inline, not by spawning a subagent. Check `docs/intel/x/<slug>/users.md`
 against `<scratch>/app-facts.md`, `<scratch>/authors.json`, `<scratch>/role_stats.json` and
 `<scratch>/reps/*.jsonl`: verify every `/status/<id>` (id exists, handle matches), every
@@ -177,14 +202,14 @@ SHOULD-FIX; a NIT only when it is a one-line change.
 ## Tests
 
 ```
-node --test "${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-users/tests/test_profile_authors.mjs"
+node --test "$SKILL_DIR/tests/test_profile_authors.mjs"
 ```
 
 Archive paths are relative to the working directory, run from the repo root that owns the archive.
 
 Build the CRM from the owning archive root (cwd) with explicit inputs:
 ```sh
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/analyze-x-users/scripts/build-crm.py" --scratch <analysis-dir> --apps <comma-separated-archive-slugs>
+python3 "$SKILL_DIR/scripts/build-crm.py" --scratch <analysis-dir> --apps <comma-separated-archive-slugs>
 ```
 The analysis directory contains crm/followers.json and each slug's authors.json.
 Output remains docs/intel/x/crm.sqlite under cwd.

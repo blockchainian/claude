@@ -5,6 +5,28 @@ talks, videos, live streams — and from **what people say** about an app — Ap
 Store reviews — into text you can read and search. The plugin also finds book
 download links and checks domain names.
 
+## Hosts and install
+
+Claude Code loads all fifteen skills. Codex loads fourteen; `case-study` keeps its
+Claude Workflow implementation and is excluded by Intel's Codex manifest.
+
+```sh
+# Claude Code
+/plugin marketplace add blockchainian/claude
+/plugin install intel@blockchainian
+
+# Codex
+codex plugin marketplace add blockchainian/claude
+codex plugin add intel@blockchainian
+```
+
+Start a new session after installation. Resolve script paths from the absolute
+loaded `SKILL.md` directory in each shell call. Both hosts use the same scripts,
+archives and existing secrets-manager store. Account
+provisioning uses the secrets-manager skill in the Secrets plugin, available in both
+hosts; installing Intel does not migrate account state. Download-book continues to
+launch its own headed Chrome through its existing Playwright script.
+
 ## Skills
 
 - **`transcribe`** — turn audio into plain-text words, transcribed
@@ -60,9 +82,8 @@ download links and checks domain names.
 - **`fetch-tiktok-mentions`** — archive TikTok videos and comments through ISP sessions.
 - **`fetch-app-reviews`** — archive written App Store reviews across storefronts.
 
-Research scripts use `~/.config/intel/.env`; archive paths are relative to the working
-directory, run from the repo root that owns the archive. X/TikTok accounts are logged in
-with the secrets plugin's `secrets-manager login x|tiktok`.
+Archive paths are relative to the working directory; run from the repo root that owns the archive. X/TikTok accounts are logged in
+through the secrets-manager skill in the Secrets plugin.
 
 ## Why they live together
 
@@ -73,6 +94,10 @@ searchable store on top, over whatever produced the words. New source kinds
 (Twitch VODs, conference talks) slot in by reusing `transcribe` for the
 audio leg and `digest` for the notes.
 
+## Configuration
+
+Intel uses `~/.config/intel/.env` for file-based request settings and API keys, shared by both hosts and all checkouts. Create the directory, copy this plugin’s `.env.example` there as `.env`, and fill in only the values needed by the skills you use. Each skill’s **Environment Variables** section lists its settings and source; optional shell-only settings remain documented there. Account credentials and login sessions stay in Secrets Manager.
+
 ## Requirements
 
 - `transcribe`: Apple Silicon; `setup.sh` installs `ffmpeg`,
@@ -82,16 +107,13 @@ audio leg and `digest` for the notes.
   extractor and the PDF scripts), `yt-dlp` (YouTube subtitles) and `poppler`
   (PDFs); a highlights PDF needs Google Chrome.
 - `translate`: `setup.sh` installs `poppler` and `uv` (for `render.py`; extract and translate are Node scripts); needs a logged-in
-  `codex` CLI (ChatGPT plan, for gpt-6-luna) and Google Chrome (`CHROME=` to
-  point elsewhere).
-- `find-domain-names`: a Namecheap API key with the calling IP whitelisted,
-  stored at `~/.config/blockchainian/claude.json` (see the skill's Setup step).
+  `codex` CLI (ChatGPT plan, for gpt-6-luna) and Google Chrome.
+- `find-domain-names`: Node.js 20.12+ and Namecheap API access with the calling IP whitelisted.
 - `case-study`: Node.js 18+ (its own scripts), everything `digest` needs (it renders with `digest`'s PDF
   script), plus `curl`; a file of machine-tested tool commands is optional.
-- `download-book`: Node.js 18+, Google Chrome, and `npm install` in the skill's
+- `download-book`: Node.js 20.12+, Google Chrome, and `npm install` in the skill's
   `scripts/` dir (Playwright drives a headed Chrome window through the site's
-  DDoS-Guard check; headless browsers get a captcha). Optional `ANNA_SECRET_KEY`
-  for the member fast download API.
+  DDoS-Guard check; headless browsers get a captcha).
 
 ## Tests
 
@@ -113,6 +135,8 @@ chunk-readiness logic, platform resolution, and `setup.sh --check`; when
 `ffmpeg` and a whisper runner are present it also runs a real end-to-end batch
 and live transcription of a generated clip.
 
-Install research dependencies with `npm install --prefix` in fetch-x-mentions/scripts,
+Install research dependencies in the installed skill directories: fetch-x-mentions/scripts,
 fetch-app-reviews/scripts and fetch-tiktok-mentions/scripts. The X post and timeline
-skills share the X client install. Each SKILL.md gives its full plugin-root command.
+skills share the X client install. Each portable SKILL.md gives its skill-relative command; case-study retains Claude plugin-root commands.
+
+Keep `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` versions equal.

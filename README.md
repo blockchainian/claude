@@ -1,7 +1,7 @@
 # claude
 
 The `blockchainian` plugin marketplace for Claude Code, with Cloudflare, Web,
-Proxy, Creator, Render, and Mobile also available in Codex from the same repository.
+Proxy, Creator, Render, Mobile, Intel, and Secrets also available in Codex from the same repository.
 
 | Plugin | What it does |
 |---|---|
@@ -47,13 +47,15 @@ codex plugin add proxy@blockchainian
 codex plugin add creator@blockchainian
 codex plugin add render@blockchainian
 codex plugin add mobile@blockchainian
+codex plugin add intel@blockchainian
+codex plugin add secrets@blockchainian
 ```
 
-The Codex catalog contains these six plugins only. Before this PR merges, add
-`--ref codex` to the marketplace command; for a local checkout, run
+The Codex catalog contains these eight plugins. For a local checkout, run
 `codex plugin marketplace add .` from its root. Start a new session after installing.
 These commands were verified with Codex CLI 0.160.0.
 
+Intel exposes fourteen skills in Codex; its case-study Workflow remains Claude-only.
 Each plugin's README covers its requirements and platform-specific behavior.
 Skills resolve script paths from the loaded `SKILL.md` directory in each shell call.
 For Mobile phone automation, review and trust `phone-session-gate` in `/hooks` first.
@@ -62,7 +64,7 @@ For Mobile phone automation, review and trust `phone-session-gate` in `/hooks` f
 
 ```
 .claude-plugin/marketplace.json   the catalog, listing every plugin
-.agents/plugins/marketplace.json the Codex catalog, listing six portable plugins
+.agents/plugins/marketplace.json the Codex catalog, listing eight portable plugins
 plugins/codex/                    the codex-manager plugin
 plugins/feature/                  the ship / handoff / retro plugin
 plugins/mobile/                   the iOS plugin
@@ -76,9 +78,10 @@ plugins/creator/                  the creator-account plugin: TikTok upload and 
 tests/                            the marketplace node suite
 ```
 
-Every plugin pins a `version` in `.claude-plugin/plugin.json`; Render also has
-a `.codex-plugin/plugin.json` for its host-specific OAuth and hook settings.
-Keep both Render versions equal. Bump the version in the same commit as
+Every plugin pins a `version` in `.claude-plugin/plugin.json`; Render and Intel also have
+a `.codex-plugin/plugin.json` for host-specific settings. Render scopes OAuth and hooks; Intel lists fourteen
+portable skills and excludes Claude-only case-study. Keep each plugin's manifest
+versions equal. Bump the version in the same commit as
 the change you want to ship — a plugin whose version is unchanged stays cached
 on every machine that already has it, however much its code moved.
 

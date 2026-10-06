@@ -5,20 +5,26 @@ description: Manage local plaintext credentials and browser sessions, import Goo
 
 # Secrets manager
 
-Run from the repo root. All state lives under `SECRETS_MANAGER_STATE_PATH` (default
+Works in Claude Code and Codex. Both hosts use the same CLI, adapter interface
+and existing account state; installing in another host does not migrate accounts.
+Close a profile’s browser before opening that same account from another host.
+
+Resolve `SKILL_DIR` from the absolute directory containing this loaded `SKILL.md`,
+not the project working directory. Set it in every shell call. Run the CLI directly
+from this skill; no global command is installed. All state lives under `SECRETS_MANAGER_STATE_PATH` (default
 `~/.config/secrets-manager`); the residential proxy from `~/.config/secrets-manager/.env` is required for every
 browser command (the home IP is never used).
 
 ## Setup (after every plugin install or update)
 
 ```sh
-"${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/setup.sh"
+SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
+"$SKILL_DIR/scripts/setup.sh"
 # Read-only report:
-"${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/setup.sh" --check
+"$SKILL_DIR/scripts/setup.sh" --check
 ```
 
-Setup installs dependencies, downloads Camoufox and writes `~/.local/bin/secrets-manager`.
-Put `~/.local/bin` on PATH; the launcher points at this install's CLI.
+Setup installs dependencies and downloads Camoufox; it does not install a global launcher.
 Configure external adapters in `~/.config/secrets-manager/config.json`:
 
 ```json
@@ -26,7 +32,7 @@ Configure external adapters in `~/.config/secrets-manager/config.json`:
 ```
 
 `SECRETS_MANAGER_ADAPTERS` (colon-separated absolute paths) overrides that file.
-Run `secrets-manager validate /absolute/path/adapters.mjs` to check the real kit contract.
+Run `node "$SKILL_DIR/scripts/cli.mjs" validate /absolute/path/adapters.mjs` to check the real kit contract.
 Without a config file or override, no app adapters are loaded; other commands still work.
 See the plugin README's Adapter interface for every field and kit helper.
 
@@ -42,10 +48,10 @@ minting) save a Playwright page video per page, OAuth popup included, under
 
 A fresh Google account signs into the apps your adapters define. Run each step separately:
 
-1. `secrets-manager import google <file>`.
-2. `secrets-manager login google --select <email>`.
-3. `secrets-manager login <app> --select <email>` for each required adapter.
-4. `secrets-manager setup <app> --select <email>` for adapters with a setup hook.
+1. `node "$SKILL_DIR/scripts/cli.mjs" import google <file>`.
+2. `node "$SKILL_DIR/scripts/cli.mjs" login google --select <email>`.
+3. `node "$SKILL_DIR/scripts/cli.mjs" login <app> --select <email>` for each required adapter.
+4. `node "$SKILL_DIR/scripts/cli.mjs" setup <app> --select <email>` for adapters with a setup hook.
 
 Every Google sign-in (`login google`, `login <app>`, `setup-2fa`) runs headed by default, so a person
 at the window clears any CAPTCHA: the headless vision solver's misses get accounts banned.
@@ -70,7 +76,8 @@ watched; widen to `--all` / higher `--concurrency` once the flow is proven on a 
 ## Commands
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/scripts/cli.mjs" <command> [options]
+SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
+node "$SKILL_DIR/scripts/cli.mjs" <command> [options]
 
 import <google|x|tiktok> [file...]
 login <google|app> [--select ID]... [--all] [--limit N] [--concurrency N] [--headless] [--rotate-proxy]
@@ -113,14 +120,14 @@ just whether the run is headed, and the phone step is always attempted automatic
 also, on any error, leaves the window open so you can inspect and finish by hand — close it to let
 the run end.
 
-When a headed run is backgrounded and the log stalls — an `>>> ASSIST NEEDED` line, or no
-progress while the browser process is still alive — Claude MUST proactively look at the Camoufox
-window with computer-use instead of idling on the log or waiting to be told: `request_access` for
-Camoufox (bundleId `org.mozilla.camoufox`), `switch_display` to the display it moved to (the
-`CAMOUFOX_DISPLAY` one), and `screenshot`. Browsers are read-tier, so Claude can SEE but not click; the point
-is to name the real blocker and the exact control the user must click, and to catch a stuck node the
-graph mishandles (e.g. a reCAPTCHA checkbox already passed where the true block is an unclicked
-**Next**, which the handoff message may still mislabel "click the reCAPTCHA").
+Run long browser commands with the host's shell execution tool and retain the process/session
+handle, stdout, stderr and final exit status. Wait for completion through the host's supported
+background task or session mechanism. No stdin or terminal code entry is needed: people enter
+verification codes directly in the headed browser. Report `ASSIST NEEDED` messages to the user.
+For diagnosis, inspect saved `debug/<id>/<step>-<ts>/screenshot.png` and `info.txt`; a saved
+capture shows the page at capture time, not a live desktop view. Do not call host-specific
+`request_access` or `switch_display` tools. Page captures use Playwright in both headed and
+headless modes; headed window recordings use the bundled Swift ScreenCaptureKit recorder.
 
 ### import
 
@@ -169,11 +176,11 @@ its file and line number.
   with a fresh browser profile, keeping the old profile as a backup; disabled again, the row is
   marked `escalated`. An account TikTok reports as banned/suspended at login is marked `restricted`.
   A new device gets "Verify it's really you" after the password: the script
-  picks the Email method and asks for the emailed 6-digit code on the terminal (its subject is
-  "NNNNNN is your 6-digit code"), then types it in. The code can also be typed into the
-  `--headed` window, which submits it once all 6 digits are in; not entered either way within
-  5 minutes, the row is marked `escalated`. Log
-  TikTok accounts in one at a time: the prompts of several would share one terminal. The mailbox itself is never opened by the script.
+  picks the Email method. In a `--headed` run, read the code from the account’s mailbox and
+  enter it directly in the TikTok browser window; the script submits a complete 6-digit code.
+  No code within 5 minutes marks the row `escalated`. A headless run encountering email
+  verification marks it `escalated` and requests a rerun with `--headed`; there is no terminal
+  input. The mailbox itself is never opened by the script.
 - **app --by-email** — dispatch to the adapter's `byEmail({db, cred, opts, io})` hook.
   A missing hook fails explicitly. The adapter owns alias login/signup and optional password minting.
 
@@ -368,7 +375,8 @@ beside the capture screenshot; capture remains best-effort and never throws.
 ## Tests
 
 ```sh
-node --test "${CLAUDE_PLUGIN_ROOT}/skills/secrets-manager/tests/"*.mjs
+SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
+node --test "$SKILL_DIR/tests/"*.mjs
 ```
 
 Offline tests cover the store, credential parsing, TOTP, config, restrictions, OTP extraction,

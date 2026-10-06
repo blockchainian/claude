@@ -2,12 +2,12 @@
 // ABOUTME: Uses a small inline fixture mirroring the site's per-<li> option list; no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseLinks, selectSlowPaths } from '../scripts/anna-archive-links.mjs';
+import { parseLinks, selectSlowPaths, readMemberKey } from '../scripts/anna-archive-links.mjs';
 
 const MD5 = '26f03228f2f3ee0f980ae56f9bd97844';
 const fixture = `<ul class="list-inside mb-4 ml-1">
@@ -37,4 +37,24 @@ test('the script runs when invoked through a symlinked directory', () => {
   symlinkSync(scripts, join(dir, 'scripts'));
   const run = spawnSync(process.execPath, [join(dir, 'scripts', 'anna-archive-links.mjs'), '--help'], { encoding: 'utf8' });
   assert.match(run.stdout + run.stderr, /用法/, 'a symlinked invocation must print the usage line, not exit silently');
+});
+
+test('the member key comes from the dotenv file, ignoring process environment', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'anna-config-'));
+  const configPath = join(dir, '.env');
+  const previous = process.env.ANNA_ARCHIVE_SECRET_KEY;
+  process.env.ANNA_ARCHIVE_SECRET_KEY = 'ignored-environment-value';
+  try {
+    writeFileSync(configPath, 'ANNA_ARCHIVE_SECRET_KEY="file-key#literal" # comment\n');
+    assert.equal(await readMemberKey(configPath), 'file-key#literal');
+    writeFileSync(configPath, 'ANNA_ARCHIVE_SECRET_KEY=""\n');
+    await assert.rejects(readMemberKey(configPath), /配置 ANNA_ARCHIVE_SECRET_KEY/);
+    writeFileSync(configPath, 'OTHER_KEY=value\n');
+    await assert.rejects(readMemberKey(configPath), /配置 ANNA_ARCHIVE_SECRET_KEY/);
+    await assert.rejects(readMemberKey(join(dir, 'missing')), { code: 'ENOENT' });
+  } finally {
+    if (previous === undefined) delete process.env.ANNA_ARCHIVE_SECRET_KEY;
+    else process.env.ANNA_ARCHIVE_SECRET_KEY = previous;
+    rmSync(dir, { recursive: true });
+  }
 });
