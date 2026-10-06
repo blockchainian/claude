@@ -58,8 +58,11 @@ KATEX_HEAD = (
     "b[b.length-1].appendChild(p);t.remove();n.className='nbm';});"  # into the formula's last no-break atom
     "document.fonts.ready.then(function(){"
     "var col=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--eqcol-w'))||1e9;"
-    "document.querySelectorAll('.katex-display').forEach(function(d){var w=0;"
-    "d.querySelectorAll('.base').forEach(function(b){w=Math.max(w,b.getBoundingClientRect().width);});"
+    # A display line is several .base atoms side by side (KaTeX splits it at each relation): its width is their sum,
+    # restarted at each line break (.newline); the equation's width is its widest line.
+    "document.querySelectorAll('.katex-display').forEach(function(d){var w=0,line=0;"
+    "d.querySelectorAll('.katex-html>.base,.katex-html>.newline').forEach(function(b){"
+    "line=b.classList.contains('newline')?0:line+b.getBoundingClientRect().width;w=Math.max(w,line);});"
     "if(w>col){d.style.fontSize=(0.98*col/w)+'em';}});});"
     '"></script>'
 )

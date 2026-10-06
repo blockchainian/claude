@@ -314,6 +314,15 @@ def test_render_e2e(rd):
         line_of = lambda w: next((i for i, ln in enumerate(text.splitlines()) if w in ln), -1)
         check("a long inline formula followed by punctuation still wraps inside", 0 <= line_of("w01") < line_of("w60"), text[:900].replace(chr(10), " | "))
         check("the wrapped formula's punctuation stays on its last line", "，" in text.splitlines()[line_of("w60")] if line_of("w60") >= 0 else False, text[:900].replace(chr(10), " | "))
+        # A display equation split into several atoms by its relations ("a = b = c"): KaTeX sets each between two
+        # relations as its own .base, side by side, so the fit must measure the whole line, not its widest atom.
+        rel_eq = "\n=".join(r"\operatorname{v%02d}\{(xy)z'+(xy'+x'y+x'y')(z+z')+(xy)z'+(xy')z\}" % i for i in range(1, 4))
+        (work / "translated" / (Path(chap["file"]).stem + ".md")).write_text(f"# 长式译\n\n设\n\n\\[{rel_eq}\\]\n\n于是。\n")
+        rd.render(work, SimpleNamespace(only=chap["id"], out=None, title=None, bg="#ffffff", fg="#000000", font_size=9.25, eq_scale=0.6, bold_factor=1.25))
+        bbox = subprocess.run(["pdftotext", "-bbox", str(prev), "-"], capture_output=True, text=True).stdout
+        page_w = float(re.search(r'<page width="([\d.]+)"', bbox).group(1))
+        right = max(float(x) for x in re.findall(r'xMax="([\d.]+)"', bbox))
+        check("a display equation with many relations is scaled to fit the column", right < page_w * (1 - 0.135) + 1, f"{right:.0f} of {page_w:.0f}")
         # Inline code and KaTeX \\mathtt are one monospace face (KaTeX_Typewriter), not two side by side; and a paragraph
         # with hard line breaks (aligned rows) gets no first-line indent, so its rows start at one x.
         (work / "translated" / (Path(chap["file"]).stem + ".md")).write_text(
