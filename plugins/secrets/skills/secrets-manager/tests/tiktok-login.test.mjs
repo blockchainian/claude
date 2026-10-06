@@ -13,13 +13,13 @@ import * as tiktok from "../scripts/tiktok-login.mjs";
 
 let previousStatePath;
 beforeEach(() => {
-  previousStatePath = process.env.SECRETS_MANAGER_STATE_PATH;
-  process.env.SECRETS_MANAGER_STATE_PATH = mkdtempSync(join(tmpdir(), "tiktok-login-"));
+  previousStatePath = process.env.SECRETS_STATE_DIR;
+  process.env.SECRETS_STATE_DIR = mkdtempSync(join(tmpdir(), "tiktok-login-"));
 });
 afterEach(() => {
-  rmSync(process.env.SECRETS_MANAGER_STATE_PATH, { recursive: true, force: true });
-  if (previousStatePath === undefined) delete process.env.SECRETS_MANAGER_STATE_PATH;
-  else process.env.SECRETS_MANAGER_STATE_PATH = previousStatePath;
+  rmSync(process.env.SECRETS_STATE_DIR, { recursive: true, force: true });
+  if (previousStatePath === undefined) delete process.env.SECRETS_STATE_DIR;
+  else process.env.SECRETS_STATE_DIR = previousStatePath;
 });
 
 const cookie = (name, domain, value = "v") => ({ name, value, domain, path: "/" });
@@ -36,14 +36,14 @@ test("sessionCookies is null without a sessionid, or with an empty one", () => {
 });
 
 test("loginProxy binds a login to the pool's last slot, or the slot the account already has", () => {
-  const env = { ISP_PROXY_URL: "http://u:p@isp.example:8000", ISP_PROXY_COUNT: "10" };
+  const env = { SECRETS_ISP_PROXY_URL: "http://u:p@isp.example:8000", SECRETS_ISP_PROXY_COUNT: "10" };
   assert.deepEqual(loginProxy(env), { slot: 10, url: "http://u:p@isp.example:8010" });
   assert.deepEqual(loginProxy(env, 3), { slot: 3, url: "http://u:p@isp.example:8003" });
-  assert.deepEqual(loginProxy({ ISP_PROXY_URL: "http://isp.example:8000" }), { slot: 1, url: "http://isp.example:8001" });
+  assert.deepEqual(loginProxy({ SECRETS_ISP_PROXY_URL: "http://isp.example:8000" }), { slot: 1, url: "http://isp.example:8001" });
 });
 
 test("loginProxy refuses to run without the ISP pool", () => {
-  assert.throws(() => loginProxy({}), /ISP_PROXY_URL/);
+  assert.throws(() => loginProxy({}), /SECRETS_ISP_PROXY_URL/);
 });
 
 function codeDialog(values) {
@@ -113,7 +113,7 @@ test("loginTiktokAccount maps ban errors to restricted and keeps escalation unch
     });
     const tiktok = await import(${JSON.stringify(new URL("tiktok-login.mjs", scripts).href)});
     const store = await import(${JSON.stringify(new URL("store.mjs", scripts).href)});
-    process.env.ISP_PROXY_URL = "http://isp.example:8000";
+    process.env.SECRETS_ISP_PROXY_URL = "http://isp.example:8000";
     const db = store.openDb(":memory:");
     try {
       store.upsertTiktok(db, { username: "bob1", password: "pw" });
@@ -239,7 +239,7 @@ for (const scenario of ["disabled-success", "disabled-twice", "banned"]) {
       });
       tiktok = await import(${JSON.stringify(new URL("tiktok-login.mjs", scripts).href)});
       const store = await import(${JSON.stringify(new URL("store.mjs", scripts).href)});
-      process.env.ISP_PROXY_URL = "http://isp.example:8000";
+      process.env.SECRETS_ISP_PROXY_URL = "http://isp.example:8000";
       const db = store.openDb(":memory:");
       try {
         store.upsertTiktok(db, { username: "bob1", password: "pw" });

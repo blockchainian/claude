@@ -102,7 +102,7 @@ export function validateAdapter(adapter) {
 
 export async function loadAdapters({ configPath = config.configJsonPath(), env = process.env, paths } = {}) {
   if (paths === undefined) {
-    if (env.SECRETS_MANAGER_ADAPTERS !== undefined) paths = env.SECRETS_MANAGER_ADAPTERS ? env.SECRETS_MANAGER_ADAPTERS.split(':') : [];
+    if (env.SECRETS_ADAPTER_FILES !== undefined) paths = env.SECRETS_ADAPTER_FILES ? env.SECRETS_ADAPTER_FILES.split(':') : [];
     else {
       let text;
       try { text = readFileSync(configPath, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }

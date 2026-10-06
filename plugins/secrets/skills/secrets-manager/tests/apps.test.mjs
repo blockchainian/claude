@@ -20,7 +20,7 @@ test('loader handles absence, config, env override, duplicates, and import error
  assert.deepEqual(await loadAdapters({configPath,env:{}}), []);
  writeFileSync(configPath,JSON.stringify({adapters:[fixture]}));
  assert.deepEqual((await loadAdapters({configPath,env:{}})).map(a=>a.name), ['alpha','beta']);
- assert.deepEqual(await loadAdapters({configPath,env:{SECRETS_MANAGER_ADAPTERS:''}}), []);
+ assert.deepEqual(await loadAdapters({configPath,env:{SECRETS_ADAPTER_FILES:''}}), []);
  await assert.rejects(loadAdapters({paths:[fixture,fixture]}), /duplicate adapter name/);
  const bad = join(dir,'bad.mjs'); writeFileSync(bad,'throw new Error("import failure")');
  await assert.rejects(loadAdapters({paths:[bad]}), e => e.message.includes(bad) && e.message.includes('import failure'));

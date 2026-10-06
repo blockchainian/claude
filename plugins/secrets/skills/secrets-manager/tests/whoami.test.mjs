@@ -10,7 +10,7 @@ import { validateAdapter } from "../scripts/adapter.mjs";
 let base;
 let previous;
 beforeEach(() => {
-  previous = [process.env.SECRETS_MANAGER_STATE_PATH, process.env.SECRETS_MANAGER_ADAPTERS];
+  previous = [process.env.SECRETS_STATE_DIR, process.env.SECRETS_ADAPTER_FILES];
   base = mkdtempSync(join(tmpdir(), "sm-whoami-"));
   const adapter = join(base, "adapter.mjs");
   writeFileSync(adapter, `export default () => [{
@@ -27,11 +27,11 @@ beforeEach(() => {
     name: 'beta', domain: 'beta.example', startUrl: 'https://beta.example/',
     entryTexts: ['Login'], signIn: async () => {}, ready: async () => true
   }];`);
-  process.env.SECRETS_MANAGER_STATE_PATH = join(base, "absent-state");
-  process.env.SECRETS_MANAGER_ADAPTERS = adapter;
+  process.env.SECRETS_STATE_DIR = join(base, "absent-state");
+  process.env.SECRETS_ADAPTER_FILES = adapter;
 });
 afterEach(() => {
-  for (const [i, key] of ['SECRETS_MANAGER_STATE_PATH', 'SECRETS_MANAGER_ADAPTERS'].entries()) {
+  for (const [i, key] of ['SECRETS_STATE_DIR', 'SECRETS_ADAPTER_FILES'].entries()) {
     if (previous[i] === undefined) delete process.env[key];
     else process.env[key] = previous[i];
   }
@@ -59,7 +59,7 @@ test("whoami resolves an external credential without creating local state", asyn
   assert.equal(await main(['whoami', 'alpha', '--select', 'refresh'], io), 0);
   assert.deepEqual(io.out, ['user@example.com']);
   assert.deepEqual(io.err, []);
-  assert.equal(existsSync(process.env.SECRETS_MANAGER_STATE_PATH), false);
+  assert.equal(existsSync(process.env.SECRETS_STATE_DIR), false);
 });
 
 test("whoami emits app and email as JSON", async () => {
@@ -74,7 +74,7 @@ test("whoami rejects unknown apps and adapters without a hook", async () => {
     assert.equal(await main(['whoami', app, '--select', 'refresh'], io), 1);
     assert.deepEqual(io.out, []);
     assert.match(io.err[0], app === 'beta' ? /beta has no whoami hook/ : /unknown adapter/);
-    assert.equal(existsSync(process.env.SECRETS_MANAGER_STATE_PATH), false);
+    assert.equal(existsSync(process.env.SECRETS_STATE_DIR), false);
   }
 });
 

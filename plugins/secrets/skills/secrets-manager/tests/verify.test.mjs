@@ -22,16 +22,16 @@ const io = () => {
 };
 
 beforeEach(() => {
-  process.env.SECRETS_MANAGER_ADAPTERS = fileURLToPath(new URL("./fixtures/adapters.mjs", import.meta.url));
-  process.env.SECRETS_MANAGER_STATE_PATH = mkdtempSync(join(tmpdir(), "sm-verify-"));
+  process.env.SECRETS_ADAPTER_FILES = fileURLToPath(new URL("./fixtures/adapters.mjs", import.meta.url));
+  process.env.SECRETS_STATE_DIR = mkdtempSync(join(tmpdir(), "sm-verify-"));
   db = store.openDb(config.dbPath());
   realChecks = Object.fromEntries(Object.entries(BUILTIN_CHECKS).map(([k, v]) => [k, v.check]));
 });
 afterEach(() => {
   for (const [k, check] of Object.entries(realChecks)) BUILTIN_CHECKS[k].check = check;
   db.close();
-  delete process.env.SECRETS_MANAGER_STATE_PATH;
-  delete process.env.SECRETS_MANAGER_ADAPTERS;
+  delete process.env.SECRETS_STATE_DIR;
+  delete process.env.SECRETS_ADAPTER_FILES;
 });
 
 const status = (table, key, id) => db.prepare(`SELECT status FROM ${table} WHERE ${key} = ?`).get(id).status;

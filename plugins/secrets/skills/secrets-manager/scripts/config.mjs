@@ -1,5 +1,5 @@
 // ABOUTME: Resolves the local state directory and proxy the skill reads and writes on the Mac.
-// ABOUTME: Everything lives under SECRETS_MANAGER_STATE_PATH (default ~/.config/secrets-manager).
+// ABOUTME: Everything lives under SECRETS_STATE_DIR (default ~/.config/secrets-manager).
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,17 +9,10 @@ import { createHash } from "node:crypto";
 
 // Populate process.env from a KEY=VALUE file without overriding what is already set.
 export function loadEnvFile(path) {
-  if (!existsSync(path)) return;
-  for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#") || !line.includes("=")) continue;
-    const idx = line.indexOf("=");
-    const key = line.slice(0, idx).trim();
-    if (!(key in process.env)) process.env[key] = line.slice(idx + 1).trim();
-  }
+  if (existsSync(path)) process.loadEnvFile(path);
 }
 
-// ~/.config/secrets-manager/.env carries RESIDENTIAL_PROXY_URL so every run goes through the proxy; it is outside the repository.
+// ~/.config/secrets-manager/.env carries SECRETS_RESIDENTIAL_PROXY_URL so every run goes through the proxy; it is outside the repository.
 loadEnvFile(join(homedir(), ".config/secrets-manager/.env"));
 
 function expandUser(p) {
@@ -28,7 +21,7 @@ function expandUser(p) {
 
 // The root of all local state: the store, credential files, browser profiles and debug captures.
 export function statePath() {
-  return expandUser(process.env.SECRETS_MANAGER_STATE_PATH || "~/.config/secrets-manager");
+  return expandUser(process.env.SECRETS_STATE_DIR || "~/.config/secrets-manager");
 }
 
 // The SQLite file holding the Google accounts, every app's sessions and the x table.
@@ -45,12 +38,12 @@ export const debugDir = () => join(statePath(), "debug");
 
 // Residential proxy applied to every account.
 export function defaultProxy() {
-  return process.env.RESIDENTIAL_PROXY_URL || null;
+  return process.env.SECRETS_RESIDENTIAL_PROXY_URL || null;
 }
 
 // HeroSMS API key for renting phone numbers to receive Google's verification SMS (~/.config/secrets-manager/.env).
 export function heroSmsKey() {
-  return process.env.HERO_SMS_API_KEY || null;
+  return process.env.SECRETS_HERO_SMS_API_KEY || null;
 }
 
 // HeroSMS country ids that must never be rented for a Google-verification number, whatever the price.

@@ -28,15 +28,15 @@ mock.module(require.resolve('camoufox-js'), {namedExports: {Camoufox: async opti
   close:async()=>{context.closed=true;}};
  contexts.push(context);return context;
 }}});
-process.env.SECRETS_MANAGER_STATE_PATH = mkdtempSync(join(tmpdir(),'profile-probe-'));
-process.env.RESIDENTIAL_PROXY_URL = 'http://user:pass@proxy.example:8080';
+process.env.SECRETS_STATE_DIR = mkdtempSync(join(tmpdir(),'profile-probe-'));
+process.env.SECRETS_RESIDENTIAL_PROXY_URL = 'http://user:pass@proxy.example:8080';
 const {kit, loadAdapters} = await import('../../scripts/adapter.mjs');
 const [adapter] = await loadAdapters({paths:[fileURLToPath(new URL('./email-adapters.mjs',import.meta.url))]});
 assert.equal(typeof kit.emailOtp.readSignupOtp, 'function');
 assert.equal(kit.emailOtp.waitForCode, undefined);
 const result = await adapter.byEmail({cred:{email:'base@example.com',app_password:'abcd efgh ijkl mnop'}});
 assert.equal(result.status,'ok');assert.equal(result.alias,'base+delta@example.com');
-assert.equal(result.detail,'fixture page');assert.equal(result.proxyUrl,process.env.RESIDENTIAL_PROXY_URL);
+assert.equal(result.detail,'fixture page');assert.equal(result.proxyUrl,process.env.SECRETS_RESIDENTIAL_PROXY_URL);
 assert.deepEqual(result.message,{otp:'481920',from:'"Delta" <signup@delta.example>',subject:'Verification code',to:'base+delta@example.com',folder:'INBOX'});
 assert.deepEqual(filled,[['input[name=code]','481920']]);
 assert.deepEqual(lifecycle,['mail-connect','mail-release','mail-logout']);

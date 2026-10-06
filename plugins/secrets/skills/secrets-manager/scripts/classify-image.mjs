@@ -30,12 +30,12 @@ function runCodex(args, prompt, env, timeoutMs) {
 
 // The model is driven through `codex exec`, signed in with the user's own plan. Pinned to a strong
 // multimodal model — on grainy reCAPTCHA grids it over-selects far less than the cheaper gpt-6-luna,
-// which cuts the wasted rounds. Override with GRID_MODEL if a different codex model is wanted.
-const MODEL = () => process.env.GRID_MODEL || "gpt-6-sol";
-const EFFORT = () => process.env.GRID_MODEL_EFFORT || "low";
+// which cuts the wasted rounds. Override with SECRETS_CAPTCHA_RESOLVER_MODEL if a different codex model is wanted.
+const MODEL = () => process.env.SECRETS_CAPTCHA_RESOLVER_MODEL || "gpt-6-sol";
+const EFFORT = () => process.env.SECRETS_CAPTCHA_RESOLVER_MODEL_EFFORT || "low";
 // Service tier is a latency SLA, not a quality knob: "fast" is served quicker at the same model and
-// reasoning effort, so use it for the per-round login call. Override with GRID_MODEL_TIER.
-const TIER = () => process.env.GRID_MODEL_TIER || "fast";
+// reasoning effort, so use it for the per-round login call. Override with SECRETS_CAPTCHA_RESOLVER_MODEL_TIER.
+const TIER = () => process.env.SECRETS_CAPTCHA_RESOLVER_MODEL_TIER || "fast";
 
 // Keep only real cell indices the grid actually has (0 .. gridN*gridN-1), de-duplicated and sorted.
 // The model is told the numbering, but a stray or out-of-range value must never become a tile click.

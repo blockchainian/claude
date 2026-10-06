@@ -2,11 +2,11 @@
 // ABOUTME: slot of the ISP proxy pool, the same pool the apps' production clients call from.
 import { ispProxyAt } from "./config.mjs";
 
-// The proxy URL of one ISP pool slot, picked at random from 1..ISP_PROXY_COUNT.
+// The proxy URL of one ISP pool slot, picked at random from 1..SECRETS_ISP_PROXY_COUNT.
 export function ispSlotUrl(env, random = Math.random) {
-  if (!env.ISP_PROXY_URL) throw new Error("No ISP_PROXY_URL in ~/.config/secrets-manager/.env; never call an app from the home IP.");
-  const count = Math.max(1, Number(env.ISP_PROXY_COUNT) || 1);
-  return ispProxyAt(env.ISP_PROXY_URL, 1 + Math.floor(random() * count));
+  if (!env.SECRETS_ISP_PROXY_URL) throw new Error("No SECRETS_ISP_PROXY_URL in ~/.config/secrets-manager/.env; never call an app from the home IP.");
+  const count = Math.max(1, Number(env.SECRETS_ISP_PROXY_COUNT) || 1);
+  return ispProxyAt(env.SECRETS_ISP_PROXY_URL, 1 + Math.floor(random() * count));
 }
 
 // fetch(url, init) through a random ISP slot with a Firefox TLS fingerprint — the browser family

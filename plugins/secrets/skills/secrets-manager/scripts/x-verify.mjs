@@ -28,7 +28,7 @@ export function classifyViewer({ status, body }, username) {
   const codes = new Set((body?.errors ?? []).map((e) => e.code));
   if (codes.has(SUSPENDED)) return "restricted";
   if (codes.has(LOCKED)) return "escalated";
-  if (status === 404) throw new Error("Viewer answered 404: X_VIEWER_QUERY_ID is stale, re-extract it from x.com's main.js");
+  if (status === 404) throw new Error("Viewer answered 404: SECRETS_X_VIEWER_QUERY_ID is stale, re-extract it from x.com's main.js");
   if (status !== 200 && !codes.size) throw new Error(`Viewer inconclusive: HTTP ${status}`);
   const user = body?.data?.viewer?.user_results?.result;
   if (user?.__typename === "UserUnavailable" && /suspend/i.test(user.reason ?? "")) return "restricted";
@@ -42,19 +42,19 @@ export function classifyViewer({ status, body }, username) {
 }
 
 function xDispatcher(proxyUrl) {
-  if (!proxyUrl) throw new Error("RESIDENTIAL_PROXY_URL is required; X is never called from the home IP");
+  if (!proxyUrl) throw new Error("SECRETS_RESIDENTIAL_PROXY_URL is required; X is never called from the home IP");
   return dispatcherFor(proxyUrl);
 }
 
 // Checks one `x` row. A row without a token pair has no session to check, so it is expired.
 export async function checkX({ row, opts = {} }) {
   if (!row.auth_token || !row.ct0) return "expired";
-  const url = viewerUrl(requireEnv("X_VIEWER_QUERY_ID"));
+  const url = viewerUrl(requireEnv("SECRETS_X_VIEWER_QUERY_ID"));
   const dispatcher = xDispatcher(config.proxyFor(row.username, { rotate: opts["rotate-proxy"] }));
   const res = await fetch(url, {
     dispatcher,
     headers: {
-      authorization: `Bearer ${requireEnv("X_BEARER")}`,
+      authorization: `Bearer ${requireEnv("SECRETS_X_BEARER_TOKEN")}`,
       "x-csrf-token": row.ct0,
       cookie: `auth_token=${row.auth_token}; ct0=${row.ct0}`,
       "x-twitter-auth-type": "OAuth2Session",
@@ -73,7 +73,7 @@ export async function checkX({ row, opts = {} }) {
 }
 
 function assertWhoamiResponse(res) {
-  if (res.status === 404) throw new Error('X whoami: X_VIEWER_QUERY_ID is stale');
+  if (res.status === 404) throw new Error('X whoami: SECRETS_X_VIEWER_QUERY_ID is stale');
   if (![200, 403].includes(res.status)) throw new Error(`X whoami: HTTP ${res.status}`);
 }
 
@@ -82,8 +82,8 @@ export async function whoamiX({ credential }, { fetchImpl = fetch, dispatcher, q
   if (typeof credential !== 'string' || !/^[0-9a-f]{40}$/i.test(credential)) {
     throw new Error('X whoami: expected a 40-hex auth_token');
   }
-  const url = viewerUrl(queryId ?? requireEnv('X_VIEWER_QUERY_ID'));
-  const headers = { authorization: `Bearer ${bearer ?? requireEnv('X_BEARER')}`,
+  const url = viewerUrl(queryId ?? requireEnv('SECRETS_X_VIEWER_QUERY_ID'));
+  const headers = { authorization: `Bearer ${bearer ?? requireEnv('SECRETS_X_BEARER_TOKEN')}`,
     cookie: `auth_token=${credential}`, 'User-Agent': UA };
   const ownedDispatcher = dispatcher === undefined && fetchImpl === fetch;
   if (ownedDispatcher) dispatcher = xDispatcher(config.proxyFor('whoami-x'));

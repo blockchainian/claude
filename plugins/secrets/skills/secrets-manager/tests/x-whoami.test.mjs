@@ -22,7 +22,7 @@ test('X whoami validates the credential before requests',async()=>{
   await assert.rejects(()=>whoamiX({credential},options),/auth_token/);
 });
 test('X whoami reports stale queries, HTTP failures and missing ct0',async()=>{
- for(const [status,message] of [[404,/X_VIEWER_QUERY_ID/],[429,/HTTP 429/],[500,/HTTP 500/],[200,/ct0/]])
+ for(const [status,message] of [[404,/SECRETS_X_VIEWER_QUERY_ID/],[429,/HTTP 429/],[500,/HTTP 500/],[200,/ct0/]])
   await assert.rejects(()=>whoamiX({credential},{...options,fetchImpl:async()=>new Response('{}',{status})}),message);
 });
 test('X whoami rejects expired, locked and suspended credentials even when a user is included',async()=>{

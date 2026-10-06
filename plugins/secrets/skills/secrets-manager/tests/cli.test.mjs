@@ -141,15 +141,15 @@ const io = () => {
 };
 
 beforeEach(() => {
-  process.env.SECRETS_MANAGER_ADAPTERS = fileURLToPath(new URL("./fixtures/adapters.mjs", import.meta.url));
+  process.env.SECRETS_ADAPTER_FILES = fileURLToPath(new URL("./fixtures/adapters.mjs", import.meta.url));
   base = mkdtempSync(join(tmpdir(), "sm-cli-"));
-  process.env.SECRETS_MANAGER_STATE_PATH = base;
+  process.env.SECRETS_STATE_DIR = base;
   db = store.openDb(config.dbPath());
 });
 afterEach(() => {
   db.close();
-  delete process.env.SECRETS_MANAGER_STATE_PATH;
-  delete process.env.SECRETS_MANAGER_ADAPTERS;
+  delete process.env.SECRETS_STATE_DIR;
+  delete process.env.SECRETS_ADAPTER_FILES;
 });
 
 const writeGoogleFile = (text) => {
@@ -344,7 +344,7 @@ test("export supports arbitrary credential fields and fails without the hook", a
     name: 'no_hook', domain: 'custom.example', startUrl: 'https://custom.example/',
     entryTexts: ['Login'], signIn: async () => {}, ready: async () => true,
   }];`);
-  process.env.SECRETS_MANAGER_ADAPTERS = path;
+  process.env.SECRETS_ADAPTER_FILES = path;
   store.upsertAccount(db, "a@x.com", "pw", null, null);
   store.saveSession(db, "custom", "a@x.com", [], []);
   const o = io();
@@ -438,7 +438,7 @@ test('byEmail, verify, validate and orphan table reads use the adapter contract'
  assert.equal(await main(['validate',fileURLToPath(new URL('./fixtures/adapters.mjs',import.meta.url))],validated),0);
  assert.ok(validated.text().includes('alpha, beta'));
  store.saveSession(db,'orphan','base@example.com',[],[]);
- process.env.SECRETS_MANAGER_ADAPTERS='';
+ process.env.SECRETS_ADAPTER_FILES='';
  assert.equal(await main(['get','orphan','--select','base@example.com'],io()),0);
  assert.equal(await main(['list'],io()),0);
  assert.equal(await main(['login','orphan'],io()),1);
@@ -494,7 +494,7 @@ function setupAdapter(hook, setupFlags = {}) {
       setup: ${hook}, setupFlags: ${JSON.stringify(setupFlags)},
     }];
   };`);
-  process.env.SECRETS_MANAGER_ADAPTERS = path;
+  process.env.SECRETS_ADAPTER_FILES = path;
 }
 
 function setupSession(email, status, cookies = []) {
@@ -683,7 +683,7 @@ test("setup flags belong only to their app and do not extend other commands", as
   writeFileSync(path, `export default () => [{ name: 'beta', domain: 'beta.example', startUrl: 'https://beta.example/',
     entryTexts: ['Login'], signIn: async () => {}, ready: async () => true,
     setup: async () => { throw new Error('hook must not run'); } }];`);
-  process.env.SECRETS_MANAGER_ADAPTERS += ':' + path;
+  process.env.SECRETS_ADAPTER_FILES += ':' + path;
   setupSession("a@x.com", "active");
   for (const args of [["setup", "beta"], ["login", "alpha"], ["verify", "alpha"]]) {
     const output = io();

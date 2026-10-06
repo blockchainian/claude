@@ -11,11 +11,11 @@ import {
   pollForState,
 } from "./login.mjs";
 
-// Where to drop the machine-readable timing summary. Override with PROBE_OUT for a known location.
-const OUT = process.env.PROBE_OUT || join(tmpdir(), "recaptcha-probe-result.json");
+// Where to drop the machine-readable timing summary. Override with SECRETS_RECAPTCHA_PROBE_RESULT_FILE for a known location.
+const OUT = process.env.SECRETS_RECAPTCHA_PROBE_RESULT_FILE || join(tmpdir(), "recaptcha-probe-result.json");
 const cred = { email: "recaptcha-demo-probe" };
 const now = () => Date.now();
-const result = { startedAt: new Date().toISOString(), head: process.env.PROBE_LABEL || "HEAD", steps: {} };
+const result = { startedAt: new Date().toISOString(), head: process.env.SECRETS_RECAPTCHA_PROBE_LABEL || "HEAD", steps: {} };
 
 try {
   await withProfile(cred.email, { headed: false }, async (_context, page) => {
