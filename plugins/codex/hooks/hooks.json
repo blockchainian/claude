@@ -1,5 +1,28 @@
 {
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__plugin_codex_codex-manager__(start|attach|review)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-manager/manager.mjs\" owner",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/codex-manager/manager.mjs\" pending",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

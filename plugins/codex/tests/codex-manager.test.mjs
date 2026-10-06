@@ -122,6 +122,144 @@ test("pending stays silent without state and blocks once without consuming await
   }
 });
 
+for (const tool of ["start", "attach", "review"]) {
+  for (const agentId of [undefined, "a7db759c4bc05c52b"]) {
+    test(`PostToolUse records ${tool} owner ${agentId ?? "main"} from MCP text content`, async () => {
+      const home = await tempHome();
+      try {
+        await mkdir(home.dir, { recursive: true });
+        const thread = { id: "thread-owned", lastStatus: "inProgress" };
+        await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ threads: [thread] }));
+        const result = await run(["owner"], {
+          env: { CODEX_MANAGER_STATE_DIR: home.home },
+          stdin: JSON.stringify({ session_id: session, hook_event_name: "PostToolUse", agent_id: agentId,
+            tool_name: `mcp__plugin_codex_codex-manager__${tool}`,
+            tool_response: { content: [{ type: "text", text: JSON.stringify({ threadId: thread.id, turnId: "turn-1" }) }] } })
+        });
+        assert.deepEqual(result, { code: 0, stdout: "", stderr: "" });
+        const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
+        assert.deepEqual(state.threads, [{ ...thread, owner: agentId ?? "main" }]);
+      } finally {
+        await home.close();
+      }
+    });
+  }
+}
+
+test("PostToolUse accepts a text content array and preserves the thread's recorded owner", async () => {
+  const home = await tempHome();
+  try {
+    await mkdir(home.dir, { recursive: true });
+    const file = path.join(home.dir, "state.json");
+    await writeFile(file, JSON.stringify({ threads: [{ id: "thread-owned" }] }));
+    const payload = { session_id: session, hook_event_name: "PostToolUse", tool_name: "mcp__plugin_codex_codex-manager__attach", agent_id: "agent-a",
+      tool_response: [{ type: "text", text: '{"threadId":"thread-owned"}' }] };
+    for (const agent_id of ["agent-a", "agent-b"]) {
+      assert.deepEqual(await run(["owner"], { env: { CODEX_MANAGER_STATE_DIR: home.home }, stdin: JSON.stringify({ ...payload, agent_id }) }),
+        { code: 0, stdout: "", stderr: "" });
+      assert.equal(JSON.parse(await readFile(file, "utf8")).threads[0].owner, "agent-a");
+    }
+  } finally {
+    await home.close();
+  }
+});
+
+test("PostToolUse owner stays silent on invalid, failed, unrelated or unknown results", async () => {
+  const home = await tempHome();
+  try {
+    await mkdir(home.dir, { recursive: true });
+    const file = path.join(home.dir, "state.json");
+    const state = JSON.stringify({ threads: [{ id: "thread-owned" }] });
+    await writeFile(file, state);
+    const payload = { session_id: session, hook_event_name: "PostToolUse", tool_name: "mcp__plugin_codex_codex-manager__start",
+      tool_response: { content: [{ type: "text", text: '{"threadId":"thread-owned"}' }] } };
+    for (const input of ["not json", {}, { ...payload, session_id: undefined },
+      { ...payload, tool_name: "mcp__other__start" }, { ...payload, tool_response: { ...payload.tool_response, isError: true } },
+      { ...payload, tool_response: { content: [{ type: "text", text: "failed" }] } },
+      { ...payload, tool_response: { content: [{ type: "text", text: '{"threadId":"unknown"}' }] } }]) {
+      assert.deepEqual(await run(["owner"], { env: { CODEX_MANAGER_STATE_DIR: home.home }, stdin: typeof input === "string" ? input : JSON.stringify(input) }),
+        { code: 0, stdout: "", stderr: "" });
+      assert.equal(await readFile(file, "utf8"), state);
+    }
+    await mkdir(path.join(home.dir, "state.json.lock"));
+    assert.deepEqual(await run(["owner"], { env: { CODEX_MANAGER_STATE_DIR: home.home }, stdin: JSON.stringify(payload) }),
+      { code: 0, stdout: "", stderr: "" });
+    assert.equal(await readFile(file, "utf8"), state);
+  } finally {
+    await home.close();
+  }
+});
+
+test("pending scopes Stop and SubagentStop without consuming other owners' events", async () => {
+  const home = await tempHome();
+  try {
+    await mkdir(home.dir, { recursive: true });
+    const threads = [{ id: "thread-main", owner: "main" }, { id: "thread-agent", owner: "agent-a" },
+      { id: "thread-other", owner: "agent-b" }, { id: "thread-legacy" }];
+    await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ threads }));
+    for (const thread of threads) {
+      await writeFile(path.join(home.dir, `${thread.id}.jsonl`), `${JSON.stringify({ kind: "notify", text: thread.id })}\n`);
+    }
+    const stop = (hook_event_name, agent_id) => run(["pending"], { env: { CODEX_MANAGER_STATE_DIR: home.home },
+      stdin: JSON.stringify({ session_id: session, hook_event_name, agent_id, stop_hook_active: false }) });
+    const main = JSON.parse((await stop("Stop")).stdout);
+    assert.equal(main.decision, "block");
+    assert.match(main.reason, /thread-main/);
+    assert.match(main.reason, /thread-legacy/);
+    assert.doesNotMatch(main.reason, /thread-agent|thread-other/);
+    assert.equal((await stop("Stop")).stdout, "");
+    const agent = JSON.parse((await stop("SubagentStop", "agent-a")).stdout);
+    assert.equal(agent.decision, "block");
+    assert.match(agent.reason, /thread-agent/);
+    assert.doesNotMatch(agent.reason, /thread-main|thread-other|thread-legacy/);
+    assert.equal((await stop("SubagentStop", "agent-a")).stdout, "");
+    assert.match(JSON.parse((await stop("SubagentStop", "agent-b")).stdout).reason, /thread-other/);
+    assert.equal((await stop("SubagentStop")).stdout, "");
+    assert.match((await run(["await", "--thread", "thread-agent"], { env: { CODEX_MANAGER_STATE_DIR: home.home } })).stdout, /thread-agent/);
+  } finally {
+    await home.close();
+  }
+});
+
+test("SubagentStop blocks only its unwatched running threads and held replies", async () => {
+  const home = await tempHome();
+  try {
+    await mkdir(home.dir, { recursive: true });
+    const threads = [{ id: "thread-main", owner: "main" }, { id: "thread-agent", owner: "agent-a" },
+      { id: "thread-other", owner: "agent-b" }, { id: "thread-legacy" }].map((thread) => ({ ...thread, lastStatus: "inProgress",
+        waiting: [{ kind: "approval", callId: "c", since: 1, text: `approve ${thread.id}` }] }));
+    await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ threads }));
+    const stop = (active) => run(["pending"], { env: { CODEX_MANAGER_STATE_DIR: home.home },
+      stdin: JSON.stringify({ session_id: session, hook_event_name: "SubagentStop", agent_id: "agent-a", stop_hook_active: active }) });
+    for (const active of [false, true]) {
+      const decision = JSON.parse((await stop(active)).stdout);
+      assert.equal(decision.decision, "block");
+      assert.ok(decision.reason.includes(`node ${JSON.stringify(manager)} await --thread thread-agent`));
+      assert.match(decision.reason, /run_in_background/);
+      assert.doesNotMatch(decision.reason, /thread-main|thread-other|thread-legacy/);
+      if (!active) assert.match(decision.reason, /waiting for reply/);
+    }
+    await writeFile(path.join(home.dir, `thread-agent.await.${process.pid}`), "");
+    assert.equal((await stop(true)).stdout, "");
+    assert.match(JSON.parse((await stop(false)).stdout).reason, /waiting for reply/);
+    const main = await run(["pending"], { env: { CODEX_MANAGER_STATE_DIR: home.home }, stdin: JSON.stringify({ session_id: session, hook_event_name: "Stop" }) });
+    assert.doesNotMatch(JSON.parse(main.stdout).reason, /thread-agent|thread-other/);
+    assert.match(JSON.parse(main.stdout).reason, /thread-legacy.*running/);
+  } finally {
+    await home.close();
+  }
+});
+
+test("hook configuration matches the plugin's thread-registering tools and both stop events", () => {
+  const { hooks } = JSON.parse(readFileSync("plugins/codex/hooks/hooks.json", "utf8"));
+  const matcher = new RegExp(hooks.PostToolUse[0].matcher);
+  for (const tool of ["start", "attach", "review"]) assert.ok(matcher.test(`mcp__plugin_codex_codex-manager__${tool}`));
+  assert.ok(!matcher.test("mcp__other__start"));
+  assert.ok(!matcher.test("mcp__plugin_codex_codex-manager__send"));
+  assert.match(hooks.PostToolUse[0].hooks[0].command, /manager\.mjs.* owner$/);
+  assert.equal(hooks.SubagentStop[0].hooks[0].command, hooks.Stop[0].hooks[0].command);
+});
+
 class McpChild {
   constructor(home, socketPath, env = {}, command = "mcp") {
     this.child = spawn(process.execPath, [manager, command], {
@@ -218,6 +356,29 @@ function daemonScript() {
   };
   return script;
 }
+
+test("MCP state updates preserve ownership written by PostToolUse", async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  try {
+    const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug" });
+    const result = await run(["owner"], { env: { CODEX_MANAGER_STATE_DIR: home.home }, stdin: JSON.stringify({
+      session_id: session, hook_event_name: "PostToolUse", tool_name: "mcp__plugin_codex_codex-manager__start", agent_id: "agent-a",
+      tool_response: { content: [{ type: "text", text: started.text }] }
+    }) });
+    assert.equal(result.code, 0, result.stderr);
+    await mcp.call("send", { threadId: "thread-A", prompt: "Add a test" });
+    const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
+    assert.equal(state.threads[0].owner, "agent-a");
+    assert.equal(state.threads[0].turnId, "turn-2");
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
 
 function inboxLines(file) {
   let text = "";
