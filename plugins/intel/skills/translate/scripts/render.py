@@ -152,6 +152,19 @@ EMPTY_P_RE = re.compile(r"<p>\s*</p>")
 # and is kept with it (.keep: break-after: avoid) so it is never left alone at a page bottom.
 LEAD_P_RE = re.compile(r'<p>((?:(?!</?p>).)*)</p>(?=\s*(?:<figure class="fig|<div class="figcap">))', re.S)
 IMG_TOKEN_RE = re.compile(rf"⟦IMG:([^⟧]+)⟧([{CJK_CLOSE}]*)")  # with any CJK punctuation right after it
+EMPHASIS_RE = re.compile(r"<(strong|b|em)>(.*?)</\1>", re.S)
+CJK_RUN_RE = re.compile(r"[　-〿㐀-鿿＀-￯]+")
+
+
+def nudge_bold_cjk(body_html):
+    """Wraps each run of Chinese inside <strong>/<b>/<em> in <span class="cjkb">, which the CSS shifts down to
+    Songti's baseline. Latin, digits and tags inside the emphasis are left alone. Runs after place_images, whose
+    caption match reads the bare "<strong>图" form."""
+    def wrap(m):
+        inner = re.sub(r"(<[^>]+>)|([^<]+)", lambda t: t.group(1) or CJK_RUN_RE.sub(
+            lambda r: f'<span class="cjkb">{r.group(0)}</span>', t.group(2)), m.group(2))
+        return f"<{m.group(1)}>{inner}</{m.group(1)}>"
+    return EMPHASIS_RE.sub(wrap, body_html)
 
 
 def is_line_art(im):
@@ -274,13 +287,24 @@ p:has(br) {{ text-indent: 0; }}  /* hard line breaks set aligned rows (number ta
    formula keeps its own break points and only its last atom is bound to the punctuation. */
 .nb {{ white-space: nowrap; }}
 .nbp {{ font-family: Baskerville, "Songti SC", serif; }}
-.body-text > p:first-of-type {{ text-indent: 0; }}
+/* Chinese books indent every paragraph; only a drop-cap paragraph starts flush, so a list section's first item (an
+   answer "1.", an index entry) lines up with the items below it. */
+.body-text:not(.no-dropcap) > p:first-of-type {{ text-indent: 0; }}
 .body-text:not(.no-dropcap) > p:first-of-type::first-letter {{ float: left; font-size: 2.6em; line-height: 0.85; padding: 3pt 4pt 0 0; }}
+/* A capped paragraph of a single line would let the two-line cap hang into the next block; clear it instead. */
+.body-text:not(.no-dropcap) > p:first-of-type + * {{ clear: left; }}
+.body-text.boldcap > p:first-of-type::first-letter {{ font-family: {hei}; font-weight: 700; color: {bold}; }}
+/* 黑体 glyphs sit about 0.05em higher on the baseline than Songti's; nudge_bold_cjk wraps bold Chinese runs so they
+   line up with the text around them. */
+.cjkb {{ vertical-align: -0.05em; }}
 h2 {{ font-family: {hei}; font-size: 11pt; font-weight: 700; color: {bold}; margin: 18pt 0 6pt; break-after: avoid; }}
 h3 {{ font-family: {hei}; font-size: 10.5pt; font-weight: 700; color: {bold}; margin: 12pt 0 4pt; break-after: avoid; }}
 hr {{ border: 0; height: 0; margin: 1.2em 0; break-after: avoid; }}  /* a scene break (Markdown ---): blank space, never the browser's inset light border */
 hr + p {{ text-indent: 0; }}
-blockquote {{ margin: 8pt 2em; font-style: italic; }}
+/* A quotation or epigraph: Latin in Baskerville italic, Chinese upright (Songti has no italic; Chrome would slant
+   it mechanically). QuoteLatin covers only Latin script, so Chinese falls through to Songti. */
+@font-face {{ font-family: "QuoteLatin"; src: local("Baskerville-Italic"); unicode-range: U+0000-024F; }}
+blockquote {{ margin: 8pt 2em; font-family: "QuoteLatin", "Songti SC", serif; }}
 blockquote p {{ text-indent: 0; }}
 ul, ol {{ margin: 4pt 0 4pt 2em; padding: 0; }}
 li {{ margin: 2pt 0; }}
@@ -302,22 +326,39 @@ p.keep {{ break-after: avoid; }}  /* a lead-in paragraph stays with the figure i
 """
 
 
-FIRST_P_RE = re.compile(r"<p>(.*?)</p>", re.S)
+FIRST_P_RE = re.compile(r"<p(?:\s[^>]*)?>(.*?)</p>", re.S)  # also <p class="keep">
+BLOCKQUOTE_RE = re.compile(r"<blockquote>.*?</blockquote>", re.S)
 LEADING_IMG_RE = re.compile(r"^(\s|<img\b[^>]*>)*")
-DROPCAP_MIN_CHARS = 60  # the 2.6em cap spans two lines; a shorter first paragraph cannot wrap round it
+BOLD_LABEL_RE = re.compile(r"<(?:strong|b)>\s*[A-Za-z]?\d")  # "**1.**", "**E1.**": an exercise or answer number
+MATH_SRC_RE = re.compile(r"\\\(.*?\\\)|\\\[.*?\\\]", re.S)
+DROPCAP_MIN_CHARS = 30  # the 2.6em cap spans two lines; a first paragraph under about a line cannot wrap round it
+
+
+def first_paragraph_head(body):
+    """The opening of the section's first top-level paragraph, after any leading marker image: the paragraph
+    CSS's `.body-text > p:first-of-type` selects, so one inside an epigraph blockquote does not count. None
+    when the section has no paragraph."""
+    m = FIRST_P_RE.search(BLOCKQUOTE_RE.sub("", body))
+    return LEADING_IMG_RE.sub("", m.group(1), count=1) if m else None
 
 
 def wants_dropcap(body):
-    """A drop cap suits a section that opens with prose. Not when its first paragraph opens with a bold label
-    (an answers or exercises section: "**1.** ...", possibly after a ▶ marker image) or a digit, where the cap
-    would land on the number, nor when the paragraph is too short for the next lines to wrap round the cap."""
-    m = FIRST_P_RE.search(body)
-    if not m:
+    """A drop cap suits a section that opens with prose, including prose that opens with a bold key phrase. Not
+    when its first paragraph opens with a bold number label (an answers or exercises section: "**1.** ...",
+    possibly after a ▶ marker image) or a digit, where the cap would land on the number, nor when the paragraph
+    is too short for the next line to wrap round the cap."""
+    head = first_paragraph_head(body)
+    if head is None or BOLD_LABEL_RE.match(head) or head[:1].isdigit():
         return False
-    head = LEADING_IMG_RE.sub("", m.group(1), count=1)
-    if head.startswith(("<strong", "<b>")) or head[:1].isdigit():
-        return False
-    return len(re.sub(r"<[^>]+>", "", m.group(1)).strip()) >= DROPCAP_MIN_CHARS
+    text = MATH_SRC_RE.sub("x", re.sub(r"<[^>]+>", "", head))  # a formula's LaTeX source sets far shorter
+    return len(text.strip()) >= DROPCAP_MIN_CHARS
+
+
+def body_classes(body):
+    """body-text plus no-dropcap, or boldcap when the capped paragraph opens bold (the cap is then set bold too)."""
+    if not wants_dropcap(body):
+        return "body-text no-dropcap"
+    return "body-text boldcap" if first_paragraph_head(body).startswith(("<strong", "<b>")) else "body-text"
 
 
 def section_html(s, title, body):
@@ -325,7 +366,7 @@ def section_html(s, title, body):
     label = f'<div class="label">{html.escape(s["label"])}</div>' if s.get("label") else ""
     return (f'<section class="{" ".join(cls)}" style="page: s{s["id"]}" id="s{s["id"]}">'
             f'<div class="opener">{label}<h1>{html.escape(title)}<span class="mk">⟦S{s["id"]}⟧</span></h1></div>'
-            f'<div class="body-text{"" if wants_dropcap(body) else " no-dropcap"}">{body}</div></section>')
+            f'<div class="{body_classes(body)}">{body}</div></section>')
 
 
 def contents_html(entries, folios):
@@ -449,7 +490,7 @@ def render(work, opt):
                 eq_scale = getattr(opt, "eq_scale", 0.6) if epub else None
                 inline_scale = getattr(opt, "inline_scale", 0.33) if epub else None
                 body = place_images(body, work, images, fg, bg, eq_scale, inline_scale)
-            ready.append((s, title_zh, body))
+            ready.append((s, title_zh, nudge_bold_cjk(body)))
         else:
             print(f"skip {s['id']} {s['title']}: not translated yet", file=sys.stderr)
     if not ready:
