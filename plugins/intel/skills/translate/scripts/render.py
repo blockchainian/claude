@@ -332,8 +332,8 @@ LEADING_IMG_RE = re.compile(r"^(\s|<img\b[^>]*>)*")
 BOLD_RE = re.compile(r"<(strong|b)>(.*?)</\1>", re.S)
 # A bold number label: "**1.**", "**E1.**" (an exercise or answer), "**表 1**", "**图 3**", "**Table 2**" (a caption).
 LABEL_TEXT_RE = re.compile(r"\s*([A-Za-z]?\d|(表|图|Table|Fig\.?)\s*\d)")
-MATH_SRC_RE = re.compile(r"\\\(.*?\\\)|\\\[.*?\\\]", re.S)
-DROPCAP_MIN_CHARS = 10  # the block after a capped paragraph clears the float, so only a stub is left uncapped
+# A numbered entry in plain text, bold or not: "算法 1.1E", "定理 A" in an index of algorithms and theorems.
+ENTRY_RE = re.compile(r"(表|图|算法|定理|Table|Fig\.?|Algorithm|Theorem)\s*[\dA-Z]")
 
 
 def first_paragraph_head(body):
@@ -347,14 +347,14 @@ def first_paragraph_head(body):
 def wants_dropcap(body):
     """A drop cap suits a section that opens with prose, including prose that opens with a bold key phrase. Not
     when its first paragraph opens with a bold number label (an answers or exercises section: "**1.** ...",
-    possibly after a ▶ marker image; a table or figure caption: "**表 1**") or a digit, where the cap would land on the number, nor on a stub of a few
-    characters."""
+    possibly after a ▶ marker image; a table or figure caption: "**表 1**"; an index entry: "算法 1.1E") or a digit, where the cap would land on
+    the number, nor when the paragraph has no text (an image alone)."""
     head = first_paragraph_head(body)
     bold = BOLD_RE.match(head) if head else None
     if head is None or bold and LABEL_TEXT_RE.match(re.sub(r"<[^>]+>", "", bold.group(2))) or head[:1].isdigit():
         return False
-    text = MATH_SRC_RE.sub("x", re.sub(r"<[^>]+>", "", head))  # a formula's LaTeX source sets far shorter
-    return len(text.strip()) >= DROPCAP_MIN_CHARS
+    text = re.sub(r"<[^>]+>", "", head).strip()
+    return bool(text) and not ENTRY_RE.match(text)  # the block after the cap clears it, so any text can carry one
 
 
 def body_classes(body):
