@@ -33,7 +33,9 @@ done
 [ -z "$DEVICE" ] || [ -z "$SIMULATOR" ] || { echo "pass --device or --simulator, not both" >&2; usage; }
 [ -n "$NAME" ] || [ "$ALL" -eq 1 ] || usage
 
-OUT="$(mktemp "${TMPDIR:-/tmp}/ios-apps.XXXXXX.json")"
+SCRATCH="${MOBILE_DATA_DIR:-$HOME/.local/share/mobile}/tmp/ios-take-screenshot"
+mkdir -p "$SCRATCH"
+OUT="$(mktemp "$SCRATCH/ios-apps.XXXXXX")"
 trap 'rm -f "$OUT"' EXIT
 
 if [ -n "$SIMULATOR" ]; then

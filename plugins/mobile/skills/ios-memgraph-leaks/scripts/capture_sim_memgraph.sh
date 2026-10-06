@@ -73,7 +73,9 @@ if [[ -z "$bundle_id" ]]; then
 fi
 
 if [[ -z "$out_dir" ]]; then
-  out_dir="$(mktemp -d "${TMPDIR:-/tmp}/mobile-ios-memgraph.XXXXXX")"
+  scratch="${MOBILE_DATA_DIR:-$HOME/.local/share/mobile}/tmp/ios-memgraph-leaks"
+  mkdir -p "$scratch"
+  out_dir="$(mktemp -d "$scratch/run.XXXXXX")"
 fi
 
 matching_processes="$(

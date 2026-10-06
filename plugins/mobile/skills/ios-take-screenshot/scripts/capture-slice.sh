@@ -25,7 +25,7 @@ if [ "$UDID" = "booted" ]; then
   exit 2
 fi
 
-LOCK="${TMPDIR:-/tmp}/ios-screenshot-lock.$UDID.json"
+LOCK="${MOBILE_STATE_DIR:-$HOME/.local/state/mobile}/locks/ios-screenshot-lock.$UDID.json"
 if [ ! -f "$LOCK" ]; then
   echo "simulator $UDID is not claimed; run claim-simulator.mjs first" >&2
   exit 3

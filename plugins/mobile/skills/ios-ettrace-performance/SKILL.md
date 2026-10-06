@@ -51,7 +51,8 @@ Use a writable run folder for each profiling session:
 
 ```bash
 if [ -z "${RUN_DIR:-}" ]; then
-  RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mobile-ios-ettrace.XXXXXX")"
+  mkdir -p "${MOBILE_DATA_DIR:-$HOME/.local/share/mobile}/tmp/ios-ettrace-performance"
+  RUN_DIR="$(mktemp -d "${MOBILE_DATA_DIR:-$HOME/.local/share/mobile}/tmp/ios-ettrace-performance/run.XXXXXX")"
 fi
 mkdir -p "$RUN_DIR"
 ```

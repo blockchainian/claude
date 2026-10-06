@@ -178,7 +178,9 @@ function run(cmd, args, options = {}) {
 }
 
 export function devicectl(...args) {
-  const out = path.join(os.tmpdir(), `tmp${crypto.randomBytes(6).toString("hex")}.json`);
+  const scratch = path.join(process.env.MOBILE_DATA_DIR || path.join(os.homedir(), ".local", "share", "mobile"), "tmp", "ios-take-screenshot");
+  fs.mkdirSync(scratch, { recursive: true });
+  const out = path.join(scratch, `devicectl-${crypto.randomBytes(6).toString("hex")}.json`);
   fs.writeFileSync(out, "");
   try {
     const proc = run("xcrun", ["devicectl", ...args, "--json-output", out]);

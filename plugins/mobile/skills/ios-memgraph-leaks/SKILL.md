@@ -52,7 +52,8 @@ Prefer capturing from the simulator already used for the reproduction. Resolve t
 SKILL_DIR="<absolute path to this loaded skill folder>"
 SIM="$UDID"
 BUNDLE_ID="<app.bundle.identifier>"
-MEMGRAPH_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mobile-ios-memgraph.XXXXXX")"
+mkdir -p "${MOBILE_DATA_DIR:-$HOME/.local/share/mobile}/tmp/ios-memgraph-leaks"
+MEMGRAPH_DIR="$(mktemp -d "${MOBILE_DATA_DIR:-$HOME/.local/share/mobile}/tmp/ios-memgraph-leaks/run.XXXXXX")"
 
 "$SKILL_DIR/scripts/capture_sim_memgraph.sh" \
   --udid "$SIM" \
