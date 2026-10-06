@@ -22,10 +22,12 @@ magnitude 4x wrong and matching no real accounting basis. So this runs in a
 auditor, not the author. The transcript's own stated reasoning is available, but
 treated as a claim to verify, never as justification for a deviation.
 
-The output is one file, `~/.claude/retros/<date>-<session>/retro.md`: the ranked
-wastes with their evidence, then the proposed fixes. Write it there, never into a
-repo — the analysed session's worktree is often deleted after it finishes, and
-this stable archive sits beside the transcripts it reads (`~/.claude/projects/`).
+The output is one file, `~/Documents/retros/<date>-<session>/retro.md`
+(`$FEATURE_OUTPUT_DIR/retros/` when set): the ranked wastes with their evidence, then the
+proposed fixes. Write it there, never into a repo — the analysed session's worktree is
+often deleted after it finishes. The machine records behind it (`retro.json` per session
+and the `fixes.jsonl` ledger) live in `~/.local/state/feature/retros/`
+(`$FEATURE_STATE_DIR/retros/` when set): they cannot be rebuilt once the transcripts age out.
 Diagnosis and fixes are two gates — write and confirm the diagnosis before
 touching anything.
 
@@ -90,8 +92,8 @@ touching anything.
    discarded-workstream count × mean joined per-workstream cost, plus the
    orchestrator's own (measured) reaction tokens. Never present a proxy as measured.
 
-5. **Write `retro.md` and `retro.json` to `~/.claude/retros/<date>-<session>/`, then
-   stop at the gate.** `retro.md` is the human record: ranked wastes with evidence
+5. **Write `retro.md` to `~/Documents/retros/<date>-<session>/` and `retro.json` to
+   `~/.local/state/feature/retros/<date>-<session>/`, then stop at the gate.** `retro.md` is the human record: ranked wastes with evidence
    (token cost, the `path:line` or memory that held the answer, the axis), then the
    proposed fixes grouped by destination (ship / plan template / memory).
    `retro.json` is the machine record that makes efficacy analyzable later — one
@@ -117,13 +119,13 @@ touching anything.
    cheapest ship guardrail, recurring across runs: validate each workstream's check
    command on the clean baseline before fan-out, and reject any gate already red.
 
-   For **every fix you actually apply**, append one line to `~/.claude/retros/fixes.jsonl`:
+   For **every fix you actually apply**, append one line to `~/.local/state/feature/retros/fixes.jsonl`:
 
    ```
    {fix_id, waste_class, type: "mechanical-gate"|"judgment"|"memory", applied_at: <commit SHA or memory path>, ref}
    ```
 
-   This is the treatment timeline. `efficacy.mjs --root ~/.claude/retros` then joins it
+   This is the treatment timeline. `efficacy.mjs` (its default root is that state directory) then joins it
    to the `retro.json` records and reports whether each fix's `waste_class` recurs in
    later comparable sessions — near-deductive for a mechanical gate (the waste becomes
    structurally impossible), only suggestive for judgment/memory fixes. It presents

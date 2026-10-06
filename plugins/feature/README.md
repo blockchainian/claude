@@ -33,7 +33,7 @@ ship, the plan template and memory.
 | `ship/scripts/check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the orchestrator runs it beside the path checker |
 | `ship/scripts/workstream.sh` | `open <id>` a worktree per workstream, `check <id> <cmd>` in it, `merge <id> [<cmd>...]` onto the session branch with optional checks, `base` for the review |
 | `retro/scripts/extract.mjs` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex lane joined from `~/.codex/sessions` |
-| `retro/scripts/efficacy.mjs` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.claude/retros` to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
+| `retro/scripts/efficacy.mjs` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.local/state/feature/retros` (`FEATURE_STATE_DIR`) to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
 
 ## Agents
 
@@ -98,3 +98,5 @@ MIT
 | --- | --- | --- | --- |
 | `CI_TIMEOUT` | CI waiting limit; default 300 seconds | Optional | Shell environment |
 | `CI_INTERVAL` | CI check interval; default 5 seconds | Optional | Shell environment |
+| `FEATURE_OUTPUT_DIR` | Root for retro reports; default ~/Documents, with retros/ | Optional | Shell environment |
+| `FEATURE_STATE_DIR` | Root for retro.json records and the fixes.jsonl ledger; default ~/.local/state/feature, with retros/ | Optional | Shell environment |
