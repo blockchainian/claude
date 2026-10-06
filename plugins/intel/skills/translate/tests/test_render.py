@@ -304,7 +304,21 @@ def test_render_e2e(rd):
         check("render fails on an unparseable equation (KaTeX error guard)", guarded)
 
 
+def test_compiles_clean():
+    # Python prints a SyntaxWarning for an invalid escape (e.g. "\\m" in a non-raw string) on every run.
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        try:
+            compile((HERE / "render.py").read_text(), "render.py", "exec")
+            clean = ""
+        except (SyntaxError, SyntaxWarning) as e:
+            clean = str(e)
+    check("render.py compiles without warnings", not clean, clean)
+
+
 def main():
+    test_compiles_clean()
     rd = load("render")
     test_render_units(rd)
     test_math_units(rd)
