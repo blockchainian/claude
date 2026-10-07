@@ -55,7 +55,7 @@ PY
 }
 
 # verdict <state> <checks-json> <elapsed> — prints the consolidated verdict JSON and exits 0
-# only for a completed success (memory gate-deploy-chains-on-exit-codes).
+# only for a completed success.
 verdict() {
   uv run --quiet --no-project python - "$REF" "$1" "$2" "$3" <<'PY'
 import json, sys

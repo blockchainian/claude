@@ -5,7 +5,7 @@ description: >
   route each fix back into the workflow it came from. Run in a SEPARATE
   session, passing the finished session's name: "/feature:retro <session-name>".
   Reads that session's transcript as evidence, ranks wastes by real token cost,
-  and proposes fixes to ship, the plan template and memory. NOT in the session being
+  and proposes fixes to ship and the plan template. NOT in the session being
   analysed (a session grading itself inherits the blind spot that caused the
   waste), and not for a one-turn task with nothing to rank.
 ---
@@ -62,8 +62,8 @@ touching anything.
 
    - **Axis A — knowable-fact miss.** The answer already existed in memory or the
      repo (a memory that warned of the gate; an existing client that held the
-     auth recipe). Fix feeds **memory**, so the next planning turn front-loads
-     the check.
+     auth recipe). Fix feeds the AGENTS.md or skill the planning turn reads, so
+     it front-loads the check.
    - **Axis B — workflow/topology deviation.** The session did not run the shape
      ship prescribes — UX work as `general-purpose` agents instead of
      `ux-implementer` + `ux-verifier`, hand-driving instead of probe-first. The
@@ -95,7 +95,7 @@ touching anything.
 5. **Write `retro.md` to `~/Documents/retros/<date>-<session>/` and `retro.json` to
    `~/.local/state/feature/retros/<date>-<session>/`, then stop at the gate.** `retro.md` is the human record: ranked wastes with evidence
    (token cost, the `path:line` or memory that held the answer, the axis), then the
-   proposed fixes grouped by destination (ship / plan template / memory).
+   proposed fixes grouped by destination (ship / plan template / AGENTS.md).
    `retro.json` is the machine record that makes efficacy analyzable later — one
    object:
 
@@ -122,19 +122,19 @@ touching anything.
    For **every fix you actually apply**, append one line to `~/.local/state/feature/retros/fixes.jsonl`:
 
    ```
-   {fix_id, waste_class, type: "mechanical-gate"|"judgment"|"memory", applied_at: <commit SHA or memory path>, ref}
+   {fix_id, waste_class, type: "mechanical-gate"|"judgment", applied_at: <commit SHA>, ref}
    ```
 
    This is the treatment timeline. `efficacy.mjs` (its default root is that state directory) then joins it
    to the `retro.json` records and reports whether each fix's `waste_class` recurs in
    later comparable sessions — near-deductive for a mechanical gate (the waste becomes
-   structurally impossible), only suggestive for judgment/memory fixes. It presents
+   structurally impossible), only suggestive for judgment fixes. It presents
    recurrence evidence; a human marks the verdict.
 
 ## Scaling
 
 Run it after an orchestration session big enough to have a spawn ledger worth
 ranking — a multi-workstream ship, a sweep. Skip it for a session that spawned
-nothing: there is no waste to rank, and its lessons belong in a plain memory.
-Verifying "the answer already existed" (Axis A) is a read-only repo/memory
+nothing: there is no waste to rank.
+Verifying "the answer already existed" (Axis A) is a read-only repo
 check — delegate that fan-out to Explore agents (`model: "sonnet"`).
