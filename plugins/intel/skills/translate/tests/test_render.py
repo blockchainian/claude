@@ -138,6 +138,9 @@ def test_render_units(rd):
     check("drop cap even on a two-character opening stub", dropcap("<p>数列</p>" + prose))
     check("no drop cap on an index entry label", not dropcap("<p>算法 1.1E</p><p>算法 1.1F</p>"))
     check("no drop cap on an image-only first paragraph", not dropcap('<p><img class="infig" src="a.png"></p>' + prose))
+    # Numbered articles ("139. …") parse as a list; the first plain paragraph after it sits mid-chapter.
+    check("no drop cap when the section opens with a list", not dropcap('<ol start="139">\n<li><p>' + "正文" * 30 + "</p></li>\n</ol>" + prose)
+          and not dropcap("<ul>\n<li>" + "正文" * 30 + "</li>\n</ul>" + prose))
     # A one-sentence opener just over a line still wraps the two-line cap; 60 characters skipped many sections.
     check("drop cap on a one-line-plus opening sentence", dropcap("<p>算法的概念是所有计算机程序设计的基础，因此我们应当从仔细分析这一概念开始。</p>"))
     check("css clears the block after a capped paragraph", ".body-text:not(.no-dropcap) > p.dropcap + * { clear: left; }" in style)

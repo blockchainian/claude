@@ -15,6 +15,7 @@ class Paragraphs(HTMLParser):
         self.stack = []
         self.items = []
         self.current = None
+        self.first_list = None
         self.feed(body)
 
     def absolute_position(self):
@@ -24,6 +25,8 @@ class Paragraphs(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag == "p" and not self.stack:
             self.current = {"start": self.absolute_position(), "inner": self.absolute_position() + len(self.get_starttag_text()), "attrs": dict(attrs)}
+        if tag in {"ol", "ul"} and not self.stack and self.first_list is None:
+            self.first_list = self.absolute_position()
         if tag not in {"img", "br", "hr", "wbr", "input", "meta", "link", "source"}:
             self.stack.append(tag)
 
@@ -40,9 +43,12 @@ class Paragraphs(HTMLParser):
 
 
 def opening_paragraph(body):
-    for p in Paragraphs(body).items:
+    """The section's first top-level prose paragraph, skipping captions; None when a top-level list comes first,
+    since the paragraph after it already sits mid-section."""
+    parsed = Paragraphs(body)
+    for p in parsed.items:
         text = re.sub(r"<[^>]+>", "", p["head"])
         if "caption" in (p["attrs"].get("class") or "").lower() or CAPTION_TEXT_RE.match(text):
             continue
-        return p
+        return None if parsed.first_list is not None and parsed.first_list < p["start"] else p
     return None
