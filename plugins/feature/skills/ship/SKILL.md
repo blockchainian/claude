@@ -237,8 +237,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    issue-tldr / fix-tldr / commit SHA,
    the deploy SHAs and deploy-check results, and the follow-ups left out of this ship — clear,
    succinct, no code anchors. Without a PR the same goes in your final message. `plan.md` stays
-   input-only; do not write the record into it. Then `workstream.sh base --clear`, write the
-   memory files and end. Write a separate
+   input-only; do not write the record into it. Then `workstream.sh base --clear` and end. Write a separate
    `<dir>/handoff.md` only if you must stop mid-phase (the context safety rail set in the user's
    CLAUDE.md, quota exhausted), naming exactly where to resume.
 
@@ -279,5 +278,4 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
   `conclusion: success` on the fixed head. Never `--admin`. Auto-push and
   auto-merge are PR-scoped only — never a prod, secret or infra mutation from this skill; a
   finding that needs one goes to the user, not into the fix round.
-- **Memory at the phase end only** — written in step 9, not mid-turn, because a memory write in
-  the middle of a session invalidates the prompt cache; no handoff unless stopping mid-phase.
+- **No handoff unless stopping mid-phase.**
