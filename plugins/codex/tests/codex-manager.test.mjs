@@ -527,6 +527,29 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
   }
 });
 
+test("mcp start sets the thread's reasoning effort when given and rejects an unknown one", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  try {
+    await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
+    const started = await mcp.call("start", { cwd: "plugins", prompt: "Find the cause", effort: "high" });
+    assert.equal(started.isError, false, started.text);
+    const start = script.messages.find((message) => message.method === "thread/start").params;
+    assert.equal(start.config.model_reasoning_effort, "high");
+
+    const rejected = await mcp.call("start", { cwd: "plugins", prompt: "Find the cause", effort: "extreme" });
+    assert.equal(rejected.isError, true);
+    assert.match(rejected.text, /effort must be one of/);
+    assert.equal(script.messages.filter((message) => message.method === "thread/start").length, 1);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
 test("mcp adopts recorded threads on startup and backfills turns that finished meanwhile", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   await mkdir(home.dir, { recursive: true });
