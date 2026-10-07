@@ -414,10 +414,11 @@ class Manager {
     return lines.length ? lines : undefined;
   }
 
-  async startThread(client, { cwd, name, sandbox, claudeTools, record }) {
+  async startThread(client, { cwd, name, sandbox, claudeTools, effort, record }) {
     const params = { cwd, approvalPolicy: "on-request", sandbox, serviceName: "codex-manager", ephemeral: false };
     if (sandbox === "workspace-write") params.config = { "sandbox_workspace_write.network_access": true };
     if (claudeTools) params.config = { ...params.config, "mcp_servers.claude-client": claudeToolsServer() };
+    if (effort) params.config = { ...params.config, model_reasoning_effort: effort };
     const started = await client.request("thread/start", params);
     const threadId = started.thread.id;
     if (name) await client.request("thread/name/set", { threadId, name });
@@ -425,11 +426,12 @@ class Manager {
     return threadId;
   }
 
-  async start({ cwd, prompt, name }) {
+  async start({ cwd, prompt, name, effort }) {
     if (!cwd || !prompt) throw new Error("cwd and prompt are required");
+    if (effort !== undefined && !reasoningEfforts.includes(effort)) throw new Error(`effort must be one of ${reasoningEfforts.join(", ")}`);
     const client = await this.connect();
     const absolute = path.resolve(cwd);
-    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: true });
+    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: true, effort });
     const turn = await this.startTurn(client, threadId, prompt);
     return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when codex finishes the turn, calls notify_claude or ask_claude, or needs an approval." };
   }
@@ -568,8 +570,11 @@ A thread is finished only when its turn completed (not failed, interrupted or wa
 Once finished, detach it in the same turn; send re-attaches it, so detaching an accepted thread early is safe.
 Before ending a multi-thread run, list the threads and detach every finished thread.`;
 
+// Reasoning efforts codex accepts for model_reasoning_effort.
+const reasoningEfforts = ["minimal", "low", "medium", "high", "xhigh"];
+
 const TOOLS = [
-  { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task. Returns the thread id and the await command to run in the background.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute working directory for the worker." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation." }, name: { type: "string", description: "Short human-readable thread name." } }, required: ["cwd", "prompt"] } },
+  { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task. Returns the thread id and the await command to run in the background.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute working directory for the worker." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation." }, name: { type: "string", description: "Short human-readable thread name." }, effort: { type: "string", enum: reasoningEfforts, description: "Reasoning effort for every turn of the thread. Omit to use codex's configured default." } }, required: ["cwd", "prompt"] } },
   { name: "attach", description: "Take over a codex session that is already running elsewhere, found by its thread id or exact name, so send, interrupt and the await command work on it. Its approvals stay with the client it runs in.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
   { name: "send", description: "Send a follow-up prompt to a codex thread. Starts a new turn when idle; when a turn is running the prompt is injected into it.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
   { name: "reply", description: "Answer a codex thread that is waiting: the text becomes the result of its ask_claude call, or, for an approval request, one of the decisions its inbox event listed. callId is needed only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },

@@ -70,7 +70,7 @@ with its app-server daemon running (`codex agents` starts one).
 
 | Tool | Does |
 |---|---|
-| `start(cwd, prompt, name?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access, the `claude-client` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. |
+| `start(cwd, prompt, name?, effort?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access, the `claude-client` MCP server in its config, and `model_reasoning_effort` when `effort` is given), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. |
 | `attach(thread)` | Take over a session that is already running elsewhere (the codex TUI, say), found by its thread id or exact name. `thread/resume` with nothing but the id subscribes to it, so its settings stay as its own client set them. After that `send`, `reply`, `interrupt`, `list` and the await command work on it. |
 | `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule); the result says which happened. |
 | `reply(threadId, text, callId?)` | Answer what the thread is waiting for: the text becomes the result of its `ask_claude` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
