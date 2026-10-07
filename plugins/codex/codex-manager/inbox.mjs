@@ -1,5 +1,5 @@
 // ABOUTME: Per-session storage for codex-manager: state.json, one inbox per codex thread, reader-owned
-// ABOUTME: cursors so events reach Claude exactly once, and the questions codex is waiting on.
+// ABOUTME: cursors with pending skipping await deliveries, and the questions codex is waiting on.
 
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -117,9 +117,11 @@ export class SessionStore {
     }
   }
 
-  /** Unread complete lines after the cursor, and the offset just past the last of them. */
+  /** Unread complete lines after the reader's cursor (pending also skips await deliveries), and their end offset. */
   unread(threadId, reader) {
-    const cursor = this.readCursor(threadId, reader);
+    const cursor = reader === "pending"
+      ? Math.max(this.readCursor(threadId, reader), this.readCursor(threadId))
+      : this.readCursor(threadId, reader);
     let text;
     try {
       text = readFileSync(this.inboxPath(threadId));

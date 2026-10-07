@@ -153,8 +153,9 @@ edits under a shared lock.
 `--timeout` exits 124 with no output when nothing arrives. The plugin's Stop
 hook (`codex-manager pending`) is the fallback: when Claude tries to stop with
 undelivered events, the hook blocks once and hands them over. `await` and the
-hook have separate cursors and take events under a per-thread lock, so each
-reader delivers an event once.
+hook have separate cursors and take events under a per-thread lock. The hook
+skips events already delivered by `await`; events delivered by the hook remain
+available to `await`. Each reader delivers an event once.
 
 PostToolUse records the starting agent as each thread's `owner` after `start`,
 `attach` or `review`: `agent_id` for a subagent, otherwise `main`. This hook is
