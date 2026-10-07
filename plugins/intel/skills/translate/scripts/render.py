@@ -408,9 +408,11 @@ def body_classes(body):
     return "body-text boldcap" if first_paragraph_head(body).startswith(("<strong", "<b>")) else "body-text"
 
 
-def section_html(s, title, body):
-    classes = body_classes(body)
-    if wants_dropcap(body):
+def section_html(s, title, body, dropcap=True):
+    """dropcap=False (--no-dropcap) sets every section uncapped, for books whose openings are numbered articles."""
+    capped = dropcap and wants_dropcap(body)
+    classes = body_classes(body) if capped else "body-text no-dropcap"
+    if capped:
         p = opening_paragraph(body)
         tag = body[p["start"]:p["inner"]]
         if re.search(r'\bclass=["\']', tag):
@@ -587,8 +589,9 @@ def render(work, opt):
         print_pdf(chrome, html_path, pdf_path)
         return pdf_path, page_map(pdf_path)
 
+    dropcap = getattr(opt, "dropcap", True)
     if opt.only:
-        pdf_path, pages = typeset("section", [section_html(*r) for r in ready])
+        pdf_path, pages = typeset("section", [section_html(*r, dropcap=dropcap) for r in ready])
         out = work / "pdf" / (Path(ready[0][0]["file"]).stem + ".pdf")
         out.parent.mkdir(exist_ok=True)
         shutil.copyfile(pdf_path, out)
@@ -600,12 +603,12 @@ def render(work, opt):
     # Chrome cannot reset the page counter mid-document; the contents page is re-typeset once the folios are known.
     front = [r for r in ready if r[0]["kind"] == "front"]
     body = [r for r in ready if r[0]["kind"] != "front"]
-    body_pdf, body_pages = typeset("body", [section_html(*r) for r in body]) if body else (None, {})
+    body_pdf, body_pages = typeset("body", [section_html(*r, dropcap=dropcap) for r in body]) if body else (None, {})
     folios = {s["id"]: str(body_pages[f"S{s['id']}"] + 1) for s, _, _ in body}
     entries = [(s, t) for s, t, _ in ready]
     front_pdf, front_pages = None, {}
     for _ in range(3):
-        front_pdf, front_pages = typeset("front", [contents_html(entries, folios)] + [section_html(*r) for r in front])
+        front_pdf, front_pages = typeset("front", [contents_html(entries, folios)] + [section_html(*r, dropcap=dropcap) for r in front])
         new = {**folios, **{s["id"]: roman_folio(front_pages[f"S{s['id']}"]) for s, _, _ in front}}
         if new == folios:
             break
@@ -720,6 +723,7 @@ def main():
     ap.add_argument("--eq-scale", type=float, default=0.6, help="EPUB build: block (display) equation images render at their intrinsic width times this (default 0.6), so all equations share one scale")
     ap.add_argument("--inline-scale", type=float, default=0.33, help="EPUB build: inline images (in-line formulas, the ▶ marker) render at their intrinsic width times this (default 0.33, about body-text size for 28px-per-em formula crops)")
     ap.add_argument("--no-recolor", dest="recolor", action="store_false", help="keep every image as is on a white plate instead of recolouring black-on-white line art to the page colours (for books whose figures are grayscale screenshots or photos)")
+    ap.add_argument("--no-dropcap", dest="dropcap", action="store_false", help="no drop cap on any section (for books whose chapters open with numbered articles)")
     opt = ap.parse_args()
     render(Path(opt.work).resolve(), opt)
 

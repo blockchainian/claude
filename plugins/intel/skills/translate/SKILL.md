@@ -196,7 +196,8 @@ KaTeX's typewriter face, the same as `\mathtt`. A paragraph with hard line break
 indent, and a continued line keeps its leading ideographic spaces (a staircase). Chapter openers carry the
 第N章 label, the title and a drop cap on the first paragraph after any epigraph (left off when that paragraph opens
 with a bold number label or a digit, as in an answers section, or has no text, only an image; a paragraph opening with a
-bold phrase gets a bold cap). Figure captions, including unnumbered `**图　…**` labels and source
+bold phrase gets a bold cap; `--no-dropcap` leaves every section uncapped, for a book whose chapters open with
+numbered articles). Figure captions, including unnumbered `**图　…**` labels and source
 caption-classed paragraphs, are skipped so the first prose paragraph carries the cap. Every paragraph is indented 2em except a drop-cap one, so a list section's first item
 lines up with the rest; body pages carry the chapter title as running head and a folio (roman in
 front matter, arabic from chapter 1). Every 目录 row is a link to its section, and the bookmarks are flat:

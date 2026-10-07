@@ -138,6 +138,8 @@ def test_render_units(rd):
     check("drop cap even on a two-character opening stub", dropcap("<p>数列</p>" + prose))
     check("no drop cap on an index entry label", not dropcap("<p>算法 1.1E</p><p>算法 1.1F</p>"))
     check("no drop cap on an image-only first paragraph", not dropcap('<p><img class="infig" src="a.png"></p>' + prose))
+    no_cap = rd.section_html(sec, "标题", prose, dropcap=False)
+    check("--no-dropcap leaves a prose opening uncapped", "no-dropcap" in no_cap and 'class="dropcap"' not in no_cap, no_cap)
     # Numbered articles ("139. …") parse as a list; the first plain paragraph after it sits mid-chapter.
     check("no drop cap when the section opens with a list", not dropcap('<ol start="139">\n<li><p>' + "正文" * 30 + "</p></li>\n</ol>" + prose)
           and not dropcap("<ul>\n<li>" + "正文" * 30 + "</li>\n</ul>" + prose))
