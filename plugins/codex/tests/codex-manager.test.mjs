@@ -94,6 +94,24 @@ test("await prints unread lines, advances the cursor, and times out on silence",
   }
 });
 
+test("pending stays silent for events already delivered by await", { timeout: 15_000 }, async () => {
+  const home = await tempHome();
+  try {
+    await mkdir(home.dir, { recursive: true });
+    const event = '{"kind":"completed","status":"completed","lastMessage":"finished the work"}\n';
+    await writeFile(path.join(home.dir, "thread-9.jsonl"), event);
+    const env = { CODEX_MANAGER_STATE_DIR: home.home };
+    const completed = await run(["await", "--thread", "thread-9", "--timeout", "1"], { env });
+    assert.equal(completed.code, 0, completed.stderr);
+    assert.equal(completed.stdout, event);
+    const pending = await run(["pending"], { env, stdin: JSON.stringify({ session_id: session, stop_hook_active: false }) });
+    assert.equal(pending.code, 0, pending.stderr);
+    assert.equal(pending.stdout, "");
+  } finally {
+    await home.close();
+  }
+});
+
 test("pending stays silent without state and blocks once without consuming await events", { timeout: 15_000 }, async () => {
   const home = await tempHome();
   try {
