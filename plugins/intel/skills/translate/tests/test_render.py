@@ -105,6 +105,8 @@ def test_render_units(rd):
     style = rd.css([427.6, 660], "#181a1d", "#e1ddd5", [("03", "前言", "front"), ("04", "第一章", "chapter")])
     check("a plate's padding stays inside max-width (a wide figure is not clipped on the right)",
           re.search(r"\.fig\.plate img \{[^}]*box-sizing: border-box", style) and re.search(r"\.infig\.plate \{[^}]*box-sizing: border-box", style))
+    check("css sets every heading level h2-h6 in bold 黑体 (Songti's default bold is invisible)",
+          all(re.search(rf"(^|[,\s]){h}\b[^{{]*\{{[^}}]*font-family: [^;]*Hei[^}}]*font-weight: 700", style, re.M) for h in ("h2", "h3", "h4", "h5", "h6")))
     check("css page size and colors", "size: 427.6pt 660pt" in style and "--bg: #181a1d" in style and "Baskerville" in style)
     check("css front roman, body arabic", '@page s03 { @top-center { content: "前言"' in style and "counter(page, lower-roman)" in style.split("@page s03")[1].split("}}")[0]
           and "content: counter(page);" in style.split("@page s04")[1].split("} }")[0])
