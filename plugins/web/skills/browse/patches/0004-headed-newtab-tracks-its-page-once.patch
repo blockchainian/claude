@@ -1,7 +1,7 @@
-From 801846ae81a59938d10e1c96024933e9988f8fc5 Mon Sep 17 00:00:00 2001
+From 95afd6b41ba978b4f4876b69312d6607391f82de Mon Sep 17 00:00:00 2001
 From: Satoshi Nakamoto <hello@chadwallet.xyz>
 Date: Thu, 8 Oct 2026 10:12:23 -0700
-Subject: [PATCH] fix(browse): headed newTab tracks its page once
+Subject: [PATCH 1/2] fix(browse): headed newTab tracks its page once
 
 launchHeaded() registers every page the context opens through
 context.on('page'), and newTab() opens its page through that context, so the
@@ -11,8 +11,8 @@ console and network entry was recorded twice. newTab now adopts the
 handler's id when the page is already tracked.
 ---
  browse/src/browser-manager.ts     | 16 +++++----
- browse/test/headed-newtab.test.ts | 54 +++++++++++++++++++++++++++++++
- 2 files changed, 64 insertions(+), 6 deletions(-)
+ browse/test/headed-newtab.test.ts | 55 +++++++++++++++++++++++++++++++
+ 2 files changed, 65 insertions(+), 6 deletions(-)
  create mode 100644 browse/test/headed-newtab.test.ts
 
 diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
@@ -51,17 +51,18 @@ index ed163ef..c40c62b 100644
      }
 diff --git a/browse/test/headed-newtab.test.ts b/browse/test/headed-newtab.test.ts
 new file mode 100644
-index 0000000..d04de21
+index 0000000..104405b
 --- /dev/null
 +++ b/browse/test/headed-newtab.test.ts
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,55 @@
 +/**
 + * Headed newTab registers each page once. launchHeaded() tracks every page the
 + * context opens through context.on('page'); newTab() opens its page through the
 + * same context, so it must adopt that registration instead of adding a second
 + * tab id for the same page (which doubled `tabs` and every log entry).
 + *
-+ * Opens a visible Chromium window: launchHeaded() is headless: false by design.
++ * Opens a visible Chromium window (launchHeaded() is headless: false by design),
++ * so it runs only with BROWSE_HEADED_TESTS=1.
 + */
 +
 +import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -72,28 +73,28 @@ index 0000000..d04de21
 +import { BrowserManager } from '../src/browser-manager';
 +import { networkBuffer } from '../src/buffers';
 +
-+const ORIGINAL_CHROMIUM_PROFILE = process.env.CHROMIUM_PROFILE;
-+let profileDir: string;
-+let testServer: ReturnType<typeof startTestServer>;
-+let bm: BrowserManager;
++describe.skipIf(!process.env.BROWSE_HEADED_TESTS)('headed newTab', () => {
++  const ORIGINAL_CHROMIUM_PROFILE = process.env.CHROMIUM_PROFILE;
++  let profileDir: string;
++  let testServer: ReturnType<typeof startTestServer>;
++  let bm: BrowserManager;
 +
-+beforeAll(async () => {
-+  profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-test-headed-'));
-+  process.env.CHROMIUM_PROFILE = profileDir;
-+  testServer = startTestServer(0);
-+  bm = new BrowserManager();
-+  await bm.launchHeaded();
-+}, 120_000);
++  beforeAll(async () => {
++    profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-test-headed-'));
++    process.env.CHROMIUM_PROFILE = profileDir;
++    testServer = startTestServer(0);
++    bm = new BrowserManager();
++    await bm.launchHeaded();
++  }, 120_000);
 +
-+afterAll(async () => {
-+  try { testServer?.server?.stop(); } catch {}
-+  await bm?.close().catch(() => {});
-+  if (ORIGINAL_CHROMIUM_PROFILE === undefined) delete process.env.CHROMIUM_PROFILE;
-+  else process.env.CHROMIUM_PROFILE = ORIGINAL_CHROMIUM_PROFILE;
-+  fs.rmSync(profileDir, { recursive: true, force: true });
-+});
++  afterAll(async () => {
++    try { testServer?.server?.stop(); } catch {}
++    await bm?.close().catch(() => {});
++    if (ORIGINAL_CHROMIUM_PROFILE === undefined) delete process.env.CHROMIUM_PROFILE;
++    else process.env.CHROMIUM_PROFILE = ORIGINAL_CHROMIUM_PROFILE;
++    fs.rmSync(profileDir, { recursive: true, force: true });
++  });
 +
-+describe('headed newTab', () => {
 +  test('adds exactly one tab for the page it opens', async () => {
 +    const before = bm.getTabCount();
 +    const id = await bm.newTab();

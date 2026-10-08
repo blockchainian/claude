@@ -78,13 +78,15 @@ node --test skills/browse/tests/*.mjs
 uv run skills/check-web-design/tests/test_check_design.py
 ```
 
-Or from the marketplace root: `npm run test:web`.
+Or from the marketplace root: `npm run test:web`. Tests that open a visible
+Chromium window are skipped unless `BROWSE_HEADED_TESTS=1`.
 
 ## Environment Variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `WEB_DATA_DIR` | Root for heap-snapshot-leaks' throwaway Chrome profile; default ~/.local/share/web | Optional | Shell environment |
+| `BROWSER_DISPLAY` | Display for browse's headed windows (any part of its name, any case; empty means the main display) | Optional | ~/.config/web/.env |
 | `CLAUDE_PLUGIN_DATA` | Root for `bin/browse`'s builds; default ~/.claude/plugins/data/web-blockchainian | Optional | Claude Code, or shell environment |
 
 Application-specific variables belong to the target project, not this plugin.
