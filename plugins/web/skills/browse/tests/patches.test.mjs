@@ -42,7 +42,9 @@ test("build.sh builds the patched browse and the patches' own tests pass in it",
     run("bash", [join(SKILL_DIR, "scripts", "build.sh"), "--dest", dest], SKILL_DIR);
 
     assert.ok(existsSync(join(dest, "browse", "dist", "browse")));
-    assert.match(readFileSync(join(dest, "browse", "dist", ".version"), "utf8"), /^\d+\.\d+\.\d+-[0-9a-f]{16}\n$/);
+    const buildId = run("bash", [join(SKILL_DIR, "scripts", "build-id.sh")], SKILL_DIR);
+    assert.match(buildId, /^[0-9a-f]{16}\n$/);
+    assert.equal(readFileSync(join(dest, "browse", "dist", ".version"), "utf8"), buildId);
     run("bun", ["test", "browse/test/no-tab-recovery.test.ts", "browse/test/tab-scoped-logs.test.ts"], dest);
   } finally {
     rmSync(root, { recursive: true, force: true });

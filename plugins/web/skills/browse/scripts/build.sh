@@ -1,25 +1,21 @@
 #!/bin/bash
 # ABOUTME: Builds the patched browse CLI: copies vendor/gstack into an install dir, applies patches/ in order, installs and compiles.
-# ABOUTME: Only --link repoints ~/.local/bin/browse at the build, which makes the running daemon restart on its next command.
+# ABOUTME: The default install dir is <plugin data>/browse/<build id>, where the plugin's bin/browse launcher looks for it.
 set -euo pipefail
 
 usage() {
-  echo "usage: build.sh [--dest <dir>] [--link]" >&2
-  echo "  --dest  install dir (default ~/.local/share/web-browse/<plugin version>)" >&2
-  echo "  --link  point ~/.local/bin/browse at the built binary" >&2
+  echo "usage: build.sh [--dest <dir>]" >&2
+  echo "  --dest  install dir (default \${CLAUDE_PLUGIN_DATA:-~/.claude/plugins/data/web-blockchainian}/browse/<build id>)" >&2
   exit 2
 }
 
 SKILL_DIR=$(cd "$(dirname "$0")/.." && pwd -P)
-PLUGIN_JSON="$SKILL_DIR/../../.claude-plugin/plugin.json"
-PLUGIN_VERSION=$(sed -n 's/^  "version": "\([^"]*\)".*/\1/p' "$PLUGIN_JSON")
-DEST="$HOME/.local/share/web-browse/$PLUGIN_VERSION"
-LINK=0
+BUILD_ID=$(bash "$SKILL_DIR/scripts/build-id.sh")
+DEST="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/web-blockchainian}/browse/$BUILD_ID"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --dest) [ $# -ge 2 ] || usage; DEST=$2; shift 2 ;;
-    --link) LINK=1; shift ;;
     *) usage ;;
   esac
 done
@@ -42,20 +38,13 @@ bun build --compile browse/src/cli.ts --outfile browse/dist/browse
 bun build --compile browse/src/find-browse.ts --outfile browse/dist/find-browse
 bash browse/scripts/build-node-server.sh
 
-# The CLI restarts a daemon whose recorded version differs, so the version is a digest of everything that shapes the build.
-BUILD_DIGEST=$(cd "$SKILL_DIR" && find vendor/gstack patches -type f | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 | cut -c1-16)
-printf '%s\n' "$PLUGIN_VERSION-$BUILD_DIGEST" > browse/dist/.version
+# The CLI restarts a daemon whose recorded version differs, so a new build id restarts the daemon once.
+printf '%s\n' "$BUILD_ID" > browse/dist/.version
 chmod +x browse/dist/browse browse/dist/find-browse
 rm -f .*.bun-build
 
 cd "$SKILL_DIR"
 rm -rf "$DEST"
 mv "$STAGE" "$DEST"
-
-if [ "$LINK" -eq 1 ]; then
-  mkdir -p "$HOME/.local/bin"
-  ln -sfn "$DEST/browse/dist/browse" "$HOME/.local/bin/browse"
-  echo "linked $HOME/.local/bin/browse -> $DEST/browse/dist/browse"
-fi
 
 echo "$DEST/browse/dist/browse"

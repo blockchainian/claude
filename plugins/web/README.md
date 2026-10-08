@@ -16,10 +16,12 @@ a built page against a design reference.
 
 `browse` is [gstack](https://github.com/garrytan/gstack)'s browser CLI (MIT),
 vendored byte-identical at a pinned commit under `skills/browse/vendor/gstack/`.
-This plugin's changes to it are patch files in `skills/browse/patches/`;
-`scripts/build.sh` copies the vendor tree to `~/.local/share/web-browse/<version>/`,
-applies the patches, installs and compiles, and with `--link` points
-`~/.local/bin/browse` at the result. The patch scopes `console` and `network` to
+This plugin's changes to it are patch files in `skills/browse/patches/`.
+`bin/browse` is a launcher Claude Code puts on the Bash tool's PATH: it computes a
+build id from the vendor tree and patches, builds on first use through
+`skills/browse/scripts/build.sh` (copy the vendor tree, apply the patches, install,
+compile) into `$CLAUDE_PLUGIN_DATA/browse/<build id>/`, and then execs the built
+CLI. Concurrent first calls build once; build output goes to stderr. The patch scopes `console` and `network` to
 the tab a command is pinned to (`BROWSE_TAB`), so parallel clients sharing the
 daemon each read only their own tab's logs. `skills/browse/UPSTREAM.md` lists
 what was vendored, what was left out, and how to upgrade.
@@ -83,5 +85,6 @@ Or from the marketplace root: `npm run test:web`.
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `WEB_DATA_DIR` | Root for heap-snapshot-leaks' throwaway Chrome profile; default ~/.local/share/web | Optional | Shell environment |
+| `CLAUDE_PLUGIN_DATA` | Root for `bin/browse`'s builds; default ~/.claude/plugins/data/web-blockchainian | Optional | Claude Code, or shell environment |
 
 Application-specific variables belong to the target project, not this plugin.
