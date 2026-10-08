@@ -260,11 +260,8 @@ export async function handleMetaCommand(
   tokenInfo?: TokenInfo | null,
   opts?: MetaCommandOpts,
 ): Promise<string> {
-  // Per-tab operations use the active session; global operations use bm directly.
-  // Resolve it where it is used, not here: `restart`, `stop` and `newtab` are how a
-  // daemon whose last tab closed gets back, and asking for a tab up here refused
-  // them for the very condition they exist to clear.
-  const activeSession = () => bm.getActiveSession();
+  // Per-tab operations use the active session; global operations use bm directly
+  const session = bm.getActiveSession();
 
   switch (command) {
     // ─── Tabs ──────────────────────────────────────────
@@ -408,15 +405,13 @@ export async function handleMetaCommand(
 
     // ─── Server Control ────────────────────────────────
     case 'status': {
+      const page = bm.getPage();
       const tabs = bm.getTabCount();
       const mode = bm.getConnectionMode();
-      // Status is what you reach for when nothing else works, so it has to
-      // survive the state it is used to diagnose. With no tab there is no url
-      // to report, and saying so is more use than refusing to answer.
       return [
         `Status: healthy`,
         `Mode: ${mode}`,
-        `URL: ${tabs > 0 ? bm.getPage().url() : '(no open tab)'}`,
+        `URL: ${page.url()}`,
         `Tabs: ${tabs}`,
         `PID: ${process.pid}`,
       ].join('\n');
@@ -724,7 +719,7 @@ export async function handleMetaCommand(
     // ─── Snapshot ─────────────────────────────────────
     case 'snapshot': {
       const isScoped = tokenInfo && tokenInfo.clientId !== 'root';
-      const snapshotResult = await handleSnapshot(args, activeSession(), {
+      const snapshotResult = await handleSnapshot(args, session, {
         splitForScoped: !!isScoped,
       });
       // Scoped tokens get split format (refs outside envelope); root gets basic wrapping
@@ -744,7 +739,7 @@ export async function handleMetaCommand(
       bm.resume();
       // Re-snapshot to capture current page state after human interaction
       const isScoped2 = tokenInfo && tokenInfo.clientId !== 'root';
-      const snapshot = await handleSnapshot(['-i'], activeSession(), { splitForScoped: !!isScoped2 });
+      const snapshot = await handleSnapshot(['-i'], session, { splitForScoped: !!isScoped2 });
       if (isScoped2) {
         return `RESUMED\n${snapshot}`;
       }

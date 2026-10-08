@@ -2,7 +2,7 @@
 
 `vendor/gstack/` is [garrytan/gstack](https://github.com/garrytan/gstack) (MIT,
 see `vendor/gstack/LICENSE`) at commit
-`2f957d33` ("fix(browse): closing the last tab no longer wedges the daemon"),
+`0d1bd561` (v1.79.0.0),
 cut down to the files the `browse` CLI needs. Vendored files are byte-identical
 to upstream; this skill's own changes live in `patches/` and are applied at build
 time by `scripts/build.sh`.
@@ -15,7 +15,7 @@ The list lives in `scripts/vendor.sh`:
 |---|---|
 | `browse/src/` | the CLI and the daemon |
 | `browse/bin/`, `browse/scripts/` | upstream helpers; `build-node-server.sh` is run by the build |
-| `browse/test/test-server.ts`, `browse/test/fixtures/basic.html` | the harness the patch's own test needs |
+| `browse/test/test-server.ts`, `browse/test/fixtures/basic.html` | the harness the patches' own tests need |
 | `lib/egress-receipt.ts`, `lib/fs-atomic.ts` | imported by `browse/src` |
 | `patches/playwright-core@1.62.1.patch` | upstream's own Playwright patch, applied by `bun install` |
 | `LICENSE` | MIT |
@@ -44,7 +44,8 @@ The list lives in `scripts/vendor.sh`:
 
 | Patch | What it changes |
 |---|---|
-| `0001-scope-console-and-network-logs-to-pinned-tab.patch` | Commands pinned to a tab (`BROWSE_TAB` / `--tab-id`) read and clear only that tab's console and network entries; adds `browse/test/tab-scoped-logs.test.ts` |
+| `0001-closing-the-last-tab-no-longer-wedges-the-daemon.patch` | After the last tab closes, `restart`, `stop`, `newtab` and `goto` still work instead of failing with "No active page"; a local fix from our gstack clone, absent from upstream at `0d1bd561`; adds `browse/test/no-tab-recovery.test.ts` |
+| `0002-scope-console-and-network-logs-to-pinned-tab.patch` | Commands pinned to a tab (`BROWSE_TAB` / `--tab-id`) read and clear only that tab's console and network entries; adds `browse/test/tab-scoped-logs.test.ts` |
 
 ## Upgrading
 
