@@ -1,0 +1,392 @@
+diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
+index c40c62b7c..588d45436 100644
+--- a/browse/src/browser-manager.ts
++++ b/browse/src/browser-manager.ts
+@@ -25,6 +25,7 @@ import { resolveChromiumProfile, cleanSingletonLocks } from './config';
+ import { launchWithXProtectHeal } from './xprotect-heal';
+ import { readPidStartTime } from './xvfb';
+ import { withCdpSession } from './cdp-bridge';
++import { browserDisplayName, displayOrigin, windowMover, windowPositionArg } from './window-display';
+ import type { MemorySnapshot, MemoryStructureStats, MemoryTabSnapshot, MemoryProcess } from './memory-snapshot';
+ 
+ /**
+@@ -663,6 +664,12 @@ export class BrowserManager {
+     const userDataDir = resolveChromiumProfile();
+     fs.mkdirSync(userDataDir, { recursive: true });
+ 
++    // Open the window on BROWSER_DISPLAY and keep later windows there.
++    const display = browserDisplayName();
++    const origin = displayOrigin(display);
++    if (origin) launchArgs.push(windowPositionArg(origin));
++    const moveWindowsToDisplay = windowMover(userDataDir, display);
++
+     // Pre-launch cleanup of stale SingletonLock/Socket/Cookie. Chromium's
+     // ProcessSingleton refuses to start when these exist from a prior crash
+     // (SIGKILL, hard crash) — the lockfiles point at a PID that may no longer
+@@ -823,6 +830,7 @@ export class BrowserManager {
+       // Inject indicator on the new tab
+       page.evaluate(indicatorScript).catch(() => {});
+       console.log(`[browse] New tab detected (id=${id}, total=${this.pages.size})`);
++      moveWindowsToDisplay();
+       this.checkTabGuardrails();
+     });
+ 
+@@ -962,7 +970,9 @@ export class BrowserManager {
+       normalizedUrl = await validateNavigationUrl(url);
+     }
+ 
+-    const page = await this.context.newPage();
++    // A headed context.newPage() can activate the browser window and take the
++    // user's focus; a background target does not.
++    const page = this.connectionMode === 'headed' ? await this.openPageInBackground() : await this.context.newPage();
+     // Headed mode's context.on('page') handler has already registered and wired
+     // this page; adopt its id instead of tracking the same page twice.
+     let id = [...this.pages].find(([, p]) => p === page)?.[0];
+@@ -987,6 +997,47 @@ export class BrowserManager {
+     return id;
+   }
+ 
++  /**
++   * Opens a blank page in this manager's context through CDP
++   * Target.createTarget({ background: true }), which leaves the browser window
++   * inactive, and returns it once the context reports it.
++   */
++  async openPageInBackground(): Promise<Page> {
++    const context = this.context;
++    if (!context) throw new Error('Browser not launched');
++    const browser = context.browser();
++    if (!browser) return context.newPage();
++    const targetInfo = (page: Page) => withCdpSession(page, async (session) => (await session.send('Target.getTargetInfo')).targetInfo);
++    const anyPage = context.pages()[0];
++    const browserContextId: string | undefined = anyPage ? (await targetInfo(anyPage)).browserContextId : undefined;
++
++    const opened: Page[] = [];
++    let wake = () => {};
++    const onPage = (page: Page) => { opened.push(page); wake(); };
++    context.on('page', onPage);
++    const session = await browser.newBrowserCDPSession();
++    try {
++      const { targetId } = await session.send('Target.createTarget', {
++        url: 'about:blank',
++        background: true,
++        ...(browserContextId ? { browserContextId } : {}),
++      });
++      const deadline = Date.now() + 10_000;
++      let checked = 0;
++      while (Date.now() < deadline) {
++        while (checked < opened.length) {
++          const page = opened[checked++];
++          if ((await targetInfo(page)).targetId === targetId) return page;
++        }
++        await new Promise<void>((resolve) => { wake = resolve; setTimeout(resolve, 100); });
++      }
++      throw new Error('Background tab did not open within 10s');
++    } finally {
++      context.off('page', onPage);
++      await session.detach().catch(() => {});
++    }
++  }
++
+   async closeTab(id?: number): Promise<void> {
+     const tabId = id ?? this.activeTabId;
+     const page = this.pages.get(tabId);
+diff --git a/browse/src/window-display.ts b/browse/src/window-display.ts
+new file mode 100644
+index 000000000..45a5553c0
+--- /dev/null
++++ b/browse/src/window-display.ts
+@@ -0,0 +1,107 @@
++/**
++ * Headed window placement: keeps browse's windows on one display,
++ * BROWSER_DISPLAY (any part of the display's name, any case; empty means the
++ * main display), read from the environment, else from ~/.config/web/.env.
++ * The first window opens there through --window-position; windows that open
++ * elsewhere later are moved there. macOS only and best-effort: any failure
++ * leaves the windows where Chromium put them.
++ *
++ * System Events cannot place another app's windows reliably and JXA cannot
++ * build the CGPoint an AXValue needs, so the display lookup and the move are
++ * Swift scripts beside this source tree (browse/scripts/).
++ */
++
++import { execFile, execFileSync } from 'child_process';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++
++const DISPLAY_SCRIPT = path.resolve(__dirname, '..', 'scripts', 'displayOrigin.swift');
++const MOVE_SCRIPT = path.resolve(__dirname, '..', 'scripts', 'moveWindows.swift');
++const WINDOW_MARGIN = 40;
++
++export interface DisplayOrigin { x: number; y: number }
++
++/** The display name from BROWSER_DISPLAY in env, else in the env file; '' for the main display. */
++export function browserDisplayName(
++  env: Record<string, string | undefined> = process.env,
++  envFile: string = path.join(os.homedir(), '.config', 'web', '.env'),
++): string {
++  if (env.BROWSER_DISPLAY !== undefined) return env.BROWSER_DISPLAY;
++  let body: string;
++  try {
++    body = fs.readFileSync(envFile, 'utf-8');
++  } catch {
++    return '';
++  }
++  for (const line of body.split('\n')) {
++    const match = line.match(/^\s*(?:export\s+)?BROWSER_DISPLAY\s*=\s*(.*?)\s*$/);
++    if (match) return match[1].replace(/^(['"])(.*)\1$/, '$2');
++  }
++  return '';
++}
++
++/** Parses displayOrigin.swift's "<x> <y>"; null for "skip" (no such display) or anything else. */
++export function parseDisplayOrigin(output: string): DisplayOrigin | null {
++  const match = output.trim().match(/^(-?\d+) (-?\d+)$/);
++  return match ? { x: Number(match[1]), y: Number(match[2]) } : null;
++}
++
++/** The Chromium flag that opens the first window a margin inside the display's origin. */
++export function windowPositionArg(origin: DisplayOrigin): string {
++  return `--window-position=${origin.x + WINDOW_MARGIN},${origin.y + WINDOW_MARGIN}`;
++}
++
++/** The pid of the main Chromium process using this profile dir, from `ps -Ao pid=,args=` output. */
++export function findChromiumPid(psOutput: string, userDataDir: string): number | null {
++  const profileArg = `--user-data-dir=${userDataDir}`;
++  for (const line of psOutput.split('\n')) {
++    const at = line.indexOf(profileArg);
++    if (at < 0 || line.includes('--type=')) continue;
++    const next = line.charAt(at + profileArg.length);
++    if (next !== '' && next !== ' ') continue;
++    const pid = Number.parseInt(line.trim().split(/\s+/, 1)[0], 10);
++    if (Number.isInteger(pid)) return pid;
++  }
++  return null;
++}
++
++/** Global screen origin of the named display, or null off macOS, without that display, or on any failure. */
++export function displayOrigin(name: string): DisplayOrigin | null {
++  if (process.platform !== 'darwin') return null;
++  try {
++    const out = execFileSync('swift', [DISPLAY_SCRIPT, name], {
++      encoding: 'utf-8',
++      stdio: ['ignore', 'pipe', 'ignore'],
++      timeout: 60_000,
++    });
++    return parseDisplayOrigin(out);
++  } catch {
++    return null;
++  }
++}
++
++/**
++ * Moves the profile's Chromium windows that are off the named display onto it,
++ * in the background. One move runs at a time; requests made meanwhile collapse
++ * into a single follow-up move. Needs Accessibility trust for the caller.
++ */
++export function windowMover(userDataDir: string, name: string): () => void {
++  let running = false;
++  let pending = false;
++  const run = () => {
++    if (process.platform !== 'darwin') return;
++    if (running) { pending = true; return; }
++    running = true;
++    execFile('ps', ['-Ao', 'pid=,args='], { encoding: 'utf-8' }, (psErr, psOut) => {
++      const pid = psErr ? null : findChromiumPid(psOut, userDataDir);
++      const done = () => {
++        running = false;
++        if (pending) { pending = false; run(); }
++      };
++      if (!pid) return done();
++      execFile('swift', [MOVE_SCRIPT, String(pid), String(WINDOW_MARGIN), name], { timeout: 60_000 }, done);
++    });
++  };
++  return run;
++}
+diff --git a/browse/test/background-tab.test.ts b/browse/test/background-tab.test.ts
+new file mode 100644
+index 000000000..a6a480593
+--- /dev/null
++++ b/browse/test/background-tab.test.ts
+@@ -0,0 +1,94 @@
++/**
++ * Background tabs — headed newTab opens its page with CDP
++ * Target.createTarget({ background: true }) so Chromium does not activate its
++ * window and take macOS focus from the user's app. The opening itself is
++ * checked on a headless browser; the focus, screenshot and requestAnimationFrame
++ * checks need a visible window, so they run only with BROWSE_HEADED_TESTS=1.
++ */
++
++import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { startTestServer } from './test-server';
++import { BrowserManager } from '../src/browser-manager';
++
++const ORIGINAL_CHROMIUM_PROFILE = process.env.CHROMIUM_PROFILE;
++const useProfile = () => {
++  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-test-background-'));
++  process.env.CHROMIUM_PROFILE = dir;
++  return dir;
++};
++const restoreProfile = (dir: string) => {
++  if (ORIGINAL_CHROMIUM_PROFILE === undefined) delete process.env.CHROMIUM_PROFILE;
++  else process.env.CHROMIUM_PROFILE = ORIGINAL_CHROMIUM_PROFILE;
++  fs.rmSync(dir, { recursive: true, force: true });
++};
++const closeWithin = (bm: BrowserManager) => Promise.race([bm.close(), new Promise((resolve) => setTimeout(resolve, 3000))]);
++
++describe('openPageInBackground', () => {
++  let profileDir: string;
++  let testServer: ReturnType<typeof startTestServer>;
++  let bm: BrowserManager;
++
++  beforeAll(async () => {
++    profileDir = useProfile();
++    testServer = startTestServer(0);
++    bm = new BrowserManager();
++    await bm.launch();
++  });
++
++  afterAll(async () => {
++    try { testServer.server.stop(true); } catch {}
++    try { await closeWithin(bm); } catch {}
++    restoreProfile(profileDir);
++  });
++
++  test('opens a page in the manager\'s own context', async () => {
++    const page = await bm.openPageInBackground();
++    const context = bm.getSession(bm.getActiveTabId()).getPage().context();
++    expect(context.pages()).toContain(page);
++    await page.goto(`${testServer.url}/basic.html`);
++    expect((await page.screenshot()).length).toBeGreaterThan(0);
++  });
++
++  test('concurrent openings each get their own page', async () => {
++    const pages = await Promise.all([bm.openPageInBackground(), bm.openPageInBackground(), bm.openPageInBackground()]);
++    expect(new Set(pages).size).toBe(3);
++  });
++});
++
++describe.skipIf(!process.env.BROWSE_HEADED_TESTS)('headed newTab in the background', () => {
++  const frontmostApp = () => Bun.spawnSync(['osascript', '-e', 'tell application "System Events" to name of first process whose frontmost is true']).stdout.toString().trim();
++  let profileDir: string;
++  let bm: BrowserManager;
++
++  beforeAll(async () => {
++    profileDir = useProfile();
++    bm = new BrowserManager();
++    await bm.launchHeaded();
++  }, 120_000);
++
++  afterAll(async () => {
++    try { await closeWithin(bm); } catch {}
++    restoreProfile(profileDir);
++  });
++
++  test('keeps the frontmost app, screenshots and runs requestAnimationFrame', async () => {
++    const before = frontmostApp();
++    const id = await bm.newTab();
++    await new Promise((resolve) => setTimeout(resolve, 1500));
++    expect(frontmostApp()).toBe(before);
++
++    const page = bm.getSession(id).getPage();
++    await page.goto('data:text/html,<h1>background</h1>');
++    expect((await page.screenshot({ timeout: 10_000 })).length).toBeGreaterThan(0);
++    const frames = await page.evaluate(() => new Promise<number>((resolve) => {
++      let n = 0;
++      const start = performance.now();
++      const tick = () => { n++; if (performance.now() - start < 1000) requestAnimationFrame(tick); else resolve(n); };
++      requestAnimationFrame(tick);
++    }));
++    expect(frames).toBeGreaterThan(30);
++  }, 30_000);
++});
+diff --git a/browse/test/window-display.test.ts b/browse/test/window-display.test.ts
+new file mode 100644
+index 000000000..bb3d8871c
+--- /dev/null
++++ b/browse/test/window-display.test.ts
+@@ -0,0 +1,81 @@
++/**
++ * Headed window placement — which display the windows go on (BROWSER_DISPLAY
++ * from the environment, else ~/.config/web/.env), the launch flag that opens
++ * the first window there, and finding the Chromium process whose windows to
++ * move. Pure logic only; nothing here launches a browser.
++ */
++
++import { afterAll, describe, expect, test } from 'bun:test';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { browserDisplayName, findChromiumPid, parseDisplayOrigin, windowPositionArg } from '../src/window-display';
++
++const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browse-display-'));
++const envFile = (body: string) => {
++  const file = path.join(dir, `${Math.random().toString(36).slice(2)}.env`);
++  fs.writeFileSync(file, body);
++  return file;
++};
++
++afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
++
++describe('browserDisplayName', () => {
++  test('prefers BROWSER_DISPLAY from the environment', () => {
++    expect(browserDisplayName({ BROWSER_DISPLAY: 'Color LCD' }, envFile('BROWSER_DISPLAY=SAMSUNG\n'))).toBe('Color LCD');
++  });
++
++  test('keeps an empty BROWSER_DISPLAY from the environment (the main display)', () => {
++    expect(browserDisplayName({ BROWSER_DISPLAY: '' }, envFile('BROWSER_DISPLAY=SAMSUNG\n'))).toBe('');
++  });
++
++  test('reads a quoted value from the env file', () => {
++    expect(browserDisplayName({}, envFile('# browse\nOTHER=1\nBROWSER_DISPLAY="Color LCD"\n'))).toBe('Color LCD');
++  });
++
++  test('reads single-quoted, unquoted and exported values', () => {
++    expect(browserDisplayName({}, envFile("BROWSER_DISPLAY='LCD'\n"))).toBe('LCD');
++    expect(browserDisplayName({}, envFile('BROWSER_DISPLAY=LCD\n'))).toBe('LCD');
++    expect(browserDisplayName({}, envFile('export BROWSER_DISPLAY="Color LCD"\n'))).toBe('Color LCD');
++  });
++
++  test('is empty when neither names a display', () => {
++    expect(browserDisplayName({}, envFile('OTHER=1\n'))).toBe('');
++    expect(browserDisplayName({}, path.join(dir, 'missing.env'))).toBe('');
++  });
++});
++
++describe('parseDisplayOrigin', () => {
++  test('parses "<x> <y>", negative included', () => {
++    expect(parseDisplayOrigin('-1512 0\n')).toEqual({ x: -1512, y: 0 });
++  });
++
++  test('is null for skip or garbage', () => {
++    expect(parseDisplayOrigin('skip\n')).toBeNull();
++    expect(parseDisplayOrigin('')).toBeNull();
++  });
++});
++
++describe('windowPositionArg', () => {
++  test('places the window a margin inside the display origin', () => {
++    expect(windowPositionArg({ x: -1512, y: 0 })).toBe('--window-position=-1472,40');
++  });
++});
++
++describe('findChromiumPid', () => {
++  const profile = '/tmp/browse profile';
++  const ps = [
++    '  101 /Applications/Other.app/Contents/MacOS/Other',
++    `  202 /x/Google Chrome for Testing.app/Contents/Frameworks/Helper --type=renderer --user-data-dir=${profile}`,
++    `  303 /x/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing --user-data-dir=${profile} --no-first-run`,
++    '  404 /x/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing --user-data-dir=/tmp/other',
++  ].join('\n');
++
++  test('finds the main browser process of the profile, not its helpers', () => {
++    expect(findChromiumPid(ps, profile)).toBe(303);
++  });
++
++  test('is null when no process uses the profile', () => {
++    expect(findChromiumPid(ps, '/tmp/none')).toBeNull();
++  });
++});

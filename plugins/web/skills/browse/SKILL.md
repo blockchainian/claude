@@ -9,8 +9,8 @@ A persistent headless Chromium behind a small CLI. The first command starts a
 daemon (~3s); every later command is ~100ms. Cookies, localStorage, tabs and
 logins persist between calls until the daemon stops.
 
-This is gstack's `browse` (MIT), vendored at a pinned commit with this skill's
-patches applied on top — see `UPSTREAM.md`.
+This is gstack's `browse` (MIT) at a pinned commit with this skill's patches
+applied on top — see `AGENTS.md`.
 
 ## Setup
 
@@ -29,8 +29,8 @@ variable such as `BROWSE_BIN`).
 
 The launcher builds the patched CLI on first use into
 `${CLAUDE_PLUGIN_DATA:-~/.claude/plugins/data/web-blockchainian}/browse/<build id>/`,
-where the build id is a digest of `vendor/gstack/`, `patches/` and `scripts/build.sh`. The first call
-takes a few seconds and needs `bun` on PATH; build output goes to stderr only.
+where the build id is a digest of `GSTACK_COMMIT`, `patches/` and the build scripts. The first call
+fetches gstack and takes several seconds; it needs `bun`, `git` and network access; build output goes to stderr only.
 A new build id means a new binary, and the running daemon restarts on its next
 command, losing every tab and login in it. Warn the user before the first call
 after a plugin update while other sessions use the daemon.

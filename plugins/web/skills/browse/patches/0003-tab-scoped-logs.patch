@@ -1,0 +1,350 @@
+diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
+index b35a9d2d5..ed163ef4b 100644
+--- a/browse/src/browser-manager.ts
++++ b/browse/src/browser-manager.ts
+@@ -819,7 +819,7 @@ export class BrowserManager {
+       this.pages.set(id, page);
+       this.tabSessions.set(id, new TabSession(page));
+       this.activeTabId = id;
+-      this.wirePageEvents(page);
++      this.wirePageEvents(page, id);
+       // Inject indicator on the new tab
+       page.evaluate(indicatorScript).catch(() => {});
+       console.log(`[browse] New tab detected (id=${id}, total=${this.pages.size})`);
+@@ -834,7 +834,7 @@ export class BrowserManager {
+       this.pages.set(id, page);
+       this.tabSessions.set(id, new TabSession(page));
+       this.activeTabId = id;
+-      this.wirePageEvents(page);
++      this.wirePageEvents(page, id);
+       // Inject indicator on restored page (addInitScript only fires on new navigations)
+       try {
+         await page.evaluate(indicatorScript);
+@@ -974,7 +974,7 @@ export class BrowserManager {
+     }
+ 
+     // Wire up console/network/dialog capture
+-    this.wirePageEvents(page);
++    this.wirePageEvents(page, id);
+ 
+     if (normalizedUrl) {
+       await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+@@ -1547,7 +1547,7 @@ export class BrowserManager {
+       this.pages.set(id, page);
+       const newSession = new TabSession(page);
+       this.tabSessions.set(id, newSession);
+-      this.wirePageEvents(page);
++      this.wirePageEvents(page, id);
+ 
+       // Restore tab ownership for the new ID — preserves scoped-agent isolation
+       // across context recreation (viewport --scale, user-agent change, handoff).
+@@ -1937,7 +1937,7 @@ export class BrowserManager {
+   }
+ 
+   // ─── Console/Network/Dialog/Ref Wiring ────────────────────
+-  private wirePageEvents(page: Page) {
++  private wirePageEvents(page: Page, tabId: number) {
+     // Track tab close — remove from pages and sessions maps, switch to another tab
+     page.on('close', () => {
+       for (const [id, p] of this.pages) {
+@@ -1998,6 +1998,7 @@ export class BrowserManager {
+         timestamp: Date.now(),
+         level: msg.type(),
+         text: msg.text(),
++        tabId,
+       });
+     });
+ 
+@@ -2006,6 +2007,7 @@ export class BrowserManager {
+         timestamp: Date.now(),
+         method: req.method(),
+         url: req.url(),
++        tabId,
+       });
+     });
+ 
+@@ -2015,7 +2017,7 @@ export class BrowserManager {
+       const status = res.status();
+       for (let i = networkBuffer.length - 1; i >= 0; i--) {
+         const entry = networkBuffer.get(i);
+-        if (entry && entry.url === url && !entry.status) {
++        if (entry && entry.tabId === tabId && entry.url === url && !entry.status) {
+           networkBuffer.set(i, { ...entry, status, duration: Date.now() - entry.timestamp });
+           break;
+         }
+@@ -2044,7 +2046,7 @@ export class BrowserManager {
+         const size = sizes.responseBodySize ?? 0;
+         for (let i = networkBuffer.length - 1; i >= 0; i--) {
+           const entry = networkBuffer.get(i);
+-          if (entry && entry.url === url && !entry.size) {
++          if (entry && entry.tabId === tabId && entry.url === url && !entry.size) {
+             networkBuffer.set(i, { ...entry, size });
+             break;
+           }
+diff --git a/browse/src/buffers.ts b/browse/src/buffers.ts
+index 27d379694..a3e8fd603 100644
+--- a/browse/src/buffers.ts
++++ b/browse/src/buffers.ts
+@@ -94,6 +94,8 @@ export interface LogEntry {
+   timestamp: number;
+   level: string;
+   text: string;
++  tabId?: number;
++  seq?: number;
+ }
+ 
+ export interface NetworkEntry {
+@@ -103,6 +105,8 @@ export interface NetworkEntry {
+   status?: number;
+   duration?: number;
+   size?: number;
++  tabId?: number;
++  seq?: number;
+ }
+ 
+ export interface DialogEntry {
+@@ -125,13 +129,44 @@ export const dialogBuffer = new CircularBuffer<DialogEntry>(HIGH_WATER_MARK);
+ // ─── Convenience add functions ──────────────────────────────
+ 
+ export function addConsoleEntry(entry: LogEntry) {
+-  consoleBuffer.push(entry);
++  consoleBuffer.push({ ...entry, seq: consoleBuffer.totalAdded });
+ }
+ 
+ export function addNetworkEntry(entry: NetworkEntry) {
+-  networkBuffer.push(entry);
++  networkBuffer.push({ ...entry, seq: networkBuffer.totalAdded });
+ }
+ 
+ export function addDialogEntry(entry: DialogEntry) {
+   dialogBuffer.push(entry);
+ }
++
++// ─── Tab-scoped views ───────────────────────────────────────
++//
++// Commands pinned to a tab (BROWSE_TAB / --tab-id) see only that tab's
++// entries, so parallel clients on separate tabs don't read each other's
++// logs. A tab-scoped clear records a cursor instead of emptying the shared
++// buffer: other tabs' entries and the unpinned global view stay intact.
++
++type TabScopedEntry = { tabId?: number; seq?: number };
++
++const tabCursors = new WeakMap<CircularBuffer<any>, Map<number, number>>();
++
++function cursorsFor(buffer: CircularBuffer<any>): Map<number, number> {
++  let cursors = tabCursors.get(buffer);
++  if (!cursors) {
++    cursors = new Map();
++    tabCursors.set(buffer, cursors);
++  }
++  return cursors;
++}
++
++/** Entries of one tab added since that tab's last tab-scoped clear. */
++export function tabEntries<T extends TabScopedEntry>(buffer: CircularBuffer<T>, tabId: number): T[] {
++  const from = cursorsFor(buffer).get(tabId) ?? 0;
++  return buffer.toArray().filter(e => e.tabId === tabId && (e.seq ?? 0) >= from);
++}
++
++/** Hides every entry of one tab added so far from tabEntries(). */
++export function clearTabEntries(buffer: CircularBuffer<TabScopedEntry>, tabId: number): void {
++  cursorsFor(buffer).set(tabId, buffer.totalAdded);
++}
+diff --git a/browse/src/read-commands.ts b/browse/src/read-commands.ts
+index db94dd003..d461017ff 100644
+--- a/browse/src/read-commands.ts
++++ b/browse/src/read-commands.ts
+@@ -7,7 +7,7 @@
+ 
+ import type { TabSession } from './tab-session';
+ import type { BrowserManager } from './browser-manager';
+-import { consoleBuffer, networkBuffer, dialogBuffer } from './buffers';
++import { consoleBuffer, networkBuffer, dialogBuffer, tabEntries, clearTabEntries } from './buffers';
+ import type { Page, Frame } from 'playwright';
+ import * as fs from 'fs';
+ import * as path from 'path';
+@@ -302,7 +302,11 @@ export async function handleReadCommand(
+   args: string[],
+   session: TabSession,
+   bm: BrowserManager,
++  opts?: { tabId?: number },
+ ): Promise<string> {
++  // Set when the request is pinned to a tab: console/network then read and
++  // clear only that tab's entries.
++  const pinnedTabId = opts?.tabId;
+   const page = session.getPage();
+   // Frame-aware target for content extraction
+   const target = session.getActiveFrameOrPage();
+@@ -461,12 +465,14 @@ export async function handleReadCommand(
+ 
+     case 'console': {
+       if (args[0] === '--clear') {
+-        consoleBuffer.clear();
++        if (pinnedTabId !== undefined) clearTabEntries(consoleBuffer, pinnedTabId);
++        else consoleBuffer.clear();
+         return 'Console buffer cleared.';
+       }
++      const all = pinnedTabId !== undefined ? tabEntries(consoleBuffer, pinnedTabId) : consoleBuffer.toArray();
+       const entries = args[0] === '--errors'
+-        ? consoleBuffer.toArray().filter(e => e.level === 'error' || e.level === 'warning')
+-        : consoleBuffer.toArray();
++        ? all.filter(e => e.level === 'error' || e.level === 'warning')
++        : all;
+       if (entries.length === 0) return args[0] === '--errors' ? '(no console errors)' : '(no console messages)';
+       return entries.map(e =>
+         `[${new Date(e.timestamp).toISOString()}] [${e.level}] ${e.text}`
+@@ -475,7 +481,8 @@ export async function handleReadCommand(
+ 
+     case 'network': {
+       if (args[0] === '--clear') {
+-        networkBuffer.clear();
++        if (pinnedTabId !== undefined) clearTabEntries(networkBuffer, pinnedTabId);
++        else networkBuffer.clear();
+         return 'Network buffer cleared.';
+       }
+ 
+@@ -522,8 +529,9 @@ export async function handleReadCommand(
+       }
+ 
+       // Default: show request metadata
+-      if (networkBuffer.length === 0) return '(no network requests)';
+-      return networkBuffer.toArray().map(e =>
++      const requests = pinnedTabId !== undefined ? tabEntries(networkBuffer, pinnedTabId) : networkBuffer.toArray();
++      if (requests.length === 0) return '(no network requests)';
++      return requests.map(e =>
+         `${e.method} ${e.url} → ${e.status || 'pending'} (${e.duration || '?'}ms, ${e.size || '?'}B)`
+       ).join('\n');
+     }
+diff --git a/browse/src/server.ts b/browse/src/server.ts
+index f22906b2e..fed9d51be 100644
+--- a/browse/src/server.ts
++++ b/browse/src/server.ts
+@@ -1177,13 +1177,13 @@ async function handleCommandInternalImpl(
+             const target = session.getActiveFrameOrPage();
+             result = await getCleanTextWithStripping(target);
+           } else {
+-            result = await handleReadCommand(command, args, session, browserManager);
++            result = await handleReadCommand(command, args, session, browserManager, { tabId: tabId ?? undefined });
+           }
+         } finally {
+           await cleanupHiddenMarkers(page);
+         }
+       } else {
+-        result = await handleReadCommand(command, args, session, browserManager);
++        result = await handleReadCommand(command, args, session, browserManager, { tabId: tabId ?? undefined });
+       }
+     } else if (WRITE_COMMANDS.has(command)) {
+       result = await handleWriteCommand(command, args, activeSession(), browserManager);
+diff --git a/browse/test/tab-scoped-logs.test.ts b/browse/test/tab-scoped-logs.test.ts
+new file mode 100644
+index 000000000..43697bc5f
+--- /dev/null
++++ b/browse/test/tab-scoped-logs.test.ts
+@@ -0,0 +1,107 @@
++/**
++ * Tab-scoped console/network logs — a command pinned to a tab (BROWSE_TAB /
++ * --tab-id) reads and clears only that tab's entries, so parallel clients
++ * driving separate tabs don't see each other's logs. Unpinned commands keep
++ * the global view.
++ */
++
++import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { startTestServer } from './test-server';
++import { BrowserManager } from '../src/browser-manager';
++import { handleReadCommand } from '../src/read-commands';
++import { consoleBuffer, networkBuffer } from '../src/buffers';
++
++// Per-FILE Chromium profile (see test/commands.test.ts for the rationale).
++const ORIGINAL_CHROMIUM_PROFILE = process.env.CHROMIUM_PROFILE;
++let CHROMIUM_PROFILE_DIR: string | undefined;
++let testServer: ReturnType<typeof startTestServer>;
++let bm: BrowserManager;
++let baseUrl: string;
++let tabA: number;
++let tabB: number;
++
++const read = (tabId: number | undefined, command: string, args: string[] = []) =>
++  handleReadCommand(command, args, bm.getActiveSession(), bm, tabId === undefined ? undefined : { tabId });
++
++async function logAndFetch(tabId: number, label: string) {
++  const page = bm.getSession(tabId).getPage();
++  await page.goto(`${baseUrl}/basic.html?tab=${label}`);
++  await page.evaluate(async (l) => {
++    console.log(`log-from-${l}`);
++    await fetch(`/basic.html?fetch=${l}`);
++  }, label);
++}
++
++async function waitForStatus(fragment: string) {
++  for (let i = 0; i < 40; i++) {
++    const entry = networkBuffer.toArray().find(e => e.url.includes(fragment));
++    if (entry?.status) return;
++    await new Promise(resolve => setTimeout(resolve, 50));
++  }
++}
++
++beforeAll(async () => {
++  CHROMIUM_PROFILE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-test-profile-'));
++  process.env.CHROMIUM_PROFILE = CHROMIUM_PROFILE_DIR;
++  testServer = startTestServer(0);
++  baseUrl = testServer.url;
++  bm = new BrowserManager();
++  await bm.launch();
++  tabA = bm.getActiveTabId();
++  tabB = await bm.newTab();
++  consoleBuffer.clear();
++  networkBuffer.clear();
++  await logAndFetch(tabA, 'a');
++  await logAndFetch(tabB, 'b');
++  await waitForStatus('fetch=a');
++  await waitForStatus('fetch=b');
++});
++
++afterAll(async () => {
++  try { testServer.server.stop(true); } catch {}
++  try { await Promise.race([bm?.close(), new Promise((resolve) => setTimeout(resolve, 3000))]); } catch {}
++  if (ORIGINAL_CHROMIUM_PROFILE === undefined) delete process.env.CHROMIUM_PROFILE;
++  else process.env.CHROMIUM_PROFILE = ORIGINAL_CHROMIUM_PROFILE;
++  if (CHROMIUM_PROFILE_DIR) { try { fs.rmSync(CHROMIUM_PROFILE_DIR, { recursive: true, force: true }); } catch {} }
++});
++
++describe('tab-scoped logs', () => {
++  test('pinned console shows only its own tab', async () => {
++    const a = await read(tabA, 'console');
++    expect(a).toContain('log-from-a');
++    expect(a).not.toContain('log-from-b');
++  });
++
++  test('pinned network shows only its own tab, with statuses', async () => {
++    const b = await read(tabB, 'network');
++    expect(b).toContain('fetch=b → 200');
++    expect(b).not.toContain('fetch=a');
++  });
++
++  test('unpinned reads still show every tab', async () => {
++    const all = await read(undefined, 'console');
++    expect(all).toContain('log-from-a');
++    expect(all).toContain('log-from-b');
++    const net = await read(undefined, 'network');
++    expect(net).toContain('fetch=a');
++    expect(net).toContain('fetch=b');
++  });
++
++  test('pinned --clear clears only its own tab', async () => {
++    await read(tabA, 'console', ['--clear']);
++    await read(tabA, 'network', ['--clear']);
++    expect(await read(tabA, 'console')).toBe('(no console messages)');
++    expect(await read(tabA, 'network')).toBe('(no network requests)');
++    expect(await read(tabB, 'console')).toContain('log-from-b');
++    expect(await read(tabB, 'network')).toContain('fetch=b');
++  });
++
++  test('pinned console --errors filters its own tab', async () => {
++    await bm.getSession(tabB).getPage().evaluate(() => console.error('error-from-b'));
++    expect(await read(tabA, 'console', ['--errors'])).toBe('(no console errors)');
++    expect(await read(tabB, 'console', ['--errors'])).toContain('error-from-b');
++  });
++});

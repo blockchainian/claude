@@ -15,16 +15,19 @@ a built page against a design reference.
 ## How it works
 
 `browse` is [gstack](https://github.com/garrytan/gstack)'s browser CLI (MIT),
-vendored byte-identical at a pinned commit under `skills/browse/vendor/gstack/`.
-This plugin's changes to it are patch files in `skills/browse/patches/`.
-`bin/browse` is a launcher Claude Code puts on the Bash tool's PATH: it computes a
-build id from the vendor tree, the patches and the build script, builds on first use through
-`skills/browse/scripts/build.sh` (copy the vendor tree, apply the patches, install,
-compile) into `$CLAUDE_PLUGIN_DATA/browse/<build id>/`, and then execs the built
-CLI. Concurrent first calls build once; build output goes to stderr. The patch scopes `console` and `network` to
-the tab a command is pinned to (`BROWSE_TAB`), so parallel clients sharing the
-daemon each read only their own tab's logs. `skills/browse/UPSTREAM.md` lists
-what was vendored, what was left out, and how to upgrade.
+pinned as the `skills/browse/gstack` submodule, with this plugin's changes as
+ordered patch files in `skills/browse/patches/`; the repository holds no gstack
+source. `bin/browse` is a launcher Claude Code puts on the Bash tool's PATH: it
+computes a build id from the pinned commit (`skills/browse/GSTACK_COMMIT`), the
+patches and the build scripts, builds on first use through
+`skills/browse/scripts/build.sh` (fetch gstack at the pinned commit, apply the
+patches, install, compile) into `$CLAUDE_PLUGIN_DATA/browse/<build id>/`, and then
+execs the built CLI. Concurrent first calls build once; build output goes to
+stderr. The patches scope `console` and `network` to the tab a command is pinned
+to (`BROWSE_TAB`), so parallel clients sharing the daemon each read only their
+own tab's logs. `skills/browse/AGENTS.md` lists the patches and how to develop,
+check and upgrade them, following the
+[blockchainian/codex](https://github.com/blockchainian/codex) patch workflow.
 
 Two Node scripts (no npm dependencies; the capture script needs Node 22+ for the built-in `WebSocket`):
 
@@ -65,7 +68,8 @@ In Claude Code:
 
 ## Requirements
 
-- `bun` on PATH to build `browse`, and a Playwright Chromium for it
+- `bun` and `git` on PATH and network access to build `browse` (it fetches gstack), and a Playwright Chromium for it
+- for developing the browse patches or running its tests: the `gstack` submodule (`git submodule update --init`)
 - `uv` on PATH (for `check-web-design`; its script declares its own dependencies)
 - Node 22+ for `heap-snapshot-leaks` (no npm install needed)
 - for `heap-snapshot-leaks`: Google Chrome, started with `--remote-debugging-port`

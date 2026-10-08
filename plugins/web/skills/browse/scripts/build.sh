@@ -1,5 +1,5 @@
 #!/bin/bash
-# ABOUTME: Builds the patched browse CLI: copies vendor/gstack into an install dir, applies patches/ in order, installs and compiles.
+# ABOUTME: Builds the patched browse CLI: fetches gstack at GSTACK_COMMIT into an install dir, applies patches/ in order, installs and compiles.
 # ABOUTME: The default install dir is <plugin data>/browse/<build id>, where the plugin's bin/browse launcher looks for it.
 set -euo pipefail
 
@@ -10,6 +10,7 @@ usage() {
 }
 
 SKILL_DIR=$(cd "$(dirname "$0")/.." && pwd -P)
+GSTACK_URL=https://github.com/garrytan/gstack.git
 BUILD_ID=$(bash "$SKILL_DIR/scripts/build-id.sh")
 DEST="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/web-blockchainian}/browse/$BUILD_ID"
 
@@ -26,16 +27,17 @@ command -v bun >/dev/null || { echo "bun not found on PATH" >&2; exit 1; }
 STAGE="$DEST.partial"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
-cp -R "$SKILL_DIR/vendor/gstack/." "$STAGE/"
-# The window-placement scripts patches/0005 runs, shared byte-identical with the secrets plugin.
-cp "$SKILL_DIR"/scripts/*.swift "$STAGE/browse/scripts/"
 
-# Stop git's repository discovery at the stage dir: inside a work tree (a dotfiles repo holding ~/.claude),
-# `git apply` resolves paths from that repo's root and silently skips every patch.
-STAGE_PARENT=$(cd "$(dirname "$STAGE")" && pwd -P)
-for patch_file in "$SKILL_DIR"/patches/*.patch; do
-  (cd "$STAGE" && GIT_CEILING_DIRECTORIES="$STAGE_PARENT" git apply "$patch_file")
-done
+# An installed plugin carries no submodule, so fetch gstack at the pinned commit: shallow, blobs on demand,
+# and only the paths browse builds from (browse/, lib/, patches/ and the root files).
+git -C "$STAGE" init -q
+git -C "$STAGE" remote add origin "$GSTACK_URL"
+git -C "$STAGE" sparse-checkout set --cone browse lib patches
+git -C "$STAGE" fetch -q --depth 1 --filter=blob:none origin "$(cat "$SKILL_DIR/GSTACK_COMMIT")"
+git -C "$STAGE" -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
+"$SKILL_DIR/scripts/apply-patches.sh" "$STAGE"
+# The window-placement scripts patches/0006 runs, shared byte-identical with the secrets plugin.
+cp "$SKILL_DIR"/scripts/*.swift "$STAGE/browse/scripts/"
 
 cd "$STAGE"
 bun install --frozen-lockfile

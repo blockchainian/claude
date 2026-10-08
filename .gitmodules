@@ -1,0 +1,3 @@
+[submodule "plugins/web/skills/browse/gstack"]
+	path = plugins/web/skills/browse/gstack
+	url = https://github.com/garrytan/gstack.git

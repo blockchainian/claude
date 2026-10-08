@@ -1,0 +1,152 @@
+diff --git a/browse/src/cli.ts b/browse/src/cli.ts
+index c5b875755..432f13e68 100644
+--- a/browse/src/cli.ts
++++ b/browse/src/cli.ts
+@@ -494,6 +494,24 @@ function openDaemonLogSink(): number | 'ignore' {
+   }
+ }
+ 
++/**
++ * Environment the CLI adds for the server it spawns, including this binary's
++ * version so the daemon records it and a later binary update restarts it.
++ */
++export function serverSpawnEnv(
++  parentPid: string,
++  extraEnv?: Record<string, string>,
++  execPath: string = process.execPath,
++): Record<string, string> {
++  const binaryVersion = readVersionHash(execPath);
++  return {
++    BROWSE_STATE_FILE: config.stateFile,
++    BROWSE_PARENT_PID: parentPid,
++    ...(binaryVersion ? { BROWSE_BINARY_VERSION: binaryVersion } : {}),
++    ...(extraEnv || {}),
++  };
++}
++
+ async function startServer(extraEnv?: Record<string, string>): Promise<ServerState> {
+   ensureStateDir(config);
+ 
+@@ -531,7 +549,7 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
+     // when the CLI exits, the server dies with it. Use Node's child_process.spawn
+     // with { detached: true } instead, which is the gold standard for Windows
+     // process independence. Credit: PR #191 by @fqueiro.
+-    const extraEnvStr = JSON.stringify({ BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, ...(extraEnv || {}) });
++    const extraEnvStr = JSON.stringify(serverSpawnEnv(parentPid, extraEnv));
+     // The daemon's real process is spawned inside the launcher's own
+     // `node -e` invocation, not in cli.ts's process — so the log file has
+     // to be opened from inside the launcher string too; an fd opened here
+@@ -563,7 +581,7 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
+       detached: true,
+       windowsHide: true,
+       stdio: ['ignore', daemonLogFd, daemonLogFd],
+-      env: { ...process.env, BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, ...extraEnv },
++      env: { ...process.env, ...serverSpawnEnv(parentPid, extraEnv) },
+     }).unref();
+   }
+ 
+diff --git a/browse/src/config.ts b/browse/src/config.ts
+index f7d7eeefa..700b20df0 100644
+--- a/browse/src/config.ts
++++ b/browse/src/config.ts
+@@ -193,6 +193,18 @@ export function readVersionHash(execPath: string = process.execPath): string | n
+   }
+ }
+ 
++/**
++ * The binary version the daemon records in its state file. The server runs
++ * under `bun run server.ts`, where execPath is bun and has no .version beside
++ * it, so the spawning CLI passes its own version in BROWSE_BINARY_VERSION.
++ */
++export function resolveBinaryVersion(
++  env: Record<string, string | undefined> = process.env,
++  execPath: string = process.execPath,
++): string | null {
++  return env.BROWSE_BINARY_VERSION || readVersionHash(execPath);
++}
++
+ /**
+  * Resolve the gstack home directory.
+  *
+diff --git a/browse/src/server.ts b/browse/src/server.ts
+index fed9d51be..16afc0df5 100644
+--- a/browse/src/server.ts
++++ b/browse/src/server.ts
+@@ -36,7 +36,7 @@ import {
+   assertValidTokenOptions, revokeSetupKeys, getClientSession, grantReducesAccess,
+ } from './token-registry';
+ import { validateTempPath } from './path-security';
+-import { resolveConfig, ensureStateDir, readVersionHash, resolveChromiumProfile, cleanSingletonLocks, isPairAgentEnabled } from './config';
++import { resolveConfig, ensureStateDir, resolveBinaryVersion, resolveChromiumProfile, cleanSingletonLocks, isPairAgentEnabled } from './config';
+ import {
+   isSessionPersistEnabled, persistSessionState, restoreSessionState,
+   sessionPersistIntervalMs, SESSION_STATE_FILE,
+@@ -3191,7 +3191,7 @@ export async function start() {
+     token: envCfg.authToken,
+     startedAt: new Date().toISOString(),
+     serverPath: path.resolve(import.meta.dir, 'server.ts'),
+-    binaryVersion: readVersionHash() || undefined,
++    binaryVersion: resolveBinaryVersion() || undefined,
+     mode: browserManager.getConnectionMode(),
+     // D2 daemon-mismatch detection: CLI computes the same hash from its
+     // resolved flags and refuses if it differs from this stored value.
+diff --git a/browse/test/binary-version.test.ts b/browse/test/binary-version.test.ts
+new file mode 100644
+index 000000000..f6e4a7ddb
+--- /dev/null
++++ b/browse/test/binary-version.test.ts
+@@ -0,0 +1,54 @@
++/**
++ * Binary version handoff — the daemon runs under `bun run server.ts`, so its
++ * own execPath is bun and has no adjacent .version. The CLI passes its version
++ * to the spawned server, which records it as binaryVersion; without it the
++ * CLI's "binary updated, restarting server" check never fires.
++ */
++
++import { afterAll, describe, expect, test } from 'bun:test';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { resolveBinaryVersion } from '../src/config';
++import { serverSpawnEnv } from '../src/cli';
++
++const distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'browse-version-'));
++fs.writeFileSync(path.join(distDir, '.version'), 'build-123\n');
++const builtExec = path.join(distDir, 'browse');
++const bareExec = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'browse-bare-')), 'bun');
++
++afterAll(() => {
++  fs.rmSync(distDir, { recursive: true, force: true });
++  fs.rmSync(path.dirname(bareExec), { recursive: true, force: true });
++});
++
++describe('resolveBinaryVersion', () => {
++  test('prefers the version the CLI passed in BROWSE_BINARY_VERSION', () => {
++    expect(resolveBinaryVersion({ BROWSE_BINARY_VERSION: 'from-cli' }, builtExec)).toBe('from-cli');
++  });
++
++  test('falls back to the .version beside execPath', () => {
++    expect(resolveBinaryVersion({}, builtExec)).toBe('build-123');
++  });
++
++  test('is null when neither is available', () => {
++    expect(resolveBinaryVersion({}, bareExec)).toBeNull();
++  });
++});
++
++describe('serverSpawnEnv', () => {
++  test('passes the CLI binary version to the server', () => {
++    const env = serverSpawnEnv('42', undefined, builtExec);
++    expect(env.BROWSE_BINARY_VERSION).toBe('build-123');
++    expect(env.BROWSE_PARENT_PID).toBe('42');
++    expect(env.BROWSE_STATE_FILE).toBeTruthy();
++  });
++
++  test('omits the version when the CLI has none', () => {
++    expect('BROWSE_BINARY_VERSION' in serverSpawnEnv('42', undefined, bareExec)).toBe(false);
++  });
++
++  test('keeps the caller extraEnv on top', () => {
++    expect(serverSpawnEnv('42', { BROWSE_HEADED: '1' }, builtExec).BROWSE_HEADED).toBe('1');
++  });
++});
