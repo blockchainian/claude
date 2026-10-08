@@ -1,16 +1,28 @@
 # web
 
-Inspect web apps from Claude Code or Codex: find memory leaks by diffing V8 heap
-snapshots, and check a built page against a design reference.
+Inspect and drive web apps from Claude Code or Codex: run a persistent headless
+Chromium from the shell, find memory leaks by diffing V8 heap snapshots, and check
+a built page against a design reference.
 
 ## Skills
 
 | Skill | What it does |
 |---|---|
+| `browse` | Drive a persistent headless Chromium with the `browse` CLI — navigate, interact, run JS, read console and network logs, screenshot — with one tab per client for parallel runs |
 | `heap-snapshot-leaks` | Capture two heap snapshots around a repeated action and diff them into a ranked report of the constructors that grew and the DOM nodes left detached |
 | `check-web-design` | Diff a built web page against a design reference and report the off-by colours, positions, and missing/extra elements |
 
 ## How it works
+
+`browse` is [gstack](https://github.com/garrytan/gstack)'s browser CLI (MIT),
+vendored byte-identical at a pinned commit under `skills/browse/vendor/gstack/`.
+This plugin's changes to it are patch files in `skills/browse/patches/`;
+`scripts/build.sh` copies the vendor tree to `~/.local/share/web-browse/<version>/`,
+applies the patches, installs and compiles, and with `--link` points
+`~/.local/bin/browse` at the result. The patch scopes `console` and `network` to
+the tab a command is pinned to (`BROWSE_TAB`), so parallel clients sharing the
+daemon each read only their own tab's logs. `skills/browse/UPSTREAM.md` lists
+what was vendored, what was left out, and how to upgrade.
 
 Two Node scripts (no npm dependencies; the capture script needs Node 22+ for the built-in `WebSocket`):
 
@@ -51,6 +63,7 @@ In Claude Code:
 
 ## Requirements
 
+- `bun` on PATH to build `browse`, and a Playwright Chromium for it
 - `uv` on PATH (for `check-web-design`; its script declares its own dependencies)
 - Node 22+ for `heap-snapshot-leaks` (no npm install needed)
 - for `heap-snapshot-leaks`: Google Chrome, started with `--remote-debugging-port`
@@ -59,6 +72,7 @@ In Claude Code:
 
 ```
 node --test skills/heap-snapshot-leaks/tests/*.mjs
+node --test skills/browse/tests/*.mjs
 uv run skills/check-web-design/tests/test_check_design.py
 ```
 
