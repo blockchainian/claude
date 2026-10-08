@@ -27,6 +27,8 @@ STAGE="$DEST.partial"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -R "$SKILL_DIR/vendor/gstack/." "$STAGE/"
+# The window-placement scripts patches/0005 runs, shared byte-identical with the secrets plugin.
+cp "$SKILL_DIR"/scripts/*.swift "$STAGE/browse/scripts/"
 
 # Stop git's repository discovery at the stage dir: inside a work tree (a dotfiles repo holding ~/.claude),
 # `git apply` resolves paths from that repo's root and silently skips every patch.
