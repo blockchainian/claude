@@ -18,7 +18,7 @@ a built page against a design reference.
 vendored byte-identical at a pinned commit under `skills/browse/vendor/gstack/`.
 This plugin's changes to it are patch files in `skills/browse/patches/`.
 `bin/browse` is a launcher Claude Code puts on the Bash tool's PATH: it computes a
-build id from the vendor tree and patches, builds on first use through
+build id from the vendor tree, the patches and the build script, builds on first use through
 `skills/browse/scripts/build.sh` (copy the vendor tree, apply the patches, install,
 compile) into `$CLAUDE_PLUGIN_DATA/browse/<build id>/`, and then execs the built
 CLI. Concurrent first calls build once; build output goes to stderr. The patch scopes `console` and `network` to

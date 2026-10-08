@@ -29,7 +29,7 @@ variable such as `BROWSE_BIN`).
 
 The launcher builds the patched CLI on first use into
 `${CLAUDE_PLUGIN_DATA:-~/.claude/plugins/data/web-blockchainian}/browse/<build id>/`,
-where the build id is a digest of `vendor/gstack/` and `patches/`. The first call
+where the build id is a digest of `vendor/gstack/`, `patches/` and `scripts/build.sh`. The first call
 takes a few seconds and needs `bun` on PATH; build output goes to stderr only.
 A new build id means a new binary, and the running daemon restarts on its next
 command, losing every tab and login in it. Warn the user before the first call

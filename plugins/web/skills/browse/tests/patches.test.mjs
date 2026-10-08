@@ -39,6 +39,9 @@ test("build.sh builds the patched browse and the patches' own tests pass in it",
   const root = mkdtempSync(join(tmpdir(), "web-browse-build-"));
   const dest = join(root, "browse");
   try {
+    // The real install dir can sit inside a git work tree (a dotfiles repo holding ~/.claude),
+    // where `git apply` resolves paths from the repo root and silently skips the patches.
+    run("git", ["init", "-q"], root);
     run("bash", [join(SKILL_DIR, "scripts", "build.sh"), "--dest", dest], SKILL_DIR);
 
     assert.ok(existsSync(join(dest, "browse", "dist", "browse")));

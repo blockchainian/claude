@@ -28,8 +28,11 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -R "$SKILL_DIR/vendor/gstack/." "$STAGE/"
 
+# Stop git's repository discovery at the stage dir: inside a work tree (a dotfiles repo holding ~/.claude),
+# `git apply` resolves paths from that repo's root and silently skips every patch.
+STAGE_PARENT=$(cd "$(dirname "$STAGE")" && pwd -P)
 for patch_file in "$SKILL_DIR"/patches/*.patch; do
-  (cd "$STAGE" && git apply "$patch_file")
+  (cd "$STAGE" && GIT_CEILING_DIRECTORIES="$STAGE_PARENT" git apply "$patch_file")
 done
 
 cd "$STAGE"
