@@ -20,18 +20,17 @@ Apply patches in filename order.
 
 Export a new patch relative to the committed patched development baseline, never relative to the unpatched gstack tree.
 
-Keep patches focused. Do not put dependency or lockfile changes into a feature patch; `0001-trim-dependencies.patch` owns `package.json` and `bun.lock`.
+Keep each patch minimal: only the code its behaviour needs, with one focused test per behaviour. Name a patch by its user-visible effect, not its mechanism. Do not put generated version or lockfile changes into a feature patch; browse builds with upstream's `package.json` and `bun.lock`.
 
 To change an existing patch, recreate the baseline before it and amend that patch. Never add a patch that undoes another.
 
 | Patch | What it changes |
 |---|---|
-| `0001-trim-dependencies.patch` | `package.json` keeps only what browse needs — `playwright`, `diff`, `socks`, `sharp` (full-page screenshot downscaling) and `cross-spawn` (the Node server bundle's polyfill) — at the versions upstream's `bun.lock` resolved, with upstream's `ip-address` override and Playwright `patchedDependencies`; `bun.lock` is regenerated for it, every package at upstream's version |
-| `0002-last-tab-close-recovery.patch` | After the last tab closes, `restart`, `stop`, `newtab` and `goto` still work instead of failing with "No active page"; adds `browse/test/no-tab-recovery.test.ts` |
-| `0003-tab-scoped-logs.patch` | Commands pinned to a tab (`BROWSE_TAB` / `--tab-id`) read and clear only that tab's console and network entries; adds `browse/test/tab-scoped-logs.test.ts` |
-| `0004-record-binary-version.patch` | The CLI passes its own version to the server it spawns (`BROWSE_BINARY_VERSION`), so the daemon records `binaryVersion` and a new build restarts it on the next command; adds `browse/test/binary-version.test.ts` |
-| `0005-headed-newtab-single-registration.patch` | In headed mode `newTab` adopts the tab id the context's `page` handler already gave its page, so each page appears once in `tabs` and logs each entry once; adds `browse/test/headed-newtab.test.ts`, which runs only with `BROWSE_HEADED_TESTS=1` |
-| `0006-headed-window-placement.patch` | Headed windows open on the display `BROWSER_DISPLAY` names (environment, else `~/.config/web/.env`) and windows that open elsewhere are moved there, through `scripts/displayOrigin.swift` and `scripts/moveWindows.swift`, which `build.sh` copies into `browse/scripts/`; headed `newTab` opens its page with CDP `Target.createTarget({ background: true })` so the browser does not take macOS focus. Adds `browse/test/window-display.test.ts` and `browse/test/background-tab.test.ts`, whose headed part runs only with `BROWSE_HEADED_TESTS=1` |
+| `0001-restart-daemon-on-new-build.patch` | The CLI passes its own version to the daemon it starts (`BROWSE_BINARY_VERSION`), which records it as `binaryVersion`; a CLI from a different build then restarts the daemon on its next command. Without it the daemon, running under `bun`, recorded no version and never restarted |
+| `0002-open-headed-window-on-chosen-display.patch` | The headed window opens on the display `BROWSER_DISPLAY` names (environment, else `~/.config/web/.env`), through `--window-position` from `scripts/displayOrigin.swift`, which `build.sh` copies into `browse/scripts/`; adds `browse/test/browser-display.test.ts` |
+| `0003-open-headed-tabs-without-stealing-focus.patch` | Headed `newTab` opens its page with CDP `Target.createTarget({ background: true })` instead of `context.newPage()`, so Chromium does not take macOS focus; adds `browse/test/background-tab.test.ts`, whose headed part runs only with `BROWSE_HEADED_TESTS=1` |
+| `0004-show-only-the-pinned-tab-logs.patch` | Commands pinned to a tab (`BROWSE_TAB` / `--tab-id`) read and clear only that tab's console and network entries, and a response's status goes to its own tab's request; adds `browse/test/tab-scoped-logs.test.ts` |
+| `0005-stop-duplicate-tabs-and-logs-in-headed-mode.patch` | Headed `newTab` adopts the tab id the context's `page` handler already gave its page, so each new tab appears once in `tabs` and logs each request once; adds `browse/test/headed-newtab.test.ts`, which runs only with `BROWSE_HEADED_TESTS=1` |
 
 The build checks out only `browse/`, `lib/`, `patches/` and the root files, so these upstream parts are absent from an install:
 
@@ -40,8 +39,6 @@ The build checks out only `browse/`, `lib/`, `patches/` and the root files, so t
 | `extension/` | headed mode starts without the gstack sidebar extension |
 | `hosts/` | `browse pair-agent --local <host>` cannot write its host config |
 | `browser-skills/` | no bundled browser skills; `~/.gstack/browser-skills/` still loads |
-| `@ngrok/ngrok` (0001) | `pair-agent` tunnels fail to start |
-| `@huggingface/transformers` (0001) | the ML prompt-injection classifier sidecar is unavailable |
 
 ## Tools
 
@@ -64,12 +61,12 @@ Run these from this skill's directory.
 >
 > - Never run `git submodule update --remote`; builds must use the committed pointer
 > - To abandon an upgrade, preserve any changes, then run `git submodule update gstack`
-> - When upstream changes `package.json` or `bun.lock`, redo `0001-trim-dependencies.patch`: trim to what browse imports, regenerate `bun.lock` with `bun install`, and check every package resolves to upstream's version
 
 ### Develop a patch
 
 - `./scripts/develop.sh` — creates the development worktree in `.worktrees/develop`, with all patches committed as the baseline
-- `bun install --frozen-lockfile` — installs the trimmed dependencies in the worktree
+- `bun install --frozen-lockfile` — installs upstream's dependencies in the worktree
+- `cp ../../scripts/displayOrigin.swift browse/scripts/` — adds the display lookup the tests need; leave it unstaged, `build.sh` adds it at build time
 - `git add <feature-files>` — stages the feature in the worktree root, including new files and tests
 - `git diff --binary --cached HEAD > ../../patches/<NNNN>-<name>.patch` — exports the staged feature as a patch
 - `./scripts/check-patches.sh` — checks that all patches apply in order

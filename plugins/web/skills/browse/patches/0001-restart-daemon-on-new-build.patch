@@ -1,0 +1,36 @@
+diff --git a/browse/src/cli.ts b/browse/src/cli.ts
+index c5b875755..7cc4fe668 100644
+--- a/browse/src/cli.ts
++++ b/browse/src/cli.ts
+@@ -531,7 +531,7 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
+     // when the CLI exits, the server dies with it. Use Node's child_process.spawn
+     // with { detached: true } instead, which is the gold standard for Windows
+     // process independence. Credit: PR #191 by @fqueiro.
+-    const extraEnvStr = JSON.stringify({ BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, ...(extraEnv || {}) });
++    const extraEnvStr = JSON.stringify({ BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, BROWSE_BINARY_VERSION: readVersionHash() || '', ...(extraEnv || {}) });
+     // The daemon's real process is spawned inside the launcher's own
+     // `node -e` invocation, not in cli.ts's process — so the log file has
+     // to be opened from inside the launcher string too; an fd opened here
+@@ -563,7 +563,7 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
+       detached: true,
+       windowsHide: true,
+       stdio: ['ignore', daemonLogFd, daemonLogFd],
+-      env: { ...process.env, BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, ...extraEnv },
++      env: { ...process.env, BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, BROWSE_BINARY_VERSION: readVersionHash() || '', ...extraEnv },
+     }).unref();
+   }
+ 
+diff --git a/browse/src/server.ts b/browse/src/server.ts
+index 87192bcdc..25a1adfe2 100644
+--- a/browse/src/server.ts
++++ b/browse/src/server.ts
+@@ -3179,7 +3179,8 @@ export async function start() {
+     token: envCfg.authToken,
+     startedAt: new Date().toISOString(),
+     serverPath: path.resolve(import.meta.dir, 'server.ts'),
+-    binaryVersion: readVersionHash() || undefined,
++    // The daemon runs under bun, so the CLI that spawned it passes its own version.
++    binaryVersion: process.env.BROWSE_BINARY_VERSION || readVersionHash() || undefined,
+     mode: browserManager.getConnectionMode(),
+     // D2 daemon-mismatch detection: CLI computes the same hash from its
+     // resolved flags and refuses if it differs from this stored value.
