@@ -1,7 +1,7 @@
 ## Snapshot Flags
 
 The snapshot is your primary tool for understanding and interacting with pages.
-`$B` is the browse binary on PATH (`~/.local/bin/browse`, linked by this skill's `scripts/build.sh --link`).
+`$B` is the browse binary: the web plugin's `bin/browse` launcher on PATH.
 
 **Syntax:** `$B snapshot [flags]`
 

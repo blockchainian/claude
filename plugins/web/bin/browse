@@ -1,0 +1,34 @@
+#!/bin/bash
+# ABOUTME: Runs the web plugin's patched browse CLI, building it on first use into <plugin data>/browse/<build id>.
+# ABOUTME: Concurrent first calls build once behind a mkdir lock; build output goes to stderr so stdout stays browse's own.
+set -euo pipefail
+
+PLUGIN_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd -P)
+SKILL_DIR="$PLUGIN_ROOT/skills/browse"
+BUILD_ID=$(bash "$SKILL_DIR/scripts/build-id.sh")
+DEST="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/web-blockchainian}/browse/$BUILD_ID"
+BIN="$DEST/browse/dist/browse"
+
+if [ ! -x "$BIN" ]; then
+  LOCK="$DEST.lock"
+  mkdir -p "$(dirname "$DEST")"
+  until mkdir "$LOCK" 2>/dev/null; do
+    # A builder that died leaves its lock behind; take it over once its pid is gone.
+    holder=$(cat "$LOCK/pid" 2>/dev/null || true)
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$LOCK"
+      continue
+    fi
+    sleep 1
+  done
+  echo $$ > "$LOCK/pid"
+  trap 'rm -rf "$LOCK"' EXIT
+  if [ ! -x "$BIN" ]; then
+    echo "[browse] building $BUILD_ID into $DEST" >&2
+    bash "$SKILL_DIR/scripts/build.sh" --dest "$DEST" >&2
+  fi
+  rm -rf "$LOCK"
+  trap - EXIT
+fi
+
+exec "$BIN" "$@"

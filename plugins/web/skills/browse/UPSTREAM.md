@@ -5,7 +5,8 @@ see `vendor/gstack/LICENSE`) at commit
 `0d1bd561` (v1.79.0.0),
 cut down to the files the `browse` CLI needs. Vendored files are byte-identical
 to upstream; this skill's own changes live in `patches/` and are applied at build
-time by `scripts/build.sh`.
+time by `scripts/build.sh`, which the plugin's `bin/browse` launcher runs on first
+use of each build id (`scripts/build-id.sh`).
 
 ## What is vendored
 
@@ -56,3 +57,4 @@ The list lives in `scripts/vendor.sh`:
    `bun.lock` with `bun install` in a scratch copy and check its versions match
    upstream's lock.
 3. Update the commit above, run `npm run test:web`, and bump the plugin version.
+   The build id changes with the vendor tree, so the launcher rebuilds on next use.

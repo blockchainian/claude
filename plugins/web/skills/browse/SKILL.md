@@ -14,24 +14,26 @@ patches applied on top — see `UPSTREAM.md`.
 
 ## Setup
 
-The CLI is `browse` on PATH (`~/.local/bin/browse`). Check it first:
+In Claude Code, `browse` is this plugin's `bin/browse` launcher, which Claude
+Code puts on the Bash tool's PATH after the user's own PATH. Check which one
+resolves:
 
 ```bash
-B=$(command -v browse) && echo "READY: $B" || echo "NEEDS_SETUP"
+B=$(command -v browse) && echo "$B"
 ```
 
-If `NEEDS_SETUP`, or after this skill's vendor tree or patches change, build it.
-Resolve `SKILL_DIR` from the absolute path of the loaded `SKILL.md` in the same
-shell call:
+If that is not `<plugin install path>/bin/browse`, another `browse` earlier on
+PATH shadows it; set `B` to the plugin's `bin/browse` explicitly. Outside Claude
+Code, call `<plugin install path>/bin/browse` directly (scripts can take it in a
+variable such as `BROWSE_BIN`).
 
-```bash
-SKILL_DIR="/absolute/path/to/loaded/skill"
-bash "$SKILL_DIR/scripts/build.sh" --link
-```
-
-The build needs `bun` on PATH. `--link` repoints `~/.local/bin/browse`; the
-running daemon then restarts on its next command and every tab and login in it
-is lost. Ask the user before linking while other sessions use the daemon.
+The launcher builds the patched CLI on first use into
+`${CLAUDE_PLUGIN_DATA:-~/.claude/plugins/data/web-blockchainian}/browse/<build id>/`,
+where the build id is a digest of `vendor/gstack/` and `patches/`. The first call
+takes a few seconds and needs `bun` on PATH; build output goes to stderr only.
+A new build id means a new binary, and the running daemon restarts on its next
+command, losing every tab and login in it. Warn the user before the first call
+after a plugin update while other sessions use the daemon.
 
 ## One tab per client (parallel runs)
 
