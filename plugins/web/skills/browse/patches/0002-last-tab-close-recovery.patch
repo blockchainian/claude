@@ -1,0 +1,168 @@
+diff --git a/browse/src/meta-commands.ts b/browse/src/meta-commands.ts
+index a2bc1f4d2..e0b2f4377 100644
+--- a/browse/src/meta-commands.ts
++++ b/browse/src/meta-commands.ts
+@@ -260,8 +260,11 @@ export async function handleMetaCommand(
+   tokenInfo?: TokenInfo | null,
+   opts?: MetaCommandOpts,
+ ): Promise<string> {
+-  // Per-tab operations use the active session; global operations use bm directly
+-  const session = bm.getActiveSession();
++  // Per-tab operations use the active session; global operations use bm directly.
++  // Resolve it where it is used, not here: `restart`, `stop` and `newtab` are how a
++  // daemon whose last tab closed gets back, and asking for a tab up here refused
++  // them for the very condition they exist to clear.
++  const activeSession = () => bm.getActiveSession();
+ 
+   switch (command) {
+     // ─── Tabs ──────────────────────────────────────────
+@@ -405,13 +408,15 @@ export async function handleMetaCommand(
+ 
+     // ─── Server Control ────────────────────────────────
+     case 'status': {
+-      const page = bm.getPage();
+       const tabs = bm.getTabCount();
+       const mode = bm.getConnectionMode();
++      // Status is what you reach for when nothing else works, so it has to
++      // survive the state it is used to diagnose. With no tab there is no url
++      // to report, and saying so is more use than refusing to answer.
+       return [
+         `Status: healthy`,
+         `Mode: ${mode}`,
+-        `URL: ${page.url()}`,
++        `URL: ${tabs > 0 ? bm.getPage().url() : '(no open tab)'}`,
+         `Tabs: ${tabs}`,
+         `PID: ${process.pid}`,
+       ].join('\n');
+@@ -719,7 +724,7 @@ export async function handleMetaCommand(
+     // ─── Snapshot ─────────────────────────────────────
+     case 'snapshot': {
+       const isScoped = tokenInfo && tokenInfo.clientId !== 'root';
+-      const snapshotResult = await handleSnapshot(args, session, {
++      const snapshotResult = await handleSnapshot(args, activeSession(), {
+         splitForScoped: !!isScoped,
+       });
+       // Scoped tokens get split format (refs outside envelope); root gets basic wrapping
+@@ -739,7 +744,7 @@ export async function handleMetaCommand(
+       bm.resume();
+       // Re-snapshot to capture current page state after human interaction
+       const isScoped2 = tokenInfo && tokenInfo.clientId !== 'root';
+-      const snapshot = await handleSnapshot(['-i'], session, { splitForScoped: !!isScoped2 });
++      const snapshot = await handleSnapshot(['-i'], activeSession(), { splitForScoped: !!isScoped2 });
+       if (isScoped2) {
+         return `RESUMED\n${snapshot}`;
+       }
+diff --git a/browse/src/server.ts b/browse/src/server.ts
+index 87192bcdc..f22906b2e 100644
+--- a/browse/src/server.ts
++++ b/browse/src/server.ts
+@@ -1132,7 +1132,18 @@ async function handleCommandInternalImpl(
+   try {
+     let result: string;
+ 
+-    const session = browserManager.getActiveSession();
++    // `goto` is what the "No active page" error tells you to run, so it has to
++    // work from no page at all — with every tab closed there is nothing to
++    // navigate, so open the tab first rather than refusing the one command that
++    // clears the state. `newtab` reaches bm directly and needs no help.
++    if (command === 'goto' && browserManager.getTabCount() === 0) {
++      await browserManager.newTab(undefined, tokenInfo?.clientId);
++    }
++
++    // Resolved per branch rather than up here: meta commands never touch it, and
++    // hoisting it made `restart`, `stop` and `tabs` unreachable once the last tab
++    // closed — the daemon could only be recovered by signalling the process.
++    const activeSession = () => browserManager.getActiveSession();
+ 
+     // Per-request warnings collected during hidden-element detection,
+     // surfaced into the envelope the LLM sees. Carries across the read
+@@ -1140,6 +1151,7 @@ async function handleCommandInternalImpl(
+     let hiddenContentWarnings: string[] = [];
+ 
+     if (READ_COMMANDS.has(command)) {
++      const session = activeSession();
+       const isScoped = tokenInfo && tokenInfo.clientId !== 'root';
+       // Hidden-element / ARIA-injection detection for every scoped
+       // DOM-reading channel (text, html, links, forms, accessibility,
+@@ -1174,7 +1186,7 @@ async function handleCommandInternalImpl(
+         result = await handleReadCommand(command, args, session, browserManager);
+       }
+     } else if (WRITE_COMMANDS.has(command)) {
+-      result = await handleWriteCommand(command, args, session, browserManager);
++      result = await handleWriteCommand(command, args, activeSession(), browserManager);
+     } else if (META_COMMANDS.has(command)) {
+       // Pass chain depth + executeCommand callback so chain routes subcommands
+       // through the full security pipeline (scope, domain, tab, wrapping).
+diff --git a/browse/test/no-tab-recovery.test.ts b/browse/test/no-tab-recovery.test.ts
+new file mode 100644
+index 000000000..67b597194
+--- /dev/null
++++ b/browse/test/no-tab-recovery.test.ts
+@@ -0,0 +1,67 @@
++/**
++ * The daemon must stay recoverable after its last tab closes.
++ *
++ * Closing every tab used to wedge the CLI completely: `handleCommandInternalImpl`
++ * (server.ts) and `handleMetaCommand` (meta-commands.ts) both resolved
++ * `getActiveSession()` above their dispatch, so every command threw
++ * `No active page. Use "browse goto <url>" first.` — including `restart`, `stop`
++ * and `newtab`, which exist to clear exactly that state, and including `goto`,
++ * the command the error text sends you to. There was no way back but SIGTERM.
++ *
++ * These pin the contract: a command that does not need a tab must not ask for one.
++ */
++
++import { describe, it, expect } from 'bun:test';
++import { BrowserManager } from '../src/browser-manager';
++import { handleMetaCommand } from '../src/meta-commands';
++
++const NO_ACTIVE_PAGE = 'No active page';
++
++/** A manager with no browser and no tabs — the state a closed last tab leaves. */
++const tabless = () => new BrowserManager();
++const noopShutdown = () => Promise.resolve();
++
++describe('meta commands with every tab closed', () => {
++  it('still restarts, which is the documented way out', async () => {
++    const result = await handleMetaCommand('restart', [], tabless(), noopShutdown);
++    expect(result).toBe('Restarting...');
++  });
++
++  it('still stops', async () => {
++    const result = await handleMetaCommand('stop', [], tabless(), noopShutdown);
++    expect(result).toBe('Server stopped');
++  });
++
++  it('still lists tabs, and lists none', async () => {
++    const result = await handleMetaCommand('tabs', [], tabless(), noopShutdown);
++    expect(result).toBe('');
++  });
++
++  /**
++   * Status is what you run to find out why nothing works, so it has to survive
++   * the state it is being used to diagnose. It used to refuse instead, which
++   * hid the one number that explains the wedge.
++   */
++  it('still reports status, naming the tab count that explains the wedge', async () => {
++    const result = await handleMetaCommand('status', [], tabless(), noopShutdown);
++    expect(result).toContain('Tabs: 0');
++    expect(result).not.toContain(NO_ACTIVE_PAGE);
++  });
++
++  /**
++   * `newtab` cannot succeed without a browser, but it must fail for the real
++   * reason. Reporting "No active page" for a command whose whole job is to
++   * create one is what made the wedge unescapable.
++   */
++  it('fails newtab on the browser being gone, not on the tab being gone', async () => {
++    await expect(handleMetaCommand('newtab', [], tabless(), noopShutdown)).rejects.toThrow(
++      'Browser not launched',
++    );
++  });
++});
++
++describe('the active session is resolved only when it is needed', () => {
++  it('is still refused for a command that genuinely needs a tab', () => {
++    expect(() => tabless().getActiveSession()).toThrow(NO_ACTIVE_PAGE);
++  });
++});
