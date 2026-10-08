@@ -48,6 +48,7 @@ The list lives in `scripts/vendor.sh`:
 | `0001-closing-the-last-tab-no-longer-wedges-the-daemon.patch` | After the last tab closes, `restart`, `stop`, `newtab` and `goto` still work instead of failing with "No active page"; a local fix from our gstack clone, absent from upstream at `0d1bd561`; adds `browse/test/no-tab-recovery.test.ts` |
 | `0002-scope-console-and-network-logs-to-pinned-tab.patch` | Commands pinned to a tab (`BROWSE_TAB` / `--tab-id`) read and clear only that tab's console and network entries; adds `browse/test/tab-scoped-logs.test.ts` |
 | `0003-record-the-cli-binary-version-in-the-daemon-state.patch` | The CLI passes its own version to the server it spawns (`BROWSE_BINARY_VERSION`), so the daemon records `binaryVersion` and a new build restarts it on the next command; adds `browse/test/binary-version.test.ts` |
+| `0004-headed-newtab-tracks-its-page-once.patch` | In headed mode `newTab` adopts the tab id the context's `page` handler already gave its page, so each page appears once in `tabs` and logs each console and network entry once; adds `browse/test/headed-newtab.test.ts`, which opens a visible Chromium window |
 
 ## Upgrading
 

@@ -1,0 +1,114 @@
+From 801846ae81a59938d10e1c96024933e9988f8fc5 Mon Sep 17 00:00:00 2001
+From: Satoshi Nakamoto <hello@chadwallet.xyz>
+Date: Thu, 8 Oct 2026 10:12:23 -0700
+Subject: [PATCH] fix(browse): headed newTab tracks its page once
+
+launchHeaded() registers every page the context opens through
+context.on('page'), and newTab() opens its page through that context, so the
+handler had already registered and wired the page when newTab registered it
+again under a second id. Every headed tab showed twice in `tabs` and every
+console and network entry was recorded twice. newTab now adopts the
+handler's id when the page is already tracked.
+---
+ browse/src/browser-manager.ts     | 16 +++++----
+ browse/test/headed-newtab.test.ts | 54 +++++++++++++++++++++++++++++++
+ 2 files changed, 64 insertions(+), 6 deletions(-)
+ create mode 100644 browse/test/headed-newtab.test.ts
+
+diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
+index ed163ef..c40c62b 100644
+--- a/browse/src/browser-manager.ts
++++ b/browse/src/browser-manager.ts
+@@ -963,9 +963,16 @@ export class BrowserManager {
+     }
+ 
+     const page = await this.context.newPage();
+-    const id = this.nextTabId++;
+-    this.pages.set(id, page);
+-    this.tabSessions.set(id, new TabSession(page));
++    // Headed mode's context.on('page') handler has already registered and wired
++    // this page; adopt its id instead of tracking the same page twice.
++    let id = [...this.pages].find(([, p]) => p === page)?.[0];
++    if (id === undefined) {
++      id = this.nextTabId++;
++      this.pages.set(id, page);
++      this.tabSessions.set(id, new TabSession(page));
++      // Wire up console/network/dialog capture
++      this.wirePageEvents(page, id);
++    }
+     this.activeTabId = id;
+ 
+     // Record tab ownership for multi-agent isolation
+@@ -973,9 +980,6 @@ export class BrowserManager {
+       this.tabOwnership.set(id, clientId);
+     }
+ 
+-    // Wire up console/network/dialog capture
+-    this.wirePageEvents(page, id);
+-
+     if (normalizedUrl) {
+       await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+     }
+diff --git a/browse/test/headed-newtab.test.ts b/browse/test/headed-newtab.test.ts
+new file mode 100644
+index 0000000..d04de21
+--- /dev/null
++++ b/browse/test/headed-newtab.test.ts
+@@ -0,0 +1,54 @@
++/**
++ * Headed newTab registers each page once. launchHeaded() tracks every page the
++ * context opens through context.on('page'); newTab() opens its page through the
++ * same context, so it must adopt that registration instead of adding a second
++ * tab id for the same page (which doubled `tabs` and every log entry).
++ *
++ * Opens a visible Chromium window: launchHeaded() is headless: false by design.
++ */
++
++import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { startTestServer } from './test-server';
++import { BrowserManager } from '../src/browser-manager';
++import { networkBuffer } from '../src/buffers';
++
++const ORIGINAL_CHROMIUM_PROFILE = process.env.CHROMIUM_PROFILE;
++let profileDir: string;
++let testServer: ReturnType<typeof startTestServer>;
++let bm: BrowserManager;
++
++beforeAll(async () => {
++  profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-test-headed-'));
++  process.env.CHROMIUM_PROFILE = profileDir;
++  testServer = startTestServer(0);
++  bm = new BrowserManager();
++  await bm.launchHeaded();
++}, 120_000);
++
++afterAll(async () => {
++  try { testServer?.server?.stop(); } catch {}
++  await bm?.close().catch(() => {});
++  if (ORIGINAL_CHROMIUM_PROFILE === undefined) delete process.env.CHROMIUM_PROFILE;
++  else process.env.CHROMIUM_PROFILE = ORIGINAL_CHROMIUM_PROFILE;
++  fs.rmSync(profileDir, { recursive: true, force: true });
++});
++
++describe('headed newTab', () => {
++  test('adds exactly one tab for the page it opens', async () => {
++    const before = bm.getTabCount();
++    const id = await bm.newTab();
++    expect(bm.getTabCount()).toBe(before + 1);
++    expect(bm.getActiveTabId()).toBe(id);
++  });
++
++  test('records one network entry per request on the new tab', async () => {
++    const id = await bm.newTab();
++    const page = bm.getSession(id).getPage();
++    await page.goto(`${testServer.url}/basic.html?headed-newtab=1`);
++    const entries = networkBuffer.toArray().filter(e => e.url.includes('headed-newtab=1'));
++    expect(entries.length).toBe(1);
++  });
++});
+-- 
+2.55.0
+
