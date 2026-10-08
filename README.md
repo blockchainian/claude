@@ -15,7 +15,7 @@ Proxy, Creator, Render, Mobile, Intel, and Secrets also available in Codex from 
 | [intel](plugins/intel/README.md) | Gathers and distills knowledge from long-form sources: transcribes audio locally with whisper, turns an article, podcast, video or PDF into searchable highlights, translates an English EPUB into a Chinese PDF, finds and downloads books, analyzes App Store reviews, finds brand names with a registrable domain, researches one creator into a sourced case study, and fetches and analyzes X, TikTok and app review archives. |
 | [creator](plugins/creator/README.md) | Posts a video to the secrets-manager TikTok account through its own browser profile, fetches the account's video stats, lists the commercial music library's hottest sounds, and opens the account's browser for a person to look. |
 | [computer-use](plugins/computer-use/README.md) | Captures one macOS app window to a PNG without hiding or moving the user's other windows. |
-| [web](plugins/web/README.md) | Finds web memory leaks by diffing V8 heap snapshots captured from a running Chrome over the DevTools protocol, and checks a built page against a design reference. |
+| [web](plugins/web/README.md) | Drives a persistent headless Chromium from the shell with one tab per client, finds web memory leaks by diffing V8 heap snapshots captured from a running Chrome over the DevTools protocol, and checks a built page against a design reference. |
 
 ## Install
 
@@ -75,7 +75,7 @@ plugins/cloudflare/               the Cloudflare plugin, trimmed to six skills
 plugins/proxy/                    the mitmproxy traffic-capture plugin
 plugins/intel/                    the research plugin: transcribe, digest, translate, case study and more
 plugins/secrets/                  the account and session plugin
-plugins/web/                      the web leak-finder and design-check plugin
+plugins/web/                      the web browser-CLI, leak-finder and design-check plugin
 plugins/computer-use/             the single-window capture plugin
 plugins/creator/                  the creator-account plugin: TikTok upload and stats
 tests/                            the marketplace node suite
