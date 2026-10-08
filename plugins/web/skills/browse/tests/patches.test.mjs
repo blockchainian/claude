@@ -45,7 +45,7 @@ test("build.sh builds the patched browse and the patches' own tests pass in it",
     const buildId = run("bash", [join(SKILL_DIR, "scripts", "build-id.sh")], SKILL_DIR);
     assert.match(buildId, /^[0-9a-f]{16}\n$/);
     assert.equal(readFileSync(join(dest, "browse", "dist", ".version"), "utf8"), buildId);
-    run("bun", ["test", "browse/test/no-tab-recovery.test.ts", "browse/test/tab-scoped-logs.test.ts"], dest);
+    run("bun", ["test", "browse/test/no-tab-recovery.test.ts", "browse/test/tab-scoped-logs.test.ts", "browse/test/binary-version.test.ts"], dest);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
