@@ -1,5 +1,5 @@
 // ABOUTME: Tests the vendored browse build: every patch applies cleanly to a fresh copy of vendor/gstack,
-// ABOUTME: and build.sh produces a binary whose patched tree passes the patch's own bun test.
+// ABOUTME: and build.sh produces a binary whose patched tree passes the patches' own bun tests.
 //
 // Run: node --test tests/
 //
@@ -35,7 +35,7 @@ test("every patch applies cleanly, in order, to a fresh copy of vendor/gstack", 
   }
 });
 
-test("build.sh builds the patched browse and the patch's own test passes in it", () => {
+test("build.sh builds the patched browse and the patches' own tests pass in it", () => {
   const root = mkdtempSync(join(tmpdir(), "web-browse-build-"));
   const dest = join(root, "browse");
   try {
@@ -43,7 +43,7 @@ test("build.sh builds the patched browse and the patch's own test passes in it",
 
     assert.ok(existsSync(join(dest, "browse", "dist", "browse")));
     assert.match(readFileSync(join(dest, "browse", "dist", ".version"), "utf8"), /^\d+\.\d+\.\d+-[0-9a-f]{16}\n$/);
-    run("bun", ["test", "browse/test/tab-scoped-logs.test.ts"], dest);
+    run("bun", ["test", "browse/test/no-tab-recovery.test.ts", "browse/test/tab-scoped-logs.test.ts"], dest);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

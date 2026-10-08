@@ -1132,18 +1132,7 @@ async function handleCommandInternalImpl(
   try {
     let result: string;
 
-    // `goto` is what the "No active page" error tells you to run, so it has to
-    // work from no page at all — with every tab closed there is nothing to
-    // navigate, so open the tab first rather than refusing the one command that
-    // clears the state. `newtab` reaches bm directly and needs no help.
-    if (command === 'goto' && browserManager.getTabCount() === 0) {
-      await browserManager.newTab(undefined, tokenInfo?.clientId);
-    }
-
-    // Resolved per branch rather than up here: meta commands never touch it, and
-    // hoisting it made `restart`, `stop` and `tabs` unreachable once the last tab
-    // closed — the daemon could only be recovered by signalling the process.
-    const activeSession = () => browserManager.getActiveSession();
+    const session = browserManager.getActiveSession();
 
     // Per-request warnings collected during hidden-element detection,
     // surfaced into the envelope the LLM sees. Carries across the read
@@ -1151,7 +1140,6 @@ async function handleCommandInternalImpl(
     let hiddenContentWarnings: string[] = [];
 
     if (READ_COMMANDS.has(command)) {
-      const session = activeSession();
       const isScoped = tokenInfo && tokenInfo.clientId !== 'root';
       // Hidden-element / ARIA-injection detection for every scoped
       // DOM-reading channel (text, html, links, forms, accessibility,
@@ -1186,7 +1174,7 @@ async function handleCommandInternalImpl(
         result = await handleReadCommand(command, args, session, browserManager);
       }
     } else if (WRITE_COMMANDS.has(command)) {
-      result = await handleWriteCommand(command, args, activeSession(), browserManager);
+      result = await handleWriteCommand(command, args, session, browserManager);
     } else if (META_COMMANDS.has(command)) {
       // Pass chain depth + executeCommand callback so chain routes subcommands
       // through the full security pipeline (scope, domain, tab, wrapping).
