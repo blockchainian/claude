@@ -1,19 +1,18 @@
 diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
-index ed163ef4b..c40c62b7c 100644
+index cb4f4729f..924efc130 100644
 --- a/browse/src/browser-manager.ts
 +++ b/browse/src/browser-manager.ts
-@@ -963,9 +963,16 @@ export class BrowserManager {
+@@ -986,9 +986,15 @@ export class BrowserManager {
      }
  
-     const page = await this.context.newPage();
+     const page = this.connectionMode === 'headed' ? await openPageInBackground(this.context) : await this.context.newPage();
 -    const id = this.nextTabId++;
 -    this.pages.set(id, page);
 -    this.tabSessions.set(id, new TabSession(page));
-+    // Headed mode's context.on('page') handler has already registered and wired
-+    // this page; adopt its id instead of tracking the same page twice.
-+    let id = [...this.pages].find(([, p]) => p === page)?.[0];
-+    if (id === undefined) {
-+      id = this.nextTabId++;
++    // In headed mode the context's 'page' handler has already registered and wired this page.
++    const registered = [...this.pages].find(([, p]) => p === page)?.[0];
++    const id = registered ?? this.nextTabId++;
++    if (registered === undefined) {
 +      this.pages.set(id, page);
 +      this.tabSessions.set(id, new TabSession(page));
 +      // Wire up console/network/dialog capture
@@ -22,7 +21,7 @@ index ed163ef4b..c40c62b7c 100644
      this.activeTabId = id;
  
      // Record tab ownership for multi-agent isolation
-@@ -973,9 +980,6 @@ export class BrowserManager {
+@@ -996,9 +1002,6 @@ export class BrowserManager {
        this.tabOwnership.set(id, clientId);
      }
  
@@ -34,18 +33,14 @@ index ed163ef4b..c40c62b7c 100644
      }
 diff --git a/browse/test/headed-newtab.test.ts b/browse/test/headed-newtab.test.ts
 new file mode 100644
-index 000000000..104405b46
+index 000000000..9db4966cb
 --- /dev/null
 +++ b/browse/test/headed-newtab.test.ts
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,44 @@
 +/**
-+ * Headed newTab registers each page once. launchHeaded() tracks every page the
-+ * context opens through context.on('page'); newTab() opens its page through the
-+ * same context, so it must adopt that registration instead of adding a second
-+ * tab id for the same page (which doubled `tabs` and every log entry).
-+ *
-+ * Opens a visible Chromium window (launchHeaded() is headless: false by design),
-+ * so it runs only with BROWSE_HEADED_TESTS=1.
++ * Headed newTab registers its page once: the context's 'page' handler already
++ * tracks every page the context opens. Opens a visible window, so it runs only
++ * with BROWSE_HEADED_TESTS=1.
 + */
 +
 +import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -71,25 +66,18 @@ index 000000000..104405b46
 +  }, 120_000);
 +
 +  afterAll(async () => {
-+    try { testServer?.server?.stop(); } catch {}
-+    await bm?.close().catch(() => {});
++    try { testServer.server.stop(true); } catch {}
++    try { await Promise.race([bm.close(), new Promise((resolve) => setTimeout(resolve, 3000))]); } catch {}
 +    if (ORIGINAL_CHROMIUM_PROFILE === undefined) delete process.env.CHROMIUM_PROFILE;
 +    else process.env.CHROMIUM_PROFILE = ORIGINAL_CHROMIUM_PROFILE;
 +    fs.rmSync(profileDir, { recursive: true, force: true });
 +  });
 +
-+  test('adds exactly one tab for the page it opens', async () => {
++  test('adds one tab, which logs each request once', async () => {
 +    const before = bm.getTabCount();
 +    const id = await bm.newTab();
 +    expect(bm.getTabCount()).toBe(before + 1);
-+    expect(bm.getActiveTabId()).toBe(id);
-+  });
-+
-+  test('records one network entry per request on the new tab', async () => {
-+    const id = await bm.newTab();
-+    const page = bm.getSession(id).getPage();
-+    await page.goto(`${testServer.url}/basic.html?headed-newtab=1`);
-+    const entries = networkBuffer.toArray().filter(e => e.url.includes('headed-newtab=1'));
-+    expect(entries.length).toBe(1);
++    await bm.getSession(id).getPage().goto(`${testServer.url}/basic.html?headed-newtab=1`);
++    expect(networkBuffer.toArray().filter((e) => e.url.includes('headed-newtab=1')).length).toBe(1);
 +  });
 +});

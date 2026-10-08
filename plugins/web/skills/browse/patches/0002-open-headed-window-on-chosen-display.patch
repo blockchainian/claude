@@ -1,0 +1,103 @@
+diff --git a/browse/src/browser-display.ts b/browse/src/browser-display.ts
+new file mode 100644
+index 000000000..45372c995
+--- /dev/null
++++ b/browse/src/browser-display.ts
+@@ -0,0 +1,38 @@
++/**
++ * Where headed browse windows open: the display BROWSER_DISPLAY names (any part
++ * of its name, any case; empty means the main display), from the environment,
++ * else from ~/.config/web/.env. macOS only; on any failure Chromium places the
++ * window itself.
++ */
++
++import { execFileSync } from 'child_process';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++
++const DISPLAY_ORIGIN_SCRIPT = path.resolve(__dirname, '..', 'scripts', 'displayOrigin.swift');
++
++export function browserDisplayName(
++  env: Record<string, string | undefined> = process.env,
++  envFile: string = path.join(os.homedir(), '.config', 'web', '.env'),
++): string {
++  if (env.BROWSER_DISPLAY !== undefined) return env.BROWSER_DISPLAY;
++  const lines = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf-8').split('\n') : [];
++  const line = lines.find((l) => l.startsWith('BROWSER_DISPLAY='));
++  return line ? line.slice('BROWSER_DISPLAY='.length).trim().replace(/^"(.*)"$/, '$1') : '';
++}
++
++/** Chromium's --window-position for a point just inside the named display, or null when it is not connected. */
++export function windowPositionArg(displayName: string): string | null {
++  if (process.platform !== 'darwin') return null;
++  try {
++    const origin = execFileSync('swift', [DISPLAY_ORIGIN_SCRIPT, displayName], {
++      encoding: 'utf-8',
++      stdio: ['ignore', 'pipe', 'ignore'],
++      timeout: 60_000,
++    }).trim().match(/^(-?\d+) (-?\d+)$/);
++    return origin ? `--window-position=${Number(origin[1]) + 40},${Number(origin[2]) + 40}` : null;
++  } catch {
++    return null;
++  }
++}
+diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
+index b35a9d2d5..1b63ed279 100644
+--- a/browse/src/browser-manager.ts
++++ b/browse/src/browser-manager.ts
+@@ -25,6 +25,7 @@ import { resolveChromiumProfile, cleanSingletonLocks } from './config';
+ import { launchWithXProtectHeal } from './xprotect-heal';
+ import { readPidStartTime } from './xvfb';
+ import { withCdpSession } from './cdp-bridge';
++import { browserDisplayName, windowPositionArg } from './browser-display';
+ import type { MemorySnapshot, MemoryStructureStats, MemoryTabSnapshot, MemoryProcess } from './memory-snapshot';
+ 
+ /**
+@@ -626,6 +627,8 @@ export class BrowserManager {
+       // Chromium too.
+       ...buildGStackLaunchArgs(),
+     ];
++    const windowPosition = windowPositionArg(browserDisplayName());
++    if (windowPosition) launchArgs.push(windowPosition);
+     if (extensionPath) {
+       // Skip --load-extension when running against a custom Chromium build
+       // that already bakes the extension in as a component extension
+diff --git a/browse/test/browser-display.test.ts b/browse/test/browser-display.test.ts
+new file mode 100644
+index 000000000..b9e49af89
+--- /dev/null
++++ b/browse/test/browser-display.test.ts
+@@ -0,0 +1,32 @@
++/**
++ * Headed windows open on BROWSER_DISPLAY: the name comes from the environment,
++ * else ~/.config/web/.env, and becomes Chromium's --window-position.
++ */
++
++import { afterAll, expect, test } from 'bun:test';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { browserDisplayName, windowPositionArg } from '../src/browser-display';
++
++const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browse-display-'));
++const envFile = path.join(dir, '.env');
++fs.writeFileSync(envFile, 'OTHER=1\nBROWSER_DISPLAY="Built-in"\n');
++afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
++
++test('the environment wins over the env file', () => {
++  expect(browserDisplayName({ BROWSER_DISPLAY: 'SAMSUNG' }, envFile)).toBe('SAMSUNG');
++});
++
++test('the env file is read, quotes dropped', () => {
++  expect(browserDisplayName({}, envFile)).toBe('Built-in');
++});
++
++test('without either, the main display', () => {
++  expect(browserDisplayName({}, path.join(dir, 'missing'))).toBe('');
++});
++
++test.skipIf(process.platform !== 'darwin')('the main display gives a window position; an absent one gives none', () => {
++  expect(windowPositionArg('')).toMatch(/^--window-position=-?\d+,-?\d+$/);
++  expect(windowPositionArg('no display has this name')).toBeNull();
++}, 120_000);

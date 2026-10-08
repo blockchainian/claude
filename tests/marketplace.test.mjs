@@ -92,7 +92,7 @@ for (const script of ["recordWindows.swift", "moveWindows.swift"]) {
   });
 }
 
-for (const script of ["displayOrigin.swift", "moveWindows.swift"]) {
+for (const script of ["displayOrigin.swift"]) {
   test(`the window script ${script} stays byte-identical between secrets and web`, async () => {
     const copies = [`plugins/secrets/skills/secrets-manager/scripts/${script}`, `plugins/web/skills/browse/scripts/${script}`];
     const [a, b] = await Promise.all(copies.map((path) => readFile(path, "utf8")));

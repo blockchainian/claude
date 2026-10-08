@@ -1,0 +1,118 @@
+diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
+index 1b63ed279..211528b6e 100644
+--- a/browse/src/browser-manager.ts
++++ b/browse/src/browser-manager.ts
+@@ -272,6 +272,26 @@ export interface BrowserState {
+   }>;
+ }
+ 
++/**
++ * Opens a blank page through CDP Target.createTarget({ background: true }), which
++ * does not activate the browser window the way context.newPage() can. The target
++ * lands in the browser's default context, so context must be a persistent one.
++ */
++export async function openPageInBackground(context: BrowserContext): Promise<Page> {
++  const session = await context.browser()!.newBrowserCDPSession();
++  try {
++    let created: (targetId: string) => void = () => {};
++    const targetId = new Promise<string>((resolve) => { created = resolve; });
++    const page = context.waitForEvent('page', {
++      predicate: async (p) => (await withCdpSession(p, (s) => s.send('Target.getTargetInfo'))).targetInfo.targetId === await targetId,
++    });
++    created((await session.send('Target.createTarget', { url: 'about:blank', background: true })).targetId);
++    return await page;
++  } finally {
++    await session.detach().catch(() => {});
++  }
++}
++
+ export class BrowserManager {
+   private browser: Browser | null = null;
+   private context: BrowserContext | null = null;
+@@ -965,7 +985,7 @@ export class BrowserManager {
+       normalizedUrl = await validateNavigationUrl(url);
+     }
+ 
+-    const page = await this.context.newPage();
++    const page = this.connectionMode === 'headed' ? await openPageInBackground(this.context) : await this.context.newPage();
+     const id = this.nextTabId++;
+     this.pages.set(id, page);
+     this.tabSessions.set(id, new TabSession(page));
+diff --git a/browse/test/background-tab.test.ts b/browse/test/background-tab.test.ts
+new file mode 100644
+index 000000000..32c655080
+--- /dev/null
++++ b/browse/test/background-tab.test.ts
+@@ -0,0 +1,72 @@
++/**
++ * Headed tabs open in the background: a CDP target created with
++ * { background: true } in the persistent (default) context, so Chromium does not
++ * take macOS focus. The opening is checked on a headless persistent context; the
++ * focus, screenshot and requestAnimationFrame checks need a visible window and run
++ * only with BROWSE_HEADED_TESTS=1.
++ */
++
++import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { chromium, type BrowserContext } from 'playwright';
++import { BrowserManager, openPageInBackground } from '../src/browser-manager';
++
++describe('openPageInBackground', () => {
++  let profileDir: string;
++  let context: BrowserContext;
++
++  beforeAll(async () => {
++    profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-test-background-'));
++    context = await chromium.launchPersistentContext(profileDir, { headless: true });
++  });
++
++  afterAll(async () => {
++    await context.close().catch(() => {});
++    fs.rmSync(profileDir, { recursive: true, force: true });
++  });
++
++  test('each call opens its own page in the persistent context', async () => {
++    const pages = await Promise.all([openPageInBackground(context), openPageInBackground(context)]);
++    expect(new Set(pages).size).toBe(2);
++    for (const page of pages) expect(context.pages()).toContain(page);
++  });
++});
++
++describe.skipIf(!process.env.BROWSE_HEADED_TESTS)('headed newTab', () => {
++  const ORIGINAL_CHROMIUM_PROFILE = process.env.CHROMIUM_PROFILE;
++  const frontmostApp = () => Bun.spawnSync(['osascript', '-e', 'tell application "System Events" to name of first process whose frontmost is true']).stdout.toString().trim();
++  let profileDir: string;
++  let bm: BrowserManager;
++
++  beforeAll(async () => {
++    profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-test-background-headed-'));
++    process.env.CHROMIUM_PROFILE = profileDir;
++    bm = new BrowserManager();
++    await bm.launchHeaded();
++  }, 120_000);
++
++  afterAll(async () => {
++    try { await Promise.race([bm.close(), new Promise((resolve) => setTimeout(resolve, 3000))]); } catch {}
++    if (ORIGINAL_CHROMIUM_PROFILE === undefined) delete process.env.CHROMIUM_PROFILE;
++    else process.env.CHROMIUM_PROFILE = ORIGINAL_CHROMIUM_PROFILE;
++    fs.rmSync(profileDir, { recursive: true, force: true });
++  });
++
++  test('keeps the frontmost app, screenshots and runs requestAnimationFrame', async () => {
++    const before = frontmostApp();
++    const page = bm.getSession(await bm.newTab()).getPage();
++    await new Promise((resolve) => setTimeout(resolve, 1500));
++    expect(frontmostApp()).toBe(before);
++    await page.goto('data:text/html,<h1>background</h1>');
++    expect((await page.screenshot({ timeout: 10_000 })).length).toBeGreaterThan(0);
++    const frames = await page.evaluate(() => new Promise<number>((resolve) => {
++      let n = 0;
++      const start = performance.now();
++      const tick = () => { n++; if (performance.now() - start < 1000) requestAnimationFrame(tick); else resolve(n); };
++      requestAnimationFrame(tick);
++    }));
++    expect(frames).toBeGreaterThan(30);
++  }, 30_000);
++});

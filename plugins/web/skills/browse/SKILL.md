@@ -156,11 +156,11 @@ $B resume
 
 ## Headed mode and proxies
 
-Headed windows open on the display `BROWSER_DISPLAY` names (any part of its
-name, any case, e.g. `Color LCD`; empty means the main display), set in the
-environment or in `~/.config/web/.env`. Windows that open elsewhere are moved
-there (needs Accessibility trust for the daemon), and new tabs open in the
-background, so the browser does not take focus from the user's app.
+The headed window opens on the display `BROWSER_DISPLAY` names (any part of
+the name macOS gives the screen, any case, e.g. `Built-in`; empty means the main
+display), set in the environment or in `~/.config/web/.env`. New tabs open in
+the background of that window, so the browser does not take focus from the
+user's app.
 
 `--headed` and `--proxy` apply only when the daemon starts; with a daemon
 already running in another config, browse refuses and asks for

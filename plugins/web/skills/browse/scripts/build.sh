@@ -36,7 +36,7 @@ git -C "$STAGE" sparse-checkout set --cone browse lib patches
 git -C "$STAGE" fetch -q --depth 1 --filter=blob:none origin "$(cat "$SKILL_DIR/GSTACK_COMMIT")"
 git -C "$STAGE" -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
 "$SKILL_DIR/scripts/apply-patches.sh" "$STAGE"
-# The window-placement scripts patches/0006 runs, shared byte-identical with the secrets plugin.
+# The display lookup patches/0002 runs, shared byte-identical with the secrets plugin.
 cp "$SKILL_DIR"/scripts/*.swift "$STAGE/browse/scripts/"
 
 cd "$STAGE"
