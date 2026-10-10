@@ -2,7 +2,7 @@
 // ABOUTME: Scaffolds a case-study work dir under the Intel state root and checks it before rendering.
 // ABOUTME: init writes chapters.json + sources.json; book strips the chapters' source marks; check verifies the chapters, the book text and sources.
 //
-// Usage: case-study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... --out <pdf> [--chapters 11]
+// Usage: case-study.mjs init <slug> --title <title> --cover <name> --source <url> [--account <url>]... [--out <pdf>] [--chapters 11]
 //        case-study.mjs news <work dir> [--since <year>] <name>...   (the news lists the scouts pick press from, into raw/news/)
 //        case-study.mjs merge <work dir>
 //        case-study.mjs sources <work dir>   (the sources already in sources.json, as a scout would list them)
@@ -882,8 +882,8 @@ function main(argv) {
   let passed
   if (cmd === 'init') {
     need(1, 'slug')
-    for (const name of ['title', 'cover', 'source', 'out']) if (values[name] === undefined) fail(`case-study.mjs init: --${name} is required`)
-    const out = values.out.replace(/^~(?=$|\/)/, homedir())
+    for (const name of ['title', 'cover', 'source']) if (values[name] === undefined) fail(`case-study.mjs init: --${name} is required`)
+    const out = values.out ? values.out.replace(/^~(?=$|\/)/, homedir()) : join(caseStudyPaths().output, `${positionals[0]}.pdf`)
     result = init(positionals[0], values.title, values.source, out, Number(values.chapters), values.cover, values.account)
     passed = true
   } else if (cmd === 'merge') {
