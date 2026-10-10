@@ -39,6 +39,38 @@ node \
 - `--limit` is how many posts to print (default 40). A request returns 20 and takes 1 to 2 seconds.
 - `--latest` (the default) is the chronological view, `--top` X's ranked one.
 
+## Setup
+
+Requires Node.js 22.13+. Install the shared X client with
+`npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`, and log the X accounts in with the
+`secrets` plugin's `secrets-manager login x`.
+
+## Shared account prerequisite
+
+Use the existing secrets-manager CLI and store to provision or log in accounts.
+It need not be installed as a Codex plugin to run its CLI. If the CLI, required
+account, proxy or browser profile is missing, report the prerequisite; do not
+create a second store or switch to a host browser profile.
+
+## Environment variables
+
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
+| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
+| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
+| `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with the account-rotation state under limits/ | No | `~/.config/intel/.env` |
+| `SECRETS_STATE_DIR` | Account-store directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
+
+Account credentials stay in the secrets-manager store; do not copy them into `.env`. Capture the
+web-client and signing values from x.com, and refresh them when its web bundle changes.
+
 ## Output
 
 stdout carries one JSON object per post (`id, url, created_at, user, name, text, likes, retweets,
@@ -67,40 +99,8 @@ before the exit code. Earlier stderr lines are notes: `@user answered 403, marke
 Full fetches (`fetch-x-mentions`, `fetch-x-user-posts`) share the same accounts, so one running at
 the same time can rate-limit accounts this search wanted.
 
-## Setup
-
-Requires Node.js 22.13+. Install the shared X client with
-`npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`, and log the X accounts in with the
-`secrets` plugin's `secrets-manager login x`.
-
-## Environment variables
-
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
-
-| Variable | Purpose | Required | Set in |
-| --- | --- | --- | --- |
-| `X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
-| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
-| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
-| `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
-| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with the account-rotation state under limits/ | No | `~/.config/intel/.env` |
-| `SECRETS_STATE_DIR` | Account-store directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
-
-Account credentials stay in the secrets-manager store; do not copy them into `.env`. Capture the
-web-client and signing values from x.com, and refresh them when its web bundle changes.
-
 ## Test
 
 ```
 node --test "$SKILL_DIR/tests/fetch-x-posts.test.mjs"
 ```
-
-## Shared account prerequisite
-
-Use the existing secrets-manager CLI and store to provision or log in accounts.
-It need not be installed as a Codex plugin to run its CLI. If the CLI, required
-account, proxy or browser profile is missing, report the prerequisite; do not
-create a second store or switch to a host browser profile.
