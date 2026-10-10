@@ -34,6 +34,25 @@ as `"totpUrlPatterns": ["<regex whose first group captures the base32 seed>"]`.
 Headed runs need Accessibility trust to move OAuth popups onto the `BROWSER_DISPLAY` display and
 Screen Recording permission to record the windows.
 
+## Environment variables
+
+Shell values take precedence over `~/.config/secrets-manager/.env`.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `RESIDENTIAL_PROXY_URL` | Residential login proxy | For related feature | ~/.config/secrets-manager/.env |
+| `ISP_PROXY_URL` | Fixed ISP proxy pool | For related feature | ~/.config/secrets-manager/.env |
+| `ISP_PROXY_COUNT` | Pool slot count; default 1 | Optional | ~/.config/secrets-manager/.env |
+| `HERO_SMS_API_KEY` | HeroSMS key for phone rentals | For related feature | ~/.config/secrets-manager/.env |
+| `X_BEARER_TOKEN` | X web-client bearer token | For related feature | ~/.config/secrets-manager/.env |
+| `X_VIEWER_QUERY_ID` | X Viewer operation ID | For related feature | ~/.config/secrets-manager/.env |
+| `BROWSER_DISPLAY` | Headed browser display: any part of its name, any case (e.g. `SAMSUNG`); unset means the main display | Optional | ~/.config/secrets-manager/.env |
+| `CAPTCHA_RESOLVER_MODEL` | Captcha vision resolver model; default gpt-6-sol | Optional | ~/.config/secrets-manager/.env |
+| `CAPTCHA_RESOLVER_MODEL_EFFORT` | Resolver reasoning effort; default low | Optional | ~/.config/secrets-manager/.env |
+| `CAPTCHA_RESOLVER_MODEL_TIER` | Resolver service tier; default fast | Optional | ~/.config/secrets-manager/.env |
+| `SECRETS_STATE_DIR` | Accounts, credential files and logged-in browser profiles; default ~/.local/state/secrets-manager | Optional | ~/.config/secrets-manager/.env |
+| `SECRETS_DATA_DIR` | Debug captures and scratch files; default ~/.local/share/secrets-manager | Optional | ~/.config/secrets-manager/.env |
+
 ## New account flow
 
 A request to "搞" (get) a new account means this whole sequence for a fresh Google account, every
@@ -59,19 +78,6 @@ challenge: rerun that step headed. `restricted` means the app banned the account
 `login google` before chasing an app failure. Take a fresh batch one account at a time with
 `--select`, and widen to `--all` or `--concurrency N` once the flow works on a few; for `setup`, set
 `--concurrency` from the app's measured rate limit.
-
-## Running and diagnosing
-
-Run long browser commands in the background and wait for their exit status, and pass every
-`ASSIST NEEDED` message on to the user. Do not call host-specific `request_access` or
-`switch_display` tools. To diagnose a failure, read the step's `screenshot.png` and `info.txt` under
-`SECRETS_DATA_DIR/debug/<id>/<step>-<ts>/`, which show the page at capture time rather than the live
-desktop; a headless Google sign-in also leaves a video of every page under
-`SECRETS_DATA_DIR/debug/<id>/rec-<ts>/`.
-
-`proxy exit down: <host> …` means the account's sticky exit is down for a while (CONNECT answers
-522): rerun later. `--rotate-proxy` changes the IP on every connection, so it cannot rescue a browser
-login.
 
 ## Commands
 
@@ -99,24 +105,18 @@ login.
   `--all`; `setup <app> --help` lists the app's own flags.
 - **export** prints app credentials as JSON lines with the values in clear.
 
-## Environment variables
+## Running and diagnosing
 
-Shell values take precedence over `~/.config/secrets-manager/.env`.
+Run long browser commands in the background and wait for their exit status, and pass every
+`ASSIST NEEDED` message on to the user. Do not call host-specific `request_access` or
+`switch_display` tools. To diagnose a failure, read the step's `screenshot.png` and `info.txt` under
+`SECRETS_DATA_DIR/debug/<id>/<step>-<ts>/`, which show the page at capture time rather than the live
+desktop; a headless Google sign-in also leaves a video of every page under
+`SECRETS_DATA_DIR/debug/<id>/rec-<ts>/`.
 
-| Variable | Purpose | Required | Set in |
-| --- | --- | --- | --- |
-| `RESIDENTIAL_PROXY_URL` | Residential login proxy | For related feature | ~/.config/secrets-manager/.env |
-| `ISP_PROXY_URL` | Fixed ISP proxy pool | For related feature | ~/.config/secrets-manager/.env |
-| `ISP_PROXY_COUNT` | Pool slot count; default 1 | Optional | ~/.config/secrets-manager/.env |
-| `HERO_SMS_API_KEY` | HeroSMS key for phone rentals | For related feature | ~/.config/secrets-manager/.env |
-| `X_BEARER_TOKEN` | X web-client bearer token | For related feature | ~/.config/secrets-manager/.env |
-| `X_VIEWER_QUERY_ID` | X Viewer operation ID | For related feature | ~/.config/secrets-manager/.env |
-| `BROWSER_DISPLAY` | Headed browser display: any part of its name, any case (e.g. `SAMSUNG`); unset means the main display | Optional | ~/.config/secrets-manager/.env |
-| `CAPTCHA_RESOLVER_MODEL` | Captcha vision resolver model; default gpt-6-sol | Optional | ~/.config/secrets-manager/.env |
-| `CAPTCHA_RESOLVER_MODEL_EFFORT` | Resolver reasoning effort; default low | Optional | ~/.config/secrets-manager/.env |
-| `CAPTCHA_RESOLVER_MODEL_TIER` | Resolver service tier; default fast | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_STATE_DIR` | Accounts, credential files and logged-in browser profiles; default ~/.local/state/secrets-manager | Optional | ~/.config/secrets-manager/.env |
-| `SECRETS_DATA_DIR` | Debug captures and scratch files; default ~/.local/share/secrets-manager | Optional | ~/.config/secrets-manager/.env |
+`proxy exit down: <host> …` means the account's sticky exit is down for a while (CONNECT answers
+522): rerun later. `--rotate-proxy` changes the IP on every connection, so it cannot rescue a browser
+login.
 
 ## Limits
 
