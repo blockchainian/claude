@@ -98,8 +98,10 @@ is no cure for a browser login.
   dialog's selectors drift.
 - **sms** rents HeroSMS numbers for Google's phone step (`HERO_SMS_API_KEY`). `balance` and `prices`
   are free; `prices` gives each country's HeroSMS id for `--country`. `number` **spends money**: it
-  only prints the quote unless `--yes` is passed. A number that gets no code is refunded. Prefer a
-  country proven to deliver Google's SMS; some never do.
+  only prints the quote unless `--yes` is passed. A number that gets no code is refunded. `prices`, `number`
+  and the login's phone step skip the countries in `SMS_COUNTRY_BLACKLIST` (`scripts/config.mjs`:
+  Cameroon, Indonesia, Philippines, Kenya), but an explicit `--country` bypasses it: never pass one of
+  those.
 - **verify** checks that accounts are still usable and saves the result; a check that cannot tell
   exits 1 and changes nothing. A 404 from `verify x` means `X_VIEWER_QUERY_ID` is stale: re-read it
   from the `main.<hash>.js` that x.com/home serves a signed-in account
