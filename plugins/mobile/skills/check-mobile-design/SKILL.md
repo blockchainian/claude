@@ -5,101 +5,89 @@ description: Check a built iOS screen against a design reference and report how 
 
 # Check mobile design
 
-Drive the "build this screen from a reference" loop: compare the app you are
-building (**actual**) against a given design (**desired**), find what differs,
-fix, repeat. The script reports two things — an image diff for *where and how
-much*, and, when you hand it the app's on-screen elements, *what* each diff
-falls on ("the `Buy` button colour is off", not "region (12,340) differs").
+This skill drives the "build this screen from a reference" loop: compare the app you are building
+(**actual**) against the given design (**desired**), fix what differs, and repeat. The image diff
+says where and how much the screens differ; when you also pass the app's on-screen views, the
+report names what each difference falls on ("the `Buy` button colour is off", not "region
+(12,340) differs"). The goal is equivalence within tolerance, not identical pixels: device scale,
+the status bar, antialiasing and colour profiles always leave a few units of difference, so
+chasing zero never converges. Stop when the report's `pass` is true.
 
-The target is **perceptual, tolerance-bounded** equivalence, not literal pixel
-equality. Device scale, the status bar, antialiasing and colour profiles make
-identical designs differ by a few units; chasing zero never converges. The
-`pass` field is the loop's stop condition.
+## Skill directory
 
-## Script location and tools
-
-Resolve this skill's directory from the absolute path of the loaded `SKILL.md`.
-In each shell call that runs a script, set `SKILL_DIR` to that directory:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call, not the
+app repository's working directory or a host plugin variable. If the loaded path is unavailable,
+stop and report it before running the script.
 
 ```bash
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
 
-Use the actual installed path, not the app repository's working directory or a
-host-specific plugin environment variable. Repeat the assignment in each shell
-call; variables may not persist between calls. If the loaded path is unavailable,
-stop and report it before running a script.
+## Setup
 
-Discover `snapshot_ui` and `screenshot` from the `xcodebuildmcp` server using the
-current host's tool inventory or tool search. Use their actual registered names;
-namespace prefixes differ between Claude Code and Codex. Report a missing tool
-rather than constructing a name.
+The script needs `uv` on PATH; it declares its own pillow and numpy dependencies. Take
+`snapshot_ui` and `screenshot` from the `xcodebuildmcp` server under the names the host's tool
+inventory or tool search actually lists, since namespace prefixes differ between hosts. If either
+is missing, report it rather than guessing a name.
 
-## The loop
+## Capture the screens
 
-1. **Capture the actual screen.** Use `ios-take-screenshot` (or, for a single
-   viewport, XcodeBuildMCP `screenshot`). Save the desired reference alongside.
-2. **Lift the view frames (the hybrid step, optional but recommended).** Call
-   `snapshot_ui` on the running app. Convert
-   its tree to `elements.json`: a JSON **list** of
-   `{"label": str, "type": str, "bbox": [x, y, w, h]}`, with `bbox` in
-   **actual-image pixels**. `snapshot_ui` frames are in points, so multiply by
-   the device scale (`screenshot_width_px / root_frame_width_pt`, e.g. ×2 or
-   ×3). Keep the leaf views that render something (labels, buttons, images);
-   drop full-screen containers.
-3. **Run the diff:**
+Capture the actual screen with `ios-take-screenshot`, or with `screenshot` for a single viewport,
+and save the desired reference beside it. Both must be PNGs of the same screen; a desired image of
+a different size is resized to the actual one, and `normalize.resized` in the report says so.
 
-   ```
-   "$SKILL_DIR/scripts/check_design.py" \
-     --actual actual.png --desired desired.png --out-dir diff \
-     [--hierarchy elements.json] \
-     [--mask-top 47 --mask-bottom 34] \
-     [--tol-de 3 --tol-px 2 --region-area-pct 0.5]
-   ```
+## Lift the view frames
 
-4. **Read `diff/diff.json`.** If `pass` is true, stop. Otherwise decide the next
-   edit from the failing entries, then look at `diff/diff.png` (actual |
-   desired | heatmap) to confirm.
-5. Re-capture and repeat.
+This step is optional but recommended, because without it every difference comes back unnamed.
+Call `snapshot_ui` on the running app and convert its tree into `elements.json`, a JSON list of
+`{"label": str, "type": str, "bbox": [x, y, w, h]}` with `bbox` in actual-image pixels.
+`snapshot_ui` frames are in points, so multiply them by the device scale,
+`screenshot_width_px / root_frame_width_pt` (for example ×2 or ×3). Keep the leaf views that render
+something, such as labels, buttons and images, and drop full-screen containers.
 
-## Masking the chrome
+## Run the diff
 
-The status bar (clock, battery) and home indicator differ between any two
-captures and are not design bugs — exclude them with `--mask-top` /
-`--mask-bottom`, in **pixels**. Typical modern iPhone at ×3: `--mask-top 141`
-(≈47pt status bar) and `--mask-bottom 102` (≈34pt home indicator); at ×2 use
-≈94 and ≈68. Anything in a masked band is left out of the regions, the summary,
-and `pass`.
+```bash
+"$SKILL_DIR/scripts/check_design.py" \
+  --actual actual.png --desired desired.png --out-dir diff \
+  [--hierarchy elements.json] \
+  [--mask-top 47 --mask-bottom 34] \
+  [--tol-de 3 --tol-px 2 --region-area-pct 0.5]
+```
 
-## Reading `diff.json`
+Read `diff/diff.json`. If `pass` is true, stop. Otherwise choose the next edit from the failing
+entries, confirm it against `diff/diff.png` (actual | desired | heatmap), then re-capture and run
+again.
 
-- `pass` — true when every attributed element is within tolerance and no
-  unattributed region exceeds `regionAreaPct` of the frame.
-- `elements[]` — one per view you supplied: `deltaE` (perceptual colour
-  distance, CIELAB CIE76), `colorActual` / `colorDesired` (hex), `offsetPx`,
-  and `kind`:
-  - `color` — right place, wrong colour. Fix the fill/tint/text colour.
-  - `position` — right look, shifted by `offsetPx` `[dx, dy]`. Fix the frame,
-    padding, or constraints.
-  - `missing` — the design has content here, the build is blank. Add the view.
-  - `extra` — the build has content here, the design is blank. Remove it.
-  - `ok` — within tolerance.
-- `regions[]` — differences not covered by any element (gradients, shadows,
-  images), each `{bbox, areaPct, deltaE}`, largest-and-worst first. If diffs
-  land in `regions` rather than `elements`, your `elements.json` is missing that
-  view — add it for a named result.
-- `summary` — `meanDeltaE`, `maxDeltaE`, `diffAreaPct`, and counts.
+The status bar (clock, battery) and home indicator differ between any two captures and are not
+design bugs, so exclude them with `--mask-top` and `--mask-bottom`, given in pixels. On a typical
+modern iPhone at ×3 use `--mask-top 141` (the ≈47 pt status bar) and `--mask-bottom 102` (the
+≈34 pt home indicator); at ×2 use about 94 and 68. Masked bands are left out of the regions, the
+summary and `pass`.
+
+## Read the report
+
+`pass` is true when every attributed element is within tolerance and no unattributed region
+exceeds `regionAreaPct` of the frame.
+
+`elements[]` has one entry per view you supplied, with `deltaE` (perceptual colour distance, CIELAB
+CIE76), `colorActual` and `colorDesired` as hex, `offsetPx`, and a `kind` that tells you what to fix:
+
+- `color`: right place, wrong colour. Fix the fill, tint or text colour.
+- `position`: right look, shifted by `offsetPx` `[dx, dy]`. Fix the frame, padding or constraints.
+- `missing`: the design has content here and the build is blank. Add the view.
+- `extra`: the build has content here and the design is blank. Remove it.
+- `ok`: within tolerance.
+
+`regions[]` lists differences not covered by any element, such as gradients, shadows and images,
+each as `{bbox, areaPct, deltaE}`, largest and worst first. A difference that lands in `regions`
+instead of `elements` means `elements.json` lacks that view; add it to get a named result.
+`summary` holds `meanDeltaE`, `maxDeltaE`, `diffAreaPct` and the counts.
 
 ## Tolerances
 
-`--tol-de` (colour, default 3), `--tol-px` (offset, default 2),
-`--region-area-pct` (default 0.5). Loosen `--tol-de` toward 5 when the reference
-is a lossy JPEG or a different colour profile; tighten toward 1 for flat-colour
-UI. Offsets larger than ~8px are reported as a colour/`missing` mismatch rather
-than a shift — re-run after the coarse placement is right.
-
-## Requirements
-
-- `uv` on PATH (the script declares its own pillow + numpy deps).
-- Both inputs are PNGs of the same screen; different sizes are resized to the
-  actual before comparison (`normalize.resized` reports it).
+The defaults are `--tol-de 3` for colour, `--tol-px 2` for offset and `--region-area-pct 0.5`.
+Loosen `--tol-de` toward 5 when the reference is a lossy JPEG or uses a different colour profile,
+and tighten it toward 1 for flat-colour UI. An element shifted by more than about 8 px is reported
+as a `color` or `missing` mismatch rather than a `position` shift, so get the coarse placement
+right first and then re-run.
