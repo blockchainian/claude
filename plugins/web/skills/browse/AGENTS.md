@@ -83,7 +83,7 @@ Run these from this skill's directory.
 - `./scripts/build.sh [--dest <dir>]` — fetches gstack at `GSTACK_COMMIT`, applies the patches, installs and compiles; default dest `${CLAUDE_PLUGIN_DATA:-~/.claude/plugins/data/web-blockchainian}/browse/<build id>`
 - `../../bin/browse` — the launcher runs `build.sh` on first use of each build id (`scripts/build-id.sh`: a digest of `GSTACK_COMMIT`, the patches and the build scripts)
 
-A new build id means a new binary, and the shared daemon restarts on its next command, losing its tabs.
+A new build id means a new binary, and each running daemon restarts on its next command, losing its tabs.
 
 ## Checks
 
