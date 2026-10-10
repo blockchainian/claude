@@ -9,7 +9,7 @@ This skill is personal patches and build tooling for gstack's `browse` CLI.
 - patches/ -- ordered personal patches
 - scripts/ -- develop, check, and build tools
 - gstack/ -- the `https://github.com/garrytan/gstack.git` submodule (MIT); its committed pointer is the build baseline
-- GSTACK_COMMIT -- the same pointer as a file, for installs that carry no submodule; a test keeps the two equal
+- GSTACK_COMMIT -- the same pointer as a file, for installs that carry no submodule
 - .worktrees/ -- disposable worktrees: `develop`, `check-patches`
 
 Keep only personal patches, workflow scripts, and their documentation here. Never import upstream source or history.
@@ -26,7 +26,7 @@ To change an existing patch, recreate the baseline before it and amend that patc
 
 | Patch | What it changes |
 |---|---|
-| `0001-restart-daemon-on-new-build.patch` | The CLI passes its own version to the daemon it starts (`BROWSE_BINARY_VERSION`), which records it as `binaryVersion`; a CLI from a different build then restarts the daemon on its next command. Without it the daemon, running under `bun`, recorded no version and never restarted |
+| `0001-restart-daemon-on-new-build.patch` | The CLI passes its own version to the daemon it starts (`BROWSE_BINARY_VERSION`), which records it as `binaryVersion`; a CLI from a different build then restarts the daemon on its next command |
 | `0002-open-headed-window-on-chosen-display.patch` | The headed window opens on the display `BROWSER_DISPLAY` names (environment, else `~/.config/web/.env`), through `--window-position` from `scripts/displayOrigin.swift`, which `build.sh` copies into `browse/scripts/`; adds `browse/test/browser-display.test.ts` |
 | `0003-open-headed-tabs-without-stealing-focus.patch` | Headed `newTab` opens its page with CDP `Target.createTarget({ background: true })` instead of `context.newPage()`, so Chromium does not take macOS focus; adds `browse/test/background-tab.test.ts`, whose headed part runs only with `BROWSE_HEADED_TESTS=1` |
 | `0004-show-only-the-pinned-tab-logs.patch` | Commands pinned to a tab (`BROWSE_TAB` / `--tab-id`) read and clear only that tab's console and network entries, and a response's status goes to its own tab's request; adds `browse/test/tab-scoped-logs.test.ts` |
