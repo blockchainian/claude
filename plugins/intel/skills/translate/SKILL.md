@@ -12,33 +12,14 @@ description: >
 
 # Translate — an EPUB book into a Chinese PDF in the same format
 
-## Runtime and paths
+## Skill directory
 
-These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
-loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
-any other variable a command below uses, in every shell call:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+scripts import from the sibling `fetch-x-mentions` skill, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
-
-If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
-because sibling skills share scripts.
-
-For a long-running command, choose a deadline before launch and keep the process handle and its
-output. In Claude Code run it with `run_in_background` and wait for the completion notification;
-in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
-before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
-process state before retrying.
-
-## Setup
-
-```bash
-"$SKILL_DIR/scripts/setup.sh"
-```
-
-It installs what is missing and reports whether `codex` is logged in and Chrome is present. Translation runs on
-the user's ChatGPT plan through `codex`; when its quota is out, wait or pass `--model` to another codex model.
 
 ## Environment variables
 
@@ -52,6 +33,15 @@ be fetched as an EPUB first. Work lives in `~/.local/state/intel/translate/<slug
 when set). Keep it: it is resumable, and the translated Markdown in it is costly to redo. The finished book is
 `<title-slug>.pdf` under `translate/` in the output root, named after the
 book's main title without its subtitle.
+
+## Setup
+
+```bash
+"$SKILL_DIR/scripts/setup.sh"
+```
+
+It installs what is missing and reports whether `codex` is logged in and Chrome is present. Translation runs on
+the user's ChatGPT plan through `codex`; when its quota is out, wait or pass `--model` to another codex model.
 
 ## 1. Extract
 
@@ -95,7 +85,7 @@ coined term with two accepted renderings); otherwise decide and note it in the s
   > <work>/translate.log 2>&1
 ```
 
-Run it using the host-specific long-command instructions above. Both hosts call the same logged-in `codex exec`
+Run it in the background and wait for it to finish. Claude Code and Codex both call the same logged-in `codex exec`
 CLI; do not replace it with host agents. A trade book is back in a few minutes. Rerunning skips sections whose
 `.md` exists; `--force --only 04,05` redoes chosen ones.
 
