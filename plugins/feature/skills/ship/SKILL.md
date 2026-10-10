@@ -9,7 +9,7 @@ description: >
   change small enough to do in one turn — there the launch overhead is the whole cost.
 ---
 
-# Ship — run the plan, never write the code
+# Ship
 
 The orchestrator is the one seat that sees both the codex and the UX workstreams. It launches, verifies and decides; it does
 not implement, and it does not drive UI. Every hour it spends editing the branch is an hour the
