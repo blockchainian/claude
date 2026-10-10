@@ -14,7 +14,7 @@ description: >
   OCR or scene description).
 ---
 
-# Transcribe audio — local whisper, file, URL, or live stream
+# Transcribe
 
 ## Skill directory
 
