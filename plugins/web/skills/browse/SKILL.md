@@ -9,9 +9,6 @@ A persistent headless Chromium behind a small CLI. The first command starts a
 daemon (~3s); every later command is ~100ms. Cookies, localStorage, tabs and
 logins persist between calls until the daemon stops.
 
-This is gstack's `browse` (MIT) at a pinned commit with this skill's patches
-applied on top — see `AGENTS.md`.
-
 ## Setup
 
 In Claude Code, `browse` is this plugin's `bin/browse` launcher, which Claude
@@ -27,13 +24,11 @@ PATH shadows it; set `B` to the plugin's `bin/browse` explicitly. Outside Claude
 Code, call `<plugin install path>/bin/browse` directly (scripts can take it in a
 variable such as `BROWSE_BIN`).
 
-The launcher builds the patched CLI on first use into
-`${CLAUDE_PLUGIN_DATA:-~/.claude/plugins/data/web-blockchainian}/browse/<build id>/`,
-where the build id is a digest of `GSTACK_COMMIT`, `patches/` and the build scripts. The first call
-fetches gstack and takes several seconds; it needs `bun`, `git` and network access; build output goes to stderr only.
-A new build id means a new binary, and the running daemon restarts on its next
-command, losing every tab and login in it. Warn the user before the first call
-after a plugin update while other sessions use the daemon.
+The first call after an install or a plugin update builds the CLI, which takes
+several seconds and needs `bun`, `git` and network access; build output goes to
+stderr, so stdout stays browse's own. A new build also restarts the shared
+daemon on its next command, losing every tab and login in it, so warn the user
+before that first call while other sessions use the daemon.
 
 ## One tab per client (parallel runs)
 
@@ -51,8 +46,7 @@ trap '"$B" closetab "$BROWSE_TAB" >/dev/null 2>&1' EXIT
 ```
 
 A pinned `console`, `console --errors`, `console --clear`, `network` and
-`network --clear` see only that tab's entries (this skill's patch); unpinned they
-see every tab. `--tab-id <N>` on one command overrides `BROWSE_TAB`.
+`network --clear` see only that tab's entries; unpinned they see every tab. `--tab-id <N>` on one command overrides `BROWSE_TAB`.
 
 Shared across tabs, so not safe to run in parallel:
 - the login: tabs share one browser context, so `localStorage.clear()` or a
@@ -134,8 +128,6 @@ $B goto file:///tmp/report.html
 $B load-html /tmp/tweet.html     # setContent; URL stays about:blank
 ```
 
-Both are scoped to files under the working directory or `$TMPDIR`.
-
 ## Logins and handoff
 
 Logins live in the daemon's browser context and die with the daemon. Save and
@@ -163,9 +155,9 @@ display), set in the environment or in `~/.config/web/.env`. New tabs open in
 the background of that window, so the browser does not take focus from the
 user's app.
 
-`--headed` and `--proxy` apply only when the daemon starts; with a daemon
-already running in another config, browse refuses and asks for
-`browse disconnect` first.
+`--headed` and `--proxy` apply only when the daemon starts. Switching a running
+daemon to another config takes `browse disconnect`, which drops the shared
+daemon's tabs and logins, so ask the user first while other sessions use it.
 
 ```bash
 browse --headed goto https://example.com
@@ -173,8 +165,7 @@ browse --proxy socks5://user:pass@host:1080 goto https://example.com
 browse download "https://protected.example.com/file" /tmp/file.bin --navigate
 ```
 
-Pass proxy credentials in the URL or in `BROWSE_PROXY_USER` /
-`BROWSE_PROXY_PASS`, never both.
+Proxy credentials go in the URL or in `BROWSE_PROXY_USER` / `BROWSE_PROXY_PASS`.
 
 ## Most-used commands
 
