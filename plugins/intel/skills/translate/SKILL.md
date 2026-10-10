@@ -10,7 +10,7 @@ description: >
   article (just translate it inline), and not for digesting or summarizing a source (use digest).
 ---
 
-# Translate — an EPUB book into a Chinese PDF in the same format
+# Translate
 
 ## Skill directory
 
