@@ -65,7 +65,7 @@ The skill workflow remains Claude-only.
 | the subject | A name, a handle, or a profile URL. Exactly one; for several, or a request to pick subjects, ask for one name. |
 | `--type` | `creator` (default). `brand` is not supported yet: say so and stop. |
 | `--apply-to` | A product whose own accounts and creator program the reasoning chapter also covers, described in a sentence or two without its name. Without it, use the text in `~/.config/intel/case-study-apply-to.txt`; with no such file, the chapter covers a person only. |
-| `--out` | The PDF path. Default `<INTEL_OUTPUT_DIR>/case-studies/<slug>.pdf` unless the user names another. |
+| `--out` | The PDF path, only when the user names one. Default: `case-studies/<slug>.pdf` under the output root. |
 | `--lang` | The language of the study. Default: the language the user is writing in. |
 
 ## Run
@@ -77,14 +77,15 @@ The skill workflow remains Claude-only.
    "${CLAUDE_PLUGIN_ROOT}/skills/digest/scripts/setup.sh"
    "${CLAUDE_PLUGIN_ROOT}/skills/case-study/scripts/case-study.mjs" init <slug> \
      --title "<how <Name> grew, in the study's language>" --cover "<Name>" \
-     --source "<profile URL>" --out "<pdf path>" [--account "<profile URL>"]...
+     --source "<profile URL>" [--out "<pdf path>"] [--account "<profile URL>"]...
    ```
 
    The title is the PDF's document title. The cover lists the subject's
    accounts under the name; without `--account` that is the profile URL. When
    the subject grew on more than one platform, give `--account` once per
    account, the one they grew on first leading. `init` prints the work
-   directory; an existing one is reused with its sources and chapters.
+   directory and the PDF path (`pdf`); an existing work directory is reused
+   with its sources and chapters.
 
 2. **Gate.** Apply the gate in the type file yourself, before spending agents:
    does the subject sell a course, coaching, a paid community or a growth tool?

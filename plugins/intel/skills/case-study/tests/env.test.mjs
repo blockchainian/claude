@@ -31,8 +31,8 @@ test('loadEnv takes the first file that exists and never overrides a variable al
   assert.deepEqual(ENV_FILES, [join(homedir(), '.config', 'intel', '.env')])
 })
 
-test('work, fetched news and rate limits live under the state root', () => {
-  assert.deepEqual(caseStudyPaths({INTEL_STATE_DIR:'/tmp/state',INTEL_DATA_DIR:'/tmp/data',INTEL_OUTPUT_DIR:'/tmp/output'}), {work:'/tmp/state/case-study/work',data:'/tmp/state/case-study/news',state:'/tmp/state/limits'})
+test('work, fetched news and rate limits live under the state root, the PDFs under the output root', () => {
+  assert.deepEqual(caseStudyPaths({INTEL_STATE_DIR:'/tmp/state',INTEL_DATA_DIR:'/tmp/data',INTEL_OUTPUT_DIR:'/tmp/output'}), {work:'/tmp/state/case-study/work',data:'/tmp/state/case-study/news',state:'/tmp/state/limits',output:'/tmp/output/case-studies'})
   const root = join(homedir(),'.local','state','intel')
-  assert.deepEqual(caseStudyPaths({}), {work:join(root,'case-study','work'),data:join(root,'case-study','news'),state:join(root,'limits')})
+  assert.deepEqual(caseStudyPaths({}), {work:join(root,'case-study','work'),data:join(root,'case-study','news'),state:join(root,'limits'),output:join(homedir(),'Documents','case-studies')})
 })

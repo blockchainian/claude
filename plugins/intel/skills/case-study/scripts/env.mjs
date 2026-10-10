@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { parseEnv as parseDotEnv } from 'node:util'
 import { join } from 'node:path'
-import { stateDir, limitsDir } from '../../fetch-x-mentions/scripts/env.mjs'
+import { stateDir, limitsDir, outputDir } from '../../fetch-x-mentions/scripts/env.mjs'
 
 export const ENV_FILES = [join(homedir(), '.config', 'intel', '.env')]
 
@@ -22,11 +22,12 @@ export function loadEnv(files = ENV_FILES, env = process.env) {
 }
 
 // Work directories and fetched news are costly to rebuild, so both live under the state root; the rate-limit
-// state is shared with fetch-x-posts. The PDF goes wherever --out says.
+// state is shared with fetch-x-posts. The PDFs go under the output root unless --out says otherwise.
 export function caseStudyPaths(env = process.env) {
   return {
     work: join(stateDir(env), 'case-study', 'work'),
     data: join(stateDir(env), 'case-study', 'news'),
     state: limitsDir(env),
+    output: join(outputDir(env), 'case-studies'),
   }
 }

@@ -25,6 +25,18 @@ before(() => {
 })
 after(() => rmSync(tmp, { recursive: true, force: true }))
 
+test('init puts the PDF under <INTEL_OUTPUT_DIR>/case-studies/ when no --out is given', () => {
+  process.env.INTEL_OUTPUT_DIR = join(tmp, 'output')
+  try {
+    const run = spawnSync(process.execPath, [fileURLToPath(new URL('../scripts/case-study.mjs', import.meta.url)), 'init', 'no-out',
+      '--title', 'How N grew', '--cover', 'N', '--source', 'https://example.com/@n'], { encoding: 'utf8', env: process.env })
+    assert.equal(run.status, 0, run.stderr)
+    assert.equal(JSON.parse(run.stdout).pdf, join(tmp, 'output', 'case-studies', 'no-out.pdf'))
+  } finally {
+    delete process.env.INTEL_OUTPUT_DIR
+  }
+})
+
 test('init scaffolds the work dir under the store and keeps an existing sources.json', () => {
   assert.equal(work, join(tmp, 'store', 'case-study', 'work', 'jane-doe'))
   assert.ok(['drafts', 'book', 'notes', 'raw', 'review'].every(d => statSync(join(work, d)).isDirectory()))
