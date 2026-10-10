@@ -63,7 +63,8 @@ Run long browser commands in the background and wait for their exit status, and 
 `ASSIST NEEDED` message on to the user. Do not call host-specific `request_access` or
 `switch_display` tools. To diagnose a failure, read the step's `screenshot.png` and `info.txt` under
 `SECRETS_DATA_DIR/debug/<id>/<step>-<ts>/`, which show the page at capture time rather than the live
-desktop; a headless Google sign-in also leaves a video of every page under `debug/<email>/rec-<ts>/`.
+desktop; a headless Google sign-in also leaves a video of every page under
+`SECRETS_DATA_DIR/debug/<id>/rec-<ts>/`.
 
 `proxy exit down: <host> …` means the account's sticky exit is down for a while (CONNECT answers
 522): rerun later. `--rotate-proxy` changes the IP on every connection, so it cannot rescue a browser
