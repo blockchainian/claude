@@ -39,6 +39,8 @@ The per-plugin gate a plan's `Checks` command composes:
 
 ### Install
 
+> Install, update and uninstall plugins at user scope only, never with the dot repo as cwd: it shares `settings.json`.
+
 - `claude plugin marketplace update blockchainian` — fetches the pushed catalog
 - `claude plugin update <plugin>@blockchainian` — installs the bumped version
 
