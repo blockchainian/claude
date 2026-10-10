@@ -5,9 +5,10 @@ description: Drive a persistent headless Chromium from the shell with the `brows
 
 # Browse
 
-A persistent headless Chromium behind a small CLI. The first command starts a
-daemon (~3s); every later command is ~100ms. Cookies, localStorage, tabs and
-logins persist between calls until the daemon stops.
+`browse` is a small CLI in front of a persistent headless Chromium. The first
+command starts a daemon in about 3 seconds and every later command takes about
+100 ms. Cookies, localStorage, tabs and logins persist between calls until the
+daemon stops.
 
 ## Environment variables
 
@@ -25,33 +26,36 @@ logins persist between calls until the daemon stops.
 ## Setup
 
 In Claude Code, `browse` is this plugin's `bin/browse` launcher, which Claude
-Code puts on the Bash tool's PATH after the user's own PATH. Check which one
-resolves:
+Code appends to the Bash tool's PATH after the user's own entries. Check which
+one resolves:
 
 ```bash
 B=$(command -v browse) && echo "$B"
 ```
 
-If that is not `<plugin install path>/bin/browse`, another `browse` earlier on
-PATH shadows it; set `B` to the plugin's `bin/browse` explicitly. Outside Claude
-Code, call `<plugin install path>/bin/browse` directly (scripts can take it in a
-variable such as `BROWSE_BIN`).
+If the path printed is not `<plugin install path>/bin/browse`, another `browse`
+earlier on PATH shadows the launcher, so set `B` to the plugin's `bin/browse`
+explicitly. Outside Claude Code, call `<plugin install path>/bin/browse`
+directly; a script can take it in a variable such as `BROWSE_BIN`.
 
-The first call after an install or a plugin update builds the CLI, which takes
-several seconds and needs `bun`, `git` and network access; build output goes to
-stderr, so stdout stays browse's own. A new build also restarts each running
-daemon on its next command, losing every tab and login in it, so warn the user
-before that first call while other sessions use the daemon.
+The first call after an install or a plugin update builds the CLI. The build
+takes several seconds, needs `bun`, `git` and network access, and writes its
+output to stderr, so stdout carries only browse's own output. A new build also
+restarts each running daemon on its next command, which loses every tab and
+login in it; while other sessions use the daemon, warn the user before that
+first call.
 
 ## One tab per client (parallel runs)
 
-Each git root (or working directory outside a repo) has one daemon, shared by
-every session working there; sessions in other repos get their own daemon. The
-headed browser's profile (`CHROMIUM_PROFILE`) is shared by all of them. Never
-kill a daemon (`pkill -f browse`, `pkill terminal-agent`): a pkill hits every
-repo's daemon and drops every session's tabs and logins. Without a tab of its own, a
-client drives whatever tab is active and races every other client. To run in
-parallel, open a tab and pin every command to it with `BROWSE_TAB`:
+Each git root, or working directory outside a repo, has one daemon that every
+session working there shares, while sessions in other repos get their own. All
+of them share the headed browser's profile (`CHROMIUM_PROFILE`). Never kill a
+daemon with `pkill -f browse` or `pkill terminal-agent`: a pkill hits every
+repo's daemon and drops every session's tabs and logins.
+
+A client without a tab of its own drives whatever tab is active and races every
+other client. To run in parallel, open a tab and pin every command to it with
+`BROWSE_TAB`:
 
 ```bash
 export BROWSE_TAB=$("$B" newtab --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["tabId"])')
@@ -61,15 +65,16 @@ trap '"$B" closetab "$BROWSE_TAB" >/dev/null 2>&1' EXIT
 "$B" network             # this tab's requests only
 ```
 
-A pinned `console`, `console --errors`, `console --clear`, `network` and
-`network --clear` see only that tab's entries; unpinned they see every tab. `--tab-id <N>` on one command overrides `BROWSE_TAB`.
+Pinned, `console`, `console --errors`, `console --clear`, `network` and
+`network --clear` see only that tab's entries; unpinned, they see every tab.
+`--tab-id <N>` on a single command overrides `BROWSE_TAB`.
 
-Shared across tabs, so not safe to run in parallel:
+Three things are shared across tabs and are not safe to run in parallel:
 - the login: tabs share one browser context, so `localStorage.clear()` or a
   logout in one tab logs every tab out;
-- `network --capture`: one capture at a time for the whole daemon;
-- `download`, `scrape`, `archive` and `chain` resolve the active tab after an
-  await, so overlapping requests can land them on another client's tab.
+- `network --capture`: the whole daemon runs one capture at a time;
+- `download`, `scrape`, `archive` and `chain`: they resolve the active tab after
+  an await, so overlapping requests can land them on another client's tab.
 
 ## Core QA patterns
 
@@ -100,9 +105,8 @@ $B screenshot /tmp/bug.png                # full-page screenshot
 $B screenshot /tmp/card.png --selector .card
 ```
 
-After a screenshot, Read the PNG so the user can see it.
-
-Two behaviors that silently invalidate screenshots:
+After a screenshot, Read the PNG so the user can see it. Two behaviours
+silently invalidate screenshots:
 - **`hover` scrolls its target into view.** Before a rest-state shot, hover only
   something already visible, and check `$B js "window.scrollY"`.
 - **The tab persists across sessions.** Start every pass with an explicit
@@ -146,16 +150,16 @@ $B load-html /tmp/tweet.html     # setContent; URL stays about:blank
 
 ## Logins and handoff
 
-Logins live in the daemon's browser context and die with the daemon. Save and
-restore the browser state (cookies and tab URLs) per working directory
-(`.gstack/` under the git root):
+Logins live in the daemon's browser context and die with the daemon. To keep
+one, save the browser state (cookies and tab URLs) and load it later; saved
+states live per working directory, in `.gstack/` under the git root:
 
 ```bash
 $B state save signed-in
 $B state load signed-in
 ```
 
-When a page needs a human (CAPTCHA, MFA, OAuth consent), hand off:
+When a page needs a human for a CAPTCHA, MFA or OAuth consent, hand it off:
 
 ```bash
 $B handoff "Stuck on CAPTCHA at login page"   # opens a visible Chrome here
@@ -165,15 +169,15 @@ $B resume
 
 ## Headed mode and proxies
 
-The headed window opens on the display `BROWSER_DISPLAY` names (any part of
-the name macOS gives the screen, any case, e.g. `Built-in`; empty means the main
-display), set in the environment or in `~/.config/web/.env`. New tabs open in
-the background of that window, so the browser does not take focus from the
-user's app.
+The headed window opens on the display `BROWSER_DISPLAY` names, set in the
+environment or in `~/.config/web/.env`. The value matches any part of the name
+macOS gives the screen, in any case (for example `Built-in`), and empty means
+the main display. New tabs open in the background of that window, so the
+browser does not take focus from the user's app.
 
 `--headed` and `--proxy` apply only when the daemon starts. Switching a running
-daemon to another config takes `browse disconnect`, which drops the
-daemon's tabs and logins, so ask the user first while other sessions use it.
+daemon to another config takes `browse disconnect`, which drops the daemon's
+tabs and logins, so while other sessions use the daemon, ask the user first.
 
 ```bash
 browse --headed goto https://example.com
@@ -197,6 +201,6 @@ browse download "https://protected.example.com/file" /tmp/file.bin --navigate
 | `viewport WxH` | Set viewport (`--scale 2` for retina) |
 | `newtab [url] [--json]` / `tab <id>` / `tabs` / `closetab [id]` | Tabs |
 
-Before using any command or snapshot flag not in this table, Read
-`sections/command-list.md` next to this file in full; it is the reference for
-every command, its arguments, and every snapshot flag.
+Before using a command or snapshot flag that is not in this table, Read
+`sections/command-list.md` next to this file in full: it documents every
+command, its arguments and every snapshot flag.
