@@ -3,7 +3,7 @@ name: check-mobile-design
 description: Check a built iOS screen against a design reference and report how far off it is, as measured JSON plus a composite PNG. Use when implementing an iOS screen to match a design pixel-close, iterating an "actual vs desired" loop, or asking why a built screen does not match a reference. Attributes each difference to a named view when given the app's frames from snapshot_ui.
 ---
 
-# Check Mobile Design
+# Check mobile design
 
 Drive the "build this screen from a reference" loop: compare the app you are
 building (**actual**) against a given design (**desired**), find what differs,
