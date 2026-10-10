@@ -31,79 +31,69 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 |---|---|---|---|
 | `INTEL_OUTPUT_DIR` | Output root; transcripts go under `transcripts/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
-One whisper engine (`whisper-large-v3-turbo`, Apple Silicon), two entry points:
-a **batch** script for finite audio, a **live** script for an ongoing stream.
-Both write plain text and print JSON about it.
+## Setup
 
-## Setup (automatic, idempotent)
-
-Run setup once at the start; it installs only what is missing and is a near-instant
-no-op when everything is present, so it is safe to run every time.
+The skill needs Apple Silicon, Node.js 18.18+ and Homebrew. Run setup at the start of every use;
+it installs only what is missing, with Homebrew, and returns at once when nothing is:
 
 ```bash
 "$SKILL_DIR/scripts/setup.sh"
 ```
 
-It ensures `ffmpeg` (pulls and segments audio), `streamlink` and `yt-dlp`
-(resolve platform lives), and a whisper runner (`mlx_whisper`, or `uv` to run it
-in an ephemeral env) — installing the missing ones with Homebrew. The whisper
-model (~1.5GB) is not fetched here: mlx-whisper downloads it on the first
-transcription and caches it, so it self-installs once. `setup.sh --check` reports
-what is present or missing without installing anything.
+It ensures `ffmpeg`, `streamlink`, `yt-dlp` and a whisper runner (`mlx_whisper`, or `uv` to run
+it in an ephemeral env). `setup.sh --check` only reports what is present or missing. The
+whisper model, `whisper-large-v3-turbo` (about 1.5 GB), downloads on the first transcription and
+is cached after that. Without setup, the first run fails and names the missing tool.
 
-Without an out path, a transcript goes to `transcripts/<source name>.txt` under the output root;
-another skill passes its own path. Downloaded audio and segments are scratch under
-`~/.local/share/intel/tmp/transcribe/`, removed when the run ends.
+Both scripts below write plain text and print JSON about it. Without an out path, the transcript
+goes to `transcripts/<source name>.txt` under the output root; a calling skill passes its own
+path. Downloaded audio and segments are scratch files, removed when the run ends.
 
-## Batch — a finite file or URL
+## Batch transcription
+
+For a finite file or URL:
 
 ```bash
 "$SKILL_DIR/scripts/transcribe-audio.mjs" \
   "<audio-url-or-file>" ["<out.txt>"]
 ```
 
-- A local path is transcribed in place; a URL is downloaded first (`curl`,
-  10-minute cap). The file may be **audio or video** — whisper decodes it with
-  ffmpeg and transcribes the audio track either way.
-- Prints JSON with `transcript` (the out path), `words`, `thin` (`words < 1500`)
-  and `source`.
-- A long recording takes minutes; run it in the background.
+A local path is transcribed in place; a URL is downloaded first, with a 10-minute cap. The file
+may be audio or video, since whisper decodes it with ffmpeg and takes the audio track. The script
+prints JSON with `transcript` (the out path), `words`, `thin` (true when `words < 1500`) and
+`source`. A long recording takes minutes, so run it in the background.
 
-## Live — an ongoing stream
+## Live transcription
+
+For an ongoing stream:
 
 ```bash
 "$SKILL_DIR/scripts/transcribe-live.mjs" \
   "<stream>" ["<out.txt>"] [--segment-seconds 30] [--max-minutes N]
 ```
 
-- `<stream>` is a direct, ffmpeg-readable URL (HLS/`.m3u8`, Icecast/radio, RTMP,
-  http) **or** a platform live — Twitch and YouTube are resolved with
-  `streamlink`/`yt-dlp`, X Spaces attempted with `yt-dlp`. A **video** stream is
-  fine — ffmpeg takes the audio track and ignores the picture.
-- `ffmpeg` segments the stream into `--segment-seconds` chunks (30s default,
-  matching whisper's window); each **completed** chunk is transcribed and
-  **appended** to `<out.txt>`, so the file is tail-able while the run continues.
-  Per-chunk text is also echoed to stderr.
-- It stops when the stream ends, at `--max-minutes` if given, or on Ctrl-C
-  (SIGINT) — in every case it lets the open chunk finalize and transcribes it
-  before exiting, then prints a JSON summary (`words`, `chunks`, ...).
-- It is long-running by nature: choose `--max-minutes` before launch unless the user
-  requested an ongoing stream. Retain the process handle; read `<out.txt>` when needed
-  for partial results. Await the bounded run, or send SIGINT to stop and finalize an
-  ongoing stream; do not use a blocking `tail -f` to wait for completion.
+`<stream>` is either a direct URL ffmpeg can read (HLS/`.m3u8`, Icecast or radio, RTMP, http) or a
+platform live: Twitch and YouTube are resolved with `streamlink` and `yt-dlp`, and X Spaces are
+attempted with `yt-dlp`. A video stream works too; ffmpeg keeps the audio and ignores the
+picture.
 
-## What the transcript is, and is not
+ffmpeg cuts the stream into chunks of `--segment-seconds` (30 by default, whisper's window).
+Each completed chunk is transcribed and appended to `<out.txt>`, so the file can be read while
+the run continues, and each chunk's text is also echoed to stderr. The run stops when the stream
+ends, at `--max-minutes` if given, or on SIGINT (Ctrl-C). In every case it finalizes and
+transcribes the open chunk before exiting, then prints a JSON summary with `words`, `chunks` and
+the batch fields.
 
-- **No speaker labels.** Whisper emits a single stream of text, so attribute
-  quotes to the source, not to a named speaker.
-- **Whatever the audio actually carries.** Downloaded episode audio often has
-  **dynamically-inserted modern ads** that are not part of the original
-  recording; whisper can also **loop**, repeating a line over a garbled or
-  musical stretch. Note both and exclude or repair them when you read.
-- **Verbatim, not edited.** It keeps filler and false starts; compress when you
-  summarise, but do not claim the transcript says something it does not.
+Choose `--max-minutes` before launch unless the user asked for an ongoing stream. Keep the
+process handle and read `<out.txt>` for partial results. Wait for a bounded run to exit, or send
+SIGINT to stop an ongoing one and let it finalize; never wait on a blocking `tail -f`.
 
-## Requirements
+## Reading the transcript
 
-Apple Silicon and Node.js 18.18+. `setup.sh` installs the rest (Homebrew required). The first run
-without `setup.sh` errors and names the missing tool.
+- **No speaker labels.** Whisper emits one stream of text, so attribute quotes to the source,
+  not to a named speaker.
+- **Only what the audio carries.** Downloaded episode audio often has dynamically inserted
+  modern ads that are not part of the original recording, and whisper can loop, repeating a line
+  over a garbled or musical stretch. Note both and exclude or repair them when you read.
+- **Verbatim, not edited.** It keeps filler and false starts. Compress when you summarise, but
+  never claim the transcript says something it does not.
