@@ -5,98 +5,94 @@ description: Find memory leaks in a running web app by diffing V8 heap snapshots
 
 # Heap snapshot leaks
 
-A web leak is what the heap keeps that a clean baseline did not: a constructor
-whose live instance count and retained bytes climb with each repeat of an
-action, or DOM nodes the page still references after they left the document
-("detached"). This skill captures two heap snapshots around that action and
-diffs them into a ranked report of the suspects.
+A web leak is what the heap keeps that a clean baseline did not: a constructor whose live instance
+count and retained bytes climb with each repeat of an action, or DOM nodes the page still
+references after they left the document ("detached"). You take one heap snapshot before and one
+after repeating that action, then diff them into a ranked list of suspects.
 
-Two scripts, both plain Node (no npm install; Node builtins only):
-- `scripts/capture-heap-snapshot.mjs` — pulls one `.heapsnapshot` from a running
-  Chrome over the DevTools protocol. Needs Node 22+ (global `WebSocket`).
-- `scripts/diff-heap-snapshots.mjs` — diffs two snapshots; reads no browser.
+## Skill directory
 
-## Script location
-
-Resolve this skill's directory from the absolute path of the loaded `SKILL.md`.
-In each shell call that runs a script, set `SKILL_DIR` to that directory:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call that runs a
+script, not to the caller's working directory or a host-specific plugin variable. If the loaded
+path is unavailable, stop and report it before running a script.
 
 ```bash
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
 
-Use the actual installed path, not the caller's working directory or a
-host-specific plugin environment variable. Shell variables may not persist
-between tool calls; repeat the assignment in each call. If the loaded path is
-unavailable, stop and report it before running a script.
+## Environment variables
 
-## The loop
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `WEB_DATA_DIR` | Data root for the throwaway Chrome debug profile; default `$HOME/.local/share/web` | No | shell |
 
-1. **Start Chrome with a debug port** and open the page under test:
+## Setup
 
-   ```
-   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-     --remote-debugging-port=9222 \
-     --user-data-dir="${WEB_DATA_DIR:-$HOME/.local/share/web}/heap-snapshot-leaks/profile"
-   ```
+The scripts use only Node builtins, so there is nothing to install. Capturing needs Node 22+ on
+`PATH` for the built-in `WebSocket`; diffing runs on Node 18.18+. Any recent Google Chrome works,
+started with a debug port as below.
 
-   A separate `--user-data-dir` keeps it off your normal profile; it is throwaway data, safe to delete. The capture
-   script connects without an `Origin` header, so `--remote-allow-origins` is not
-   needed. Confirm the tab is visible: `capture-heap-snapshot.mjs --list`.
-   That profile carries no logins: if the page under test is behind one, log in
-   in that window before taking the baseline snapshot.
+## Find a leak
 
-2. **Baseline snapshot**, at rest:
+Start Chrome with a debug port and a separate profile, then open the page under test in it:
 
-   ```
-   "$SKILL_DIR/scripts/capture-heap-snapshot.mjs" \
-     --url-contains myapp --out leaks/before.heapsnapshot
-   ```
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="${WEB_DATA_DIR:-$HOME/.local/share/web}/heap-snapshot-leaks/profile"
+```
 
-3. **Do the suspect action N times** (open and close the modal, route away and
-   back, ~10–20×) — drive it with the current host's connected Chrome tools
-   (such as Claude's `claude-in-chrome` or Codex's connected Chrome), or by hand.
-   Confirm those tools can access the same debug-profile tab before using them;
-   if they cannot, have the user perform the action in that window. Repetition
-   is what separates a real leak from one-off allocation.
+The separate profile keeps the run off your normal one and is safe to delete. It carries no
+logins, so if the page sits behind one, log in in that window before the baseline. The capture
+script sends no `Origin` header, so Chrome does not need `--remote-allow-origins`. Run
+`"$SKILL_DIR/scripts/capture-heap-snapshot.mjs" --list` to confirm the tab is visible.
 
-4. **Second snapshot** the same way, to `leaks/after.heapsnapshot`. The capture
-   forces a GC first, so what remains is genuinely retained.
+Take the baseline snapshot with the page at rest:
 
-5. **Diff:**
+```bash
+"$SKILL_DIR/scripts/capture-heap-snapshot.mjs" \
+  --url-contains myapp --out leaks/before.heapsnapshot
+```
 
-   ```
-   "$SKILL_DIR/scripts/diff-heap-snapshots.mjs" \
-     --before leaks/before.heapsnapshot --after leaks/after.heapsnapshot \
-     [--top 25] [--min-size-delta 50000]
-   ```
+Then do the suspect action about 10 to 20 times, such as opening and closing a modal or routing
+away and back; repetition is what separates a real leak from a one-off allocation. Drive it with
+the host's connected Chrome tools (Claude's `claude-in-chrome` or Codex's connected Chrome) after
+confirming they can reach the same debug-profile tab, or else have the user do it by hand in that
+window. Take the second snapshot the same way to `leaks/after.heapsnapshot`; the capture forces a
+garbage collection first, so what remains is genuinely retained. Diff the two:
 
-6. **Read the report, fix, repeat** until the suspects and the detached count
-   stop climbing with N.
+```bash
+"$SKILL_DIR/scripts/diff-heap-snapshots.mjs" \
+  --before leaks/before.heapsnapshot --after leaks/after.heapsnapshot \
+  [--top 25] [--min-size-delta 50000]
+```
+
+Read the report, fix the cause, and repeat the loop until the suspects and the detached count stop
+climbing with the number of repeats.
 
 ## Reading the report
 
-- `summary.suspects` — constructors that both grew in count and retained more
-  bytes: the leak candidates, worst first. A count that climbs in step with N
-  (10 repeats → ~10 more) is the tell.
-- `growth[]` — every constructor by retained-byte change: `countBefore/After`,
-  `countDelta`, `sizeDeltaBytes`. Raise `--min-size-delta` to cut noise.
-- `detached` — DOM nodes still referenced after leaving the document:
-  `before`, `after`, `delta`, and `topTypes`. A rising `delta` means the page
-  holds views it removed — usually a listener or a closure keeping them alive.
-- `totalSelfSizeDeltaBytes`, `nodeCountDelta` — the overall drift; near zero
-  across a repeated action is the goal.
+- `summary.suspects`: constructors that both grew in count and retained more bytes, worst first.
+  These are the leak candidates; a count that climbs in step with the repeats (10 repeats, about 10
+  more instances) is the tell.
+- `growth[]`: every constructor ranked by retained-byte change, with `countBefore`, `countAfter`,
+  `countDelta` and `sizeDeltaBytes`. Raise `--min-size-delta` to cut noise.
+- `detached`: DOM nodes still referenced after leaving the document, as `before`, `after`, `delta`
+  and `topTypes`. A rising `delta` means the page holds views it removed, usually through a
+  listener or closure that keeps them alive.
+- `totalSelfSizeDeltaBytes` and `nodeCountDelta`: the overall drift, which should be near zero
+  across a repeated action.
 
-## Interpreting common leaks
+Common patterns point to these causes:
 
-- Growing `Detached HTMLxxxElement` / `EventListener` → a listener not removed
-  on unmount/teardown.
-- Growing framework component/fiber/scope constructors → components retained
-  after they should unmount; check subscriptions, timers, closures over `this`.
-- Growing `Array` / `Map` / `Object` with no ceiling → an unbounded cache.
+- Growing `Detached HTMLxxxElement` or `EventListener`: a listener not removed on unmount or
+  teardown.
+- Growing framework component, fiber or scope constructors: components retained after they should
+  unmount; check subscriptions, timers and closures over `this`.
+- Growing `Array`, `Map` or `Object` with no ceiling: an unbounded cache.
 
-## Requirements
+## Tests
 
-- Google Chrome, started with `--remote-debugging-port` (any recent version).
-- Node 22+ on PATH (the capture script uses the built-in `WebSocket`; the diff
-  script runs on Node 18.18+). No npm dependencies.
+```bash
+npm run test:web
+```
