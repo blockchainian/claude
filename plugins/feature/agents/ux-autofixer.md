@@ -1,6 +1,6 @@
 ---
 name: ux-autofixer
-description: Fix the review and probe findings the orchestrator routed to the UX lane — each committed in the UX lane's worktree for the orchestrator to merge — and return a flat-JSON status. Use for the UX half of the fix round while codex fixes the backend findings in parallel.
+description: Fix the review and probe findings the orchestrator routed to the UX workstream — each committed in the UX workstream's worktree for the orchestrator to merge — and return a flat-JSON status. Use for the UX half of the fix round while codex fixes the backend findings in parallel.
 model: claude-opus-5-5
 effort: medium
 tools: Bash, Read, Edit, Write, Glob, Grep
@@ -53,7 +53,7 @@ that has no place in the code.
   orchestrator runs them. The probes are the plan's UX checks for your surfaces, quoted in your
   brief as commands. Run them against a dev server you start
   in your own worktree on a free port (the project's dev command with a port flag, `BASE_URL` to
-  the probe); never build, never use the project's default dev port or another lane's server, and
+  the probe); never build, never use the project's default dev port or another workstream's server, and
   stop yours before you return.
 - On a failing check about your own change: fix and re-run, at most twice, then report it verbatim.
   A browse error, a pre-existing console error, or a failure on a surface you did not touch is

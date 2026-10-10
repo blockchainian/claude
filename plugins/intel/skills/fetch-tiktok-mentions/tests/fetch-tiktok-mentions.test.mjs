@@ -415,11 +415,11 @@ test("a blocked session is replaced, with its error, and its unit goes back on t
   const done = [];
   let blockOnce = true;
   const { left } = await drain({
-    lanes: 1,
+    workstreams: 1,
     units: ["a", "b", "c"],
-    open: async (lane) => {
+    open: async (workstream) => {
       const session = `s${opened.length}`;
-      opened.push(lane);
+      opened.push(workstream);
       return session;
     },
     close: async (session, failed) => closed.push(`${session}:${failed ? failed.scope : "done"}`),
@@ -434,14 +434,14 @@ test("a blocked session is replaced, with its error, and its unit goes back on t
   });
   assert.equal(left, 0);
   assert.deepEqual(done.sort(), ["a", "b", "c"]);
-  assert.deepEqual(opened, [0, 0]); // the lane's first session, then its replacement
+  assert.deepEqual(opened, [0, 0]); // the workstream's first session, then its replacement
   assert.deepEqual(closed, ["s0:session", "s1:done"]); // every session opened is closed
 });
 
-test("a lane stops after repeated failures and reports the units left", async () => {
+test("a workstream stops after repeated failures and reports the units left", async () => {
   const lines = [];
   const { left } = await drain({
-    lanes: 1,
+    workstreams: 1,
     units: ["a", "b"],
     open: async () => "s",
     close: async () => {},
@@ -454,13 +454,13 @@ test("a lane stops after repeated failures and reports the units left", async ()
   assert.match(lines.at(-1), /stopped/);
 });
 
-test("lanes share one queue, each through its own session", async () => {
+test("workstreams share one queue, each through its own session", async () => {
   const used = new Set();
   const done = [];
   const { left } = await drain({
-    lanes: 2,
+    workstreams: 2,
     units: ["a", "b", "c", "d"],
-    open: async (lane) => `s${lane}`,
+    open: async (workstream) => `s${workstream}`,
     close: async () => {},
     work: async (session, unit) => {
       used.add(session);
@@ -518,7 +518,7 @@ test("a hashtag is pulled once per session, a user and a keyword once; a source'
   assert.deepEqual([mentioned.items, mentioned.pulls, mentioned.complete, mentioned.missing], [[], 1, true, true]);
 });
 
-test("lanes share one session per slot; a failed session is replaced once, after a cool-down", async () => {
+test("workstreams share one session per slot; a failed session is replaced once, after a cool-down", async () => {
   const opened = [];
   const closed = [];
   const waits = [];
@@ -533,13 +533,13 @@ test("lanes share one session per slot; a failed session is replaced once, after
     cooldownMs: 60000,
     wait: async (ms) => waits.push(ms),
   });
-  const [a, b, c, d] = await Promise.all([0, 1, 2, 3].map((lane) => pool.open(lane)));
-  assert.deepEqual(opened.sort(), [1, 2]); // four lanes, two sessions, slots are 1-based
+  const [a, b, c, d] = await Promise.all([0, 1, 2, 3].map((workstream) => pool.open(workstream)));
+  assert.deepEqual(opened.sort(), [1, 2]); // four workstreams, two sessions, slots are 1-based
   assert.equal(a, c);
   assert.equal(b, d);
   assert.notEqual(a, b);
 
-  // Two lanes report the same session blocked at the IP level: it is closed once (the second report
+  // Two workstreams report the same session blocked at the IP level: it is closed once (the second report
   // is told so), and reopened once after the cool-down.
   const ipBlock = new Blocked("empty response", "ip");
   assert.deepEqual(await Promise.all([pool.close(a, ipBlock), pool.close(c, ipBlock)]), [true, false]);
@@ -556,14 +556,14 @@ test("lanes share one session per slot; a failed session is replaced once, after
   assert.notEqual(a3, a2);
   assert.deepEqual(waits, [60000]);
 
-  // At the end every lane lets go; a session closes when its last lane does, without a cool-down.
+  // At the end every workstream lets go; a session closes when its last workstream does, without a cool-down.
   await pool.close(b, null);
   assert.deepEqual(closed, [a.n, a2.n]);
   await pool.close(d, null);
   assert.deepEqual(closed, [a.n, a2.n, b.n]);
 });
 
-test("a session that fails to open is retried by the next lane", async () => {
+test("a session that fails to open is retried by the next workstream", async () => {
   let tries = 0;
   const pool = sharedSessions({
     count: 1,
@@ -593,15 +593,15 @@ test("a pacer spaces request starts evenly at the rate, whoever asks", async () 
   assert.deepEqual(waits, [0, 50, 40, 0, 50]);
 });
 
-test("a lane whose shared session another lane already replaced is not charged a failure", async () => {
+test("a workstream whose shared session another workstream already replaced is not charged a failure", async () => {
   const lines = [];
   let calls = 0;
   const done = [];
   const { left } = await drain({
-    lanes: 1,
+    workstreams: 1,
     units: ["a", "b", "c", "d"],
     open: async () => "s",
-    close: async () => false, // the pool says: this session was already handed back by another lane
+    close: async () => false, // the pool says: this session was already handed back by another workstream
     work: async (_session, unit) => {
       if (calls++ < 3) throw new Error("Target page, context or browser has been closed");
       done.push(unit);

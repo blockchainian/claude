@@ -195,7 +195,7 @@ overlap="$here/../scripts/check-overlap.sh"
 
 out=$("$overlap" "$here/fixture/check-overlap/shared-file.md"); rc=$?
 expect "a file on two workstreams' Files: lines is flagged" \
-  "OVERLAP: src/shared/client.ts (home-lanes, token-tabs)" 1 "$out" $rc
+  "OVERLAP: src/shared/client.ts (home-workstreams, token-tabs)" 1 "$out" $rc
 
 out=$("$overlap" "$here/fixture/check-overlap/disjoint.md"); rc=$?
 expect "disjoint workstreams pass; Files: outside a workstream section is ignored" "" 0 "$out" $rc

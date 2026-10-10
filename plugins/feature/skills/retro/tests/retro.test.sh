@@ -22,8 +22,8 @@ expect "claude-sonnet-5=300 (23%)"       # defined agent: model from its own jso
 expect "WS-A parity fixes"               # label joined via toolUseId t1
 expect "session grand total (orchestrator + subagents): 1,450"
 
-# codex lane: deterministic thread-id join, billable = 1000+200(cache_write)+300+100 = 1600
-expect "codex lane (1 rollouts, billable tokens; exact thread-id join)"
+# codex workstream: deterministic thread-id join, billable = 1000+200(cache_write)+300+100 = 1600
+expect "codex workstream (1 rollouts, billable tokens; exact thread-id join)"
 expect "[exact] codex-thread-1"
 expect "codex TOTAL: 1,600"
 expect "mean joined rollout: 1,600 tok"   # proxy multiplier for un-joinable failed workstreams

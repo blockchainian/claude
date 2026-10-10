@@ -2,7 +2,7 @@
 
 ## UX workstreams (Fable)
 
-### `home-lanes` — home lanes
+### `home-workstreams` — home workstreams
 
 Files: `src/screens/home.ts`
 

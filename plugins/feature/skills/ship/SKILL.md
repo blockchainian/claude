@@ -1,9 +1,9 @@
 ---
 name: ship
 description: >
-  Run a written plan through the codex and UX lanes to a shipped feature —
+  Run a written plan through the codex and UX workstreams to a shipped feature —
   launch the workstreams, merge them behind the plan's checks, deploy and check what the plan
-  says to, triage codex's review, run the fix lanes, decide production. Use when a `plan.md` exists — written in
+  says to, triage codex's review, run the fix workstreams, decide production. Use when a `plan.md` exists — written in
   plan mode, by hand, or by any agent — with Workstreams, Dependencies and Checks sections:
   "/feature:ship <plan.md>", "run this plan", "ship this plan". NOT for planning, and not for a
   change small enough to do in one turn — there the launch overhead is the whole cost.
@@ -11,9 +11,9 @@ description: >
 
 # Ship — run the plan, never write the code
 
-The orchestrator is the one seat that sees both lanes. It launches, verifies and decides; it does
+The orchestrator is the one seat that sees both the codex and the UX workstreams. It launches, verifies and decides; it does
 not implement, and it does not drive UI. Every hour it spends editing the branch is an hour the
-backend lane cannot merge onto it, and every UI step it drives by hand is a step a UX check would
+backend workstream cannot merge onto it, and every UI step it drives by hand is a step a UX check would
 have answered in one background call.
 
 This skill is tuned for Opus 5.5 medium (`/model claude-opus-5-5`, `/effort medium`) in a fresh
@@ -30,13 +30,13 @@ reads it by section, so three sections are required and the rest are read when p
 - **Workstreams** — one `### <id>` block per codex workstream, each ending with a `Files:` line
   naming the files it owns. The block plus Dependencies and Checks is the whole brief the codex
   thread receives, so it must be enough to build the workstream without the rest of the file.
-- **Dependencies** — the order between workstreams, if any, and the wire contract the UX lane codes
+- **Dependencies** — the order between workstreams, if any, and the wire contract the UX workstream codes
   against. Ship wires these into the task board as `addBlockedBy`.
-- **Checks** — one command per line, run in order and stopping at the first red: by each lane
+- **Checks** — one command per line, run in order and stopping at the first red: by each workstream
   before finishing and once in the session tree after each merged batch.
 
 Optional, each read by the step that names it: **UX workstreams** (`### <id>` blocks with a
-`Surfaces:` and a `Files:` line; without this section there is no UX lane), **Deploy** (a
+`Surfaces:` and a `Files:` line; without this section there is no UX workstream), **Deploy** (a
 `staging:` and/or `production:` command, each printing JSON with the deployed `sha`), **UX
 checks** (one probe command per line, each printing a verdict JSON and exiting non-zero on
 failure), **Deploy checks** (commands run after each deploy with `DEPLOY_ENV` and the deploy JSON's fields in the environment), and
@@ -63,7 +63,7 @@ any `handoff.md` sits beside it; the review's `review.md`, the triaged `findings
 
 ## Workstream worktrees
 
-Both lanes work in worktrees so nothing edits the session branch while another lane merges onto
+Codex and UX workstreams work in worktrees so nothing edits the session branch while another workstream merges onto
 it. `${CLAUDE_PLUGIN_ROOT}/skills/ship/scripts/workstream.sh` owns their lifecycle; never run the git
 commands by hand:
 
@@ -87,14 +87,14 @@ Open a task board so the run's shape is visible while it works: one `TaskCreate`
 per checkpoint, wired with the plan's Dependencies as `addBlockedBy`, its status flipped as each
 transition lands. It is a **view, not the record** — `plan.md`, the PR and the verdict JSONs stay
 authoritative; the board only mirrors them and is never read back as a source of truth. Only the
-orchestrator touches it — the lane agents have no Task tools and never self-report.
+orchestrator touches it — the workstream agents have no Task tools and never self-report.
 
 - **Create** the tasks in step 1, all `pending`, right after the base is pinned and the check is
   green: one per codex workstream, one per UX workstream, and one per checkpoint the procedure
   already has — review triage, UX checks, each deploy the plan names.
 - **Name** each task for its outcome, taken verbatim from the workstream's goal in `plan.md` —
   imperative and domain-level: `Add CSV export to the reports page`, not
-  `codex workstream 1`, not `UX lane A`. Keep the lane, agent, model and tool out of the subject —
+  `codex workstream 1`, not `UX workstream A`. Keep the workstream, agent, model and tool out of the subject —
   that is the "how", and `owner` already carries who. Keep ordering words out too (`after backend`,
   `step 2`); the deps carry order. Add the module when two names would collide. `activeForm` is the
   present-continuous of the same outcome (`Adding CSV export to the reports page`).
@@ -102,8 +102,8 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
   codex workstream that waits for another one's merge, a `needs-backend` UX workstream blocked by
   the backend task it waits on; production is blocked by triage and the UX checks checkpoint.
 - **Flip status** at the transitions the procedure already defines: `in_progress` when you launch a
-  lane or start a checkpoint, `completed` when its branch merges clean or its verdict is green. A
-  finding sent back to a lane reopens that lane's task to `in_progress` until its re-run is green.
+  workstream or start a checkpoint, `completed` when its branch merges clean or its verdict is green. A
+  finding sent back to a workstream reopens that workstream's task to `in_progress` until its re-run is green.
 
 ## Procedure
 
@@ -117,7 +117,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    waste; never skip it because the gate came straight from `AGENTS.md`. With the check green, open
    the task board (see **Task board**) before any fan-out, so the rest of the run is visible.
 
-2. **Launch the codex lane — one thread per workstream.** For EVERY codex workstream in the plan
+2. **Launch the codex workstreams — one thread each.** For EVERY codex workstream in the plan
    whose Dependencies are already merged and their batch's Checks green (none, at the start),
    in one message: `workstream.sh open <id>`, then codex-manager `start` with `cwd` the printed
    path, `name` the id, and a prompt that is the workstream block verbatim plus the plan's
@@ -135,7 +135,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    that dependency's batch passes Checks: `open` branches from the merged HEAD, so its worktree
    already carries what it depends on and its Checks can pass alone.
 
-3. **Launch the UX lane, in parallel — one implementer per UX workstream.** In the same message,
+3. **Launch the UX workstreams, in parallel — one implementer each.** In the same message,
    `workstream.sh open <id>` for EVERY UX workstream and spawn a `ux-implementer` agent per
    workstream with the Agent tool, giving each its worktree path, its workstream block, the wire
    contract quoted as a real response body, the plan's Checks to run before finishing, and the
@@ -143,17 +143,17 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    agent commits after every coherent step and returns flat JSON: `status` is `done`, `blocked`
    or `needs-backend`.
 
-   **When a workstream finishes**, either lane: merge it straight away with `workstream.sh merge
-   <id>` and no commands; do not repeat its lane Checks with `workstream.sh check`. Merge all
+   **When a workstream finishes**, codex or UX: merge it straight away with `workstream.sh merge
+   <id>` and no commands; do not repeat its workstream Checks with `workstream.sh check`. Merge all
    workstreams that finished together as one batch, in the plan's Dependencies order; a workstream
    whose dependency is not merged yet waits. Run the plan's Checks once in the session tree after
-   that batch, without waiting for still-running lanes.
-   Red: identify the merged lane that caused it, `workstream.sh open fix-<id>`, and send its owner
+   that batch, without waiting for still-running workstreams.
+   Red: identify the merged workstream that caused it, `workstream.sh open fix-<id>`, and send its owner
    the new path and failing output — codex-manager `send` or `SendMessage` — to fix and run Checks
    there. Merge the fix without commands and re-run Checks in the session tree, at most twice
    (Hard rules); a third red is a finding for the user. Green: open dependent workstreams as in
    step 2. When the last batch is green, push the session branch and open the PR (`gh pr create`)
-   or let the push update it. Merging a lane branch is integration, not editing.
+   or let the push update it. Merging a workstream branch is integration, not editing.
 
 4. **Review, then deploy and check staging.** Start when the last workstream is merged and pushed.
 
@@ -192,7 +192,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
       the work; it never decides it.
    c. Then decide the owner of each finding, exactly once, from the plan: a file on a UX
       workstream's `Files:` line is `ux`, any other file is `codex`; a finding with no file goes
-      to whichever lane owns the behaviour it describes. Findings in the same file get the same
+      to whichever workstream owns the behaviour it describes. Findings in the same file get the same
       owner.
    d. Write them to `<dir>/review/findings.json` as `[{file, line, claim, owner,
       disposition}]`.
@@ -204,17 +204,17 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
    f. No kept findings means no fix round: post step 7's summary comment if a finding was
       rejected, then go to step 8.
 
-7. **Fix, both lanes at once, one round.**
+7. **Fix, codex and UX at once, one round.**
 
    a. `workstream.sh open fix-codex` when there are `codex` findings and `workstream.sh open
-      fix-ux` when there are `ux` findings, so neither lane can dirty the other's tree or the
+      fix-ux` when there are `ux` findings, so neither workstream can dirty the other's tree or the
       session branch.
    b. codex-manager `start` in the codex worktree with the `codex` findings, the path of
       `decisions.md` and the same standing instructions as step 2, and append what it decides
       to that file as in step 2; spawn `ux-autofixer` with the `ux` findings, its worktree path and
       the plan's Checks to run before finishing and the UX checks for its surfaces. A finding
       touching `.claude/**` or `CLAUDE.md` comes back for the user.
-   c. There is no re-review: merge completed lanes without commands, then run Checks once per
+   c. There is no re-review: merge completed workstreams without commands, then run Checks once per
       merged batch as in step 3 and push only on green; if the plan deploys to staging, redeploy
       it and re-run its Deploy checks; re-run only the UX checks for surfaces the fixes touched.
    d. Post one PR comment summarising the findings and their dispositions; that comment is the
@@ -244,7 +244,7 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 ## Hard rules
 
 - **Every wait ends the turn.** Launch, say one line about what is running, and stop. Task
-  notifications re-invoke you when a lane finishes. NEVER idle-wait.
+  notifications re-invoke you when a workstream finishes. NEVER idle-wait.
 - **No `sleep` in the foreground.** Anything that waits runs with `run_in_background`.
 - **No UI driving from the main loop.** The plan's UX checks only, run with `run_in_background`,
   verdict JSON read back. Delegate to `ux-verifier` only a freeform walk with objective assertions
@@ -258,12 +258,12 @@ orchestrator touches it — the lane agents have no Task tools and never self-re
 - **Disjoint work runs at once.** Workstreams with disjoint `Files:` lines are launched in the same
   message, never one after another. Serial slices were the whole cost of the 2026-09-11 mobile
   session: 66 minutes of implementation took 4 h 40 min of wall clock.
-- **Ad-hoc Agent spawns cannot set effort** and inherit the session's — that is why the UX lanes
+- **Ad-hoc Agent spawns cannot set effort** and inherit the session's — that is why the UX workstreams
   are defined agents. Once the user has raised effort, spawn defined agents only.
 - **Agents are idle, not dead.** Send findings back by message and keep their context. Drop one only
   when its work is done or it has idled past the one-hour cache TTL, then spawn fresh with a short
   brief.
-- **Loops are capped.** A red batch Check goes back to the responsible lane's owner at most
+- **Loops are capped.** A red batch Check goes back to the responsible workstream's owner at most
   twice; the third red is a finding for the user. A UX-check failure gets at most three fix rounds:
   two with the owning UX agent in step 5, then step 7's round. A review finding gets step 7's one round and no
   re-review; the re-run of the UX checks on the surfaces the fixes touched is the second gate. A

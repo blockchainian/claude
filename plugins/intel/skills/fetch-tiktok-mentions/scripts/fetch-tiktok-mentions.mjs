@@ -94,11 +94,11 @@ const SESSION_COOKIE = "sessionid"; // the cookie of a signed-in tiktok.com brow
 const SESSION_COOLDOWN_MS = 60000; // how long a slot rests after TikTok answered its IP with empty bodies
 const REQUEST_TIMEOUT_MS = 30000;
 const DOWNLOAD_TIMEOUT_MS = 600000; // a file fetch shares the slot's bandwidth with the others in flight
-const DOWNLOAD_LANES = 4; // file fetches in flight per session: bandwidth-bound, more only time out
+const DOWNLOAD_WORKSTREAMS = 4; // file fetches in flight per session: bandwidth-bound, more only time out
 const MAX_DOWNLOAD_BYTES = 200e6; // a file is carried out of the page as one base64 string
 const EMPTY_RETRY_MS = 3000;
 const TEMPLATE_WAIT_MS = 30000;
-const MAX_LANE_FAILURES = 3; // failures in a row (blocked sessions, sessions that won't open) before a lane stops
+const MAX_WORKSTREAM_FAILURES = 3; // failures in a row (blocked sessions, sessions that won't open) before a workstream stops
 const KEPT_LANGUAGES = ["en", "un"]; // caption languages kept: English, and "un" (TikTok could not tell)
 const HASHTAG_PULLS = 4; // sessions that pull one hashtag: measured 42, 52, 56, 58 kept videos, then no more
 const STALE_PAGES = 2; // pages in a row with nothing unseen before a source is taken as repeating
@@ -444,26 +444,26 @@ export function ispProxyAt(baseUrl, slot) {
   return u.toString().replace(/\/$/, "");
 }
 
-// `lanes` workers pull units off one queue, each through the session `open(lane)` gives it. When a
-// unit's work throws (a blocked session, a dead page) the lane hands the session back with the
-// error (`close(session, error)`), the unit goes back on the queue and the lane opens a session again;
-// MAX_LANE_FAILURES failures in a row stop the lane. A throw on a session another lane already
-// handed back (`close` answers false) is that lane's failure, not this one's. Every session opened is handed back. Returns
+// `workstreams` workers pull units off one queue, each through the session `open(workstream)` gives it. When a
+// unit's work throws (a blocked session, a dead page) the workstream hands the session back with the
+// error (`close(session, error)`), the unit goes back on the queue and the workstream opens a session again;
+// MAX_WORKSTREAM_FAILURES failures in a row stop the workstream. A throw on a session another workstream already
+// handed back (`close` answers false) is that workstream's failure, not this one's. Every session opened is handed back. Returns
 // how many units were left undone.
-export async function drain({ lanes, units, open, close, work, log }) {
+export async function drain({ workstreams, units, open, close, work, log }) {
   const queue = [...units];
   await Promise.all(
-    Array.from({ length: lanes }, async (_, lane) => {
+    Array.from({ length: workstreams }, async (_, workstream) => {
       let session = null;
       let failures = 0;
       const failed = (what, e) => {
         failures++;
-        log(`  [${lane}] ${what}: ${e.message.split("\n")[0]}`);
+        log(`  [${workstream}] ${what}: ${e.message.split("\n")[0]}`);
       };
-      while (queue.length && failures < MAX_LANE_FAILURES) {
+      while (queue.length && failures < MAX_WORKSTREAM_FAILURES) {
         if (!session) {
           try {
-            session = await open(lane);
+            session = await open(workstream);
           } catch (e) {
             failed("session did not open", e);
             continue;
@@ -482,7 +482,7 @@ export async function drain({ lanes, units, open, close, work, log }) {
         }
       }
       if (session) await close(session, null);
-      if (failures >= MAX_LANE_FAILURES) log(`  [${lane}] stopped after ${failures} failures in a row`);
+      if (failures >= MAX_WORKSTREAM_FAILURES) log(`  [${workstream}] stopped after ${failures} failures in a row`);
     }),
   );
   return { left: queue.length };
@@ -501,23 +501,23 @@ export function pacer(rate, now = Date.now, wait = sleep) {
   };
 }
 
-// `count` sessions shared by any number of lanes: lane n works through the session of slot
+// `count` sessions shared by any number of workstreams: workstream n works through the session of slot
 // (n % count) + 1, opened when first asked for. A session handed back with an error is closed once,
-// however many lanes report it; when the error is held against the IP (a Blocked with scope "ip")
+// however many workstreams report it; when the error is held against the IP (a Blocked with scope "ip")
 // the slot's next session opens only after `cooldownMs`, otherwise at once. A session handed back
-// without an error closes when its last lane lets go. `close` answers whether this call was the
+// without an error closes when its last workstream lets go. `close` answers whether this call was the
 // one that closed the session.
 export function sharedSessions({ count, openOne, closeOne, cooldownMs, wait }) {
   const slots = Array.from({ length: count }, () => ({ entry: null, cooling: false }));
   return {
-    async open(lane) {
-      const slot = slots[lane % count];
+    async open(workstream) {
+      const slot = slots[workstream % count];
       if (!slot.entry) {
         const entry = { users: 0, session: null };
         entry.opening = (async () => {
           if (slot.cooling) await wait(cooldownMs);
           slot.cooling = false;
-          entry.session = await openOne((lane % count) + 1);
+          entry.session = await openOne((workstream % count) + 1);
           return entry.session;
         })();
         slot.entry = entry;
@@ -533,7 +533,7 @@ export function sharedSessions({ count, openOne, closeOne, cooldownMs, wait }) {
     },
     async close(session, failed) {
       const slot = slots.find((s) => s.entry?.session === session);
-      if (!slot) return false; // another lane already handed this session back as failed
+      if (!slot) return false; // another workstream already handed this session back as failed
       if (!failed && --slot.entry.users > 0) return false;
       slot.entry = null;
       slot.cooling = failed?.scope === "ip";
@@ -713,14 +713,14 @@ async function main() {
   progress.runs.push(thisRun);
   let videos = await loadJsonl(videosPath);
 
-  // Lanes finish units concurrently; every file write goes through one chain so the progress file
+  // Workstreams finish units concurrently; every file write goes through one chain so the progress file
   // is never torn.
   let checkpoint = Promise.resolve();
   const commit = (fn) => (checkpoint = checkpoint.then(fn));
   const saveProgress = () => writeFile(progressPath, JSON.stringify(progress, null, 1));
   const entry = (id) => (progress.videos[id] ??= { comments: { count: 0, complete: false }, downloaded: false });
 
-  // Each phase works through one session per ISP slot, several lanes on each.
+  // Each phase works through one session per ISP slot, several workstreams on each.
   const sessions = Math.min(args.sessions ?? ispCount(), ispCount());
   const pool = async (units, work, perSession = args.concurrency) => {
     const shared = sharedSessions({
@@ -730,8 +730,8 @@ async function main() {
       cooldownMs: SESSION_COOLDOWN_MS,
       wait: sleep,
     });
-    const lanes = Math.min(sessions * perSession, units.length);
-    return drain({ lanes, units, open: shared.open, close: shared.close, work, log });
+    const workstreams = Math.min(sessions * perSession, units.length);
+    return drain({ workstreams, units, open: shared.open, close: shared.close, work, log });
   };
   let left = 0;
 
@@ -752,7 +752,7 @@ async function main() {
     pool(pulls.filter((pull) => !viaAccount.includes(pull)), collect),
     account
       ? drain({
-          lanes: 1,
+          workstreams: 1,
           units: viaAccount,
           open: () => openAccountSession(account),
           close: (session, error) => {
@@ -833,7 +833,7 @@ async function main() {
         });
         log(`  ${unit.id}: ${outcome.startsWith("failed") ? `download ${outcome}` : outcome}`);
       },
-      DOWNLOAD_LANES,
+      DOWNLOAD_WORKSTREAMS,
     );
     left += undone;
   }

@@ -376,7 +376,7 @@ test("a 429 is never given up on — it waits the reset (0 for a past one) and c
   assert.deepEqual(waits, [0, 0]);
 });
 
-test("a lane that fails is paused, its day goes back to the queue, and the others drain it", async () => {
+test("a workstream that fails is paused, its day goes back to the queue, and the others drain it", async () => {
   const plan = [{ day: "d1" }, { day: "d2" }, { day: "d3" }, { day: "d4" }];
   const done = [];
   const fetchEntry = async (acct, entry) => {

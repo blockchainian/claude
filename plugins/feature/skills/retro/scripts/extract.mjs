@@ -244,7 +244,7 @@ function spawns(orch) {
   return out;
 }
 
-function hasCodexLane(sp) {
+function hasCodexWorkstream(sp) {
   for (const v of sp.values()) if ((v.subagent_type || "").startsWith("codex:")) return true;
   return false;
 }
@@ -375,7 +375,7 @@ function codexTokens(filePath, basis) {
 }
 
 /**
- * Join the codex lane's real token cost: by recorded thread id (deterministic),
+ * Join the codex workstream's real token cost: by recorded thread id (deterministic),
  * else by originator + cwd + time window (correlation). Returns [rows, deterministicBool].
  */
 function codexCost(orch, codexRoot, basis) {
@@ -481,10 +481,10 @@ function report(name, root, basis, codexRoot) {
     }
   }
 
-  if (hasCodexLane(sp)) {
+  if (hasCodexWorkstream(sp)) {
     const [rows, deterministic] = codexCost(orch, codexRoot, basis);
     const join = deterministic ? "exact thread-id join" : "correlation (originator+cwd+time) — heuristic";
-    console.log(`  --- codex lane (${rows.length} rollouts, ${basis} tokens; ${join}) ---`);
+    console.log(`  --- codex workstream (${rows.length} rollouts, ${basis} tokens; ${join}) ---`);
     let ctot = 0;
     for (const [tk, sid, how, rname] of rows) {
       console.log(`    ${fmtComma(tk).padStart(12)}  [${how}] ${pyStr(sid).slice(0, 36)}  ${rname.slice(0, 44)}`);
@@ -497,7 +497,7 @@ function report(name, root, basis, codexRoot) {
       console.log("  ** rank this against the Claude buckets above — a failed/nothing-merged codex run " +
         "belongs in the ranking, never dropped because its cost lived off-transcript. **");
     } else {
-      console.log("  ** codex lane present but no rollouts joined (ephemeral runs, pruned, or no match). " +
+      console.log("  ** codex workstream present but no rollouts joined (ephemeral runs, pruned, or no match). " +
         "Rank its failure events by impact: discarded-workstream count x mean joined per-workstream " +
         "cost, plus the orchestrator's own reaction tokens. Never drop the event. **");
     }

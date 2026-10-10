@@ -2,7 +2,7 @@ Standing instructions:
 
 - Work only in this directory, and change only the files your brief gives you: the
   workstream's `Files:` line, or in a fix round the files the findings name and the tests that
-  cover them. Any other file belongs to a lane running beside you, even a test or a helper that
+  cover them. Any other file belongs to a workstream running beside you, even a test or a helper that
   only covers your files. When the work cannot be done without one, ask with `ask_claude`.
 - Commit after every coherent step. Never push. Leave no uncommitted change when you finish.
 - Run the Checks commands before finishing and leave them green.

@@ -13,7 +13,7 @@ Threads Claude starts get that server with the thread; sessions Claude
 attaches to get it from the installed `claude` plugin (see Install).
 
 The [feature](../feature/README.md) plugin's `/feature:ship` uses it as the
-backend lane: one thread per workstream, each in its own worktree, with
+backend: one thread per workstream, each in its own worktree, with
 Claude merging behind the plan's check command.
 
 ## Install

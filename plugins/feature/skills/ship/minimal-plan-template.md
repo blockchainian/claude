@@ -20,7 +20,7 @@ Files: `path/a.ts`, `path/b.ts`.
 
 ## UX workstreams
 
-<!-- Optional. Same block shape, one `ux-implementer` agent each. Omit the section for no UX lane. -->
+<!-- Optional. Same block shape, one `ux-implementer` agent each. Omit the section for no UX workstream. -->
 
 ### `<id>` — <what changes and where>
 
@@ -36,7 +36,7 @@ that one merges, so its worktree already carries the dependency. Workstreams not
 at once. -->
 
 - <order between workstreams, or `none`>
-- <wire contract the UX lane codes against, as a real response body>
+- <wire contract the UX workstream codes against, as a real response body>
 
 ## New files
 

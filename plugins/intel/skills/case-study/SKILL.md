@@ -35,7 +35,7 @@ the workflow sends them the absolute paths of the files below.
 |---|---|---|
 | `references/evidence.md` | every agent | What counts as read, the kinds of claim, who cannot be evidence |
 | `references/tools.md` | every agent | The commands for pages, search, uploads, archives and records, all through `scripts/gate.mjs` |
-| `types/creator.md` | every agent | The gate, source types, scout lanes, what the numbers must establish, the chapters |
+| `types/creator.md` | every agent | The gate, source types, scout workstreams, what the numbers must establish, the chapters |
 | `briefs/scout.md` | scouts | Finding sources of one type |
 | `briefs/read.md` | readers | Reading a batch of sources into tagged notes |
 | `briefs/numbers.md` | numbers agents | The curve from the archive, the upload record |
