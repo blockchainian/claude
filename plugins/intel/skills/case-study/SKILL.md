@@ -62,6 +62,9 @@ they are sent the absolute paths of the files below and read them themselves.
 | `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with work directories under case-study/work/, fetched news under case-study/news/ and rate limits under limits/ | Optional | ~/.config/intel/.env |
 | `INTEL_OUTPUT_DIR` | Output root; default ~/Documents, with the PDFs under case-studies/ | Optional | ~/.config/intel/.env |
 
+The Exa key is `exaApiKey` in `~/.mcporter/mcporter.json`, not in the `.env`. After rotating it, delete
+`<INTEL_STATE_DIR>/limits/exa-out-of-credits`, or searches skip Exa for up to 10 minutes.
+
 The skill workflow remains Claude-only.
 
 ## Arguments
@@ -175,6 +178,8 @@ ask for one name.
    Do not start another subject.
 
 ## Rules for the orchestrator
+
+- Test a changed or new tool before a run, never inside one.
 
 - The files are the deliverable; an agent's summary is its own account. Counts
   come from the check, not from an agent.
