@@ -3,7 +3,7 @@ name: heap-snapshot-leaks
 description: Find memory leaks in a running web app by diffing V8 heap snapshots taken around a repeated action. Use when a page's memory grows over time, a single-page app slows the longer it runs, or you suspect detached DOM nodes, dangling listeners, or retained components after navigating away. Captures snapshots from Chrome over the DevTools protocol and reports which constructors grew and what stayed detached.
 ---
 
-# Heap Snapshot Leaks
+# Heap snapshot leaks
 
 A web leak is what the heap keeps that a clean baseline did not: a constructor
 whose live instance count and retained bytes climb with each repeat of an
