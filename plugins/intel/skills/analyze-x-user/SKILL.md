@@ -5,81 +5,89 @@ description: Profile ONE X/Twitter account from its own timeline (tweets.jsonl +
 
 # Analyze X user
 
+This skill turns one account's own timeline into `profile.md`: who the account is, what it talks
+about most, which tokens and people it pushes, how and when it posts, and what motivates it, read
+from its own posts only, with no aggregation across accounts. It mirrors `analyze-x-users`, which
+segments the crowd mentioning an app; here the labels describe the account's own posts (what kind,
+about which asset, which way, with what stake). The numbers come from the archive, the per-post
+labels from the `analyze-x-mentions` labeler run under this skill's spec, and the qualitative read
+from the representative posts you read yourself.
+
 ## Skill directory
 
-Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The commands run scripts from the sibling
-`analyze-x-mentions` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+commands run scripts from the sibling `analyze-x-mentions` and `fetch-x-mentions` skills, so keep
+the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
 
+The commands below run from any working directory and use these names, with `<user>` the account
+and `<scratch>` a scratch directory:
+
+```
+S="$SKILL_DIR/scripts"
+T="$SKILL_DIR/../analyze-x-mentions/scripts"
+STATE="$(node "$SKILL_DIR/../fetch-x-mentions/scripts/env.mjs" state)"
+OUT="$(node "$SKILL_DIR/../fetch-x-mentions/scripts/env.mjs" output)"
+U="$STATE/x/kols/<user>"
+O="$OUT/x/kols/<user>"
+VOCAB="$STATE/x/kols/vocab.json"
+```
+
+`$U` is the archive: `tweets.jsonl` and `replies.jsonl` from `fetch-x-user-posts`, and next to them
+this skill's `profile.json` (the stats) and `labels.jsonl` (one line per post, kept so a rerun
+labels only new posts). `$O` gets `profile.md` and `images/`. `$VOCAB` holds the topics and
+interests seen across accounts; assets stay per account. Expand `~` to the absolute home path in
+JSON arguments.
+
 ## Environment variables
 
-Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the output root, `INTEL_OUTPUT_DIR` (default `~/Documents`). Expand `~` to the absolute home path in JSON arguments.
+No X credentials are needed to analyze an existing archive.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
-| `INTEL_OUTPUT_DIR` | Output root; profiles go under `x/kols/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
+| `CODEX_HOME` | Existing Codex login directory the shared labeler uses; default `~/.codex` | No | Shell environment before running the command; no automatic `.env` loading |
+| `INTEL_STATE_DIR` | State root holding the archive and vocabulary; default `~/.local/state/intel` | No | `~/.config/intel/.env` |
+| `INTEL_OUTPUT_DIR` | Output root; profiles go under `x/kols/`; default `~/Documents` | No | `~/.config/intel/.env` |
 
-The shared `analyze-x-mentions` labeler uses this setting for its existing Codex login. No X credentials are needed to analyze an existing timeline archive.
+## Setup
 
-One account's own timeline → `profile.md`: who this account is, what they talk about most, which
-tokens and people they push, how and when they post, and what motivates them — read from their
-own posts, no aggregation across accounts. Deterministic stats come from the archive; the kind,
-topic, asset, stance and interest of each post come from `analyze-x-mentions`'s labeler run under
-this skill's own spec; the qualitative read comes from the representative posts `reps.mjs` picks
-by label, read by whoever runs the skill.
+The skill needs Node 20 or later, the shared `analyze-x-mentions` labeler scripts (`clean.mjs`,
+`chunk.mjs`, `run-labels.mjs`, `merge-labels.mjs`) and its `render_charts.py`, which needs `uv` and
+matplotlib.
 
-This is per-account profiling. It is the mirror of `analyze-x-users` (which segments the *crowd*
-mentioning an app); here the subject is the account itself, so the labels describe the account's
-own posts (what kind, about which asset, which way, with what stake), not an app.
-
-## Input & output
-
-- **Input**: `~/.local/state/intel/x/kols/<user>/tweets.jsonl` and `.../replies.jsonl` from `fetch-x-user-posts`.
-- **Output**: `profile.md` + `images/` in `x/kols/<user>/` under the output root; next to the input, `profile.json`
-  (deterministic stats) and `labels.jsonl` (one line per post, committed so a rerun only labels new posts).
-
-Commands may run from any working directory; `S="$SKILL_DIR/scripts"`,
-`T="$SKILL_DIR/../analyze-x-mentions/scripts"` (the shared labeler) below. `U=~/.local/state/intel/x/kols/<user>` (the archive), `O="$OUT/x/kols/<user>"` (the doc), with the output root from
-
-```
-OUT="$(node "$SKILL_DIR/../fetch-x-mentions/scripts/env.mjs" output)"
-```
-
-## Procedure
-
-### 1. Deterministic profile (script)
+## Deterministic profile
 
 ```
 node $S/profile-user.mjs $U --out <scratch>
 ```
 
-Prints and writes `<scratch>/profile.json`: volume (tweets vs replies, reply ratio), cadence
-(active days, span, posts/active day, posting hours in UTC), engagement (avg / median / max),
-the `$cashtags` and `@handles` the account pushes most, top hashtags, domains linked, languages,
-and the 15 most-engaged posts. Rerun with `--labels $U/labels.jsonl` after step 3 to fold in the
-label tallies. This is the objective backbone; read it before writing anything.
+This prints and writes `<scratch>/profile.json`: volume (tweets vs replies, reply ratio), cadence
+(active days, span, posts per active day, posting hours in UTC), engagement (average, median, max),
+the `$cashtags` and `@handles` the account pushes most, top hashtags, linked domains, languages and
+the 15 most-engaged posts. It is the objective backbone of the profile; read it before writing
+anything.
 
-### 2. Label the account's own posts (the shared labeler, the KOL spec)
+## Label the posts
 
-The labeler machinery (`clean.mjs`, `chunk.mjs`, `run-labels.mjs`, `merge-labels.mjs`, gpt-6-luna
-through `codex exec`) is `analyze-x-mentions`'s; the prompt is not. `$S/kol-spec.mjs` holds this
-skill's rules, fields and answer schema, and `~/.local/state/intel/x/kols/vocab.json` its own vocabulary
-(topics and interests seen across accounts; assets stay per account). Fields per post:
+The labeler is `analyze-x-mentions`'s, with gpt-6-luna through `codex exec`, but the prompt is
+this skill's: `$S/kol-spec.mjs` holds the rules, fields and answer schema, and `$VOCAB` the
+vocabulary. Each post gets these fields:
 
-- `about` — has content of its own (a view, a call, a trade, a story) vs gm / emoji / one word
-- `kind` — call · analysis · pnl · news · promo · banter · noise
-- `topic` — the subject (market-macro, token-call, exchange-news, industry-drama, …)
-- `asset` — the ticker or project the post is about, `market` for a market-wide view, `none`
-- `stance` — bullish / bearish / neutral toward the asset, `none` when no asset
-- `point` — the claim in ≤ 12 words
-- `interest` — the stake the post itself shows: own-token, referral, sponsored, exchange-affiliate,
-  paid-group, creator-rewards, airdrop-farming, team-member, or null
+- `about`: has content of its own (a view, a call, a trade, a story) vs gm, emoji or one word
+- `kind`: call, analysis, pnl, news, promo, banter or noise
+- `topic`: the subject (market-macro, token-call, exchange-news, industry-drama, …)
+- `asset`: the ticker or project the post is about, `market` for a market-wide view, or `none`
+- `stance`: bullish, bearish or neutral toward the asset, `none` when there is no asset
+- `point`: the claim in at most 12 words
+- `interest`: the stake the post itself shows (own-token, referral, sponsored, exchange-affiliate,
+  paid-group, creator-rewards, airdrop-farming, team-member) or null
 
-Combine the two streams and chunk them, skipping posts already in `labels.jsonl`:
+When the account has too few substantive posts to profile (say under 30), skip labeling and say so
+in the doc. Otherwise combine the two streams and chunk them, skipping posts already in
+`labels.jsonl`:
 
 ```
 cat $U/tweets.jsonl $U/replies.jsonl > <scratch>/all.jsonl
@@ -87,40 +95,49 @@ node $T/clean.mjs <scratch>/all.jsonl --out <scratch>/clean.json
 node $T/chunk.mjs <scratch>/clean.json --size 500 --out <scratch> --labels $U/labels.jsonl
 ```
 
-Write `<scratch>/account-facts.md` for the labeler: the account's display name, language(s), what
-it is known for, the chains / exchanges / tokens it is tied to, the handles it talks to most (from
-`profile.json`), and the noise typical of its replies. Facts only; the field definitions come from
-the spec.
+Write `<scratch>/account-facts.md` for the labeler with facts only, since the field definitions come
+from the spec: the account's display name, its languages, what it is known for, the chains,
+exchanges and tokens it is tied to, the handles it talks to most (from `profile.json`) and the
+noise typical of its replies.
 
-Run the labeler and merge into this account's store:
+Then run the labeler in the background and merge its output into the account's store:
 
 ```
-node $T/run-labels.mjs --spec $S/kol-spec.mjs --facts <scratch>/account-facts.md --vocab ~/.local/state/intel/x/kols/vocab.json --out <scratch> <scratch>/chunk*.json
-node $T/merge-labels.mjs $U/labels.jsonl <scratch> --spec $S/kol-spec.mjs --vocab ~/.local/state/intel/x/kols/vocab.json
+node $T/run-labels.mjs --spec $S/kol-spec.mjs --facts <scratch>/account-facts.md --vocab $VOCAB --out <scratch> <scratch>/chunk*.json
+node $T/merge-labels.mjs $U/labels.jsonl <scratch> --spec $S/kol-spec.mjs --vocab $VOCAB
 ```
 
-Chunks of 500 keep the wall time near one chunk (about 5 min) since the pool runs 20 in flight; skip labeling entirely for an account
-with too few substantive posts to profile (say < 30) and note that in the doc. Run `run-labels.mjs` in the background.
+Chunks of 500 keep the wall time near that of one chunk, about 5 minutes, because the pool runs 20
+at once.
 
-### 3. Representative posts (script, read inline)
+## Representative posts
 
-Rerun `profile-user.mjs $U --labels $U/labels.jsonl --out <scratch>` so `profile.json` carries
-the label tallies (kinds, topics, assets with their bullish / bearish split, interests) and the 15
-top posts with their labels. Then dump the posts each section is written from and read the file:
+Rerun the profile with the labels so `profile.json` carries the label tallies (kinds, topics,
+assets with their bullish and bearish split, interests) and the labels of the 15 top posts:
+
+```
+node $S/profile-user.mjs $U --labels $U/labels.jsonl --out <scratch>
+```
+
+Then dump the posts each section is written from, and read the file yourself, with no subagent and
+no hand sampling:
 
 ```
 node $S/reps.mjs $U --out <scratch>/reps.txt [--per 15] [--apps <archive-slugs>]
 ```
 
-One block per section, chosen by label: the top posts of each of the 10 biggest topics, the
-market / BTC posts in date order, every post with a stake grouped by stake, calls, promos, the top
-assets, the accounts it @-mentions most, and every post naming a trading app (`--apps`, default
-list in the script). About 1200 lines for a 3000-post account; no subagent, no sampling by hand.
+It writes one block per section, chosen by label: the top posts of each of the 10 biggest topics,
+the market and BTC posts in date order, every post with a stake grouped by stake, calls, promos,
+the top assets, the accounts it @-mentions most and, for the comma-separated archive slugs given
+with `--apps`, every post naming that trading app (none by default). A 3000-post account gives
+about 1200 lines.
 
-### 4. Charts (analyze-x-mentions script)
+## Charts
 
-Five PNGs into `$O/images/`, values from `profile.json` and `labels.jsonl` (the topic groups are
-the ones the doc uses, summed over `labels.jsonl`, not over the top-15 list in `profile.json`):
+Render five PNGs into `$O/images/` with the `analyze-x-mentions` chart script, taking the values
+from `profile.json` and `labels.jsonl`. Sum the topic groups the doc uses over `labels.jsonl`, not
+over the top-15 list in `profile.json`. The assets chart shows the top 10 assets with at least 5
+bullish plus bearish posts.
 
 ```
 echo '{"out_dir":"x/kols/<user>/images","charts":[
@@ -133,9 +150,11 @@ echo '{"out_dir":"x/kols/<user>/images","charts":[
 ]}' | $T/render_charts.py /dev/stdin
 ```
 
-Assets: those with at least 5 bullish + bearish posts, top 10. Open every PNG and check the labels.
+Open every PNG and check its labels.
 
-### 5. Write `profile.md` (Chinese, concrete, evidence only)
+## Write the profile
+
+Write `$O/profile.md` in Chinese, concrete and from evidence only, in this shape:
 
 ```
 # @<user> 画像（<first_post> → <last_post>）
@@ -196,34 +215,32 @@ project / token; say plainly when a stake is absent)
 可信度：<one line: how many posts labeled, numbers from labels + archive, quotes id-checked>
 ```
 
-Rules:
-- Quote line is exactly `> @<user>：[text](url)`, link on the text, verbatim, Chinese posts in
-  Chinese. Every claim carries its number or its quote. "有返佣" needs a referral post; "广告 /
-  sponsored" only when a post says so. A follower count comes from `~/.local/state/intel/x/crm-followers.json`.
-- No method / model / process narration except the 可信度 line.
-- Before shipping: `node $S/check-quotes.mjs $O/profile.md $U` must report 0 bad (id exists,
-  handle matches, quote is a verbatim substring). Fix the doc, never the check.
+Every claim carries its number or its quote. A quote line is exactly `> @<user>：[text](url)`, with
+the link on the verbatim text and Chinese posts quoted in Chinese. Say "有返佣" only with a referral
+post, and "广告 / sponsored" only when a post says so. Take a follower count from
+`$STATE/x/crm-followers.json`. Narrate no method, model or process outside the 可信度 line.
 
-### 6. Ship
+Before shipping, run the quote check; it must report 0 bad, meaning every quoted id exists, its
+handle matches and the quote is a verbatim substring. Fix the doc, never the check.
 
-Return the paths to `$O/profile.md`, `$O/images`, `$U/profile.json`, `$U/labels.jsonl` and the vocabulary file. `clean.json`, the chunks and `labelsN.json` are scratch.
+```
+node $S/check-quotes.mjs $O/profile.md $U
+```
 
-## Batch note
+## Ship
 
-This skill profiles **one** account. To profile a roster, run it per account (a subagent each,
-a bounded pool using Claude Code's Agent tool or Codex's `spawn_agent` and
-`wait_agent`, with explicit file paths and a distinct output directory per account) — but that is the expensive downstream step, not part of fetching. Do not fan
-labeling out to a whole roster without being asked.
+Return the paths to `$O/profile.md`, `$O/images`, `$U/profile.json`, `$U/labels.jsonl` and
+`$VOCAB`. `clean.json`, the chunks and the `labelsN.json` files are scratch.
 
-## Requirements
+## Profiling a roster
 
-- Node ≥ 20; the shared `analyze-x-mentions` labeler (`chunk.mjs`, `run-labels.mjs`, `merge-labels.mjs`,
-  `clean.mjs`) and `render_charts.py` (`uv`, matplotlib); `$S/kol-spec.mjs` and `~/.local/state/intel/x/kols/vocab.json`.
+This skill profiles one account. For a roster, run it once per account, each in its own subagent
+from a bounded pool, with explicit file paths and a distinct output directory per account. This is
+the expensive downstream step, not part of fetching, so never fan labeling out to a whole roster
+unless asked.
 
 ## Tests
 
 ```
 node --test "$SKILL_DIR/tests/test_profile_user.mjs" "$SKILL_DIR/tests/test_reps.mjs"
 ```
-
-Pass `--apps <comma-separated archive slugs>` to reps.mjs for app sections; default is empty.
