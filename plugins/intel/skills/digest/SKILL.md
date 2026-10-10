@@ -40,7 +40,7 @@ process state before retrying.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `INTEL_OUTPUT_DIR` | Output root; default ~/Documents, with digests under digests/ | No | ~/.config/intel/.env |
+| `INTEL_OUTPUT_DIR` | Output root; digests go under `digests/`; default `~/Documents` | No | ~/.config/intel/.env |
 
 A source URL after `/digest` is fetched, read, and turned into a highlights
 draft — that is the default. Two keywords instead select a store command.
@@ -53,8 +53,7 @@ draft — that is the default. Two keywords instead select a store command.
 | `save` take-aways (text) | Append them to the item's `## Take-aways` |
 | `search` query (regex ok) | Search everything saved |
 
-The store is `~/Documents/digests/` (override with
-`INTEL_OUTPUT_DIR`, then append `digests/`). Items live in `items/<slug>.md`, listed in
+The store is `digests/` under the output root. Items live in `items/<slug>.md`, listed in
 `index.md`. Drafts stage in `~/.local/state/intel/digest/<slug>/` (`INTEL_STATE_DIR`) until saved. (The store holds
 articles, episodes, videos and papers alike.)
 
@@ -211,7 +210,7 @@ own page size.
    ```
 
    It typesets every chapter that has a highlights file into
-   `<source>-highlights.pdf` in the store (`~/Documents/digests/`), prints that path, and
+   `<source>-highlights.pdf` in the store, prints that path, and
    writes the combined `<work>/draft.md`. `--out`, `--bg`, `--fg` and
    `--font-size` override the defaults, which are the translate skill's.
    Re-run it after editing any chapter's file.
