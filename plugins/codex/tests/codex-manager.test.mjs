@@ -426,12 +426,12 @@ test("mcp initialize provides thread lifecycle instructions before tools are loa
     assert.equal(response.code, 0, response.stderr);
     const { result } = JSON.parse(response.stdout);
     assert.equal(typeof result.instructions, "string");
-    assert.match(result.instructions, /start.*await.*background/);
-    assert.match(result.instructions, /reply.*already answered.*list.*waiting/);
-    assert.match(result.instructions, /finished only.*turn completed.*not failed, interrupted.*waiting on an ask.*checked and accepted.*no further message/);
-    assert.match(result.instructions, /Blocked threads.*results still being checked.*not finished/);
-    assert.match(result.instructions, /detach.*same turn.*send re-attaches.*safe/);
-    assert.match(result.instructions, /Before ending a multi-thread run, list.*detach every finished thread/);
+    assert.match(result.instructions, /start.*await.*run_in_background/);
+    assert.match(result.instructions, /no activity for a minute.*stuck.*pointed hint.*never steer.*faked tests/);
+    assert.match(result.instructions, /finished only.*turn completed.*not failed, interrupted.*waiting on an ask or approval.*checked and accepted.*no further message/);
+    assert.match(result.instructions, /Detach it in that same turn/);
+    assert.match(result.instructions, /before ending a multi-thread run, list.*detach every finished one/);
+    assert.match(result.instructions, /check list for waiting requests before you reply.*already answered/);
   } finally {
     await home.close();
   }

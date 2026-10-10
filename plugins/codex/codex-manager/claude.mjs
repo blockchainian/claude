@@ -7,8 +7,8 @@ import { SessionStore, askTimeoutSeconds, readSupervisor, running } from "./inbo
 
 const textArgument = { type: "object", properties: { text: { type: "string", description: "The message for Claude." } }, required: ["text"], additionalProperties: false };
 const TOOLS = [
-  { name: "notify_claude", description: "Send a short progress note to Claude, the supervisor of this thread. Claude reads it asynchronously; keep working after calling it. Fails at once when no Claude session supervises this thread.", inputSchema: textArgument },
-  { name: "ask_claude", description: "Ask Claude, the supervisor of this thread, for a decision and wait for the answer. The answer comes back as this tool's result. Use it only when you need a decision you cannot make yourself; if no answer arrives in time the result says so and you proceed on your own judgment. Fails at once when no Claude session supervises this thread.", inputSchema: textArgument }
+  { name: "notify_claude", description: "Send Claude, the supervisor of this thread, a short progress note, then keep working. Fails at once when no Claude session supervises this thread.", inputSchema: textArgument },
+  { name: "ask_claude", description: "Ask Claude, the supervisor of this thread, for a decision you cannot make yourself, such as a change to a file another thread is editing, which you must not edit yourself. You wait, and the answer comes back as this tool's result; if none arrives in time, proceed on your own judgment. Fails at once when no Claude session supervises this thread.", inputSchema: textArgument }
 ];
 const POLL_MS = 250;
 
