@@ -3,7 +3,9 @@
 Research skills for Claude Code and Codex. They turn long-form sources (articles, podcasts, videos,
 live streams, PDFs and whole books) into transcripts, highlights and translations, archive and
 analyze what people say about an app on X, TikTok and the App Store, research creators in depth,
-find book downloads and check which brand domains are still registrable.
+find book downloads and check which brand domains are still registrable. They also archive and
+measure the X Following feed and trending topics, save feed digests, and preview or perform
+X account actions through opencli.
 
 ## Install
 
@@ -20,7 +22,7 @@ codex plugin add intel@blockchainian
 Start a new session after installing or updating. Both hosts load the same skills and scripts,
 except `case-study`, which runs as a Claude Code workflow and is not available in Codex. Skills
 that sign in to X or TikTok use the accounts stored by the `secrets-manager` skill of the secrets
-plugin.
+plugin. Feed reads and account actions instead use the user’s logged-in opencli account.
 
 ## Configuration
 
@@ -52,6 +54,8 @@ path.
 | `fetch-x-mentions` | Archive every X post mentioning an app over a date range. |
 | `fetch-x-posts` | Print a few X posts for any search query. |
 | `fetch-x-user-posts` | Archive X accounts' own posts and replies. |
+| `fetch-x-feed` | Archive and measure the Following feed or a trending topic and save its digest. |
+| `manage-x-account` | Preview and perform X account actions, individually or in batches. |
 | `analyze-x-mentions` | Analyze an app's reception on X from its mentions archive. |
 | `analyze-x-users` | Profile the accounts that mention an app. |
 | `analyze-x-user` | Profile one X account from its own timeline. |

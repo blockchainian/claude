@@ -1,0 +1,96 @@
+[
+  {
+    "id": "1",
+    "author": "placeholder",
+    "bio": "placeholder",
+    "text": "placeholder",
+    "likes": 2,
+    "retweets": 1,
+    "replies": 0,
+    "views": 33,
+    "created_at": "Fri Sep 11 05:04:46 +0000 2026",
+    "url": "https://example.invalid/post/1",
+    "has_media": false,
+    "media_urls": [],
+    "media_posters": [],
+    "card": null,
+    "quoted_tweet": null
+  },
+  {
+    "id": "2",
+    "author": "placeholder",
+    "bio": "placeholder",
+    "text": "placeholder",
+    "likes": 25,
+    "retweets": 6,
+    "replies": 2,
+    "views": 99,
+    "created_at": "Fri Sep 11 05:04:15 +0000 2026",
+    "url": "https://example.invalid/post/1",
+    "has_media": true,
+    "media_urls": [
+      "placeholder"
+    ],
+    "media_posters": [
+      "placeholder"
+    ],
+    "card": null,
+    "quoted_tweet": null
+  },
+  {
+    "id": "3",
+    "author": "placeholder",
+    "bio": "placeholder",
+    "text": "placeholder",
+    "likes": 0,
+    "retweets": 0,
+    "replies": 0,
+    "views": 63,
+    "created_at": "Fri Sep 11 05:04:14 +0000 2026",
+    "url": "https://example.invalid/post/1",
+    "has_media": true,
+    "media_urls": [
+      "placeholder"
+    ],
+    "media_posters": [
+      "placeholder"
+    ],
+    "card": null,
+    "quoted_tweet": null
+  },
+  {
+    "id": "4",
+    "author": "placeholder",
+    "bio": "placeholder",
+    "text": "placeholder",
+    "likes": 0,
+    "retweets": 0,
+    "replies": 0,
+    "views": 222,
+    "created_at": "Fri Sep 11 05:03:17 +0000 2026",
+    "url": "https://example.invalid/post/1",
+    "has_media": true,
+    "media_urls": [
+      "placeholder"
+    ],
+    "media_posters": [
+      "placeholder"
+    ],
+    "card": null,
+    "quoted_tweet": {
+      "id": "placeholder",
+      "author": "placeholder",
+      "name": "placeholder",
+      "text": "placeholder",
+      "created_at": "Fri Sep 11 04:47:00 +0000 2026",
+      "url": "https://example.invalid/post/1",
+      "has_media": true,
+      "media_urls": [
+        "placeholder"
+      ],
+      "media_posters": [
+        "placeholder"
+      ]
+    }
+  }
+]

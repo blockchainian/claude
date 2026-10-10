@@ -1,7 +1,7 @@
 {
   "name": "intel",
-  "version": "0.61.6",
-  "description": "Research, transcription, book translation, social archives and analysis: fourteen shared Claude Code and Codex skills. Case-study remains Claude-only.",
+  "version": "0.62.0",
+  "description": "Research, transcription, book translation, social archives and analysis, X feed digests and X account actions: sixteen shared Claude Code and Codex skills. Case-study remains Claude-only.",
   "author": {
     "name": "blockchainian"
   },
@@ -43,10 +43,12 @@
     "./skills/download-book",
     "./skills/fetch-app-reviews",
     "./skills/fetch-tiktok-mentions",
+    "./skills/fetch-x-feed",
     "./skills/fetch-x-mentions",
     "./skills/fetch-x-posts",
     "./skills/fetch-x-user-posts",
     "./skills/find-domain-names",
+    "./skills/manage-x-account",
     "./skills/transcribe",
     "./skills/translate"
   ]
