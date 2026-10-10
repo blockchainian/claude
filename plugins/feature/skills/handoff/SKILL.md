@@ -9,7 +9,7 @@ description: >
   own record and needs no handoff.
 ---
 
-# Handoff — what a resumer needs, and nothing else
+# Handoff
 
 A resumer reads the handoff plus the phase's document (or, for research, the materialized
 findings). Everything else must be pointed to, not restated. Target under 40 lines for the
