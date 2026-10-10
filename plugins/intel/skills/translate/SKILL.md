@@ -114,9 +114,12 @@ protected as `⟦CODE:key⟧`; `codeblocks.json` stores their verbatim text. Tra
 The renderer restores smaller, wrapping monospace `<pre><code>` blocks; fenced or raw code bypasses math parsing.
 
 Check the listing before spending calls: a section with suspiciously few or many words, or a title parsed wrong,
-means a spine file was mis-grouped. A warning that chapter numbers skip or repeat means an opener was not
-recognised — inspect the sections and, if needed, edit `<work>/sections.json` (drop an entry, or change its
-`kind`) before translating. A common case: a book that stores its endnotes per chapter under "Chapter N" nav
+means a spine file was mis-grouped; odd EPUBs (chapters split by anchor ids, ad pages in the spine, one-file
+pdftohtml builds) can lose bodies or have them typed `front`. A warning that chapter numbers skip or repeat means an opener was not
+recognised — inspect the sections and, if needed, edit `<work>/sections.json` before translating: drop an entry (or delete its `file`) to skip it, since
+translation and rendering skip only sections without a `file`, whatever their `kind`; a body section typed
+`front` becomes `kind: "chapter"`, plus `label: "第N章"` when numbered. Edit `sections.json` in place: extract
+refuses a work dir that already holds one, because re-extracting renumbers the ids the translations are keyed to. A common case: a book that stores its endnotes per chapter under "Chapter N" nav
 titles; those are references, not chapters — remove them from `sections.json` so they are not translated.
 
 ## 2. Glossary (short, before translating)
@@ -139,7 +142,9 @@ sections in flight, one no-tool `codex exec` per section in a private `CODEX_HOM
 book (27 sections of 1.5–3.5k words) is back in about a minute, a 380-page book (54 sections, up to 12k
 words) in about five; 7–15k input and 2–4k output tokens per section. Each answer is checked (starts with `# title`, at least 0.6 Chinese
 characters per English word, identical placeholder counts and numeric `<sup>N</sup>` marker sets) and retried once; a section that still fails is kept as `<id>.rejected.md` and
-reported as `FAILED`, listing missing or extra protected tokens. Rerunning skips sections whose `.md` exists (`--force` redoes them, `--only 04,05`
+reported as `FAILED`, listing missing or extra protected tokens. Short or heading-less sections and
+MathML-heavy ones are sometimes rejected while complete: check the text against the source, add a `# 标题`
+line if it lacks one, and accept it by renaming `<id>.rejected.md` to the section's `<id>-<slug>.md`. Rerunning skips sections whose `.md` exists (`--force` redoes them, `--only 04,05`
 narrows).
 
 While it runs, preview any finished section as its own PDF (own page numbers, no cover):
@@ -243,7 +248,8 @@ re-translating; retranslate the section only if the prose itself is wrong.
 
 ## Editing after the fact
 
-The translation is plain Markdown in `<work>/translated/`: fix a sentence there and rerun step 4 (seconds). Retranslate
+The translation is plain Markdown in `<work>/translated/`: fix a sentence there and rerun step 4 (seconds). A section's title is its md's first `# ` line, not the
+`sections.json` title: fix titles in the md. Retranslate
 one section with `translate.mjs <work> --force --only <id>`. A different look (light theme, other margins) is
 `--bg/--fg` or an edit to `css()` in `render.py`.
 
