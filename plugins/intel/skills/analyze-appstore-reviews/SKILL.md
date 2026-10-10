@@ -3,7 +3,7 @@ name: analyze-appstore-reviews
 description: Turn a scraped App Store reviews JSON into a concise, data-driven Chinese analysis doc plus charts — most-liked and most-disliked patterns ranked by frequency, and the top feature requests. Use when asked to analyze/分析 an app's App Store reviews, summarize what users love and hate, or extract feature requests from a reviews dataset. NOT for scraping reviews (the JSON must already exist) or for non-review market research.
 ---
 
-# Analyze App Store Reviews
+# Analyze App Store reviews
 
 ## Skill directory
 
