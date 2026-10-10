@@ -11,29 +11,6 @@ flag. Claude Code and Codex share the same accounts, so close a profile's browse
 account from the other host. To write an app adapter, read
 [references/adapters.md](references/adapters.md).
 
-## Setup (after every plugin install or update)
-
-```sh
-SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
-"$SKILL_DIR/scripts/setup.sh"
-# Read-only report:
-"$SKILL_DIR/scripts/setup.sh" --check
-```
-
-Fill in `~/.config/secrets-manager/.env` from the plugin's `.env.example` (variables below) and list
-the app adapters in `~/.config/secrets-manager/config.json`, checking each file with
-`node "$SKILL_DIR/scripts/cli.mjs" validate /absolute/path/adapters.mjs`:
-
-```json
-{"adapters": ["/absolute/path/adapters.mjs"]}
-```
-
-A vendor whose Google lines carry the TOTP seed in a URL needs that URL's pattern in the same file,
-as `"totpUrlPatterns": ["<regex whose first group captures the base32 seed>"]`.
-
-Headed runs need Accessibility trust to move OAuth popups onto the `BROWSER_DISPLAY` display and
-Screen Recording permission to record the windows.
-
 ## Environment variables
 
 Shell values take precedence over `~/.config/secrets-manager/.env`.
@@ -52,6 +29,29 @@ Shell values take precedence over `~/.config/secrets-manager/.env`.
 | `CAPTCHA_RESOLVER_MODEL_TIER` | Resolver service tier; default fast | Optional | ~/.config/secrets-manager/.env |
 | `SECRETS_STATE_DIR` | Accounts, credential files and logged-in browser profiles; default ~/.local/state/secrets-manager | Optional | ~/.config/secrets-manager/.env |
 | `SECRETS_DATA_DIR` | Debug captures and scratch files; default ~/.local/share/secrets-manager | Optional | ~/.config/secrets-manager/.env |
+
+## Setup (after every plugin install or update)
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
+"$SKILL_DIR/scripts/setup.sh"
+# Read-only report:
+"$SKILL_DIR/scripts/setup.sh" --check
+```
+
+Fill in `~/.config/secrets-manager/.env` from the plugin's `.env.example` (variables above) and list
+the app adapters in `~/.config/secrets-manager/config.json`, checking each file with
+`node "$SKILL_DIR/scripts/cli.mjs" validate /absolute/path/adapters.mjs`:
+
+```json
+{"adapters": ["/absolute/path/adapters.mjs"]}
+```
+
+A vendor whose Google lines carry the TOTP seed in a URL needs that URL's pattern in the same file,
+as `"totpUrlPatterns": ["<regex whose first group captures the base32 seed>"]`.
+
+Headed runs need Accessibility trust to move OAuth popups onto the `BROWSER_DISPLAY` display and
+Screen Recording permission to record the windows.
 
 ## New account flow
 
