@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import * as ex from "../scripts/extract.mjs";
 
@@ -384,4 +385,13 @@ test("a standalone appendix after body whitespace remains one section", () => {
   makeEpub(epub, {"c.xhtml": '<h1>1. Logs</h1><p>body</p>', "a.xhtml": '\n<section data-type="appendix"><h1>Appendix A</h1><p>appendix</p></section>'},
     ["c.xhtml", "a.xhtml"], {"c.xhtml": "1. Logs", "a.xhtml": "Appendix A"});
   assert.deepEqual(extractSections(work, epub).map(s => [s.title, s.words]), [["Logs", 3], ["Appendix A", 3]]);
+});
+
+test("refuses a work dir that already holds sections.json", () => {
+  const work = tmpDir(), sections = path.join(work, "sections.json");
+  fs.writeFileSync(sections, '{"sections": []}');
+  const run = spawnSync(process.execPath, [new URL("../scripts/extract.mjs", import.meta.url).pathname, path.join(work, "b.epub"), "--work", work], { encoding: "utf8" });
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /sections\.json/);
+  assert.equal(fs.readFileSync(sections, "utf8"), '{"sections": []}');
 });

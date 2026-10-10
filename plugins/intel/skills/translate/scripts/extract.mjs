@@ -812,6 +812,11 @@ export function main(argv) {
   } else {
     work = defaultWork(source);
   }
+  // Re-extracting renumbers section ids and orphans the translations keyed to them.
+  if (fs.existsSync(path.join(work, "sections.json"))) {
+    process.stderr.write(`${work} already holds sections.json; edit it in place, or extract into a new --work dir.\n`);
+    process.exit(2);
+  }
 
   const pageSize = args.pageSize.toLowerCase().split("x").map((x) => {
     const f = Number(x);
