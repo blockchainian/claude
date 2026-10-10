@@ -25,6 +25,12 @@ when the point is how the app behaves on real hardware. Use the simulator when t
 already running there, when no phone is connected, or when the request is about layout and
 content rather than the device. If the request does not say and both are available, ask.
 
+## Environment variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `MOBILE_OUTPUT_DIR` | Output root; screenshots go under `ios-screenshots/<run>/`; default `~/Documents` | Optional | Shell environment |
+
 ## Where Results Go
 
 ### Script location and shell values
@@ -62,8 +68,7 @@ mkdir -p "$SLICE_DIR" "$OUT_ROOT"
 printf 'RUN_ID=%s\nSLICE_DIR=%s\nOUT_ROOT=%s\n' "$RUN_ID" "$SLICE_DIR" "$OUT_ROOT"
 ```
 
-The stitched PNG goes where the caller asks, via `--out`. `MOBILE_OUTPUT_DIR` (default
-`~/Documents`) only takes effect if it is set in the shell that runs this command, so to use it,
+The stitched PNG goes where the caller asks, via `--out`. `MOBILE_OUTPUT_DIR` only takes effect if it is set in the shell that runs this command, so to use it,
 make `MOBILE_OUTPUT_DIR=/some/dir` the first line of that same command. `RUN_ID` gives each run its own
 subdirectory under it, so two sessions capturing the same screen cannot overwrite each
 other, and it is also the name under which this run claims its simulator.
