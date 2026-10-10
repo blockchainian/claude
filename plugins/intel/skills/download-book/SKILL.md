@@ -1,6 +1,6 @@
 ---
 name: download-book
-description: Search Anna's Archive for EPUB books, compare result download counts, extract fast and slow download links, and download the selected book to ~/Documents/books. Use when asked to find a book's download options, inspect this site's EPUB search results, or download a book.
+description: Search Anna's Archive for EPUB books, compare result download counts, extract fast and slow download links, and download the selected book to the intel output folder. Use when asked to find a book's download options, inspect this site's EPUB search results, or download a book.
 ---
 
 # Download book
@@ -16,11 +16,12 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 ## Environment variables
 
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in the member key there; the script reads only that file.
+Set these in `~/.config/intel/.env`, starting from the intel plugin’s `.env.example`. The member key is read only from that file.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `ANNA_ARCHIVE_SECRET_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `~/.config/intel/.env` |
+| `INTEL_OUTPUT_DIR` | Output root; books go under `books/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
 ## Setup (once)
 
@@ -34,19 +35,19 @@ It fetches the site through a headed Chrome window that it opens itself, one bac
 
 ## Run
 
-Pass a book title and the file to save it to:
+Pass a book title, and `--download` to save it:
 
 ```sh
-"$SKILL_DIR/scripts/anna-archive-links.mjs" "Pride and Prejudice" --out ~/Documents/books/"Pride and Prejudice.epub"
+"$SKILL_DIR/scripts/anna-archive-links.mjs" "Pride and Prejudice" --download
 ```
 
-The script picks the EPUB result with the most downloads on the first search page and prints JSON with that record (`title`, `md5`, `downloads_total`), its `fast` and `slow` links and, with `--out`, the `download` result. Without `--out` it only finds the links, which takes about 90 seconds.
+The script picks the EPUB result with the most downloads on the first search page and prints JSON with that record (`title`, `md5`, `downloads_total`), its `fast` and `slow` links and, with `--download`, the `download` result. Without it the script only finds the links, which takes about 90 seconds.
 
 Confirm the selected `title` matches the book the user asked for. A loose query can make a different book the most downloaded; re-run with a tighter query (add the author, edition, or subtitle) before downloading. The top record can still be a fan conversion or page scans: once downloaded, list the EPUB's entries (`unzip -l`) and check it holds real XHTML chapters, not one image per page. For a math book, avoid O'Reilly EPUBs whose files sit under `sbo-rt-content/`: their MathML is broken.
 
 ## Download
 
-Download the book to `~/Documents/books` (`<INTEL_OUTPUT_DIR>/books` when set) without asking the user to approve it, passing `--out ~/Documents/books/"<Title>.epub"` named from the book title. Run it in the background, since a slow download can take many minutes. Download several books one at a time, because this IP allows only one download at a time; finding links without `--out` can run in parallel.
+Download the book without asking the user to approve it; `--download` saves it as `books/<title>.epub` under the output root, named from the selected record, and `--out <file>` saves it elsewhere. Run it in the background, since a slow download can take many minutes. Download several books one at a time, because this IP allows only one download at a time; finding links without downloading can run in parallel.
 
 The JSON's `download` holds the saved `path`, the `url` used and the `refused` links, or an `error`. When every link was refused with 429, another download from this IP (often the user's own browser) is still running: report that and retry after it finishes.
 
