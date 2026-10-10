@@ -26,13 +26,13 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
+| `INTEL_STATE_DIR` | State root; work dirs go under `translate/`; default `~/.local/state/intel` | Optional | `~/.config/intel/.env` |
 | `INTEL_OUTPUT_DIR` | Output root; finished books go under `translate/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
-The book is usually the download-book skill's EPUB under `books/` in the output root; a book you have only as a PDF must
-be fetched as an EPUB first. Work lives in `~/.local/state/intel/translate/<slug>/` (`<INTEL_STATE_DIR>/translate/<slug>/`
-when set). Keep it: it is resumable, and the translated Markdown in it is costly to redo. The finished book is
-`<title-slug>.pdf` under `translate/` in the output root, named after the
-book's main title without its subtitle.
+The book is usually the download-book skill's EPUB under `books/` in the output root; a book you have only as a
+PDF must be fetched as an EPUB first. Each book's work dir is `translate/<slug>/` under the state root. Keep it:
+it is resumable, and the translated Markdown in it is costly to redo. The finished book is `<title-slug>.pdf`
+under `translate/` in the output root, named after the book's main title without its subtitle.
 
 ## Setup
 
@@ -47,20 +47,17 @@ the user's ChatGPT plan through `codex`; when its quota is out, wait or pass `--
 
 ```bash
 "$SKILL_DIR/scripts/extract.mjs" <book.epub>
-```
-
-Add `--keep-images` when the book's figures or equations are stored as images (a textbook); without it,
-extraction is text-only and figures and tables are lost, so a rate table comes out as prose.
-
-```bash
 "$SKILL_DIR/scripts/extract.mjs" <book.epub> --keep-images
 ```
 
-Extraction prints one line per section (`id kind title: words`) and the work dir. The kinds are `contents` and
-`skip` (not translated), `front` (roman folios), `chapter` (第N章, arabic folios from 1) and `back`. Check the
-listing before spending calls: a section with suspiciously few or many words, or a wrongly parsed title, means a
-spine file was mis-grouped, and odd EPUBs can lose bodies or type them `front`. A warning that chapter numbers
-skip or repeat means an opener was not recognised.
+Add `--keep-images` when the book stores its figures or equations as images, as textbooks do. Without it,
+extraction is text-only, so figures and tables are lost and a rate table comes out as prose.
+
+Extraction prints the work dir and one line per section, `id kind title: words`. Sections of kind `contents` and
+`skip` are not translated, `front` gets roman folios, `chapter` gets 第N章 and arabic folios from 1, and `back`
+is back matter. Check the listing before spending calls. A section with suspiciously few or many words, or a wrongly
+parsed title, means a spine file was mis-grouped, and odd EPUBs can lose bodies or type them `front`. A warning
+that chapter numbers skip or repeat means a chapter opener was not recognised.
 
 Fix any of these in `<work>/sections.json` before translating:
 
@@ -75,8 +72,8 @@ renumbers the ids the translations are keyed to.
 
 Write `<work>/glossary.md` with the book's key terms, every chapter title with its Chinese rendering, and the
 authors' names. The chapter titles become the 目录 and the bookmarks, so pinning them here keeps in-text
-references, the contents page and the bookmarks consistent. Ask the user only when a term is a real choice (a
-coined term with two accepted renderings); otherwise decide and note it in the summary.
+references, the contents page and the bookmarks consistent. Ask the user only when a term is a real choice, such
+as a coined term with two accepted renderings; otherwise decide and note it in the summary.
 
 ## Translate
 
@@ -85,31 +82,30 @@ coined term with two accepted renderings); otherwise decide and note it in the s
   > <work>/translate.log 2>&1
 ```
 
-Run it in the background and wait for it to finish. Claude Code and Codex both call the same logged-in `codex exec`
-CLI; do not replace it with host agents. A trade book is back in a few minutes. Rerunning skips sections whose
-`.md` exists; `--force --only 04,05` redoes chosen ones.
+Translation goes through the logged-in `codex exec` CLI; never replace it with host agents. A trade book is done
+in a few minutes. A rerun skips sections whose `.md` exists, and `--force --only 04,05` redoes chosen ones.
 
 A section whose answer fails the checks twice is kept as `<id>.rejected.md` and reported as `FAILED`. Short or
-heading-less sections and MathML-heavy ones are sometimes rejected while complete: check the text against the
+heading-less sections and MathML-heavy ones are sometimes rejected while complete. Check such a text against the
 source, add a `# 标题` line if it lacks one, and accept it by renaming `<id>.rejected.md` to the section's
 `<id>-<slug>.md`.
 
-While it runs, preview any finished section as its own PDF, and read one chapter against the source before the
-rest lands: wrong register, a dropped paragraph or a glossary miss is cheaper to fix now, by editing the glossary
-and rerunning `--force --only`.
+While translation runs, preview any finished section as its own PDF, and read one chapter against the source
+before the rest lands. A wrong register, a dropped paragraph or a glossary miss is cheaper to fix now, by editing
+the glossary and rerunning with `--force --only`.
 
 ```bash
 "$SKILL_DIR/scripts/render.py" <work> --only 04
 ```
 
-When every section is back, lint the Markdown and fix each reported line in it:
+When every section is back, lint the Markdown and fix each line it reports:
 
 ```bash
 "$SKILL_DIR/scripts/lint_md.py" <work> [id ...]
 ```
 
 An unclosed inline tag matters most, since one open `<code>` turns every later section into code. A section with
-many "unconverted math" hits had its LaTeX conversion skipped: retranslate it with
+many "unconverted math" hits had its LaTeX conversion skipped; retranslate it with
 `translate.mjs <work> --force --only <id> --effort medium`.
 
 ## Render the book
@@ -118,15 +114,15 @@ many "unconverted math" hits had its LaTeX conversion skipped: retranslate it wi
 "$SKILL_DIR/scripts/render.py" <work> --title "<中文书名>"
 ```
 
-Rendering needs network, because KaTeX loads from a CDN. Sections without a translation yet are skipped with a
-warning, so a partial book renders at any time. Pages default to a dark reading theme; `--bg/--fg` change it.
-For a book whose figures are grayscale screenshots or photos, add `--no-recolor` so images keep their own
-colours on a white plate; for one whose chapters open with numbered articles, add `--no-dropcap`.
+Rendering needs network, because KaTeX loads from a CDN. Sections not yet translated are skipped with a warning,
+so a partial book renders at any time. Pages default to a dark reading theme, which `--bg` and `--fg` change. For
+a book whose figures are grayscale screenshots or photos, add `--no-recolor` so images keep their own colours on a
+white plate; for one whose chapters open with numbered articles, add `--no-dropcap`.
 
-Then look, do not assume: render the cover, the 目录, one chapter opener and one body page to PNG
-(`pdftoppm -r 45`) and check that the header is masked on openers, folios restart at chapter 1, and 目录 page
-numbers match the bookmarks (pikepdf: the 目录 page's `/Annots` links point at the same pages). Then run the
-format check on the PDF:
+Then look rather than assume. Render the cover, the 目录, one chapter opener and one body page to PNG with
+`pdftoppm -r 45`, and check that the header is masked on openers, that folios restart at chapter 1, and that the
+目录 page numbers match the bookmarks (with pikepdf, the 目录 page's `/Annots` links point at the same pages).
+Then run the format check on the PDF:
 
 ```bash
 "$SKILL_DIR/scripts/format_check.py" <book.pdf> > <work>/format-check.txt
@@ -154,9 +150,9 @@ exits 0:
 Editing the Markdown is faster and more faithful than retranslating; retranslate only when the prose itself is
 wrong.
 
-## Editing after the fact
+## Edit a finished translation
 
 The translation is plain Markdown in `<work>/translated/`: fix a sentence there and rerun the render. A section's
-title is its Markdown's first `# ` line, not the `sections.json` title, so fix titles in the Markdown. Retranslate
-one section with `translate.mjs <work> --force --only <id>`. A different look beyond `--bg/--fg` is an edit to
-`css()` in `render.py`.
+title is the first `# ` line of its Markdown, not its `sections.json` title, so fix titles in the Markdown.
+Retranslate one section with `translate.mjs <work> --force --only <id>`. A look beyond what `--bg` and `--fg`
+change is an edit to `css()` in `render.py`.
