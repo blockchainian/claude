@@ -16,13 +16,11 @@ is already in (read those files; do not fetch it again), or `done` (its notes
 are written; skip it).
 
 Take the sources one at a time, each through all three steps before the next
-is opened: an agent that fetches the whole batch first and writes its notes
-last loses all of it when it is interrupted.
+is opened.
 
 1. Open it and save the full text (the page, the transcript, the PDF's text)
-   as a file under `raw/<batch>/`. A script later matches every figure in the
-   study against these files, and a source with no saved text has all its
-   figures sent back for checking by hand.
+   as a file under `raw/<batch>/`. The study's figures are checked against
+   these files.
 2. Append one line to `notes/<batch>.raw.tsv` for each file saved: the URL, a
    tab, the file's path from the work directory (`raw/<batch>/<file>`).
 3. Read the saved text to the end (a long interview or transcript too) and

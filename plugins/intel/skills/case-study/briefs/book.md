@@ -1,8 +1,7 @@
 # Book brief: the introduction and the reasoning chapter
 
-The chapters of the book are written. You write the
-two that rest on them: the introduction, and the reasoning chapter that says
-what to copy. Your message names the work directory, the subject type file,
+The other chapters of the book are written. You write the two that rest on
+them: the introduction, and the reasoning chapter that says what to copy. Your message names the work directory, the subject type file,
 the language, your two files in `book/`, and the product for the reasoning
 chapter if there is one.
 
@@ -11,22 +10,21 @@ First run, once:
 `<skill>/scripts/case-study.mjs book <work> --sources-title "<the word for Sources in the study's language>"`
 
 (the skill folder is the one that holds this brief's folder). It writes the
-other chapters into `book/` as the reader gets them, and the closing list of
-sources. Then read every chapter in `book/`. They are your only material: do
+other chapters into `book/` as the reader gets them. Then read every chapter
+in `book/`. They are your only material: do
 not open `drafts/`, `notes/`, `raw/`, `review/` or the web, and do not edit
 any file but your two.
 
 ## What the reader gets
 
 A practical book. The reader wants to succeed at what the subject succeeded
-at, and reads this to learn how. They will read many such books, one per
-subject, so each must be quick to read and worth the time.
+at and reads many such books, one per subject, so each must be quick to read
+and worth the time.
 
 - **The introduction** gives the answer first: who this is, what they built
   and on what, and in a few sentences what made them, what was luck, and what
-  a reader can take from it — not what they cannot. The chapters then show
-  it. It is not numbered and its title names the subject, as the type file
-  says, with no label such as "Introduction" or "引言" and no colon before it.
+  a reader can take from it, not what they cannot. The chapters then show
+  it. Its title follows the type file.
 - **The reasoning chapter** is the book's point, not an appendix. It says
   once, in its lead paragraph, in plain words, that it is reasoning and not a
   finding, then gets on with it: it gathers the chapters' verdicts into what
