@@ -155,7 +155,7 @@ export async function runLive(src, outTxt, seconds = 30, maxMinutes = null, onTe
 
 const USAGE = `usage: ${PROG} [-h] [--segment-seconds SEGMENT_SECONDS] ` +
   `[--max-minutes MAX_MINUTES]\n` +
-  `${" ".repeat(7 + PROG.length)}source out_txt`;
+  `${" ".repeat(7 + PROG.length)}source [out_txt]`;
 
 const HELP = `${USAGE}
 
@@ -164,6 +164,7 @@ Transcribe a live audio stream.
 positional arguments:
   source                stream URL (direct or Twitch/YouTube/X) or file
   out_txt               transcript file, appended as chunks land
+                        (default: <INTEL_OUTPUT_DIR>/transcripts/<source name>.txt)
 
 options:
   -h, --help            show this help message and exit
@@ -199,7 +200,7 @@ export function parseCli(argv) {
     process.stdout.write(HELP);
     process.exit(0);
   }
-  const missing = ["source", "out_txt"].slice(positionals.length);
+  const missing = ["source"].slice(positionals.length);
   if (missing.length) usageError(`the following arguments are required: ${missing.join(", ")}`);
   if (positionals.length > 2) {
     usageError(`unrecognized arguments: ${positionals.slice(2).join(" ")}`);
@@ -220,10 +221,12 @@ export function parseCli(argv) {
       usageError(`argument --max-minutes: invalid float value: '${raw}'`);
     }
   }
-  return { source: positionals[0], outTxt: positionals[1], segmentSeconds, maxMinutes };
+  const outTxt = positionals[1] ?? base.transcriptPath(positionals[0]);
+  return { source: positionals[0], outTxt, segmentSeconds, maxMinutes };
 }
 
 export async function main(argv = process.argv.slice(2)) {
+  loadEnvFile();
   const a = parseCli(argv);
   const summary = await runLive(a.source, a.outTxt, a.segmentSeconds, a.maxMinutes,
     (t) => process.stderr.write(t + "\n"));

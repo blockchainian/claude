@@ -168,3 +168,23 @@ describe("e2e whisper smoke", { skip: e2eSkip }, () => {
     assert.equal(js.chunks, 3, res.stdout);
   });
 });
+
+describe("default transcript path", () => {
+  test("saves under the intel output root, named from the source", () => {
+    assert.equal(audio.transcriptPath("/rec/Episode 12.mp3", { INTEL_OUTPUT_DIR: "/out" }),
+      "/out/transcripts/Episode 12.txt");
+    assert.equal(audio.transcriptPath("https://twitch.tv/somechannel", { INTEL_OUTPUT_DIR: "/out" }),
+      "/out/transcripts/somechannel.txt");
+    assert.match(audio.transcriptPath("a.m4a", {}), /\/Documents\/transcripts\/a\.txt$/);
+  });
+
+  test("live: out_txt is optional and defaults to the output root", () => {
+    process.env.INTEL_OUTPUT_DIR = "/out";
+    try {
+      assert.equal(live.parseCli(["https://example.com/show.m3u8"]).outTxt,
+        "/out/transcripts/show.txt");
+    } finally {
+      delete process.env.INTEL_OUTPUT_DIR;
+    }
+  });
+});

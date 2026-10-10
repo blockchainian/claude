@@ -37,7 +37,9 @@ process state before retrying.
 
 ## Environment variables
 
-No skill-specific environment variables or `.env` file are required.
+| Variable | Purpose | Required | Set in |
+|---|---|---|---|
+| `INTEL_OUTPUT_DIR` | Output root; transcripts go under `transcripts/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
 One whisper engine (`whisper-large-v3-turbo`, Apple Silicon), two entry points:
 a **batch** script for finite audio, a **live** script for an ongoing stream.
@@ -59,15 +61,15 @@ model (~1.5GB) is not fetched here: mlx-whisper downloads it on the first
 transcription and caches it, so it self-installs once. `setup.sh --check` reports
 what is present or missing without installing anything.
 
-A transcript asked for by the user goes to `~/Documents/transcripts/<name>.txt` (`<INTEL_OUTPUT_DIR>/transcripts/`
-when set); another skill passes its own path. Downloaded audio and segments are scratch under
+Without an out path, a transcript goes to `transcripts/<source name>.txt` under the output root;
+another skill passes its own path. Downloaded audio and segments are scratch under
 `~/.local/share/intel/tmp/transcribe/`, removed when the run ends.
 
 ## Batch — a finite file or URL
 
 ```bash
 "$SKILL_DIR/scripts/transcribe-audio.mjs" \
-  "<audio-url-or-file>" "<out.txt>"
+  "<audio-url-or-file>" ["<out.txt>"]
 ```
 
 - A local path is transcribed in place; a URL is downloaded first (`curl`,
@@ -80,7 +82,7 @@ when set); another skill passes its own path. Downloaded audio and segments are 
 
 ```bash
 "$SKILL_DIR/scripts/transcribe-live.mjs" \
-  "<stream>" "<out.txt>" [--segment-seconds 30] [--max-minutes N]
+  "<stream>" ["<out.txt>"] [--segment-seconds 30] [--max-minutes N]
 ```
 
 - `<stream>` is a direct, ffmpeg-readable URL (HLS/`.m3u8`, Icecast/radio, RTMP,
