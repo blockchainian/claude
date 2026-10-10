@@ -16,82 +16,86 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 ## Environment variables
 
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The checker reads this file directly; exported shell variables are not used for these credentials.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in only the values the
+skills you use need. The checker reads this file directly and ignores exported shell variables.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `NAMECHEAP_USERNAME` | Namecheap account username | Yes | `~/.config/intel/.env` |
 | `NAMECHEAP_API_KEY` | Namecheap API key | Yes | `~/.config/intel/.env` |
 
-Brainstorm a brand name and hand back only the ones you can actually register.
-The naming taste is fixed (below); the one thing that changes per run is the
-**theme**, which you always ask for. Availability is checked live against
-Namecheap's official API, so a name on the final list is real, not a guess.
-
 ## Setup
 
-Requires Namecheap API access with the caller's public IP whitelisted. If the checker
-reports a missing credential or rejected IP, resolve that prerequisite before checking
-names; do not repeatedly send the same failed request.
+The checker needs Namecheap API access with the caller's public IP whitelisted. If it reports a
+missing credential or a rejected IP, have that fixed before checking any names, and do not resend
+the same failed request.
 
-## The flow
+## Ask for the theme
 
-1. **Ask the user for the theme / product.** Always. There is no default —
-   the theme drives the whole metaphor pool. (One line is enough: "a crypto
-   trading app", "a sleep-tracking wearable", "a co-op board game".)
-2. **Generate candidates** in the fixed style below, aimed at the sweet spot:
-   a **short coined word distilled from a metaphor of the theme** — e.g. for a
-   wealth product, *treasure trove → trovy*. Coined words first, metaphor words
-   second, and **no compound words**.
-3. **Check availability** with `scripts/check.mjs` across `.xyz / .ai / .fun`.
-   Keep `available-standard`; carry `available-premium` as flagged backups with
-   their price; drop `taken` and (usually) `reserved-premium`.
-4. **Collision check by popularity.** WebSearch the survivors. Drop a name only
-   when it collides with something **popular / well-known** — a notable crypto
-   or tech project, a mainstream brand, a famous title. An obscure namesake is
-   not a reason to cut. Judge by how well-known the clash is, not by mere
-   existence of a namesake.
-5. **Present a ranked shortlist**, coined above metaphor, each with a one-line
-   note on **where the meaning is buried** (the point is it's discoverable, see
-   the style). Flag any premium picks with their buy/renew price.
+Always ask the user for the theme or product first; there is no default, because the theme drives
+the whole metaphor pool. One line is enough, such as "a crypto trading app", "a sleep-tracking
+wearable" or "a co-op board game". This question and the setup prompt when the key is missing are
+the only times to interrupt the user. Never ask them to pick a style direction: the style below is
+already decided.
 
-The only things that interrupt the user are the theme question (step 1) and the
-setup prompt when the key is missing. **Never ask the user to pick a style
-direction** — the style is already decided:
+## Generate candidates
 
-## Fixed style
+Aim for the sweet spot, a short coined word distilled from a metaphor of the theme: for a wealth
+product, *treasure trove* becomes *trovy*. Generate coined words first and metaphor words second,
+and no compound words, since two-word names run long. Every candidate follows this fixed style:
 
-- **Interesting, any register** — playful, witty, or bold all welcome; don't
-  self-limit to one vibe.
-- **Meaning buried one layer, but not too deep** — don't put the theme word on
-  the face; make the reader discover it. But keep it gettable by an ordinary
-  person (a name whose sense only appears with etymology is buried too deep —
-  cut it).
-- **Coined first, metaphor second, no compounds** — compound two-word names run
-  long; skip them.
-- **Not tied to one product feature** — the name lives at the brand layer, not
-  bound to "fast" / "sniping" / "info-edge".
+- **Interesting, in any register.** Playful, witty and bold are all welcome; don't limit yourself
+  to one vibe.
+- **Meaning buried one layer, but not too deep.** Keep the theme word off the face of the name so
+  the reader discovers it, yet keep it gettable by an ordinary person. A name whose sense only
+  appears through etymology is buried too deep; cut it.
+- **Not tied to one product feature.** The name lives at the brand layer, not bound to "fast",
+  "sniping" or "info-edge".
 
-Length caps (a hard filter, not a score): **coined ≤ 6 letters, metaphor ≤ 8.**
-Priority is separate and by type: coined outranks metaphor regardless of length.
+Length caps are a hard filter, not a score: coined words at most 6 letters, metaphor words at most
+8. Priority is by type, separately from length: a coined word outranks a metaphor word whatever
+their lengths.
 
-## The checker — `scripts/check.mjs`
+## Check availability
 
-```
+Run the candidates through the checker across `.xyz`, `.ai` and `.fun`. Keep `available-standard`
+names, carry `available-premium` names as flagged backups with their price, and drop `taken` and,
+usually, `reserved-premium`.
+
+## Filter collisions by popularity
+
+WebSearch the survivors and drop a name only when it collides with something popular or well
+known: a notable crypto or tech project, a mainstream brand, a famous title. Judge by how well
+known the clash is; an obscure namesake is not a reason to cut.
+
+## Present the shortlist
+
+Hand back a ranked shortlist, coined words above metaphor words, each with a one-line note on where
+the meaning is buried, since the point is that it can be discovered. Flag every premium pick with
+its buy and renewal price.
+
+## Checker
+
+```sh
 "$SKILL_DIR/scripts/check.mjs" <name|domain> ...
 ```
 
-A bare word (`trovy`) expands to `.xyz/.ai/.fun`; a full domain (`trovy.xyz`)
-is checked as given. Prints one row per domain: `domain  status  price`, where
-status is `available-standard` (registrable, normal price), `available-premium`
-(registrable but premium — price shown), `reserved-premium` (held by the
-registry, price shown), or `taken`. Batches of 50 per API call.
+A bare word such as `trovy` expands to `.xyz`, `.ai` and `.fun`; a full domain such as `trovy.xyz`
+is checked as given. The checker prints one row per domain, `domain  status  price`, with one of
+four statuses:
+
+- `available-standard`: registrable at the normal price.
+- `available-premium`: registrable but premium; the price is shown.
+- `reserved-premium`: held by the registry; the price is shown.
+- `taken`: registered.
+
+It sends up to 50 domains per API call.
 
 ## Tests
 
-```
+```sh
 node --test skills/find-domain-names/tests/check.test.mjs
 ```
 
-Covers XML parsing and the four-state classification on a fixed Namecheap
-response (no network).
+The tests cover XML parsing and the four-status classification on a fixed Namecheap response,
+without network access.
