@@ -1,4 +1,4 @@
-## Snapshot Flags
+## Snapshot flags
 
 `$B` is the browse binary: the web plugin's `bin/browse` launcher on PATH.
 
@@ -42,7 +42,7 @@ $B click @c1       # cursor-interactive ref (from -C)
 
 Refs are invalidated on navigation — run `snapshot` again after `goto`.
 
-## Full Command List
+## Full command list
 
 ### Navigation
 | Command | Description |

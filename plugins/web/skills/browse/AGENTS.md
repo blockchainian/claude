@@ -85,13 +85,13 @@ Run these from this skill's directory.
 
 A new build id means a new binary, and each running daemon restarts on its next command, losing its tabs.
 
-## Checks
-
-- **patches**: `./scripts/check-patches.sh`
-- **browse**: `npm run test:web` from the repository root, with `BROWSE_HEADED_TESTS` unset
-
 ## Version control
 
 - Commit each coherent verified change with a plugin version bump, push it, and update the installed plugin.
 - Commit `gstack` pointer changes together with `GSTACK_COMMIT` when upgrading upstream.
 - Never push personal development commits to the gstack remote.
+
+## Checks
+
+- **patches**: `./scripts/check-patches.sh`
+- **browse**: `npm run test:web` from the repository root, with `BROWSE_HEADED_TESTS` unset
