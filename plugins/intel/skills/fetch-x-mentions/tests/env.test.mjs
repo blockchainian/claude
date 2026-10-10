@@ -83,3 +83,14 @@ test('plugin roots default under the home directory and each has its own overrid
  assert.equal(tmpDir('translate',env),join(root,'d/tmp/translate'));
  assert.ok(spawnSync('test',['-d',join(root,'d/tmp/translate')]).status===0);
 });
+
+test('the CLI prints one root path when named, with the env file applied', () => {
+ const home=mkdtempSync(join(tmpdir(),'intel-root-home-'));
+ mkdirSync(join(home,'.config/intel'),{recursive:true});
+ writeFileSync(join(home,'.config/intel/.env'),'INTEL_OUTPUT_DIR=~/out\n');
+ const env={...process.env,HOME:home};delete env.INTEL_OUTPUT_DIR;
+ const script=new URL('../scripts/env.mjs',import.meta.url).pathname;
+ const result=spawnSync(process.execPath,[script,'output'],{env,encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);
+ assert.equal(result.stdout,join(home,'out')+'\n');
+});
