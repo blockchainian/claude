@@ -9,7 +9,7 @@ Files: `src/routes/feed.ts`, `src/lib/feed.ts`
 
 ## UX workstreams (Fable)
 
-### `home-lanes` — home lanes
+### `home-workstreams` — home workstreams
 
 1. step
 Files: `src/screens/home.ts`, `src/shared/client.ts`

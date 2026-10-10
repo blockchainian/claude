@@ -81,7 +81,7 @@ touching anything.
    exploration, a gate-fix the plan could not have avoided. Honesty about what
    was not waste is what makes the ranking credible.
 
-4. **Account for the codex lane.** Codex runs in an external runtime, so its cost
+4. **Account for the codex workstream.** Codex runs in an external runtime, so its cost
    is not in the Claude transcript — but `extract.mjs` recovers it from
    `~/.codex/sessions`: by the codex thread ids codex-manager returned in the
    transcript (exact), else by originator + worktree + time window
@@ -101,7 +101,7 @@ touching anything.
 
    ```
    {session_id, name, date, shape: "goal"|"ship", grand_total,
-    lanes: {orchestrator, subagents, codex},
+    workstreams: {orchestrator, subagents, codex},
     findings: [{waste_class, axis, cost, cost_kind: "measured"|"proxy",
                 fix_destination, fix_id}]}
    ```

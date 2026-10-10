@@ -33,9 +33,9 @@ and their own account of their method stays a claim throughout.
 10. Third-party data firms and academic work.
 11. Criticism and exposés.
 
-## Scout lanes
+## Scout workstreams
 
-| Lane | Source types |
+| Workstream | Source types |
 |---|---|
 | interviews | 1. The video search, with every name the subject goes by, and podcast search |
 | own-explainers | 2, and the books the subject wrote |

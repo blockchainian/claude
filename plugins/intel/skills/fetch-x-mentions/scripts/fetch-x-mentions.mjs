@@ -846,7 +846,7 @@ async function main() {
       `up to ${maxPages * PAGE} tweets/day\n`,
   );
 
-  // Lanes finish days concurrently; the append and the progress write of each day go through
+  // Workstreams finish days concurrently; the append and the progress write of each day go through
   // one chain so lines never interleave and the progress file is never torn.
   let checkpoint = Promise.resolve();
   const commitDay = (day, got) => {

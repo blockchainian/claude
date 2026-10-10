@@ -137,7 +137,7 @@ recorded complete without a request.
 TikTok's web API answers an unsigned request with an empty 200. Each session opens tiktok.com in
 Camoufox, copies the query params of the first API request the page itself sends, and calls
 `fetch()` inside the page, where TikTok's own script signs it. One session is one browser on one
-ISP slot (a fixed IP), shared by several lanes. A non-JSON answer (`Access Denied`) is held against
+ISP slot (a fixed IP), shared by several workstreams. A non-JSON answer (`Access Denied`) is held against
 the session: it is closed and a fresh one on the same slot takes the work over at once. An empty
 answer is held against the IP: the slot's next session opens after a one-minute cool-down.
 
@@ -161,10 +161,10 @@ First use in a checkout: `npm install --prefix "$SKILL_DIR/scripts"`. Use the Ca
 
 ## Failures
 
-- `blocked, replacing the session` now and then is normal. Lanes ending with
+- `blocked, replacing the session` now and then is normal. Workstreams ending with
   `stopped after 3 failures in a row` mean their IP stays refused: the other slots finish what
   they can; wait and rerun, or lower `--concurrency`.
-- `the page sent no API request`: the page was slow or got a challenge; the lane retries.
+- `the page sent no API request`: the page was slow or got a challenge; the workstream retries.
 - Every request blocked from the first one: TikTok changed its page. Open tiktok.com/explore,
   check that its `/api/` requests still carry `device_id` and are signed by the page's `fetch`.
 - `download failed`: the play address answered non-200; rerun.

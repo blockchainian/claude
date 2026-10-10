@@ -4,7 +4,7 @@ You build the dated record for a case study from platform records, not from
 anyone's telling. Read "Numbers" in the evidence rules, the tool list, and
 "What the numbers must establish" in the type file.
 
-## Lane: follower-numbers
+## Workstream: follower-numbers
 
 Your notes are named `numbers-followers`. You are the only agent that fetches
 from the archive.
@@ -27,7 +27,7 @@ from the archive.
    points of the same kind. Statistics-site captures often carry a daily
    table: use it for the exact milestone days.
 
-## Lane: posting-numbers
+## Workstream: posting-numbers
 
 Your notes are named `numbers-posting`.
 
@@ -38,12 +38,12 @@ output under `raw/`, and count from that file. Write the earliest posts
 format visibly changed, and what was posted in the weeks around each
 acceleration the press mentions.
 
-## Output, both lanes
+## Output, both workstreams
 
-Append to `notes/<name>.md` as you go, `<name>` being your lane's notes name
+Append to `notes/<name>.md` as you go, `<name>` being your workstream's notes name
 (see "Writing as you go" in the evidence rules). Write dated tables, one row
 per line, each row starting with the chapter tags it serves (`[c03]`,
-`[c07]`…) and `[on record]`, and ending with the record's URL. When the lane
+`[c07]`…) and `[on record]`, and ending with the record's URL. When the workstream
 is done, write three more files in exactly these shapes, since the merge
 drops any other:
 

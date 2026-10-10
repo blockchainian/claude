@@ -18,10 +18,10 @@ async function run(args, slow = [], dead = []) {
     if (dead.includes(opts.label)) return Promise.resolve(null) // an agent that died returns nothing
     const finish = () => {
       if (opts.label.startsWith('scout:')) {
-        const lane = opts.label.slice(6)
-        // 30 sources per lane, one shared by every lane
+        const workstream = opts.label.slice(6)
+        // 30 sources per workstream, one shared by every workstream
         return { sources: [{ url: 'https://shared.example/a/', outlet: 'Shared' },
-          ...Array.from({ length: 29 }, (_, i) => ({ url: `https://${lane}.example/${i}`, outlet: lane, year: '2020' }))] }
+          ...Array.from({ length: 29 }, (_, i) => ({ url: `https://${workstream}.example/${i}`, outlet: workstream, year: '2020' }))] }
       }
       if (opts.label === 'merge:read') return '{"sources": 130, "failed": 0, "gaps": 4}'
       if (opts.label === 'cited:sources') return '{"cited": 60}'
@@ -44,12 +44,12 @@ const ARGS = { subject: 'Jane Doe', work: '/w', skill: '/s', lang: 'English', to
 const labels = (calls, prefix) => calls.filter(c => c.label.startsWith(prefix)).map(c => c.label)
 const BODY = ['02', '03', '04', '05', '06', '07', '08', '09']
 
-const LANES = ['interviews', 'own-explainers', 'internal-documents', 'press-at-the-time', 'trade-and-profiles', 'books-and-films', 'people', 'records', 'data-and-today', 'criticism']
+const WORKSTREAMS = ['interviews', 'own-explainers', 'internal-documents', 'press-at-the-time', 'trade-and-profiles', 'books-and-films', 'people', 'records', 'data-and-today', 'criticism']
 
 test('one scout per source type, each told to search at once and open nothing, with its share of the caps', async () => {
   const { calls } = await run(ARGS)
   const scouts = calls.filter(c => c.label.startsWith('scout:') && !c.label.endsWith('-numbers'))
-  assert.deepEqual(scouts.map(c => c.label.slice(6)).sort(), [...LANES].sort())
+  assert.deepEqual(scouts.map(c => c.label.slice(6)).sort(), [...WORKSTREAMS].sort())
   assert.ok(scouts.every(c => c.prompt.includes('1/12 share')), 'the two numbers agents run beside the ten scouts')
 })
 
