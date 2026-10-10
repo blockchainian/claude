@@ -16,7 +16,8 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 ## Environment variables
 
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in the values below. The
+script loads that file without replacing variables already exported in the shell.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
@@ -27,72 +28,72 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 | `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
 | `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
 | `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
-| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with the account-rotation state under limits/ | No | `~/.config/intel/.env` |
-| `SECRETS_STATE_DIR` | Account-store directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; the account-rotation state lives under `limits/`; default `~/.local/state/intel` | No | `~/.config/intel/.env` |
+| `SECRETS_STATE_DIR` | Account-store directory; default `~/.local/state/secrets-manager` | No | `~/.config/intel/.env` |
 
-Account credentials stay in the secrets-manager store; do not copy them into `.env`. Capture the
-web-client and signing values from x.com, and refresh them when its web bundle changes.
+The web-client and signing values are captured from x.com; refresh them when its web bundle
+changes. Account credentials stay in the secrets-manager store and never go into `.env`.
 
 ## Setup
 
-Requires Node.js 22.13+. Install the shared X client with
-`npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`, and log the X accounts in with the
-`secrets` plugin's `secrets-manager login x`.
+The script needs Node.js 22.13+. Install the shared X client once:
 
-## Shared account prerequisite
+```sh
+npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"
+```
 
-Use the existing secrets-manager CLI and store to provision or log in accounts.
-It need not be installed as a Codex plugin to run its CLI. If the CLI, required
-account, proxy or browser profile is missing, report the prerequisite; do not
-create a second store or switch to a host browser profile.
+Log the X accounts in with the `secrets` plugin's `secrets-manager login x`. Its CLI runs without
+being installed as a Codex plugin. If the CLI, an account, the proxy or a browser profile is
+missing, report that prerequisite; never create a second store or switch to a host browser profile.
 
 ## Run
 
-Run one X search and print the posts it returns; nothing is written to disk. For an account's
-profile (bio, links, follower counts), which search does not return, use
+One run sends one X search and prints the posts it returns; nothing is written to disk.
+
+```sh
+node "$SKILL_DIR/scripts/fetch-x-posts.mjs" "<query>" [--limit <n>] [--latest|--top]
+```
+
+- The query is X search syntax in one quoted argument and goes to X as written, so operators work:
+  `"from:zachxbt min_faves:5000"`, `"Kobeissi Letter since:2026-01-01_00:00:00_UTC"`,
+  `"to:alpha filter:replies"`.
+- `--limit` sets how many posts to print (default 40). Each request returns 20 posts and takes 1 to
+  2 seconds.
+- `--latest`, the default, is the chronological view; `--top` is X's ranked one.
+
+Search does not return an account's profile (bio, links, follower counts); get that with
 `curl -s https://api.fxtwitter.com/<handle>`.
-
-```
-node \
-  "$SKILL_DIR/scripts/fetch-x-posts.mjs" \
-  "<query>" [--limit <n>] [--latest|--top]
-```
-
-- `query` is X search syntax in one quoted argument, passed as written, so operators work:
-  `"from:zachxbt min_faves:5000"`, `"Kobeissi Letter since:2026-01-01_00:00:00_UTC"`, `"to:alpha filter:replies"`.
-- `--limit` is how many posts to print (default 40). A request returns 20 and takes 1 to 2 seconds.
-- `--latest` (the default) is the chronological view, `--top` X's ranked one.
 
 ## Output
 
-stdout carries one JSON object per post (`id, url, created_at, user, name, text, likes, retweets,
-replies, views, quoted, in_reply_to`), in X's order. `created_at` is UTC, `text` is the whole post
-(for a retweet, the original's text), `quoted` is the quoted post's url or null and `in_reply_to`
-the parent's id or null.
+Each stdout line is one JSON object per post, in X's order, with `id, url, created_at, user, name,
+text, likes, retweets, replies, views, quoted, in_reply_to`. `created_at` is UTC and `text` is the
+whole post, for a retweet the original's text. `quoted` is the quoted post's url and `in_reply_to`
+the parent's id, each null when absent.
 
-An exit 0 with no lines means the search has no results. Any failure exits 1 with a last stderr
-line `fetch-x-posts: <reason>`, but the posts found before it are still printed, so read stdout
-before the exit code. Earlier stderr lines are notes: `@user answered 403, marked bad`, and
+Exit 0 with no lines means the search has no results. Any failure exits 1 with a last stderr line
+`fetch-x-posts: <reason>`, but the posts found before it are still printed, so read stdout before
+the exit code. Earlier stderr lines are notes: `@user answered 403, marked bad`, and
 `N of M accounts usable` when fewer than 10 are.
 
 ## Failures
 
-- `@user answered 403, marked bad`: the stored ct0 no longer matches the session or the account is
-  locked. Re-derive the ct0 pairs with `node "$SKILL_DIR/../fetch-x-mentions/scripts/verify-x.mjs" --all`,
-  then put the accounts back into rotation:
-  `sqlite3 ~/.local/state/intel/limits/fetch-x-posts.sqlite "update accounts set paused_until=0, bad=null"`.
+- `@user answered 403, marked bad`: the account's stored session no longer matches or the account
+  is locked. Re-derive the session pairs with
+  `node "$SKILL_DIR/../fetch-x-mentions/scripts/verify-x.mjs" --all`, then put the accounts back
+  into rotation with
+  `sqlite3 "${INTEL_STATE_DIR:-$HOME/.local/state/intel}/limits/fetch-x-posts.sqlite" "update accounts set paused_until=0, bad=null"`.
 - `all N accounts are paused`: X rate-limited every account; wait for the reset time it names.
 - `failed after N attempts` is the proxy, not a ban; rerun.
 - `SearchTimeline 400` mentioning the operation or features means X redeployed; update
   `X_SEARCH_QUERY_ID` in `~/.config/intel/.env` and `FEATURES` in `fetch-x-mentions.mjs`.
-- `Cannot find package 'undici'` in a fresh worktree:
-  `npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`.
+- `Cannot find package 'undici'` in a fresh worktree means the Setup install is missing; run it.
 
-Full fetches (`fetch-x-mentions`, `fetch-x-user-posts`) share the same accounts, so one running at
-the same time can rate-limit accounts this search wanted.
+The full fetches, `fetch-x-mentions` and `fetch-x-user-posts`, use the same accounts, so one running
+at the same time can rate-limit accounts this search wanted.
 
-## Test
+## Tests
 
-```
+```sh
 node --test "$SKILL_DIR/tests/fetch-x-posts.test.mjs"
 ```
