@@ -16,24 +16,14 @@ description: >
 
 # Transcribe audio — local whisper, file, URL, or live stream
 
-## Runtime and paths
+## Skill directory
 
-These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
-loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
-any other variable a command below uses, in every shell call:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+scripts import from the sibling `fetch-x-mentions` skill, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
-
-If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
-because sibling skills share scripts.
-
-For a long-running command, choose a deadline before launch and keep the process handle and its
-output. In Claude Code run it with `run_in_background` and wait for the completion notification;
-in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
-before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
-process state before retrying.
 
 ## Environment variables
 
@@ -77,6 +67,7 @@ another skill passes its own path. Downloaded audio and segments are scratch und
   ffmpeg and transcribes the audio track either way.
 - Prints JSON with `transcript` (the out path), `words`, `thin` (`words < 1500`)
   and `source`.
+- A long recording takes minutes; run it in the background.
 
 ## Live — an ongoing stream
 
