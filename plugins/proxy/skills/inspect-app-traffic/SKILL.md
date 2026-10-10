@@ -3,7 +3,7 @@ name: inspect-app-traffic
 description: Capture and decode the HTTP and WebSocket traffic of one target web or mobile app with mitmproxy. Use when asked to see what API calls an app makes, intercept or sniff a web or iPhone app's requests, reverse-engineer an app's API or WebSocket protocol, or set up mitmproxy with Zero Omega. One shared proxy on port 8080; each capture is a filtered view of its stream.
 ---
 
-# Inspect App Traffic
+# Inspect app traffic
 
 Capture the HTTP and WebSocket traffic of a target app — a website driven from this Mac
 through the Zero Omega extension, or an iPhone over WireGuard — decrypt its TLS, and read its
