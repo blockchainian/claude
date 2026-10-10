@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -46,7 +46,8 @@ function expandUser(path) {
 
 // Python skills reuse this loader rather than implementing another dotenv parser; a root name
 // (data, state or output) prints just that path, for shell commands.
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// Node resolves the main module through symlinks, so argv[1] must be resolved the same way.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   loadEnvFile();
   const roots = {data: dataDir(), state: stateDir(), output: outputDir()};
   const name = process.argv[2];

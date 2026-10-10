@@ -1,7 +1,7 @@
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {loadEnvFile,requireEnv,envPath} from '../scripts/env.mjs';
@@ -93,4 +93,11 @@ test('the CLI prints one root path when named, with the env file applied', () =>
  const result=spawnSync(process.execPath,[script,'output'],{env,encoding:'utf8'});
  assert.equal(result.status,0,result.stderr);
  assert.equal(result.stdout,join(home,'out')+'\n');
+});
+
+test('the CLI prints through a symlinked scripts directory', () => {
+ const dir=mkdtempSync(join(tmpdir(),'intel-env-link-'));
+ symlinkSync(new URL('../scripts/',import.meta.url).pathname,join(dir,'scripts'));
+ const result=spawnSync(process.execPath,[join(dir,'scripts','env.mjs'),'output'],{env:{...process.env,INTEL_OUTPUT_DIR:'/out'},encoding:'utf8'});
+ assert.equal(result.stdout,'/out\n',result.stderr);
 });
