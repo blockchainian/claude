@@ -26,14 +26,17 @@ variable such as `BROWSE_BIN`).
 
 The first call after an install or a plugin update builds the CLI, which takes
 several seconds and needs `bun`, `git` and network access; build output goes to
-stderr, so stdout stays browse's own. A new build also restarts the shared
+stderr, so stdout stays browse's own. A new build also restarts each running
 daemon on its next command, losing every tab and login in it, so warn the user
 before that first call while other sessions use the daemon.
 
 ## One tab per client (parallel runs)
 
-Every session on the machine shares one daemon. Never kill it (`pkill -f browse`, `pkill terminal-agent`):
-that drops every session's tabs and logins. Without a tab of its own, a
+Each git root (or working directory outside a repo) has one daemon, shared by
+every session working there; sessions in other repos get their own daemon. The
+headed browser's profile (`CHROMIUM_PROFILE`) is shared by all of them. Never
+kill a daemon (`pkill -f browse`, `pkill terminal-agent`): a pkill hits every
+repo's daemon and drops every session's tabs and logins. Without a tab of its own, a
 client drives whatever tab is active and races every other client. To run in
 parallel, open a tab and pin every command to it with `BROWSE_TAB`:
 
@@ -156,7 +159,7 @@ the background of that window, so the browser does not take focus from the
 user's app.
 
 `--headed` and `--proxy` apply only when the daemon starts. Switching a running
-daemon to another config takes `browse disconnect`, which drops the shared
+daemon to another config takes `browse disconnect`, which drops the
 daemon's tabs and logins, so ask the user first while other sessions use it.
 
 ```bash
@@ -174,7 +177,7 @@ browse download "https://protected.example.com/file" /tmp/file.bin --navigate
 | `BROWSER_DISPLAY` | Display for the headed window; see Headed mode and proxies | No | shell, or `~/.config/web/.env` |
 | `BROWSE_PROXY_USER`, `BROWSE_PROXY_PASS` | Proxy credentials for `--proxy`, instead of putting them in its URL | No | shell |
 | `CHROMIUM_PROFILE` | Profile directory of the headed browser (default `~/.gstack/chromium-profile`) | No | shell |
-| `BROWSE_STATE_FILE` | State file that picks which daemon a client talks to (default `.gstack/browse.json` under the git root, else the working directory) | No | shell |
+| `BROWSE_STATE_FILE` | State file that picks which daemon a client talks to (default `.gstack/browse.json` under the git root or working directory) | No | shell |
 | `BROWSE_IDLE_TIMEOUT` | Milliseconds of inactivity before the daemon shuts down, losing its tabs and logins (default 1800000, 30 min) | No | shell |
 | `CLAUDE_PLUGIN_DATA` | Parent directory of the launcher's builds | No | set by Claude Code |
 
