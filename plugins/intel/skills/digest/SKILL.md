@@ -19,25 +19,22 @@ description: >
 
 ## Runtime and paths
 
-Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
-this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
+loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
+any other variable a command below uses, in every shell call:
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
 
-Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
-shell variables may not persist between calls. If the loaded path is unavailable, stop
-and report it. Keep the full intel plugin installed: sibling skills share scripts.
-Run archive commands from the repository that owns the archive; configuration and
-account stores are shared between hosts and are not migrated by installing intel.
+If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
+because sibling skills share scripts.
 
-For finite long-running commands, choose a deadline before launch and retain the process
-handle and output. In Claude Code use `run_in_background` and its completion notification;
-in Codex use the shell tool's process/session handle and wait for completion. Subagents
-must await their own commands before returning. Do not repeatedly poll logs or assume a
-background completion wakes either host. On timeout, preserve diagnostics and report the
-process state before retrying. Use the current host's image/file tools to inspect artifacts.
+For a long-running command, choose a deadline before launch and keep the process handle and its
+output. In Claude Code run it with `run_in_background` and wait for the completion notification;
+in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
+before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
+process state before retrying.
 
 ## Environment Variables
 
