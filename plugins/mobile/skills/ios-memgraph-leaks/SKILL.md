@@ -3,7 +3,7 @@ name: ios-memgraph-leaks
 description: Capture and inspect iOS leaks and memgraphs. Use when debugging leaked objects, retain cycles, memory growth, or before/after leak evidence.
 ---
 
-# iOS Memgraph Leaks
+# iOS memgraph leaks
 
 Use this skill to prove iOS leaks from a live simulator process or an existing `.memgraph`. Pair it with `../ios-debugger-agent/SKILL.md` when the task also needs simulator build, install, launch, UI driving, logs, or screenshots.
 
