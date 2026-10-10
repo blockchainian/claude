@@ -3,7 +3,7 @@ name: download-book
 description: Search Anna's Archive for EPUB books, compare result download counts, extract fast and slow download links, and download the selected book to ~/Documents/books. Use when asked to find a book's download options, inspect this site's EPUB search results, or download a book.
 ---
 
-# Download Book
+# Download book
 
 ## Runtime and paths
 
@@ -24,14 +24,6 @@ in Codex keep the shell tool's session handle and wait on it. A subagent waits f
 before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
 process state before retrying.
 
-## Environment variables
-
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in the member key there; the script reads only that file.
-
-| Variable | Purpose | Required | Set in |
-| --- | --- | --- | --- |
-| `ANNA_ARCHIVE_SECRET_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `~/.config/intel/.env` |
-
 ## Setup (once)
 
 The script needs Node.js 20.12+, Google Chrome, and its npm dependencies:
@@ -41,6 +33,14 @@ npm install --prefix "$SKILL_DIR/scripts"
 ```
 
 It fetches the site through a headed Chrome window that it opens itself, one background tab per run, so several lookups can run at once. Do not use that window while runs are in progress.
+
+## Environment variables
+
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in the member key there; the script reads only that file.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `ANNA_ARCHIVE_SECRET_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `~/.config/intel/.env` |
 
 ## Run
 
