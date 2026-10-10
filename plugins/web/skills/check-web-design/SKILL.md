@@ -3,7 +3,7 @@ name: check-web-design
 description: Check a built web page against a design reference and report how far off it is, as measured JSON plus a composite PNG. Use when implementing a web page to match a design pixel-close, iterating an "actual vs desired" loop, or asking why a built page does not match a reference. Attributes each difference to a named element when given the page's DOM rects.
 ---
 
-# Check Web Design
+# Check web design
 
 Drive the "build this page from a reference" loop: compare the page you are
 building (**actual**) against a given design (**desired**), find what differs,
