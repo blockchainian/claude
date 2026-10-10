@@ -3,7 +3,7 @@ name: ios-ettrace-performance
 description: Capture and interpret iOS Simulator ETTrace profiles. Use when profiling launch or runtime latency, comparing traces, or finding CPU-heavy stacks.
 ---
 
-# iOS ETTrace Performance
+# iOS ETTrace performance
 
 Use this skill to capture a focused, symbolicated ETTrace profile from an iOS simulator app. Pair it with `../ios-debugger-agent/SKILL.md` when the task also needs simulator build, install, launch, UI driving, logs, or screenshots.
 
