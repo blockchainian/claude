@@ -5,52 +5,14 @@ description: Fetch a few X/Twitter posts that match any search query onto stdout
 
 # Fetch X posts
 
-## Runtime and paths
+## Skill directory
 
-These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
-loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
-any other variable a command below uses, in every shell call:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+script imports from the sibling `fetch-x-mentions` skill, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
-
-If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
-because sibling skills share scripts.
-
-For a long-running command, choose a deadline before launch and keep the process handle and its
-output. In Claude Code run it with `run_in_background` and wait for the completion notification;
-in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
-before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
-process state before retrying.
-
-Run one X search and print the posts it returns; nothing is written to disk. For an account's
-profile (bio, links, follower counts), which search does not return, use
-`curl -s https://api.fxtwitter.com/<handle>`.
-
-```
-node \
-  "$SKILL_DIR/scripts/fetch-x-posts.mjs" \
-  "<query>" [--limit <n>] [--latest|--top]
-```
-
-- `query` is X search syntax in one quoted argument, passed as written, so operators work:
-  `"from:zachxbt min_faves:5000"`, `"Kobeissi Letter since:2026-01-01_00:00:00_UTC"`, `"to:alpha filter:replies"`.
-- `--limit` is how many posts to print (default 40). A request returns 20 and takes 1 to 2 seconds.
-- `--latest` (the default) is the chronological view, `--top` X's ranked one.
-
-## Setup
-
-Requires Node.js 22.13+. Install the shared X client with
-`npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`, and log the X accounts in with the
-`secrets` plugin's `secrets-manager login x`.
-
-## Shared account prerequisite
-
-Use the existing secrets-manager CLI and store to provision or log in accounts.
-It need not be installed as a Codex plugin to run its CLI. If the CLI, required
-account, proxy or browser profile is missing, report the prerequisite; do not
-create a second store or switch to a host browser profile.
 
 ## Environment variables
 
@@ -70,6 +32,36 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 Account credentials stay in the secrets-manager store; do not copy them into `.env`. Capture the
 web-client and signing values from x.com, and refresh them when its web bundle changes.
+
+## Setup
+
+Requires Node.js 22.13+. Install the shared X client with
+`npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`, and log the X accounts in with the
+`secrets` plugin's `secrets-manager login x`.
+
+## Shared account prerequisite
+
+Use the existing secrets-manager CLI and store to provision or log in accounts.
+It need not be installed as a Codex plugin to run its CLI. If the CLI, required
+account, proxy or browser profile is missing, report the prerequisite; do not
+create a second store or switch to a host browser profile.
+
+## Run
+
+Run one X search and print the posts it returns; nothing is written to disk. For an account's
+profile (bio, links, follower counts), which search does not return, use
+`curl -s https://api.fxtwitter.com/<handle>`.
+
+```
+node \
+  "$SKILL_DIR/scripts/fetch-x-posts.mjs" \
+  "<query>" [--limit <n>] [--latest|--top]
+```
+
+- `query` is X search syntax in one quoted argument, passed as written, so operators work:
+  `"from:zachxbt min_faves:5000"`, `"Kobeissi Letter since:2026-01-01_00:00:00_UTC"`, `"to:alpha filter:replies"`.
+- `--limit` is how many posts to print (default 40). A request returns 20 and takes 1 to 2 seconds.
+- `--latest` (the default) is the chronological view, `--top` X's ranked one.
 
 ## Output
 
