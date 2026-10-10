@@ -17,24 +17,15 @@ description: >
 
 # Digest — highlights from any source, stored and searchable
 
-## Runtime and paths
+## Skill directory
 
-These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
-loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
-any other variable a command below uses, in every shell call:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+scripts use the sibling `fetch-x-mentions`, `transcribe` and `translate` skills, so keep the whole
+intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
-
-If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
-because sibling skills share scripts.
-
-For a long-running command, choose a deadline before launch and keep the process handle and its
-output. In Claude Code run it with `run_in_background` and wait for the completion notification;
-in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
-before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
-process state before retrying.
 
 ## Environment variables
 
@@ -96,8 +87,7 @@ for PDFs). Typesetting a highlights PDF also needs Google Chrome.
    - If `audio_url` is **non-null** (the page links audio, or the URL itself was
      an audio file) and the text is thin, transcribe the audio with the
      `transcribe` skill. It is long-running (model download on first use,
-     then faster than realtime), so follow the host-specific long-command
-     instructions in Runtime and paths. Wait for completion before reading
+     then faster than realtime), so run it in the background. Wait for completion before reading
      the transcript; a subagent awaits its own command before returning:
 
      ```bash
