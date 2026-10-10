@@ -7,9 +7,9 @@ description: List the hottest sounds of TikTok's commercial (royalty-free) music
 
 ## Skill directory
 
-Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
-scripts import from the sibling `upload-tiktok-video` skill's `scripts/tiktok-session.mjs`, so keep
-the whole creator plugin installed.
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The script
+imports `scripts/tiktok-session.mjs` from the sibling `upload-tiktok-video` skill, so keep the whole
+creator plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
@@ -17,65 +17,64 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 ## Environment variables
 
-Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; Claude Code, Codex and all worktrees use this file. Existing shell values take precedence.
+Copy the creator plugin's `.env.example` to `~/.config/creator/.env`, the one file Claude Code,
+Codex and every worktree read; a value already set in the shell wins.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
+| `ISP_PROXY_URL` | ISP pool matching the account's login pool | Yes | ~/.config/creator/.env |
 | `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
 | `CREATOR_STATE_DIR` | State root; default ~/.local/state/creator, with each account's posts.jsonl and stats.jsonl under tiktok/<username>/ | Optional | ~/.config/creator/.env |
 | `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with each account's screen recordings under tiktok/<username>/recordings/ | Optional | ~/.config/creator/.env |
-| `SECRETS_STATE_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
+| `SECRETS_STATE_DIR` | Existing secrets-manager account and profile directory; default ~/.local/state/secrets-manager | Optional | ~/.config/creator/.env |
 
-Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
+Account credentials, sessions and profiles stay in secrets-manager, apart from the creator
+configuration.
 
 ## Setup
 
-Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
-and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
-shared by Claude Code and Codex at `~/.local/state/secrets-manager` (`SECRETS_STATE_DIR` explicitly
-overrides it), including TikTok account rows, ISP slots and browser profiles.
-Creator reads this store; use secrets-manager to provision or log in an account if it is missing.
-Installing creator in another host does not create or migrate accounts.
+The script needs Node.js 22.13+ with `node:sqlite`, the npm dependencies of the
+upload-tiktok-video runtime, and the Camoufox browser that secrets-manager installs. It reads the
+existing secrets-manager store, which Claude Code and Codex share and which holds the TikTok account
+rows, ISP slots and browser profiles. If the account is missing, provision it or log it in with
+secrets-manager; installing creator on another host neither creates nor migrates accounts.
 
-Run once for the installed creator plugin (all four skills use this same install):
+Install the dependencies once for the installed creator plugin; all four creator skills share this
+install:
 
 ```sh
-SKILL_DIR="/absolute/path/to/loaded/skill"
 (cd "$SKILL_DIR/../upload-tiktok-video/scripts" && npm ci)
 ```
 
 ## Run
 
 ```sh
-SKILL_DIR="/absolute/path/to/loaded/skill"
 node "$SKILL_DIR/scripts/fetch-tiktok-sounds.mjs" [--username <name>] [--count <n>] [--headed [--with-sound]]
 ```
 
-- `--username`: read the list as that account of the store; default the account
+- `--username` reads the list as that account of the store; by default it is the account
   upload-tiktok-video posts as.
-- `--count`: how many sounds, hottest first. Default 20.
-- `--headed`: show the browser window and screen-record it to
-  `<username>/recordings/sounds-<ts>.mov`, to debug a read that stopped working.
-- `--with-sound`: with `--headed`, unmute the browser (Playwright mutes it), to play the sounds on
-  the page.
+- `--count` sets how many sounds to list, hottest first; the default is 20.
+- `--headed` shows the browser window and screen-records it to
+  `<username>/recordings/sounds-<ts>.mov` under the data root, to debug a read that stopped working.
+- `--with-sound`, together with `--headed`, unmutes the browser (Playwright mutes it) so the sounds
+  play on the page.
 
-Prints one line per sound:
+The script prints one line per sound:
 
 ```
 7603363008859047972  Comedy Corridor — Finley Reed  1:49  1522060 posts
 ```
 
-The first column is the id to pass to `upload-tiktok-video --sound`. "posts" is how many posts use
-the sound.
+The first column is the id to pass to `upload-tiktok-video --sound`, and "posts" counts the posts
+that use the sound.
 
 ## How it works
 
-The list is Studio's own (`creator/music/unlimited/list`, about 770,000 sounds, sorted by hot), so
-it needs a signed-in account: the account's Camoufox profile is opened on its ISP slot at
-`tiktokstudio/sound-library`, and the list is fetched inside that page, 20 sounds a page. Nothing
-else may have the profile open at the same time. Every sound on this list is cleared for use in
-any post on TikTok, promotional ones included; the clearance does not extend to other platforms.
+The list is Studio's own (`creator/music/unlimited/list`, about 770,000 sounds sorted by hot), so it
+needs a signed-in account. The script opens the account's Camoufox profile on its ISP slot at
+`tiktokstudio/sound-library` and fetches the list inside that page, 20 sounds a page. Nothing else may
+have the profile open while it runs.
 
-Needs the upload-tiktok-video skill's `npm ci` and `ISP_PROXY_URL` in the secrets-manager's
-`.env`.
+Every sound on this list is cleared for use in any post on TikTok, promotional ones included, but
+the clearance does not extend to other platforms.
