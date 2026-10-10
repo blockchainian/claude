@@ -7,7 +7,7 @@ import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseLine, loadCredentials, setAppPassword, setTotpSecret } from "../scripts/credentials.mjs";
+import { parseLine, loadCredentials, setAppPassword, setTotpSecret, totpUrlPatterns } from "../scripts/credentials.mjs";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "creds-"));
 
@@ -33,16 +33,26 @@ test("parseLine accepts only email and password", () => {
   assert.equal(cred.app_password, null);
 });
 
-test("parseLine reads the 2fa.fb.tools vendor format (TOTP in a URL, extra fields)", () => {
-  const cred = parseLine(
-    "u@x.com:pw123:rec@vend.com:http://vend.com/view/abc123:https://2fa.fb.tools/AAAA2222BBBB3333CCCC4444",
-  );
-  assert.deepEqual(cred, {
+const VENDOR_LINE = "u@x.com:pw123:rec@vend.com:http://vend.com/view/abc123:https://totp.example/AAAA2222BBBB3333CCCC4444";
+
+test("parseLine reads a configured vendor format (TOTP in a URL, extra fields)", () => {
+  assert.deepEqual(parseLine(VENDOR_LINE, [/totp\.example\/([A-Za-z2-7]{16,})/]), {
     email: "u@x.com",
     password: "pw123",
     totp_secret: "AAAA2222BBBB3333CCCC4444",
     app_password: null,
   });
+});
+
+test("parseLine knows no vendor format unless one is configured", () => {
+  assert.equal(parseLine(VENDOR_LINE, []).totp_secret, "rec@vend.com");
+});
+
+test("totpUrlPatterns reads config.json, and is empty without it", () => {
+  const dir = tmp(), path = join(dir, "config.json");
+  assert.deepEqual(totpUrlPatterns(path), []);
+  writeFileSync(path, JSON.stringify({ adapters: [], totpUrlPatterns: ["totp\\.example/([A-Za-z2-7]{16,})"] }));
+  assert.equal(parseLine(VENDOR_LINE, totpUrlPatterns(path)).totp_secret, "AAAA2222BBBB3333CCCC4444");
 });
 
 test("parseLine returns null for a blank line", () => {

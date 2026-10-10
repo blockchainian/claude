@@ -4,17 +4,19 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { configJsonPath } from "./config.mjs";
+
 const clean = (s) => (s && s.trim()) || null;
 
 // Parse one credential line into `{email, password, totp_secret, app_password}`, or null if blank.
 // Two shapes are accepted: the store's own positional shape, and a vendor shape detected by a TOTP
-// URL that embeds the base32 seed, from which only email, password and seed are taken. Add a
-// `TOTP_URL_PATTERNS` entry to support another vendor's URL. Throws on a line with no password.
-const TOTP_URL_PATTERNS = [/2fa\.fb\.tools\/([A-Za-z2-7]{16,})/];
-export function parseLine(line) {
+// URL that embeds the base32 seed, from which only email, password and seed are taken. Vendor URL
+// patterns come from `totpUrlPatterns` in config.json, so no vendor is named in the repo. Throws on
+// a line with no password.
+export function parseLine(line, patterns = configuredPatterns()) {
   line = line.trim();
   if (!line) return null;
-  for (const pattern of TOTP_URL_PATTERNS) {
+  for (const pattern of patterns) {
     const seed = line.match(pattern);
     if (!seed) continue;
     const [email, password] = line.split(":");
@@ -35,6 +37,15 @@ export function parseLine(line) {
     app_password: clean(parts[3]), // Google app password (16 chars); not used by web login
   };
 }
+
+// The `totpUrlPatterns` of config.json: regex sources whose first group captures the base32 seed.
+export function totpUrlPatterns(path = configJsonPath()) {
+  if (!existsSync(path)) return [];
+  return (JSON.parse(readFileSync(path, "utf8")).totpUrlPatterns ?? []).map((source) => new RegExp(source));
+}
+
+let configured;
+const configuredPatterns = () => (configured ??= totpUrlPatterns());
 
 function credentialFiles(dir) {
   return readdirSync(dir)

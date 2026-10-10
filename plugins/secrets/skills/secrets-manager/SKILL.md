@@ -28,6 +28,9 @@ the app adapters in `~/.config/secrets-manager/config.json`, checking each file 
 {"adapters": ["/absolute/path/adapters.mjs"]}
 ```
 
+A vendor whose Google lines carry the TOTP seed in a URL needs that URL's pattern in the same file,
+as `"totpUrlPatterns": ["<regex whose first group captures the base32 seed>"]`.
+
 Headed runs need Accessibility trust to move OAuth popups onto the `BROWSER_DISPLAY` display and
 Screen Recording permission to record the windows.
 
