@@ -5,28 +5,19 @@ description: Profile the accounts behind an app's X/Twitter mentions — who tal
 
 # Analyze Twitter Users
 
-## Runtime and paths
+## Skill directory
 
-These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
-loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
-any other variable a command below uses, in every shell call:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+commands and scripts use the sibling `analyze-x-mentions` and `fetch-x-mentions` skills, so keep
+the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
 
-If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
-because sibling skills share scripts.
-
-For a long-running command, choose a deadline before launch and keep the process handle and its
-output. In Claude Code run it with `run_in_background` and wait for the completion notification;
-in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
-before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
-process state before retrying.
+## Environment variables
 
 Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under `x/<slug>/` in the output root, which the commands below read into `OUT`. Expand `~` to the absolute home path in JSON arguments.
-
-## Environment variables
 
 Set these in `~/.config/intel/.env`, starting from the intel plugin’s `.env.example`.
 
