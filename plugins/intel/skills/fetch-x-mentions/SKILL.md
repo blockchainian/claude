@@ -47,7 +47,7 @@ node \
   deduplicated by id, newest first once a run completes.
 - `tweets.out.json`: `{ query, dailyLimit, days: { "YYYY-MM-DD": { count, oldest, refill } } }`.
 
-## Environment Variables
+## Environment variables
 
 Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
 

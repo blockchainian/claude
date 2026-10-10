@@ -99,7 +99,7 @@ login.
   `--all`; `setup <app> --help` lists the app's own flags.
 - **export** prints app credentials as JSON lines with the values in clear.
 
-## Environment Variables
+## Environment variables
 
 Shell values take precedence over `~/.config/secrets-manager/.env`.
 

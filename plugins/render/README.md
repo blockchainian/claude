@@ -52,7 +52,7 @@ status command as a generated skill; the shared entry point is `render-monitor`.
 use `render-monitor` to check status and `render-blueprints` to validate
 `render.yaml` explicitly; validation does not run automatically after edits.
 
-## Environment Variables
+## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |

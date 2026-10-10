@@ -26,7 +26,7 @@ process state before retrying.
 
 Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the default `~/Documents` output root; replace it with the configured `INTEL_OUTPUT_DIR` when set. Expand `~` to the absolute home path in JSON arguments.
 
-## Environment Variables
+## Environment variables
 
 No skill-specific environment variables or `.env` file are required.
 

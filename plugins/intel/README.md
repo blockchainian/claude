@@ -26,7 +26,7 @@ plugin.
 
 Settings and API keys go in `~/.config/intel/.env`, shared by both hosts and all checkouts. Copy
 this plugin's `.env.example` there and fill in only what the skills you use need; each skill's
-**Environment Variables** section lists its settings. Files land under three roots:
+**Environment variables** section lists its settings. Files land under three roots:
 
 - `INTEL_OUTPUT_DIR` (default `~/Documents`): finished outputs.
 - `INTEL_STATE_DIR` (default `~/.local/state/intel`): fetched archives, labels, work directories

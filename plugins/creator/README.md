@@ -4,7 +4,7 @@ Run creator accounts on TikTok from Claude Code or Codex. See
 [installation](../../README.md#codex). The accounts, their
 credentials, browser profiles and status live in the secrets plugin's `secrets-manager` store; this plugin only reads it.
 
-## Environment Variables
+## Environment variables
 
 Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hosts and all worktrees use this file. Existing shell values take precedence.
 

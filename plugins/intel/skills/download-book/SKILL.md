@@ -24,7 +24,7 @@ in Codex keep the shell tool's session handle and wait on it. A subagent waits f
 before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
 process state before retrying.
 
-## Environment Variables
+## Environment variables
 
 Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in the member key there; the script reads only that file.
 

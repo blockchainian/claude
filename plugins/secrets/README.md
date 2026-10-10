@@ -32,7 +32,7 @@ SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
 It needs Node with `node:sqlite` support, and Swift for headed window placement on macOS. Both
 hosts read the same accounts, so close a profile's browser before opening that account from the
 other host. Configuration goes in `~/.config/secrets-manager/.env`, starting from this plugin's
-`.env.example`; the skill's **Environment Variables** table lists the settings.
+`.env.example`; the skill's **Environment variables** table lists the settings.
 
 ## Commands
 

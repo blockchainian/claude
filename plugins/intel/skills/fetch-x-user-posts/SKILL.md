@@ -115,7 +115,7 @@ process exits non-zero while any stream is still worth an attempt, so **loop the
 exits 0** (e.g. `for i in $(seq 8); do node … && break; sleep 120; done`). Changing
 `--since`/`--until` starts a fresh window (all streams reset).
 
-## Environment Variables
+## Environment variables
 
 Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
 

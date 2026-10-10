@@ -5,7 +5,7 @@ description: List the hottest sounds of TikTok's commercial (royalty-free) music
 
 # Fetch TikTok sounds
 
-## Environment Variables
+## Environment variables
 
 Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hosts and all worktrees use this file. Existing shell values take precedence.
 

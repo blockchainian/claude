@@ -52,7 +52,7 @@ retries incomplete apps for up to 6 passes.
 `~/.local/state/intel/reviews/<name>.json`: `{ appId, appName, updatedAt, complete, countriesDone, count, reviews }`.
 `complete` is true only when every storefront reached a confirmed end.
 
-## Environment Variables
+## Environment variables
 
 Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
 

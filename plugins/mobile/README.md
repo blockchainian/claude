@@ -155,7 +155,7 @@ Changes in this fork:
   not enable: simulator location, appearance, statusbar, keyboard and erase
   control, plus build, install, launch, and test on physical devices.
 
-## Environment Variables
+## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |

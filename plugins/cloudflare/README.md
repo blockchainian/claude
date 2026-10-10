@@ -42,7 +42,7 @@ slash commands are convenience entry points and are not duplicated as skills.
 `web-perf` additionally requires a configured Chrome DevTools MCP server; the
 five bundled Cloudflare servers do not provide browser performance tools.
 
-## Environment Variables
+## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |

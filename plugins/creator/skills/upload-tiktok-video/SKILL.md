@@ -5,7 +5,7 @@ description: Post one mp4 to the TikTok account the secrets-manager skill logged
 
 # Upload a TikTok video
 
-## Environment Variables
+## Environment variables
 
 Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hosts and all worktrees use this file. Existing shell values take precedence.
 

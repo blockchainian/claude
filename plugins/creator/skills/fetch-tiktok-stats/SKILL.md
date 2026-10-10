@@ -5,7 +5,7 @@ description: Record the current plays, likes, comments, shares and saves of ever
 
 # Fetch TikTok stats
 
-## Environment Variables
+## Environment variables
 
 Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hosts and all worktrees use this file. Existing shell values take precedence.
 

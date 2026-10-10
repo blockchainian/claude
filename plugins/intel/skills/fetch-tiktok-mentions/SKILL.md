@@ -144,7 +144,7 @@ answer is held against the IP: the slot's next session opens after a one-minute 
 Video files are fetched inside the session too: `item/detail/` gives a fresh play address, signed
 for the session's IP, and the page's `fetch()` pulls the bytes, four files at a time per session.
 
-## Environment Variables
+## Environment variables
 
 Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
 

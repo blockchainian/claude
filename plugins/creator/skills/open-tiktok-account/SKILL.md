@@ -5,7 +5,7 @@ description: Open a secrets-manager TikTok account's own Camoufox profile in a s
 
 # Open a TikTok account
 
-## Environment Variables
+## Environment variables
 
 Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hosts and all worktrees use this file. Existing shell values take precedence.
 
