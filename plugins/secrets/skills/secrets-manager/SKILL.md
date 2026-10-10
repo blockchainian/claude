@@ -72,17 +72,15 @@ login.
 
 ## Commands
 
-- **import** reads `<state>/google/*.txt`, `<state>/x/*.txt` or `<state>/tiktok/*.txt`, or the named
-  files, one account per line: `email:password:totp_secret:app_password` for Google (the last two
-  optional), the vendor's `username:password:email:email_password:…` for X, and
-  `username:password:email:email_password:profile_url` for TikTok. Reruns are safe. Import only
+- **import** reads the credential files under `SECRETS_STATE_DIR` (`google/`, `x/`, `tiktok/`), or the
+  named files, one account per line, and reports any line it cannot parse. Reruns are safe. Import only
   burner accounts into X, never the user's own: intel's X fetchers read with every `active` X row.
   After importing a new `auth_token` for a known X account, derive its ct0 with intel's
   `fetch-x-mentions/scripts/verify-x.mjs`.
 - **login tiktok** binds the session to the account's fixed ISP slot, so use it only from that slot.
   On a new device TikTok emails a code: in a `--headed` run, read it from the account's mailbox and
   type it into the TikTok window within 5 minutes.
-- **setup-2fa** completes an `email:password`-only Google account with an authenticator TOTP, 2-Step
+- **setup-2fa** completes a password-only Google account with an authenticator TOTP, 2-Step
   Verification and an app password. Run `login google` first, and watch the first account in its
   window, since the enrollment dialog's selectors drift.
 - **sms** rents HeroSMS numbers for Google's phone step. `number` spends money, so it only quotes

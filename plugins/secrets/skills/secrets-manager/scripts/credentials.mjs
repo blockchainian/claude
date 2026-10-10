@@ -7,13 +7,9 @@ import { join } from "node:path";
 const clean = (s) => (s && s.trim()) || null;
 
 // Parse one credential line into `{email, password, totp_secret, app_password}`, or null if blank.
-// Two shapes are accepted:
-//   1. Positional `email:password:totp_secret:app_password` (last two optional; trailing empty = none).
-//   2. A "2FA-as-a-service" vendor drop that embeds the TOTP seed in a URL and carries extra fields
-//      (recovery email, an inbox-viewer URL) with no store column, e.g.
-//      `email:password:recovery@x:http://host/view/<id>:https://2fa.fb.tools/<BASE32>`.
-// The vendor shape is detected by its TOTP URL and takes only email, password and the base32 seed;
-// add another `TOTP_URL_PATTERNS` entry to support a new vendor's URL. Throws on a line with no password.
+// Two shapes are accepted: the store's own positional shape, and a vendor shape detected by a TOTP
+// URL that embeds the base32 seed, from which only email, password and seed are taken. Add a
+// `TOTP_URL_PATTERNS` entry to support another vendor's URL. Throws on a line with no password.
 const TOTP_URL_PATTERNS = [/2fa\.fb\.tools\/([A-Za-z2-7]{16,})/];
 export function parseLine(line) {
   line = line.trim();

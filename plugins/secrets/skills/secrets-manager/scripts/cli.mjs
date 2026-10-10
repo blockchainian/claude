@@ -13,10 +13,9 @@ import { BUILTIN_CHECKS, CHECK_RESULTS, nextStatus } from "./verify.mjs";
 import { NeedsHuman } from "./errors.mjs";
 // --- credential file parsing -------------------------------------------------
 
-// X accounts arrive from a vendor in a few colon-separated shapes (6 or 8 fields, and the
-// auth-token/TOTP columns appear in either order). Rather than a fixed position, fields are keyed
-// by shape: the first four are always username:password:email:email_password, and the TOTP secret
-// is the base32 (16-char) field among the rest. Extra vendor columns (a long token, a UUID, a live
+// X accounts arrive from a vendor in a few colon-separated shapes. Past the leading account
+// fields, columns are keyed by shape rather than position: the TOTP secret is the base32 (16-char)
+// field among the rest. Extra vendor columns (a long token, a UUID, a live
 // auth_token) are ignored — the flow logs in fresh from password + TOTP.
 const isTotpSecret = (v) => /^[A-Z2-7]{16}$/.test(v);
 const isAuthToken = (v) => /^[0-9a-f]{40}$/.test(v);
@@ -35,8 +34,8 @@ export function parseXVendorLine(line) {
   return { username, password, email, email_password, totp_secret, auth_token };
 }
 
-// TikTok accounts arrive as `username:password:email:email_password:profile_url`. Only the first
-// four fields are kept; the profile url repeats the username. The email pair is optional: a third
+// TikTok accounts arrive as colon-separated lines. Only the first four fields are kept; the
+// profile url repeats the username. The email pair is optional: a third
 // field that is not an address (the profile url of a line without one) is not taken for it.
 export function parseTiktokLine(line) {
   const [username, password, email, email_password] = line.split(":").map((part) => part.trim());
@@ -288,10 +287,9 @@ async function loginByEmail(db, target, opts, io) {
 
 // --- setup-2fa ---------------------------------------------------------------
 
-// Provision the second factor for Google accounts that only have email:password: add an
+// Provision the second factor for Google accounts that have only a password: add an
 // authenticator (scraping its TOTP secret), turn on 2-Step Verification, and mint a Gmail app
-// password, writing the TOTP secret and app password back to the credential file so the account
-// matches the full email:password:totp_secret:app_password shape. Requires a live Google session
+// password, writing the TOTP secret and app password back to the credential file. Requires a live Google session
 // per account (`login google` first); a logged-out account is reported and skipped without marking
 // it escalated. Skips accounts already carrying both a TOTP secret and an app password unless
 // --all; the three steps are independent, so a resumed run only does what is missing. The app
