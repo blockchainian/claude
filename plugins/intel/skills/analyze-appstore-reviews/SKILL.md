@@ -22,94 +22,90 @@ Set these in `~/.config/intel/.env`, starting from the intel plugin’s `.env.ex
 | --- | --- | --- | --- |
 | `INTEL_OUTPUT_DIR` | Output root; analyses go under `reviews/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
-Turn one app's scraped reviews into a short, **evidence-only** analysis: what users
-love, what they hate, and what they ask for — each ranked by how often it actually
-appears, every claim backed by the data. The output reads in one pass and hides
-nothing.
+## Setup
 
-**以数据说话，不瞎编。** Every number comes from the JSON; every quote is verbatim.
-Counts rank themes — call them 量级, not precise values. When you cannot support a
-claim from the data, drop it.
+`stats.mjs` needs Node.js 18.18+ and no npm packages. `render_charts.py` needs `uv` on PATH, which
+pulls matplotlib itself, and a CJK font; it uses Arial Unicode, Hiragino Sans GB or STHeiti,
+whichever it finds first.
 
-## Input & output
+## Input and output
 
-- **Input**: a reviews JSON whose `reviews[]` items carry `rating` (1–5), `title`,
-  `body`, `date`, `country`, and optionally `developerResponseBody`. This is the
-  App Store scraper's shape.
-- **Output**, in `reviews/<app>/` under the output root, named after the reviews JSON; the stats JSON's `outDir` gives the absolute path: `analysis.md` + `images/`:
-  - `analysis.md` — concise **Chinese** doc (structure below).
-  - four charts — rating distribution, likes, dislikes, top feature requests.
+The input is a reviews JSON in the App Store scraper's shape: a `reviews[]` array whose items carry
+`rating` (1–5), `title`, `body`, `date`, `country` and optionally `developerResponseBody`. The
+output goes to `reviews/<app>/` under the output root, named after the reviews JSON, and the stats
+JSON's `outDir` gives its absolute path. It holds `analysis.md`, a concise Chinese doc, and an
+`images/` folder with four charts: the rating distribution, likes, dislikes and top feature
+requests.
 
-## Procedure
+The analysis is evidence only. **以数据说话，不瞎编。** Every number comes from the JSON and every
+quote is verbatim; when the data cannot support a claim, drop it. Counts only rank themes, so
+present them as 量级, not precise values.
 
-### 1. Ground with deterministic stats (script)
+## Ground the numbers
 
-```
-"$SKILL_DIR/scripts/stats.mjs" \
-  <reviews.json> --dump-dir <scratch>
+```sh
+"$SKILL_DIR/scripts/stats.mjs" <reviews.json> --dump-dir <scratch>
 ```
 
-Prints a stats JSON (`outDir`, total, 1–5★ distribution, avg, US vs non-US, date range,
-developer-response count, `n_dislike_1_3`, `n_like_4_5`, top countries) and writes
-`neg.txt` (1–2★), `mid.txt` (3★), `pos.txt` (4–5★). These numbers are facts — use
-them as-is.
+The script prints a stats JSON with `outDir`, the total, the 1–5★ distribution, the average, US
+versus non-US, the date range, the developer-response count, `n_dislike_1_3`, `n_like_4_5` and the
+top countries. It also writes `neg.txt` (1–2★), `mid.txt` (3★) and `pos.txt` (4–5★) to the dump
+directory. These numbers are facts; use them as they are.
 
-### 2. Read ALL the text, split by sentiment
+## Read every review
 
-Read the whole of `neg.txt`, `mid.txt`, `pos.txt`. **Do not sample.** Reading every
-review is what grounds themes in what people actually said, instead of guessing from
-keywords. For a large dataset, delegate the reading to a subagent and keep only the
-themes. Use Claude Code's Agent tool or Codex's `spawn_agent` (`fork_turns: "none"`),
-with explicit input paths and the reading brief; collect the result before counting.
+Read the whole of `neg.txt`, `mid.txt` and `pos.txt`. **Do not sample**: reading every review is
+what grounds the themes in what people actually said rather than in guessed keywords. For a large
+dataset, hand the reading to a subagent that starts with no forked history (in Codex,
+`spawn_agent` with `fork_turns: "none"`), give it the input paths
+and the reading brief, and keep only the themes it returns; collect its result before counting.
 
-### 3. Count themes with review-level keyword hits
+## Count themes
 
-For each theme you saw, write a regex and count **reviews that match** (one hit per
-review). Count like-themes only within **4–5★**, dislike-themes only within
-**1–3★** ("easy to deposit, impossible to withdraw" is not praise). Discipline:
+For each theme you saw, write a regex and count the **reviews that match**, one hit per review.
+Count like-themes only within **4–5★** and dislike-themes only within **1–3★**, because "easy to
+deposit, impossible to withdraw" is not praise.
 
-- Word-boundary the patterns with `(?<![A-Za-z0-9])term(?![A-Za-z0-9])`, not
-  `\b`: Python's `\w` includes CJK, so `\bapp\b` misses `手机app`. Spot-check
-  every bucket by printing ~10 sample matches before trusting its count — kill
-  false positives (`down`→download, `fun`→fund, `card`→credit card, `hot`→shot,
-  `ban`→bank, `tail`→retail).
-- The counts only **rank**; present them as 量级.
+Bound each term with `(?<![A-Za-z0-9])term(?![A-Za-z0-9])`, not `\b`: Python's `\w` includes CJK,
+so `\bapp\b` misses `手机app`. Before trusting a bucket's count, print about 10 sample matches and
+remove false positives such as `down`→download, `fun`→fund, `card`→credit card, `hot`→shot,
+`ban`→bank and `tail`→retail.
 
-### 4. Derive the top feature requests
+## Find the top feature requests
 
-Count only **explicit product asks** ("please add / wish / missing X"), separate
-from complaints. Note the semantics (e.g. users who already copy-trade asking for
-*auto* execution). **If complaint themes — lower fees, fix speed — would outrank the
-feature list, say so in one line rather than hide it.**
+Count only **explicit product asks** ("please add", "wish", "missing X"), kept apart from
+complaints, and note what the ask really means, for example users who already copy-trade asking for
+*auto* execution. **If complaint themes such as lower fees or faster speed would outrank the feature
+list, say so in one line rather than hide it.**
 
-### 5. Write `analysis.md` (concise Chinese)
+## Write the analysis
 
-Sections:
+Write `analysis.md` in concise Chinese. Open with a short scope and method note that carries **no
+data-source citation**: no JSON path, no appId, no "可复算/可核对"; the reader knows where the data
+comes from. Then write these sections:
 
-- A short scope + method note. **No data-source citation** — no JSON path, no appId,
-  no "可复算/可核对". The reader knows where the data is from.
-- **一、这批数据是什么** — rating distribution + a one-line "what is this app".
-- **二、最喜欢什么（4–5★）** — themes ranked, each `· <count>`.
-- **三、最不喜欢什么（1–3★）** — themes ranked, each `· <count>`. When a "scam"
-  bucket dominates, split it into (a) real operational failures (deposit taken but
-  not credited, can't withdraw) vs (b) memecoin/asset loss blamed on the app; flag
-  platform-level allegations (freeze-and-dump, wash trading) as **未证实 user
-  claims**, not facts.
-- **四、Top 5 功能请求 / 改进建议** — with the fee/speed caveat from step 4.
-- **五、数据质量与方法** — the noise the reader must know: star-vs-text mismatch
-  (5★ that say "scam"/"trash" for visibility; 1★ that say "good"), promo/referral-code
-  reviews inflating praise, low-information shill short reviews, non-English
-  undercount by English regexes, keyword counts are 量级 not precise, survivorship
-  bias toward the two extremes.
+- **一、这批数据是什么**: the rating distribution and a one-line "what is this app".
+- **二、最喜欢什么（4–5★）**: themes ranked, each `· <count>`.
+- **三、最不喜欢什么（1–3★）**: themes ranked, each `· <count>`. When a "scam" bucket dominates,
+  split it into (a) real operational failures, such as a deposit taken but not credited or a
+  withdrawal that fails, and (b) memecoin or asset losses blamed on the app. Flag platform-level
+  allegations such as freeze-and-dump or wash trading as **未证实 user claims**, not facts.
+- **四、Top 5 功能请求 / 改进建议**: with the fee and speed caveat from the feature requests.
+- **五、数据质量与方法**: the noise the reader must know about: star-versus-text mismatch (5★ reviews
+  that say "scam" or "trash" for visibility, 1★ reviews that say "good"), promo and referral-code
+  reviews inflating praise, low-information shill short reviews, non-English reviews undercounted
+  by English regexes, keyword counts being 量级 rather than precise, and survivorship bias toward
+  the two extremes.
 
-**Quotes**: blockquote the **comment body only**, plain text, verbatim — **no star,
-no title, no id, no country, no bold, no italics, no brackets**. One `>` line per
-quote. Keep the prose tight; every line costs the reader.
+Quote **the comment body only**, verbatim and as plain text, one `>` line per quote, with **no
+star, title, id, country, bold, italics or brackets**. Keep the prose tight; every line costs the
+reader. If the repo already holds a `reception.md`-style analysis, follow its tone and structure.
 
-### 6. Charts (script)
+## Draw the charts
 
-Build a spec and render. Chinese labels; one horizontal bar chart per ranked section
-(likes `#1baf7a`, dislikes `#eb6834`, requests `#2a78d6`) plus a rating chart:
+Build a spec with Chinese labels, one horizontal bar chart per ranked section in its fixed colour
+(likes `#1baf7a`, dislikes `#eb6834`, requests `#2a78d6`) plus the rating chart, and list each
+chart's labels and values in ranked order, largest first:
 
 ```
 echo '{"out_dir":"<outDir>/images","charts":[
@@ -120,28 +116,16 @@ echo '{"out_dir":"<outDir>/images","charts":[
 ]}' | "$SKILL_DIR/scripts/render_charts.py" /dev/stdin
 ```
 
-Charts are transparent with dual-mode gray text (work in dark and light mode) and
-carry a title only — no subtitle, legend, or stat line. Embed each at the top of its
-section: `![最喜欢什么](images/<app>-likes.png)`.
+Embed each chart at the top of its section, for example `![最喜欢什么](images/<app>-likes.png)`.
 
-### 7. Adversarial review before shipping
+## Review adversarially
 
-Spawn an adversarial subagent with Claude Code's Agent tool or Codex's
-`spawn_agent` (`fork_turns: "none"`), giving it explicit artifact paths and this brief: independently recompute the distribution and every
-theme count with its own method, verify each quote exists and is accurate, check the
-top-5 ordering, and hunt cherry-picked quotes and star-vs-text contamination. Apply
-the valid findings to `analysis.md` after collecting its final result (Codex uses
-`wait_agent`); then tell the user what it actually caught.
+Before shipping, spawn an adversarial subagent of the same kind and give it the
+artifact paths with this brief: independently recompute the distribution and every theme count with
+its own method, verify that each quote exists and is accurate, check the top-5 ordering, and hunt
+for cherry-picked quotes and star-versus-text contamination. Wait for its final result, apply the
+valid findings to `analysis.md`, and tell the user what it actually caught.
 
-### 8. Ship
+## Ship
 
-Commit, push, and open the doc + charts for the user.
-
-## Requirements
-
-- Node.js 18.18+ for `stats.mjs` (no npm dependencies).
-- `uv` on PATH for `render_charts.py` (it declares its own deps and pulls
-  matplotlib).
-- A CJK font — the renderer tries Arial Unicode / Hiragino Sans GB / STHeiti.
-- Style sibling for tone and structure: an existing `reception.md`-style analysis if
-  the repo has one.
+Commit, push, and open the doc and charts for the user.
