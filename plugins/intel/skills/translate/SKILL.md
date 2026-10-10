@@ -45,11 +45,12 @@ the user's ChatGPT plan through `codex`; when its quota is out, wait or pass `--
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
+| `INTEL_OUTPUT_DIR` | Output root; finished books go under `translate/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
-The book is usually the download-book skill's EPUB in `~/Documents/books/`; a book you have only as a PDF must
+The book is usually the download-book skill's EPUB under `books/` in the output root; a book you have only as a PDF must
 be fetched as an EPUB first. Work lives in `~/.local/state/intel/translate/<slug>/` (`<INTEL_STATE_DIR>/translate/<slug>/`
 when set). Keep it: it is resumable, and the translated Markdown in it is costly to redo. The finished book is
-`<title-slug>.pdf` in `~/Documents/translate/` (`<INTEL_OUTPUT_DIR>/translate/` when set), named after the
+`<title-slug>.pdf` under `translate/` in the output root, named after the
 book's main title without its subtitle.
 
 ## 1. Extract
