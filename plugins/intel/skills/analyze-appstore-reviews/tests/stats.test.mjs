@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, describe, test } from "node:test";
-import { computeStats, formatDump, formatStats, pyRound } from "../scripts/stats.mjs";
+import { analysisDir, computeStats, formatDump, formatStats, pyRound } from "../scripts/stats.mjs";
 
 const script = fileURLToPath(new URL("../scripts/stats.mjs", import.meta.url));
 
@@ -72,6 +72,12 @@ describe("pyRound", () => {
   });
 });
 
+describe("analysisDir", () => {
+  test("puts the analysis under the output root, named after the reviews file", () => {
+    assert.equal(analysisDir("/state/reviews/fomo.json", { INTEL_OUTPUT_DIR: "/out" }), "/out/reviews/fomo");
+  });
+});
+
 describe("formatting", () => {
   test("formatStats prints an integral avg as a float", () => {
     const { out } = computeStats([{ rating: 4 }, { rating: 4 }]);
@@ -96,7 +102,7 @@ describe("cli", () => {
   });
   after(() => rmSync(tmp, { recursive: true, force: true }));
 
-  const run = (...args) => spawnSync(process.execPath, [script, ...args], { cwd: tmp, encoding: "utf-8" });
+  const run = (...args) => spawnSync(process.execPath, [script, ...args], { cwd: tmp, encoding: "utf-8", env: { ...process.env, INTEL_OUTPUT_DIR: "/out" } });
 
   test("prints the stats JSON and writes the three dumps", () => {
     const res = run("reviews.json", "--dump-dir", "dump");
@@ -104,6 +110,7 @@ describe("cli", () => {
     const out = JSON.parse(res.stdout);
     assert.equal(out.total, 8);
     assert.equal(out.avg, 3.12);
+    assert.equal(out.outDir, join("/out", "reviews", "reviews"));
     assert.equal(res.stderr, "\nwrote neg(3) mid(1) pos(4) to dump\n");
     // neg.txt is sorted by rating (1★ first), stable within a rating
     assert.equal(readFileSync(join(tmp, "dump", "neg.txt"), "utf-8"), "[1|de]  :: Scam!\n[1|fr] Worst :: never again\n[2|us] Bad :: \n");

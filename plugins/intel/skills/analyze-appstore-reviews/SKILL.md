@@ -26,7 +26,11 @@ process state before retrying.
 
 ## Environment variables
 
-No skill-specific environment variables or `.env` file are required.
+Set these in `~/.config/intel/.env`, starting from the intel plugin’s `.env.example`.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `INTEL_OUTPUT_DIR` | Output root; analyses go under `reviews/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
 Turn one app's scraped reviews into a short, **evidence-only** analysis: what users
 love, what they hate, and what they ask for — each ranked by how often it actually
@@ -42,7 +46,7 @@ claim from the data, drop it.
 - **Input**: a reviews JSON whose `reviews[]` items carry `rating` (1–5), `title`,
   `body`, `date`, `country`, and optionally `developerResponseBody`. This is the
   App Store scraper's shape.
-- **Output**, in `~/Documents/reviews/<app>/` (the `INTEL_OUTPUT_DIR` root when set; expand `~` to the absolute home path in JSON): `analysis.md` + `images/`:
+- **Output**, in `reviews/<app>/` under the output root, named after the reviews JSON; the stats JSON's `outDir` gives the absolute path: `analysis.md` + `images/`:
   - `analysis.md` — concise **Chinese** doc (structure below).
   - four charts — rating distribution, likes, dislikes, top feature requests.
 
@@ -55,7 +59,7 @@ claim from the data, drop it.
   <reviews.json> --dump-dir <scratch>
 ```
 
-Prints a stats JSON (total, 1–5★ distribution, avg, US vs non-US, date range,
+Prints a stats JSON (`outDir`, total, 1–5★ distribution, avg, US vs non-US, date range,
 developer-response count, `n_dislike_1_3`, `n_like_4_5`, top countries) and writes
 `neg.txt` (1–2★), `mid.txt` (3★), `pos.txt` (4–5★). These numbers are facts — use
 them as-is.
@@ -118,7 +122,7 @@ Build a spec and render. Chinese labels; one horizontal bar chart per ranked sec
 (likes `#1baf7a`, dislikes `#eb6834`, requests `#2a78d6`) plus a rating chart:
 
 ```
-echo '{"out_dir":"~/Documents/reviews/<app>/images","charts":[
+echo '{"out_dir":"<outDir>/images","charts":[
   {"type":"rating","file":"<app>-rating-distribution.png","title":"评分分布：两极分化","values":[C1,C2,C3,C4,C5]},
   {"type":"bar","file":"<app>-likes.png","title":"最喜欢什么（4–5★）","labels":[...],"values":[...],"color":"#1baf7a"},
   {"type":"bar","file":"<app>-dislikes.png","title":"最不喜欢什么（1–3★）","labels":[...],"values":[...],"color":"#eb6834"},

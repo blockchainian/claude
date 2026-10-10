@@ -9,14 +9,16 @@
 // `developerResponseBody`. Prints a stats JSON to stdout. With --dump-dir, also
 // writes neg.txt (1-2 star), mid.txt (3 star) and pos.txt (4-5 star), one review
 // per line as `[rating|country] title :: body`, so the agent reads the full text.
+// The stats JSON's `outDir` is where the analysis doc and charts go.
 //
 // Nothing here interprets — it only counts. Themes and quotes are the agent's job.
 //
 // Usage: stats.mjs <reviews.json> [--dump-dir <dir>]
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { loadEnvFile, outputDir } from "../../fetch-x-mentions/scripts/env.mjs";
 
 const USAGE = "usage: stats.mjs [-h] [--dump-dir DUMP_DIR] json";
 
@@ -93,6 +95,11 @@ export function computeStats(reviews) {
   return { out, neg, mid, pos };
 }
 
+// Where the analysis doc and charts go: <INTEL_OUTPUT_DIR>/reviews/<reviews file name>.
+export function analysisDir(json, env = process.env) {
+  return join(outputDir(env), "reviews", basename(json, ".json"));
+}
+
 // Same text as Python's json.dumps(indent=2): avg is always a float there, so 4 prints as 4.0.
 export function formatStats(out) {
   return JSON.stringify(out, null, 2).replace(/^(\s*"avg": -?\d+)(,?)$/m, "$1.0$2");
@@ -139,9 +146,10 @@ function parseCli(argv) {
 
 export function main(argv) {
   const args = parseCli(argv);
+  loadEnvFile();
   const reviews = load(args.json);
   const { out, neg, mid, pos } = computeStats(reviews);
-  console.log(formatStats(out));
+  console.log(formatStats({ ...out, outDir: analysisDir(args.json) }));
 
   if (args.dumpDir) {
     mkdirSync(args.dumpDir, { recursive: true });
