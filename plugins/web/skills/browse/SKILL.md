@@ -37,7 +37,8 @@ after a plugin update while other sessions use the daemon.
 
 ## One tab per client (parallel runs)
 
-Every session on the machine shares one daemon. Without a tab of its own, a
+Every session on the machine shares one daemon. Never kill it (`pkill -f browse`, `pkill terminal-agent`):
+that drops every session's tabs and logins. Without a tab of its own, a
 client drives whatever tab is active and races every other client. To run in
 parallel, open a tab and pin every command to it with `BROWSE_TAB`:
 

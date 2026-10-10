@@ -12,6 +12,9 @@ a built page against a design reference.
 | `heap-snapshot-leaks` | Capture two heap snapshots around a repeated action and diff them into a ranked report of the constructors that grew and the DOM nodes left detached |
 | `check-web-design` | Diff a built web page against a design reference and report the off-by colours, positions, and missing/extra elements |
 
+Before adding a skill, check that claude-in-chrome (driving the user's own Chrome) and `cloudflare:web-perf`
+(page performance) do not already cover it.
+
 ## How it works
 
 `browse` is [gstack](https://github.com/garrytan/gstack)'s browser CLI (MIT),
