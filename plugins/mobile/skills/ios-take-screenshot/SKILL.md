@@ -3,7 +3,7 @@ name: ios-take-screenshot
 description: Capture one whole iOS app screen as a single stitched PNG, including everything below the fold. Use when asked to screenshot an app screen, capture a full page, or collect screens of another app for design research. Drives either a real iPhone connected over USB, through appium-mcp, or a booted simulator, through XcodeBuildMCP.
 ---
 
-# iOS Take Screenshot
+# iOS take screenshot
 
 Produce exactly ONE image per requested screen. iOS has no full-page screenshot API — `screenshot` returns only the visible viewport — so a whole screen must be captured as slices and stitched. This skill owns that end to end: open the app, reach the screen, capture slices, stitch, delete the slices.
 
