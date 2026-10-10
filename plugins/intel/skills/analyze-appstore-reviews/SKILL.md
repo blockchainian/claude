@@ -77,9 +77,11 @@ For each theme you saw, write a regex and count **reviews that match** (one hit 
 review). Count like-themes only within **4–5★**, dislike-themes only within
 **1–3★** ("easy to deposit, impossible to withdraw" is not praise). Discipline:
 
-- Word-boundary the patterns. Spot-check every bucket by printing ~10 sample
-  matches before trusting its count — kill false positives (`down`→download,
-  `fun`→fund, `card`→credit card, `hot`→shot, `ban`→bank, `tail`→retail).
+- Word-boundary the patterns with `(?<![A-Za-z0-9])term(?![A-Za-z0-9])`, not
+  `\b`: Python's `\w` includes CJK, so `\bapp\b` misses `手机app`. Spot-check
+  every bucket by printing ~10 sample matches before trusting its count — kill
+  false positives (`down`→download, `fun`→fund, `card`→credit card, `hot`→shot,
+  `ban`→bank, `tail`→retail).
 - The counts only **rank**; present them as 量级.
 
 ### 4. Derive the top feature requests
