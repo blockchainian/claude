@@ -31,10 +31,23 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `INTEL_OUTPUT_DIR` | Output root; digests go under `digests/`; default `~/Documents` | No | ~/.config/intel/.env |
+| `INTEL_OUTPUT_DIR` | Output root; the store is `digests/` under it; default `~/Documents` | No | ~/.config/intel/.env |
+| `INTEL_STATE_DIR` | State root; drafts stage in `digest/<slug>/` under it until saved; default `~/.local/state/intel` | No | ~/.config/intel/.env |
 
-A source URL after `/digest` is fetched, read, and turned into a highlights
-draft — that is the default. Two keywords instead select a store command.
+## Setup
+
+Run the setup script at the start of every run. It installs only what is missing: `uv` (which runs
+the trafilatura article extractor and the PDF scripts), `yt-dlp` for YouTube subtitles and
+`poppler` for `pdftotext`. Typesetting a highlights PDF also needs Google Chrome.
+
+```bash
+"$SKILL_DIR/scripts/setup.sh"
+```
+
+## Modes
+
+A source URL after `/digest` is the default: it is fetched, read and turned into a highlights
+draft. Two keywords select a store command instead.
 
 | Argument | What it does |
 |---|---|
@@ -44,172 +57,126 @@ draft — that is the default. Two keywords instead select a store command.
 | `save` take-aways (text) | Append them to the item's `## Take-aways` |
 | `search` query (regex ok) | Search everything saved |
 
-The store is `digests/` under the output root. Items live in `items/<slug>.md`, listed in
-`index.md`. Drafts stage in `~/.local/state/intel/digest/<slug>/` (`INTEL_STATE_DIR`) until saved. (The store holds
-articles, episodes, videos and papers alike.)
+The store holds articles, episodes, videos and papers alike. Each item lives in `items/<slug>.md`
+and is listed in `index.md`.
 
-## Setup (automatic, idempotent)
+## Digest a URL
 
-Run once at the start; it installs only what is missing and is a no-op when
-everything is present, so it is safe to run every time.
+A PDF, whether a `.pdf` URL or a local file, skips this flow; follow "Digest a PDF" instead. For
+any other URL, fetch it first:
 
 ```bash
-"$SKILL_DIR/scripts/setup.sh"
+"$SKILL_DIR/scripts/fetch_source.py" "<url>"
 ```
 
-It ensures `uv` (runs the trafilatura article extractor and the PDF scripts
-in an ephemeral env), `yt-dlp` (YouTube subtitles) and `poppler` (`pdftotext`,
-for PDFs). Typesetting a highlights PDF also needs Google Chrome.
+The script prints JSON with `slug`, `transcript` (the text file path), `draft`, `words`, `thin` and
+`audio_url`. An ordinary page yields only its main article body, without nav, sidebars or footers.
+A YouTube URL yields its subtitles, and `subtitles` says which kind: with `auto` there are no
+speaker labels, so attribute quotes to the source rather than a named speaker; with `manual`,
+use speaker labels only where the text actually carries them.
 
-## Digest a URL (the default)
+Next, decide what the page gave you. If `audio_url` is non-null (the page links audio, or the URL
+was itself an audio file) and the text is thin, transcribe the audio with the `transcribe` skill.
+It is long-running, with a model download on first use and faster than realtime after that, so
+run it in the background and wait for it to finish before reading the transcript; a subagent
+waits on its own command before returning.
 
-1. **Fetch.**
+```bash
+"$SKILL_DIR/../transcribe/scripts/setup.sh"
+"$SKILL_DIR/../transcribe/scripts/transcribe-audio.mjs" \
+  "<audio_url>" "<transcript path>"
+```
 
-   ```bash
-   "$SKILL_DIR/scripts/fetch_source.py" "<url>"
-   ```
+It writes plain text to the same `transcript` path and prints JSON with the new `words` and
+`thin`. A transcribed transcript has no speaker labels. Downloaded audio often carries
+dynamically inserted modern ads, and whisper occasionally loops on a garbled stretch; note both
+and exclude or repair them as you read. The `transcribe` skill has more.
 
-   It prints JSON with `slug`, `transcript` (the text file path), `draft`,
-   `words`, `thin` and `audio_url`. For an ordinary page it extracts the main
-   article body with trafilatura (falling back to a plain tag-strip), so nav,
-   sidebars and footers are dropped. A dead link or a blocked request exits with
-   the HTTP status — report that status, do not retry the same URL.
+Otherwise, read the text you have. `thin` (under 1500 words) is only a hint: a short article is
+still a real article, so highlight it. But if the page is a bare player or paywall shell with no
+real prose and no `audio_url`, say so and stop rather than inventing highlights.
 
-   For a YouTube URL it pulls subtitles with `yt-dlp` and reports which kind in
-   `subtitles`. With `auto` there are no speaker labels, so attribute quotes to
-   the source, not a named speaker; with `manual` the labels may be present, so
-   use them only where the text actually carries them.
+Read all of the transcript, in order, in sequential chunks with the Read tool (`offset: 1, limit:
+90`, then `offset: 91, limit: 110`, and so on), keeping each chunk under roughly 45000 characters
+so it cannot blow up the context. Skimming the opening and the closing misses the middle, which
+is usually where the content is. When a chunk is sponsor reads, navigation cruft or sign-off
+banter, note that and move on.
 
-   A **PDF** (a `.pdf` URL or a local file path) does not go through this
-   step — follow "Digest a PDF" below instead.
+Write the draft to the `draft` path from the fetch output, using the draft template below, then
+print the highlights in the conversation too: the user asked for highlights, not a file path.
+Offer `/digest save` in one line, and do not save unprompted.
 
-1b. **Decide what the page gave you.**
-   - If `audio_url` is **non-null** (the page links audio, or the URL itself was
-     an audio file) and the text is thin, transcribe the audio with the
-     `transcribe` skill. It is long-running (model download on first use,
-     then faster than realtime), so run it in the background. Wait for completion before reading
-     the transcript; a subagent awaits its own command before returning:
+## Digest a PDF
 
-     ```bash
-     "$SKILL_DIR/../transcribe/scripts/setup.sh"
-     "$SKILL_DIR/../transcribe/scripts/transcribe-audio.mjs" \
-       "<audio_url>" "<transcript path>"
-     ```
+A PDF gets one set of highlights per chapter, and the result is itself a PDF in the translate
+skill's book format (dark page, Baskerville + Songti SC, chapter openers, running heads, folios,
+one bookmark per chapter) at the source PDF's own page size. Split it first:
 
-     It writes plain text to the same `transcript` path and prints JSON with the
-     new `words`/`thin`. A transcribed transcript has **no speaker labels**, and
-     downloaded audio often carries **dynamically-inserted modern ads** with
-     whisper occasionally looping on a garbled stretch — note both and
-     exclude/repair them when reading. See the `transcribe` skill for more.
-   - Otherwise, **read the text you have.** `thin` (under 1500 words) is only a
-     hint: a short *article* is still a real article — highlight it. But if the
-     page is a bare player or paywall shell with no real prose and no
-     `audio_url`, say so and stop rather than inventing highlights.
+```bash
+"$SKILL_DIR/scripts/pdf_highlights.py" split "<file.pdf or url>"
+```
 
-2. **Read all of it, in order.** Sequential chunks with the Read tool:
-   `offset: 1, limit: 90` on the transcript, then `offset: 91, limit: 110`, and
-   so on. Keep each chunk's `limit` small enough that it cannot blow up the
-   context — roughly 45000 characters. Skimming the opening
-   and the closing produces highlights that miss the middle, which is where the
-   content usually is. If a chunk is sponsor reads, navigation cruft, or
-   sign-off banter, note that and move on.
+The script prints JSON with `work` (the work dir), `unit`, `page_size` and `chapters`, each with
+`id`, `title`, `pages`, `chars`, `text` and `highlights` (paths relative to `work`). The chapters
+are the PDF's bookmarks. A PDF with no bookmarks is split one section per page (`unit: "page"`),
+and `--by page` forces that.
 
-3. **Write the draft** to the `draft` path from step 1, using the template
-   below. Then print the highlights in the conversation too — the user asked for
-   highlights, not a file path.
+From the split JSON, pick the chapters that carry real content. Skip, and do not dispatch, any
+that is front or back matter (cover, contents page, index, copyright page) or has a near-zero
+`chars`; a skipped chapter gets no highlights file, and `render` ignores it.
 
-4. Offer `/digest save` in one line. Do not save unprompted.
+A book (`unit: "chapter"`) is written in parallel, one fresh subagent per content chapter, which
+is faster and keeps each chapter's text out of your own context. Use Claude Code's Agent tool or
+Codex's `spawn_agent` with `fork_turns: "none"`, since each subagent needs only its own chapter,
+never this conversation. Launch several in one message so they run at once; for a long book keep
+each batch to about 6–8 subagents and launch the next batch when the first returns. In Codex,
+collect each child's final result with `wait_agent`. Give every subagent a prompt containing,
+filled in for its chapter:
 
-## Digest a PDF (per chapter, PDF out)
+- the absolute paths to read (`<work>/<text>`) and to write (`<work>/<highlights>`), the chapter
+  `title` and the `unit`;
+- this instruction: *Read all of the text file in chunks (the host's file-reading tool, bounded
+  chunks of ~45000 chars — do not skim the middle), then write the highlights file: a `# <title>`
+  line followed by themed `## ` sections. No frontmatter, no TL;DR. Write in the language of the
+  PDF. Reply only `done`, or the error if you could not write the file.*
+- the "Writing a chapter" and "What makes a highlight" sections below, both copied verbatim:
+  together they are the whole brief, since the subagent cannot see this skill.
 
-A PDF gets one set of highlights per chapter — connected paragraphs for a
-book, bullets for a per-page PDF — and the result is itself a PDF:
-the translate skill's book format (dark page, Baskerville + Songti SC, chapter
-openers, running heads, folios, one bookmark per chapter) at the source PDF's
-own page size.
+When the subagents return, check with `ls -l` that every expected `<work>/<highlights>` exists and
+is non-empty, and re-dispatch any that are missing or empty before rendering.
 
-1. **Split.**
+A per-page PDF (`unit: "page"`: a deck, a filing, a form) is not fanned out, because its sections
+are single pages and there can be a great many. Write those yourself, in order, as you read them.
 
-   ```bash
-   "$SKILL_DIR/scripts/pdf_highlights.py" split "<file.pdf or url>"
-   ```
+Then render:
 
-   It prints JSON: `work` (the work dir), `unit`, `page_size`, and `chapters`,
-   each with `id`, `title`, `pages`, `chars`, `text` and `highlights` (paths
-   relative to `work`). The chapters are the PDF's bookmarks; a PDF with no
-   bookmarks is split one section per page (`unit: "page"`), and `--by page`
-   forces that. An image-only (scanned) PDF exits with an error — there is no
-   OCR here, so say it is scanned and stop.
+```bash
+"$SKILL_DIR/scripts/pdf_highlights.py" render "<work>"
+```
 
-2. **Write one highlights file per chapter — in parallel, one subagent per
-   chapter.** Each chapter is independent: its own text file in, its own
-   highlights file out. Fanning them out is faster than writing them one by one,
-   and it keeps each chapter's text out of your own context.
+It typesets every chapter that has a highlights file into `<source>-highlights.pdf` in the store,
+prints that path and writes the combined `<work>/draft.md`. `--out`, `--bg`, `--fg` and
+`--font-size` override the defaults, which are the translate skill's. Re-run it after editing any
+chapter's file.
 
-   First, from the split JSON, pick the chapters that carry real content. **Skip
-   — do not dispatch —** any that is front or back matter (cover, contents page,
-   index, copyright page) or has a near-zero `chars`; a skipped chapter simply
-   gets no highlights file, and `render` ignores it.
-
-   Then dispatch the content chapters with Claude Code's Agent tool or Codex's
-   `spawn_agent` (`fork_turns: "none"`): **one fresh subagent per chapter** (each subagent needs only
-   its own chapter, never this conversation). Launch several in one message so
-   they run at once; for a long book keep each batch to about 6–8 subagents and
-   launch the next batch when the first returns. Give every subagent a prompt
-   that contains, filled in for its chapter:
-   - the absolute paths to read (`<work>/<text>`) and to write
-     (`<work>/<highlights>`), the chapter `title`, and the `unit`;
-   - this instruction: *Read all of the text file in chunks (the host's file-reading tool,
-     bounded chunks of ~45000 chars — do not skim the middle), then write the
-     highlights file: a `# <title>` line followed by themed `## ` sections. No
-     frontmatter, no TL;DR. Write in the language of the PDF. Reply only `done`,
-     or the error if you could not write the file.*
-   - the **"Writing a chapter"** block and the **"What makes a highlight"**
-     section below, both copied verbatim — together they are the whole brief the
-     subagent writes to, since it cannot see this skill.
-
-   In Claude Code collect Agent results; in Codex use `wait_agent` and collect
-   each child's final result. When the subagents return, verify every expected `<work>/<highlights>` exists
-   and is non-empty (`ls -l`); re-dispatch any that are missing or empty before
-   rendering.
-
-   A **per-page PDF** (`unit: "page"`: a deck, a filing, a form) is **not** fanned
-   out — its sections are single pages and there can be a great many, so write
-   those yourself, in order, as you read them.
+Report the PDF path and a short per-chapter summary in the conversation. Fill `source`, `author`
+and `topics` into the frontmatter of `draft.md`, then offer `/digest save` in one line. Do not
+save unprompted.
 
 ### Writing a chapter
 
-   **A book (`unit: "chapter"`) is written as prose, not bullets.** A book is
-   long, and a chapter of bullet points reads as disconnected notes. Open the
-   chapter with one paragraph stating what it argues, then make each `## `
-   section one to a few complete paragraphs that read straight through: each
-   paragraph carries one line of the argument, its sentences are connected
-   (because, so, but, as a result), and the numbers, names and dates sit
-   inside the sentences. No bullet lists and no `## Quotes` section — a short
-   quote goes inside the paragraph it belongs to, attributed there. The rules
-   in "What makes a highlight" still hold: theme over order, specifics kept,
-   disagreements recorded, nothing the source does not say. Only a PDF split
-   per page (`unit: "page"`: a deck, a filing, a form) keeps themed bullets and
-   an optional `## Quotes`; so do articles, podcasts and videos in the URL
-   flow above.
+A book (`unit: "chapter"`) is written as prose, not bullets: a book is long, and a chapter of
+bullet points reads as disconnected notes. Open the chapter with one paragraph stating what it
+argues, then make each `## ` section one to a few complete paragraphs that read straight through.
+Each paragraph carries one line of the argument, its sentences are connected (because, so, but,
+as a result), and the numbers, names and dates sit inside the sentences. Use no bullet lists and
+no `## Quotes` section; a short quote goes inside the paragraph it belongs to, attributed there.
+The rules in "What makes a highlight" still hold: theme over order, specifics kept, disagreements
+recorded, nothing the source does not say. Only a PDF split per page (`unit: "page"`: a deck, a
+filing, a form) keeps themed bullets and an optional `## Quotes`, as do articles, podcasts and
+videos in the URL flow.
 
-3. **Render.**
-
-   ```bash
-   "$SKILL_DIR/scripts/pdf_highlights.py" render "<work>"
-   ```
-
-   It typesets every chapter that has a highlights file into
-   `<source>-highlights.pdf` in the store, prints that path, and
-   writes the combined `<work>/draft.md`. `--out`, `--bg`, `--fg` and
-   `--font-size` override the defaults, which are the translate skill's.
-   Re-run it after editing any chapter's file.
-
-4. Report the PDF path and a short per-chapter summary in the conversation.
-   Fill `source`, `author` and `topics` into the frontmatter of `draft.md`,
-   then offer `/digest save` in one line. Do not save unprompted.
-
-### What makes a highlight
+## What makes a highlight
 
 - **Organise by theme, not by order.** The source is already sequential; that
   ordering is not a finding.
@@ -245,7 +212,7 @@ Why: the one passage kept in the source's own wording is marked as a quote;
 everything not inside quote marks is paraphrase.
 </example>
 
-### Draft template
+## Draft template
 
 ```markdown
 ---
@@ -275,66 +242,69 @@ topics: [<3-8 lowercase search keys: companies, people, concepts>]
 - <at most 5 bullets, 10 words each, plain words>
 ```
 
-`title` and `url` are required to save; the rest are optional. `topics` is what
-makes `search` useful later — put the names someone would search for in six
+`title` and `url` are required to save; the rest are optional. `slug` is the one the fetch printed.
+`topics` is what makes `search` useful later, so put in the names someone would search for in six
 months, not generic category words.
 
-## save
+## Save
 
-`save` has two forms. Bare `save` stores the item; `save <input>` attaches
-take-aways to it.
-
-### save (no input) — store the highlights
+Bare `save` stores the draft from this session's digest run; if there is no draft in the session,
+ask which one rather than guessing.
 
 ```bash
 "$SKILL_DIR/scripts/store.mjs" save "<draft path>"
 ```
 
-Save the draft from the digest run in this session (no draft in the session →
-ask which one rather than guessing). The script refuses a draft missing `title`
-or `url`, stamps `saved:` with today's date, and rebuilds `index.md`. A
-different item landing on the same slug is filed alongside it as `<slug>-2.md`.
-**If this item (same `url`) is already stored, save is a no-op** — it prints the
-stored path and changes nothing, so it never clobbers take-aways added later.
-Read the path the script prints — a `-2` means two items share a slug.
+The script refuses a draft missing `title` or `url`, and stamps `saved:` with today's date. If
+the same `url` is already stored, save is a no-op: it prints the stored path and changes nothing,
+so it never clobbers take-aways added later. A different item landing on the same slug is filed
+beside it as `<slug>-2.md`, so read the path the script prints: a `-2` means two items share a
+slug.
 
-### save \<input\> — append take-aways
+`save <input>` attaches the user's own take-aways, often a numbered list, to the stored item, each
+as a bullet in a `## Take-aways` section at the top of the file. Repeated calls accumulate into
+the same section.
 
-`<input>` is one or more of the user's own take-aways (often a numbered list).
-Each becomes a bullet in a `## Take-aways` section at the top of the stored
-file. Steps:
-
-1. **Resolve the stored file.** Run bare `save` first (it stores the item, or
-   no-ops and prints the path if already stored). Use that printed path as
-   `<stored.md>`. No draft this session → find the item with `search`/`list`.
-2. **See what's already there:**
+1. Resolve the stored file by running bare `save` first, which stores the item or prints its path
+   if already stored, and use that path as `<stored.md>`. With no draft this session, find the
+   item with `search` or `list`.
+2. See what is already there:
    ```bash
    "$SKILL_DIR/scripts/store.mjs" takeaway "<stored.md>" --list
    ```
-3. **For each take-away in `<input>`** (strip any leading `1.`/`-`), decide:
-   - **Overlaps an existing item** (same point, reworded or extended) → revise
-     that item in place, merging the sharper wording:
-     ```bash
-     "$SKILL_DIR/scripts/store.mjs" takeaway "<stored.md>" --revise <n> "<text>"
-     ```
-   - **New point** → append it:
-     ```bash
-     "$SKILL_DIR/scripts/store.mjs" takeaway "<stored.md>" --add "<text>"
-     ```
+3. For each take-away in `<input>`, with any leading `1.` or `-` stripped, decide yourself whether
+   it overlaps an existing item; the script only edits the list. If it makes the same point,
+   reworded or extended, revise that item in place with the sharper wording merged in; if it is
+   a new point, append it:
+   ```bash
+   "$SKILL_DIR/scripts/store.mjs" takeaway "<stored.md>" --revise <n> "<text>"
+   "$SKILL_DIR/scripts/store.mjs" takeaway "<stored.md>" --add "<text>"
+   ```
+   Both print the resulting numbered take-aways; renumber against that before the next call.
 
-Judging overlap is yours — the script only edits the list. `--add`/`--revise`
-print the resulting numbered take-aways; renumber against that before the next
-call. Multiple `save <input>` calls accumulate into the same section.
-
-## search
+## Search
 
 ```bash
 "$SKILL_DIR/scripts/store.mjs" search "<query>"
 "$SKILL_DIR/scripts/store.mjs" list
 ```
 
-The query is a case-insensitive regex over the whole file, frontmatter included,
-so `search coinbase` finds it in `topics` as well as in the body. Report what
-matched in your own words with the item and its URL; do not paste the raw match
-block unless the user asks for it. Zero matches is an answer — say the store has
-nothing on it, and offer to digest a source that would.
+The query is a case-insensitive regex over the whole file, frontmatter included, so `search
+coinbase` finds it in `topics` as well as in the body. Report what matched in your own words, with
+the item and its URL, and paste the raw match block only if the user asks for it. Zero matches is
+an answer: say the store has nothing on it, and offer to digest a source that would.
+
+## Failures and limits
+
+- A dead link or a blocked request makes `fetch_source.py` exit with the HTTP status. Report that
+  status, and do not retry the same URL.
+- An image-only (scanned) PDF makes `split` exit with an error. There is no OCR here, so say it is
+  scanned and stop.
+
+## Tests
+
+```bash
+uv run "$SKILL_DIR/tests/test_fetch_source.py"
+uv run "$SKILL_DIR/tests/test_pdf_highlights.py"
+node --test "$SKILL_DIR"/tests/*.mjs
+```
