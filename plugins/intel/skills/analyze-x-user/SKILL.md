@@ -3,7 +3,7 @@ name: analyze-x-user
 description: Profile ONE X/Twitter account from its own timeline (tweets.jsonl + replies.jsonl left by fetch-x-user-posts) into x/kols/<user>/profile.md under the intel output folder — who the account is, what it talks about most, the tokens and people it pushes, its posting behaviour and interests, read from its own posts. Labels each post with the analyze-x-mentions labeler, then writes a single-account profile. Use when asked to profile / 画像 one KOL from their fetched timeline. NOT for the accounts mentioning an app (use analyze-x-users) and NOT for fetching the posts (use fetch-x-user-posts).
 ---
 
-# Analyze X user (single account)
+# Analyze X user
 
 ## Skill directory
 
