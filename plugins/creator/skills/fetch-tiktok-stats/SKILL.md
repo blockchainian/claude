@@ -7,9 +7,9 @@ description: Record the current plays, likes, comments, shares and saves of ever
 
 ## Skill directory
 
-Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. Keep the
-full creator plugin installed: all four skills use its
-`upload-tiktok-video/scripts/tiktok-session.mjs` runtime and dependencies.
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+script imports the sibling `upload-tiktok-video` skill's `scripts/tiktok-session.mjs` runtime and
+uses its dependencies, so keep the whole creator plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
@@ -31,20 +31,20 @@ Account credentials, sessions and profiles remain in Secrets Manager; Creator co
 
 ## Setup
 
-Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
-and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
-shared by Claude Code and Codex at `~/.local/state/secrets-manager` (`SECRETS_STATE_DIR` explicitly
-overrides it), including TikTok account rows, ISP slots and browser profiles.
-config/creator/.env` or the process environment. Creator reads this
-store; use secrets-manager to provision or log in an account if it is missing. Installing
-creator in another host does not create or migrate accounts.
-
-Run once for the installed creator plugin (all four skills use this same install):
+The script needs Node.js 22.13+ with `node:sqlite` and the Camoufox browser that secrets-manager
+installs. Install the runtime's npm dependencies once for the installed creator plugin; all four
+creator skills share this install:
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 (cd "$SKILL_DIR/../upload-tiktok-video/scripts" && npm ci)
 ```
+
+Creator only reads the existing secrets-manager store, which Claude Code and Codex share at
+`~/.local/state/secrets-manager` unless `SECRETS_STATE_DIR` points elsewhere; it holds the TikTok
+account rows, ISP slots and browser profiles. Installing creator on another host does not create
+or migrate accounts, so when the account is missing, provision or log it in with secrets-manager
+(`login tiktok`).
 
 ## Run
 
@@ -53,32 +53,31 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 node "$SKILL_DIR/scripts/fetch-tiktok-stats.mjs" [--username <name>] [--headed [--with-sound]]
 ```
 
-- `--username` reads another account; default the account upload-tiktok-video posts as: the
-  secrets-manager store's earliest imported `active` TikTok account.
-- `--headed` shows the browser window and screen-records it to
-  `<username>/recordings/stats-<ts>.mov`, to debug a read that stopped working; `--with-sound`
-  also unmutes it.
-- One run is one sample. Run it again later (a schedule, or by hand) to build the series.
+By default the script reads the account upload-tiktok-video posts as, which is the store's
+earliest imported `active` TikTok account; `--username` reads another account instead. To debug a
+read that stopped working, `--headed` shows the browser window and screen-records it to
+`<username>/recordings/stats-<ts>.mov` under the data root, and `--with-sound` also unmutes it.
 
-Each run appends one row per video to `~/.local/state/creator/tiktok/<username>/stats.jsonl`
-(`CREATOR_STATE_DIR` overrides the parent root; `tiktok/` is appended) and prints them:
+One run is one sample. The script appends one row per video to
+`tiktok/<username>/stats.jsonl` under the state root and prints the counts; run it again later, on
+a schedule or by hand, to build the series. Each row has this shape:
 
 ```
 { at, username, videoId, createTime, playCount, diggCount, commentCount, shareCount, collectCount }
 ```
 
-## How it works
+## How the read works
 
-TikTok's web API answers an unsigned request with an empty 200, and the TikTok-Api library is not
-used. A fresh anonymous Camoufox browser on the account's ISP slot opens tiktok.com, copies the
-query params of the first API request the page sends, and calls `user/detail/` (the account's
-secUid) and `post/item_list/` with `fetch()` inside the page, where TikTok's own script signs them.
-This is the same method intel's fetch-tiktok-mentions uses. No login is needed: the account's
-profile is not opened, and the store is only read.
+TikTok's web API answers an unsigned request with an empty 200, so the script does not use the
+TikTok-Api library. It opens tiktok.com in a fresh anonymous Camoufox browser on the account's ISP
+slot, copies the query params of the first API request the page sends, and calls `user/detail/`
+(for the account's secUid) and `post/item_list/` with `fetch()` inside the page, where TikTok's own
+script signs them. This is the same method as intel's fetch-tiktok-mentions. No login is needed:
+the account's profile is never opened.
 
-An anonymous viewer gets the first page of a profile, about 35 videos, newest first; older videos
-are not sampled. A video posted a minute ago may not show to an anonymous viewer yet (measured: 0
-videos about 20 s after posting, the video a minute later); it is in the next sample.
+## Limits
 
-Needs the upload-tiktok-video skill's `npm ci` (the browser code lives there) and
-`ISP_PROXY_URL` in `~/.config/creator/.env`.
+An anonymous viewer gets only the first page of a profile, about 35 videos, newest first, so older
+videos are not sampled. A video posted a minute ago may not show to an anonymous viewer yet: in one
+measurement it was missing about 20 seconds after posting and present a minute later. It appears in
+the next sample.
