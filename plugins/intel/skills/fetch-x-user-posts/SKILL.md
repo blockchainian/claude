@@ -5,30 +5,48 @@ description: Fetch an X/Twitter account's own posts and replies over a date rang
 
 # Fetch X users
 
-## Runtime and paths
-
-These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
-loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
-any other variable a command below uses, in every shell call:
-
-```sh
-SKILL_DIR="/absolute/path/to/loaded/skill"
-```
-
-If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
-because sibling skills share scripts.
-
-For a long-running command, choose a deadline before launch and keep the process handle and its
-output. In Claude Code run it with `run_in_background` and wait for the completion notification;
-in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
-before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
-process state before retrying.
-
 Fetch what accounts post themselves — their own tweets and their replies — as opposed to
 `fetch-x-mentions`, which fetches what everyone says about an app. Give it a batch of screen
 names; it writes one folder per user. The auth core (x-client-transaction-id, the account list,
 the SearchTimeline request, page parsing, retry/quota handling, cross-account draining) is
 imported from `fetch-x-mentions`, with request settings loaded from this script's own directory.
+
+## Skill directory
+
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+scripts import from the sibling `fetch-x-mentions` skill, so keep the whole intel plugin installed.
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+## Environment variables
+
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
+| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
+| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_USER_QUERY_ID` | UserByScreenName operation ID for the existence pre-check | No; enables pre-check | `~/.config/intel/.env` |
+| `X_TIMELINE_QUERY_ID` | UserTweetsAndReplies operation ID for the timeline fallback | No; enables timeline fallback | `~/.config/intel/.env` |
+| `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with X archives under x/ | No | `~/.config/intel/.env` |
+| `SECRETS_STATE_DIR` | Account-store directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
+
+Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.local/state/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
+
+## Shared account prerequisite
+
+Use the existing secrets-manager CLI and store to provision or log in accounts.
+It need not be installed as a Codex plugin to run its CLI. If the CLI, required
+account, proxy or browser profile is missing, report the prerequisite; do not
+create a second store or switch to a host browser profile.
+## Run
 
 Run from any working directory; data paths are under `INTEL_STATE_DIR`.
 
@@ -38,6 +56,8 @@ node \
   <user> [<user> ...] [--file <path>] [--since YYYY-MM-DD] [--until YYYY-MM-DD] \
   [--max-pages <n>] [--max-tries <n>]
 ```
+
+A batch runs for a long time, so run it in the background.
 
 - `<user>` is a bare screen name (a leading `@`, an `x.com/…` URL, or a trailing path are
   stripped; invalid names are dropped). Pass as many as you like.
@@ -61,7 +81,7 @@ node \
 ```
 
 Every X account has its own rate bucket, so N accounts ≈ N× throughput; the streams drain
-across all accounts at once. Run it using the host-specific long-command instructions above.
+across all accounts at once. Run it in the background.
 
 ## Output
 
@@ -115,26 +135,6 @@ process exits non-zero while any stream is still worth an attempt, so **loop the
 exits 0** (e.g. `for i in $(seq 8); do node … && break; sleep 120; done`). Changing
 `--since`/`--until` starts a fresh window (all streams reset).
 
-## Environment variables
-
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
-
-| Variable | Purpose | Required | Set in |
-| --- | --- | --- | --- |
-| `X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
-| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
-| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
-| `X_USER_QUERY_ID` | UserByScreenName operation ID for the existence pre-check | No; enables pre-check | `~/.config/intel/.env` |
-| `X_TIMELINE_QUERY_ID` | UserTweetsAndReplies operation ID for the timeline fallback | No; enables timeline fallback | `~/.config/intel/.env` |
-| `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
-| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with X archives under x/ | No | `~/.config/intel/.env` |
-| `SECRETS_STATE_DIR` | Account-store directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
-
-Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.local/state/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
-
 ## Failures
 
 - `failed after N attempts` is the proxy, not a ban; rerun.
@@ -149,13 +149,4 @@ Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager s
 node --test "$SKILL_DIR/tests/fetch-x-user-posts.test.mjs"
 ```
 
-Archive paths below show the default Intel state root; use the configured `INTEL_STATE_DIR` when set.
-
 Setup shared X client: `npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`.
-
-## Shared account prerequisite
-
-Use the existing secrets-manager CLI and store to provision or log in accounts.
-It need not be installed as a Codex plugin to run its CLI. If the CLI, required
-account, proxy or browser profile is missing, report the prerequisite; do not
-create a second store or switch to a host browser profile.
