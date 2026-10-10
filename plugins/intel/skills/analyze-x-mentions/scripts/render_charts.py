@@ -15,7 +15,7 @@ gray for text/spines so the same PNG reads on both light and dark surfaces.
 
 Spec shape:
 {
-  "out_dir": "abs/or/rel/path",
+  "out_dir": "absolute path, or relative to the intel output root",
   "charts": [
     {"type": "bar", "file": "x-hot-topics.png", "title": "热点话题（提及条数）",
      "labels": ["...", ...], "values": [720, ...], "color": "#2a78d6"},
@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
@@ -139,9 +141,15 @@ def daily(path: str, title: str, days: list[str], values: list[int],
     fig.savefig(path, transparent=True); plt.close(fig)
 
 
+def output_root() -> str:
+    """The intel output root (INTEL_OUTPUT_DIR, default ~/Documents), resolved by the plugin's env.mjs."""
+    script = Path(__file__).resolve().parents[2] / "fetch-x-mentions" / "scripts" / "env.mjs"
+    return json.loads(subprocess.check_output(["node", str(script)], text=True))["output"]
+
+
 def main() -> None:
     spec = json.load(open(sys.argv[1], encoding="utf-8")) if len(sys.argv) > 1 else json.load(sys.stdin)
-    out_dir = spec.get("out_dir", ".")
+    out_dir = os.path.join(output_root(), spec.get("out_dir", "."))
     os.makedirs(out_dir, exist_ok=True)
     setup_font()
     for c in spec["charts"]:
