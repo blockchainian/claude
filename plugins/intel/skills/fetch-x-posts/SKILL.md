@@ -73,20 +73,21 @@ Requires Node.js 22.13+. Install the shared X client with
 `npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`, and log the X accounts in with the
 `secrets` plugin's `secrets-manager login x`.
 
-Copy the intel plugin's `.env.example` to `~/.config/intel/.env` and fill in these values; variables
-already exported in the shell win.
+## Environment Variables
 
-| Variable | Purpose | Required |
-| --- | --- | --- |
-| `X_BEARER_TOKEN` | X web-client bearer token | Yes |
-| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes |
-| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes |
-| `X_TID_FRAME` | Animation frame data used to sign requests | Yes |
-| `X_TID_ROW` | Animation row index used to sign requests | Yes |
-| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes |
-| `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes |
-| `INTEL_STATE_DIR` | State root holding the rotation state under `limits/`; default ~/.local/state/intel | No |
-| `SECRETS_STATE_DIR` | Account-store directory; default ~/.local/state/secrets-manager | No |
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `X_BEARER_TOKEN` | X web-client bearer token | Yes | `~/.config/intel/.env` |
+| `X_SEARCH_QUERY_ID` | SearchTimeline operation ID | Yes | `~/.config/intel/.env` |
+| `X_TID_VERIFICATION` | Site-verification value used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_FRAME` | Animation frame data used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_ROW` | Animation row index used to sign requests | Yes | `~/.config/intel/.env` |
+| `X_TID_INDICES` | Key-byte indices used to sign requests | Yes | `~/.config/intel/.env` |
+| `RESIDENTIAL_PROXY_URL` | Default residential proxy | Yes | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with the account-rotation state under limits/ | No | `~/.config/intel/.env` |
+| `SECRETS_STATE_DIR` | Account-store directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
 
 Account credentials stay in the secrets-manager store; do not copy them into `.env`. Capture the
 web-client and signing values from x.com, and refresh them when its web bundle changes.
