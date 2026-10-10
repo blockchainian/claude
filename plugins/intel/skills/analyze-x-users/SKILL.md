@@ -3,7 +3,7 @@ name: analyze-x-users
 description: Profile the accounts behind an app's X/Twitter mentions — who talks about it (casual passers-by, social chatter, degen traders, referral promoters, own-token promoters, KOLs, giveaway farmers, critics), which die-hard daily promoters have a financial stake, and what motivates each segment — into a Chinese users doc with charts. Use when asked to profile / 画像 / 分类 the users or accounts mentioning an app, or who the "死粉" and shillers are. Needs an archive already labeled by analyze-x-mentions (labels.jsonl); NOT for what people say about the app (use analyze-x-mentions for reception.md).
 ---
 
-# Analyze Twitter Users
+# Analyze X users
 
 ## Skill directory
 
