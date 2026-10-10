@@ -43,7 +43,9 @@ book's main title without its subtitle.
 It installs what is missing and reports whether `codex` is logged in and Chrome is present. Translation runs on
 the user's ChatGPT plan through `codex`; when its quota is out, wait or pass `--model` to another codex model.
 
-## 1. Extract
+## Procedure
+
+### 1. Extract
 
 ```bash
 "$SKILL_DIR/scripts/extract.mjs" <book.epub>
@@ -71,14 +73,14 @@ Fix any of these in `<work>/sections.json` before translating:
 Edit `sections.json` in place. Extract refuses a work dir that already holds one, because re-extracting
 renumbers the ids the translations are keyed to.
 
-## 2. Glossary
+### 2. Glossary
 
 Write `<work>/glossary.md` with the book's key terms, every chapter title with its Chinese rendering, and the
 authors' names. The chapter titles become the 目录 and the bookmarks, so pinning them here keeps in-text
 references, the contents page and the bookmarks consistent. Ask the user only when a term is a real choice (a
 coined term with two accepted renderings); otherwise decide and note it in the summary.
 
-## 3. Translate
+### 3. Translate
 
 ```bash
 "$SKILL_DIR/scripts/translate.mjs" <work> --glossary <work>/glossary.md \
@@ -112,7 +114,7 @@ An unclosed inline tag matters most, since one open `<code>` turns every later s
 many "unconverted math" hits had its LaTeX conversion skipped: retranslate it with
 `translate.mjs <work> --force --only <id> --effort medium`.
 
-## 4. Render the book
+### 4. Render the book
 
 ```bash
 "$SKILL_DIR/scripts/render.py" <work> --title "<中文书名>"
@@ -136,7 +138,7 @@ Loose lines in its report are for information; every other finding is a layout d
 book over. Open the PDF for the user, and say in the summary when the source had figures or tables that a
 text-only extract dropped.
 
-## 5. Fix equations the render rejects
+### 5. Fix equations the render rejects
 
 An equation KaTeX cannot parse renders as raw red LaTeX, so `render.py` exits non-zero and lists each one as
 `section NN (page P)`. A render that exits non-zero is not done: never hand that book to the user. Fix each
