@@ -16,43 +16,42 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 ## Environment variables
 
-Set these in `~/.config/intel/.env`, starting from the intel plugin’s `.env.example`. The member key is read only from that file.
-
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `ANNA_ARCHIVE_SECRET_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `~/.config/intel/.env` |
 | `INTEL_OUTPUT_DIR` | Output root; books go under `books/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
-## Setup (once)
+## Setup
 
-The script needs Node.js 20.12+, Google Chrome, and its npm dependencies:
+Needs Node.js 20.12+ and Google Chrome:
 
 ```sh
 npm install --prefix "$SKILL_DIR/scripts"
 ```
 
-It fetches the site through a headed Chrome window that it opens itself, one background tab per run, so several lookups can run at once. Do not use that window while runs are in progress.
+The script drives a headed Chrome window it opens itself; don't use that window while a run is going.
 
 ## Run
-
-Pass a book title, and `--download` to save it:
 
 ```sh
 "$SKILL_DIR/scripts/anna-archive-links.mjs" "Pride and Prejudice" --download
 ```
 
-The script picks the EPUB result with the most downloads on the first search page and prints JSON with that record (`title`, `md5`, `downloads_total`), its `fast` and `slow` links and, with `--download`, the `download` result. Without it the script only finds the links, which takes about 90 seconds.
+It picks the most-downloaded EPUB on the first search page and prints JSON: the record's `title`
+and `md5`, its `fast` and `slow` links and, with `--download`, the saved `download.path` or
+`download.error`. Download without asking the user, in the background, one book at a time: this IP
+allows one download at once. Finding links alone (no `--download`, about 90 s) can run in parallel.
 
-Confirm the selected `title` matches the book the user asked for. A loose query can make a different book the most downloaded; re-run with a tighter query (add the author, edition, or subtitle) before downloading. The top record can still be a fan conversion or page scans: once downloaded, list the EPUB's entries (`unzip -l`) and check it holds real XHTML chapters, not one image per page. For a math book, avoid O'Reilly EPUBs whose files sit under `sbo-rt-content/`: their MathML is broken.
+- Check `title` is the requested book; if not, tighten the query (author, edition, subtitle) and
+  re-run.
+- Check the EPUB holds real XHTML chapters (`unzip -l`), not one image per page. For a math book,
+  reject O'Reilly EPUBs with files under `sbo-rt-content/`: their MathML is broken.
+- Every link refused with 429: another download from this IP (often the user's browser) is
+  running; say so and retry after it ends.
+- 未通过浏览器验证 (a captcha): save the search page and the selected detail page as HTML from your
+  own browser and pass `--search-html` and `--detail-html`; `--slow-html` takes a saved
+  slow-download page of the same MD5.
+- Use only file URLs the script returned, and report missing links as unavailable. Never download
+  from libgen or its mirrors: their files are often samples, early releases or truncated.
 
-## Download
-
-Download the book without asking the user to approve it; `--download` saves it as `books/<title>.epub` under the output root, named from the selected record, and `--out <file>` saves it elsewhere. Run it in the background, since a slow download can take many minutes. Download several books one at a time, because this IP allows only one download at a time; finding links without downloading can run in parallel.
-
-The JSON's `download` holds the saved `path`, the `url` used and the `refused` links, or an `error`. When every link was refused with 429, another download from this IP (often the user's own browser) is still running: report that and retry after it finishes.
-
-If the browser check fails (the script reports 未通过浏览器验证, usually a captcha), save the search results and the selected detail page as HTML from your own browser and pass them with `--search-html` and `--detail-html`. Pass `--slow-html` for a saved slow download page when its live entry is blocked; that page must belong to the selected MD5 record.
-
-Report missing or blocked links as unavailable, and download only a file URL the script returned, never one inferred from an error page. Never download from libgen or any of its mirrors, even when the fast API is out of downloads or a server fails: its files are often samples, early releases or cut-off downloads.
-
-To turn the EPUB into a Chinese PDF, pass it to the `translate` skill.
+Pass the EPUB to the `translate` skill for a Chinese PDF.
