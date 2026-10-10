@@ -5,24 +5,37 @@ description: Fetch a brand's TikTok videos from hashtag pages, user pages and ke
 
 # Fetch TikTok mentions
 
-## Runtime and paths
+## Skill directory
 
-These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
-loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
-any other variable a command below uses, in every shell call:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+script imports from the sibling `fetch-x-mentions` skill, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
 
-If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
-because sibling skills share scripts.
+## Environment variables
 
-For a long-running command, choose a deadline before launch and keep the process handle and its
-output. In Claude Code run it with `run_in_background` and wait for the completion notification;
-in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
-before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
-process state before retrying.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `~/.config/intel/.env` |
+| `ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `~/.config/intel/.env` |
+| `SECRETS_STATE_DIR` | Account-store and browser-profile directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with videos under tiktok/ | No | `~/.config/intel/.env` |
+
+Account credentials, login sessions and browser profiles stay in the existing Secrets Manager store; do not copy them into `.env`.
+
+First use in a checkout: `npm install --prefix "$SKILL_DIR/scripts"`. Use the Camoufox browser installed by secrets-manager (`npx camoufox-js fetch`).
+
+## Shared account prerequisite
+
+Use the existing secrets-manager CLI and store to provision or log in accounts.
+It need not be installed as a Codex plugin to run its CLI. If the CLI, required
+account, proxy or browser profile is missing, report the prerequisite; do not
+create a second store or switch to a host browser profile.
+## Run
 
 Hashtag pages, user profiles, keyword searches, comments and video files.
 TikTok has no "everything about a brand" view, so coverage is the union of the sources you give.
@@ -70,7 +83,7 @@ node \
 
 Every run does three things: collects every source (a hashtag through four sessions at once, see below; new videos are
 added, held ones get fresh stats), fetches comments for the videos whose comments are not
-complete, and downloads the videos without a file. Use the host-specific long-command instructions above; read the
+complete, and downloads the videos without a file. Run it in the background; read the
 log. **Rerun the same command until it exits 0.**
 
 The default rate is 20 requests/s per anonymous session. Tune `--rate` and `--concurrency`
@@ -144,21 +157,6 @@ answer is held against the IP: the slot's next session opens after a one-minute 
 Video files are fetched inside the session too: `item/detail/` gives a fresh play address, signed
 for the session's IP, and the page's `fetch()` pulls the bytes, four files at a time per session.
 
-## Environment variables
-
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
-
-| Variable | Purpose | Required | Set in |
-| --- | --- | --- | --- |
-| `ISP_PROXY_URL` | ISP proxy pool base URL | Yes | `~/.config/intel/.env` |
-| `ISP_PROXY_COUNT` | Number of pool slots; default 1 | No | `~/.config/intel/.env` |
-| `SECRETS_STATE_DIR` | Account-store and browser-profile directory; default ~/.local/state/secrets-manager | No | `~/.config/intel/.env` |
-| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with videos under tiktok/ | No | `~/.config/intel/.env` |
-
-Account credentials, login sessions and browser profiles stay in the existing Secrets Manager store; do not copy them into `.env`.
-
-First use in a checkout: `npm install --prefix "$SKILL_DIR/scripts"`. Use the Camoufox browser installed by secrets-manager (`npx camoufox-js fetch`).
-
 ## Failures
 
 - `blocked, replacing the session` now and then is normal. Workstreams ending with
@@ -175,13 +173,4 @@ First use in a checkout: `npm install --prefix "$SKILL_DIR/scripts"`. Use the Ca
 node --test "$SKILL_DIR/tests/fetch-tiktok-mentions.test.mjs"
 ```
 
-Archive paths below show the default Intel state root; use the configured `INTEL_STATE_DIR` when set.
-
 Log the account in with the `secrets` plugin’s `secrets-manager login tiktok`.
-
-## Shared account prerequisite
-
-Use the existing secrets-manager CLI and store to provision or log in accounts.
-It need not be installed as a Codex plugin to run its CLI. If the CLI, required
-account, proxy or browser profile is missing, report the prerequisite; do not
-create a second store or switch to a host browser profile.
