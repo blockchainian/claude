@@ -3,7 +3,7 @@ name: fetch-x-user-posts
 description: Fetch an X/Twitter account's own posts and replies over a date range into ~/.local/state/intel/x/kols/<user>/tweets.jsonl and replies.jsonl — the authenticated SearchTimeline `from:<user>` paged chronologically, sharded across X accounts through the residential proxy, resumable, for a batch of usernames at once. Use when asked to fetch / 抓 / 拉 one or many accounts' own timelines (e.g. a KOL roster's past-year posts). NOT for posts that mention an app (use fetch-x-mentions), NOT for a few of an account's posts without saving them (use fetch-x-posts) and NOT for reading the archive (analyze-x-user).
 ---
 
-# Fetch X users
+# Fetch X user posts
 
 Fetch what accounts post themselves — their own tweets and their replies — as opposed to
 `fetch-x-mentions`, which fetches what everyone says about an app. Give it a batch of screen
