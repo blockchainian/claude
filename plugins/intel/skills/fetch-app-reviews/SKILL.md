@@ -1,9 +1,9 @@
 ---
 name: fetch-app-reviews
-description: Fetch every App Store written review of an iOS app across all storefronts into ~/.local/state/intel/reviews/<name>.json, rotating a residential-proxy exit per request, resumable per storefront — or of every app in ~/.local/state/intel/reviews/apps.json. Use when asked to fetch / 抓 / 拉 an app's App Store reviews or refresh the reviews dataset. NOT for reading the reviews (analyze-appstore-reviews) and NOT for X mentions (fetch-x-mentions).
+description: Fetch every App Store written review of an iOS app across all storefronts into the intel state folder, rotating a residential-proxy exit per request, resumable per storefront — or of every app in the reviews app list. Use when asked to fetch / 抓 / 拉 an app's App Store reviews or refresh the reviews dataset. NOT for reading the reviews (analyze-appstore-reviews) and NOT for X mentions (fetch-x-mentions).
 ---
 
-# Fetch App Store reviews
+# Fetch app reviews
 
 ## Skill directory
 
@@ -16,43 +16,46 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 ## Environment variables
 
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in only the values the
+skills you use need. The scripts load that file without replacing variables already exported in the
+shell.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `INTEL_STATE_DIR` | State root; default ~/.local/state/intel, with reviews under reviews/ | No | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; reviews go under `reviews/`; default `~/.local/state/intel` | No | `~/.config/intel/.env` |
 | `RESIDENTIAL_PROXY_URL` | Rotating residential proxy | Yes | `~/.config/intel/.env` |
 
-Each request opens a fresh proxy connection to rotate the exit IP.
+## Setup
+
+Install the scripts' dependencies once:
+
+```sh
+npm install --prefix "$SKILL_DIR/scripts"
+```
 
 ## Run
 
-Archives are written under `INTEL_STATE_DIR/reviews/`, independent of the working directory.
+To fetch one app, pass its numeric App Store id (for example 6741115427) and, optionally, the output
+name; without a name, the script derives one from the app's store name.
 
-One app:
-
-```
-node \
-  "$SKILL_DIR/scripts/fetch-app-reviews.mjs" <appleId> [name]
+```sh
+node "$SKILL_DIR/scripts/fetch-app-reviews.mjs" <appleId> [name]
 ```
 
-- `appleId` is the numeric App Store id, e.g. 6741115427.
-- `name` is the output slug; omitted, it is derived from the store name.
+To fetch every app in `reviews/apps.json` under the state root, a ranked app list with `rank`,
+`name`, `appId` and ratings, run the all-apps script. It goes from the bottom rank up and takes a
+long time, so run it in the background.
 
-Every app in `~/.local/state/intel/reviews/apps.json` (the crypto-app leaderboard: rank, name, appId, ratings), bottom rank first:
-
-```
-node \
-  "$SKILL_DIR/scripts/fetch-all-app-reviews.mjs"
+```sh
+node "$SKILL_DIR/scripts/fetch-all-app-reviews.mjs"
 ```
 
-It runs for a long time, so run it in the background.
-
-Both are resumable: rerun the same command. Per-storefront completion is kept in the output
-file, so a retry only re-fetches storefronts that have not confirmed an end. The all-apps run
-retries incomplete apps for up to 6 passes.
+Both write under `reviews/` in the state root, whatever the working directory. Both resume when you
+rerun the same command: the output file records which storefronts reached a confirmed end, and a
+rerun fetches only the rest. The all-apps script itself retries incomplete apps for up to 6 passes.
 
 ## Output
 
-`~/.local/state/intel/reviews/<name>.json`: `{ appId, appName, updatedAt, complete, countriesDone, count, reviews }`.
-`complete` is true only when every storefront reached a confirmed end.
+Each app goes to `reviews/<name>.json` under the state root as
+`{ appId, appName, updatedAt, complete, countriesDone, count, reviews }`. `complete` is true only
+when every storefront reached a confirmed end; otherwise rerun the command.
