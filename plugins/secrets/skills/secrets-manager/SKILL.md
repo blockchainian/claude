@@ -5,11 +5,16 @@ description: Manage local plaintext credentials and browser sessions — import 
 
 # Secrets manager
 
-Run the CLI from this skill, with `SKILL_DIR` set in every shell call to the absolute directory
-containing this loaded `SKILL.md`; `node "$SKILL_DIR/scripts/cli.mjs" --help` lists every command and
-flag. Claude Code and Codex share the same accounts, so close a profile's browser before opening that
-account from the other host. To write an app adapter, read
-[references/adapters.md](references/adapters.md).
+## Skill directory
+
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call, and run the
+CLI from there; `node "$SKILL_DIR/scripts/cli.mjs" --help` lists every command and flag. Claude Code
+and Codex share the same accounts, so close a profile's browser before opening that account from the
+other host. To write an app adapter, read [references/adapters.md](references/adapters.md).
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
+```
 
 ## Environment variables
 
@@ -30,98 +35,108 @@ Shell values take precedence over `~/.config/secrets-manager/.env`.
 | `SECRETS_STATE_DIR` | Accounts, credential files and logged-in browser profiles; default ~/.local/state/secrets-manager | Optional | ~/.config/secrets-manager/.env |
 | `SECRETS_DATA_DIR` | Debug captures and scratch files; default ~/.local/share/secrets-manager | Optional | ~/.config/secrets-manager/.env |
 
-## Setup (after every plugin install or update)
+## Setup
+
+Run the setup script after every plugin install or update; `--check` only reports what is present.
 
 ```sh
-SKILL_DIR="/absolute/path/to/loaded/secrets-manager"
 "$SKILL_DIR/scripts/setup.sh"
-# Read-only report:
 "$SKILL_DIR/scripts/setup.sh" --check
 ```
 
-Fill in `~/.config/secrets-manager/.env` from the plugin's `.env.example` (variables above) and list
-the app adapters in `~/.config/secrets-manager/config.json`, checking each file with
+Fill in `~/.config/secrets-manager/.env` from the plugin's `.env.example`, and list the app adapters
+in `~/.config/secrets-manager/config.json`, checking each adapter file with
 `node "$SKILL_DIR/scripts/cli.mjs" validate /absolute/path/adapters.mjs`:
 
 ```json
 {"adapters": ["/absolute/path/adapters.mjs"]}
 ```
 
-A vendor whose Google lines carry the TOTP seed in a URL needs that URL's pattern in the same file,
+If a vendor's Google lines carry the TOTP seed inside a URL, add that URL's pattern to the same file
 as `"totpUrlPatterns": ["<regex whose first group captures the base32 seed>"]`.
 
-Headed runs need Accessibility trust to move OAuth popups onto the `BROWSER_DISPLAY` display and
-Screen Recording permission to record the windows.
+Headed runs need Accessibility trust, to move OAuth popups onto the `BROWSER_DISPLAY` display, and
+Screen Recording permission, to record the windows.
 
 ## New account flow
 
-A request to "搞" (get) a new account means this whole sequence for a fresh Google account, every
-app your adapters define included. Run each step on its own:
+A request to "搞" (get) a new account means this whole sequence for a fresh Google account, including
+every app your adapters define. Run each command on its own:
 
-1. `node "$SKILL_DIR/scripts/cli.mjs" import google <file>`.
-2. `node "$SKILL_DIR/scripts/cli.mjs" login google --select <email>`.
-3. `node "$SKILL_DIR/scripts/cli.mjs" login <app> --select <email>` for each required adapter.
-4. `node "$SKILL_DIR/scripts/cli.mjs" setup <app> --select <email>` for adapters with a setup hook.
+1. `node "$SKILL_DIR/scripts/cli.mjs" import google <file>`
+2. `node "$SKILL_DIR/scripts/cli.mjs" login google --select <email>`
+3. `node "$SKILL_DIR/scripts/cli.mjs" login <app> --select <email>`, for each required adapter
+4. `node "$SKILL_DIR/scripts/cli.mjs" setup <app> --select <email>`, for adapters with a setup hook
 
-The account is done when Google is `active` and each required app session is `ready` (or `active`
-when its adapter has no setup hook); report each app's status from `list`.
+The account is done when Google is `active` and each required app session is `ready`, or `active`
+when its adapter has no setup hook; report each app's status from `list`.
 
-Google sign-ins (`login google`, `login <app>`, `setup-2fa`) run headed so a person can clear any
-CAPTCHA; keep them headed, because the headless vision solver's misses get accounts banned. In a
-headed run a person also clears whatever the script cannot and enters verification codes in the
-window, and after an error the window stays open until it is closed. Don't rerun a failed Google
-sign-in over and over: repeated re-auth locks the account out for hours.
+Google sign-ins (`login google`, `login <app>`, `setup-2fa`) run headed so that a person can clear
+any CAPTCHA. Keep them headed: the headless vision solver's misses get accounts banned. In a headed
+run the person also clears whatever the script cannot and enters verification codes in the window,
+and after an error the window stays open until it is closed. Don't rerun a failed Google sign-in over
+and over, because repeated re-auth locks the account out for hours.
 
-A failed step leaves a status that says what to do. `escalated` means a person must clear a
-challenge: rerun that step headed. `restricted` means the app banned the account: stop for that app.
-`expired` means the session lapsed: rerun the step. An app step needs Google `active`, so fix
-`login google` before chasing an app failure. Take a fresh batch one account at a time with
-`--select`, and widen to `--all` or `--concurrency N` once the flow works on a few; for `setup`, set
-`--concurrency` from the app's measured rate limit.
+A failed command leaves a status that says what to do:
+
+- `escalated`: a person must clear a challenge, so rerun that command headed.
+- `restricted`: the app banned the account, so stop for that app.
+- `expired`: the session lapsed, so rerun the command.
+
+An app login needs Google `active`, so fix `login google` before chasing an app failure. Take a fresh
+batch one account at a time with `--select`, and widen to `--all` or `--concurrency N` once the flow
+works on a few; for `setup`, set `--concurrency` from the app's measured rate limit.
 
 ## Commands
 
-- **import** reads the credential files under `SECRETS_STATE_DIR` (`google/`, `x/`, `tiktok/`), or the
-  named files, one account per line, and reports any line it cannot parse. Reruns are safe. Import only
-  burner accounts into X, never the user's own: intel's X fetchers read with every `active` X row.
-  After importing a new `auth_token` for a known X account, derive its ct0 with intel's
-  `fetch-x-mentions/scripts/verify-x.mjs`.
-- **login tiktok** binds the session to the account's fixed ISP slot, so use it only from that slot.
-  On a new device TikTok emails a code: in a `--headed` run, read it from the account's mailbox and
-  type it into the TikTok window within 5 minutes.
+- **import** reads the credential files under `SECRETS_STATE_DIR` (`google/`, `x/`, `tiktok/`), or
+  the files you name, one account per line, and reports any line it cannot parse. Reruns are safe.
+  Import only burner accounts into X, never the user's own, because intel's X fetchers read with
+  every `active` X row. After importing a new `auth_token` for a known X account, derive its ct0 with
+  intel's `fetch-x-mentions/scripts/verify-x.mjs`.
+- **login tiktok** binds the session to the account's fixed ISP slot, so use the session only from
+  that slot. On a new device TikTok emails a code: in a `--headed` run, read it from the account's
+  mailbox and type it into the TikTok window within 5 minutes.
 - **setup-2fa** completes a password-only Google account with an authenticator TOTP, 2-Step
   Verification and an app password. Run `login google` first, and watch the first account in its
   window, since the enrollment dialog's selectors drift.
 - **sms** rents HeroSMS numbers for Google's phone step. `number` spends money, so it only quotes
-  until you pass `--yes`; `prices` is free and gives the country ids `--country` takes. Never pass
-  `--country` for Cameroon, Indonesia, the Philippines or Kenya: they do not deliver Google's code,
-  and `--country` bypasses `SMS_COUNTRY_BLACKLIST` in `scripts/config.mjs`, which keeps them out
-  otherwise.
-- **verify** checks that accounts still work and saves the result; exit 1 means a check could not
+  until you pass `--yes`; `prices` is free and gives the country ids that `--country` takes. Never
+  pass `--country` for Cameroon, Indonesia, the Philippines or Kenya: they do not deliver Google's
+  code, and `--country` bypasses the `SMS_COUNTRY_BLACKLIST` in `scripts/config.mjs` that otherwise
+  keeps them out.
+- **verify** checks that accounts still work and saves the result. Exit 1 means a check could not
   tell, and nothing was changed. A 404 from `verify x` means `X_VIEWER_QUERY_ID` is stale: re-read it
   from the `main.<hash>.js` that x.com/home serves a signed-in account
   (`queryId:"…",operationName:"Viewer"`).
-- **setup** runs the adapter's setup hook on `active` app sessions, and on `ready` ones too with
-  `--all`; `setup <app> --help` lists the app's own flags.
-- **export** prints app credentials as JSON lines with the values in clear.
+- **setup** runs the adapter's setup hook on `active` app sessions, and with `--all` on `ready` ones
+  too; `setup <app> --help` lists the app's own flags.
+- **export** prints app credentials as JSON lines, with the values in clear.
 
-## Running and diagnosing
+## Failures and limits
 
 Run long browser commands in the background and wait for their exit status, and pass every
 `ASSIST NEEDED` message on to the user. Do not call host-specific `request_access` or
-`switch_display` tools. To diagnose a failure, read the step's `screenshot.png` and `info.txt` under
-`SECRETS_DATA_DIR/debug/<id>/<step>-<ts>/`, which show the page at capture time rather than the live
-desktop; a headless Google sign-in also leaves a video of every page under
+`switch_display` tools.
+
+To diagnose a failure, read the step's `screenshot.png` and `info.txt` under
+`SECRETS_DATA_DIR/debug/<id>/<step>-<ts>/`; they show the page at capture time, not the live desktop.
+A headless Google sign-in also leaves a video of every page under
 `SECRETS_DATA_DIR/debug/<id>/rec-<ts>/`.
 
 `proxy exit down: <host> …` means the account's sticky exit is down for a while (CONNECT answers
-522): rerun later. `--rotate-proxy` changes the IP on every connection, so it cannot rescue a browser
-login.
+522), so rerun later. `--rotate-proxy` changes the IP on every connection, so it cannot rescue a
+browser login.
 
-## Limits
+Google often refuses to send its SMS to rented numbers on fresh accounts. A headed run then hands the
+window to a person, who types a real number and takes the SMS on their own phone. The script never
+solves a Cloudflare CAPTCHA; run headed and click it yourself.
 
-- Google often refuses to send its SMS to rented numbers on fresh accounts. A headed run then hands
-  the window to a person, who types a real number and takes the SMS on their own phone.
-- A Cloudflare CAPTCHA is never solved by the script; run headed and click it yourself.
-- Selectors drift, and the offline tests (`node --test "$SKILL_DIR/tests/"*.mjs`) do not cover them:
-  tune `login.mjs` or your adapter against a live account, headed.
+## Tests
+
+The offline tests do not cover selectors, which drift, so tune `login.mjs` or your adapter against a
+live account, headed.
+
+```sh
+node --test "$SKILL_DIR/tests/"*.mjs
+```
