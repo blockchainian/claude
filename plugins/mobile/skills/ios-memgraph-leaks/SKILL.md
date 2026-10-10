@@ -5,107 +5,126 @@ description: Capture and inspect iOS leaks and memgraphs. Use when debugging lea
 
 # iOS memgraph leaks
 
-Use this skill to prove iOS leaks from a live simulator process or an existing `.memgraph`. Pair it with `../ios-debugger-agent/SKILL.md` when the task also needs simulator build, install, launch, UI driving, logs, or screenshots.
+This skill proves iOS leaks from a live simulator process or from an existing `.memgraph`. When the
+task also needs a simulator build, install, launch, UI driving, logs or screenshots, pair it with
+`../ios-debugger-agent/SKILL.md`.
 
-## Simulator ownership
+## Skill directory
 
-For live simulator work, select an explicit UUID and claim it before build, launch or capture.
-Use this skill's actual loaded directory, and keep the same `UDID` and `RUN_ID` throughout:
-
-In each shell call, reassign `SKILL_DIR`, `UDID`, and `RUN_ID` to the resolved
-values; shell variables do not persist between calls.
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md`, never to the app repo's `pwd`:
+installed plugins usually live outside the app being debugged. Shell variables do not persist
+between calls, so reassign `SKILL_DIR`, `UDID` and `RUN_ID` to the same resolved values in every
+shell call.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+## Environment variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `MOBILE_DATA_DIR` | Scratch root; captures go under `tmp/ios-memgraph-leaks/`; default `~/.local/share/mobile` | Optional | Shell environment |
+
+## Simulator ownership
+
+Live simulator work needs an explicit simulator UUID, claimed before any build, launch or capture
+and kept, with the same `RUN_ID`, for the whole run. Analyzing an existing memgraph needs no claim.
+
+```sh
 UDID="<chosen-simulator-uuid>"
 RUN_ID="$(uuidgen)"
 node "$SKILL_DIR/../ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
-The coordinator assigns different UUIDs to parallel runs. Exit 3 means the chosen target is
-owned: wait for release or choose another UUID; do not steal a live run. When called inside an
-existing debugger/screenshot run, reuse its claim and run id; only the outer run releases it.
-Analyzing existing artifacts needs no simulator claim.
+The coordinator gives parallel runs different UUIDs. Exit 3 means another run owns the simulator:
+wait for it to release or choose another UUID, and never steal a live run. Inside an existing
+debugger or screenshot run, reuse its claim and run id; only that outer run releases it.
 
-XcodeBuildMCP calls must pass `simulatorId` explicitly; build and app-path calls also pass
-`projectPath` or `workspacePath`, `scheme`, configuration and a run-specific `derivedDataPath`.
-Launch/stop calls pass `bundleId`. Do not change shared session defaults or active profiles.
-Check that the exposed schema accepts `simulatorId` and each response targets the chosen UUID;
-stop on a mismatch or reconnect a server that still exposes only shared-default targeting.
+Every XcodeBuildMCP call passes `simulatorId` explicitly. Build and app-path calls also pass
+`projectPath` or `workspacePath`, `scheme`, the configuration and a run-specific `derivedDataPath`;
+launch and stop calls pass `bundleId`. Do not change shared session defaults or active profiles.
+Check that the exposed schema accepts `simulatorId` and that every response targets the chosen
+UUID. On a mismatch, stop, or reconnect a server that still targets only shared defaults.
 
-## Core Workflow
+## Workflow
 
-1. Build, launch, and drive the exact flow that should release objects.
-2. Capture a memgraph from the running simulator process with `scripts/capture_sim_memgraph.sh`.
-3. Summarize leaks with `scripts/summarize_memgraph_leaks.py`.
-4. For each app-owned leaked type, inspect ownership with `leaks --traceTree=<address> <file.memgraph>` and grouped leak evidence.
-5. Make the smallest root-cause patch, then recapture the same flow on the same simulator when possible.
-6. Report proof: before/after leak counts, disappeared root types, remaining leaks, memgraph paths, and test/build results.
+Build and launch the app, then drive the exact flow that should release the objects. Capture a
+memgraph from the running process, summarize its leaks, and for each app-owned leaked type inspect
+ownership with `leaks --traceTree=<address> <file.memgraph>` and the grouped leak evidence. Make the
+smallest root-cause patch, then recapture the same flow, on the same simulator when possible, and
+report the proof.
 
-Do not claim a leak fix from a smaller memgraph alone. A credible fix explains the ownership path that kept the object alive and shows that the same path or type disappears after the patch.
+A smaller memgraph alone never proves a fix. A credible fix explains the ownership path that kept
+the object alive and shows that the same path or type disappears after the patch.
 
 ## Capture
 
-Prefer capturing from the simulator already used for the reproduction. Resolve the simulator UDID and app bundle identifier, then capture the running app:
+Capture from the simulator already used for the reproduction, with its UDID and the app's bundle
+identifier:
 
-```bash
-SKILL_DIR="<absolute path to this loaded skill folder>"
-SIM="$UDID"
-BUNDLE_ID="<app.bundle.identifier>"
-mkdir -p "${MOBILE_DATA_DIR:-$HOME/.local/share/mobile}/tmp/ios-memgraph-leaks"
-MEMGRAPH_DIR="$(mktemp -d "${MOBILE_DATA_DIR:-$HOME/.local/share/mobile}/tmp/ios-memgraph-leaks/run.XXXXXX")"
-
+```sh
 "$SKILL_DIR/scripts/capture_sim_memgraph.sh" \
-  --udid "$SIM" \
-  --bundle-id "$BUNDLE_ID" \
-  --out-dir "$MEMGRAPH_DIR"
+  --udid "$UDID" \
+  --bundle-id "<app.bundle.identifier>"
 ```
 
-Do not derive `SKILL_DIR` from the target app repo's `pwd`; installed plugins usually live outside the app being debugged. Store captures in a run-specific temp or user-chosen folder, not under `SKILL_DIR`.
+Without `--out-dir`, each capture goes to a fresh run directory under the scratch root. A folder
+passed with `--out-dir` should be run-specific or chosen by the user, never under `SKILL_DIR`. The
+script prints the paths of the memgraph, the raw `leaks` output and a metadata file.
 
-If the process cannot be found, confirm the bundle identifier and use `xcrun simctl spawn "$SIM" launchctl list` to inspect running labels.
+If it cannot find the process, confirm the bundle identifier and list the running labels with
+`xcrun simctl spawn "$UDID" launchctl list`.
 
 ## Summarize
 
-Summarize an existing memgraph:
-
-```bash
+```sh
 "$SKILL_DIR/scripts/summarize_memgraph_leaks.py" \
   /path/to/app.memgraph \
   --trace-limit 5 \
   --out /path/to/leak-summary.md
 ```
 
-Use `--trace-limit` sparingly. Trace trees are useful root-cause evidence, but large memgraphs can produce noisy output. If a trace tree says `Found 0 roots referencing`, treat it as an unreachable/self-retained leak candidate and use the summary's grouped leak tree or `leaks --groupByType <file.memgraph>` to identify the retained fields and payload chain.
+Keep `--trace-limit` small: trace trees are useful root-cause evidence, but large memgraphs make
+them noisy. A trace tree that says `Found 0 roots referencing` marks an unreachable or self-retained
+leak candidate; use the summary's grouped leak tree, or `leaks --groupByType <file.memgraph>`, to
+find the retained fields and the payload chain.
 
-## Root Cause Rules
+## Root cause rules
 
 - Identify the first app-owned leaked type in the leak output or trace.
-- Determine the intended lifetime: process, session, account, view, request, or task.
-- Treat lazy or deferred allocation as a scope reduction, not a leak fix, unless the original eager allocation itself violated the intended lifetime.
-- Prove retain-cycle claims with either a `traceTree` ownership path or an isolated reproduction.
-- For unreachable/self-cycle leaks, `traceTree` may have no root path; use `leaks --groupByType` plus source verification to find the self-retaining edge.
-- Do not claim success just because total leak count went down; prove the specific type or path disappeared.
-- Separate real root-cause branches from candidate/noise branches.
+- Determine its intended lifetime: process, session, account, view, request or task.
+- Treat lazy or deferred allocation as a scope reduction, not a leak fix, unless the original eager
+  allocation itself violated the intended lifetime.
+- Prove a retain-cycle claim with either a `traceTree` ownership path or an isolated reproduction.
+- For an unreachable or self-cycle leak, `traceTree` may show no root path; find the self-retaining
+  edge with `leaks --groupByType` and by verifying the source.
+- Never claim success because the total leak count went down; prove the specific type or path
+  disappeared.
+- Separate real root-cause branches from candidate and noise branches.
 - Prefer deleting the retaining edge over adding broad cleanup code.
 
 ## Report
 
-A useful leak report includes:
+The leak report gives:
 
-- the exact flow and simulator/app build
+- the exact flow, the simulator and the app build
 - the memgraph and summary paths
-- app-owned leaked types and counts
-- at least one ownership path, or grouped leak tree evidence when the object is unreachable from roots
-- the smallest proposed or applied retaining-edge fix
-- before/after evidence when a fix was made
+- the app-owned leaked types and their counts
+- at least one ownership path, or grouped leak tree evidence when the object is unreachable from
+  roots
+- the smallest proposed or applied fix to the retaining edge
+- before/after leak counts, the root types that disappeared and the leaks that remain, when a fix
+  was made
+- the test and build results
 
-If the memgraph shows only framework/runtime noise, say that and recommend the next narrower capture rather than inventing an app leak.
+If the memgraph shows only framework or runtime noise, say so and recommend a narrower next capture
+rather than inventing an app leak.
 
 ## Cleanup
 
-After capture and simulator-driving processes finish, release this run's own claim on success
-or failure; an outer caller retains and releases its shared claim. Preserve diagnostics first.
+Once capture and simulator driving have finished, keep the diagnostics, then release this run's own
+claim, on success or failure. A claim reused from an outer run stays for that run to release.
 
 ```sh
 node "$SKILL_DIR/../ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
