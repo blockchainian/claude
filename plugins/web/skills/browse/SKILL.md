@@ -165,7 +165,18 @@ browse --proxy socks5://user:pass@host:1080 goto https://example.com
 browse download "https://protected.example.com/file" /tmp/file.bin --navigate
 ```
 
-Proxy credentials go in the URL or in `BROWSE_PROXY_USER` / `BROWSE_PROXY_PASS`.
+## Environment Variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `BROWSE_TAB` | Pins every command to one tab; see One tab per client | No | the caller's shell |
+| `BROWSE_HEADED` | `1` starts the daemon headed, like `--headed` | No | shell profile |
+| `BROWSER_DISPLAY` | Display for the headed window; see Headed mode and proxies | No | shell, or `~/.config/web/.env` |
+| `BROWSE_PROXY_USER`, `BROWSE_PROXY_PASS` | Proxy credentials for `--proxy`, instead of putting them in its URL | No | shell |
+| `CHROMIUM_PROFILE` | Profile directory of the headed browser (default `~/.gstack/chromium-profile`) | No | shell |
+| `BROWSE_STATE_FILE` | State file that picks which daemon a client talks to (default `.gstack/browse.json` under the git root, else the working directory) | No | shell |
+| `BROWSE_IDLE_TIMEOUT` | Milliseconds of inactivity before the daemon shuts down, losing its tabs and logins (default 1800000, 30 min) | No | shell |
+| `CLAUDE_PLUGIN_DATA` | Parent directory of the launcher's builds | No | set by Claude Code |
 
 ## Most-used commands
 
