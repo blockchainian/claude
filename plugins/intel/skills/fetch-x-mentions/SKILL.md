@@ -68,7 +68,7 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 Account credentials (`auth_token`, `ct0`) stay in the existing Secrets Manager store, normally `~/.local/state/secrets-manager/secrets.sqlite`; do not copy them into `.env`. Capture the X web-client and signing values from x.com; refresh them when its web bundle changes.
 
-Provision accounts with `secrets-manager import x`, then run `verify-x.mjs` below; each account has its own rate bucket.
+Provision burner accounts only (every `active` row is used; never the user's own) with `secrets-manager import x`, then run `verify-x.mjs` below; each account has its own rate bucket.
 
 `verify-x.mjs` specifically requires `RESIDENTIAL_PROXY_URL` when verifying tokens.
 
