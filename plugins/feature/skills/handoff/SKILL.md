@@ -11,54 +11,56 @@ description: >
 
 # Handoff
 
-A resumer reads the handoff plus the phase's document (or, for research, the materialized
-findings). Everything else must be pointed to, not restated. Target under 40 lines for the
-handoff itself. File: `handoff.md` beside the phase document (`plan.md`), rewritten in place on every later
-handoff for the same topic.
+Whoever resumes reads the handoff together with the phase's document, or for research the
+materialized findings, so the handoff points to everything else instead of restating it. Keep it
+under 40 lines. Write it as `handoff.md` beside the phase document (`plan.md`), and on every later
+handoff for the same topic rewrite that file in place; never date a second file or append.
 
-## Five sections, in this order
+## Sections
 
-1. **Stopped at** — one sentence: the phase, the step within it, why the stop.
-2. **Done** — pointers only: commit SHAs, file paths, artifact URLs, data files, memory
-   files. No narration of what they contain.
-3. **Next** — the single next step and the command or prompt that starts it.
-4. **Unverified** — every assumption still standing, one line each, with what would settle
-   it. Write "none" rather than omitting the heading.
-5. **Do not redo** — what looks unfinished but is finished, with the evidence; sources
-   already exhausted; queries and quotas already spent.
+The handoff has five sections, in this order:
 
-## Rules
+1. **Stopped at**: one sentence naming the phase, the step within it and why the session stopped.
+2. **Done**: pointers only (commit SHAs, file paths, artifact URLs, data files, memory files),
+   with no narration of what they contain.
+3. **Next**: the single next step, not a list, and the command or prompt that starts it. The
+   resumer decides the rest from the phase document.
+4. **Unverified**: every assumption still standing, one line each, with what would settle it.
+   Write "none" rather than dropping the heading.
+5. **Do not redo**: what looks unfinished but is finished, with the evidence; sources already
+   exhausted; queries and quotas already spent.
 
-- Every claim carries a SHA, path, URL or command. A sentence without one is narration; cut it.
-- Do not summarise the plan or the report. Link them.
-- Do not record decisions already in a phase document or a memory file. Link them.
-- One next step, not a list. The resumer decides the rest from the phase document.
+Every claim carries a SHA, path, URL or command; a sentence without one is narration, so cut it.
+Link the plan or the report instead of summarising it, and link decisions already recorded in a
+phase document or a memory file instead of recording them again.
 
-## Two shapes
+## Development flow
 
-**Development flow** (plan → ship): "Done" is SHAs and
-phase docs; "Next" is the phase after the one that produced the last document: writing `plan.md`,
-or the ship step on `plan.md`; "Do not redo" is the probes already
-green and the workstreams already merged (with the check output path).
+In the plan → ship flow, **Done** is SHAs and phase docs. **Next** is the phase after the one that
+produced the last document: writing `plan.md`, or the ship step on `plan.md`. **Do not redo** lists
+the probes already green and the workstreams already merged, with the path to the check output.
 
-**Research session** (gather → analyse → derive → report): there is no phase doc, and mid-session
-the substance lives only in tool results and assistant messages. So a research handoff has a
-**materialize step first**, then the five sections. Materialize into `specs/<date>-<topic>/`:
-- `findings.md` — every insight derived so far, one bullet each, with its evidence (a number,
-  a quote, a file path, a URL). This is the file the resumer actually reads.
-- raw data that exists only in the transcript (fetched pages, API responses, agent reports)
-  saved as files; scripts already on disk are pointers, not copies.
-- `sources.md` — the queries run, the sources exhausted, the retrieval quotas spent (X, Reddit,
-  opencli budgets), so nothing is re-fetched.
-Then "Done" lists those paths; "Unverified" is the claims not yet cross-checked; "Do not redo"
-points at `sources.md`. The 40-line cap applies to the handoff, not to the materialized files.
-Record the session id in "Stopped at": the transcript under `~/.claude/projects/` holds every
-tool result, and a resumer can pull one specific result from it by grep without reading it all.
+## Research session
 
-## Trigger
+A research session (gather → analyse → derive → report) has no phase document, and mid-session its
+substance lives only in tool results and assistant messages. Before writing the five sections,
+materialize it into `specs/<date>-<topic>/`:
 
-The idle wake-up: a Stop hook in the dotfiles schedules a one-shot 55 minutes after every turn
-end; if the session is still idle it fires "[idle-wakeup <session>] If still idle, write the
-handoff per the feature:handoff skill and end." The hook owns scheduling: never create, delete or
-reschedule the wake-up yourself. A later handoff for the same topic replaces the earlier file in
-place; never date a second file or append.
+- `findings.md`: every insight derived so far, one bullet each, with its evidence (a number, a
+  quote, a file path, a URL). This is the file the resumer actually reads.
+- Raw data that exists only in the transcript (fetched pages, API responses, agent reports), saved
+  as files. Scripts already on disk are pointers, not copies.
+- `sources.md`: the queries run, the sources exhausted and the retrieval quotas spent (X, Reddit,
+  opencli budgets), so nothing is fetched again.
+
+**Done** then lists those paths, **Unverified** is the claims not yet cross-checked, and **Do not
+redo** points at `sources.md`. The 40-line limit applies to the handoff, not to the materialized
+files. Put the session id in **Stopped at**: the transcript under `~/.claude/projects/` holds every
+tool result, and the resumer can grep one specific result out of it without reading it all.
+
+## Idle wake-up
+
+A Stop hook in the dotfiles schedules a one-shot 55 minutes after every turn ends. If the session is
+still idle then, it fires "[idle-wakeup <session>] If still idle, write the handoff per the
+feature:handoff skill and end." The hook owns the scheduling: never create, delete or reschedule
+the wake-up yourself.
