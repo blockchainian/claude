@@ -3,13 +3,13 @@ name: open-tiktok-account
 description: Open a secrets-manager TikTok account's own Camoufox profile in a shown browser window, signed in as that account on its ISP slot, at TikTok Studio or any tiktok.com page, so a person can look around — private (only-me) posts, Studio analytics, settings — optionally with sound; the run ends when the window is closed. Use when asked to open / 打开 a TikTok account, or to see or hear a post only the account can see. NOT for posting (upload-tiktok-video), NOT for numbers (fetch-tiktok-stats) and NOT for logging the account in (secrets-manager).
 ---
 
-# Open a TikTok account
+# Open TikTok account
 
 ## Skill directory
 
-Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call.
-Keep the full creator plugin installed: all four skills use its
-`upload-tiktok-video/scripts/tiktok-session.mjs` runtime and dependencies.
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. Keep the
+whole creator plugin installed, because all four of its skills run on the runtime and dependencies of
+`upload-tiktok-video/scripts/tiktok-session.mjs`.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
@@ -17,53 +17,45 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 ## Environment variables
 
-Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; Claude Code, Codex and all worktrees use this file. Existing shell values take precedence.
+Copy the creator plugin's `.env.example` to `~/.config/creator/.env`, the one file every host and
+worktree reads. Values already set in the shell take precedence.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
-| `ISP_PROXY_URL` | ISP pool matching the account’s login pool | Yes | ~/.config/creator/.env |
-| `BROWSER_DISPLAY` | Display for headed browser windows | Optional | ~/.config/creator/.env |
-| `CREATOR_STATE_DIR` | State root; default ~/.local/state/creator, with each account's posts.jsonl and stats.jsonl under tiktok/<username>/ | Optional | ~/.config/creator/.env |
-| `CREATOR_DATA_DIR` | Data root; default ~/.local/share/creator, with each account's screen recordings under tiktok/<username>/recordings/ | Optional | ~/.config/creator/.env |
-| `SECRETS_STATE_DIR` | Existing Secrets Manager account/profile directory | Optional | ~/.config/creator/.env |
-
-Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
+| `ISP_PROXY_URL` | ISP pool matching the account's login pool | Yes | `~/.config/creator/.env` |
+| `BROWSER_DISPLAY` | Display the browser window opens on | Optional | `~/.config/creator/.env` |
+| `SECRETS_STATE_DIR` | Existing secrets-manager store of accounts, ISP slots and profiles; default `~/.local/state/secrets-manager` | Optional | `~/.config/creator/.env` |
 
 ## Setup
 
-Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
-and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
-shared by Claude Code and Codex at `~/.local/state/secrets-manager` (`SECRETS_STATE_DIR` explicitly
-overrides it), including TikTok account rows, ISP slots and browser profiles.
-config/creator/.env` or the process environment. Creator reads this
-store; use secrets-manager to provision or log in an account if it is missing. Installing
-creator in another host does not create or migrate accounts.
-
-Run once for the installed creator plugin (all four skills use this same install):
+The script needs Node.js 22.13+ with `node:sqlite` and the Camoufox browser that secrets-manager
+installs. Install the runtime's npm dependencies once for the plugin; all four skills share this
+install:
 
 ```sh
-SKILL_DIR="/absolute/path/to/loaded/skill"
 (cd "$SKILL_DIR/../upload-tiktok-video/scripts" && npm ci)
 ```
+
+Account credentials, sessions and profiles stay in the secrets-manager store, which Claude Code and
+Codex share; creator only reads it. Installing creator on another host creates and migrates no
+accounts, so provision or log in a missing account with secrets-manager.
 
 ## Run
 
 ```sh
-SKILL_DIR="/absolute/path/to/loaded/skill"
-node "$SKILL_DIR/scripts/open-tiktok-account.mjs" \
-  [--username <name>] [--url <url>] [--with-sound]
+node "$SKILL_DIR/scripts/open-tiktok-account.mjs" [--username <name>] [--url <url>] [--with-sound]
 ```
 
-- `--username`: the account of the store, in any status: a `restricted` one opens too, to see
-  TikTok's ban notice or appeal. Default the account upload-tiktok-video posts as.
-- `--url`: the tiktok.com page to open. Default TikTok Studio's home.
-- `--with-sound`: unmute the browser (Playwright mutes it), to hear the videos.
+- `--username` picks the store's account, in any status: a `restricted` one opens too, to see TikTok's
+  ban notice or appeal. The default is the account upload-tiktok-video posts as.
+- `--url` is the `https://www.tiktok.com/` page to open. The default is TikTok Studio's home.
+- `--with-sound` unmutes the browser, which Playwright otherwise mutes, so the videos can be heard.
 
-Run through the host's shell execution tool and retain its process/session handle and output.
-It holds until the person closes the window, so use a background execution session. Wait on
-its completion event when needed; do not repeatedly poll the process or log. A review deadline
-must not silently close the person's browser. The window is always
-shown, so there is no `--headed`, and nothing is recorded. The profile is the one `login tiktok`
-signed in, opened as that same device and IP; a logged-out profile is said so in the log. Nothing
-else may have the profile open at the same time, so close the window before uploading or listing
-sounds as that account.
+The window is always shown, so there is no `--headed`, and nothing is recorded. It opens the profile
+`login tiktok` signed in, as that same device and IP. The run holds until the person closes the
+window, so start it in the background and wait for it to exit; never let a timeout close the
+person's browser.
+
+If the log says the profile is logged out, or the script finds no such account, run the
+secrets-manager skill's `login tiktok` for it. Nothing else may have the profile open at the same
+time, so have the window closed before uploading or listing sounds as that account.
