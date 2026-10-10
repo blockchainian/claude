@@ -1,11 +1,11 @@
 # Adapter interface
 
-An adapter file is an ES module that default-exports `(kit) => Adapter[]` and takes everything it
-needs from `kit`, never importing plugin files by path. List the file in
+An adapter file is an ES module that default-exports `(kit) => Adapter[]`. It takes everything it
+needs from `kit` and never imports plugin files by path. List the file in
 `~/.config/secrets-manager/config.json` and check it with
-`node "$SKILL_DIR/scripts/cli.mjs" validate <path>`. The interface lives in this skill's
-`scripts/adapter.mjs`; any field or kit change bumps the plugin's minor version, and a removal or
-rename bumps the major.
+`node "$SKILL_DIR/scripts/cli.mjs" validate <path>`. The interface is defined in this skill's
+`scripts/adapter.mjs`: any change to a field or to the kit bumps the plugin's minor version, and a
+removal or rename bumps the major.
 
 ## Fields
 
@@ -31,22 +31,22 @@ rename bumps the major.
 
 ## Hooks
 
-`byEmail` receives `{db, cred, opts, io}` and returns `{status: "ok" | "error", alias?, detail?}`. It
-picks the alias, mints any password and saves the session itself; the engine registers the alias
-account when the status is `ok`.
+`byEmail` receives `{db, cred, opts, io}` and returns `{status: "ok" | "error", alias?, detail?}`. The
+hook picks the alias, mints any password and saves the session itself; when the status is `ok`, the
+engine registers the alias account.
 
-`verify` receives `{db, email, session, opts, io}`. Throw when the check cannot tell; the status
-then stays unchanged.
+`verify` receives `{db, email, session, opts, io}`. It throws when the check cannot tell, and the
+status then stays unchanged.
 
 `setup` receives `{db, email, session, opts, io}`, with `session.state` holding the previous run's
-state, parsed, or `null`. It resolves to `{summary, state}`: `summary` a nonempty one-line string and
-`state` any JSON-serialisable value except `undefined`. On success the engine saves `state` and marks
-the session `ready`. Throw `kit.NeedsHuman` when a person must act, with a message saying what to do:
-the session becomes `escalated`. Any other error leaves the status and the previous state as they
+state, parsed, or `null`. It resolves to `{summary, state}`, where `summary` is a nonempty one-line string
+and `state` is any JSON-serialisable value except `undefined`. On success the engine saves `state` and marks
+the session `ready`. When a person must act, throw `kit.NeedsHuman` with a message saying what to do,
+and the session becomes `escalated`. Any other error leaves the status and the previous state as they
 were.
 
 `setupFlags` maps kebab-case flag names to `{type: "boolean" | "string", description: string}`, with
-nonempty descriptions and neither the engine's global flag names nor `help`. Values reach `setup`
+nonempty descriptions; the names may not be the engine's global flag names or `help`. Values reach `setup`
 under their original names:
 
 ```js
@@ -58,12 +58,12 @@ setupFlags: {
 
 ## Kit
 
-- `NeedsHuman` — the error to throw when the current step needs a person; its message must say what
-  to do. It stops the app login's retries but does not pause the browser or resume the hook.
+- `NeedsHuman` is the error to throw when the current step needs a person, with a message that says
+  what to do. It stops the app login's retries, but it does not pause the browser or resume the hook.
 - `clickFirst(page, texts, timeout = 15000, misses = [])`, `hasLsKey(page, substr)`,
   `hasCookie(page, name)` and `gotoWithRetry(page, url)`, also under `kit.page`. `clickFirst` returns
-  a boolean and appends `{text, reason}` to `misses` for each click timeout, the reason being the
-  trimmed Playwright message, capped at 2000 characters.
+  a boolean and, for each click timeout, appends `{text, reason}` to `misses`, where `reason` is the
+  trimmed Playwright message capped at 2000 characters.
 - `debug.capture(page, email, label, note)` saves a screenshot, plus `note` as `screenshot.txt`;
   it never throws. `restriction.storedTokenLive` and `restriction.tokenLive` check a token.
 - `aliasFor(baseEmail, tag)` and `mintAppPassword(cred, {name, ...})`; `tag` and `name` are required.
@@ -92,4 +92,4 @@ setupFlags: {
   `defaultProxy`, `proxyFor`, …) and `credentials` (`loadCredentials(dir)`,
   `setAppPassword(dir, email, appPassword)`, `setTotpSecret(dir, email, secret)`). `login` reads the
   credential files under `config.credentialsDir(app)` on every run, so a hook that mints an app
-  password writes it back there.
+  password must write it back there.
