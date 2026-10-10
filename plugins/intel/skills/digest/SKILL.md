@@ -15,7 +15,7 @@ description: >
   evaluating a tool or vendor (use evaluate).
 ---
 
-# Digest — highlights from any source, stored and searchable
+# Digest
 
 ## Skill directory
 
