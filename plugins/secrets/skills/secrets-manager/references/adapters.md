@@ -1,0 +1,87 @@
+# Adapter interface
+
+The interface lives in this skill's `scripts/adapter.mjs` and is versioned by
+this plugin: any field or kit change bumps the minor version; removal or rename bumps major.
+An ES module default-exports `(kit) => Adapter[]`. It never imports plugin files by path.
+
+| Field | Contract |
+|---|---|
+| `name` | Required normalized `[a-z0-9_]+` table and CLI target (must equal `store.toAppSlug(name)`); `google`, `x`, `tiktok` and the `sqlite_` prefix are reserved. |
+| `domain` | Required registrable domain, scopes exports to it and subdomains. |
+| `startUrl` | Required login entry URL. |
+| `entryTexts` | Required nonempty string array of logged-out entry labels. |
+| `signIn(page)` | Required async hook, opens same-tab or popup Google OAuth. |
+| `ready(page)` | Required async boolean hook, session token present and live. |
+| `signedInUrl(url)` | Optional boolean hook indicating already signed in. |
+| `attempts` | Optional positive retry count, default 1. |
+| `byEmail(ctx)` | Optional password signup/login through a Gmail plus-alias. |
+| `verify(ctx)` | Optional hook returning `active`, `restricted` or `expired`. |
+| `setupFlags` | Optional object of kebab-case names to `{type: "boolean" \| "string", description: string}`; nonempty descriptions, no global flag names or `help`. Accepted only by this app’s `setup` command. |
+| `setup({db, email, session, opts, io})` | Optional async hook returning `{summary, state}`: a nonempty one-line string and JSON-serialisable app state (not `undefined`); throws `kit.NeedsHuman` to mark the session `escalated`. Other errors preserve status; every failure preserves setup state and exits 1. The engine stores JSON `state` and `ready` together on success. |
+| `bannedResponse({url, status, body})` | Optional; called during `login <app>` for every app-domain response with status >= 400. A non-empty reason means the app banned the account: its session row is recorded `restricted` (created if absent), the Google account is untouched, and `login <app>` never retries it. |
+| `whoami({credential})` | Optional async hook returning `{email: string}`; credential type is app-specific. Missing or ambiguous identity throws. |
+| `credentials(session)` | Optional `(session) => Record<string, string> \| null`; returns usable credential fields. |
+| `blockedHosts` | Optional host wildcard strings merged at startup. |
+| `blockedWebSockets` | Optional WebSocket URL wildcards merged at startup. |
+
+`ByEmailContext` is `{db, cred, opts, io}`; `ByEmailResult` is
+`{status: "ok" | "error", alias?, detail?}`. The adapter owns alias selection,
+password minting and session saves; the engine registers a successful alias account.
+`VerifyContext` is `{db, email, session, opts, io}`. The engine persists a valid result;
+a thrown error leaves status unchanged and fails the command.
+
+The kit provides:
+
+- `NeedsHuman`: the same error class the engine uses. Throw it when the current
+  step requires human action; the message must say what action is needed. App
+  login retries stop on this error. It does not itself pause a browser or resume
+  the interrupted hook: those behaviors belong to the calling flow.
+
+- `clickFirst(page, texts, timeout = 15000, misses = [])`, `hasLsKey(page, substr)`, `hasCookie(page, name)`,
+  `gotoWithRetry(page, url)` (also under `kit.page`). Click timeouts append `{text, reason}`
+  to `misses` (trimmed Playwright messages, capped at 2000 characters); the return stays boolean.
+- `debug.capture(page, email, label, note)` saves an optional text note as `screenshot.txt`
+  beside `screenshot.png`, best-effort; `restriction.storedTokenLive`, `restriction.tokenLive`.
+- `aliasFor(baseEmail, tag)` (required tag), `mintAppPassword(cred, {name, ...})`
+  (required name).
+- `withProfile(key, {headed = false, rotate = false, proxyUrl = config.proxyFor(key, {rotate}),
+  blockAssets = true, record = false}, fn)` opens a persistent Camoufox browser for a `byEmail`, `verify` or `setup`
+  hook. It reuses the engine's profile directory, proxy, stored fingerprint, traffic blocking,
+  headed diagnostics and cleanup; a headless run with `record` saves page videos under the
+  account's debug dir. Calls `fn(context, page)`, returns its result,
+  and closes the context in `finally`, including when the callback throws.
+  Resolve proxy URLs explicitly with `kit.config.proxyFor(key, {rotate})` when needed.
+- `ispFetch(url, init)` is `fetch` through a random ISP pool slot (`ISP_PROXY_URL`, slots
+  1..`ISP_PROXY_COUNT`) with a Firefox TLS fingerprint (impit), like Camoufox's,, for a `verify` hook that checks
+  an account over the app's own API. Returns a fetch `Response`; it throws without `ISP_PROXY_URL`.
+- The engine's app-flow steps, for a hook that drives a login itself:
+  `gotoPastCloudflare(page, url, {assist = false, timeoutMs = 45000})` (waits out a
+  Cloudflare challenge, assisting when headed), `waitReady(page, adapter, timeoutMs = 40000)`
+  (polls `adapter.ready`), `appAlreadySignedIn(page, adapter, timeoutMs = 12000)`,
+  `withAppRetries(attempts, attempt, {onRetry})`, `exportScoped(db, page, adapter, email)`
+  (saves the session scoped to `adapter.domain`) and the pure `filterState(state, domain)`.
+- `emailOtp` exposes the email-otp module's real exports: `extractOtp(text)`,
+  `otpCandidates(text)`, and `readSignupOtp(baseEmail, appPassword, {toAlias = null,
+  sinceEpoch = null, timeoutS = 120, pollS = 5} = {})`. The reader uses the base Gmail
+  inbox and app password (spaces stripped), optionally filters a plus-alias and messages
+  newer than the click (`sinceEpoch` in seconds), then checks Spam after the inbox timeout.
+  Returns `{otp, from, subject, to, folder}`, or the same metadata with
+  `{securityAlert: true, otp: null}` for a Security Alert, or `null` on timeout.
+- `store`: `openDb`, `getSession`, `saveSession`, `saveSetupState`, `setSessionStatus`, `listAccounts`,
+  `sessionsForAccount`, `STATUS_*` and the remaining store exports.
+- `config`: `dbPath`, `statePath`, `defaultProxy`, `proxyFor` and the remaining config exports.
+- `credentials`: `loadCredentials(dir)`, `setAppPassword(dir, email, appPassword)`,
+  `setTotpSecret(dir, email, secret)` — the credential files under `config.credentialsDir(app)`
+  are what `login` reads each run, so a hook that mints an app password writes it back there.
+
+Configure `~/.config/secrets-manager/config.json`:
+
+```json
+{"adapters": ["/absolute/path/adapters.mjs"]}
+```
+
+No config means zero adapters. Unknown login/verify/setup/export targets fail with loaded
+names; duplicate names or invalid modules fail startup and identify the module path.
+`validate` takes module paths directly and exits 0 printing names or 1 reporting the error.
+Existing app tables retain their names and remain visible through list/get without adapters.
+The plugin owns fixed google/x/tiktok schema and creates app session tables on first save.
