@@ -1,7 +1,7 @@
 {
   "name": "intel",
-  "version": "0.61.6",
-  "description": "Gather and distill knowledge from long-form sources and from what people say: transcribe audio locally with whisper, turn an article, podcast transcript, or video into durable, searchable highlights, translate a whole English EPUB book into a Chinese PDF in the original's format, find EPUB download links and download the book, analyze an app's App Store reviews into a data-driven Chinese doc with charts, brainstorm a brand name whose domain is actually registrable, and research one creator into a sourced, adversarially reviewed case study PDF. Fetch and analyze X mentions, posts and user timelines, profile users, collect TikTok mentions and fetch App Store reviews.",
+  "version": "0.62.0",
+  "description": "Gather and distill knowledge from long-form sources and from what people say: transcribe audio locally with whisper, turn an article, podcast transcript, or video into durable, searchable highlights, translate a whole English EPUB book into a Chinese PDF in the original's format, find EPUB download links and download the book, analyze an app's App Store reviews into a data-driven Chinese doc with charts, brainstorm a brand name whose domain is actually registrable, and research one creator into a sourced, adversarially reviewed case study PDF. Fetch and analyze X mentions, posts and user timelines, profile users, collect TikTok mentions and fetch App Store reviews. Archive and measure the Following feed and trending topics, save feed digests, and preview or perform X account actions.",
   "author": {
     "name": "blockchainian"
   },
