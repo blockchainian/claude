@@ -5,14 +5,35 @@ description: Capture one whole iOS app screen as a single stitched PNG, includin
 
 # iOS take screenshot
 
-Produce exactly ONE image per requested screen. iOS has no full-page screenshot API — `screenshot` returns only the visible viewport — so a whole screen must be captured as slices and stitched. This skill owns that end to end: open the app, reach the screen, capture slices, stitch, delete the slices.
+iOS screenshots return only the visible viewport, so this skill captures a whole screen as overlapping slices and stitches them into exactly one PNG per requested screen: open the app, reach the screen, capture slices, stitch, delete the slices.
 
-## Pick the Target First
+## Skill directory
 
-Everything below has a real-device path and a simulator path. They differ in three places
-only — how the app is found, how a session is set up, and which calls scroll and capture.
-The stitcher, the output convention, the slice discipline, the settle rule, the
-endless-list rule, cleanup and reporting are identical.
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call that runs a script, using the installed path rather than the app repository's working directory or a host-specific plugin variable. If the loaded path is unavailable, stop and report it before running a script.
+
+```bash
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
+Variables do not survive between shell calls. Wherever this document writes `$SLICE_DIR`, `$OUT_ROOT`, `$UDID` or `$RUN_ID`, type out the absolute value in full, or put the whole capture loop in one command. Getting this wrong fails quietly: an `if [ -z "${SLICE_DIR:-}" ]` guard mints a new directory on every command, one slice in each, and the stitch succeeds on that single slice without complaint.
+
+The scripts print their results on stdout; the one-line package note `uv` prints on a first run goes to stderr, so parse stdout alone.
+
+## Environment variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `MOBILE_OUTPUT_DIR` | Output root; screenshots go under `ios-screenshots/<run>/`; default `~/Documents` | Optional | First line of the run-setup command |
+| `MOBILE_DATA_DIR` | Data root; slices go under `tmp/ios-take-screenshot/` | Optional | Shell environment |
+| `MOBILE_STATE_DIR` | State root; device claims go under `locks/`, shared by every session of the same user | Optional | Shell environment |
+| `CAPABILITIES_CONFIG` | Path to a local `capabilities.json` the appium-mcp server reads instead of inline capabilities | Optional | appium-mcp server environment |
+| `SCREENSHOTS_DIR` | Where `appium_screenshot` writes; otherwise the server's working directory | Optional | appium-mcp server environment |
+
+## Setup
+
+### Pick the target
+
+Every step has a real-device path and a simulator path, which differ only in how the app is found, how the session is set up, and which calls scroll and capture. Stitching, output naming, settling, the endless-list rule, cleanup and reporting are the same on both.
 
 | | Real device | Simulator |
 |---|---|---|
@@ -20,43 +41,13 @@ endless-list rule, cleanup and reporting are identical.
 | Drive layer | appium-mcp | XcodeBuildMCP |
 | Capture | `appium_screenshot` | `xcrun simctl io` |
 
-Use the device when the request names one, when the app is only installed on a phone, or
-when the point is how the app behaves on real hardware. Use the simulator when the app is
-already running there, when no phone is connected, or when the request is about layout and
-content rather than the device. If the request does not say and both are available, ask.
+Use the device when the request names one, when the app is installed only on a phone, or when the point is how the app behaves on real hardware. Use the simulator when the app is already running there, when no phone is connected, or when the request is about layout and content. If the request does not say and both are available, ask.
 
-## Environment variables
-
-| Variable | Purpose | Required | Set in |
-| --- | --- | --- | --- |
-| `MOBILE_OUTPUT_DIR` | Output root; screenshots go under `ios-screenshots/<run>/`; default `~/Documents` | Optional | Shell environment |
-
-## Where Results Go
-
-### Script location and shell values
-
-Resolve this skill's directory from the absolute path of the loaded `SKILL.md`.
-In each shell call that runs a script, set `SKILL_DIR` to that directory:
-
-```bash
-SKILL_DIR="/absolute/path/to/loaded/skill"
-```
-
-Use the actual installed path, not the app repository's working directory or a
-host-specific plugin environment variable. If the loaded path is unavailable,
-stop and report it before running a script. Repeat the assignment in each shell
-call; variables may not persist between calls.
-
-Each command runs in its own shell, so a variable assigned in one command is empty in the
-next. Where this document writes `$SLICE_DIR`, `$OUT_ROOT` or `$UDID`, it means
-**the absolute value you were given, typed out in full** — or put the whole capture loop in a
-single command. Getting it wrong fails quietly: an `if [ -z "${SLICE_DIR:-}" ]` guard mints a
-new directory on every command, one slice in each, and the stitch succeeds on that single
-slice and reports nothing wrong.
+Tool names here are unprefixed: find the actual registered names of the appium-mcp tools (such as `appium_screenshot`) and the XcodeBuildMCP tools (such as `swipe`) in the host's tool inventory or tool search, and never construct a prefix. If a required tool is unavailable, report it before going on.
 
 ### Set the run up once
 
-Run this one command and read the three values out of its output:
+Run this one command and read the three values from its output:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
@@ -68,457 +59,188 @@ mkdir -p "$SLICE_DIR" "$OUT_ROOT"
 printf 'RUN_ID=%s\nSLICE_DIR=%s\nOUT_ROOT=%s\n' "$RUN_ID" "$SLICE_DIR" "$OUT_ROOT"
 ```
 
-The stitched PNG goes where the caller asks, via `--out`. `MOBILE_OUTPUT_DIR` only takes effect if it is set in the shell that runs this command, so to use it,
-make `MOBILE_OUTPUT_DIR=/some/dir` the first line of that same command. `RUN_ID` gives each run its own
-subdirectory under it, so two sessions capturing the same screen cannot overwrite each
-other, and it is also the name under which this run claims its simulator.
-
-Each screen is then named for what it shows:
+`MOBILE_OUTPUT_DIR` takes effect only when it is set in the shell that runs this command, so to use it make `MOBILE_OUTPUT_DIR=/some/dir` the first line of that same command. `RUN_ID` gives each run its own output subdirectory, so two sessions capturing the same screen cannot overwrite each other, and it is also the name under which this run claims its device. Each screen is saved as:
 
 ```
 $OUT_ROOT/<app-slug>/<screen-slug>.png
 ```
 
-Report the full path when you finish — a run-scoped directory is only useful to later tools
-if they are told where it is. A path given in the request always wins over the default.
+A path given in the request always wins over this default; pass it to the stitcher's `--out`. Keep slices in `SLICE_DIR`, never under the skill folder.
 
-Slices are scratch under `$MOBILE_DATA_DIR/tmp/ios-take-screenshot/` (default
-`~/.local/share/mobile/...`); remove `$SLICE_DIR` once the stitch is written.
+### Claiming a device
 
-Several agents can share the artifact library. Device use is exclusive per UDID:
-`claim-simulator.mjs` atomically holds one device for one `RUN_ID`, and
-`capture-slice.sh` refuses an unclaimed simulator or another run's claim.
-Different simulators can run in parallel; multiple callers use one phone in turn,
-waiting and claiming again after the holder releases it. There is no background queue.
-
-The phone hook binds the claimed task to the host session and its agent identity
-on the first WebDriverAgent preparation or session create. It reserves a create
-before execution and records only that call's successful session. Every Appium
-phone operation must pass its explicit `sessionId`; shared active-session defaults
-are denied, as are operations by the main agent or a sibling when a subagent owns
-the task. Session listing and device discovery remain available to everyone.
-Deletes clear the connection but retain the task owner, including across failed
-creates and reconnects, until the claim is released. Do not detach an owned session.
-A same-run reclaim preserves ownership; release refuses while a connection or
-create is recorded. `RUN_ID` remains the cooperative shell claim identifier: only
-the assigned agent should claim/release it. Give the entire phone task to one agent;
-do not delegate phone operations to another agent while holding the claim.
-
-The stitcher writes to a staging file and renames it into place, so readers never
-see a half-written PNG. Its verdict reports `replaced_existing` when a run replaces
-an earlier capture of the same screen.
-
-## Core Workflow
-
-0. Discover the target and set up the session.
-1. Open the app (find it first — the default device listing hides App Store apps).
-2. Navigate to the requested screen and confirm you are on it by looking at a screenshot.
-3. Scroll to the top, then capture overlapping slices downward, capped.
-4. Stitch with `scripts/stitch_screens.py` and read its JSON verdict.
-5. Delete the slices. Keep only the stitched PNG.
-
-Keep slices in a run-specific temp dir, never under the skill folder.
-
-## Tool Names
-
-Tool names below are unprefixed. Discover Appium tools such as `appium_screenshot`
-from the `appium-mcp` server, and simulator tools such as `swipe` from the
-`xcodebuildmcp` server, through the current host's tool inventory or tool search.
-Call their actual registered names; Claude Code and Codex use different namespace
-prefixes, so do not construct one. If a required tool is unavailable, report it
-before proceeding.
-
-Device-specific capabilities — UDID, team id, WebDriverAgent bundle id — are not in the
-plugin config, since they differ per machine. Pass them inline to
-`appium_session_management` (`action=create`), or point the server at a local
-`capabilities.json` with `CAPABILITIES_CONFIG`. Do not ask the user for these values and
-do not carry them between sessions — step 0 discovers them and prints them ready to use.
-
-## Safety
-
-On a real device you are driving someone's phone, often signed into a real account with
-real money. A simulator has no real account behind it, but the same discipline keeps a
-capture run honest and cheap, so follow it on both.
-
-- Read-only. Never tap anything that transacts, sends, confirms, deletes, posts, or follows.
-- Never type into a credential, seed-phrase, or payment field.
-- Navigation, tab switching, and scrolling are fine. Anything that changes state is not.
-- If a screen can only be reached by a state-changing action, stop and ask.
-
-**Never tap a coordinate without a fresh screenshot showing what is under it.** An app
-resumes on whatever screen it was last left on, so coordinates memorised from an earlier
-run land somewhere else entirely. In one run, a remembered tab-bar position landed on a
-payment button after the app reopened elsewhere, opening a checkout sheet. Screenshot,
-look, then tap.
-
-To dismiss a modal sheet, tap the dimmed backdrop above it. A downward swipe on the sheet
-body often does nothing, and repeating it wastes turns.
-
-## 0. Set Up the Target
+Device use is exclusive per UDID. `claim-simulator.mjs` holds one simulator or phone for one `RUN_ID`, and `capture-slice.sh` refuses a simulator that is unclaimed or claimed by another run. Different simulators can run in parallel; several callers share one phone in turn, waiting and claiming again after the holder releases it, with no background queue. Only the agent assigned to a run claims and releases it, and a run capturing several screens keeps its claim until the last one, because releasing between screens invites another agent in mid-run. Nested screenshot or profiling work reuses the outer run's UDID and `RUN_ID`, and only the outer run releases the claim. Never expire a claim because its timestamp is old: profiling can take a long time.
 
 ### Real device
 
-Before phone automation, verify the plugin's `phone-session-gate` hook is active.
-In Codex, review and trust the loaded hook in `/hooks`. If the gate is not active
-or trusted, stop phone automation and report it; the written claim workflow does
-not replace the hook. The loaded hook must be active before using a shared phone.
+Before any phone automation, check that the plugin's `phone-session-gate` hook is active; in Codex, review and trust the loaded hook in `/hooks`. If the gate is not active or not trusted, stop phone automation and report it, because the written claim workflow does not replace the hook.
 
-Discover the session values rather than asking for them or remembering them:
+Discover the session values rather than asking the user for them or carrying them between sessions:
 
 ```bash
 "$SKILL_DIR/scripts/discover-ios-setup.mjs"
 ```
 
-It reports the connected devices, which provisioning profiles cover them, whether
-WebDriverAgent is installed, and — when everything is in place — a `suggestedCapabilities`
-object to pass straight to `appium_session_management` (`action=create`). Exit 0 means
-ready; exit 1 lists what is missing. The UDID comes from the device list, the team id from
-a profile that covers the device, and the WebDriverAgent bundle id from the runner already
-installed on it.
+It reports the connected devices, which provisioning profiles cover them, whether WebDriverAgent is installed, and, when everything is in place, a `suggestedCapabilities` object for `appium_session_management` (`action=create`). Exit 0 means ready; exit 1 lists what is missing. The UDID, team id and WebDriverAgent bundle id differ per machine and are not in the plugin config: pass them inline to `appium_session_management` (`action=create`), or point the server at a `capabilities.json` with `CAPABILITIES_CONFIG`.
 
-Before preparing WebDriverAgent or creating the session, claim the phone for this
-run, so no other agent opens a session that ends yours:
+Before preparing WebDriverAgent or creating the session, claim the phone so no other agent opens a session that ends yours:
 
 ```bash
 "$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
-Exit 0 means it is yours. Exit 3 means another run holds it; wait and claim again, since
-there is no other phone to pick. Hold the claim across every screen of the flow and
-release it at cleanup, after deleting the Appium session. The hook records the session id
-in the claim when `create` succeeds, and clears only that session when an explicit `sessionId` delete succeeds.
+Exit 0 means it is yours. Exit 3 means another run holds it: wait and claim again, since there is no other phone to pick. Hold the claim across every screen of the flow.
 
-**If WebDriverAgent is not installed, do not build it by hand.** Use
-`appium_prepare_ios_real_device`:
+The gate binds the claimed phone to the host session and agent that first prepares WebDriverAgent or creates a session, and it records that session's id in the claim. Give the whole phone task to that one agent and do not delegate phone operations while holding the claim; the gate denies operations by the main agent or a sibling when a subagent owns the task. Pass the explicit `sessionId` on every Appium phone operation, because shared active-session defaults are denied. Session listing and device discovery stay open to everyone. Do not detach an owned session. Deleting a session keeps the task owner, across failed creates and reconnects, until the claim is released; reclaiming with the same `RUN_ID` keeps ownership; and release is refused while a session or create is recorded.
 
-1. Call it with no `provisioningProfileUuid` to list available profiles.
-2. Call it again with the chosen UUID and `isFreeAccount` — false for a paid Apple
-   Developer account, true otherwise. It downloads the matching WebDriverAgent release,
-   packages it as an IPA, resigns it with that profile, and returns a `capabilitiesHint`.
-3. Pass that hint to `appium_session_management` (`action=create`), serialising the whole
-   object — do not drop its boolean or numeric values.
+If WebDriverAgent is not installed, do not build it by hand; use `appium_prepare_ios_real_device`:
 
-Two switches live on the phone and cannot be set from the Mac. Developer Mode, which
-`devicectl` does report, and **Settings -> Developer -> UI TESTING -> Enable UI
-Automation**, which it does not report at all. Without the second, session creation fails
-with a bare `xcodebuild failed with code 65`, and the real reason — "Timed out while
-enabling automation mode" — appears only in the test log. Ask the user to turn both on, and
-to leave the phone unlocked while a session runs.
+1. Call it with no `provisioningProfileUuid` to list the available profiles.
+2. Call it again with the chosen UUID and `isFreeAccount`, false for a paid Apple Developer account and true otherwise. It downloads the matching WebDriverAgent release, packages and resigns it with that profile, and returns a `capabilitiesHint`.
+3. Pass that hint to `appium_session_management` (`action=create`), serialising the whole object without dropping its boolean or numeric values.
 
-A paid Apple Developer account re-signs WebDriverAgent yearly; a free Apple ID expires it
-every 7 days, after which capture stops working until it is signed again.
+Two switches live on the phone and cannot be set from the Mac: Developer Mode, which `devicectl` reports, and **Settings -> Developer -> UI TESTING -> Enable UI Automation**, which it does not report at all. Without the second, session creation fails with a bare `xcodebuild failed with code 65`, and the real reason, "Timed out while enabling automation mode", appears only in the test log. Ask the user to turn both on and to leave the phone unlocked while a session runs. A paid account re-signs WebDriverAgent yearly; a free Apple ID's signature expires every 7 days, after which capture stops working until it is signed again.
 
 ### Simulator
 
-There is no WebDriverAgent, no provisioning profile and no session to create. A booted
-simulator is the whole requirement:
+A booted simulator is the whole requirement; there is no WebDriverAgent, provisioning profile or session to create.
 
 ```bash
 "$SKILL_DIR/scripts/discover-ios-setup.mjs" --target simulator
 ```
 
-Exit 0 prints the booted simulators and a `sessionDefaults` object; exit 1 says either that
-nothing is booted or that several are and it will not guess between them. Boot one with
-`boot_sim` if none is running, and `open_sim` if you want to watch. With several booted,
-choose one and run it again with `--device <udid>`; it then reports that one as selected.
-
-Keep the chosen UDID — the `selectedSimulator.udid` from that report — and paste it into
-every command that needs it, as above.
-
-Then claim it for this run, so no other agent drives it while you capture:
+Exit 0 prints the booted simulators and a `sessionDefaults` object. Exit 1 means nothing is booted, or several are and it will not guess: boot one with `boot_sim` (and `open_sim` if you want to watch), or choose one and re-run with `--device <udid>` to have it reported as selected. Keep the `selectedSimulator.udid` from that report as `$UDID`, then claim it:
 
 ```bash
 "$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
 ```
 
-Exit 0 means it is yours. Exit 3 means another run holds it, and the message says which
-run and for how long. Decide: wait and claim again, or abort and pick another simulator.
-Never `--steal` unless you know that run is dead. The claim is a file under
-`$MOBILE_STATE_DIR/locks` (default `~/.local/state/mobile/locks`), so it is visible to every
-session of the same user; releasing it is part of cleanup.
+Exit 0 means it is yours. Exit 3 means another run holds it, and the message says which run and for how long: wait and claim again, or abort and pick another simulator. Never `--steal` unless you know that run is dead.
 
-This plugin enables `XCODEBUILDMCP_DISABLE_SESSION_DEFAULTS=true`. Pass the claimed
-`simulatorId` on every simulator/UI tool call, and `bundleId` on launch/stop calls;
-build or app-path calls also need the explicit project/workspace and scheme.
-Do not call `session_set_defaults` or switch active profiles: those settings remain
-shared across agents. The discovery report's `sessionDefaults` is a compatibility
-output; copy its selected UUID into calls instead of setting shared defaults.
-If the exposed schema omits `simulatorId`, reconnect the server with this plugin's
-configuration before parallel use. Do not drive an ambiguous target.
+The plugin sets `XCODEBUILDMCP_DISABLE_SESSION_DEFAULTS=true`, so pass the claimed `simulatorId` on every simulator and UI tool call, `bundleId` on launch and stop calls, and the explicit project or workspace and scheme on build and app-path calls. Do not call `session_set_defaults` or switch active profiles, because those settings are shared across agents; the discovery report's `sessionDefaults` exists only for compatibility, so copy its selected UUID into calls instead. If the exposed schema omits `simulatorId`, reconnect the server with this plugin's configuration before parallel use. Compare each reported `artifacts.simulatorId`, or a snapshot's `udid`, with the chosen UUID and stop on a mismatch; never drive an ambiguous target.
 
-Compare each reported `artifacts.simulatorId` (or snapshot `udid`) with the chosen
-UUID. Stop on a mismatch. `simctl` capture uses the same explicit UDID, so swipes
-and screenshots target the same simulator.
-
-For the same reason, do not use `booted` as a stand-in for the UDID. `simctl` resolves it to
-one running simulator without saying which, and simulators routinely hold different builds
-of the same app — on one machine the same app was version 62 on one booted simulator and 64
-on another. `claim-simulator.mjs` and `capture-slice.sh` refuse it outright.
+For the same reason, never use `booted` in place of the UDID. `simctl` resolves it to one running simulator without saying which, and booted simulators routinely hold different builds of the same app. `claim-simulator.mjs` and `capture-slice.sh` refuse it.
 
 ### Interrupted runs
 
-Never expire a claim just because its timestamp is old: profiling may take a long
-time. If a caller crashed or a create result is unknown, inspect Appium's session
-list and confirm the old run is no longer operating the phone. Only then use the
-existing `--steal` option to recover the claim; it clears the old reservation.
-Delete any leftover session by explicit `sessionId` before creating a new one.
-A late result from the old create cannot commit over a new reservation. Do not
-manually delete mutex files; the OS releases their locks when processes exit.
+If a caller crashed or a create result is unknown, check Appium's session list and confirm the old run is no longer operating the phone. Only then recover the claim with `--steal`, which clears the old reservation, and delete any leftover session by its explicit `sessionId` before creating a new one. Do not delete lock files by hand; the OS releases them when their processes exit.
 
-## 1. Open the App
+## Safety
 
-### Real device
+On a real device you are driving someone's phone, often signed into a real account with real money; follow the same rules on a simulator.
+
+- Stay read-only: never tap anything that transacts, sends, confirms, deletes, posts or follows.
+- Never type into a credential, seed-phrase or payment field.
+- Navigation, tab switching and scrolling are fine; anything that changes state is not.
+- If a screen can be reached only by a state-changing action, stop and ask.
+
+Never tap a coordinate without a fresh screenshot showing what is under it. An app resumes on whatever screen it was last left on, so remembered coordinates can land on something else entirely, such as a payment button. To dismiss a modal sheet, tap the dimmed backdrop above it; a downward swipe on the sheet body often does nothing.
+
+## Open the app
+
+On a real device, find the bundle id with the script, not with `devicectl` directly, because `xcrun devicectl device info apps` lists only developer-installed apps by default and an App Store app looks absent; the script passes `--include-all-apps`.
 
 ```bash
 "$SKILL_DIR/scripts/find-ios-app.sh" --device <udid> --name <app name>
 ```
 
-`xcrun devicectl device info apps` lists **only developer-installed apps by default** — an App Store app looks absent. The script passes `--include-all-apps`, which is the whole reason it exists. Do not call `devicectl` directly for this.
+If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create` and the discovered capabilities, which carry `appium:udid`. Foreground the app with `appium_app_lifecycle` (`action=activate`, `id=<bundleId>`). Sessions idle out: when a call fails with "Session does not exist", delete that session (`action=delete` with its explicit `sessionId`) and create again, because the gate denies a create while the claim still records the old session.
 
-Foreground it with `appium_app_lifecycle` (`action=activate`, `id=<bundleId>`), then
-screenshot. An app resumes where the user left it, not on its home screen, so confirm
-where you actually are before navigating.
-
-If no Appium session exists yet, create one: `select_device` (`platform=ios`, `iosDeviceType=real`, `deviceUdid=<udid>`), then `appium_session_management` with `action=create` and the discovered capabilities, which carry `appium:udid`. Sessions idle out. When a call fails with "Session does not exist", delete the session first (`action=delete`, with that explicit `sessionId`), then create again; the gate denies a create while the claim still records the old session.
-
-### Simulator
+On a simulator, `devicectl` cannot see simulators, so the script reads `simctl listapps` instead:
 
 ```bash
 "$SKILL_DIR/scripts/find-ios-app.sh" --simulator "$UDID" --name <app name>
 ```
 
-`devicectl` cannot see simulators at all, so this reads `simctl listapps` instead. The
-script also accepts `booted`, but only when exactly one simulator is running — with several
-up it refuses rather than answering about an arbitrary one.
+It also accepts `booted`, but only when exactly one simulator is running; with several up it refuses.
 
-Then `launch_app_sim` with that bundle id. The screen can stay blank for several seconds
-after launch, so wait with `wait_for_ui` (`predicate: settled`) before the first screenshot,
-then screenshot to see where the app resumed. A development build may resume on its dev
-launcher — a list of servers, not the app. Pick the
-running server from that list and dismiss any developer menu, then confirm the app itself
-is on screen before going further.
+Launch it with `launch_app_sim`. The screen can stay blank for several seconds, so wait with `wait_for_ui` (`predicate: settled`) before the first screenshot. A development build may resume on its dev launcher, a list of servers rather than the app: pick the running server, dismiss any developer menu, and confirm the app itself is on screen.
 
-## 2. Find the Requested Screen
+On either target, take a screenshot before navigating, because an app resumes where the user left it rather than on its home screen.
 
-Navigate by tab bar, search, or an element found with `appium_find_element` on a device, or
-from a `snapshot_ui` target on a simulator. Prefer `accessibility id` over xpath.
+## Find the requested screen
 
-Then **look at a screenshot and confirm you are on the right screen** before capturing. Do not assume a tap landed. This is the single most common way a capture run wastes its slices.
+Navigate by tab bar, search, or an element found with `appium_find_element` on a device or from a `snapshot_ui` target on a simulator, preferring `accessibility id` over xpath. Then look at a screenshot and confirm you are on the right screen before capturing; never assume a tap landed, since this is the most common way a run wastes its slices.
 
-Not every visible row can be tapped by ref. On the simulator some list rows are exposed as
-text rather than buttons, and tapping their ref fails with `TARGET_NOT_ACTIONABLE`; stock
-Settings is like this below its first level. Reach such a screen another way, or pick a
-different screen, rather than retrying the same ref.
+On the simulator some list rows are exposed as text rather than buttons, and tapping their ref fails with `TARGET_NOT_ACTIONABLE`; stock Settings is like this below its first level. Reach such a screen another way, or pick a different screen, rather than retrying the ref.
 
-## 3. Capture Slices
+## Capture slices
 
-Read this section before your first scroll. These three facts cost an hour to learn:
+Read these before the first scroll:
 
-- **`direction` is the direction the CONTENT moves, not the finger.** `direction=up` scrolls you FURTHER DOWN the page. To move toward the top of a page, use `direction=down`. This holds on both targets. Getting it backwards produces slices that look random and overlap measurements that read as "nothing moved".
-- **Scoping matters, and a screen can hold several scroll views.** A bare gesture may not
-  move the page at all, so every scroll must name a container.
-- **One scoped scroll advances roughly a full viewport** at the default distance, which is
-  too far. The stitcher joins slices by finding where they overlap, so a scroll that
-  advances a whole screen leaves nothing to match on, and a short section between two
-  slices is never photographed at all. Ask for about half a screen — `distance` 0.5 on the
-  simulator — and let the stitcher measure the real offset. Measured on one screen:
-  `distance` 0.7 advanced 1819px of a 2220px body, over 80%, while 0.3 advanced 770px and
-  left a comfortable overlap. Do not hand-tune drag coordinates; scoped `direction` scrolls
-  are far more reliable than custom `x/y/endX/endY` drags, which frequently move nothing.
+- **`direction` is the direction the content moves, not the finger**, on both targets. `direction=up` scrolls further down the page and `direction=down` moves toward the top. Getting it backwards produces slices that look random and overlap readings of "nothing moved".
+- **Every scroll must name a container.** A screen can hold several scroll views, and a bare gesture may not move the page at all.
+- **Scroll about half a screen.** One scoped scroll at the default distance advances roughly a full viewport, which leaves the stitcher no overlap to match and skips any short section between slices. Use `distance` 0.5 on the simulator and let the stitcher measure the real offset; on one screen 0.7 advanced 1819px of a 2220px body while 0.3 advanced 770px with a comfortable overlap. Do not hand-tune `x/y/endX/endY` drags, which frequently move nothing.
 
-A floating scroll-to-top button, where an app has one, returns to the top of the *list*, not the top of the *page*. Expect one more `direction=down` scroll to bring a header or chart back into view.
+A floating scroll-to-top button returns to the top of the list, not the page, so expect one more `direction=down` scroll to bring a header or chart back into view.
 
-### Scrolling and capturing on a real device
+### Capturing on a real device
 
-Find a container with `appium_find_element` (`strategy=-ios class chain`,
-`selector=**/XCUIElementTypeScrollView`) and pass its `elementUUID` to every scroll.
-That selector returns the **first** match in hierarchy order, which is not necessarily the
-one holding the content you want. It may scroll a different axis, or be nested, or be
-inert. So after the first scroll, compare against the previous frame: if nothing moved,
-try `**/XCUIElementTypeScrollView[2]`, then `[3]`, and so on. Exhausting them establishes
-only that nothing moves the screen **vertically** — see below before calling the screen
-one viewport tall.
+Find a container with `appium_find_element` (`strategy=-ios class chain`, `selector=**/XCUIElementTypeScrollView`) and pass its `elementUUID` to every scroll. That selector returns the first match in hierarchy order, which may scroll the other axis, be nested or be inert, so after the first scroll compare against the previous frame and, if nothing moved, try `**/XCUIElementTypeScrollView[2]`, then `[3]` and so on. Exhausting them proves only that nothing scrolls vertically; see [One axis per capture](#one-axis-per-capture) before calling the screen one viewport tall.
 
-`appium_screenshot` writes wherever the MCP server is configured to write (`SCREENSHOTS_DIR`, otherwise the working directory) and returns that path. It does not write into `SLICE_DIR`. Copy each returned file across as you go, named so a glob sorts in capture order:
+`appium_screenshot` writes to the server's `SCREENSHOTS_DIR` or working directory and returns the path, not into `SLICE_DIR`. Copy each file across as you go, named so a glob sorts in capture order, and never pass `maxWidth`, because downscaling loses the detail the overlap matcher needs:
 
 ```bash
 cp "$RETURNED_PATH" "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
-Save slices at full resolution — do not pass `maxWidth` when capturing for a stitch, since downscaling loses the detail the overlap matcher needs.
+### Capturing on a simulator
 
-### Scrolling and capturing on a simulator
-
-**Do not capture slices with the XcodeBuildMCP `screenshot` tool.** It returns a downscaled,
-lossy JPEG — 369x800 for a screen that is really 1179x2556 — whatever the file is named. It
-is fine for looking at a screen; it destroys the detail the overlap matcher needs. Capture
-with the wrapper instead, which writes a full-resolution PNG straight into `SLICE_DIR`, so
-there is no copy step, and refuses a simulator this run does not hold:
+Never capture slices with the XcodeBuildMCP `screenshot` tool: whatever the file is named, it returns a downscaled, lossy JPEG (369x800 for a 1179x2556 screen), fine for looking but useless for stitching. Capture with `capture-slice.sh`, which writes a full-resolution PNG straight into `SLICE_DIR` and refuses a simulator this run does not hold:
 
 ```bash
 "$SKILL_DIR/scripts/capture-slice.sh" --simulator "$UDID" --run "$RUN_ID" \
   --out "$SLICE_DIR/slice-$(printf '%02d' "$N").png"
 ```
 
-Every script here prints its result as JSON on stdout; the one-line package note `uv`
-prints on a first run goes to stderr, so parse stdout alone. Exit 0 prints the path it
-wrote. Exit 2 is a bad argument, `booted` included. Exit 3 is a
-simulator this run does not hold — unclaimed, or held by another run, which the message
-names; that is not a retry, it is the one-agent-per-simulator rule.
+Exit 0 prints the path it wrote; exit 2 is a bad argument, `booted` included; exit 3 is a simulator this run does not hold, unclaimed or held by another run the message names, which is the one-agent-per-simulator rule and not a reason to retry.
 
-Scroll with `swipe`, which requires `withinElementRef`. Get the first ref from
-`snapshot_ui` — it lists scrollable targets. After every swipe, call `snapshot_ui` again
-for the next ref. The swipe response carries a fresh snapshot only when the accessibility
-tree settled in time, and on a live screen it rarely does: the usual response is the settle
-warning described below, with no targets in it. If a swipe does return targets, use them
-and skip the call.
+Scroll with `swipe`, which requires `withinElementRef`. Take the first ref from `snapshot_ui`, which lists scrollable targets, and call `snapshot_ui` again after every swipe for the next one. Never reuse a ref across a swipe because it worked before: a top-level container often keeps the same ref string for a swipe or two and then changes without warning, and a stale ref fails with `TARGET_NOT_ACTIONABLE` or `SNAPSHOT_MISSING`. On either error take a new snapshot rather than retrying. If a swipe response does carry targets, use them and skip the snapshot call.
 
-Never reuse a ref across a swipe on the strength of it having worked before. A ref can go
-stale once the screen moves, and a stale one fails with `TARGET_NOT_ACTIONABLE` or
-`SNAPSHOT_MISSING`. A top-level container often keeps the same ref string for a whole
-capture, and sometimes for a swipe or two before it changes, with nothing to say which
-time is the last. Reading it fresh costs one call; a stale ref costs a failed swipe and a
-snapshot anyway. On either error take a new snapshot rather than retrying the same ref.
+Most swipes warn `SNAPSHOT_CAPTURE_FAILED`, "the refreshed runtime snapshot did not settle". That is the accessibility tree timing out on a busy screen, not the rendering: the pixels are fine, so take a fresh `snapshot_ui` and carry on. No delay is needed between a swipe and the capture, because the screen has stopped moving by the time `swipe` returns. `snapshot_ui` reports no geometry at all, so anything that needs to know where a region sits must read it from the pixels, which is what the stitcher's `--crop-band` does.
 
-No delay is needed between the swipe and the capture: by the time `swipe` returns, the
-screen has stopped moving. Expect `swipe` to warn `SNAPSHOT_CAPTURE_FAILED` — "the
-refreshed runtime snapshot did not settle" — on most calls; that is the norm on a busy
-screen, and it is its accessibility tree timing out, not the rendering. Take a fresh `snapshot_ui` for the next ref and carry on; the pixels are fine.
+### One axis per capture
 
-`snapshot_ui` reports no geometry at all — no rect, no frame, no coordinates. Anything that
-needs to know where a region sits must read it from the pixels instead. That is what
-`--crop-band` on the stitcher is for; see the sideways capture below.
+The capture loop scrolls vertically and the stitcher joins along one axis. Before concluding a screen does not scroll, try a horizontal scroll on the same containers.
 
-### One capture covers one axis
+- **A screen that only scrolls sideways**, such as a wide table or a paged gallery, is captured the same way, scrolling `direction=left` to advance, and stitched with `--axis horizontal`. Fixed chrome is then read off the left and right edges, so `--sticky-top` and `--sticky-bottom` mean left and right.
+- **A screen that scrolls both ways** cannot become one image. Capture the vertical page as the main artifact and each horizontally scrollable region as its own image named for that region. Never assemble a two-dimensional mosaic: the matcher aligns along a single axis and a grid gives it no consistent seam.
 
-The loop below scrolls vertically, and the stitcher joins slices along that axis. Before
-concluding a screen does not scroll at all, try a horizontal scroll on the same containers:
+A sideways region must be reduced to its own band before stitching. The rest of the screen holds still while a carousel scrolls, and static content matches at any offset, so full-screen slices splice confidently in the wrong place.
 
-- **A screen that only scrolls sideways** — a wide table, a paged gallery — moves on the
-  horizontal attempt. Capture it the same way, scrolling `direction=left` to advance, and
-  stitch with `--axis horizontal`. Fixed chrome is then read off the left and right edges,
-  so `--sticky-top` and `--sticky-bottom` mean left and right if you need to override them.
-- **A screen that scrolls both ways** cannot become one image. Capture the vertical page as
-  the main artifact, then capture any horizontally scrollable region as its own image named
-  for that region. Do not try to assemble a two-dimensional mosaic: the overlap matcher
-  aligns along a single axis, and a grid of slices gives it no consistent seam to find.
-
-**A sideways region must be reduced to its own band before stitching.** A carousel occupies
-a band; the rest of the screen holds still while it scrolls. Full-screen slices would be
-mostly static, and static content matches at any offset, so the matcher splices confidently
-in the wrong place. There are two ways to get the band, one per target:
-
-- **Real device:** pass the container's `elementUUID` to `appium_screenshot` and the capture
-  is cropped to that band. Find the container by shape rather than by guessing an index.
-  Walk `**/XCUIElementTypeScrollView[1]`, `[2]`, … and read each one's geometry with
-  `appium_get_element_attribute` (`attribute=rect`). A horizontal scroller is wide and
-  short — full screen width, a fraction of its height — while a page container is nearly as
-  tall as the screen. On one app this immediately separated a 393x118 carousel from the
-  393x704 page container, with no trial-and-error scrolling.
-- **Simulator:** there is no element-scoped capture and no geometry to crop to, so capture
-  full screen and let the stitcher find the band: `--axis horizontal --crop-band`. It keeps
-  the rows that change between slices, which is exactly the region that scrolled, and
-  reports them as `cropped_band` in the verdict. Check that against the carousel you meant
-  to capture.
-
-Element captures can differ by a pixel between frames as the rect rounds; the stitcher trims
-to the common size rather than rejecting the set.
-
-Either way, say in the report which axis was captured and whether content extends past it.
-A capture that silently drops the other axis reads as complete when it is not.
+- **Real device:** pass the container's `elementUUID` to `appium_screenshot` to crop the capture to that band. Find the container by shape: walk `**/XCUIElementTypeScrollView[1]`, `[2]`, … and read each one's `appium_get_element_attribute` (`attribute=rect`). A horizontal scroller is full screen width and a fraction of its height, such as 393x118, while a page container is nearly screen height, such as 393x704. The stitcher trims element captures that differ by a pixel to their common size.
+- **Simulator:** capture full screen and stitch with `--axis horizontal --crop-band`, which keeps the rows that change between slices and reports them as `cropped_band`. Check that against the carousel you meant to capture.
 
 ### Settle, then capture
 
-**Let the screen settle before the first slice.** A screen captured mid-transition differs
-from the same screen a moment later, and that difference is easily mistaken for scrolling.
-Screenshot twice and compare; only start capturing once two consecutive frames are nearly
-identical. Skipping this produced a run that captured one non-scrolling screen twice and
-stitched a duplicate.
+Let the screen settle before the first slice, because a frame taken mid-transition differs from the same screen a moment later and reads as scrolling, which can stitch a non-scrolling screen to itself. Screenshot twice and start only once two consecutive frames are nearly identical, a `mean_abs_diff` below about 2. Bound that wait to about three attempts: a live feed never settles. A transition's difference drops to near zero within a second or two, while live content holds a steady difference; once you know it is live, capture anyway and say so in the report.
 
-Name every throwaway frame — settle probes, the at-the-top check, the bottom marker —
-outside the slice pattern, `probe-*.png` in `SLICE_DIR`, so the `slice-*.png` glob at
-stitch time cannot pick one up. A probe that slips into the stitch is not always caught:
-the stitcher refuses an identical pair, but a probe taken mid-transition is not identical
-to anything.
-
-Compare two frames with:
+Compare two frames with `frame_diff.py`; the system python has no imaging library, so do not reach for another tool.
 
 ```bash
 "$SKILL_DIR/scripts/frame_diff.py" <before.png> <after.png>
 ```
 
-It prints `mean_abs_diff` on a 0-255 scale, and — more useful — `scrolled_px`, the offset
-at which the later frame's content is found in the earlier one. It finds the fixed chrome
-from the pair itself and reports it as `sticky_top` and `sticky_bottom`; pass those flags
-only to override what it found. Do not reach for another tool: the system python has no
-imaging library, and this script carries its own.
+It prints `mean_abs_diff` on a 0-255 scale and `scrolled_px`, the offset at which the later frame's content is found in the earlier one, with its `match_error`, and it detects fixed chrome from the pair as `sticky_top` and `sticky_bottom`; pass those flags only to override it. Judge movement by `scrolled_px`, not by the difference: a net worth, PnL or balance ticks on its own, so a static screen never reaches zero difference, while `scrolled_px` stays 0 when nothing scrolled and a real scroll reports its offset with a low `match_error`.
 
-**Bound that wait to about three attempts.** A live feed never settles — its content keeps
-arriving — so an unbounded settle loop waits forever. Tell the two apart by whether the
-change decays: a transition drops to near zero within a second or two, while live content
-holds a steady difference indefinitely. Once you have established it is live, capture
-anyway and say so in the report.
+Name every throwaway frame (settle probes, the at-the-top check, the bottom marker) `probe-*.png` in `SLICE_DIR`, so the `slice-*.png` glob cannot pick one up. The stitcher refuses an identical pair, but a probe taken mid-transition is not identical to anything and slips through.
 
-Capture loop:
+Then run the capture loop:
 
-1. Scroll toward the top (`direction=down`) until the top no longer changes: capture a
-   probe, swipe once more, capture another probe, and compare with `frame_diff.py`.
-   `scrolled_px` 0 on that pair means you are at the top. An app usually resumes near the
-   top of a tab, so this is often a single swipe.
-2. Capture slice 1 — a fresh capture named as a slice, not one of the probes.
-3. Scroll `direction=up` once → screenshot → next slice.
-4. Repeat until the page stops moving, with a hard stop at **6 slices**.
+1. Scroll toward the top (`direction=down`) until it stops changing: capture a probe, swipe once more, capture another probe, and compare. `scrolled_px` 0 means you are at the top; an app usually resumes near the top of a tab, so this is often one swipe.
+2. Capture slice 1, a fresh capture named as a slice, not one of the probes.
+3. Scroll `direction=up` once and capture the next slice.
+4. Repeat until the page stops moving, with a hard stop at 6 slices.
 
-"Nearly identical" means a `mean_abs_diff` below about 2 on settled frames.
-Compare each new slice against the previous one:
+When a new frame shows the page did not move (difference below 2, or `scrolled_px` 0), stop: that frame is the bottom marker, so capture it as a probe, never a slice. If that happens on the very first scroll, the screen does not scroll at all and one slice is the whole screen; pass it alone to the stitcher, which copies it through, and never stitch a screen to itself.
 
-- **Below 2 → stop.** The page did not move. That frame marks the bottom, it is not
-  content: capture it as a probe, never as a slice, so nothing has to be deleted before the
-  stitch.
-- **If that happens on the very first scroll, the screen does not scroll at all.** One slice
-  is the whole screen. Pass it alone to the stitcher, which copies a single slice through
-  unchanged. Do not stitch a screen to itself.
+Judge what is advancing. Repeating rows of the same shape, such as a comment thread, feed or search results, are an endless list: one scroll and two slices are enough, because the stitched image already shows the endless section, so stop there and report the capture as truncated. Distinct sections that each appear once, such as a description, a stats table and a footer, are finite page content: follow them to the bottom.
 
-The stitcher reports `vs_previous_diff` per seam, which separates "never moved" from "moved
-but would not align" when a seam fails.
+A live feed cannot be captured as one coherent page. New rows arrive between slices, so the image is a composite of moments: row ages will not read in order, a "new items" affordance may appear mid-image, and seam error runs close to the accept threshold. Present it as a composite, not as the screen at one instant.
 
-**A difference is not the same as movement.** A screen can be static and still differ
-between frames: a net worth, a PnL, a claimable balance all tick on their own, so the raw
-difference never reaches zero and the rule above reads as "it moved" forever. That is what
-`scrolled_px` is for — it is 0 when nothing scrolled, whatever the values did, and a real
-scroll reports the offset it found with a low `match_error`. Judge by that, not by the
-difference alone. This is the same hazard as a live feed, in a milder form: there, whole
-rows arrive; here, a few digits change in place.
+## Stitch
 
-**Infinite scroll: two screens is enough — one scroll.** An endless list has no bottom to
-reach, and capturing more of it adds rows, not information. Such a list is usually already
-partly visible on the first screen, so a single scroll reveals the next page of rows, and
-the stitched image makes the endless section obvious. Stop there and report the capture as
-truncated.
-
-Two slices is also the one case where chrome detection has the least to work with. It
-works by comparing slices, and with a single pair the first slice is half the evidence, so
-where the app expands a large navigation title at the top of a page and collapses it once
-the page moves, that band reads as content and the crop stops short of the title bar. A
-compact title bar that does not change detects fine. When it does go wrong, the seam fails
-loudly rather than silently — `all_spliced` is false and the slices are butt-joined. If
-that happens on a two-slice capture, read the chrome height off a slice and pass
-`--sticky-top` explicitly; do not reach for `--max-error`.
-
-Judge which case you are in by what is advancing. Repeating rows of the same shape — a
-comment thread, a feed, a search-results list — are an endless list: stop at two screens. Distinct
-sections that each appear once — a description, a stats table, a footer — are finite page
-content: follow them to the bottom.
-
-**A live feed cannot be captured as one coherent page.** New rows arrive between slices, so
-the stitched image is a composite of two moments rather than a snapshot of one: row ages
-will not read in order, and a "new items" affordance may appear mid-image. Seam error also
-runs close to the accept threshold, because no two frames of a live screen match cleanly.
-Present such a capture as a composite, not as the state of the screen at one instant.
-
-The stitcher trusts the order it is given; passing slices out of order produces a confidently wrong image.
-
-## 4. Stitch
+Pass the slices in capture order; the stitcher trusts the order it is given and produces a confidently wrong image from slices out of order.
 
 ```bash
 "$SKILL_DIR/scripts/stitch_screens.py" \
@@ -526,79 +248,43 @@ The stitcher trusts the order it is given; passing slices out of order produces 
   --slices "$SLICE_DIR"/slice-*.png
 ```
 
-The script auto-detects the fixed chrome (status bar, sticky header, pinned bottom bar), finds where each slice overlaps the previous one by sliding a textured band and minimising pixel difference, and splices at the matched row so duplicated content appears once.
+It detects the fixed chrome (status bar, sticky header, pinned bottom bar), finds where each slice overlaps the previous one, and splices so duplicated content appears once. Read its JSON verdict:
 
-It prints a JSON verdict. **Read it.** Every seam must say `"spliced": true`. A
-`"butt_joined"` seam means no overlap was found and content may be missing at that seam.
-It refuses outright, writing nothing, when two consecutive slices are identical: that is a
-bottom marker that should have been dropped, or a swipe that hit a different simulator
-than the capture. Fix the slices; do not pass the pair some other way.
+- Every seam must say `"spliced": true`, and `all_spliced` must be true. A `"butt_joined"` seam means no overlap was found and content may be missing there.
+- `vs_previous_diff` per seam separates "never moved" from "moved but would not align".
+- `replaced_existing` reports that this run replaced an earlier capture of the same screen.
+- The stitcher writes nothing when two consecutive slices are identical: that is a bottom marker that should have been a probe, or a swipe that hit a different simulator than the capture. Fix the slices; do not pass the pair some other way.
 
-Where that seam sits tells you what went wrong:
+Where a butt-joined seam sits tells you what went wrong. At the bottom of the page, the last scroll usually hit the end and moved almost nothing; a `vs_previous_diff` near zero means that slice was not content and should have been discarded. Mid-page, one swipe advanced further than a screen, so whatever sat between the two slices was never captured and the image looks plausible while missing a section; recapture that stretch with about half the `distance`. This is the failure most easily mistaken for a good capture.
 
-- **At the bottom of the page**, it usually means the last scroll hit the end and moved
-  almost nothing. Check `vs_previous_diff`: near zero means the slice was not content and
-  should have been discarded.
-- **Mid-page**, the scroll overshot. One swipe advanced further than a screen, so the two
-  slices do not overlap and whatever sat between them was never captured — the stitched
-  image looks plausible and is missing a section. Recapture that stretch with a smaller
-  `distance`, roughly half of what you used. This is the failure most likely to be
-  mistaken for a good capture, because nothing about the image looks wrong.
-
-**Do not chase a failing seam by raising `--max-error`.** Loosening the threshold does not
-find a better alignment; it accepts a worse one. On a six-slice capture that failed one
-seam, raising it made every seam report `"spliced": true` and produced an image a third
-shorter than the page it came from, with the missing rows gone silently. When a seam fails,
-the cause is almost always the chrome bounds, so check those first.
-
-If `sticky_detected` in the verdict looks wrong, override it and re-run. Both flags take the **number of pixels** of fixed chrome at each edge, not row indices:
+Never chase a failing seam by raising `--max-error`. Loosening the threshold accepts a worse alignment rather than finding a better one: on one six-slice capture it made every seam report spliced and produced an image a third shorter than the page, with the missing rows gone silently. A failing seam almost always means wrong chrome bounds, so check `sticky_detected` first, and if it looks wrong override it and re-run. Both flags take the number of pixels of fixed chrome at each edge, not row indices; read the status bar plus any pinned header, and the pinned bottom bar, off a slice:
 
 ```bash
 --sticky-top 362 --sticky-bottom 357
 ```
 
-Read those off a slice: how tall is the status bar plus any pinned header, and how tall is the pinned bottom bar. Detection handles a pinned header that shows a live-updating value, because it measures the share of pixels in a row that change rather than the size of the change. It also ignores the first slice when three or more were captured, because iOS expands a large navigation title at the top of a page and collapses it as soon as the page moves — measuring that band against later slices reads it as content and crops short of it. With exactly two slices there is nothing left to measure once the first is set aside, so it is measured, and a screen whose title collapses after the first slice then needs `--sticky-top` passed by hand.
+Detection handles a pinned header with a live-updating value, and with three or more slices it ignores the first, because iOS expands a large navigation title at the top of a page and collapses it once the page moves. With exactly two slices it must use the first, so where the title collapses the band reads as content and the crop stops short of the title bar; a compact title bar that does not change detects fine. That failure is loud, `all_spliced` false with the slices butt-joined, and the fix is to read the chrome height off a slice and pass `--sticky-top`, not to raise `--max-error`.
 
-Verify the result by opening it and checking continuity across seams: ordered lists must stay ordered, and no row may repeat. On a dark UI a flat black band can match anywhere, so a low error score alone is not proof.
+Then open the result and check continuity across seams: ordered lists stay ordered and no row repeats. On a dark UI a flat black band can match anywhere, so a low error alone is not proof. When a stitch looks suspect, check its height: it should be about the first slice plus the sum of the scroll steps, minus the bottom chrome that the first slice carries and the stitch drops; far short means content was dropped whatever `all_spliced` says. That arithmetic cannot catch a bad butt join, which pads in a whole untrimmed slice and comes out longer than predicted while a section is missing, so for a butt-joined seam read the bottom of the earlier slice and the top of the next and ask whether anything belongs between them.
 
-One thing the stitcher cannot remove: a button that floats over the page rather than
-sitting flush with an edge. Chrome is detected at the top and bottom edges only, so a
-floating action button is spliced in as content wherever it sits inside the part of a
-slice the stitch keeps. Whether it repeats depends on where it floats and how far each
-scroll advanced: one pinned near the bottom edge usually lands in the tail every splice
-discards and shows once, while one over the middle can show once per slice. A repeat is a
-property of the screen, not a bad stitch. Say so in the report rather than re-running.
+A button floating over the page, rather than flush with an edge, cannot be removed, because chrome is detected only at the edges. It is spliced in as content and may repeat: one pinned near the bottom usually lands in the discarded tail and shows once, while one over the middle can show once per slice. That is a property of the screen, not a bad stitch, so say so in the report rather than re-running.
 
-A stronger check when a stitch looks suspect: the output height should be about the first
-slice plus the sum of the scroll steps, minus the bottom chrome, which the first slice
-carries and the stitch drops. If it is far short, content was dropped no matter what
-`all_spliced` says.
+## Clean up
 
-That check only catches a bad splice, though. It cannot catch a bad butt join, which pads
-in a whole untrimmed slice and so comes out *longer* than the arithmetic predicts even
-while a section is missing. For a butt-joined seam there is no substitute for looking at
-it: read the bottom of the earlier slice and the top of the next one, and ask whether
-anything should sit between them.
-
-## 5. Clean Up
-
-Delete the slice directory, on a phone delete this run's explicit Appium `sessionId`,
-then release the claim. Nested screenshot/profiling work retains the outer run's
-UDID and RUN_ID; only the outer run releases the claim.
-A run that captures several screens keeps its claim until the last one; releasing between
-screens only invites another agent in mid-run:
+Delete `SLICE_DIR`, on a phone delete this run's Appium session by its explicit `sessionId`, then release the claim:
 
 ```bash
 "$SKILL_DIR/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
 ```
 
-The stitched PNG is the only artifact that survives. Name it for what it shows — `settings.png`, `search-results.png`, `product-detail.png` — never `screenshot-1.png` or a timestamp.
-
-Where a screen's own header and the tab that reaches it disagree — a tab bar reading
-"Account" above a page headed "Portfolio" — name it for the header, which is what the image
-shows. The app slug is the app's display name from `find-ios-app.sh`, lowercased, spaces to
-hyphens: `MyApp` becomes `myapp`.
+The stitched PNG is the only artifact that survives. Name it for what the screen shows, such as `settings.png`, `search-results.png` or `product-detail.png`, never `screenshot-1.png` or a timestamp. Where a screen's header and the tab that reaches it disagree, such as an "Account" tab above a page headed "Portfolio", name it for the header. The app slug is the app's display name from `find-ios-app.sh`, lowercased with spaces turned to hyphens: `MyApp` becomes `myapp`.
 
 ## Reporting
 
-State the target, the output path, the number of slices, whether the capture was truncated by infinite scroll, and every seam's status. If any seam was butt-joined, say so plainly instead of presenting the image as complete.
+State the target, the full output path, the number of slices, which axis was captured and whether content extends past it, whether the capture was truncated by infinite scroll or is a live-feed composite, any floating button that repeats, and every seam's status. If any seam was butt-joined, say so plainly instead of presenting the image as complete.
+
+## Tests
+
+```bash
+npm run test:mobile
+```
