@@ -10,7 +10,7 @@ description: >
   waste), and not for a one-turn task with nothing to rank.
 ---
 
-# Retro — find the waste, route the fix
+# Retro
 
 A session that wasted effort did so because of a flawed model of the world —
 it did not think to check the gate, or to read the existing client. Asking that
