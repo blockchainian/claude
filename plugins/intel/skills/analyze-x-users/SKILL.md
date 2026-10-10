@@ -24,11 +24,15 @@ in Codex keep the shell tool's session handle and wait on it. A subagent waits f
 before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
 process state before retrying.
 
-Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the default `~/Documents` output root; replace it with the configured `INTEL_OUTPUT_DIR` when set. Expand `~` to the absolute home path in JSON arguments.
+Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under `x/<slug>/` in the output root, which the commands below read into `OUT`. Expand `~` to the absolute home path in JSON arguments.
 
 ## Environment variables
 
-No skill-specific environment variables or `.env` file are required.
+Set these in `~/.config/intel/.env`, starting from the intel plugin’s `.env.example`.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `INTEL_OUTPUT_DIR` | Output root; docs and charts go under `x/<slug>/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
 The accounts behind one app's X mentions → `users.md`: how the accounts split into
 behavioral segments, how much of the posts and engagement each segment owns, the
@@ -42,11 +46,12 @@ self-review checks quotes and overclaims before the doc ships.
 - **Input**: `~/.local/state/intel/x/<slug>/tweets.jsonl` and `~/.local/state/intel/x/<slug>/labels.jsonl`
   as left by `analyze-x-mentions` (every clean post labeled: `about, sentiment, topic, interest`).
   Run `analyze-x-mentions` first if `labels.jsonl` is missing or behind the archive.
-- **Output**: `~/Documents/x/<slug>/users.md` and two charts in
-  `~/Documents/x/<slug>/images/<slug>-users-*.png`.
+- **Output**: `$OUT/x/<slug>/users.md` and two charts in
+  `$OUT/x/<slug>/images/<slug>-users-*.png`.
 
 Commands may run from any working directory; `S="$SKILL_DIR/scripts"`,
-`T="$SKILL_DIR/../analyze-x-mentions/scripts"` below.
+`T="$SKILL_DIR/../analyze-x-mentions/scripts"` and
+`OUT="$(node "$SKILL_DIR/../fetch-x-mentions/scripts/env.mjs" output)"` below.
 
 > **Run steps 3 and 6 inline — do not spawn subagents for them.** The motivation read
 > and the adversarial review are done by whoever runs this skill, directly against
@@ -115,7 +120,7 @@ is fast; do the roles one after another rather than fanning out.
 ### 4. Charts (analyze-x-mentions script)
 
 ```
-echo '{"out_dir":"~/Documents/x/<slug>/images","charts":[
+echo '{"out_dir":"x/<slug>/images","charts":[
   {"type":"grouped","file":"<slug>-users-segments.png","title":"各类用户占账号 / 推文 / 互动的比例（%）",
    "labels":["社交闲聊 / 蹭热度","普通用户 / 一次性提及",...],
    "series":[{"name":"%账号","values":[...],"color":"#2a78d6"},{"name":"%推文","values":[...],"color":"#1baf7a"},{"name":"%互动","values":[...],"color":"#eb6834"}]},
@@ -182,7 +187,7 @@ Rules:
 ### 6. Adversarial review, inline
 
 Read `$SKILL_DIR/review-prompt.md` and follow it exactly, reviewing the
-doc yourself — inline, not by spawning a subagent. Check `~/Documents/x/<slug>/users.md`
+doc yourself — inline, not by spawning a subagent. Check `$OUT/x/<slug>/users.md`
 against `<scratch>/app-facts.md`, `<scratch>/authors.json`, `<scratch>/role_stats.json` and
 `<scratch>/reps/*.jsonl`: verify every `/status/<id>` (id exists, handle matches), every
 number against the stats, and every claim against a quote. Apply every MUST-FIX and
