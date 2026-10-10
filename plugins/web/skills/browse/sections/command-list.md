@@ -1,8 +1,7 @@
 ## Snapshot flags
 
-`$B` is the browse binary: the web plugin's `bin/browse` launcher on PATH.
-
-**Syntax:** `$B snapshot [flags]`
+`$B` is the browse binary, the web plugin's `bin/browse` launcher on PATH. A
+snapshot runs as `$B snapshot [flags]`:
 
 ```
 -i        --interactive           Interactive elements only (buttons, links, inputs) with @e refs. Also auto-enables cursor-interactive scan (-C) to capture dropdowns and popovers.
@@ -16,31 +15,29 @@
 -H <json> --heatmap               Color-coded overlay screenshot from JSON map: '{"@e1":"green","@e3":"red"}'. Valid colors: green, yellow, red, blue, orange, gray.
 ```
 
-All flags can be combined freely. `-o` only applies when `-a` is also used.
-Example: `$B snapshot -i -a -C -o /tmp/annotated.png`
+Flags combine freely, as in `$B snapshot -i -a -C -o /tmp/annotated.png`; `-o`
+applies only together with `-a`, and `-a` prints the text tree as well as saving
+the PNG. On its first call `-D` returns the full tree and stores it as the
+baseline, which persists across navigations until the next `-D` call replaces
+it.
 
-`-D` returns the full tree on its first call and stores it as the baseline,
-which persists across navigations until the next `-D` call replaces it. `-a`
-prints the text tree as well as saving the PNG.
-
-**Ref numbering:** @e refs are assigned sequentially (@e1, @e2, ...) in tree order.
-@c refs from `-C` are numbered separately (@c1, @c2, ...).
-
-After snapshot, use @refs as selectors in any command:
+@e refs are numbered in tree order (@e1, @e2, ...), and the @c refs from `-C`
+are numbered separately (@c1, @c2, ...). After a snapshot, use the refs as
+selectors in any command:
 ```bash
 $B click @e3       $B fill @e4 "value"     $B hover @e1
 $B html @e2        $B css @e5 "color"      $B attrs @e6
 $B click @c1       # cursor-interactive ref (from -C)
 ```
 
-**Output format:** indented accessibility tree with @ref IDs, one element per line.
+A snapshot prints an indented accessibility tree, one element per line with its @ref:
 ```
   @e1 [heading] "Welcome" [level=1]
   @e2 [textbox] "Email"
   @e3 [button] "Submit"
 ```
 
-Refs are invalidated on navigation — run `snapshot` again after `goto`.
+Navigation invalidates refs, so run `snapshot` again after `goto`.
 
 ## Full command list
 
