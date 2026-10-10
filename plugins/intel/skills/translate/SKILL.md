@@ -31,6 +31,15 @@ in Codex keep the shell tool's session handle and wait on it. A subagent waits f
 before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
 process state before retrying.
 
+## Setup
+
+```bash
+"$SKILL_DIR/scripts/setup.sh"
+```
+
+It installs what is missing and reports whether `codex` is logged in and Chrome is present. Translation runs on
+the user's ChatGPT plan through `codex`; when its quota is out, wait or pass `--model` to another codex model.
+
 ## Environment variables
 
 | Variable | Purpose | Required | Set in |
@@ -42,15 +51,6 @@ be fetched as an EPUB first. Work lives in `~/.local/state/intel/translate/<slug
 when set). Keep it: it is resumable, and the translated Markdown in it is costly to redo. The finished book is
 `<title-slug>.pdf` in `~/Documents/translate/` (`<INTEL_OUTPUT_DIR>/translate/` when set), named after the
 book's main title without its subtitle.
-
-## Setup
-
-```bash
-"$SKILL_DIR/scripts/setup.sh"
-```
-
-It installs what is missing and reports whether `codex` is logged in and Chrome is present. Translation runs on
-the user's ChatGPT plan through `codex`; when its quota is out, wait or pass `--model` to another codex model.
 
 ## 1. Extract
 
