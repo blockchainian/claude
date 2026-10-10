@@ -7,29 +7,26 @@ description: Search Anna's Archive for EPUB books, compare result download count
 
 ## Runtime and paths
 
-Works in Claude Code and Codex. Resolve `SKILL_DIR` from the absolute directory of
-this loaded `SKILL.md`, not the working directory or a host-specific environment variable:
+These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
+loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
+any other variable a command below uses, in every shell call:
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
 
-Repeat this assignment and any `S`, `T` or `U` assignments used below in every shell call;
-shell variables may not persist between calls. If the loaded path is unavailable, stop
-and report it. Keep the full intel plugin installed: sibling skills share scripts.
-Run archive commands from the repository that owns the archive; configuration and
-account stores are shared between hosts and are not migrated by installing intel.
+If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
+because sibling skills share scripts.
 
-For finite long-running commands, choose a deadline before launch and retain the process
-handle and output. In Claude Code use `run_in_background` and its completion notification;
-in Codex use the shell tool's process/session handle and wait for completion. Subagents
-must await their own commands before returning. Do not repeatedly poll logs or assume a
-background completion wakes either host. On timeout, preserve diagnostics and report the
-process state before retrying. Use the current host's image/file tools to inspect artifacts.
+For a long-running command, choose a deadline before launch and keep the process handle and its
+output. In Claude Code run it with `run_in_background` and wait for the completion notification;
+in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
+before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
+process state before retrying.
 
 ## Environment Variables
 
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in the member key. The script reads this file directly; it does not read the member key from the process environment.
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in the member key there; the script reads only that file.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
@@ -37,38 +34,34 @@ Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in
 
 ## Setup (once)
 
-Requires Node.js 20.12+ for `util.parseEnv`.
-
-The site sits behind DDoS-Guard, which serves a captcha to headless browsers and to plain HTTP clients. The script therefore drives a headed Google Chrome window through Playwright: it needs Google Chrome installed and the `playwright` package next to the script. The same script launches its own headed Chrome in both hosts; it does not require host browser tools. Install dependencies beside that script:
+The script needs Node.js 20.12+, Google Chrome, and its npm dependencies:
 
 ```sh
 npm install --prefix "$SKILL_DIR/scripts"
 ```
 
-The browser profile persists at `~/.local/share/intel/download-book/profile` (under `INTEL_DATA_DIR` when set); deleting it only costs the next run a browser check. One Chrome window serves every run: the first run opens it, each run works in a background tab of its own (it does not take the focus) and closes that tab when it finishes, and the window closes by itself a minute after the last tab. Several books can be looked up at once, one run per book; do not use the window meanwhile.
+It fetches the site through a headed Chrome window that it opens itself, one background tab per run, so several lookups can run at once. Do not use that window while runs are in progress.
 
 ## Run
 
-Run the bundled script with a book title and the file to save it to:
+Pass a book title and the file to save it to:
 
 ```sh
 "$SKILL_DIR/scripts/anna-archive-links.mjs" "Pride and Prejudice" --out ~/Documents/books/"Pride and Prejudice.epub"
 ```
 
-The script searches the first EPUB results page, reads download counts embedded in that page (using the metadata endpoint only when a count is missing), selects the highest count, calls the fast download API, and resolves a slow download link. For the slow link it prefers a "slightly faster but with waitlist" server (these download at megabytes per second after a short queue) over the "no waitlist" servers (immediate but throttled to tens of KB/s), polling the waitlist entry until its direct link appears and falling back to a no-waitlist server if the queue does not clear in time. It prints JSON with the selected record, any links found and, with `--out`, the `download` result. Without `--out` it only finds the links. Finding the links takes about 90 seconds — the browser check plus the slow server's queue.
+The script picks the EPUB result with the most downloads on the first search page and prints JSON with that record (`title`, `md5`, `downloads_total`), its `fast` and `slow` links and, with `--out`, the `download` result. Without `--out` it only finds the links, which takes about 90 seconds.
 
-Confirm the selected `title` matches the book the user asked for. The script picks the highest download count on the results page, which can be a different book when the query is loose; if it mismatches, re-run with a tighter query (add the author, edition, or subtitle) before downloading. The top record can still be a fan conversion or page scans: once downloaded, list the EPUB's entries (`unzip -l`) and check it holds real XHTML chapters, not one image per page. For a math book, avoid O'Reilly EPUBs whose files sit under `sbo-rt-content/`: their MathML is broken.
+Confirm the selected `title` matches the book the user asked for. A loose query can make a different book the most downloaded; re-run with a tighter query (add the author, edition, or subtitle) before downloading. The top record can still be a fan conversion or page scans: once downloaded, list the EPUB's entries (`unzip -l`) and check it holds real XHTML chapters, not one image per page. For a math book, avoid O'Reilly EPUBs whose files sit under `sbo-rt-content/`: their MathML is broken.
 
 ## Download
 
-Download the book to `~/Documents/books` (`<INTEL_OUTPUT_DIR>/books` when set) automatically, without asking the user to approve it: pass `--out ~/Documents/books/"<Title>.epub"`, naming the file from the book title. Run it in the background; a slow download can take many minutes. Download several books one at a time: this IP allows one download at a time and a second answers 429. Finding the links (without `--out`) can run in parallel.
+Download the book to `~/Documents/books` (`<INTEL_OUTPUT_DIR>/books` when set) without asking the user to approve it, passing `--out ~/Documents/books/"<Title>.epub"` named from the book title. Run it in the background, since a slow download can take many minutes. Download several books one at a time, because this IP allows only one download at a time; finding links without `--out` can run in parallel.
 
-With `--out` the script tries `fast.url` first, then `slow.url`, then every other slow entry on the detail page (waitlist servers first), resolving each only when the link before it answered 429 ("too many downloads at the same time from the same IP"). Any other HTTP failure stops it. It writes through a `.part` file and keeps the file only when it is an EPUB (a Zip), so an HTML error page is never saved. The JSON's `download` holds `path`, the `url` used and the `refused` links, or an `error`. When every link answers 429, another download from this IP (often the user's own browser) is still running: report that and retry after it finishes.
+The JSON's `download` holds the saved `path`, the `url` used and the `refused` links, or an `error`. When every link was refused with 429, another download from this IP (often the user's own browser) is still running: report that and retry after it finishes.
 
-To turn the downloaded EPUB into a Chinese PDF, pass it to the `translate` skill, which reads the EPUB directly.
+If the browser check fails (the script reports 未通过浏览器验证, usually a captcha), save the search results and the selected detail page as HTML from your own browser and pass them with `--search-html` and `--detail-html`. Pass `--slow-html` for a saved slow download page when its live entry is blocked; that page must belong to the selected MD5 record.
 
-If the browser check still fails (the script reports 未通过浏览器验证, usually a captcha), save the search results and selected detail page as HTML from your own browser, then pass `--search-html` and `--detail-html`. Pass `--slow-html` for a saved slow download page when its live entry is blocked. The saved slow page must refer to the selected MD5 record.
+Report missing or blocked links as unavailable, and download only a file URL the script returned, never one inferred from an error page. Never download from libgen or any of its mirrors, even when the fast API is out of downloads or a server fails: its files are often samples, early releases or cut-off downloads.
 
-Report missing or blocked links as unavailable. Do not infer a direct file URL from an error page; only download the file URL the script actually returned.
-
-Never download from libgen (libgen.li, libgen.rs or any other mirror), even when the fast API is out of downloads or a server fails: its files are often samples, early releases or cut-off downloads. When the fast API is out of downloads, use `slow.url`.
+To turn the EPUB into a Chinese PDF, pass it to the `translate` skill.
