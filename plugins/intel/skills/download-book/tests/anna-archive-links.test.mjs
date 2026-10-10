@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseLinks, selectSlowPaths, readMemberKey, leftEntry, orderSlowPaths, downloadFirst } from '../scripts/anna-archive-links.mjs';
+import { parseLinks, selectSlowPaths, readMemberKey, leftEntry, orderSlowPaths, downloadFirst, bookPath } from '../scripts/anna-archive-links.mjs';
 
 const MD5 = '26f03228f2f3ee0f980ae56f9bd97844';
 const fixture = `<ul class="list-inside mb-4 ml-1">
@@ -119,4 +119,10 @@ test('the member key comes from the dotenv file, ignoring process environment', 
     else process.env.ANNA_ARCHIVE_SECRET_KEY = previous;
     rmSync(dir, { recursive: true });
   }
+});
+
+test('bookPath saves under the intel output root, named from the book title', () => {
+  assert.equal(bookPath('Pride and Prejudice', { INTEL_OUTPUT_DIR: '/out' }), '/out/books/Pride and Prejudice.epub');
+  assert.equal(bookPath('A/B: C', { INTEL_OUTPUT_DIR: '/out' }), '/out/books/A-B- C.epub');
+  assert.match(bookPath('Emma', {}), /\/Documents\/books\/Emma\.epub$/);
 });
