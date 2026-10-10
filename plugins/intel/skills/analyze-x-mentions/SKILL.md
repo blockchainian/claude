@@ -24,13 +24,14 @@ in Codex keep the shell tool's session handle and wait on it. A subagent waits f
 before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
 process state before retrying.
 
-Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the default `~/Documents` output root; replace it with the configured `INTEL_OUTPUT_DIR` when set. Expand `~` to the absolute home path in JSON arguments.
+Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the output root (`INTEL_OUTPUT_DIR`): `render_charts.py` resolves a relative `out_dir` against it, and `OUT="$(node "$SKILL_DIR/../fetch-x-mentions/scripts/env.mjs" output)"` gives its absolute path for writing `reception.md`. Expand `~` to the absolute home path in JSON arguments.
 
 ## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
+| `INTEL_OUTPUT_DIR` | Output root; docs and charts go under `x/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
 The labeler reads `auth.json` from that directory and copies the login into a temporary private Codex home. No X credentials are needed to analyze an existing archive.
 
@@ -49,7 +50,7 @@ bug, the number, the date.
   `clean.mjs` dedups by id). Run
   on a finished archive; pass `--since/--until` to analyze a window of it. The doc
   title states the window.
-- **Output**: `~/Documents/x/<slug>/reception.md` + `images/`; and, next to the input,
+- **Output**: `x/<slug>/reception.md` + `images/` under the output root; and, next to the input,
   `~/.local/state/intel/x/<slug>/labels.jsonl`, one line per post (`id, about, sentiment, topic,
   feature, point, request, interest`), committed, so the next run labels only the
   posts it has not seen and any window can be reported from the store without
@@ -273,7 +274,7 @@ never from a labeler's paraphrase, and link it as
 ### 5. Charts (script)
 
 ```
-echo '{"out_dir":"~/Documents/x/<slug>/images","charts":[
+echo '{"out_dir":"x/<slug>/images","charts":[
   {"type":"bar","file":"<slug>-hot-topics.png","title":"热点话题（提及条数）","labels":[...],"values":[...],"color":"#2a78d6"},
   {"type":"daily","file":"<slug>-daily-volume.png","title":"每日提及量与当天事件","days":["09-02",...],"values":[...],"events":{"09-10":"App Store 下架"}},
   (a window longer than ~3 months uses months as days: `<slug>-monthly-volume.png`, "每月提及量与当月事件", "days":["2025-01",...])

@@ -3,9 +3,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { clean, facts, readLog, botAuthors } from "../scripts/clean.mjs";
-import { writeFileSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { writeFileSync, mkdtempSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { chunk } from "../scripts/chunk.mjs";
 import { verifySummary, tally, byFeature, byTopic, topTexts, norm, readLabels, inWindow, timeline } from "../scripts/aggregate.mjs";
 import { mergeLabels, growVocab, applyAliases } from "../scripts/merge-labels.mjs";
@@ -301,4 +303,14 @@ test("growVocab grows the lists a spec names, not only the mentions fields", () 
   assert.deepEqual(vocab, { topics: ["market-macro"], interests: ["own-token"] });
   assert.deepEqual(g.added, { topics: [["market-macro", 2]], interests: [["own-token", 1]] });
   assert.ok(!("assets" in vocab));
+});
+
+test("render_charts puts a relative out_dir under the intel output root", () => {
+  const root = mkdtempSync(join(tmpdir(), "out-"));
+  const cwd = mkdtempSync(join(tmpdir(), "cwd-"));
+  const script = fileURLToPath(new URL("../scripts/render_charts.py", import.meta.url));
+  const r = spawnSync(script, [], { cwd, input: JSON.stringify({ out_dir: "x/acme/images", charts: [] }), env: { ...process.env, INTEL_OUTPUT_DIR: root }, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(join(root, "x", "acme", "images")));
+  assert.ok(!existsSync(join(cwd, "x")));
 });
