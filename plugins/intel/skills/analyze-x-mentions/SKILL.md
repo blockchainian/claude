@@ -5,28 +5,18 @@ description: Turn a fetched X/Twitter mentions archive (tweets.jsonl from fetch-
 
 # Analyze Twitter
 
-## Runtime and paths
+## Skill directory
 
-These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
-loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
-any other variable a command below uses, in every shell call:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
+scripts import from the sibling `fetch-x-mentions` skill, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
 
-If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
-because sibling skills share scripts.
-
-For a long-running command, choose a deadline before launch and keep the process handle and its
-output. In Claude Code run it with `run_in_background` and wait for the completion notification;
-in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
-before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
-process state before retrying.
+## Environment variables
 
 Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the output root (`INTEL_OUTPUT_DIR`): `render_charts.py` resolves a relative `out_dir` against it, and `OUT="$(node "$SKILL_DIR/../fetch-x-mentions/scripts/env.mjs" output)"` gives its absolute path for writing `reception.md`. Expand `~` to the absolute home path in JSON arguments.
-
-## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
@@ -127,6 +117,8 @@ scripts):
 ```
 node $S/run-labels.mjs --facts <scratch>/app-facts.md --vocab ~/.local/state/intel/x/vocab.json --out <scratch> <scratch>/chunk*.json
 ```
+
+Run it in the background: ~100 chunks take about an hour.
 
 Each call runs in a private `CODEX_HOME` (the login copied, no user config,
 AGENTS.md, plugins, hooks or tools), the labeling rules as the model's
@@ -366,5 +358,3 @@ Return the paths to `reception.md` and `images/` under the output root and `labe
 ```
 node --test "$SKILL_DIR/tests/test_analyze_tweets.mjs"
 ```
-
-Archive paths below show the default Intel state root; use the configured `INTEL_STATE_DIR` when set.
