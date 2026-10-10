@@ -29,7 +29,8 @@ process state before retrying. Use the current host's image/file tools to inspec
 
 Fetch the posts one search returns and print them — as opposed to `fetch-x-mentions` and
 `fetch-x-user-posts`, which fetch everything over a date range and save it under `~/.local/state/intel/x/`.
-Give it any X search query; it prints a small number of posts and writes no file. The request
+Give it any X search query; it prints a small number of posts and writes no file. For an account's
+profile (bio, links, follower counts), which search does not return, use `curl -s https://api.fxtwitter.com/<handle>`. The request
 (x-client-transaction-id, the account list, the SearchTimeline url, the proxy) is imported from
 `fetch-x-mentions`, with request settings loaded from this script's own directory.
 
