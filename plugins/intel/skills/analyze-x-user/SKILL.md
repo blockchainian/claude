@@ -1,6 +1,6 @@
 ---
 name: analyze-x-user
-description: Profile ONE X/Twitter account from its own timeline (tweets.jsonl + replies.jsonl left by fetch-x-user-posts) into ~/Documents/x/kols/<user>/profile.md — who the account is, what it talks about most, the tokens and people it pushes, its posting behaviour and interests, read from its own posts. Labels each post with the analyze-x-mentions labeler, then writes a single-account profile. Use when asked to profile / 画像 one KOL from their fetched timeline. NOT for the accounts mentioning an app (use analyze-x-users) and NOT for fetching the posts (use fetch-x-user-posts).
+description: Profile ONE X/Twitter account from its own timeline (tweets.jsonl + replies.jsonl left by fetch-x-user-posts) into x/kols/<user>/profile.md under the intel output folder — who the account is, what it talks about most, the tokens and people it pushes, its posting behaviour and interests, read from its own posts. Labels each post with the analyze-x-mentions labeler, then writes a single-account profile. Use when asked to profile / 画像 one KOL from their fetched timeline. NOT for the accounts mentioning an app (use analyze-x-users) and NOT for fetching the posts (use fetch-x-user-posts).
 ---
 
 # Analyze X user (single account)
@@ -24,13 +24,14 @@ in Codex keep the shell tool's session handle and wait on it. A subagent waits f
 before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
 process state before retrying.
 
-Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the default `~/Documents` output root; replace it with the configured `INTEL_OUTPUT_DIR` when set. Expand `~` to the absolute home path in JSON arguments.
+Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the output root, `INTEL_OUTPUT_DIR` (default `~/Documents`). Expand `~` to the absolute home path in JSON arguments.
 
 ## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment before running the command; no automatic `.env` loading |
+| `INTEL_OUTPUT_DIR` | Output root; profiles go under `x/kols/`; default `~/Documents` | Optional | `~/.config/intel/.env` |
 
 The shared `analyze-x-mentions` labeler uses this setting for its existing Codex login. No X credentials are needed to analyze an existing timeline archive.
 
@@ -48,11 +49,15 @@ own posts (what kind, about which asset, which way, with what stake), not an app
 ## Input & output
 
 - **Input**: `~/.local/state/intel/x/kols/<user>/tweets.jsonl` and `.../replies.jsonl` from `fetch-x-user-posts`.
-- **Output**: `profile.md` + `images/` in `~/Documents/x/kols/<user>/`; next to the input, `profile.json`
+- **Output**: `profile.md` + `images/` in `x/kols/<user>/` under the output root; next to the input, `profile.json`
   (deterministic stats) and `labels.jsonl` (one line per post, committed so a rerun only labels new posts).
 
 Commands may run from any working directory; `S="$SKILL_DIR/scripts"`,
-`T="$SKILL_DIR/../analyze-x-mentions/scripts"` (the shared labeler) below. `U=~/.local/state/intel/x/kols/<user>` (the archive), `O=~/Documents/x/kols/<user>` (the doc).
+`T="$SKILL_DIR/../analyze-x-mentions/scripts"` (the shared labeler) below. `U=~/.local/state/intel/x/kols/<user>` (the archive), `O="$OUT/x/kols/<user>"` (the doc), with the output root from
+
+```
+OUT="$(node "$SKILL_DIR/../fetch-x-mentions/scripts/env.mjs" output)"
+```
 
 ## Procedure
 
@@ -128,7 +133,7 @@ Five PNGs into `$O/images/`, values from `profile.json` and `labels.jsonl` (the 
 the ones the doc uses, summed over `labels.jsonl`, not over the top-15 list in `profile.json`):
 
 ```
-echo '{"out_dir":"~/Documents/x/kols/<user>/images","charts":[
+echo '{"out_dir":"x/kols/<user>/images","charts":[
   {"type":"bar","file":"<user>-kinds.png","title":"帖子类型","labels":["闲聊","分析",...],"values":[...],"color":"#2a78d6"},
   {"type":"bar","file":"<user>-topics.png","title":"聊什么","labels":["<grouped topic>",...],"values":[...],"color":"#2a78d6"},
   {"type":"bar","file":"<user>-interests.png","title":"利益","labels":["X 创作者分成","返佣链接",...],"values":[...],"color":"#eb6834"},
