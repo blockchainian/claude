@@ -5,49 +5,33 @@ description: Capture and interpret iOS Simulator ETTrace profiles. Use when prof
 
 # iOS ETTrace performance
 
-Use this skill to capture a focused, symbolicated ETTrace profile from an iOS simulator app. Pair it with `../ios-debugger-agent/SKILL.md` when the task also needs simulator build, install, launch, UI driving, logs, or screenshots.
+This skill captures one focused, symbolicated ETTrace profile from an iOS simulator app and reads
+it. When the task also needs a simulator build, install, launch, UI driving, logs or screenshots,
+use it together with `../ios-debugger-agent/SKILL.md`.
 
-## Simulator ownership
+Before anything else, pick one focused flow and write down where it starts and stops, then build
+the exact simulator app you will install and profile; the sections below follow the rest of the
+session in order. Avoid broad "use the app for a while" captures: one trace covers one
+user-visible flow.
 
-For live simulator work, select an explicit UUID and claim it before build, launch or capture.
-Use this skill's actual loaded directory, and keep the same `UDID` and `RUN_ID` throughout:
+## Skill directory
 
-In each shell call, reassign `SKILL_DIR`, `UDID`, and `RUN_ID` to the resolved
-values; shell variables do not persist between calls.
+Shell variables do not persist between calls, so in every shell call reassign `SKILL_DIR` to the
+absolute directory of this loaded skill, and `UDID` and `RUN_ID` to the values you chose for this
+session; keep the same `UDID` and `RUN_ID` throughout.
 
-```sh
-SKILL_DIR="/absolute/path/to/loaded/skill"
-UDID="<chosen-simulator-uuid>"
-RUN_ID="$(uuidgen)"
-node "$SKILL_DIR/../ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
-```
+## Environment variables
 
-The coordinator assigns different UUIDs to parallel runs. Exit 3 means the chosen target is
-owned: wait for release or choose another UUID; do not steal a live run. When called inside an
-existing debugger/screenshot run, reuse its claim and run id; only the outer run releases it.
-Analyzing existing artifacts needs no simulator claim.
-
-XcodeBuildMCP calls must pass `simulatorId` explicitly; build and app-path calls also pass
-`projectPath` or `workspacePath`, `scheme`, configuration and a run-specific `derivedDataPath`.
-Launch/stop calls pass `bundleId`. Do not change shared session defaults or active profiles.
-Check that the exposed schema accepts `simulatorId` and each response targets the chosen UUID;
-stop on a mismatch or reconnect a server that still exposes only shared-default targeting.
-
-## Core Workflow
-
-1. Pick one focused flow and write down the expected start and stop points.
-2. Build the exact simulator app that will be installed and profiled.
-3. Temporarily link ETTrace into that app target for simulator/debug profiling.
-4. Collect UUID-matched dSYMs for the app executable and embedded dynamic frameworks.
-5. Capture one launch or runtime trace.
-6. Preserve the processed flamegraph JSON immediately after the run.
-7. Analyze only the processed JSON and report the flow, artifacts, hotspots, and caveats.
-
-Avoid broad "use the app for a while" captures. One trace should correspond to one user-visible flow.
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `MOBILE_DATA_DIR` | Root for scratch run folders, under `tmp/ios-ettrace-performance/`; default `~/.local/share/mobile` | Optional | Shell environment |
+| `MOBILE_STATE_DIR` | Root for simulator claims; default `~/.local/state/mobile` | Optional | Shell environment |
+| `RUN_DIR` | Reuse an existing writable run folder instead of creating one | Optional | Shell environment |
+| `ETTRACE_TAG` | ETTrace source tag for the app-side framework build; default `v1.1.0`; set it to match the installed runner when Homebrew updates | Optional | Shell environment |
 
 ## Setup
 
-Use a writable run folder for each profiling session:
+Give each profiling session its own writable run folder:
 
 ```bash
 if [ -z "${RUN_DIR:-}" ]; then
@@ -57,28 +41,44 @@ fi
 mkdir -p "$RUN_DIR"
 ```
 
-Install the ETTrace runner CLI if it is not already available:
+Install the host-side runner if `ettrace` is not already available:
 
 ```bash
 brew install emergetools/homebrew-tap/ettrace
 ```
 
-`ettrace` is the host-side macOS runner. The app must also link an `ETTrace.xcframework` for the iOS Simulator architecture.
-This workflow is validated for ETTrace v1.1.0 processed `output_<thread>.json` files with top-level `nodes`.
+The app must also link an `ETTrace.xcframework` built for the iOS Simulator architecture. This
+workflow is validated for ETTrace v1.1.0 processed `output_<thread>.json` files with top-level
+`nodes`.
 
-## Link ETTrace Into The App
+## Simulator ownership
 
-Wire ETTrace into the exact app target being profiled. Keep the integration in a clearly temporary patch and remove it when the profiling task is done unless the user explicitly asks to keep it.
+For live simulator work, pick an explicit simulator UUID and claim it before you build, launch or
+capture. Analyzing existing artifacts needs no claim.
 
-Preferred options:
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+UDID="<chosen-simulator-uuid>"
+RUN_ID="$(uuidgen)"
+node "$SKILL_DIR/../ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID"
+```
 
-- Reuse an existing simulator-compatible `ETTrace.xcframework` if the repo already vendors one.
-- If none exists, build a simulator-only copy into `RUN_DIR` from the upstream ETTrace package.
-- Link the framework directly into the app target, not only into tests, resources, data files, or a nested launcher target.
-- Confirm launch logs print `Starting ETTrace`.
-- Profile only one ETTrace-instrumented simulator app on the host at a time because simulator mode listens on a fixed localhost port. A different UUID does not isolate this port; serialize ETTrace captures, and ensure only the selected app connects.
+The coordinator gives parallel runs different UUIDs. Exit 3 means another run owns the target: wait
+for it to release or choose another UUID, and never steal a live run. When this skill runs inside an
+existing debugger or screenshot run, reuse that run's claim and run id; only the outer run releases
+it.
 
-Build a simulator framework when needed:
+Every XcodeBuildMCP call passes `simulatorId` explicitly. Build and app-path calls also pass
+`projectPath` or `workspacePath`, `scheme`, the configuration and a run-specific `derivedDataPath`;
+launch and stop calls pass `bundleId`. Do not change shared session defaults or active profiles.
+Check that the exposed schema accepts `simulatorId` and that each response targets the chosen UUID.
+On a mismatch, stop, or reconnect a server that still offers only shared-default targeting.
+
+## Link ETTrace into the app
+
+Wire ETTrace into the exact app target you are profiling, as a clearly temporary patch. Reuse a
+simulator-compatible `ETTrace.xcframework` if the repo already vendors one; otherwise build a
+simulator-only copy into `RUN_DIR` from the upstream package:
 
 ```bash
 ETTRACE_TAG="${ETTRACE_TAG:-v1.1.0}" # Override to match the installed runner when Homebrew updates.
@@ -105,7 +105,8 @@ xcodebuild -create-xcframework \
 popd >/dev/null
 ```
 
-For Bazel apps, a temporary import usually looks like:
+Link the framework directly into the app target, not only into tests, resources, data files or a
+nested launcher target. In a Bazel app, a temporary import usually looks like this:
 
 ```python
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_xcframework_import")
@@ -118,13 +119,18 @@ apple_dynamic_xcframework_import(
 )
 ```
 
-For Xcode projects, temporarily add the simulator `ETTrace.xcframework` to the app target's Link Binary With Libraries / Embed Frameworks phases for the debug simulator build you are profiling, then remove that wiring after profiling.
+In an Xcode project, add the simulator `ETTrace.xcframework` to the app target's **Link Binary With
+Libraries** and **Embed Frameworks** phases for the debug simulator build you are profiling.
 
-## Symbolication Gate
+After launch, confirm the logs print `Starting ETTrace`. Simulator mode listens on a fixed localhost
+port, and a different UUID does not isolate it, so profile only one ETTrace-instrumented simulator
+app on the host at a time: serialize captures and make sure only the selected app connects.
 
-Do not draw conclusions from an unsymbolicated flamegraph. Before every capture, prepare a dSYM folder that includes the app dSYM and any embedded first-party dynamic framework dSYMs.
+## Collect dSYMs
 
-Collect dSYMs after the final build that produced the installed app:
+Never draw conclusions from an unsymbolicated flamegraph. Before every capture, and after the final
+build that produced the installed app, collect the app dSYM and every embedded first-party dynamic
+framework dSYM:
 
 ```bash
 SKILL_DIR="<absolute path to this loaded skill folder>"
@@ -139,20 +145,28 @@ DSYMS="$RUN_DIR/dsyms"
   --extra-dsym "$RUN_DIR/ETTrace-iphonesimulator.xcarchive/dSYMs/ETTrace.framework.dSYM"
 ```
 
-Add `--require-framework <FrameworkName>` for app-owned dynamic frameworks that must symbolicate; use `--require-all-frameworks` only when every embedded framework is app-owned or expected to have symbols. If the helper reports a missing required app or framework dSYM, rebuild the exact simulator app with dSYM generation before tracing, or add the build output directory that contains those dSYMs as another `--search-root`.
+Add `--require-framework <FrameworkName>` for each app-owned dynamic framework that must
+symbolicate, and use `--require-all-frameworks` only when every embedded framework is app-owned or
+expected to have symbols. If the script reports a missing required app or framework dSYM, rebuild
+the exact simulator app with dSYM generation before tracing, or add the build output directory that
+holds those dSYMs as another `--search-root`.
 
-Verify important UUIDs before tracing when the report looks suspicious:
+When the report looks suspicious, verify the important UUIDs before tracing:
 
 ```bash
 dwarfdump --uuid "$APP/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
 find "$DSYMS" -maxdepth 1 -type d -name '*.dSYM' -print -exec dwarfdump --uuid {} \;
 ```
 
-After ETTrace exits, read its symbolication summary. Treat meaningful first-party "have library but no symbol" lines as a failed trace unless they are tiny noise. Unsymbolicated system-framework or ETTrace internal buckets are usually acceptable.
+After ETTrace exits, read its symbolication summary. Meaningful first-party "have library but no
+symbol" lines mean the trace failed, unless they are tiny noise; unsymbolicated system-framework or
+ETTrace internal buckets are usually fine.
 
 ## Capture
 
-For launch traces:
+Run `ettrace` attached to a TTY so it can read its interactive prompts; without one it can exit
+without a useful trace. Each capture first writes a start marker and clears old outputs. A launch
+trace, for startup or first render only, uses `--launch`:
 
 ```bash
 cd "$RUN_DIR"
@@ -162,9 +176,12 @@ find "$RUN_DIR" -maxdepth 1 \( -name 'output.json' -o -name 'output_*.json' \) -
 ettrace --simulator --launch --verbose --dsyms "$DSYMS"
 ```
 
-Use `--launch` only when measuring startup or first render. The first launch connection can force quit the app; relaunch from the simulator home screen rather than Xcode if prompted. For first-launch-after-install traces, temporarily set `ETTraceRunAtStartup=YES` in the app Info.plist, then run `ettrace --simulator` and launch from the home screen.
+The first launch connection can force-quit the app; if prompted, relaunch it from the simulator home
+screen rather than from Xcode. For a first-launch-after-install trace, temporarily set
+`ETTraceRunAtStartup=YES` in the app's Info.plist, run `ettrace --simulator`, and launch from the
+home screen.
 
-For runtime flow traces:
+A runtime flow trace drops `--launch`:
 
 ```bash
 cd "$RUN_DIR"
@@ -174,13 +191,15 @@ find "$RUN_DIR" -maxdepth 1 \( -name 'output.json' -o -name 'output_*.json' \) -
 ettrace --simulator --verbose --dsyms "$DSYMS"
 ```
 
-Start from a stable screen, start ETTrace, perform exactly one focused flow, wait until visible work is complete, then stop the runner. For wider attribution, add `--multi-thread`; otherwise start with the main thread.
+Start from a stable screen, start ETTrace, perform exactly one focused flow, wait until the visible
+work is done, then stop the runner. Start with the main thread, and add `--multi-thread` when you
+need wider attribution.
 
-Run `ettrace` attached to a TTY so it can read interactive prompts; without a TTY the runner can exit without a useful trace.
+## Preserve outputs
 
-## Preserve Outputs
-
-The next ETTrace run can overwrite processed flamegraph files, so preserve fresh `output_<thread-id>.json` files immediately. Do not analyze a saved `output.json`; ETTrace also serves a viewer route with that name, and raw `emerge-output/output.json` files are not the processed flamegraph artifacts this workflow expects.
+The next ETTrace run can overwrite the processed flamegraph files, so copy the fresh
+`output_<thread-id>.json` files right after each run. This also writes a `summary.txt` from the
+analyzer:
 
 ```bash
 PRESERVED_DIR="$(mktemp -d "$RUN_DIR/run-$(date +%Y%m%d-%H%M%S).XXXXXX")"
@@ -203,27 +222,30 @@ if [ ! -s "$PRESERVED_DIR/summary.txt" ]; then
 fi
 ```
 
-Analyze only processed `output_*.json` files in `RUN_DIR`. Ignore `output.json` and raw `emerge-output/output.json` files unless debugging ETTrace itself. If the analyzer rejects the JSON shape, capture again with the Homebrew ETTrace runner and matching app-side `ETTrace.xcframework` tag instead of trying to interpret the rejected file.
+Analyze only the processed `output_*.json` files from `RUN_DIR`. Ignore `output.json`, which is also
+the name of ETTrace's viewer route, and raw `emerge-output/output.json` files, which are not
+processed flamegraphs, unless you are debugging ETTrace itself. If the analyzer rejects the JSON
+shape, capture again with the Homebrew runner and an app-side `ETTrace.xcframework` of the matching
+tag instead of interpreting the rejected file.
 
-## Read The Profile
+## Read the profile
 
-Start from `run-*/summary.txt`, then inspect processed JSON directly if needed.
+Start from `run-*/summary.txt`, and open the processed JSON directly only when you need more. The
+report covers:
 
-Report:
-
-- exact flow, app build, simulator model/runtime, and run count
-- processed flamegraph JSON paths
-- top active leaves and inclusive first-party stacks with sample weights or percentages
+- the exact flow, app build, simulator model and runtime, and run count
+- the processed flamegraph JSON paths
+- the top active leaves and inclusive first-party stacks, with sample weights or percentages
 - whether symbols were complete for app-owned binaries
-- caveats such as first-run setup, simulator-only cost, network variance, or low sample count
-- before/after deltas only when the same flow was captured with comparable setup
-
+- caveats such as first-run setup, simulator-only cost, network variance or a low sample count
+- before/after deltas, only when the same flow was captured with comparable setup
 
 ## Cleanup
 
-Remove temporary ETTrace app wiring when profiling is complete unless the user asked to keep it. Keep or discard run artifacts based on the active task.
-After ETTrace and simulator-driving processes have finished, release this run's own claim,
-on success or failure (an outer caller retains and releases its shared claim):
+Remove the temporary ETTrace app wiring when profiling is done, unless the user asked to keep it,
+and keep or discard the run artifacts as the task requires. Once ETTrace and every
+simulator-driving process have finished, release this run's own claim, on success or failure; an
+outer caller keeps and releases its shared claim itself.
 
 ```sh
 node "$SKILL_DIR/../ios-take-screenshot/scripts/claim-simulator.mjs" "$UDID" --run "$RUN_ID" --release
