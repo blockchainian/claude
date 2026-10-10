@@ -5,28 +5,18 @@ description: Profile ONE X/Twitter account from its own timeline (tweets.jsonl +
 
 # Analyze X user (single account)
 
-## Runtime and paths
+## Skill directory
 
-These skills run in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory of this
-loaded `SKILL.md`, not the working directory or a host environment variable, and repeat it, with
-any other variable a command below uses, in every shell call:
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The commands run scripts from the sibling
+`analyze-x-mentions` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
 
-If the loaded path is unavailable, stop and report it. Keep the whole intel plugin installed,
-because sibling skills share scripts.
-
-For a long-running command, choose a deadline before launch and keep the process handle and its
-output. In Claude Code run it with `run_in_background` and wait for the completion notification;
-in Codex keep the shell tool's session handle and wait on it. A subagent waits for its own commands
-before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
-process state before retrying.
+## Environment variables
 
 Archive paths below show the default `~/.local/state/intel` root; replace it with the configured `INTEL_STATE_DIR` when set. Docs and charts go under the output root, `INTEL_OUTPUT_DIR` (default `~/Documents`). Expand `~` to the absolute home path in JSON arguments.
-
-## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
@@ -110,7 +100,7 @@ node $T/merge-labels.mjs $U/labels.jsonl <scratch> --spec $S/kol-spec.mjs --voca
 ```
 
 Chunks of 500 keep the wall time near one chunk (about 5 min) since the pool runs 20 in flight; skip labeling entirely for an account
-with too few substantive posts to profile (say < 30) and note that in the doc.
+with too few substantive posts to profile (say < 30) and note that in the doc. Run `run-labels.mjs` in the background.
 
 ### 3. Representative posts (script, read inline)
 
@@ -235,7 +225,5 @@ labeling out to a whole roster without being asked.
 ```
 node --test "$SKILL_DIR/tests/test_profile_user.mjs" "$SKILL_DIR/tests/test_reps.mjs"
 ```
-
-Archive paths below show the default Intel state root; use the configured `INTEL_STATE_DIR` when set.
 
 Pass `--apps <comma-separated archive slugs>` to reps.mjs for app sections; default is empty.
