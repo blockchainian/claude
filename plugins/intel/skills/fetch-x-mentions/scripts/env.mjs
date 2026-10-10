@@ -44,8 +44,12 @@ function expandUser(path) {
   return path.startsWith('~/') ? join(homedir(), path.slice(2)) : path;
 }
 
-// Python skills reuse this loader rather than implementing another dotenv parser.
+// Python skills reuse this loader rather than implementing another dotenv parser; a root name
+// (data, state or output) prints just that path, for shell commands.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   loadEnvFile();
-  console.log(JSON.stringify({data: dataDir(), state: stateDir(), output: outputDir()}));
+  const roots = {data: dataDir(), state: stateDir(), output: outputDir()};
+  const name = process.argv[2];
+  if (name && !(name in roots)) { console.error(`unknown root: ${name}`); process.exit(2); }
+  console.log(name ? roots[name] : JSON.stringify(roots));
 }
