@@ -22,14 +22,20 @@ magnitude 4x wrong and matching no real accounting basis. So this runs in a
 auditor, not the author. The transcript's own stated reasoning is available, but
 treated as a claim to verify, never as justification for a deviation.
 
-The output is one file, `~/Documents/retros/<date>-<session>/retro.md`
-(`$FEATURE_OUTPUT_DIR/retros/` when set): the ranked wastes with their evidence, then the
-proposed fixes. Write it there, never into a repo — the analysed session's worktree is
-often deleted after it finishes. The machine records behind it (`retro.json` per session
-and the `fixes.jsonl` ledger) live in `~/.local/state/feature/retros/`
-(`$FEATURE_STATE_DIR/retros/` when set): they cannot be rebuilt once the transcripts age out.
+The output is one file, `retros/<date>-<session>/retro.md` under the output root: the
+ranked wastes with their evidence, then the proposed fixes. Write it there, never into a
+repo — the analysed session's worktree is often deleted after it finishes. The machine
+records behind it (`retro.json` per session and the `fixes.jsonl` ledger) live in
+`retros/` under the state root: they cannot be rebuilt once the transcripts age out.
 Diagnosis and fixes are two gates — write and confirm the diagnosis before
 touching anything.
+
+## Environment variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `FEATURE_OUTPUT_DIR` | Output root; `retro.md` goes under `retros/`; default `~/Documents` | Optional | Shell environment |
+| `FEATURE_STATE_DIR` | State root; `retro.json` and `fixes.jsonl` go under `retros/`; default `~/.local/state/feature` | Optional | Shell environment |
 
 ## Procedure
 
@@ -92,8 +98,8 @@ touching anything.
    discarded-workstream count × mean joined per-workstream cost, plus the
    orchestrator's own (measured) reaction tokens. Never present a proxy as measured.
 
-5. **Write `retro.md` to `~/Documents/retros/<date>-<session>/` and `retro.json` to
-   `~/.local/state/feature/retros/<date>-<session>/`, then stop at the gate.** `retro.md` is the human record: ranked wastes with evidence
+5. **Write `retro.md` to `retros/<date>-<session>/` under the output root and `retro.json`
+   to `retros/<date>-<session>/` under the state root, then stop at the gate.** `retro.md` is the human record: ranked wastes with evidence
    (token cost, the `path:line` or memory that held the answer, the axis), then the
    proposed fixes grouped by destination (ship / plan template / AGENTS.md).
    `retro.json` is the machine record that makes efficacy analyzable later — one
@@ -119,7 +125,7 @@ touching anything.
    cheapest ship guardrail, recurring across runs: validate each workstream's check
    command on the clean baseline before fan-out, and reject any gate already red.
 
-   For **every fix you actually apply**, append one line to `~/.local/state/feature/retros/fixes.jsonl`:
+   For **every fix you actually apply**, append one line to `retros/fixes.jsonl` under the state root:
 
    ```
    {fix_id, waste_class, type: "mechanical-gate"|"judgment", applied_at: <commit SHA>, ref}
