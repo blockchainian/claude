@@ -84,7 +84,9 @@ is no cure for a browser login.
 - **import** reads `<state>/google/*.txt`, `<state>/x/*.txt` or `<state>/tiktok/*.txt`, or the named
   files, one account per line. Google lines are `email:password:totp_secret:app_password` (the last
   two optional); X lines are the vendor's, starting `username:password:email:email_password`; TikTok
-  lines are `username:password:email:email_password:profile_url`. Reruns are safe. After importing a
+  lines are `username:password:email:email_password:profile_url`. Reruns are safe. Import only burner
+  accounts into X: intel's X fetchers read with every `active` X row, unfiltered, so never import the
+  user's own accounts. After importing a
   new `auth_token` for a known X account, derive its ct0 with intel's
   `fetch-x-mentions/scripts/verify-x.mjs`.
 - **login tiktok** uses the account's fixed ISP slot, and its session works only from that slot. A new
