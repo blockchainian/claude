@@ -9,6 +9,19 @@ A persistent headless Chromium behind a small CLI. The first command starts a
 daemon (~3s); every later command is ~100ms. Cookies, localStorage, tabs and
 logins persist between calls until the daemon stops.
 
+## Environment variables
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `BROWSE_TAB` | Pins every command to one tab; see One tab per client | No | the caller's shell |
+| `BROWSE_HEADED` | `1` starts the daemon headed, like `--headed` | No | shell profile |
+| `BROWSER_DISPLAY` | Display for the headed window; see Headed mode and proxies | No | shell, or `~/.config/web/.env` |
+| `BROWSE_PROXY_USER`, `BROWSE_PROXY_PASS` | Proxy credentials for `--proxy`, instead of putting them in its URL | No | shell |
+| `CHROMIUM_PROFILE` | Profile directory of the headed browser (default `~/.gstack/chromium-profile`) | No | shell |
+| `BROWSE_STATE_FILE` | State file that picks which daemon a client talks to (default `.gstack/browse.json` under the git root or working directory) | No | shell |
+| `BROWSE_IDLE_TIMEOUT` | Milliseconds of inactivity before the daemon shuts down, losing its tabs and logins (default 1800000, 30 min) | No | shell |
+| `CLAUDE_PLUGIN_DATA` | Parent directory of the launcher's builds | No | set by Claude Code |
+
 ## Setup
 
 In Claude Code, `browse` is this plugin's `bin/browse` launcher, which Claude
@@ -29,19 +42,6 @@ several seconds and needs `bun`, `git` and network access; build output goes to
 stderr, so stdout stays browse's own. A new build also restarts each running
 daemon on its next command, losing every tab and login in it, so warn the user
 before that first call while other sessions use the daemon.
-
-## Environment variables
-
-| Variable | Purpose | Required | Set in |
-| --- | --- | --- | --- |
-| `BROWSE_TAB` | Pins every command to one tab; see One tab per client | No | the caller's shell |
-| `BROWSE_HEADED` | `1` starts the daemon headed, like `--headed` | No | shell profile |
-| `BROWSER_DISPLAY` | Display for the headed window; see Headed mode and proxies | No | shell, or `~/.config/web/.env` |
-| `BROWSE_PROXY_USER`, `BROWSE_PROXY_PASS` | Proxy credentials for `--proxy`, instead of putting them in its URL | No | shell |
-| `CHROMIUM_PROFILE` | Profile directory of the headed browser (default `~/.gstack/chromium-profile`) | No | shell |
-| `BROWSE_STATE_FILE` | State file that picks which daemon a client talks to (default `.gstack/browse.json` under the git root or working directory) | No | shell |
-| `BROWSE_IDLE_TIMEOUT` | Milliseconds of inactivity before the daemon shuts down, losing its tabs and logins (default 1800000, 30 min) | No | shell |
-| `CLAUDE_PLUGIN_DATA` | Parent directory of the launcher's builds | No | set by Claude Code |
 
 ## One tab per client (parallel runs)
 
