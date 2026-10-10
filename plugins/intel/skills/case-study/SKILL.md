@@ -17,7 +17,7 @@ description: >
   one article or video (use digest).
 ---
 
-# Case study — one subject, researched, typeset
+# Case study
 
 A case study answers one question about one subject: how did they get here,
 and which parts of it are on the record. The reader gets a practical book with
