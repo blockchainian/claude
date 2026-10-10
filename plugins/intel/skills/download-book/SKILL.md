@@ -5,7 +5,7 @@ description: Search Anna's Archive for EPUB books, compare result download count
 
 # Download book
 
-## Runtime and paths
+## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
 scripts import from the sibling `fetch-x-mentions` skill, so keep the whole intel plugin installed.
@@ -13,6 +13,14 @@ scripts import from the sibling `fetch-x-mentions` skill, so keep the whole inte
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
 ```
+
+## Environment variables
+
+Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in the member key there; the script reads only that file.
+
+| Variable | Purpose | Required | Set in |
+| --- | --- | --- | --- |
+| `ANNA_ARCHIVE_SECRET_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `~/.config/intel/.env` |
 
 ## Setup (once)
 
@@ -23,14 +31,6 @@ npm install --prefix "$SKILL_DIR/scripts"
 ```
 
 It fetches the site through a headed Chrome window that it opens itself, one background tab per run, so several lookups can run at once. Do not use that window while runs are in progress.
-
-## Environment variables
-
-Copy the intel plugin’s `.env.example` to `~/.config/intel/.env` and fill in the member key there; the script reads only that file.
-
-| Variable | Purpose | Required | Set in |
-| --- | --- | --- | --- |
-| `ANNA_ARCHIVE_SECRET_KEY` | Anna’s Archive member key | Yes, for member fast-download links | `~/.config/intel/.env` |
 
 ## Run
 
