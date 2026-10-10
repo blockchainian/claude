@@ -92,7 +92,7 @@ extractor against a hermetic fixture session).
 
 MIT
 
-## Environment Variables
+## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |

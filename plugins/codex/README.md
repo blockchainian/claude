@@ -249,7 +249,7 @@ abandoned calls, and threads nobody supervises.
 
 MIT
 
-## Environment Variables
+## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |

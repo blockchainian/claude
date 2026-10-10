@@ -168,7 +168,7 @@ browse --proxy socks5://user:pass@host:1080 goto https://example.com
 browse download "https://protected.example.com/file" /tmp/file.bin --navigate
 ```
 
-## Environment Variables
+## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |

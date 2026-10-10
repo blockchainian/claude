@@ -24,7 +24,7 @@ in Codex keep the shell tool's session handle and wait on it. A subagent waits f
 before returning. Do not poll logs in a loop. On a timeout, keep the diagnostics and report the
 process state before retrying.
 
-## Environment Variables
+## Environment variables
 
 No skill-specific environment variables or `.env` file are required.
 

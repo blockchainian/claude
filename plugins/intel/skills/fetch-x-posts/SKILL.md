@@ -73,7 +73,7 @@ Requires Node.js 22.13+. Install the shared X client with
 `npm install --prefix "$SKILL_DIR/../fetch-x-mentions/scripts"`, and log the X accounts in with the
 `secrets` plugin's `secrets-manager login x`.
 
-## Environment Variables
+## Environment variables
 
 Copy the intel plugin’s `.env.example` to `~/.config/intel/.env`, then fill in only the values needed by the skills you use. The CLI loads that file without replacing variables already exported in the shell.
 

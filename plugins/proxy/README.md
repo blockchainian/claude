@@ -66,7 +66,7 @@ X25519 derivation against a known mitmproxy key pair and the RFC 7748 vector. Th
 lifecycle, the fan-out into per-capture files, and the caller scoping are verified in a live
 capture.
 
-## Environment Variables
+## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |

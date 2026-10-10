@@ -43,7 +43,7 @@ the workflow sends them the absolute paths of the files below.
 | `briefs/book.md` | the book agent | The introduction and the reasoning chapter |
 | `workflows/creator.mjs` | you | The research and writing stages as a workflow script |
 
-## Environment Variables
+## Environment variables
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
