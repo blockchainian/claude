@@ -1,13 +1,11 @@
 # Tools
 
 Every third-party service is called through the gate, `<this skill>/scripts/gate.mjs`
-(the skill folder is the one that holds this file's folder): many agents run at
-once and the limits are per machine, so the gate queues, paces, changes exit
-and retries for all of them. Never go around it with `curl r.jina.ai`,
-`mcporter call exa...`, `opencli ...`, `yt-dlp ...` or `wayback.mjs` directly.
-It may wait in a queue: give its commands a Bash timeout of 300000 or more.
-Use the commands as written; do not spend the run testing tools. Everything is
-read-only: never post, comment, like or follow.
+(the skill folder is the one that holds this file's folder), which queues,
+paces and retries for every agent on the machine. Never go around it with the
+reader, `mcporter call exa...`, `opencli ...`, `yt-dlp ...` or `wayback.mjs`
+directly. It may wait in a queue: give its commands a Bash timeout of 300000 or
+more. Use the commands as written; do not spend the run testing tools.
 
 `G` below stands for `<this skill>/scripts/gate.mjs`. `gate.mjs stats` prints
 calls and failures per command.
@@ -29,10 +27,12 @@ calls and failures per command.
   `mentions` (how many times the name was found in the article).
   - It finds the articles in whose text GDELT recognised the name, not every
     article with the words, and there is no title.
+  - It runs its queries in the Google Cloud project `BIGQUERY_PROJECT_ID`,
+    with the `bq` command logged in (`gcloud auth login`). Without them, or
+    once the month's free queries are used up, it fails: GDELT is then a gap.
 - Both news commands have no cap: a year of a known name is hundreds of
   lines. Save the output to a file and count the domains before opening any.
-  What they fetched is kept under `~/.local/state/intel/case-study/news/`, a folder per
-  name, so asking again for days already held costs nothing.
+  Asking again for days already fetched costs nothing.
 - Reddit: `$G chrome reddit search "<query>" -f yaml`, `$G chrome reddit read <post id>`.
 
 ## Reading a page
@@ -67,9 +67,8 @@ The gate adds the Chrome login itself: never add `--cookies-from-browser`.
   One JSON upload per line, oldest first: `id`, `kind` (`videos`, `shorts`
   or `streams`), `date` (the exact upload day, from the video's own page),
   `timestamp`, `views` (today's total), `duration` (seconds), `title`, `url`.
-  - It reads every video's page, many at once, through the proxy's exits and
-    without the login: about 1,000 uploads in 3 minutes. Run it once and work from the file; do not
-    read video pages one by one for their dates.
+  - About 1,000 uploads take 3 minutes. Run it once and work from the file;
+    never read video pages one by one for their dates.
   - The pages it could not read (private or removed videos) are named on
     stderr: a gap. "YouTube refused every route" means no page was read:
     write it into the gaps and do not fall back to reading pages one by one.
@@ -154,14 +153,10 @@ Every post on X — a search, an account's own posts, a thread — comes from
   - Chosen captures in one batch: put the capture URLs
     (`https://web.archive.org/web/<timestamp>id_/<url>`) in a file, then
     `$G wayback fetch <work>/raw/archive --from <file>`.
-  - Captures go through the residential proxy at 100 requests a minute (240
-    captures take 3 minutes); the capture lists go through the ISP proxy at
-    100 a minute. A request that failed is asked again: a capture at once,
-    through another address; a list after a pause of the whole batch. What
-    keeps failing is named in the error, and
-    `curve` still prints the rows it got first: report what is missing as it
-    is, do not retry around it or go direct. Give `curve` every address in
-    one call.
+  - 240 captures take about 3 minutes; failed requests are retried by the
+    gate. What keeps failing is named in the error, and `curve` still prints
+    the rows it got first: report what is missing as it is, never retry
+    around it or go direct. Give `curve` every address in one call.
   - A status of 429 in the output is a capture of a page that answered 429 at
     the time, not a limit on you. Pick another capture near that date.
 - Before writing that a period has no archive data, list the captures for every
@@ -179,23 +174,3 @@ Every post on X — a search, an account's own posts, a thread — comes from
   not the registry; say what they are.
 - Books: the `download-book` skill of this plugin; a PDF is read with
   `pdftotext`.
-
-## The machine's settings
-
-The gate and `wayback.mjs` read them from Intel’s `~/.config/intel/.env`.
-Nothing has to be exported in the shell. A value that starts with `~/` is
-under the home directory.
-
-- `ISP_PROXY_URL`: the proxy, one URL; the ten ports after its own are the
-  exits. Without it the gate reads direct, with one exit's share of the
-  limits.
-- `RESIDENTIAL_PROXY_URL`: the rotating residential proxy `wayback` reads the
-  archive's captures through, one URL; without it `wayback` stops with an
-  error. The capture lists go through `ISP_PROXY_URL`. `gnews` asks Google News
-  through an `ISP_PROXY_URL` exit and again through this proxy when Google
-  refuses the exit.
-The X-post fetching command locates its sibling script inside the installed Intel plugin; no script-path variable is needed.
-- `BIGQUERY_PROJECT_ID`: the Google Cloud project `$G gdelt` runs its BigQuery
-  queries in, with the `bq` command logged in (`gcloud auth login`). Without
-  it, or once the project's free 1 TiB of queries for the month is used,
-  `$G gdelt` fails: GDELT is then a gap.

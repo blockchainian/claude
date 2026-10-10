@@ -1,57 +1,49 @@
 # Chapter writer brief
 
 You write one chapter of the book: the text the reader gets. Nobody rewrites
-or checks it after you: a script removes the source marks, and what is left is
-printed. Your message names the subject, the type file, the work
-directory, the language and your chapter file.
+it after you: a script removes the source marks, and what is left is printed.
 
-Read `references/evidence.md` next to this brief's folder and your chapter's
-row in the type file. You did not read the sources and you do not search the
-web.
+Read the evidence rules and your chapter's row in the type file. You did not
+read the sources and you do not search the web.
 
 Your material is every bullet tagged with your chapter:
-`<skill>/scripts/case-study.mjs bullets <work> NN` (the skill folder is the
-one that holds this brief's folder). Read all of them. Anything not in the
-notes does not go in. A long dated table in the numbers notes is printed with
+`<skill>/scripts/case-study.mjs bullets <work> NN`, `<skill>` being the
+folder that holds this brief's folder. Read all of them; anything not in the
+notes does not go in. A long dated table in the numbers notes comes back as
 one row per quarter and a line naming the file the rest is in: open that file
 only for a day the chapter needs.
 
 ## What the reader gets
 
 A practical book. The reader wants to succeed at what the subject succeeded
-at, and reads this to learn how: the subject's rise is the thread, and what
-the reader takes away is what to do. They will read many such books, one per
+at and reads this to learn how: the subject's rise is the thread, and what
+the reader takes away is what to do. They read many such books, one per
 subject, so each must be quick to read and worth the time.
 
-The notes are the record of everything that was found. Your chapter is not
-the record: it is what the record teaches. From it the reader can say:
+The notes are the record of everything that was found; your chapter is what
+the record teaches. From it the reader can say:
 
-- what the subject did that made the difference — each method concretely
+- what the subject did that made the difference, each method concretely
   enough to repeat: what exactly, how often, with whom, at what cost, in what
   order;
-- what was luck or timing — the platform's state then, who happened to
+- what was luck or timing: the platform's state then, who happened to
   notice, what no longer exists;
 - what was their own skill or work;
 - what the reader can copy or adapt today, and how.
 
-There is no target length. A chapter is as long as what it teaches and no
-longer. The test for every paragraph, figure and chart: does it help the
-reader act, or understand why something worked or cannot be repeated? What
-only documents the record stays in the notes, where it remains on file: every
-reading of a curve, every year of a company's accounts, each step of a
-dispute that changed nothing, a second source that repeats the first. Every
-sentence you write is opened and checked against its source, so a sentence
-the reader cannot use costs a check and gives nothing. When you cannot tell
-whether a bullet passes the test, it stays out. Fewer things, each one right
-and each one useful, beat a complete account.
+A chapter is as long as what it teaches and no longer. The test for every
+paragraph, figure and chart: does it help the reader act, or understand why
+something worked or cannot be repeated? What only documents the record stays
+in the notes: every reading of a curve, every year of a company's accounts,
+each step of a dispute that changed nothing, a second source that repeats the
+first. When you cannot tell whether a bullet passes the test, leave it out.
 
 ## The text
 
 1. **Keep what the reader can use.** Everything a reader needs to repeat a
    method or to judge it is there in full: the steps, the cadence, the
    people, the cost, the one or two figures that show it worked. History
-   stays as far as it explains a method or a turn. When two sentences say
-   the same thing, one goes.
+   stays as far as it explains a method or a turn.
 2. **Every method gets a verdict, where it is told.** After a method or a
    turning point, say in a sentence or two which it was — luck or timing, the
    subject's own doing, or something a reader can copy (and how). What
@@ -150,7 +142,7 @@ must read right without them.
 
 Re-read the chapter once as a reader who wants to do what the subject did.
 Cut every sentence that talks about the research, repeats an earlier one or
-teaches nothing; cut every section a reader could skip without losing a
+teaches nothing, and every section a reader could skip without losing a
 method, a verdict or the reason for one. A paragraph that still recites
 figures one after another becomes a chart, or goes.
 

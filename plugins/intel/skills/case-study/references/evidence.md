@@ -1,29 +1,27 @@
 # Evidence rules
 
+Every agent in a case study (scout, reader, numbers agent, writer) works to
+these.
+
 ## Keeping your context small
 
-Every tool result you pull in is re-read on every later step, so a large dump
-is paid for dozens of times. Pull in only what you need:
+Every tool result you pull in is re-read on every later step. Pull in only
+what you need:
 
 - A chapter: `grep -n` for the sentences that name your source or hold the
-  figure or quote you are checking, not the whole file. Read a whole chapter
-  only when your task is to write it.
-- A page or transcript: search it for the passage you need (`grep -n -C 3`
-  on the saved file, or the fetch tool's `| grep` / `| head -c 6000`), not the
-  full text. Save the full text under `raw/` once and search that file.
-- A listing or a log: `head`, `tail`, `wc -l` or a count, not the whole thing.
-- Your own output file at restart: that one file, nothing else extra.
+  figure or quote you are checking. Read a whole chapter only when your task
+  is to write it.
+- A page or transcript: save the full text under `raw/` once and search it for
+  the passage you need (`grep -n -C 3` on the saved file, or the fetch tool's
+  `| grep` / `| head -c 6000`).
+- A listing or a log: `head`, `tail`, `wc -l` or a count.
 
 ## Writing as you go
 
-Every agent writes its output file while it works, by appending (`>>` or an
-edit that adds lines), never by rewriting the whole file: a rewrite makes you
-produce the whole file again each time. When your output file already exists
-at start, you were interrupted: read that one file, nothing else extra, and
+Write your output file while you work, by appending (`>>` or an edit that adds
+lines), never by rewriting the whole file. When your output file already
+exists at start, you were interrupted: read that one file, nothing else, and
 continue from the first item it does not cover.
-
-Every agent in a case study — scout, reader, numbers agent, writer — works
-to these.
 
 ## What counts as read
 
@@ -40,14 +38,13 @@ to these.
 
 ## The kind of every claim
 
-In a chapter (`drafts/`), a bracket in the sentence names its source and says
-which kind the claim is. The book text (`book/`) is the chapter without the
-brackets, so the sentence carries the same distinction in ordinary wording
-too:
+In a chapter (`drafts/`), a bracket in the sentence names its source and the
+kind of claim. The book text (`book/`) is the chapter without the brackets, so
+the sentence carries the same distinction in ordinary wording too:
 
 | Kind | What it is |
 |---|---|
-| self-reported | The subject, or their staff, manager or company, said it — also when a newspaper prints it |
+| self-reported | The subject, or their staff, manager or company, said it, also when a newspaper prints it |
 | on record | An archive snapshot, a platform page, a filing, a court document |
 | reported at the time | Press published when the event happened |
 | reported later | A profile or retrospective written afterwards |

@@ -1,13 +1,11 @@
 # Scout brief
 
-You find sources of one kind for one case study, fast: about five minutes.
-You do not open or read them and you write no notes: readers open every
-source you return and drop what is not usable. Your message names the subject,
-the first year of their growth, the type file, your lane, the work directory
-and the tool list.
+You find sources of one kind for one case study in about five minutes. You do
+not open or read them and you write no notes: readers open every source you
+return and drop what is not usable.
 
-Read `references/tools.md` next to this brief's folder and your lane's row and
-source types in the type file. Then:
+Read the tool list and your lane's row and source types in the type file.
+Then:
 
 1. Write every query for your lane at once and run them all in one command,
    in parallel, each into its own file:
@@ -17,20 +15,20 @@ source types in the type file. Then:
    ```
 
    The queries cover:
-   - every name the subject goes by, the real name and every handle their
+   - every name the subject goes by: the real name and every handle their
      accounts have had, old handles included;
-   - every year from the first year of growth to today, at least two queries
-     naming the year, for every lane whose sources are dated (all but
-     records and internal-documents): the growth years are what the book is
-     about, and a search without a year returns this year's coverage;
+   - every year from the first year of growth to today, with at least two
+     queries naming the year, in every lane whose sources are dated (all but
+     records and internal-documents), because a search without a year returns
+     this year's coverage;
    - the subject's home country and language.
 
    Each query names your source type in its words (`interview`, `podcast`,
-   `documentary`, `lawsuit`, `former employee`, `criticism`): a query on a
-   topic alone returns the same pages for every lane. Stay in your lane's
-   source types; another lane searches the rest.
+   `documentary`, `lawsuit`, `former employee`, `criticism`), since a query on
+   a topic alone returns the same pages for every lane. Stay in your lane's
+   source types; other lanes search the rest.
 
-   Other channels go in the same command, each its own file, by lane:
+   Other channels go in the same command, each into its own file, by lane:
 
    | Lane | Also |
    |---|---|
@@ -40,17 +38,16 @@ source types in the type file. Then:
    | people | `$G ytsearch` |
    | criticism | `$G ytsearch`, `$G chrome reddit search`, `$G fetch-x-posts` |
 
-   `ytsearch` queries are plain words: no `OR`, no quotes, no other operators.
-   YouTube reads them as words to match, and most such searches come back
-   empty.
+   `ytsearch` queries are plain words, with no `OR`, quotes or other
+   operators: with them most searches come back empty.
 
-2. List the files that came back empty. Ask each of those again once, in one
-   command, with fewer and plainer words. A year that is still empty for
-   every query is a finding: return it as a line in your last source's `why`.
+2. List the files that came back empty and ask each of those again once, in
+   one command, with fewer and plainer words. A year that is still empty for
+   every query is a finding: add it as a line to your last source's `why`.
 
 3. Pick from the results in one look: the original pages about the subject,
-   from many sites. Leave out:
-   - search pages, wikis, fan wikis, aggregators and token or company data
+   from many sites, 15 or more. Leave out:
+   - search pages, wikis, fan wikis, aggregators, and token or company data
      sites (cryptorank, rootdata, mytokencap and the like);
    - net-worth and biography farms, and blogs that explain "how X went viral"
      without naming a source;
@@ -58,15 +55,12 @@ source types in the type file. Then:
    - press releases;
    - a repost or translation of a page you already have: keep the original.
 
-   Aim for 15 or more.
+4. Return them, with no further searches.
 
-4. Return them. No further searches.
-
-You find; you never open. Do not run `$G read`, `$G yt`, `$G wayback`, or any `$G chrome` command other than the searches in the table:
-the readers open every page. Do not use the archive of profile pages,
-statistics sites or channel listings: the numbers agents own those.
+Do not run `$G read`, `$G yt`, `$G wayback`, or any `$G chrome` command other
+than the searches in the table. Leave the archive of profile pages,
+statistics sites and channel listings to the numbers agents.
 
 Return for each source its URL, outlet, year, source type, and one line on
 what it should contain. Every video and every podcast episode is a source of
-its own, with its own URL: never name another one in a source's line. No
-other text.
+its own, with its own URL: never name another one in a source's line.

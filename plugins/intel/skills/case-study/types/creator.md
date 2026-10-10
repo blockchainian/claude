@@ -9,21 +9,20 @@ Check whether the subject sells a growth course, a make-money course, coaching,
 a paid community about growing or earning, or a creator-growth tool. Search for
 it and open the subject's own site or link-in-bio. A subject who earns from
 telling their success story is not studied: report what was found and stop,
-unless the user has already said to include them. A subject who sells such a
-product on the side and is included anyway has it stated plainly in the
-introduction and in the money chapter, and their own account of their method stays a claim throughout.
+unless the user has already said to include them. When such a subject is
+included, the introduction and the money chapter state the product plainly,
+and their own account of their method stays a claim throughout.
 
 ## Source types to cover
 
-1. The subject's own long interviews and podcasts — full transcript or
-   subtitles, read to the end.
+1. The subject's own long interviews and podcasts, read to the end from the
+   full transcript or subtitles.
 2. The subject's own videos, posts, threads and newsletters that explain how
    they work. For a subject whose platform is text, their posts are the primary
    material: read the posts themselves, not summaries of them.
 3. Leaked or internal documents: production handbooks, onboarding documents.
-4. Press from the time of each growth phase, found with the two news commands
-   over the years of that phase, kept apart from later profiles. Include press in the subject's home country
-   and language.
+4. Press from the time of each growth phase, kept apart from later profiles,
+   including press in the subject's home country and language.
 5. Creator-industry trade press.
 6. Books, biographies and documentaries about the subject.
 7. Former staff, collaborators, managers and peers describing how the account
@@ -36,14 +35,12 @@ introduction and in the money chapter, and their own account of their method sta
 
 ## Scout lanes
 
-Ten scouts search at once, one lane each:
-
 | Lane | Source types |
 |---|---|
 | interviews | 1. The video search, with every name the subject goes by, and podcast search |
 | own-explainers | 2, and the books the subject wrote |
 | internal-documents | 3 |
-| press-at-the-time | 4, picked from the news lists (both news commands over every name the subject goes by, from the first growth year to today, fetched once before the scouts) |
+| press-at-the-time | 4, picked from the news lists fetched before the scouts |
 | trade-and-profiles | 5, and the large later profiles |
 | books-and-films | 6 |
 | people | 7 |
@@ -77,11 +74,11 @@ a publication's outside-contributor network written with the manager's help.
 ## Chapters
 
 Adjust the titles to the subject; cover all of these. Each chapter opens with a
-lead paragraph, then `##` sections, as many as its material needs. The introduction is not
-numbered and its title is the statement itself, naming the subject ("How <Name>
-grew", in the study's language), with no label such as "Introduction" and no
-colon before it. Numbering starts with the chapter after it. The closing
-sources list is not numbered.
+lead paragraph, then as many `##` sections as its material needs. The
+introduction is not numbered: its title is the statement itself, naming the
+subject ("How <Name> grew", in the study's language), with no label such as
+"Introduction" or "引言" and no colon before it. Numbering starts with the
+chapter after it. The closing sources list is not numbered.
 
 | File | Title | Covers |
 |---|---|---|
