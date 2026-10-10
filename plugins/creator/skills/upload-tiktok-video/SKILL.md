@@ -5,9 +5,17 @@ description: Post one mp4 to the TikTok account the secrets-manager skill logged
 
 # Upload a TikTok video
 
+## Skill directory
+
+Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call.
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+```
+
 ## Environment variables
 
-Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hosts and all worktrees use this file. Existing shell values take precedence.
+Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; Claude Code, Codex and all worktrees use this file. Existing shell values take precedence.
 
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
@@ -19,21 +27,24 @@ Copy the Creator plugin’s `.env.example` to `~/.config/creator/.env`; both hos
 
 Account credentials, sessions and profiles remain in Secrets Manager; Creator configuration is separate.
 
-## Runtime and paths
-
-Works in Claude Code and Codex. Set `SKILL_DIR` to the absolute directory containing the
-`SKILL.md` that the host loaded for this skill; replace the example value below with that actual
-path. Do not use the project's working directory or a host-specific plugin-root variable.
-Keep the full creator plugin installed: all four skills use its
-`upload-tiktok-video/scripts/tiktok-session.mjs` runtime and dependencies.
+## Setup
 
 Requires Node.js 22.13+ with `node:sqlite`, the upload-tiktok-video runtime's npm dependencies,
 and the Camoufox browser installed by secrets-manager. The existing secrets-manager store is
-shared across both hosts at `~/.local/state/secrets-manager` (`SECRETS_STATE_DIR` explicitly
+shared by Claude Code and Codex at `~/.local/state/secrets-manager` (`SECRETS_STATE_DIR` explicitly
 overrides it), including TikTok account rows, ISP slots and browser profiles.
-Configure `ISP_PROXY_URL` in `~/.config/creator/.env` or the process environment. Creator reads this
-store; use secrets-manager to provision or log in an account if it is missing. Installing
+Creator reads this store; use secrets-manager to provision or log in an account if it is missing. Installing
 creator in another host does not create or migrate accounts.
+
+All four creator skills share this install:
+
+```sh
+SKILL_DIR="/absolute/path/to/loaded/skill"
+(cd "$SKILL_DIR/scripts" && npm ci)
+```
+
+Camoufox is fetched by the secrets plugin's setup. `ISP_PROXY_URL` comes from `~/.config/creator/.env`.
+Recording needs macOS's Screen Recording permission for the terminal running `swift`.
 
 ## Run
 
@@ -101,18 +112,6 @@ One directory per account:
   `videoId` is null when the video had not reached the profile in time.
 - `~/.local/share/creator/tiktok/<username>/recordings/upload-<ts>.mov` (`CREATOR_DATA_DIR` overrides the root): the screen recording of a `--headed` run, also on failure. When a
   step fails, rerun with `--headed` and watch it first.
-
-## Setup
-
-All four creator skills share this install:
-
-```sh
-SKILL_DIR="/absolute/path/to/loaded/skill"
-(cd "$SKILL_DIR/scripts" && npm ci)
-```
-
-Camoufox is fetched by the secrets plugin's setup. `ISP_PROXY_URL` comes from `~/.config/creator/.env`.
-Recording needs macOS's Screen Recording permission for the terminal running `swift`.
 
 ## Not here
 
