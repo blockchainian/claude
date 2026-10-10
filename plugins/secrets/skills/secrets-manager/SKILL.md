@@ -56,9 +56,11 @@ A fresh Google account signs into the apps your adapters define. Run each step s
 Every Google sign-in (`login google`, `login <app>`, `setup-2fa`) runs headed by default, so a person
 at the window clears any CAPTCHA: the headless vision solver's misses get accounts banned.
 `--headless` opts out. `login x|tiktok`, `verify` and `setup` stay headless unless `--headed`.
+Don't rerun a failed Google sign-in over and over: repeated re-auth locks the account out for hours.
 
 Done means Google is `active` and required app sessions are `ready` when their adapters have
-a setup hook, otherwise `active`; `list` shows their status.
+a setup hook, otherwise `active`; `list` shows their status. Report each app's status. A request
+to "搞" (get) a new account means this whole sequence, every app included.
 
 Every step reuses the account's one profile, so an app step never re-does Google. When a step
 fails it records a status that says how to proceed:
@@ -253,7 +255,8 @@ intel plugin's `fetch-x-mentions/scripts/verify-x.mjs`.
 prepares each selected logged-in account through the adapter's optional
 `setup({db, email, session, opts, io})` hook. Like adapter verification, it selects imported
 accounts holding an app session: by default only `active`; `--all` also includes `ready`
-for a setup rerun. Other statuses are excluded even with `--all`.
+for a setup rerun. Other statuses are excluded even with `--all`. Set `--concurrency` from
+the app's measured rate limit.
 The hook resolves to `{summary, state}`: `summary` is a nonempty one-line string; `state`
 is any JSON-serialisable app-specific value, including `null`, but not `undefined`. Success
 stores JSON in `state` and marks the session `ready` (logged in and setup done) in one
