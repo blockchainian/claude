@@ -63,6 +63,13 @@ def test_render_units(rd):
     title, body = rd.md_to_html("# 章名\n\n第一段 *强调*。\n\n> 引文\n\n## 小标题\n\n第二段。\n")
     check("markdown title split off", title == "章名" and "<h1" not in body)
     check("markdown body html", "<em>强调</em>" in body and "<blockquote>" in body and "<h2>小标题</h2>" in body)
+    _, dialogue = rd.md_to_html('# 章名\n\n<p class="indent">**PCB 专家 1：**元件不一定非得是芯片。</p>\n\n'
+                                '<p class="indent">\n**开发人员：**那我就叫它们“元件”？\n</p>\n\n'
+                                '<div class="sidebar"><hr/>\n<p class="title">标题</p>\n'
+                                '<p class="sidebarpara">成为**通用语言**的一部分。</p>\n<hr/></div>\n')
+    check("markdown inside raw <p> blocks, also nested in a <div>, is rendered",
+          dialogue.count("<strong>") == 3 and "**" not in dialogue and 'class="indent"' in dialogue
+          and '<div class="sidebar">' in dialogue and "markdown=" not in dialogue, dialogue)
     import tempfile as _tmp
     from PIL import Image, ImageDraw
     with _tmp.TemporaryDirectory() as d:
