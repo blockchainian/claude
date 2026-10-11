@@ -48,7 +48,7 @@ Run `node "$SKILL_DIR/scripts/cli.mjs" <command>`; `--help` gives every flag.
 | `setup-2fa` | Enroll Google TOTP, turn on 2-Step, mint an app password. |
 | `sms <balance\|prices\|number>` | Rent numbers for Google's verification SMS. |
 | `whoami <x\|app> --select CREDENTIAL [--json]` | Identify a credential without touching stored accounts. |
-| `export <app> [--select EMAIL]...` | Print active or ready session credentials as JSONL. |
+| `export <x\|tiktok\|app> [--select ID]...` | Print active builtin or active/ready app session credentials as JSONL. |
 | `get <app> --select ID...` | Read stored sessions. |
 | `set-status <app> <status> --select ID...` | Set session status. |
 | `list [--json]` | List accounts and all stored app tables. |
