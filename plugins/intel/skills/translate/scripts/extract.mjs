@@ -437,7 +437,9 @@ export function epubFragment(z, href, work, keepImages, counter, codes = {}) {
   // Protect listings before whitespace and inline-tag cleaning changes their content.
   const listing = /<pre\b[^>]*>([\s\S]*?)<\/pre>|<div\b[^>]*>\s*(?:<div\b[^>]*>\s*)?<tt\b[^>]*>([\s\S]*?)<\/tt>\s*(?:<\/div>\s*)?<\/div>|<(tt|code)\b[^>]*>((?:(?!<\/\3>)[\s\S])*?<br\b(?:(?!<\/\3>)[\s\S])*?)<\/\3>/gi;
   body = body.replace(listing, (block, pre, tt, tag, multiline) => {
-    const rawCode = (pre ?? tt ?? multiline).replace(/<br\b[^>]*>/gi, "\n").replace(/<[^>]*>/g, "");
+    // Calibre emits CRLF plus LF after each highlighted token's closing tag; real line breaks are bare LF.
+    const rawCode = (pre ?? tt ?? multiline).replace(/(<\/[^>]+>)\r\n\n/g, "$1")
+      .replace(/<br\b[^>]*>/gi, "\n").replace(/<[^>]*>/g, "");
     const key = `c${++counter}`;
     codes[key] = unescapeXml(rawCode.replace(/&nbsp;/g, " ")).replace(/\u00a0/g, " ");
     return `\n<p>⟦CODE:${key}⟧</p>\n`;
