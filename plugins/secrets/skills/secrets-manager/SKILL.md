@@ -111,7 +111,8 @@ works on a few; for `setup`, set `--concurrency` from the app's measured rate li
   (`queryId:"…",operationName:"Viewer"`).
 - **setup** runs the adapter's setup hook on `active` app sessions, and with `--all` on `ready` ones
   too; `setup <app> --help` lists the app's own flags.
-- **export** prints app credentials as JSON lines, with the values in clear.
+- **export** prints credentials for builtin X/TikTok accounts and adapter apps as JSON lines,
+  with the values in clear. Builtins export only `active` accounts; `--select` filters by username.
 
 ## Failures and limits
 

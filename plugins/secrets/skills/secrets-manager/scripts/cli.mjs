@@ -71,8 +71,21 @@ const getAdapter = name => {
 };
 // Login tables keyed by username instead of a Google email.
 const USERNAME_TABLES = {
-  x: { label: "X", setStatus: store.setXStatus },
-  tiktok: { label: "TikTok", setStatus: store.setTiktokStatus },
+  x: {
+    label: "X", setStatus: store.setXStatus,
+    list: db => store.getPendingX(db, { force: true }),
+    credentials: ({ auth_token, ct0, cookies }) => auth_token && ct0
+      ? { auth_token, ct0, cookies: cookies === null ? null : JSON.parse(cookies) } : null,
+  },
+  tiktok: {
+    label: "TikTok", setStatus: store.setTiktokStatus,
+    list: db => store.getPendingTiktok(db, { force: true }),
+    credentials: ({ cookies, isp_slot }) => {
+      if (!cookies || isp_slot === null) return null;
+      const jar = JSON.parse(cookies);
+      return jar.length ? { cookies: jar, isp_slot } : null;
+    },
+  },
 };
 let SESSION_TABLES = [...APP_ADAPTERS, ...Object.keys(USERNAME_TABLES)];
 
@@ -535,6 +548,16 @@ async function runWhoami(opts, io) {
 
 function runExport(db, opts, io) {
   const [app] = opts.positional;
+  if (app in USERNAME_TABLES) {
+    const table = USERNAME_TABLES[app];
+    for (const account of pick(table.list(db), a => a.username, opts)) {
+      if (account.status !== store.STATUS_ACTIVE) continue;
+      const fields = table.credentials(account);
+      if (fields === null) io.error(`${account.username}\tmissing`);
+      else io.log(JSON.stringify({ app, username: account.username, ...fields }));
+    }
+    return 0;
+  }
   const adapter = getAdapter(app);
   if (!adapter.credentials) throw new Error(`${app} has no credentials hook`);
   for (const account of pick(store.listAccounts(db), (a) => a.email, opts)) {
@@ -642,7 +665,7 @@ const USAGE = `Usage: secrets-manager <command> [options]
   setup-2fa [--select EMAIL]... [--all] [--headless] [--limit N] [--concurrency N] [--rotate-proxy]
   sms <balance|prices|number> [--country N] [--max-price X] [--yes]
   whoami <x|app> --select CREDENTIAL [--json]
-  export <app> [--select EMAIL]...
+  export <x|tiktok|app> [--select ID]...
   get <app> --select ID...
   set-status <app> <active|ready|expired|restricted|escalated> --select ID...
   list [--json]`;
