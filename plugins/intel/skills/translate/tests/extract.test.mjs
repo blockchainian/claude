@@ -380,6 +380,15 @@ test("a listing split by numeric callouts remains one protected block", () => {
   assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(path.join(work, "codeblocks.json"), "utf8"))), ['a\n b (1)\n c\n']);
 });
 
+test("CRLF breaks a converter put after each highlighted token in a listing are dropped", () => {
+  // Excerpt of a Calibre-converted O'Reilly listing: every </code> is followed by CRLF plus LF, real line breaks by LF.
+  const work = tmpDir(), epub = path.join(work, "b.epub");
+  const pre = '<pre data-type="programlisting"><code class="no">PREFIX</code>\r\n\n <code class="p">:</code>\r\n\n <code class="o">&lt;</code>\r\n\n<code class="ss">urn</code>\r\n\n<code class="o">&gt;</code>\r\n\n\n\n<code class="k">SELECT</code>\r\n\n <code class="nv">?x</code>\r\n\n\n</pre>';
+  makeEpub(epub, {"c.xhtml": `<h1>1. Code</h1>${pre}`}, ["c.xhtml"], {"c.xhtml": "1. Code"});
+  extractSections(work, epub);
+  assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(path.join(work, "codeblocks.json"), "utf8"))), ['PREFIX : <urn>\n\nSELECT ?x\n']);
+});
+
 test("a standalone appendix after body whitespace remains one section", () => {
   const work = tmpDir(), epub = path.join(work, "b.epub");
   makeEpub(epub, {"c.xhtml": '<h1>1. Logs</h1><p>body</p>', "a.xhtml": '\n<section data-type="appendix"><h1>Appendix A</h1><p>appendix</p></section>'},
