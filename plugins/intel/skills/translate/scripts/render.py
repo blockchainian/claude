@@ -167,7 +167,12 @@ def md_to_html(md_text, codes=None):
     body = re.sub(r"((?:  |<br\s*/?>)\n)(\u3000+)", lambda m: m.group(1) + "&#12288;" * len(m.group(2)), body)
     body = MATH_RE.sub(stash, body)
     body = re.sub(r"^>[ \t]?(@@MATH\d+@@)[ \t]*$", r"\1", body, flags=re.M)  # unwrap a math-only blockquote line
-    out = markdown.markdown(body, extensions=["smarty", "tables", "sane_lists"], output_format="html")
+    # A raw <p class="..."> block (an indented dialogue line, a sidebar paragraph inside a <div>) still carries
+    # Markdown emphasis, which Markdown leaves untouched inside HTML unless the block opts in.
+    body = re.sub(r"^<(p|div)(\s[^>]*)?>",
+                  lambda m: f'<{m.group(1)}{m.group(2) or ""} markdown="{"span" if m.group(1) == "p" else "1"}">',
+                  body, flags=re.M)
+    out = markdown.markdown(body, extensions=["smarty", "tables", "sane_lists", "md_in_html"], output_format="html")
     for i, raw in enumerate(code_vault):
         marker = f"@@CODE{i}@@"
         out = out.replace(f"<p>{marker}</p>", raw).replace(marker, raw)
