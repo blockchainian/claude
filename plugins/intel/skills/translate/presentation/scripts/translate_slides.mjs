@@ -9,13 +9,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** The translate-epub skill's scripts dir: the sibling skill in this plugin, else the newest installed copy. */
 function translateSkillScripts() {
-  const sibling = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "translate-epub", "scripts");
+  const sibling = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "epub", "scripts");
   if (fs.existsSync(path.join(sibling, "translate.mjs"))) return sibling;
   const root = path.join(os.homedir(), ".claude/plugins/cache/blockchainian/intel");
   const ver = (v) => v.split(".").map(Number);
   const newest = fs.readdirSync(root).filter((v) => /^\d+\.\d+\.\d+$/.test(v))
     .sort((a, b) => { const x = ver(a), y = ver(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; }).pop();
-  return path.join(root, newest, "skills/translate-epub/scripts");
+  return path.join(root, newest, "skills/translate/epub/scripts");
 }
 
 const { runCodex } = await import(pathToFileURL(path.join(translateSkillScripts(), "translate.mjs")).href);

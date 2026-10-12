@@ -110,7 +110,7 @@ test("Intel shares sixteen portable skills and keeps case-study Claude-only", as
     "analyze-appstore-reviews", "analyze-x-mentions", "analyze-x-user", "analyze-x-users",
     "digest", "download-book", "fetch-app-reviews", "fetch-tiktok-mentions",
     "fetch-x-feed", "fetch-x-mentions", "fetch-x-posts", "fetch-x-user-posts",
-    "find-domain-names", "manage-x-account", "transcribe", "translate-epub",
+    "find-domain-names", "manage-x-account", "transcribe", "translate/epub",
   ].map((name) => `./skills/${name}`));
   for (const skill of codex.skills) {
     const text = await readFile(`${root}/${skill}/SKILL.md`, "utf8");

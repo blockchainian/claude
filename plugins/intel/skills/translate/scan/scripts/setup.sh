@@ -5,7 +5,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-"$HERE/../../translate-epub/scripts/setup.sh" "$@"
+"$HERE/../../epub/scripts/setup.sh" "$@"
 
 missing=()
 if ! command -v magick >/dev/null 2>&1; then
@@ -17,7 +17,7 @@ if ! command -v magick >/dev/null 2>&1; then
   fi
 fi
 command -v swiftc >/dev/null 2>&1 || missing+=("swiftc (xcode-select --install)")
-[ -d "$HERE/../../translate-paper/scripts" ] || missing+=("the translate-paper skill next to this one")
+[ -d "$HERE/../../paper/scripts" ] || missing+=("the translate-paper skill next to this one")
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo "missing: ${missing[*]}"

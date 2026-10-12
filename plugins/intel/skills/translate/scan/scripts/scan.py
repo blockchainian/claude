@@ -15,8 +15,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SKILLS = HERE.parents[1]
-TRANSLATE = SKILLS / "translate-epub" / "scripts"
-PAPERS = SKILLS / "translate-paper" / "scripts"
+TRANSLATE = SKILLS / "epub" / "scripts"
+PAPERS = SKILLS / "paper" / "scripts"
 
 # Documents in flight: more parallel renders and translations have run a 16 GB Mac out of memory.
 MAX_JOBS = 2
@@ -30,7 +30,7 @@ KINDS = {
 
 def intel_paths():
     """The Intel output, state and data roots, as resolved by the plugin's one path helper."""
-    script = SKILLS / "fetch-x-mentions" / "scripts" / "env.mjs"
+    script = SKILLS.parent / "fetch-x-mentions" / "scripts" / "env.mjs"
     return {k: Path(v) for k, v in json.loads(subprocess.check_output(["node", str(script)], text=True)).items()}
 
 

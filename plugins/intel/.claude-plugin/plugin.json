@@ -33,5 +33,13 @@
     "tiktok",
     "mentions",
     "user-profiles"
+  ],
+  "skills": [
+    "./skills",
+    "./skills/translate/epub",
+    "./skills/translate/pdf",
+    "./skills/translate/paper",
+    "./skills/translate/presentation",
+    "./skills/translate/scan"
   ]
 }

@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadEnvFile, stateDir } from "../../fetch-x-mentions/scripts/env.mjs";
+import { loadEnvFile, stateDir } from "../../../fetch-x-mentions/scripts/env.mjs";
 import { OCR_DEFAULTS, ocrPages } from "./ocr.mjs";
 import { disagreements, tokens } from "./proof.mjs";
 import { visionLines } from "./vision.mjs";

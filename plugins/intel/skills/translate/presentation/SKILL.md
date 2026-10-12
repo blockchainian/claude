@@ -35,7 +35,7 @@ Run the translate-epub skill's setup (`uv`, poppler, the codex login). The fonts
 Medium, and Menlo.
 
 ```bash
-"$SKILL_DIR/../translate-epub/scripts/setup.sh"
+"$SKILL_DIR/../epub/scripts/setup.sh"
 ```
 
 ## Translate one deck

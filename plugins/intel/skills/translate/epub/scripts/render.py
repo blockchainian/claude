@@ -519,7 +519,7 @@ def page_colors(opt):
 @functools.cache
 def intel_paths():
     """The Intel output, state and data roots, as resolved by the plugin's one path helper."""
-    script = Path(__file__).resolve().parents[2] / "fetch-x-mentions" / "scripts" / "env.mjs"
+    script = Path(__file__).resolve().parents[3] / "fetch-x-mentions" / "scripts" / "env.mjs"
     return {k: Path(v) for k, v in json.loads(subprocess.check_output(["node", str(script)], text=True)).items()}
 
 

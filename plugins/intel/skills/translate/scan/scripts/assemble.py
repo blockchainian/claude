@@ -18,7 +18,7 @@ from PIL import Image
 # The typeset-paper pipeline's rules, shared so both kinds of paper come out alike: publisher boilerplate to drop
 # (the ACM permission footnote, the copyright line) and printed URLs as short Markdown links.
 # Also the site boilerplate page some course PDFs end with.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "translate-paper" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "paper" / "scripts"))
 from paper_rules import OCW_PAGE_RE, PUBLISHER_RE, link_label, linkify  # noqa: E402
 
 MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
