@@ -71,8 +71,11 @@ pub struct Session {
     pub name: Option<String>,
     /// Best available title when there is no user name: the AI title, else the first prompt.
     pub title: String,
-    /// First user prompt, up to 512 chars, for the details panel.
+    /// Latest real user prompt, up to 512 chars, for the details panel.
     pub prompt: String,
+    pub prompt_at: Option<DateTime<Utc>>,
+    pub turn_messages: usize,
+    pub last_record_at: Option<DateTime<Utc>>,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub git_branch: Option<String>,

@@ -1,0 +1,16 @@
+Task details
+
+Activity task
+○ Ready
+
+Model: Unknown
+Reasoning: Unknown
+
+Project
+/tmp/project
+
+Latest activity · 7s ago
+Run checks
+
+Prompt · 42 msgs · 10m 5s
+Activity task
