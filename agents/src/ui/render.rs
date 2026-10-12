@@ -262,9 +262,15 @@ impl View {
         // Sections top to bottom: title, prompt, the newer of latest activity
         // and last message, background, needs attention, project, branch, model.
         // Whatever does not fit is cut at the bottom and marked with an ellipsis.
-        let mut header = Line::from(vec!["Task details".bold(), " · ".dim()]);
-        let suffix = Line::from(vec![" · ".dim(), dot, " ".into(), status.into()]);
-        let title_width = width.saturating_sub(header.width() + suffix.width());
+        let mut header = Line::from(vec![
+            "Task details".bold(),
+            " · ".dim(),
+            dot,
+            " ".into(),
+            status.into(),
+            " · ".dim(),
+        ]);
+        let title_width = width.saturating_sub(header.width());
         let title_style = self.title_style(&session.id).bold();
         let title = if title_width <= 1 {
             Line::from(Span::styled("…", title_style))
@@ -278,7 +284,6 @@ impl View {
             )
         };
         header.spans.extend(title.spans);
-        header.spans.extend(suffix.spans);
         let mut items: Vec<Item> = vec![header.into()];
 
         let mut header = vec!["Prompt".dim()];

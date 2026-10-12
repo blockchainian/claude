@@ -1,4 +1,4 @@
-Task details · PR task · ○ Inactive
+Task details · ○ Inactive · PR task
 
 Prompt
 PR task

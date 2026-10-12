@@ -397,7 +397,7 @@ fn details_include_attention_and_clip_messages() {
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
     assert_eq!(buf[(0, 21)].symbol(), "…");
-    let title_cell = &buf[(15, 0)];
+    let title_cell = &buf[(31, 0)];
     assert!(title_cell.modifier.contains(ratatui::style::Modifier::BOLD));
     assert_eq!(title_cell.fg, Color::Reset);
 }
@@ -906,7 +906,7 @@ fn details_header_truncates_only_the_title() {
         include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
     );
     let lines = rendered.lines().collect::<Vec<_>>();
-    assert_eq!(lines[0], "Task details · A very long … · ● Working");
+    assert_eq!(lines[0], "Task details · ● Working · A very long …");
     assert_eq!(lines[1], "");
     assert_eq!(lines[2], "Prompt");
     assert!(
