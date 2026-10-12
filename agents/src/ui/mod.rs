@@ -26,7 +26,14 @@ use std::{cell::RefCell, collections::HashSet, path::Path, path::PathBuf};
 use unicode_width::UnicodeWidthStr;
 
 const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
-    ("Active", &[SessionStatus::Working, SessionStatus::Ready]),
+    (
+        "Active",
+        &[
+            SessionStatus::Working,
+            SessionStatus::Ready,
+            SessionStatus::NeedsInput,
+        ],
+    ),
     ("Ready", &[SessionStatus::Ready]),
     ("Working", &[SessionStatus::Working]),
     ("Needs you", &[SessionStatus::NeedsInput]),

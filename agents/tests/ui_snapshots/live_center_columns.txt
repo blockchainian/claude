@@ -1,15 +1,15 @@
   Agent command center  Group: Project  g
-   Active 3   Ready 2   Working 1   Needs you 2   Inactive 1                                                                                   tab/⇧tab filter
+   Active 5   Ready 2   Working 1   Needs you 2   Inactive 1                                                                                   tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                                                                   Status         Updated  │ Task details · ○ Ready · Current task
-  Pinned  1 of 2                                                                                                      │
+  Pinned  2                                                                                                           │
   › ○ Current task                                                                            Ready              now  │ Prompt
-                                                                                                                      │ Current task
-  /tmp/project  2 of 4                                                                                                │
-    ○ A longer task title that uses the available column                                      Ready           5m ago  │ Project
-    ● Working task                                                                            Working         1d ago  │ /tmp/project
+    ● Needs an answer                                                                         Needs input     2h ago  │ Current task
                                                                                                                       │
-                                                                                                                      │ Model: Unknown
+  /tmp/project  3 of 4                                                                                                │ Project
+    ○ A longer task title that uses the available column                                      Ready           5m ago  │ /tmp/project
+    ● Failed task                                                                             Needs input     1h ago  │
+    ● Working task                                                                            Working         1d ago  │ Model: Unknown
                                                                                                                       │
                                                                                                                       │
                                                                                                                       │

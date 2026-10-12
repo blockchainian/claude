@@ -104,7 +104,7 @@ fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
     );
 }
 #[test]
-fn active_tab_lists_only_working_and_ready_sessions() {
+fn active_tab_lists_all_sessions_except_inactive() {
     let mut view = View::default();
     view.set_sessions(
         vec![
@@ -123,10 +123,10 @@ fn active_tab_lists_only_working_and_ready_sessions() {
     let rendered = screen(&view, 100, 16);
     assert!(rendered.contains("Working session"));
     assert!(rendered.contains("Ready session"));
-    assert!(!rendered.contains("Needs input session"));
+    assert!(rendered.contains("Needs input session"));
     assert!(!rendered.contains("Inactive session"));
-    assert_eq!(view.visible_indices().len(), 2);
-    assert!(rendered.contains("Active 2"));
+    assert_eq!(view.visible_indices().len(), 3);
+    assert!(rendered.contains("Active 3"));
     view.set_sessions(
         vec![session(
             "inactive",
@@ -145,7 +145,7 @@ fn active_tab_lists_only_working_and_ready_sessions() {
 fn tabs_cycle_in_display_order_and_filter_by_label() {
     let mut view = fixture();
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.visible_indices().len(), 3);
+    assert_eq!(view.visible_indices().len(), 5);
     let filters = [
         ("Ready", SessionStatus::Ready, 2),
         ("Working", SessionStatus::Working, 1),
@@ -332,9 +332,9 @@ fn actions_and_hide_move_to_next_visible_row() {
         key(&mut view, KeyCode::Char('h')),
         Some(Action::Hide("42".into()))
     );
-    assert_eq!(view.selected_id(), Some("43"));
+    assert_eq!(view.selected_id(), Some("44"));
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
-    assert!(screen(&view, 88, 16).contains("Rename › A longer task title"));
+    assert!(screen(&view, 88, 16).contains("Rename › Needs an answer"));
     key(&mut view, KeyCode::Esc);
 
     assert_eq!(
