@@ -113,7 +113,7 @@ impl View {
                 let count = self
                     .rows
                     .iter()
-                    .filter(|s| !self.hidden.contains(&s.id) && group.is_none_or(|g| g == s.status))
+                    .filter(|s| !self.hidden.contains(&s.id) && group.contains(&s.status))
                     .count();
                 format!("{label} {count}")
             })

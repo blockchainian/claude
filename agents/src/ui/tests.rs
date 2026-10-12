@@ -104,10 +104,48 @@ fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
     );
 }
 #[test]
+fn active_tab_lists_only_working_and_ready_sessions() {
+    let mut view = View::default();
+    view.set_sessions(
+        vec![
+            session("working", "Working session", SessionStatus::Working, 1),
+            session("ready", "Ready session", SessionStatus::Ready, 1),
+            session(
+                "needs-input",
+                "Needs input session",
+                SessionStatus::NeedsInput,
+                1,
+            ),
+            session("inactive", "Inactive session", SessionStatus::Inactive, 1),
+        ],
+        false,
+    );
+    let rendered = screen(&view, 100, 16);
+    assert!(rendered.contains("Working session"));
+    assert!(rendered.contains("Ready session"));
+    assert!(!rendered.contains("Needs input session"));
+    assert!(!rendered.contains("Inactive session"));
+    assert_eq!(view.visible_indices().len(), 2);
+    assert!(rendered.contains("Active 2"));
+    view.set_sessions(
+        vec![session(
+            "inactive",
+            "Inactive session",
+            SessionStatus::Inactive,
+            1,
+        )],
+        false,
+    );
+    let rendered = screen(&view, 100, 16);
+    assert!(rendered.contains("Active 0"));
+    assert!(rendered.contains("No matching tasks"));
+}
+
+#[test]
 fn tabs_cycle_in_display_order_and_filter_by_label() {
     let mut view = fixture();
-    assert_eq!(TASK_FILTERS[view.status_filter], ("All", None));
-    assert_eq!(view.visible_indices().len(), 6);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.visible_indices().len(), 3);
     let filters = [
         ("Ready", SessionStatus::Ready, 2),
         ("Working", SessionStatus::Working, 1),
@@ -116,7 +154,7 @@ fn tabs_cycle_in_display_order_and_filter_by_label() {
     ];
     for (label, status, count) in filters {
         key(&mut view, KeyCode::Tab);
-        assert_eq!(TASK_FILTERS[view.status_filter], (label, Some(status)));
+        assert_eq!(TASK_FILTERS[view.status_filter], (label, &[status][..]));
         assert_eq!(view.visible_indices().len(), count);
         assert!(
             view.visible_indices()
@@ -125,14 +163,14 @@ fn tabs_cycle_in_display_order_and_filter_by_label() {
         );
     }
     key(&mut view, KeyCode::Tab);
-    assert_eq!(TASK_FILTERS[view.status_filter], ("All", None));
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
     for (label, status, _) in filters.into_iter().rev() {
         view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
-        assert_eq!(TASK_FILTERS[view.status_filter], (label, Some(status)));
+        assert_eq!(TASK_FILTERS[view.status_filter], (label, &[status][..]));
         assert_eq!(view.selected_row().unwrap().status, status);
     }
     key(&mut view, KeyCode::BackTab);
-    assert_eq!(TASK_FILTERS[view.status_filter], ("All", None));
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
 }
 #[test]
 fn live_center_status_filter() {
@@ -162,7 +200,10 @@ fn live_center_search_active() {
 }
 #[test]
 fn live_center_show_more() {
-    let mut view = View::default();
+    let mut view = View {
+        status_filter: 4,
+        ..View::default()
+    };
     view.set_sessions(
         vec![session("42", "Recent task", SessionStatus::Inactive, 120)],
         true,
@@ -201,7 +242,10 @@ fn agents_overview_model_grouping() {
 }
 #[test]
 fn agents_overview_recent_sessions_twelve_rows_delta() {
-    let mut view = View::default();
+    let mut view = View {
+        status_filter: 4,
+        ..View::default()
+    };
     view.set_sessions(
         (1..=12)
             .map(|i| {
@@ -218,7 +262,8 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
         true,
     );
     let rendered = screen(&view, 80, 24);
-    assert!(rendered.contains("All 12"));
+    assert!(rendered.contains("Active 0"));
+    assert!(rendered.contains("Inactive 12"));
     assert!(rendered.contains("/  12"));
     let expected = include_str!("../../tests/ui_snapshots/agents_overview_recent_sessions.txt");
     // The reference loads ten rows. Twelve rows change only counts and append Task 2 / Task 1.
@@ -287,9 +332,9 @@ fn actions_and_hide_move_to_next_visible_row() {
         key(&mut view, KeyCode::Char('h')),
         Some(Action::Hide("42".into()))
     );
-    assert_eq!(view.selected_id(), Some("44"));
+    assert_eq!(view.selected_id(), Some("43"));
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
-    assert!(screen(&view, 88, 16).contains("Rename › Needs an answer"));
+    assert!(screen(&view, 88, 16).contains("Rename › A longer task title"));
     key(&mut view, KeyCode::Esc);
 
     assert_eq!(
@@ -394,6 +439,7 @@ fn details_include_attention_and_clip_messages() {
     row.prompt = "prompt ".repeat(40);
     row.last_message = Some("message ".repeat(60));
     let mut view = View::new(Grouping::Project, false);
+    view.status_filter = 3;
     view.set_sessions(vec![row], false);
     let rendered = screen(&view, 160, 50);
     for label in [
@@ -556,7 +602,7 @@ fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
     let mut view = fixture();
     view.status_filter = TASK_FILTERS
         .iter()
-        .position(|(_, status)| *status == Some(SessionStatus::Ready))
+        .position(|(label, _)| *label == "Ready")
         .unwrap();
     key(&mut view, KeyCode::Char('r'));
     let mut rows = view.rows.clone();
@@ -699,6 +745,7 @@ fn delete_live_rows_open_the_dialog_and_ignore_show_more() {
 #[test]
 fn live_center_delete_dialog() {
     let mut view = View::new(Grouping::Project, false);
+    view.status_filter = 4;
     view.set_sessions(
         vec![session("44", "Unloaded task", SessionStatus::Inactive, 120)],
         false,
@@ -758,6 +805,7 @@ fn details_branch_and_pull_request_use_session_title_color() {
     });
     let color = style::thread_color(&row.id);
     let mut view = View::new(Grouping::Project, true);
+    view.status_filter = 4;
     view.set_sessions(vec![row], false);
     let area = Rect::new(0, 0, 40, 18);
     let mut buf = Buffer::empty(area);
@@ -785,6 +833,7 @@ fn details_branch_pull_request_snapshot() {
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
     row.git_branch = Some("main".into());
     let mut view = View::new(Grouping::Project, false);
+    view.status_filter = 4;
     view.set_sessions(vec![row.clone()], false);
     let area = Rect::new(0, 0, 40, 18);
     let render = |view: &View| {

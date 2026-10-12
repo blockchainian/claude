@@ -25,12 +25,12 @@ use ratatui::{
 use std::{cell::RefCell, collections::HashSet, path::Path, path::PathBuf};
 use unicode_width::UnicodeWidthStr;
 
-const TASK_FILTERS: &[(&str, Option<SessionStatus>)] = &[
-    ("All", None),
-    ("Ready", Some(SessionStatus::Ready)),
-    ("Working", Some(SessionStatus::Working)),
-    ("Needs you", Some(SessionStatus::NeedsInput)),
-    ("Inactive", Some(SessionStatus::Inactive)),
+const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
+    ("Active", &[SessionStatus::Working, SessionStatus::Ready]),
+    ("Ready", &[SessionStatus::Ready]),
+    ("Working", &[SessionStatus::Working]),
+    ("Needs you", &[SessionStatus::NeedsInput]),
+    ("Inactive", &[SessionStatus::Inactive]),
 ];
 
 #[derive(Default)]
@@ -217,8 +217,7 @@ impl View {
             .enumerate()
             .filter(|(_, s)| {
                 !self.hidden.contains(&s.id)
-                    && (self.rename_target.as_deref() == Some(&s.id)
-                        || filter.is_none_or(|f| f == s.status))
+                    && (self.rename_target.as_deref() == Some(&s.id) || filter.contains(&s.status))
                     && (search.is_empty()
                         || format!(
                             "{} {} {} {}",
