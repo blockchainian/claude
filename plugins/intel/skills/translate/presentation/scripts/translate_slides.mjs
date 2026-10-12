@@ -117,6 +117,20 @@ async function main() {
         console.log(`batch ${n + 1} plain retry: ${e.message.slice(0, 300)}`);
       }
     }
+    // What is still left gets one call each at medium effort, with its tags and then without: a batch of other
+    // texts is what usually makes the model change a code run or a picture token in this one.
+    for (const t of items.splice(0)) {
+      let ok = false;
+      for (const text of [t, t.replace(/<\/?s\d+>/g, "")]) {
+        try {
+          const [zh] = await translateBatch([text], { ...opt, effort: "medium" }, glossary);
+          if (!problem(text, zh)) { done[t] = zh; ok = true; break; }
+        } catch (e) {
+          console.log(`single retry: ${e.message.slice(0, 300)}`);
+        }
+      }
+      if (!ok) items.push(t);
+    }
     failed = failed.concat(items);
     fs.writeFileSync(outFile, JSON.stringify(done, null, 1));
   }));
