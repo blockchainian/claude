@@ -189,7 +189,7 @@ impl App {
             }
             Action::Unsupported(what) => {
                 self.view.set_notice(Some(format!(
-                    "{what} is not supported for Claude Code sessions"
+                    "{what} is not supported"
                 )));
             }
         }
