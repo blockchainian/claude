@@ -397,7 +397,7 @@ impl View {
             let prefix_width = Line::from(project.clone()).width();
             let link = line_width_fits(prefix_width + label.len(), width)
                 .then(|| (prefix_width as u16, label.len() as u16, pr.url.clone()));
-            project.push(label.into());
+            project.push(Span::styled(label, self.title_style(&session.id)));
             link
         });
         if let Some(branch) = &session.git_branch {

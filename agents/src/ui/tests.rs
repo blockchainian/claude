@@ -715,9 +715,13 @@ fn delete_dialog_number_shortcuts_follow_codex() {
 }
 
 #[test]
-fn details_branch_uses_session_title_color() {
+fn details_branch_and_pull_request_use_session_title_color() {
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
     row.git_branch = Some("main".into());
+    row.pr = Some(crate::model::PullRequest {
+        number: 833,
+        url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
+    });
     let color = style::thread_color(&row.id);
     let mut view = View::new(Grouping::Project, true);
     view.set_sessions(vec![row], false);
@@ -733,9 +737,12 @@ fn details_branch_uses_session_title_color() {
         })
         .expect("Project header");
     for (offset, symbol) in "main".chars().enumerate() {
-        let cell = &buf[(10 + offset as u16, project_y)];
+        let cell = &buf[(17 + offset as u16, project_y)];
         assert_eq!(cell.symbol(), symbol.to_string());
         assert_eq!(cell.fg, color);
+    }
+    for x in 10..14 {
+        assert_eq!(buf[(x, project_y)].fg, color);
     }
 }
 
