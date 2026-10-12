@@ -139,17 +139,7 @@ impl App {
                 self.view.set_loading(true);
                 self.refresh();
             }
-            Action::Open(id) => {
-                if let Some(session) = self.session(&id) {
-                    if session.process.is_some() {
-                        let notice = jump_to(&session);
-                        self.view.set_notice(Some(notice));
-                    } else {
-                        return self.launch_claude(session, &["--resume", &id]);
-                    }
-                }
-            }
-            Action::Resume(id) => {
+            Action::Open(id) | Action::Resume(id) => {
                 if let Some(session) = self.session(&id) {
                     return self.launch_claude(session, &["--resume", &id]);
                 }
@@ -248,35 +238,6 @@ fn tmux(args: &[&str]) -> Result<String, String> {
         )),
         Err(error) => Err(format!("tmux unavailable: {error}")),
     }
-}
-
-/// Switches the attached tmux client to the pane the session runs in.
-fn jump_to(session: &Session) -> String {
-    let Some(process) = session.process.as_ref() else {
-        return "Session is not running".to_owned();
-    };
-    let Some(target) = process.tmux.as_deref() else {
-        return format!("Session runs in another terminal (pid {})", process.pid);
-    };
-    if std::env::var_os("TMUX").is_none() {
-        return format!("Session runs in tmux pane {target}; attach tmux to jump there");
-    }
-    let Some((tmux_session, window, pane)) = tmux_target(target) else {
-        return format!("Unexpected tmux target {target}");
-    };
-    let current = tmux(&["display-message", "-p", "#S"]).unwrap_or_default();
-    let mut steps: Vec<Vec<&str>> = Vec::new();
-    if current != tmux_session {
-        steps.push(vec!["switch-client", "-t", tmux_session]);
-    }
-    steps.push(vec!["select-window", "-t", window]);
-    steps.push(vec!["select-pane", "-t", pane]);
-    for args in steps {
-        if let Err(error) = tmux(&args) {
-            return error;
-        }
-    }
-    format!("Switched to {}", session.display_title())
 }
 
 /// Stops the running turn the way the user would: Esc in the session's pane.
