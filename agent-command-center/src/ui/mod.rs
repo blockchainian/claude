@@ -20,7 +20,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Clear, Paragraph, Widget},
 };
-use std::{cell::RefCell, collections::HashSet, path::Path};
+use std::{cell::RefCell, collections::HashSet, path::Path, path::PathBuf};
 use unicode_width::UnicodeWidthStr;
 
 const TASK_FILTERS: &[(&str, Option<SessionStatus>)] = &[
@@ -39,6 +39,7 @@ struct Viewport {
 
 pub struct View {
     rows: Vec<Session>,
+    project_groups: Vec<ProjectGroup>,
     selected: usize,
     grouping: Grouping,
     use_colors: bool,
@@ -60,14 +61,33 @@ impl Default for View {
     }
 }
 
-fn project_key(session: &Session) -> &Path {
-    &session.cwd
+/// Sessions in the same checkout and subdirectory share a project; linked worktrees join their primary checkout.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProjectGroup {
+    key: (PathBuf, PathBuf),
+    heading: PathBuf,
+}
+
+impl ProjectGroup {
+    fn for_session(session: &Session) -> Self {
+        match crate::repository::repository_identity(&session.cwd) {
+            Some(identity) => Self {
+                key: (identity.common_dir, identity.relative_cwd.clone()),
+                heading: identity.primary_root.join(identity.relative_cwd),
+            },
+            None => Self {
+                key: (session.cwd.clone(), PathBuf::new()),
+                heading: session.cwd.clone(),
+            },
+        }
+    }
 }
 
 impl View {
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
             rows: Vec::new(),
+            project_groups: Vec::new(),
             selected: usize::MAX,
             grouping,
             use_colors,
@@ -94,6 +114,7 @@ impl View {
                 .then_with(|| b.updated_at.cmp(&a.updated_at))
                 .then_with(|| a.id.cmp(&b.id))
         });
+        self.project_groups = sessions.iter().map(ProjectGroup::for_session).collect();
         self.rows = sessions;
         self.has_more = has_more;
         self.selected = if show_more {
@@ -157,7 +178,7 @@ impl View {
             return self.is_pinned(left) && self.is_pinned(right);
         }
         match grouping {
-            Grouping::Project => project_key(&self.rows[left]) == project_key(&self.rows[right]),
+            Grouping::Project => self.project_groups[left].key == self.project_groups[right].key,
             Grouping::Status => self.rows[left].status == self.rows[right].status,
             Grouping::Model => self.rows[left].model_name() == self.rows[right].model_name(),
         }
@@ -189,7 +210,7 @@ impl View {
         match self.grouping {
             Grouping::Project => visible.sort_by_key(|i| {
                 (
-                    project_key(&self.rows[*i]),
+                    &self.project_groups[*i].key,
                     std::cmp::Reverse(self.rows[*i].updated_at),
                 )
             }),
