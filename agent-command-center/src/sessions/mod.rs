@@ -44,6 +44,131 @@ pub fn rename(transcript: &Path, id: &str, name: &str) -> io::Result<()> {
     )?)
 }
 
+/// Removes the transcript and its sibling directory without following symlinks.
+pub fn delete(transcript: &Path) -> io::Result<()> {
+    fs::remove_file(transcript)?;
+    match fs::remove_dir_all(transcript.with_extension("")) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Stops the matching registered process before deleting its session files.
+pub fn delete_session(config_dir: &Path, session: &Session) -> io::Result<()> {
+    let transcript = session
+        .transcript
+        .as_deref()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Nothing to delete"))?;
+    if let Some(process) = &session.process {
+        let pid = process.pid;
+        if pid == 0 || pid > i32::MAX as u32 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid process id",
+            ));
+        }
+        let directory = config_dir.join("sessions");
+        let path = directory.join(format!("{pid}.json"));
+        let entry: registry::Entry = serde_json::from_slice(&fs::read(&path)?)?;
+        if entry.pid != Some(pid)
+            || entry.session_id.as_deref() != Some(&session.id)
+            || entry.started_at != process.started_at.map(|time| time.timestamp_millis())
+        {
+            return Err(io::Error::other("Session registry changed"));
+        }
+        stop_process(&entry)?;
+        // A process may remove its own registry entry while shutting down.
+        match fs::read(&path) {
+            Ok(bytes) => {
+                let current: registry::Entry = serde_json::from_slice(&bytes)?;
+                if current.pid != entry.pid
+                    || current.session_id != entry.session_id
+                    || current.proc_start != entry.proc_start
+                    || current.started_at != entry.started_at
+                {
+                    return Err(io::Error::other("Session registry changed"));
+                }
+                remove_if_present(&path)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        for file in fs::read_dir(directory)? {
+            let file = file?;
+            let name = file.file_name();
+            let name = name.to_string_lossy();
+            if name
+                .strip_prefix(&format!("{pid}."))
+                .is_some_and(|suffix| suffix.ends_with(".key"))
+            {
+                remove_if_present(&file.path())?;
+            }
+        }
+    }
+    delete(transcript)
+}
+
+fn remove_if_present(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn process_exists(pid: u32) -> io::Result<bool> {
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(false)
+    } else {
+        Err(error)
+    }
+}
+
+fn stop_process(entry: &registry::Entry) -> io::Result<()> {
+    use std::time::{Duration, Instant};
+    let pid = entry.pid.expect("validated process id");
+    for (signal, timeout) in [(libc::SIGTERM, 5), (libc::SIGKILL, 2)] {
+        if !process_exists(pid)? {
+            return Ok(());
+        }
+        let starts = registry::process_starts(&[pid]);
+        if !starts
+            .get(&pid)
+            .is_some_and(|actual| registry::matches_start(entry, actual))
+        {
+            return Err(io::Error::other(
+                "Process start time does not match registry",
+            ));
+        }
+        if unsafe { libc::kill(pid as libc::pid_t, signal) } != 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(());
+            }
+            return Err(error);
+        }
+        let deadline = Instant::now() + Duration::from_secs(timeout);
+        loop {
+            if !process_exists(pid)? {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "Session process did not exit",
+    ))
+}
+
 pub fn config_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("CLAUDE_CONFIG_DIR") {
         return PathBuf::from(path);
@@ -577,5 +702,119 @@ mod rename_tests {
         );
         // A missing transcript must not be recreated.
         assert!(rename(&project.join("missing.jsonl"), id, "Missing").is_err());
+    }
+}
+
+#[cfg(test)]
+mod delete_tests {
+    use super::*;
+
+    #[test]
+    fn delete_removes_transcript_children_and_refresh_prunes_cache() {
+        for children in [false, true] {
+            let config = tempfile::tempdir().unwrap();
+            let id = "00000000-0000-0000-0000-000000000001";
+            let path = tests::transcript(config.path(), id, 0);
+            let directory = path.with_extension("");
+            if children {
+                fs::create_dir_all(directory.join("subagents/nested")).unwrap();
+                fs::write(directory.join("subagents/nested/agent.jsonl"), "child").unwrap();
+                fs::write(directory.join("custom-title.json"), "{}").unwrap();
+            }
+            let registry = config.path().join("sessions/keep.json");
+            fs::create_dir_all(registry.parent().unwrap()).unwrap();
+            fs::write(&registry, "{}").unwrap();
+            let mut store = Store::new(config.path().into());
+            assert_eq!(store.refresh().sessions.len(), 1);
+            assert!(store.summaries.contains_key(&path));
+            delete(&path).unwrap();
+            assert!(!path.exists());
+            assert!(!directory.exists());
+            assert!(registry.exists());
+            assert!(store.refresh().sessions.is_empty());
+            assert!(!store.summaries.contains_key(&path));
+        }
+    }
+
+    #[test]
+    fn delete_does_not_follow_symlinks() {
+        use std::os::unix::fs::symlink;
+        let config = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let path = tests::transcript(config.path(), "00000000-0000-0000-0000-000000000001", 0);
+        let keep = outside.path().join("keep.jsonl");
+        fs::write(&keep, "keep").unwrap();
+        fs::remove_file(&path).unwrap();
+        symlink(&keep, &path).unwrap();
+        symlink(outside.path(), path.with_extension("")).unwrap();
+        delete(&path).unwrap();
+        assert!(keep.exists());
+        assert!(fs::symlink_metadata(path.with_extension("")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod delete_live_tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn delete_stops_matching_process_and_removes_registry_and_keys() {
+        for (mismatch, ignore_term) in [(false, false), (true, false), (false, true)] {
+            let config = tempfile::tempdir().unwrap();
+            let child = if ignore_term {
+                Command::new("sh")
+                    .args(["-c", "trap '' TERM; exec sleep 60"])
+                    .spawn()
+                    .unwrap()
+            } else {
+                Command::new("sleep").arg("60").spawn().unwrap()
+            };
+            let pid = child.id();
+            let mut child = child;
+            let reaper = std::thread::spawn(move || child.wait().unwrap());
+            let start = registry::process_starts(&[pid])[&pid][0];
+            let id = "00000000-0000-0000-0000-000000000001";
+            let path = tests::transcript(config.path(), id, 0);
+            let registry_dir = config.path().join("sessions");
+            fs::create_dir_all(&registry_dir).unwrap();
+            let entry = registry_dir.join(format!("{pid}.json"));
+            fs::write(&entry, serde_json::to_vec(&serde_json::json!({
+                "pid": pid, "sessionId": id, "startedAt": start.timestamp_millis(),
+                "procStart": if mismatch { "Thu Jan  1 00:00:00 1970".into() } else { start.format("%a %b %e %H:%M:%S %Y").to_string() },
+                "kind": "interactive", "status": "idle"
+            })).unwrap()).unwrap();
+            let key = registry_dir.join(format!("{pid}.token.key"));
+            let other_key = registry_dir.join(format!("{pid}0.token.key"));
+            fs::write(&key, "private").unwrap();
+            fs::write(&other_key, "private").unwrap();
+            let mut store = Store::new(config.path().into());
+            let mut session = store.refresh().sessions.remove(0);
+            session.process = Some(Process {
+                pid,
+                status: "idle".into(),
+                kind: None,
+                version: None,
+                started_at: Some(start),
+            });
+            let result = delete_session(config.path(), &session);
+            if mismatch {
+                assert!(result.is_err());
+                assert_eq!(unsafe { libc::kill(pid as i32, 0) }, 0);
+                assert!(entry.exists());
+                assert!(path.exists());
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
+            } else {
+                result.unwrap();
+                assert!(!entry.exists());
+                assert!(!key.exists());
+                assert!(other_key.exists());
+                assert!(!path.exists());
+                assert!(store.refresh().sessions.is_empty());
+            }
+            reaper.join().unwrap();
+        }
     }
 }

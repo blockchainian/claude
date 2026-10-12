@@ -68,6 +68,10 @@ fn alive(entry: &Entry, starts: &HashMap<u32, Vec<DateTime<Utc>>>) -> bool {
     let Some(actual) = starts.get(&pid) else {
         return true;
     };
+    matches_start(entry, actual)
+}
+
+pub(super) fn matches_start(entry: &Entry, actual: &[DateTime<Utc>]) -> bool {
     let expected = entry.proc_start.as_deref().and_then(|start| {
         NaiveDateTime::parse_from_str(start, "%a %b %e %H:%M:%S %Y")
             .ok()

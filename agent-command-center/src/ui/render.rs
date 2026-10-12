@@ -78,6 +78,7 @@ impl View {
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout = self.center_layout(area);
         if !(self.searching || self.rename_target.is_some())
+            || self.delete_dialog.is_some()
             || self.help
             || layout.search.is_empty()
         {
@@ -192,6 +193,59 @@ impl View {
         if !layout.details.is_empty() {
             self.render_details(layout.details, buf);
         }
+        if let Some(dialog) = &self.delete_dialog {
+            self.render_delete_dialog(dialog, layout.list, buf);
+            self.viewport.borrow_mut().marker = None;
+        }
+    }
+    fn render_delete_dialog(&self, dialog: &DeleteDialog, area: Rect, buf: &mut Buffer) {
+        use ratatui::widgets::{Block, Borders};
+        let width = area.width.min(80);
+        let content_width = usize::from(width.saturating_sub(4).max(1));
+        let mut lines = Vec::new();
+        for text in textwrap::wrap(
+            &format!("Permanently delete “{}”?", dialog.title),
+            content_width,
+        ) {
+            lines.push(Line::from(text.into_owned().bold()));
+        }
+        let description = if dialog.live {
+            "This stops the running session, then permanently deletes its transcript. This cannot be undone."
+        } else {
+            "This permanently deletes the session's transcript. This cannot be undone."
+        };
+        for text in textwrap::wrap(description, content_width) {
+            lines.push(Line::from(text.into_owned().dim()));
+        }
+        lines.push(Line::default());
+        for (confirm, label) in [(false, "Cancel"), (true, "Permanently delete session")] {
+            let selected = dialog.confirm == confirm;
+            let text = format!(
+                "{} {}. {label}",
+                if selected { "›" } else { " " },
+                if confirm { 2 } else { 1 }
+            );
+            lines.push(Line::from(Span::styled(
+                text,
+                if selected {
+                    super::style::selection_style()
+                } else {
+                    Style::default()
+                },
+            )));
+        }
+        let height = area.height.min(lines.len() as u16 + 2);
+        let dialog = Rect::new(
+            area.x + (area.width - width) / 2,
+            area.y + (area.height - height) / 2,
+            width,
+            height,
+        );
+        Clear.render(dialog, buf);
+        let block = Block::default().borders(Borders::ALL);
+        let inner = block.inner(dialog).inner(Margin::new(1, 0));
+        block.render(dialog, buf);
+        Paragraph::new(lines).render(inner, buf);
     }
     pub(super) fn render_details(&self, area: Rect, buf: &mut Buffer) {
         let Some(session) = self.selected_row() else {

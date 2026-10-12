@@ -40,6 +40,33 @@ impl View {
         let plain = !key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
+        if let Some(dialog) = &mut self.delete_dialog {
+            if plain {
+                match key.code {
+                    KeyCode::Esc => self.delete_dialog = None,
+                    KeyCode::Enter => {
+                        let dialog = self.delete_dialog.take().expect("delete dialog is open");
+                        if dialog.confirm {
+                            return Some(Action::Delete(dialog.id));
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') => {
+                        dialog.confirm = !dialog.confirm;
+                    }
+                    KeyCode::Home | KeyCode::PageUp | KeyCode::Char('1') => dialog.confirm = false,
+                    KeyCode::End | KeyCode::PageDown | KeyCode::Char('2') => dialog.confirm = true,
+                    _ => {}
+                }
+            } else if key.modifiers.contains(KeyModifiers::CONTROL) {
+                match key.code {
+                    KeyCode::Char('p' | 'k' | 'n' | 'j') => dialog.confirm = !dialog.confirm,
+                    KeyCode::Char('b') => dialog.confirm = false,
+                    KeyCode::Char('f') => dialog.confirm = true,
+                    _ => {}
+                }
+            }
+            return None;
+        }
         if self.help {
             if key.code == KeyCode::Esc
                 || (plain && key.code == KeyCode::Char('?') && key.kind == KeyEventKind::Press)
@@ -186,7 +213,16 @@ impl View {
                 }
             }
             KeyCode::Char('a') => return Some(Action::Unsupported("Archive")),
-            KeyCode::Backspace => return Some(Action::Unsupported("Delete")),
+            KeyCode::Backspace => {
+                if let Some(session) = self.selected_row() {
+                    self.delete_dialog = Some(DeleteDialog {
+                        id: session.id.clone(),
+                        title: session.display_title().to_owned(),
+                        confirm: false,
+                        live: session.process.is_some(),
+                    });
+                }
+            }
             KeyCode::Char('o') => return self.selected_id().map(|id| Action::Resume(id.into())),
             KeyCode::Char('f') => return self.selected_id().map(|id| Action::Fork(id.into())),
             KeyCode::Char('x') => return Some(Action::Unsupported("Stop")),
