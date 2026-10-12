@@ -308,6 +308,44 @@ fn live_center_search_active() {
     assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((15, 3)));
 }
 #[test]
+fn show_more_is_only_listed_on_inactive() {
+    let mut view = fixture();
+    view.set_sessions(view.rows.clone(), true);
+    for (tab, (_, statuses)) in TASK_FILTERS.iter().enumerate() {
+        view.status_filter = tab;
+        view.reconcile_selection();
+        let inactive = *statuses == [SessionStatus::Inactive];
+        assert_eq!(view.selectable_indices().contains(&usize::MAX), inactive);
+        assert_eq!(screen(&view, 160, 22).contains("Show more"), inactive);
+    }
+}
+
+#[test]
+fn leaving_inactive_reconciles_show_more_selection() {
+    let mut view = fixture();
+    view.set_sessions(view.rows.clone(), true);
+    key(&mut view, KeyCode::BackTab);
+    key(&mut view, KeyCode::End);
+    assert_eq!(view.selected, usize::MAX);
+
+    key(&mut view, KeyCode::Tab);
+
+    assert_eq!(view.selected, view.visible_indices()[0]);
+    assert_eq!(view.selected_id(), Some("42"));
+}
+
+#[test]
+fn empty_active_tab_does_not_page_inactive_sessions() {
+    let mut view = View::default();
+    view.set_sessions(
+        vec![session("42", "Recent task", SessionStatus::Inactive, 120)],
+        true,
+    );
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(!view.loading);
+}
+
+#[test]
 fn live_center_show_more() {
     let mut view = View {
         status_filter: 4,
@@ -457,14 +495,17 @@ fn actions_and_hide_move_to_next_visible_row() {
 }
 #[test]
 fn paging_tracks_headings_and_never_wraps() {
-    let mut view = View::default();
+    let mut view = View {
+        status_filter: 4,
+        ..View::default()
+    };
     view.set_sessions(
         (0..30)
             .map(|i| {
                 let mut row = session(
                     &i.to_string(),
                     &format!("Task {i}"),
-                    SessionStatus::Ready,
+                    SessionStatus::Inactive,
                     i,
                 );
                 if i >= 10 {

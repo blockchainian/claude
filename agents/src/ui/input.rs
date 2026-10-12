@@ -18,7 +18,10 @@ impl View {
         }];
     }
     fn activate(&mut self) -> Option<Action> {
-        if self.selected == usize::MAX && self.has_more {
+        if self.selected == usize::MAX
+            && self.has_more
+            && TASK_FILTERS[self.status_filter].1 == [SessionStatus::Inactive]
+        {
             if self.loading {
                 return None;
             }

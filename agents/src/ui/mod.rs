@@ -278,7 +278,7 @@ impl View {
     }
     fn selectable_indices(&self) -> Vec<usize> {
         let mut visible = self.visible_indices();
-        if self.has_more {
+        if self.has_more && TASK_FILTERS[self.status_filter].1 == [SessionStatus::Inactive] {
             visible.push(usize::MAX);
         }
         visible
