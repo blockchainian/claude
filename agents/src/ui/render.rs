@@ -431,6 +431,7 @@ impl View {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().dim())
+                .title_style(Style::default().not_dim())
                 .title(title);
             let inner = block.inner(box_area);
             block.render(box_area, buf);
