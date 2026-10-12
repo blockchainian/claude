@@ -1,5 +1,15 @@
 use super::*;
 
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+
+/// Whether the terminal background is light, as the terminal reported at startup.
+static LIGHT_BACKGROUND: AtomicBool = AtomicBool::new(false);
+
+pub fn set_light_background(light: bool) {
+    LIGHT_BACKGROUND.store(light, Ordering::Relaxed);
+}
+
 pub(super) fn selection_style() -> Style {
     let term = std::env::var("TERM").unwrap_or_default();
     selection_style_for(
@@ -7,17 +17,14 @@ pub(super) fn selection_style() -> Style {
         term.contains("256color")
             || term.contains("truecolor")
             || std::env::var_os("COLORTERM").is_some(),
-        std::env::var("COLORFGBG").ok().as_deref(),
+        LIGHT_BACKGROUND.load(Ordering::Relaxed),
     )
 }
 
-pub(super) fn selection_style_for(no_color: bool, colors: bool, colorfgbg: Option<&str>) -> Style {
+pub(super) fn selection_style_for(no_color: bool, colors: bool, light: bool) -> Style {
     if no_color || !colors {
         return Style::default().bold().reversed();
     }
-    let light = colorfgbg
-        .and_then(|s| s.rsplit(';').next())
-        .is_some_and(|s| s == "7" || s == "15");
     if light {
         Style::default()
             .bold()

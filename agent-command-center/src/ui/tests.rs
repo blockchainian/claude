@@ -302,25 +302,25 @@ fn paging_tracks_headings_and_never_wraps() {
 fn styles_and_unicode_clipping() {
     use super::style::selection_style_for;
     assert_eq!(
-        selection_style_for(false, true, Some("0;15")),
+        selection_style_for(false, true, true),
         Style::default()
             .bold()
             .fg(Color::Indexed(18))
             .bg(Color::Indexed(111))
     );
     assert_eq!(
-        selection_style_for(false, true, None),
+        selection_style_for(false, true, false),
         Style::default()
             .bold()
             .fg(Color::Indexed(24))
             .bg(Color::Indexed(233))
     );
     assert_eq!(
-        selection_style_for(true, true, None),
+        selection_style_for(true, true, false),
         Style::default().bold().reversed()
     );
     assert_eq!(
-        selection_style_for(false, false, None),
+        selection_style_for(false, false, false),
         Style::default().bold().reversed()
     );
     assert_eq!(

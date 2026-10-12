@@ -2,6 +2,7 @@ mod app;
 mod model;
 mod sessions;
 mod state;
+mod terminal_background;
 mod ui;
 
 fn main() {

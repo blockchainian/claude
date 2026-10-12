@@ -9,6 +9,7 @@ mod rows;
 mod selection_tabs;
 mod shortcut_help;
 mod style;
+pub use style::set_light_background;
 
 use crate::model::{Action, Grouping, Session, SessionStatus};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
