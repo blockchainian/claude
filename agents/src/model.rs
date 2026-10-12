@@ -57,6 +57,12 @@ pub struct PullRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Activity {
+    pub label: String,
+    pub at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Session {
     /// Claude Code session id (the transcript file stem).
     pub id: String,
@@ -76,6 +82,8 @@ pub struct Session {
     pub updated_at: DateTime<Utc>,
     /// Latest assistant text, up to 512 chars.
     pub last_message: Option<String>,
+    pub last_message_at: Option<DateTime<Utc>>,
+    pub activity: Option<Activity>,
     /// Latest user prompt, up to 512 chars.
     pub last_prompt: Option<String>,
     pub transcript: Option<PathBuf>,

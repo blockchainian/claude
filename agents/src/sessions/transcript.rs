@@ -1,6 +1,7 @@
-use crate::model::PullRequest;
+use crate::model::{Activity, PullRequest};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -17,6 +18,8 @@ pub(super) struct Summary {
     pub custom_title: Option<String>,
     pub last_prompt: Option<String>,
     pub last_message: Option<String>,
+    pub last_message_at: Option<DateTime<Utc>>,
+    pub activity: Option<Activity>,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
@@ -79,6 +82,8 @@ fn read_messages(
     summary: &mut Summary,
 ) -> io::Result<()> {
     let mut prompt_found = false;
+    let mut activity_done = false;
+    let mut tool_results = HashSet::new();
     loop {
         // Keep the incomplete first line for the next block instead of dropping it.
         let skip = if start == 0 {
@@ -98,14 +103,47 @@ fn read_messages(
             {
                 summary.prompt = preview(&prompt);
                 prompt_found = true;
+                activity_done = true;
+            }
+            let at = record["timestamp"]
+                .as_str()
+                .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&Utc));
+            if !activity_done && let Some(blocks) = record["message"]["content"].as_array() {
+                for block in blocks.iter().rev() {
+                    if record["type"] == "user" && block["type"] == "tool_result" {
+                        if let Some(id) = block["tool_use_id"].as_str() {
+                            tool_results.insert(id.to_owned());
+                        }
+                    } else if record["type"] == "assistant"
+                        && block["type"] == "tool_use"
+                        && let Some(id) = block["id"].as_str()
+                        && !tool_results.contains(id)
+                    {
+                        activity_done = true;
+                        if let Some(at) = at
+                            && let Some(label) = block["input"]["description"]
+                                .as_str()
+                                .filter(|value| !value.trim().is_empty())
+                                .or_else(|| block["name"].as_str())
+                        {
+                            summary.activity = Some(Activity {
+                                label: label.to_owned(),
+                                at,
+                            });
+                        }
+                        break;
+                    }
+                }
             }
             if summary.last_message.is_none()
                 && record["type"] == "assistant"
                 && let Some(message) = content_text(&record, true)
             {
                 summary.last_message = Some(preview(&message));
+                summary.last_message_at = at;
             }
-            if prompt_found && summary.last_message.is_some() {
+            if prompt_found && summary.last_message.is_some() && activity_done {
                 return Ok(());
             }
         }
@@ -283,6 +321,86 @@ mod tests {
         for _ in 0..bytes.div_ceil(traffic.len()) {
             file.write_all(traffic.as_bytes()).unwrap();
         }
+    }
+
+    #[test]
+    fn activity_tracks_unfinished_tools_and_record_timestamps() {
+        let at = DateTime::parse_from_rfc3339("2026-10-12T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        for description in [Some("Run checks"), None, Some("  ")] {
+            for completed in [false, true] {
+                let mut file = tempfile::NamedTempFile::new().unwrap();
+                file.write_all(FIXTURE.as_bytes()).unwrap();
+                let mut assistant: Value =
+                    serde_json::from_str(FIXTURE.lines().nth(1).unwrap()).unwrap();
+                assistant["timestamp"] = at.to_rfc3339().into();
+                assistant["message"]["content"] = serde_json::json!([
+                    {"type": "text", "text": "Checking"},
+                    {"type": "tool_use", "id": "check", "name": "Bash", "input": {"description": description}}
+                ]);
+                writeln!(file, "{assistant}").unwrap();
+                if completed {
+                    writeln!(
+                        file,
+                        "{}",
+                        serde_json::json!({"type": "user", "message": {"content": [
+                            {"type": "tool_result", "tool_use_id": "check", "content": "done"}
+                        ]}})
+                    )
+                    .unwrap();
+                }
+                let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+                assert_eq!(summary.last_message_at, Some(at));
+                assert_eq!(summary.last_message.as_deref(), Some("Checking"));
+                if completed {
+                    assert!(summary.activity.is_none());
+                } else {
+                    let activity = summary.activity.unwrap();
+                    assert_eq!(
+                        activity.label,
+                        if description == Some("Run checks") {
+                            "Run checks"
+                        } else {
+                            "Bash"
+                        }
+                    );
+                    assert_eq!(activity.at, at);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn activity_survives_chunks_and_stops_at_the_latest_prompt() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(FIXTURE.as_bytes()).unwrap();
+        let mut assistant: Value = serde_json::from_str(FIXTURE.lines().nth(1).unwrap()).unwrap();
+        assistant["message"]["content"] = serde_json::json!([
+            {"type": "tool_use", "id": "earlier", "name": "Read", "input": {}},
+            {"type": "tool_use", "id": "pending", "name": "Bash", "input": {"description": "中".repeat(CHUNK as usize)}}
+        ]);
+        writeln!(file, "{assistant}").unwrap();
+        write_tool_traffic(&mut file, 3 * CHUNK as usize);
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(summary.activity.unwrap().label, "中".repeat(CHUNK as usize));
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "pending", "content": "done"}
+            ]}})
+        )
+        .unwrap();
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(summary.activity.unwrap().label, "Read");
+        assert_eq!(summary.last_message_at, read_fixture().last_message_at);
+        let mut user: Value = serde_json::from_str(FIXTURE.lines().next().unwrap()).unwrap();
+        user["message"]["content"] = "Next turn".into();
+        writeln!(file, "{user}").unwrap();
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert!(summary.activity.is_none());
+        assert!(summary.last_message_at.is_some());
     }
 
     #[test]

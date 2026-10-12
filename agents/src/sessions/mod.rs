@@ -437,6 +437,8 @@ fn session(
         process: None,
         updated_at,
         last_message: summary.last_message,
+        last_message_at: summary.last_message_at,
+        activity: summary.activity,
         last_prompt: summary.last_prompt,
         transcript: path,
     }
