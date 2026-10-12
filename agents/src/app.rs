@@ -1,7 +1,8 @@
-//! Terminal loop: polls the session sources, renders the view and executes its actions.
+//! Terminal loop: reacts to session changes and keyboard input, renders the view and executes actions.
 
 use crate::model::Action;
 use crate::model::Session;
+use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
 use crate::sessions::Snapshot;
 use crate::sessions::Store;
 use crate::state::Preferences;
@@ -16,11 +17,64 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
+use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
-const POLL_INTERVAL: Duration = Duration::from_millis(250);
+// Bounds reader shutdown before handing the terminal to Claude.
+const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(250);
+
+enum Input {
+    Terminal(io::Result<Event>),
+    Filesystem(notify::Result<()>),
+}
+
+struct InputReader {
+    stopped: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl InputReader {
+    fn start(sender: mpsc::Sender<Input>) -> io::Result<Self> {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stop = stopped.clone();
+        let thread = thread::Builder::new()
+            .name("agents-input".into())
+            .spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let event = match crossterm::event::poll(INPUT_STOP_INTERVAL) {
+                        Ok(false) => continue,
+                        Ok(true) if stop.load(Ordering::Relaxed) => break,
+                        Ok(true) => crossterm::event::read(),
+                        Err(error) => Err(error),
+                    };
+                    let failed = event.is_err();
+                    if sender.send(Input::Terminal(event)).is_err() || failed {
+                        break;
+                    }
+                }
+            })?;
+        Ok(Self {
+            stopped,
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for InputReader {
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            // The reader returns before raw mode ends or a child inherits stdin.
+            thread.join().expect("terminal reader panicked");
+        }
+    }
+}
 
 pub struct App {
     config_dir: PathBuf,
@@ -88,11 +142,32 @@ impl App {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     ) -> io::Result<()> {
-        let mut last_refresh = Instant::now() - REFRESH_INTERVAL;
+        let (sender, receiver) = mpsc::channel();
+        let filesystem = sender.clone();
+        let mut watcher = match crate::sessions::watch(&self.config_dir, move |event| {
+            let _ = filesystem.send(Input::Filesystem(event.map(|_| ())));
+        }) {
+            Ok(watcher) => Some(watcher),
+            Err(error) => {
+                self.view
+                    .set_notice(Some(format!("Falling back to polling: {error}")));
+                None
+            }
+        };
+        let _reader = InputReader::start(sender)?;
+        let mut schedule = RefreshSchedule::new(
+            Instant::now(),
+            if watcher.is_some() {
+                FALLBACK_INTERVAL
+            } else {
+                POLLING_INTERVAL
+            },
+        );
+        self.refresh();
         loop {
-            if last_refresh.elapsed() >= REFRESH_INTERVAL {
+            if schedule.due(Instant::now()) {
                 self.refresh();
-                last_refresh = Instant::now();
+                schedule.refreshed(Instant::now());
             }
             terminal.draw(|frame| {
                 let area = frame.area();
@@ -108,13 +183,23 @@ impl App {
             {
                 terminal.set_cursor_position((x, y))?;
             }
-            if crossterm::event::poll(POLL_INTERVAL)? {
-                match crossterm::event::read()? {
-                    Event::Key(key) if self.handle_key(key) => {
-                        return Ok(());
-                    }
-                    Event::Resize(..) => {}
+            match receiver.recv_timeout(schedule.timeout(Instant::now())) {
+                Ok(Input::Terminal(event)) => match event? {
+                    Event::Key(key) if self.handle_key(key) => return Ok(()),
                     _ => {}
+                },
+                Ok(Input::Filesystem(Ok(()))) if watcher.is_some() => {
+                    schedule.changed(Instant::now());
+                }
+                Ok(Input::Filesystem(Err(error))) if watcher.is_some() => {
+                    self.view
+                        .set_notice(Some(format!("Falling back to polling: {error}")));
+                    watcher = None;
+                    schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+                }
+                Ok(Input::Filesystem(_)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(io::Error::other("event readers disconnected"));
                 }
             }
         }

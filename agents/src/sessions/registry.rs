@@ -130,6 +130,32 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn partial_registry_is_skipped_until_a_complete_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let value = fixture(dir.path());
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let valid_path = dir.path().join("sessions/valid.json");
+        let partial_path = dir.path().join("sessions/partial.json");
+        fs::write(&valid_path, &bytes).unwrap();
+        fs::write(&partial_path, &bytes[..bytes.len() / 2]).unwrap();
+        let entries = live(dir.path());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].session_id.as_deref(),
+            value["sessionId"].as_str()
+        );
+
+        fs::write(&partial_path, &bytes).unwrap();
+        let entries = live(dir.path());
+        assert_eq!(entries.len(), 2);
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.session_id.as_deref() == value["sessionId"].as_str())
+        );
+    }
+
+    #[test]
     fn registry_checks_process_start_and_dead_pids() {
         let dir = tempfile::tempdir().unwrap();
         let mut value = fixture(dir.path());

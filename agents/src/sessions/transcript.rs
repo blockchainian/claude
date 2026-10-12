@@ -203,6 +203,16 @@ mod tests {
     }
 
     #[test]
+    fn truncated_last_line_preserves_preceding_summary() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(FIXTURE.as_bytes()).unwrap();
+        let assistant = FIXTURE.lines().nth(1).unwrap();
+        file.write_all(&assistant.as_bytes()[..assistant.len() / 2])
+            .unwrap();
+        assert_summary(&read(file.path(), file.as_file().metadata().unwrap().len()).unwrap());
+    }
+
+    #[test]
     fn real_transcript_summary_and_large_head_tail() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(FIXTURE.as_bytes()).unwrap();

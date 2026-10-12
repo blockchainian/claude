@@ -15,8 +15,12 @@ cargo build --release
 - `$CLAUDE_CONFIG_DIR/projects/*/<session-id>.jsonl` — transcripts; read in head and tail chunks only.
 - `$CLAUDE_CONFIG_DIR/agents.json` — pins, grouping and an optional `theme`: a `.tmTheme` path whose accents color the session titles, as in Codex. Without it the titles use Catppuccin Latte on a light terminal and Mocha on a dark one, Codex's defaults.
 
+Changes to the registry and transcripts refresh the dashboard after a 50 ms debounce. A full refresh every 5 seconds checks process liveness; unavailable filesystem notifications fall back to 1-second polling.
+
 ## Checks
 
 ```sh
 cargo test
+cargo clippy --all-targets
+cargo build --release
 ```
