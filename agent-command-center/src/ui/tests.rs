@@ -433,3 +433,12 @@ fn marker_pos_follows_the_selected_row_and_clears_on_help() {
     view.render(area, &mut buf);
     assert_eq!(view.marker_pos(), None);
 }
+
+#[test]
+fn details_name_a_missing_prompt() {
+    let mut row = session("blank", "Blank task", SessionStatus::Ready, 10);
+    row.prompt = String::new();
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    assert!(screen(&view, 160, 24).contains("No prompt available."));
+}
