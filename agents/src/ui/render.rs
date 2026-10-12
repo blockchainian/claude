@@ -320,7 +320,7 @@ impl View {
                 session.last_record_at.unwrap_or(start)
             };
             let messages = session.turn_messages;
-            let label = if messages == 1 { "msg" } else { "msgs" };
+            let label = if messages == 1 { "message" } else { "messages" };
             header.extend([
                 " · ".dim(),
                 format!("{messages} {label}").dim(),
