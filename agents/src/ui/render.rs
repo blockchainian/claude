@@ -1,4 +1,4 @@
-use super::formatting::visible_suffix;
+use super::formatting::{format_relative_time, visible_suffix};
 use super::hints::hint_line;
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
@@ -189,9 +189,10 @@ impl View {
                     .set_style(Style::default().dim());
             }
         }
-        self.render_center_rows(layout.list, buf);
+        let now = chrono::Utc::now();
+        self.render_center_rows(layout.list, buf, now);
         if !layout.details.is_empty() {
-            self.render_details(layout.details, buf);
+            self.render_details(layout.details, buf, now);
         }
         if let Some(dialog) = &self.delete_dialog {
             self.render_delete_dialog(dialog, layout.list, buf);
@@ -246,7 +247,12 @@ impl View {
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }
-    pub(super) fn render_details(&self, area: Rect, buf: &mut Buffer) {
+    pub(super) fn render_details(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
         let Some(session) = self.selected_row() else {
             return;
         };
@@ -330,8 +336,32 @@ impl View {
                 "Waiting for your response.".into(),
             ]);
         }
+        if session.status == SessionStatus::Working
+            && let Some(activity) = &session.activity
+        {
+            let wrapped = textwrap::wrap(&activity.label, width);
+            let mut label = wrapped
+                .first()
+                .map_or(String::new(), |line| line.to_string());
+            if wrapped.len() > 1 {
+                label.push('…');
+            }
+            details.extend([
+                Line::default(),
+                Line::from(vec![
+                    "Latest activity".dim(),
+                    " · ".dim(),
+                    format_relative_time(now, Some(activity.at)).dim(),
+                ]),
+                truncate_line_with_ellipsis_if_overflow(Line::from(label), width),
+            ]);
+        }
         if let Some(message) = &session.last_message {
-            details.extend([Line::default(), "Last message".dim().into()]);
+            let mut header = vec!["Last message".dim()];
+            if let Some(at) = session.last_message_at {
+                header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
+            }
+            details.extend([Line::default(), Line::from(header)]);
             details.extend(
                 textwrap::wrap(message, width)
                     .into_iter()

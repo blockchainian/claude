@@ -1,0 +1,16 @@
+Task details
+
+Activity task
+○ Ready
+
+Model: Unknown
+Reasoning: Unknown
+
+Project
+/tmp/project
+
+Last message · 1h ago
+Checking the project
+
+Prompt
+Activity task

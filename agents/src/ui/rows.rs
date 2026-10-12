@@ -31,7 +31,12 @@ fn columns(area: Rect) -> (Rect, Rect, Rect) {
 }
 
 impl View {
-    pub(super) fn render_center_rows(&self, area: Rect, buf: &mut Buffer) {
+    pub(super) fn render_center_rows(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        reference: chrono::DateTime<chrono::Utc>,
+    ) {
         let row_width = area.width;
         let area = Rect {
             width: row_width.saturating_sub(/*rhs*/ 1),
@@ -76,7 +81,6 @@ impl View {
                 .right_aligned()
                 .render(updated, buf);
         }
-        let reference = chrono::Utc::now();
         let height = usize::from(viewport.height);
         state.page_height = height;
         let mut start = state.scroll.min(entries.len().saturating_sub(height));

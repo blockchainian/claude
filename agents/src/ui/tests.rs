@@ -16,6 +16,8 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         process: None,
         updated_at: Utc::now() - Duration::seconds(age),
         last_message: None,
+        last_message_at: None,
+        activity: None,
         last_prompt: None,
         transcript: None,
     }
@@ -375,7 +377,7 @@ fn details_include_attention_and_clip_messages() {
     assert!(position("Needs attention") < position("Last message"));
     let area = Rect::new(0, 0, 38, 25);
     let mut buf = Buffer::empty(area);
-    view.render_details(area, &mut buf);
+    view.render_details(area, &mut buf, Utc::now());
     assert_eq!(buf[(0, 24)].symbol(), "…");
     let title_cell = &buf[(0, 2)];
     assert!(title_cell.modifier.contains(ratatui::style::Modifier::BOLD));
@@ -703,7 +705,7 @@ fn details_branch_pull_request_snapshot() {
     let area = Rect::new(0, 0, 40, 18);
     let render = |view: &View| {
         let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf);
+        view.render_details(area, &mut buf, Utc::now());
         buf.content
             .chunks(40)
             .map(|row| {
@@ -739,4 +741,58 @@ fn details_branch_pull_request_snapshot() {
     row.git_branch = None;
     view.set_sessions(vec![row], false);
     assert!(!render(&view).contains("#833"));
+}
+
+#[test]
+fn details_activity_only_while_working() {
+    let now = Utc::now();
+    let mut row = session("activity", "Activity task", SessionStatus::Working, 7);
+    row.activity = Some(crate::model::Activity {
+        label: "Run checks".into(),
+        at: now - Duration::seconds(7),
+    });
+    row.last_message = Some("Checking the project".into());
+    row.last_message_at = Some(now - Duration::hours(1));
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(vec![row.clone()], false);
+    let render = |view: &View| {
+        let area = Rect::new(0, 0, 40, 24);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, now);
+        buf.content
+            .chunks(40)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end_matches('\n')
+            .to_owned()
+    };
+    let rendered = render(&view);
+    assert_eq!(
+        rendered,
+        include_str!("../../tests/ui_snapshots/details_activity_working.txt")
+    );
+    assert!(rendered.contains("Latest activity · 7s ago"));
+    assert!(rendered.contains("Last message · 1h ago"));
+    assert!(rendered.find("Run checks") < rendered.find("Last message"));
+    row.activity.as_mut().unwrap().label =
+        "Run checks on every changed surface in the project".into();
+    view.set_sessions(vec![row.clone()], false);
+    let clipped = render(&view);
+    assert!(clipped.contains("Run checks on every changed surface in…"));
+    assert!(!clipped.contains("surface in the project"));
+    row.status = SessionStatus::Ready;
+    view.set_sessions(vec![row], false);
+    let idle = render(&view);
+    assert!(!idle.contains("Latest activity"));
+    assert_eq!(
+        idle,
+        include_str!("../../tests/ui_snapshots/details_activity_idle.txt")
+    );
 }
