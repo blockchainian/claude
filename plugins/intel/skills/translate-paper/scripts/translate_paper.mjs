@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ABOUTME: Translates a paper work dir (from pdf2work.py) section by section through the translate skill's codex
+// ABOUTME: Translates a paper work dir (from pdf2work.py) section by section through the translate-epub skill's codex
 // ABOUTME: runner, with paper rules and a math check on top of the skill's output checks; resumable.
 //
 // Usage: translate_paper.mjs <work dir> [--only 02,03] [--jobs 20] [--model gpt-6-luna] [--effort medium]
@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { stateDir } from "../../fetch-x-mentions/scripts/env.mjs";
-import { buildPrompt, checkOutput, cjkCount, runCodex } from "../../translate/scripts/translate.mjs";
+import { buildPrompt, checkOutput, cjkCount, runCodex } from "../../translate-epub/scripts/translate.mjs";
 
 const katex = createRequire(import.meta.url)("katex");
 

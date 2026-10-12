@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["pymupdf>=1.24", "websocket-client>=1.7", "pikepdf>=9", "markdown>=3.5", "pillow>=10"]
 # ///
-# ABOUTME: Prints one Chinese-translated HTML page to <page>.pdf in the translate skill's book look: dark page, folio,
+# ABOUTME: Prints one Chinese-translated HTML page to <page>.pdf in the translate-epub skill's book look: dark page, folio,
 # ABOUTME: Baskerville/Songti body, 黑体 bold, boxed Menlo code, page chrome hidden and wide content fitted.
 #
 # Usage: html2pdf.py <page.html> [--base URL] [--skip-bookmark TEXT ...]
@@ -13,7 +13,7 @@
 import argparse, re, shutil, subprocess, sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "translate" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "translate-epub" / "scripts"))
 from render import chrome_binary  # noqa: E402
 
 W, H = 427.92, 660  # the reference book traction.pdf

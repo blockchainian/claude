@@ -1,5 +1,5 @@
 ---
-name: translate
+name: translate-epub
 description: >
   Translate a whole English EPUB book into a Chinese PDF that keeps the original's format: the same cover
   image, page size, chapter structure, running heads, folios, a clickable 目录 page and PDF bookmarks (Cover,

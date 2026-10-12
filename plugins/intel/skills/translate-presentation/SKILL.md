@@ -2,7 +2,7 @@
 name: translate-presentation
 description: >
   Translate an English lecture slide deck PDF (Keynote, PowerPoint or Google Slides export with a text layer) into a
-  Chinese PDF page for page: the same pages, figures and layout, the translate skill's dark theme (page #000409, ink
+  Chinese PDF page for page: the same pages, figures and layout, the translate-epub skill's dark theme (page #000409, ink
   #6e7f7a, 黑体), each prose text box replaced in place by fitted Chinese, screenshots and diagrams recoloured, photos
   kept. Text inside figures, code and names stay English. Translation goes through `codex exec`. Use for
   "/translate-presentation <deck.pdf>", "把这份幻灯片翻译成中文", "translate these lecture slides", or a batch of decks.
@@ -15,7 +15,7 @@ description: >
 ## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The scripts import from the
-sibling `translate` skill (theme helpers in `render.py`, `runCodex` in `translate.mjs`), which imports from
+sibling `translate-epub` skill (theme helpers in `render.py`, `runCodex` in `translate.mjs`), which imports from
 `fetch-x-mentions`, so keep the whole intel plugin installed.
 
 ```sh
@@ -31,11 +31,11 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 
 ## Setup
 
-Run the translate skill's setup (`uv`, poppler, the codex login). The fonts come from macOS: Heiti SC Light and
+Run the translate-epub skill's setup (`uv`, poppler, the codex login). The fonts come from macOS: Heiti SC Light and
 Medium, and Menlo.
 
 ```bash
-"$SKILL_DIR/../translate/scripts/setup.sh"
+"$SKILL_DIR/../translate-epub/scripts/setup.sh"
 ```
 
 ## Translate one deck

@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["pikepdf>=9", "markdown>=3.5", "pillow>=10"]
 # ///
-# ABOUTME: Renders a translated paper work dir with the translate skill's render.py, adding what a paper needs: figure
+# ABOUTME: Renders a translated paper work dir with the translate-epub skill's render.py, adding what a paper needs: figure
 # ABOUTME: crops shown at their source size, footnotes set small, and a cover that carries the English title.
 #
 # Usage: render_paper.py <work dir> --out <paper.pdf> [render.py options: --only, --bg, --fg, --font-size, --no-recolor, --no-dropcap]
@@ -13,7 +13,7 @@ import re
 import sys
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("render", Path(__file__).resolve().parents[2] / "translate" / "scripts" / "render.py")
+spec = importlib.util.spec_from_file_location("render", Path(__file__).resolve().parents[2] / "translate-epub" / "scripts" / "render.py")
 render = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(render)
 

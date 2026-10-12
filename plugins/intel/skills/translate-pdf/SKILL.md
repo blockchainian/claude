@@ -2,13 +2,13 @@
 name: translate-pdf
 description: >
   Translate an English document we print ourselves, a web page (course reading, lab handout, blog post) or a Markdown
-  note, into a Chinese PDF in the translate skill's book look: same page size, dark theme, Baskerville/Songti body,
+  note, into a Chinese PDF in the translate-epub skill's book look: same page size, dark theme, Baskerville/Songti body,
   黑体 bold, boxed code, Mermaid diagrams, MathJax math, bookmarks. Code, identifiers, math and diagram labels stay
   English; prose, headings, captions and exercise text are translated through `codex exec`. Translating from the
   source keeps structure, code blocks, exercises and images exact. Use for "/translate-pdf <url or .md>", "把这个网页
   翻译成中文 PDF", "translate these course pages", or to re-render after editing a translation. NOT for a PDF that only
   exists as a PDF (papers, slides, scans: use translate-paper, translate-presentation or translate-scan), and NOT for an
-  EPUB book (use translate).
+  EPUB book (use translate-epub).
 ---
 
 # Translate PDF
@@ -16,7 +16,7 @@ description: >
 ## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The scripts import from the
-sibling `translate` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
+sibling `translate-epub` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
@@ -36,7 +36,7 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 "$SKILL_DIR/scripts/setup.sh"
 ```
 
-It runs the translate skill's setup (poppler, uv, codex login, Chrome) and installs Readability and jsdom for
+It runs the translate-epub skill's setup (poppler, uv, codex login, Chrome) and installs Readability and jsdom for
 `readable.mjs` into `scripts/node_modules`.
 
 ## Translate one document
@@ -58,7 +58,7 @@ A 10k-word page takes about a minute: eight codex calls of about 1,500 words run
   as "MIT 6.1020 course reading". Both set the translator's register.
 - `--glossary FILE` pins terms, one `english: 中文` line each. Keep one glossary per course or subject and pass it to
   every document of it, so terms agree across files; pin any heading that repeats on every page too. Course
-  glossaries shared with the other translate skills live in
+  glossaries shared with the other translate-epub skills live in
   `~/.local/state/intel/translate-glossaries/<course number>.md`; translate-paper appends to them.
 - `--reader` keeps only the article on a page whose site wraps it in chrome: tags, dates, avatars, reading time,
   share bars, subscription boxes, site footers. A course site whose page is the document, exercise widgets
@@ -78,7 +78,7 @@ A 10k-word page takes about a minute: eight codex calls of about 1,500 words run
    sees short tags, and join puts them back. Segment ids are hashes of their text, so the cache survives a changed
    page.
 2. Translate. `translate_segments.mjs` sends consecutive segments as one JSON object per `codex exec` call through
-   the translate skill's `runCodex` and checks each answer: every link target, `k="n"` and whole code element must
+   the translate-epub skill's `runCodex` and checks each answer: every link target, `k="n"` and whole code element must
    come back; on a page that loads MathJax or KaTeX no formula may run into Chinese text (a lost delimiter); where
    the source has no TeX, none may be added. A failing segment is retried in a smaller batch, then alone at medium
    effort; one that fails all three stays English and is reported `FAILED`.
@@ -102,7 +102,7 @@ A 10k-word page takes about a minute: eight codex calls of about 1,500 words run
 
 Write a small driver that maps each document to its source and options (glossary, `--reader` by host, the output
 path) and runs `translate_doc.sh` a few at a time, each run logging to its own file. Each run holds a headless Chrome
-and a pymupdf check, so run at most 3 at once, and never alongside another translate skill's batch: concurrent
+and a pymupdf check, so run at most 3 at once, and never alongside another translate-epub skill's batch: concurrent
 batches exhausted memory and rebooted the machine. Never edit the driver while it runs: bash reads a script as it executes, so running instances pick up
 shifted bytes. A second full pass is cheap, since every translated segment is cached: it rechecks everything, redoes
 only what fails, and re-renders.

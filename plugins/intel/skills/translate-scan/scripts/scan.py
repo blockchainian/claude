@@ -15,7 +15,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SKILLS = HERE.parents[1]
-TRANSLATE = SKILLS / "translate" / "scripts"
+TRANSLATE = SKILLS / "translate-epub" / "scripts"
 PAPERS = SKILLS / "translate-paper" / "scripts"
 
 # Documents in flight: more parallel renders and translations have run a 16 GB Mac out of memory.

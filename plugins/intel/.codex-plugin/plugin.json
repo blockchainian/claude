@@ -50,6 +50,6 @@
     "./skills/find-domain-names",
     "./skills/manage-x-account",
     "./skills/transcribe",
-    "./skills/translate"
+    "./skills/translate-epub"
   ]
 }

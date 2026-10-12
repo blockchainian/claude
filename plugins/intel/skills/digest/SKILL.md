@@ -8,7 +8,7 @@ description: >
   article/episode/paper", "search my notes". Handles ordinary article and
   transcript pages, YouTube (via subtitles), PDFs (URL or local file), and
   audio pages (via the transcribe skill). A PDF is highlighted chapter by
-  chapter and the highlights come back as a PDF in the translate skill's book
+  chapter and the highlights come back as a PDF in the translate-epub skill's book
   format, at the source's page size.
 
   NOT for: general web research across many pages (use agent-reach), or
@@ -20,7 +20,7 @@ description: >
 ## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
-scripts use the sibling `fetch-x-mentions`, `transcribe` and `translate` skills, so keep the whole
+scripts use the sibling `fetch-x-mentions`, `transcribe` and `translate-epub` skills, so keep the whole
 intel plugin installed.
 
 ```sh
@@ -156,7 +156,7 @@ Then render:
 
 It typesets every chapter that has a highlights file into `<source>-highlights.pdf` in the store,
 prints that path and writes the combined `<work>/draft.md`. `--out`, `--bg`, `--fg` and
-`--font-size` override the defaults, which are the translate skill's. Re-run it after editing any
+`--font-size` override the defaults, which are the translate-epub skill's. Re-run it after editing any
 chapter's file.
 
 Report the PDF path and a short per-chapter summary in the conversation. Fill `source`, `author`

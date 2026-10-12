@@ -2,12 +2,12 @@
 name: translate-scan
 description: >
   Translate a scanned or handwritten PDF (pages that are images, with no usable text layer) into a Chinese PDF in
-  the translate skill's book format: codex reads each page image into Markdown (text, headings, math as LaTeX,
+  the translate-epub skill's book format: codex reads each page image into Markdown (text, headings, math as LaTeX,
   figures cropped with their captions), macOS Vision cross-checks the words, and the translate-paper pipeline
   translates and typesets it. Also produces per-page text boxes (position, text, font size) for image-only slide
   decks, for the slides pipeline to render. Use for "/translate-scan <file.pdf>", "translate this scanned paper",
   "翻译这份扫描件/手写笔记", or "text boxes for this image-only deck". NOT for PDFs with a real text layer (use
-  translate-paper), EPUB books (use translate), or slides with a text layer (use translate-presentation).
+  translate-paper), EPUB books (use translate-epub), or slides with a text layer (use translate-presentation).
 ---
 
 # Translate scan
@@ -15,7 +15,7 @@ description: >
 ## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The scripts import from
-the sibling `translate`, `translate-paper` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
+the sibling `translate-epub`, `translate-paper` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
@@ -36,7 +36,7 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 "$SKILL_DIR/scripts/setup.sh"
 ```
 
-It runs the translate skill's setup (poppler, uv, codex login, Chrome) and checks ImageMagick, the Swift compiler
+It runs the translate-epub skill's setup (poppler, uv, codex login, Chrome) and checks ImageMagick, the Swift compiler
 (the macOS Vision helper is compiled on first use) and the translate-paper skill. macOS only.
 
 ## Translate scanned documents
@@ -68,8 +68,8 @@ a rerun resumes at the first step without output.
 5. translate-paper' `translate_paper.mjs` translates (paper rules, KaTeX check, automatic glossary, the cover's
    author lines); `restore_verbatim.py` then puts Markdown tables (data stays in English) and section numbers back
    exactly as in the source.
-6. The translate skill's `lint_md.py`, translate-paper' `render_paper.py` (a paper gets a title cover and a 目录,
-   notes get neither) and the translate skill's `format_check.py` finish the PDF.
+6. The translate-epub skill's `lint_md.py`, translate-paper' `render_paper.py` (a paper gets a title cover and a 目录,
+   notes get neither) and the translate-epub skill's `format_check.py` finish the PDF.
 
 The output is `<out-dir>/<name>.pdf`; with `--mirror ROOT` it is `<out-dir>/<path below ROOT>`, so a tree of course
 folders keeps its shape. A `FAILED` line names the step; the end of `run.log` has the cause. A render that fails on
