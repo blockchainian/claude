@@ -922,6 +922,7 @@ fn details_background_boxes_tail_and_clip_output() {
     let mut output = tempfile::NamedTempFile::new().unwrap();
     writeln!(output, "discard\nfirst\nlast\n{}", "x".repeat(80)).unwrap();
     let mut row = session("background", "Background task", SessionStatus::Ready, 120);
+    row.last_message = Some("Checking the project".into());
     row.background = vec![
         crate::model::BackgroundTask {
             description: "Run checks".into(),
@@ -934,18 +935,19 @@ fn details_background_boxes_tail_and_clip_output() {
             started_at: Utc::now(),
         },
     ];
-    let rendered = queued_details(row.clone(), 19);
+    let rendered = queued_details(row.clone(), 22);
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_background.txt")
     );
     row.background[0].description = "A very long description ".repeat(5);
     assert_eq!(
-        queued_details(row.clone(), 19),
+        queued_details(row.clone(), 22),
         include_str!("../../tests/ui_snapshots/details_background_long_title.txt")
     );
     let clipped = queued_details(row, 17);
     assert!(clipped.contains("Background\n╭"));
+    assert!(!clipped.contains("Last message"));
     assert!(clipped.contains("…\n\nPrompt"));
     assert!(!clipped.contains("Waiting for output"));
 }

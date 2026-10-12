@@ -15,5 +15,8 @@ Background
 ╰──────────────────────────────────────╯
 ─ Waiting for output ───────────────────
 
+Last message
+Checking the project
+
 Prompt
 Background task

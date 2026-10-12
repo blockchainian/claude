@@ -346,7 +346,9 @@ impl View {
         prompt.extend(session.queued.iter().map(|queued| {
             truncate_line_with_ellipsis_if_overflow(Line::from(queued.clone()), width)
         }));
-        // Activity sits above the prompt and takes the height the prompt leaves over.
+        // Everything between the header and the prompt takes the height the
+        // prompt leaves over: Needs attention, Background, then the newer of
+        // Latest activity and Last message.
         let mut details = Vec::new();
         if session.status == SessionStatus::NeedsInput {
             details.extend([
@@ -356,6 +358,15 @@ impl View {
                 "Waiting for your response.".into(),
             ]);
         }
+        if !session.background.is_empty() {
+            details.extend([Line::default(), "Background".dim().into()]);
+        }
+        let boxes = session
+            .background
+            .iter()
+            .map(|task| (task, tail_lines(&task.output, 1)))
+            .collect::<Vec<_>>();
+        let mut activity_lines = Vec::new();
         // Latest activity and Last message share one slot and follow the
         // clock: whichever of the latest tool call and the last reply is newer.
         let activity = session
@@ -370,7 +381,7 @@ impl View {
             if wrapped.len() > 1 {
                 label.push('…');
             }
-            details.extend([
+            activity_lines.extend([
                 Line::default(),
                 Line::from(vec![
                     "Latest activity".dim(),
@@ -385,27 +396,19 @@ impl View {
             if let Some(at) = session.last_message_at {
                 header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
             }
-            details.extend([Line::default(), Line::from(header)]);
-            details.extend(
+            activity_lines.extend([Line::default(), Line::from(header)]);
+            activity_lines.extend(
                 textwrap::wrap(message, width)
                     .into_iter()
                     .map(|s| Line::from(s.into_owned())),
             );
         }
-        if !session.background.is_empty() {
-            details.extend([Line::default(), "Background".dim().into()]);
-        }
         let available = usize::from(area.height).saturating_sub(lines.len() + prompt.len());
-        let boxes = session
-            .background
+        let boxes_height = boxes
             .iter()
-            .map(|task| (task, tail_lines(&task.output, 1)))
-            .collect::<Vec<_>>();
-        let details_height = details.len()
-            + boxes
-                .iter()
-                .map(|(_, lines)| box_height(lines.len()))
-                .sum::<usize>();
+            .map(|(_, lines)| box_height(lines.len()))
+            .sum::<usize>();
+        let details_height = details.len() + boxes_height + activity_lines.len();
         let details_start = lines.len();
         let text_height = details.len().min(available);
         details.truncate(text_height);
@@ -453,6 +456,13 @@ impl View {
                 .style(Style::default().dim())
                 .render(inner, buf);
             offset += height;
+        }
+        for text in activity_lines {
+            if offset >= available {
+                break;
+            }
+            line(text, row(area, (details_start + offset) as u16, 1), buf);
+            offset += 1;
         }
         if details_height > available && available > 0 {
             let last = row(area, (details_start + available - 1) as u16, 1);
