@@ -13,8 +13,7 @@ Background
 ╭ A very long description A very long… ╮
 │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
 ╰──────────────────────────────────────╯
-╭ Waiting for output ──────────────────╮
-╰──────────────────────────────────────╯
+─ Waiting for output ───────────────────
 
 Prompt
 Background task

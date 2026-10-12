@@ -13,8 +13,7 @@ Background
 ╭ Run checks ──────────────────────────╮
 │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
 ╰──────────────────────────────────────╯
-╭ Waiting for output ──────────────────╮
-╰──────────────────────────────────────╯
+─ Waiting for output ───────────────────
 
 Prompt
 Background task
