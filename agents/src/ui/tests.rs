@@ -951,6 +951,29 @@ fn details_background_boxes_tail_and_clip_output() {
 }
 
 #[test]
+fn background_box_dims_border_but_not_title() {
+    use ratatui::style::Modifier;
+    let mut row = session("background", "Background task", SessionStatus::Ready, 120);
+    row.background.push(crate::model::BackgroundTask {
+        description: "Run checks".into(),
+        output: "/nonexistent/output".into(),
+        started_at: Utc::now(),
+    });
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 40, 20);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, Utc::now());
+    let top = (0..20)
+        .find(|y| buf[(0, *y)].symbol() == "╭")
+        .expect("box top border");
+    assert!(buf[(0, top)].modifier.contains(Modifier::DIM));
+    assert!(buf[(30, top)].modifier.contains(Modifier::DIM));
+    assert_eq!(buf[(2, top)].symbol(), "R");
+    assert!(!buf[(2, top)].modifier.contains(Modifier::DIM));
+}
+
+#[test]
 fn background_redraw_follows_selection() {
     let mut first = session("first", "First", SessionStatus::Ready, 0);
     first.background.push(crate::model::BackgroundTask {
