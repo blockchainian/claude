@@ -187,7 +187,8 @@ impl App {
                             }
                             Err(error) => {
                                 self.refresh();
-                                self.view.set_notice(Some(format!("Failed to delete: {error}")));
+                                self.view
+                                    .set_notice(Some(format!("Failed to delete: {error}")));
                             }
                         }
                     }
@@ -209,9 +210,8 @@ impl App {
                 self.save_preferences();
             }
             Action::Unsupported(what) => {
-                self.view.set_notice(Some(format!(
-                    "{what} is not supported"
-                )));
+                self.view
+                    .set_notice(Some(format!("{what} is not supported")));
             }
         }
         false
