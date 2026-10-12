@@ -3,14 +3,14 @@ Task details · Background task · ○ Ready
 Prompt
 Background task
 
+Last message
+Checking the project
+
 Background
 ╭ Run checks · 0s ─────────────────────╮
 │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
 ╰──────────────────────────────────────╯
 ╶ Waiting for output · 0s ─────────────╴
-
-Last message
-Checking the project
 
 Project
 /tmp/project

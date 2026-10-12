@@ -383,10 +383,10 @@ fn details_include_attention_and_clip_messages() {
         .lines()
         .position(|line| line.trim_end().ends_with("/tmp/project"));
     assert!(position("Prompt") < position("Last message"));
-    assert!(position("Needs attention") < position("Last message"));
-    assert!(position("Last message") < position("Branch"));
-    assert!(position("Branch") < project);
-    assert!(project < position("Model: claude-opus"));
+    assert!(position("Last message") < position("Needs attention"));
+    assert!(position("Needs attention") < project);
+    assert!(project < position("Branch"));
+    assert!(position("Branch") < position("Model: claude-opus"));
     assert!(
         rendered
             .lines()
@@ -1001,6 +1001,7 @@ fn details_background_boxes_tail_and_clip_output() {
         },
     ];
     let rendered = queued_details(row.clone(), 22);
+    assert!(rendered.find("Last message").unwrap() < rendered.find("Background\n").unwrap());
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_background.txt")
