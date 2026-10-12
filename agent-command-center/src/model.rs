@@ -1,0 +1,161 @@
+//! Sessions as the command center sees them, independent of where they were read from.
+
+use chrono::DateTime;
+use chrono::Utc;
+use std::path::PathBuf;
+
+/// Status groups in display order; the enum order is the sort order.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum SessionStatus {
+    /// The session waits for the user: a permission prompt or a question.
+    NeedsInput,
+    /// A turn is running (registry status `busy` or `shell`).
+    Working,
+    /// A live session with no running turn (registry status `idle`).
+    Ready,
+    /// No live process; only the transcript remains.
+    Inactive,
+}
+
+impl SessionStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NeedsInput => "Needs input",
+            Self::Working => "Working",
+            Self::Ready => "Ready",
+            Self::Inactive => "Inactive",
+        }
+    }
+
+    /// Maps a registry status string (`busy`, `shell`, `idle`, `waiting`).
+    pub fn from_registry(status: &str) -> Option<Self> {
+        match status {
+            "waiting" => Some(Self::NeedsInput),
+            "busy" | "shell" => Some(Self::Working),
+            "idle" => Some(Self::Ready),
+            _ => None,
+        }
+    }
+}
+
+/// A live process behind a session, read from `~/.claude/sessions/<pid>.json`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Process {
+    pub pid: u32,
+    /// Registry status string as written by Claude Code.
+    pub status: String,
+    /// `interactive`, `bg`, `daemon` or `daemon-worker`.
+    pub kind: Option<String>,
+    /// tmux target as `session:@window.%pane`, when the session runs inside tmux.
+    pub tmux: Option<String>,
+    pub version: Option<String>,
+    pub started_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Session {
+    /// Claude Code session id (the transcript file stem).
+    pub id: String,
+    pub cwd: PathBuf,
+    /// Name the user gave the session (`/rename` or `--name`).
+    pub name: Option<String>,
+    /// Best available title when there is no user name: the AI title, else the first prompt.
+    pub title: String,
+    /// First user prompt, up to 512 chars, for the details panel.
+    pub prompt: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub git_branch: Option<String>,
+    pub status: SessionStatus,
+    pub process: Option<Process>,
+    pub updated_at: DateTime<Utc>,
+    /// Latest assistant text, up to 512 chars.
+    pub last_message: Option<String>,
+    /// Latest user prompt, up to 512 chars.
+    pub last_prompt: Option<String>,
+    pub transcript: Option<PathBuf>,
+}
+
+impl Session {
+    pub fn display_title(&self) -> &str {
+        let title = self.name.as_deref().unwrap_or(&self.title);
+        title.trim().lines().next().unwrap_or("Untitled session")
+    }
+
+    pub fn model_name(&self) -> &str {
+        self.model
+            .as_deref()
+            .filter(|model| !model.is_empty())
+            .unwrap_or("Unknown")
+    }
+}
+
+/// What the view asks the app to do; the view never touches processes or files itself.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Action {
+    /// Enter: jump to a live session's terminal, or resume an inactive one.
+    Open(String),
+    /// `o`: resume the session in this terminal (`claude --resume <id>`).
+    Resume(String),
+    /// `f`: resume as a new session id (`claude --resume <id> --fork-session`).
+    Fork(String),
+    /// `n`: start a new session in the given directory.
+    New(Option<PathBuf>),
+    /// `x`: interrupt the running turn of a working session.
+    Stop(String),
+    /// `h`: hide the session until the next launch.
+    Hide(String),
+    /// `p`: pin or unpin the session.
+    TogglePin { id: String, pinned: bool },
+    /// `g`: the grouping changed; persist it.
+    PersistGrouping(Grouping),
+    /// `w`, `r`, `a`, backspace: no Claude Code equivalent yet; show the notice.
+    Unsupported(&'static str),
+    /// "Show more" was activated: load the next page of inactive sessions.
+    ShowMore,
+    /// Esc on the top level, or ctrl-c.
+    Quit,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Grouping {
+    #[default]
+    Project,
+    Status,
+    Model,
+}
+
+impl Grouping {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::Status => "status",
+            Self::Model => "model",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "project" => Some(Self::Project),
+            "status" => Some(Self::Status),
+            "model" => Some(Self::Model),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Project => "Project",
+            Self::Status => "Status",
+            Self::Model => "Model",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Project => Self::Status,
+            Self::Status => Self::Model,
+            Self::Model => Self::Project,
+        }
+    }
+}

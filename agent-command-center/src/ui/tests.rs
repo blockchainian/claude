@@ -1,0 +1,409 @@
+use super::*;
+use chrono::{Duration, Utc};
+
+fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
+    Session {
+        id: id.into(),
+        cwd: "/tmp/project".into(),
+        name: None,
+        title: title.into(),
+        prompt: title.into(),
+        model: None,
+        effort: None,
+        git_branch: None,
+        status,
+        process: None,
+        updated_at: Utc::now() - Duration::seconds(age),
+        last_message: None,
+        last_prompt: None,
+        transcript: None,
+    }
+}
+fn screen(view: &View, width: u16, height: u16) -> String {
+    let area = Rect::new(0, 0, width, height);
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf);
+    buf.content
+        .chunks(usize::from(width))
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+fn key(view: &mut View, code: KeyCode) -> Option<Action> {
+    view.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+fn fixture() -> View {
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(
+        vec![
+            session("42", "Current task", SessionStatus::Ready, -3600),
+            session(
+                "43",
+                "A longer task title that uses the available column",
+                SessionStatus::Ready,
+                330,
+            ),
+            session("44", "Needs an answer", SessionStatus::NeedsInput, 7230),
+            session("45", "Unloaded task", SessionStatus::Inactive, 172830),
+            session("46", "Working task", SessionStatus::Working, 86430),
+            session("47", "Failed task", SessionStatus::NeedsInput, 3630),
+        ],
+        false,
+    );
+    view.set_pinned(&["42".into(), "44".into()]);
+    view.selected = view.rows.iter().position(|s| s.id == "42").unwrap();
+    view
+}
+fn simple_fixture() -> View {
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(
+        vec![
+            session("42", "Current task", SessionStatus::Ready, 120),
+            session("43", "Needs an answer", SessionStatus::NeedsInput, 120),
+            session("44", "Unloaded task", SessionStatus::Inactive, 120),
+        ],
+        false,
+    );
+    view
+}
+#[test]
+fn live_center_columns_without_voice_and_with_needs_input_error_delta() {
+    assert_eq!(
+        screen(&fixture(), 160, 22),
+        include_str!("../../tests/ui_snapshots/live_center_columns.txt")
+    );
+}
+#[test]
+fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
+    let mut view = simple_fixture();
+    key(&mut view, KeyCode::Char('?'));
+    assert_eq!(
+        screen(&view, 60, 24),
+        include_str!("../../tests/ui_snapshots/live_center_help_two_columns.txt")
+    );
+    // At 56 columns the filled tab strip hides Inactive; the shortcut columns still fit.
+    let narrow = screen(&view, 56, 24);
+    let wide = screen(&view, 60, 24);
+    assert_eq!(
+        narrow.lines().skip(3).collect::<Vec<_>>(),
+        wide.lines().skip(3).collect::<Vec<_>>()
+    );
+}
+#[test]
+fn live_center_status_filter() {
+    let mut view = simple_fixture();
+    key(&mut view, KeyCode::BackTab);
+    assert_eq!(
+        screen(&view, 40, 12),
+        include_str!("../../tests/ui_snapshots/live_center_status_filter.txt")
+    );
+}
+#[test]
+fn live_center_search_active() {
+    let mut view = View::default();
+    view.set_sessions(
+        vec![session("42", "Task to find", SessionStatus::Ready, 120)],
+        false,
+    );
+    key(&mut view, KeyCode::Char('/'));
+    for c in "find".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    assert_eq!(
+        screen(&view, 88, 16),
+        include_str!("../../tests/ui_snapshots/live_center_search_active.txt")
+    );
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((15, 3)));
+}
+#[test]
+fn live_center_show_more() {
+    let mut view = View::default();
+    view.set_sessions(
+        vec![session("42", "Recent task", SessionStatus::Inactive, 120)],
+        true,
+    );
+    key(&mut view, KeyCode::Down);
+    assert_eq!(
+        screen(&view, 80, 12),
+        include_str!("../../tests/ui_snapshots/live_center_show_more.txt")
+    );
+    assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::ShowMore));
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(screen(&view, 80, 12).contains("Loading more…"));
+}
+#[test]
+fn agents_overview_model_grouping() {
+    let mut view = View::new(Grouping::Model, false);
+    let rows = [
+        ("Older task", Some("model-a"), 4),
+        ("Other model", Some("model-b"), 3),
+        ("Recent task", Some("model-a"), 2),
+        ("Legacy task", None, 1),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (title, model, age))| {
+        let mut row = session(&i.to_string(), title, SessionStatus::Ready, age);
+        row.model = model.map(str::to_owned);
+        row
+    })
+    .collect();
+    view.set_sessions(rows, false);
+    assert_eq!(
+        screen(&view, 100, 24),
+        include_str!("../../tests/ui_snapshots/agents_overview_model_grouping.txt")
+    );
+}
+#[test]
+fn agents_overview_recent_sessions_twelve_rows_delta() {
+    let mut view = View::default();
+    view.set_sessions(
+        (1..=12)
+            .map(|i| {
+                let mut row = session(
+                    &i.to_string(),
+                    &format!("Task {i}"),
+                    SessionStatus::Inactive,
+                    (13 - i) * 60,
+                );
+                row.cwd = "/".into();
+                row
+            })
+            .collect(),
+        true,
+    );
+    let rendered = screen(&view, 80, 24);
+    assert!(rendered.contains("All 12"));
+    assert!(rendered.contains("/  12"));
+    let expected = include_str!("../../tests/ui_snapshots/agents_overview_recent_sessions.txt");
+    // The reference loads ten rows. Twelve rows change only counts and append Task 2 / Task 1.
+    for (actual, expected) in rendered
+        .lines()
+        .skip(5)
+        .take(10)
+        .zip(expected.lines().skip(5).take(10))
+    {
+        assert_eq!(
+            actual.split("Inactive").next(),
+            expected.split("Inactive").next()
+        );
+    }
+    assert!(rendered.contains("Task 2 "));
+    assert!(rendered.contains("Task 1 "));
+    assert!(rendered.contains("Show more"));
+}
+#[test]
+fn search_text_wins_and_refresh_preserves_selection_and_state() {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Char('/'));
+    for c in "task".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    key(&mut view, KeyCode::Char('j'));
+    assert_eq!(view.search, "taskj");
+    key(&mut view, KeyCode::Backspace);
+    assert_eq!(view.search, "task");
+    let id = view.selected_id().unwrap().to_owned();
+    view.set_sessions(view.rows.clone(), false);
+    assert_eq!(view.selected_id(), Some(id.as_str()));
+    assert!(view.searching);
+    assert_eq!(view.search, "task");
+    key(&mut view, KeyCode::Esc);
+    assert!(!view.searching);
+    assert_eq!(key(&mut view, KeyCode::Esc), Some(Action::Quit));
+}
+#[test]
+fn actions_and_hide_move_to_next_visible_row() {
+    let mut view = fixture();
+    assert_eq!(
+        key(&mut view, KeyCode::Char('o')),
+        Some(Action::Resume("42".into()))
+    );
+    assert_eq!(
+        key(&mut view, KeyCode::Char('f')),
+        Some(Action::Fork("42".into()))
+    );
+    assert_eq!(
+        key(&mut view, KeyCode::Right),
+        Some(Action::Open("42".into()))
+    );
+    assert_eq!(key(&mut view, KeyCode::Char('x')), None);
+    assert_eq!(
+        key(&mut view, KeyCode::Char('p')),
+        Some(Action::TogglePin {
+            id: "42".into(),
+            pinned: false
+        })
+    );
+    assert_eq!(
+        key(&mut view, KeyCode::Char('h')),
+        Some(Action::Hide("42".into()))
+    );
+    assert_eq!(view.selected_id(), Some("44"));
+    assert_eq!(
+        key(&mut view, KeyCode::Char('r')),
+        Some(Action::Unsupported("Rename"))
+    );
+    assert_eq!(
+        key(&mut view, KeyCode::Backspace),
+        Some(Action::Unsupported("Delete"))
+    );
+    assert_eq!(
+        key(&mut view, KeyCode::Char('g')),
+        Some(Action::PersistGrouping(Grouping::Status))
+    );
+    assert_eq!(
+        key(&mut view, KeyCode::Char('n')),
+        Some(Action::New(Some("/tmp/project".into())))
+    );
+}
+#[test]
+fn paging_tracks_headings_and_never_wraps() {
+    let mut view = View::default();
+    view.set_sessions(
+        (0..30)
+            .map(|i| {
+                let mut row = session(
+                    &i.to_string(),
+                    &format!("Task {i}"),
+                    SessionStatus::Ready,
+                    i,
+                );
+                if i >= 10 {
+                    row.cwd = "/tmp/second-project".into();
+                }
+                row
+            })
+            .collect(),
+        true,
+    );
+    screen(&view, 110, 18);
+    key(&mut view, KeyCode::PageDown);
+    assert_eq!(view.selected_id(), Some("10"));
+    key(&mut view, KeyCode::PageUp);
+    assert_eq!(view.selected_id(), Some("0"));
+    for _ in 0..40 {
+        key(&mut view, KeyCode::PageDown);
+        screen(&view, 110, 18);
+    }
+    assert_eq!(view.selected_id(), None);
+    key(&mut view, KeyCode::PageDown);
+    assert_eq!(view.selected_id(), None);
+    key(&mut view, KeyCode::Down);
+    assert_eq!(view.selected_id(), Some("0"));
+}
+#[test]
+fn styles_and_unicode_clipping() {
+    use super::style::selection_style_for;
+    assert_eq!(
+        selection_style_for(false, true, Some("0;15")),
+        Style::default()
+            .bold()
+            .fg(Color::Indexed(18))
+            .bg(Color::Indexed(111))
+    );
+    assert_eq!(
+        selection_style_for(false, true, None),
+        Style::default()
+            .bold()
+            .fg(Color::Indexed(24))
+            .bg(Color::Indexed(233))
+    );
+    assert_eq!(
+        selection_style_for(true, true, None),
+        Style::default().bold().reversed()
+    );
+    assert_eq!(
+        selection_style_for(false, false, None),
+        Style::default().bold().reversed()
+    );
+    assert_eq!(
+        super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+            Line::from("你好 world"),
+            4
+        )
+        .to_string(),
+        "你…"
+    );
+    let view = fixture();
+    for width in 0..100 {
+        for height in 0..7 {
+            let area = Rect::new(5, 8, width, height);
+            view.render(area, &mut Buffer::empty(area));
+        }
+    }
+}
+
+#[test]
+fn details_include_process_attention_and_clip_messages() {
+    let mut row = session("details", "Details task", SessionStatus::NeedsInput, 120);
+    row.model = Some("claude-opus".into());
+    row.effort = Some("high".into());
+    row.git_branch = Some("main".into());
+    row.process = Some(crate::model::Process {
+        pid: 123,
+        status: "waiting".into(),
+        kind: None,
+        tmux: Some("work:@1.%2".into()),
+        version: Some("2.0".into()),
+        started_at: None,
+    });
+    row.prompt = "prompt ".repeat(40);
+    row.last_message = Some("message ".repeat(60));
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    let rendered = screen(&view, 160, 36);
+    for label in [
+        "Model: claude-opus",
+        "Reasoning: high",
+        "Branch",
+        "main",
+        "Process",
+        "pid 123 · tmux work:@1.%2 · v2.0",
+        "Needs attention",
+        "Open task to review.",
+        "Waiting for your response.",
+        "Last message",
+    ] {
+        assert!(rendered.contains(label), "{label}");
+    }
+    let area = Rect::new(0, 0, 38, 25);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf);
+    assert_eq!(buf[(0, 24)].symbol(), "…");
+    let title_cell = &buf[(0, 2)];
+    assert!(title_cell.modifier.contains(ratatui::style::Modifier::BOLD));
+    assert_eq!(title_cell.fg, Color::Reset);
+}
+
+#[test]
+fn empty_states_notices_and_help_only_handle_close_keys() {
+    let mut view = View::default();
+    assert!(screen(&view, 80, 12).contains("No tasks yet"));
+    view.set_loading(true);
+    assert!(screen(&view, 80, 12).contains("Loading tasks…"));
+    view.set_sessions(vec![session("a", "Alpha", SessionStatus::Ready, 1)], false);
+    key(&mut view, KeyCode::Char('/'));
+    key(&mut view, KeyCode::Char('z'));
+    assert!(screen(&view, 80, 12).contains("No matching tasks"));
+    key(&mut view, KeyCode::Esc);
+    view.set_notice(Some("Notice".into()));
+    assert!(screen(&view, 80, 12).ends_with("  Notice"));
+    key(&mut view, KeyCode::Left);
+    assert!(view.notice.is_none());
+    key(&mut view, KeyCode::Char('?'));
+    assert_eq!(key(&mut view, KeyCode::Char('n')), None);
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+        None
+    );
+    assert!(view.help);
+    key(&mut view, KeyCode::Esc);
+    assert!(!view.help);
+}
