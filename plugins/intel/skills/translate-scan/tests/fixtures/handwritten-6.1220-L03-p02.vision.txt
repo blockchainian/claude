@@ -1,0 +1,26 @@
+0.1624 0.0418 0.9129 0.0818	= convolution of vectors A & reverse (B
+0.2306 0.0800 0.8612 0.1164	→ inner product of all relative shifts
+0.8210 0.1340 0.9649 0.1623	shifts of
+0.8729 0.1618 0.9694 0.1927	rev(B)
+0.2400 0.1964 0.9741 0.2473	- useful for smoothing etc. in digital signal
+0.1784 0.2488 0.4969 0.2930	- O(na) time "
+0.8165 0.2345 0.9694 0.2673	processing
+0.1788 0.2873 0.8329 0.3255	- O(nlg3) or even O(niE) HE>O
+0.2303 0.3222 0.9487 0.3691	via Strassen-like divide & conguer tricks
+0.1756 0.3575 0.6914 0.4170	- TODAY: On lg n) time!
+0.0447 0.4291 0.6188 0.4836	Representations of polynomials:
+0.0941 0.4727 0.4494 0.5055	A coefficient vector
+0.4753 0.4636 0.7976 0.5091	("monomial basis")
+0.0870 0.5053 0.3742 0.5457	B roots + scale:
+0.4635 0.5036 0.9812 0.5491	(Fundamental Theorem of Algebra)
+0.2024 0.5382 0.8965 0.5836	A(X) = (x-ro)(x-ri)..... (x-Vn-1).c
+0.1529 0.5782 0.9718 0.6200	- but impossible to find exact roots with to-*.
+0.1624 0.6145 0.6447 0.6545	→ addition hard/impossible
+0.1559 0.6455 0.7581 0.6918	- multiplication: concatenate roots
+0.1600 0.6818 0.5059 0.7182	- evaluate in On)
+0.0894 0.7545 0.9412 0.8018	samples: (xo-yo), (21. ys),.... (Xn-1-уп-1)
+0.3200 0.7927 0.9694 0.8364	with Alxi) = yi Vi &xis distinct
+0.1882 0.8291 0.9600 0.8727	uniquely determine degree-(n-1) polynomial A
+0.1904 0.8631 0.9461 0.9028	[Lagrange & Fundamental Theorem of Algebral
+0.1553 0.8964 0.9671 0.9455	- add/multiply each yi (assuming X's match,
+0.1576 0.9345 0.8024 0.9800	- evaluate requires interpolation...

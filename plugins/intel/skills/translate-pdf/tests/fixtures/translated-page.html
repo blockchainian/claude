@@ -1,0 +1,33 @@
+<html>
+<head>
+<title>
+6.1810 / Fall 2026
+</title>
+<meta content="no-cache" http-equiv="pragma"/>
+<meta content="IE=edge" http-equiv="X-UA-Compatible"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<base href=".."/>
+<link href="css/bootstrap.min.css" media="screen" rel="stylesheet"/>
+<link href="css/style.css" rel="stylesheet" type="text/css"/>
+<link href="labs/labs.css?v=2" rel="stylesheet" type="text/css"/>
+<script src="labs/guidance.js"></script>
+</head>
+<body bgcolor="#ffffff" text="#000000">
+<div class="container">
+<h2>xv6 阅读作业</h2>
+<p>本学期，我们希望你阅读 <a href="https://github.com/mit-pdos/xv6-riscv/tree/riscv/kernel">xv6 内核</a>的完整实现，并结合阅读<a href="https://mit-pdos.github.io/xv6-riscv-book/">xv6 教材</a>，其中解释了内核实现背后的原理和设计。</p><p>本讲请阅读 xv6 内核实现中的以下文件：</p><ul>
+<li><tt>kernel/memlayout.h</tt>
+</li><li><tt>kernel/vm.c</tt>
+</li><li><tt>kernel/kalloc.c</tt>
+</li><li><tt>kernel/riscv.h</tt>
+</li><li><tt>kernel/exec.c</tt>
+</li></ul>
+<p>在 <tt>exec.c:loadseg()</tt> 中，内核查找物理地址 <tt>pa</tt>，然后将其直接传递给 <tt>readi()</tt>，后者像处理指针一样向该地址写入数据。内核如何能够写入物理内存地址，而不是虚拟内存地址？是哪一行代码使这成为可能？</p><p>教材第 3 章或许有助于理解内核如何使用页表。</p><p>请将答案提交为名为 <tt>homework.txt</tt> 的 ASCII 文本文件，上传至 Gradescope 上对应的“Lecture N”作业。</p><hr/>
+<font style="font-size: 12px;">
+<p>有关 6.1810 的问题或意见？请给课程工作人员发送电子邮件：<a href="mailto:61810-staff@lists.csail.mit.edu"><i>61810-staff@lists.csail.mit.edu</i></a>。</p><p>
+</p></font>
+</div>
+<script src="js/jquery-1.10.2.min.js"></script>
+<script src="js/bootstrap.min.js"></script>
+</body>
+</html>
