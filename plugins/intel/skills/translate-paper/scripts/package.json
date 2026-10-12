@@ -1,0 +1,9 @@
+{
+  "name": "translate-paper-scripts",
+  "private": true,
+  "type": "module",
+  "description": "KaTeX for translate_paper.mjs's formula check (the renderer typesets with the same KaTeX version from its CDN)",
+  "dependencies": {
+    "katex": "0.16.11"
+  }
+}
