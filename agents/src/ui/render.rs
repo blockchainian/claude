@@ -429,12 +429,7 @@ impl View {
                 break;
             }
             let height = box_height(output.len()).min(available - offset);
-            let mut box_area = row(area, (details_start + offset) as u16, height as u16);
-            // A bare rule stops one column short of the box edges on both sides.
-            if output.is_empty() {
-                box_area.x += 1;
-                box_area.width = box_area.width.saturating_sub(2);
-            }
+            let box_area = row(area, (details_start + offset) as u16, height as u16);
             // Title: description, then how long the command has been running.
             // One space keeps the title off the corner glyph on both sides.
             let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
@@ -447,9 +442,10 @@ impl View {
                 .spans
                 .extend([" ── ".dim(), elapsed.dim(), " ".into()]);
             // Without output the task is just its titled top rule, which has no
-            // corner glyph, so the rule itself leads the title.
+            // corner glyph, so the rule itself leads the title; half-width
+            // glyphs at both ends keep it visually inside the box edges.
             let borders = if output.is_empty() {
-                title.spans.insert(0, "─ ".dim());
+                title.spans.insert(0, "╶ ".dim());
                 Borders::TOP
             } else {
                 title.spans.insert(0, " ".into());
@@ -463,6 +459,9 @@ impl View {
                 .title(title);
             let inner = block.inner(box_area);
             block.render(box_area, buf);
+            if output.is_empty() && box_area.width > 0 {
+                buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
+            }
             // One column of padding on both sides keeps output off the borders.
             let inner = Rect {
                 x: inner.x + 1,
