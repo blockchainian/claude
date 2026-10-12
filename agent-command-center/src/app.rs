@@ -84,10 +84,9 @@ impl App {
             })?;
             if crossterm::event::poll(POLL_INTERVAL)? {
                 match crossterm::event::read()? {
-                    Event::Key(key)
-                        if self.handle_key(key) => {
-                            return Ok(());
-                        }
+                    Event::Key(key) if self.handle_key(key) => {
+                        return Ok(());
+                    }
                     Event::Resize(..) => {}
                     _ => {}
                 }
@@ -146,18 +145,7 @@ impl App {
             }
             Action::Stop(id) => {
                 if let Some(session) = self.session(&id) {
-                    let notice = match session.process.as_ref() {
-                        Some(process) => {
-                            // SIGINT interrupts the running turn, like ctrl-c in that session.
-                            let sent = unsafe { libc::kill(process.pid as i32, libc::SIGINT) } == 0;
-                            if sent {
-                                format!("Interrupted {}", session.display_title())
-                            } else {
-                                format!("Could not signal pid {}", process.pid)
-                            }
-                        }
-                        None => "Session is not running".to_owned(),
-                    };
+                    let notice = interrupt(&session);
                     self.view.set_notice(Some(notice));
                 }
             }
@@ -215,6 +203,27 @@ impl App {
     }
 }
 
+/// Splits `session:@window.%pane` into its window and pane targets.
+fn tmux_target(target: &str) -> Option<(&str, &str, &str)> {
+    let (window, pane) = target.rsplit_once('.')?;
+    let (tmux_session, _) = window.split_once(':')?;
+    Some((tmux_session, window, pane))
+}
+
+fn tmux(args: &[&str]) -> Result<String, String> {
+    match Command::new("tmux").args(args).output() {
+        Ok(output) if output.status.success() => {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        }
+        Ok(output) => Err(format!(
+            "tmux {} failed: {}",
+            args[0],
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Err(format!("tmux unavailable: {error}")),
+    }
+}
+
 /// Switches the attached tmux client to the pane the session runs in.
 fn jump_to(session: &Session) -> String {
     let Some(process) = session.process.as_ref() else {
@@ -226,30 +235,42 @@ fn jump_to(session: &Session) -> String {
     if std::env::var_os("TMUX").is_none() {
         return format!("Session runs in tmux pane {target}; attach tmux to jump there");
     }
-    let Some((window, pane)) = target.rsplit_once('.') else {
+    let Some((tmux_session, window, pane)) = tmux_target(target) else {
         return format!("Unexpected tmux target {target}");
     };
-    let Some((tmux_session, _)) = window.split_once(':') else {
-        return format!("Unexpected tmux target {target}");
-    };
-    for args in [
-        vec!["switch-client", "-t", tmux_session],
-        vec!["select-window", "-t", window],
-        vec!["select-pane", "-t", pane],
-    ] {
-        match Command::new("tmux").args(&args).output() {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => {
-                return format!(
-                    "tmux {} failed: {}",
-                    args[0],
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
-            Err(error) => return format!("tmux unavailable: {error}"),
+    let current = tmux(&["display-message", "-p", "#S"]).unwrap_or_default();
+    let mut steps: Vec<Vec<&str>> = Vec::new();
+    if current != tmux_session {
+        steps.push(vec!["switch-client", "-t", tmux_session]);
+    }
+    steps.push(vec!["select-window", "-t", window]);
+    steps.push(vec!["select-pane", "-t", pane]);
+    for args in steps {
+        if let Err(error) = tmux(&args) {
+            return error;
         }
     }
     format!("Switched to {}", session.display_title())
+}
+
+/// Stops the running turn the way the user would: Esc in the session's pane.
+fn interrupt(session: &Session) -> String {
+    let Some(process) = session.process.as_ref() else {
+        return "Session is not running".to_owned();
+    };
+    let Some(target) = process.tmux.as_deref() else {
+        return format!(
+            "Session runs outside tmux (pid {}); press esc there",
+            process.pid
+        );
+    };
+    let Some((_, _, pane)) = tmux_target(target) else {
+        return format!("Unexpected tmux target {target}");
+    };
+    match tmux(&["send-keys", "-t", pane, "Escape"]) {
+        Ok(_) => format!("Sent esc to {}", session.display_title()),
+        Err(error) => error,
+    }
 }
 
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
