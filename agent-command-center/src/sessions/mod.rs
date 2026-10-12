@@ -7,11 +7,42 @@ use crate::model::{Process, Session, SessionStatus};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::{self, Write};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use transcript::Summary;
 
 const PAGE_SIZE: usize = 10;
+
+/// Persists the custom title in Claude Code's transcript and sidecar formats.
+pub fn rename(transcript: &Path, id: &str, name: &str) -> io::Result<()> {
+    let mut record = serde_json::to_vec(&serde_json::json!({
+        "type": "custom-title", "customTitle": name, "sessionId": id
+    }))?;
+    record.push(b'\n');
+    fs::OpenOptions::new()
+        .append(true)
+        .open(transcript)?
+        .write_all(&record)?;
+
+    let directory = transcript.with_file_name(id);
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .recursive(true)
+        .create(&directory)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    let mut sidecar = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(directory.join("custom-title.json"))?;
+    sidecar.set_permissions(fs::Permissions::from_mode(0o600))?;
+    sidecar.write_all(&serde_json::to_vec(
+        &serde_json::json!({"customTitle": name}),
+    )?)
+}
 
 pub fn config_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("CLAUDE_CONFIG_DIR") {
@@ -76,18 +107,21 @@ impl Store {
                 .as_deref()
                 .expect("live entries have session ids");
             let (summary, path, modified) = self.summary(id);
-            let has_title = summary.custom_title.is_some() || summary.ai_title.is_some();
+            let custom_title = summary.custom_title.clone();
+            let has_title = custom_title.is_some() || summary.ai_title.is_some();
             let mut session = session(id.to_owned(), summary, path, modified);
             if let Some(cwd) = entry.cwd.as_deref().filter(|cwd| !cwd.is_empty()) {
                 session.cwd = PathBuf::from(cwd);
             } else if session.cwd.as_os_str().is_empty() {
                 session.cwd = self.config_dir.clone();
             }
-            session.name = entry
-                .name
-                .as_deref()
-                .filter(|_| entry.name_source.as_deref() == Some("user"))
-                .map(transcript::preview);
+            session.name = custom_title.or_else(|| {
+                entry
+                    .name
+                    .as_deref()
+                    .filter(|_| entry.name_source.as_deref() == Some("user"))
+                    .map(transcript::preview)
+            });
             if !has_title
                 && entry.name_source.as_deref() == Some("derived")
                 && let Some(name) = entry.name.as_deref().filter(|name| !name.trim().is_empty())
@@ -288,7 +322,7 @@ mod tests {
 
     const FIXTURE: &str = include_str!("../../tests/fixtures/transcript.jsonl");
 
-    fn transcript(dir: &Path, id: &str, age: u64) -> PathBuf {
+    pub(super) fn transcript(dir: &Path, id: &str, age: u64) -> PathBuf {
         let project = dir.join("projects/ambiguous-project-slug");
         fs::create_dir_all(&project).unwrap();
         let path = project.join(format!("{id}.jsonl"));
@@ -442,5 +476,107 @@ mod tests {
         fs::remove_file(path).unwrap();
         assert!(store.refresh().sessions.is_empty());
         assert!(store.summaries.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn rename_overrides_live_registry_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let value = registry::tests::fixture(dir.path());
+        let id = value["sessionId"].as_str().unwrap();
+        let path = tests::transcript(dir.path(), id, 0);
+        fs::write(
+            dir.path().join("sessions/live.json"),
+            serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
+        let mut store = Store::new(dir.path().into());
+        assert_eq!(
+            store.refresh().sessions[0].display_title(),
+            "translate-papers"
+        );
+        // This is the real custom-title record shape appended by saveCustomTitle.
+        let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type":"custom-title", "customTitle":"Renamed live", "sessionId":id})
+        )
+        .unwrap();
+        assert_eq!(store.refresh().sessions[0].display_title(), "Renamed live");
+    }
+
+    #[test]
+    fn rename_appends_and_refreshes_latest_title_with_private_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "00000000-0000-0000-0000-000000000001";
+        let project = dir.path().join("projects/test");
+        fs::create_dir_all(&project).unwrap();
+        let path = project.join(format!("{id}.jsonl"));
+        let mut original = include_str!("../../tests/fixtures/transcript.jsonl").to_owned();
+        // Keep the original title in the head and append the rename in the tail.
+        let title = original.lines().nth(2).unwrap().to_owned();
+        for _ in 0..4000 {
+            original.push_str(&title);
+            original.push('\n');
+        }
+        fs::write(&path, &original).unwrap();
+        let mut store = Store::new(dir.path().into());
+        store.refresh();
+        for name in ["Quoted \"title\" \n 中文", "Latest title"] {
+            rename(&path, id, name).unwrap();
+            let bytes = fs::read(&path).unwrap();
+            assert!(bytes.starts_with(original.as_bytes()));
+            assert!(bytes.ends_with(b"\n"));
+            let record: serde_json::Value = serde_json::from_slice(
+                bytes
+                    .strip_suffix(b"\n")
+                    .unwrap()
+                    .rsplit(|b| *b == b'\n')
+                    .next()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                record,
+                serde_json::json!({"type": "custom-title", "customTitle": name, "sessionId": id})
+            );
+            let sidecar = project.join(id).join("custom-title.json");
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&fs::read(&sidecar).unwrap()).unwrap(),
+                serde_json::json!({"customTitle": name})
+            );
+            assert_eq!(
+                fs::metadata(&sidecar).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(
+                fs::metadata(project.join(id)).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(
+                transcript::read(&path, bytes.len() as u64)
+                    .unwrap()
+                    .custom_title
+                    .as_deref(),
+                Some(name)
+            );
+            assert_eq!(
+                store.refresh().sessions[0].display_title(),
+                name.lines().next().unwrap()
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(&path).unwrap().lines().count(),
+            original.lines().count() + 2
+        );
+        // A missing transcript must not be recreated.
+        assert!(rename(&project.join("missing.jsonl"), id, "Missing").is_err());
     }
 }

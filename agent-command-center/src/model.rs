@@ -109,7 +109,9 @@ pub enum Action {
     TogglePin { id: String, pinned: bool },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
-    /// `w`, `r`, `a`, backspace: no Claude Code equivalent yet; show the notice.
+    /// `r`: set the session display name.
+    Rename { id: String, name: String },
+    /// `w`, `a`, backspace: no Claude Code equivalent yet; show the notice.
     Unsupported(&'static str),
     /// "Show more" was activated: load the next page of inactive sessions.
     ShowMore,
