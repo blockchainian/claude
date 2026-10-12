@@ -40,6 +40,16 @@ const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     ("Inactive", &[SessionStatus::Inactive]),
 ];
 
+fn tab_for_status(status: Option<SessionStatus>, current_tab: usize) -> usize {
+    match status {
+        Some(status) if TASK_FILTERS[current_tab].1.contains(&status) => current_tab,
+        Some(SessionStatus::Ready) => 1,
+        Some(SessionStatus::Working) => 2,
+        Some(SessionStatus::NeedsInput) => 3,
+        Some(SessionStatus::Inactive) | None => 0,
+    }
+}
+
 #[derive(Default)]
 struct Viewport {
     scroll: usize,
@@ -140,17 +150,26 @@ impl View {
         self.project_groups = sessions.iter().map(ProjectGroup::for_session).collect();
         self.rows = sessions;
         self.has_more = has_more;
+        let selected_index = selected
+            .as_deref()
+            .and_then(|id| self.rows.iter().position(|s| s.id == id));
+        if selected.is_some()
+            && selected_index.is_none_or(|index| !self.visible_indices().contains(&index))
+        {
+            self.status_filter = tab_for_status(
+                selected_index.map(|index| self.rows[index].status),
+                self.status_filter,
+            );
+        }
         self.selected = if show_more {
             usize::MAX
         } else {
-            selected
-                .and_then(|id| self.rows.iter().position(|s| s.id == id))
-                .unwrap_or_else(|| {
-                    self.selectable_indices()
-                        .first()
-                        .copied()
-                        .unwrap_or(usize::MAX)
-                })
+            selected_index.unwrap_or_else(|| {
+                self.selectable_indices()
+                    .first()
+                    .copied()
+                    .unwrap_or(usize::MAX)
+            })
         };
         self.reconcile_selection();
     }

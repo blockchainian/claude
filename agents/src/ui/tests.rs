@@ -173,6 +173,115 @@ fn tabs_cycle_in_display_order_and_filter_by_label() {
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
 }
 #[test]
+fn refresh_follows_selected_ready_session_to_working_tab() {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(view.selected_id(), Some("42"));
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Working;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Working");
+    assert_eq!(view.selected_id(), Some("42"));
+}
+
+#[test]
+fn refresh_follows_selected_needs_input_session_to_ready_tab() {
+    let mut view = fixture();
+    for _ in 0..3 {
+        key(&mut view, KeyCode::Tab);
+    }
+    assert_eq!(view.selected_id(), Some("44"));
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "44").unwrap().status = SessionStatus::Ready;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    assert_eq!(view.selected_id(), Some("44"));
+}
+
+#[test]
+fn refresh_returns_to_active_when_selected_working_session_becomes_inactive() {
+    let mut view = fixture();
+    for _ in 0..2 {
+        key(&mut view, KeyCode::Tab);
+    }
+    assert_eq!(view.selected_id(), Some("46"));
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "46").unwrap().status = SessionStatus::Inactive;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected, view.visible_indices()[0]);
+}
+
+#[test]
+fn refresh_returns_to_active_when_selected_working_session_disappears() {
+    let mut view = fixture();
+    for _ in 0..2 {
+        key(&mut view, KeyCode::Tab);
+    }
+    assert_eq!(view.selected_id(), Some("46"));
+    let rows = view.rows.iter().filter(|s| s.id != "46").cloned().collect();
+
+    view.set_sessions(rows, true);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected, view.visible_indices()[0]);
+}
+
+#[test]
+fn refresh_keeps_selected_session_on_active_when_ready_becomes_working() {
+    let mut view = fixture();
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Working;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some("42"));
+}
+
+#[test]
+fn refresh_selects_first_active_session_when_selection_becomes_inactive() {
+    let mut view = fixture();
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Inactive;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some("44"));
+    assert_eq!(view.selected, view.visible_indices()[0]);
+}
+
+#[test]
+fn refresh_keeps_tab_when_selected_session_is_hidden_only_by_search() {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Tab);
+    key(&mut view, KeyCode::Char('/'));
+    for c in "Current".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    assert_eq!(view.selected_id(), Some("42"));
+    let mut rows = view.rows.clone();
+    let selected = rows.iter_mut().find(|s| s.id == "42").unwrap();
+    selected.title = "Other task".into();
+    selected.prompt = "Other task".into();
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    assert_eq!(view.search, "Current");
+    assert_eq!(view.selected_id(), None);
+}
+
+#[test]
 fn live_center_status_filter() {
     let mut view = simple_fixture();
     key(&mut view, KeyCode::BackTab);
