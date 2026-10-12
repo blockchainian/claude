@@ -11,7 +11,7 @@ Project
 
 Background
 ╭ Run checks ──────────────────────────╮
-│ last                                 │
+│ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
 ╰──────────────────────────────────────╯
 ╭ Waiting for output ──────────────────╮
 ╰──────────────────────────────────────╯
