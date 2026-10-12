@@ -98,6 +98,22 @@ impl QueueOperation {
     }
 }
 
+/// Text of a prompt the model acted on: a typed user message, or a queued
+/// message absorbed into a running turn, which Claude Code stores as an
+/// attachment instead of a user record.
+fn prompt_text(record: &Value) -> Option<String> {
+    match record["type"].as_str()? {
+        "user" => content_text(record, false),
+        "attachment" => {
+            let attachment = &record["attachment"];
+            (attachment["type"] == "queued_command" && attachment["commandMode"] == "prompt")
+                .then(|| attachment["prompt"].as_str().map(str::to_owned))
+                .flatten()
+        }
+        _ => None,
+    }
+}
+
 fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
     let mut queue = VecDeque::new();
     for operation in operations.into_iter().rev() {
@@ -133,6 +149,9 @@ fn read_messages(
 ) -> io::Result<()> {
     let mut prompt_found = false;
     let mut turn_messages = 0;
+    // An absorbed queued prompt waits for its `remove` record, which carries
+    // the moment the running turn actually picked it up.
+    let mut absorbed = None;
     let mut operations = Vec::new();
     let mut next_user = None;
     let mut dequeued_user = None;
@@ -171,9 +190,16 @@ fn read_messages(
             if !prompt_found && record["type"] == "assistant" {
                 turn_messages += 1;
             }
+            if absorbed.is_some()
+                && record["type"] == "queue-operation"
+                && record["operation"] == "remove"
+                && record["commandUuid"].as_str() == absorbed.as_deref()
+            {
+                summary.prompt_at = at;
+                absorbed = None;
+            }
             if !prompt_found
-                && record["type"] == "user"
-                && let Some(prompt) = content_text(&record, false)
+                && let Some(prompt) = prompt_text(&record)
                 && !prompt.trim().is_empty()
                 && !prompt.trim_start().starts_with('<')
             {
@@ -181,6 +207,11 @@ fn read_messages(
                 summary.prompt_at = at;
                 summary.turn_messages = turn_messages;
                 prompt_found = true;
+                if record["type"] == "attachment" {
+                    absorbed = record["attachment"]["source_uuid"]
+                        .as_str()
+                        .map(str::to_owned);
+                }
             }
             // The latest tool call, finished or not; the panel shows it while it
             // is newer than the last reply.
@@ -212,6 +243,7 @@ fn read_messages(
                 summary.last_message_at = at;
             }
             if prompt_found
+                && absorbed.is_none()
                 && summary.last_message.is_some()
                 && summary.activity.is_some()
                 && quiet_point
@@ -448,6 +480,64 @@ mod tests {
         assert_eq!(summary(&file).queued, ["B"]);
         queue(&mut file, "remove", "absent");
         assert_eq!(summary(&file).queued, ["B"]);
+    }
+
+    fn absorb(file: &mut impl Write, mode: &str, prompt: &str, uuid: &str) {
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "queue-operation", "operation": "remove",
+                "timestamp": "2026-10-12T10:00:09Z", "content": prompt,
+                "reason": "absorbed_mid_turn", "commandUuid": uuid, "deliveryId": "delivery"
+            })
+        )
+        .unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "attachment", "timestamp": "2026-10-12T10:00:01Z",
+                "attachment": {
+                    "type": "queued_command", "commandMode": mode, "prompt": prompt,
+                    "source_uuid": uuid, "delivery_id": "delivery", "humanTurn": true
+                }
+            })
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn absorbed_prompt_replaces_the_prompt_and_restarts_the_turn() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        queue(&mut file, "enqueue", "hey");
+        absorb(&mut file, "prompt", "hey", "command-hey");
+        writeln!(&mut file, "{}", FIXTURE.lines().nth(1).unwrap()).unwrap();
+        let summary = summary(&file);
+        assert_eq!(summary.prompt, "hey");
+        assert_eq!(
+            summary.prompt_at.unwrap().to_rfc3339(),
+            "2026-10-12T10:00:09+00:00"
+        );
+        assert_eq!(summary.turn_messages, 1);
+        assert!(summary.queued.is_empty());
+    }
+
+    #[test]
+    fn absorbed_notification_is_not_a_prompt() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        queue(&mut file, "enqueue", "<task-notification>done");
+        absorb(
+            &mut file,
+            "task-notification",
+            "<task-notification>done",
+            "command-note",
+        );
+        let summary = summary(&file);
+        assert_eq!(summary.prompt, "Current prompt");
+        assert_eq!(summary.turn_messages, 2);
     }
 
     #[test]
