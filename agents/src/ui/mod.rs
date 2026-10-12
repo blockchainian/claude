@@ -1,6 +1,7 @@
 //! Command center adapted from OpenAI Codex's TUI (Apache-2.0).
 mod formatting;
 mod hints;
+mod hyperlink;
 mod input;
 mod line_truncation;
 mod navigation;
