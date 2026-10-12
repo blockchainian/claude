@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnvFile, tmpDir } from "../../fetch-x-mentions/scripts/env.mjs";
-import { codexHome, OFF } from "../../translate/scripts/translate.mjs";
+import { codexHome, OFF } from "../../translate-epub/scripts/translate.mjs";
 import { applyReadings, cropSpots, disagreements, proofPrompt, READINGS_SCHEMA } from "./proof.mjs";
 import { visionLines } from "./vision.mjs";
 

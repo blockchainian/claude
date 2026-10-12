@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["pymupdf", "pikepdf", "fonttools", "markdown", "pillow", "numpy"]
 # ///
-# ABOUTME: Translates a slide-deck PDF into Chinese page for page: recolours the deck to the translate skill's dark
+# ABOUTME: Translates a slide-deck PDF into Chinese page for page: recolours the deck to the translate-epub skill's dark
 # theme, then replaces each prose text block in place with its fitted Chinese translation.
 # Usage: slides.py extract <deck.pdf> <work dir>
 #        slides.py render  <deck.pdf> <work dir> <out.pdf>
@@ -25,11 +25,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def translate_skill_scripts():
-    """The translate skill's scripts dir: the sibling skill in this plugin, else the newest installed copy."""
-    sibling = os.path.join(HERE, "..", "..", "translate", "scripts")
+    """The translate-epub skill's scripts dir: the sibling skill in this plugin, else the newest installed copy."""
+    sibling = os.path.join(HERE, "..", "..", "translate-epub", "scripts")
     if os.path.exists(os.path.join(sibling, "render.py")):
         return sibling
-    vers = glob.glob(os.path.expanduser("~/.claude/plugins/cache/blockchainian/intel/*/skills/translate/scripts"))
+    vers = glob.glob(os.path.expanduser("~/.claude/plugins/cache/blockchainian/intel/*/skills/translate-epub/scripts"))
     key = lambda p: tuple(int(x) for x in re.findall(r"\d+", p.split("/intel/")[1].split("/")[0]))
     return max(vers, key=key)
 

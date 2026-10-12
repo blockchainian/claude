@@ -45,7 +45,7 @@ path.
 |---|---|
 | `transcribe` | Transcribe audio or a live stream locally with whisper. |
 | `digest` | Turn an article, transcript, video or PDF into searchable highlights. |
-| `translate` | Translate an English EPUB into a Chinese PDF in the original's format. |
+| `translate-epub` | Translate an English EPUB into a Chinese PDF in the original's format. |
 | `case-study` | Write a sourced case study of one creator as a short PDF book. |
 | `download-book` | Find EPUB downloads on Anna's Archive and fetch the chosen book. |
 | `find-domain-names` | Brainstorm brand names and keep those with a registrable domain. |

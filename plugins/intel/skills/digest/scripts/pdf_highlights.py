@@ -4,7 +4,7 @@
 # dependencies = ["pikepdf>=9", "markdown>=3.5", "pillow>=10"]
 # ///
 # ABOUTME: Splits a PDF into chapters (its bookmarks) or pages for per-chapter highlights, and typesets the
-# ABOUTME: written highlights into a PDF in the translate skill's book format at the source's page size.
+# ABOUTME: written highlights into a PDF in the translate-epub skill's book format at the source's page size.
 #
 # Usage: pdf_highlights.py split <file.pdf | url> [--by page]
 #        pdf_highlights.py render <work dir> [--out <highlights.pdf>] [--bg iterm|#rrggbb] [--fg #rrggbb|iterm] [--font-size 9.25]
@@ -35,7 +35,7 @@ def load(path):
 
 
 fs = load(HERE / "fetch_source.py")
-rd = load(HERE.parent.parent / "translate" / "scripts" / "render.py")  # the book format: css, Chrome print, background
+rd = load(HERE.parent.parent / "translate-epub" / "scripts" / "render.py")  # the book format: css, Chrome print, background
 ch = load(HERE / "charts.py")  # ```chart blocks -> figures
 
 MARKER_RE = re.compile(r"⟦[^⟧]*⟧")  # the invisible page markers a translate-built PDF carries

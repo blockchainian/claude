@@ -1,11 +1,11 @@
 #!/bin/bash
-# ABOUTME: Idempotent auto-setup for translate-pdf: runs the translate skill's setup (poppler, uv, codex, Chrome),
+# ABOUTME: Idempotent auto-setup for translate-pdf: runs the translate-epub skill's setup (poppler, uv, codex, Chrome),
 # ABOUTME: then installs readable.mjs's Node packages (Readability, jsdom) beside it when missing.
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
-"$HERE/../../translate/scripts/setup.sh" "$@"
+"$HERE/../../translate-epub/scripts/setup.sh" "$@"
 
 if [ -d "$HERE/node_modules/@mozilla/readability" ] && [ -d "$HERE/node_modules/jsdom" ]; then
   echo "present: readability, jsdom"

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ABOUTME: Translates a document's text segments (Markdown blocks or HTML fragments) into Chinese through the
-// ABOUTME: translate skill's codex exec call, a batch of consecutive segments per call, many calls in flight; resumable.
+// ABOUTME: translate-epub skill's codex exec call, a batch of consecutive segments per call, many calls in flight; resumable.
 //
 // Usage: translate_segments.mjs <segments.json> <out.json> --format md|html [--title T] [--glossary g.md]
 //                               [--context "course material"] [--words 1500] [--jobs 8] [--model gpt-6-luna]
@@ -12,7 +12,7 @@ import fs from "node:fs";
 
 import { fileURLToPath } from "node:url";
 
-import { runCodex } from "../../translate/scripts/translate.mjs";
+import { runCodex } from "../../translate-epub/scripts/translate.mjs";
 import { loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
 
 export const rules = (context) => `You are a professional technical translator (English -> Simplified Chinese) translating

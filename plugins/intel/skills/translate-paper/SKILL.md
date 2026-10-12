@@ -2,13 +2,13 @@
 name: translate-paper
 description: >
   Translate a typeset English PDF with a text layer, such as a research paper (one or two columns), lecture or
-  recitation notes, a textbook chapter, an outline or a handout, into a Chinese PDF in the translate skill's book
+  recitation notes, a textbook chapter, an outline or a handout, into a Chinese PDF in the translate-epub skill's book
   format. Reading order, headings, lists, code, tables, LaTeX math, footnotes and references are kept, and figures
-  are cropped from the page with their captions. MinerU parses the layout, the translate skill's codex runner
+  are cropped from the page with their captions. MinerU parses the layout, the translate-epub skill's codex runner
   translates each section, and its render.py typesets the result. Use for "/translate-paper <paper.pdf>",
   "把这篇论文翻译成中文", "translate these lecture notes", or a batch of course PDFs.
   NOT for scanned or handwritten PDFs without a text layer (use translate-scan), slides (use translate-presentation),
-  EPUB books (use translate), or web pages (use translate-pdf).
+  EPUB books (use translate-epub), or web pages (use translate-pdf).
 ---
 
 # Translate papers
@@ -16,7 +16,7 @@ description: >
 ## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The scripts import from
-the sibling `translate` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
+the sibling `translate-epub` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
 
 ## Environment variables
 
@@ -33,7 +33,7 @@ the sibling `translate` and `fetch-x-mentions` skills, so keep the whole intel p
 "$SKILL_DIR/scripts/setup.sh"
 ```
 
-It installs MinerU into its own venv, KaTeX for the formula check, and runs the translate skill's setup (poppler,
+It installs MinerU into its own venv, KaTeX for the formula check, and runs the translate-epub skill's setup (poppler,
 uv, codex login, Chrome). MinerU's models download on first use.
 
 ## One PDF
@@ -74,7 +74,7 @@ MinerU invents data tables for charts) and builds the work dir from its `middle_
   words splits further at its headings, each ⟦IMG⟧/⟦CODE⟧ token weighing 25 words. References become a verbatim
   back section that is not translated.
 
-`translate_paper.mjs` uses the translate skill's `runCodex`, `checkOutput` and `buildPrompt` with paper rules, and
+`translate_paper.mjs` uses the translate-epub skill's `runCodex`, `checkOutput` and `buildPrompt` with paper rules, and
 sends each section together with the PDF text layer of its blocks. The translator repairs MinerU's formula
 misreads against that text layer, such as the word "big" read as `\mathbf{\ddot{big}}`. On top of the skill's
 checks, a section is rejected and retried when a display equation is missing, under 90% of the inline formulas
@@ -96,7 +96,7 @@ Before the sections it makes two codex calls:
   write; the file is never rewritten.
 - **Cover authors.** When there is a byline, it writes `cover_authors`: names in English, affiliations in Chinese.
 
-`render_paper.py` runs the translate skill's `render.py` with paper patches:
+`render_paper.py` runs the translate-epub skill's `render.py` with paper patches:
 
 - **Cover.** A paper's cover shows the English title, then one author per line with the shared affiliation on the
   last line, or "name, affiliation" per line when the authors are at different places. Notes, which have no

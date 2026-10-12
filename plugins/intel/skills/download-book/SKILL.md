@@ -56,4 +56,4 @@ slow-download page of the same MD5 if that page is blocked too. Use only file UR
 returned, and report missing links as unavailable. Never download from libgen or its mirrors, whose
 files are often samples, early releases or truncated.
 
-To get a Chinese PDF, pass the EPUB to the `translate` skill.
+To get a Chinese PDF, pass the EPUB to the `translate-epub` skill.

@@ -1,11 +1,11 @@
 #!/bin/bash
-# ABOUTME: Idempotent auto-setup for translate-scan: the translate skill's setup (poppler, uv, codex, Chrome), plus
+# ABOUTME: Idempotent auto-setup for translate-scan: the translate-epub skill's setup (poppler, uv, codex, Chrome), plus
 # ABOUTME: ImageMagick for page crops and the Swift compiler that builds the macOS Vision helper.
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-"$HERE/../../translate/scripts/setup.sh" "$@"
+"$HERE/../../translate-epub/scripts/setup.sh" "$@"
 
 missing=()
 if ! command -v magick >/dev/null 2>&1; then
