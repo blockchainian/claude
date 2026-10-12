@@ -51,6 +51,12 @@ pub struct Process {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PullRequest {
+    pub number: u64,
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Session {
     /// Claude Code session id (the transcript file stem).
     pub id: String,
@@ -64,6 +70,7 @@ pub struct Session {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub git_branch: Option<String>,
+    pub pr: Option<PullRequest>,
     pub status: SessionStatus,
     pub process: Option<Process>,
     pub updated_at: DateTime<Utc>,

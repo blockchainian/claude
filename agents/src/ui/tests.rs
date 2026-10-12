@@ -11,6 +11,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         model: None,
         effort: None,
         git_branch: None,
+        pr: None,
         status,
         process: None,
         updated_at: Utc::now() - Duration::seconds(age),
@@ -693,4 +694,51 @@ fn delete_dialog_number_shortcuts_follow_codex() {
         key(&mut view, KeyCode::Enter),
         Some(Action::Delete("42".into()))
     );
+}
+
+#[test]
+fn details_branch_pull_request_snapshot() {
+    let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
+    row.git_branch = Some("main".into());
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(vec![row.clone()], false);
+    let area = Rect::new(0, 0, 40, 18);
+    let render = |view: &View| {
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf);
+        buf.content
+            .chunks(40)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| {
+                        let symbol = cell.symbol();
+                        let symbol = symbol
+                            .rsplit("\x1b\\")
+                            .find(|part| !part.is_empty() && !part.starts_with("\x1b]8"))
+                            .unwrap_or("");
+                        symbol.split("\x1b]8").next().unwrap().to_owned()
+                    })
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(
+        render(&view),
+        include_str!("../../tests/ui_snapshots/details_branch.txt")
+    );
+    row.pr = Some(crate::model::PullRequest {
+        number: 833,
+        url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
+    });
+    view.set_sessions(vec![row.clone()], false);
+    assert_eq!(
+        render(&view),
+        include_str!("../../tests/ui_snapshots/details_branch_pr.txt")
+    );
+    row.git_branch = None;
+    view.set_sessions(vec![row], false);
+    assert!(!render(&view).contains("#833"));
 }

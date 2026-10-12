@@ -432,6 +432,7 @@ fn session(
         model: summary.model,
         effort: summary.effort,
         git_branch: summary.git_branch,
+        pr: summary.pr,
         status: SessionStatus::Inactive,
         process: None,
         updated_at,

@@ -1,3 +1,4 @@
+use crate::model::PullRequest;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::fs::File;
@@ -10,6 +11,7 @@ const CHUNK: u64 = 64 * 1024;
 pub(super) struct Summary {
     pub cwd: Option<PathBuf>,
     pub git_branch: Option<String>,
+    pub pr: Option<PullRequest>,
     pub prompt: String,
     pub ai_title: Option<String>,
     pub custom_title: Option<String>,
@@ -18,6 +20,17 @@ pub(super) struct Summary {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
+}
+
+impl Summary {
+    fn record_pr(&mut self, record: &Value) {
+        if record["type"] == "pr-link"
+            && let Some(number) = record["prNumber"].as_u64()
+            && let Some(url) = text(record, "prUrl")
+        {
+            self.pr = Some(PullRequest { number, url });
+        }
+    }
 }
 
 pub(super) fn preview(text: &str) -> String {
@@ -81,6 +94,7 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
     }
     let mut summary = Summary::default();
     for record in records(&head) {
+        summary.record_pr(&record);
         if !matches!(record["type"].as_str(), Some("user" | "assistant")) {
             continue;
         }
@@ -104,6 +118,7 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
     }
     let tail = if len <= 2 * CHUNK { &head } else { &tail };
     for record in records(tail) {
+        summary.record_pr(&record);
         if let Some(timestamp) = record["timestamp"]
             .as_str()
             .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
@@ -200,6 +215,55 @@ mod tests {
             summary.timestamp.unwrap().to_rfc3339(),
             "2026-10-06T16:39:29.554+00:00"
         );
+    }
+
+    const PR: &str = include_str!("../../tests/fixtures/pr-link.jsonl");
+
+    #[test]
+    fn pull_request_absent() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(FIXTURE.as_bytes()).unwrap();
+        assert!(
+            read(file.path(), file.as_file().metadata().unwrap().len())
+                .unwrap()
+                .pr
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn pull_request_last_wins_in_head_and_tail() {
+        let expected: Value = serde_json::from_str(PR).unwrap();
+        for large in [false, true] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            file.write_all(FIXTURE.as_bytes()).unwrap();
+            file.write_all(PR.as_bytes()).unwrap();
+            let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+            let pr = summary.pr.unwrap();
+            assert_eq!(pr.number, expected["prNumber"].as_u64().unwrap());
+            assert_eq!(pr.url, expected["prUrl"].as_str().unwrap());
+            if large {
+                for _ in 0..2000 {
+                    writeln!(file, "{}", FIXTURE.lines().nth(2).unwrap()).unwrap();
+                }
+                assert!(
+                    read(file.path(), file.as_file().metadata().unwrap().len())
+                        .unwrap()
+                        .pr
+                        .is_some()
+                );
+            }
+            let mut last = expected.clone();
+            last["prNumber"] = 833.into();
+            last["prUrl"] = "https://github.com/0xbabedead/chadwallet/pull/833".into();
+            writeln!(file, "{last}").unwrap();
+            let pr = read(file.path(), file.as_file().metadata().unwrap().len())
+                .unwrap()
+                .pr
+                .unwrap();
+            assert_eq!(pr.number, 833);
+            assert_eq!(pr.url, last["prUrl"].as_str().unwrap());
+        }
     }
 
     #[test]

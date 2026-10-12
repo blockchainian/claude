@@ -277,12 +277,33 @@ impl View {
             "Project".dim().into(),
             session.cwd.display().to_string().into(),
         ];
+        let mut pr_link = None;
         if let Some(branch) = &session.git_branch {
-            lines.extend([
-                Line::default(),
-                "Branch".dim().into(),
-                branch.clone().into(),
-            ]);
+            lines.push(Line::default());
+            if let Some(pr) = &session.pr {
+                let label = format!("#{}", pr.number);
+                let prefix_width = 8 + branch.width() + 3;
+                let line_width = prefix_width + label.len();
+                if lines.len() < usize::from(area.height) && line_width <= usize::from(area.width) {
+                    pr_link = Some((
+                        Rect::new(
+                            area.x + prefix_width as u16,
+                            area.y + lines.len() as u16,
+                            label.len() as u16,
+                            1,
+                        ),
+                        &pr.url,
+                    ));
+                }
+                lines.push(Line::from(vec![
+                    "Branch  ".dim(),
+                    branch.clone().into(),
+                    " · ".dim(),
+                    label.into(),
+                ]));
+            } else {
+                lines.extend(["Branch".dim().into(), branch.clone().into()]);
+            }
         }
         let width = usize::from(area.width.max(1));
         let mut prompt = vec![Line::default(), "Prompt".dim().into()];
@@ -329,6 +350,9 @@ impl View {
         lines.truncate(usize::from(area.height));
         for (offset, text) in lines.into_iter().enumerate() {
             line(text, row(area, offset as u16, 1), buf);
+        }
+        if let Some((area, url)) = pr_link {
+            super::hyperlink::hyperlink(buf, area, url);
         }
     }
 }
