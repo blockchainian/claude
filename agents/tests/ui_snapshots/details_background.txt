@@ -15,8 +15,8 @@ Background
 Last message
 Checking the project
 
-Project
-/tmp/project
-
 Model: Unknown
 Reasoning: Unknown
+
+Project
+/tmp/project
