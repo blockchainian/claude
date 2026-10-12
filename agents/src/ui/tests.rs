@@ -1026,3 +1026,48 @@ fn background_redraw_follows_selection() {
     view.set_sessions(Vec::new(), false);
     assert!(!view.has_background());
 }
+
+#[test]
+fn details_markdown_snapshot() {
+    let mut row = session("markdown", "Markdown task", SessionStatus::Working, 0);
+    row.prompt = "Use `cargo` and **tests**".into();
+    row.queued = vec!["- *queued* prompt".into()];
+    row.last_message =
+        Some("## Result\n\nBuilt [agents](https://example.com).\n\n```\ncargo test\n```".into());
+    let mut view = View::default();
+    view.set_sessions(vec![row], false);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 21)).unwrap();
+    terminal
+        .draw(|frame| view.render_details(frame.area(), frame.buffer_mut(), Utc::now()))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let rendered = buffer
+        .content
+        .chunks(40)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        rendered,
+        include_str!("../../tests/ui_snapshots/details_markdown.txt")
+    );
+    assert_eq!(buffer[(4, 6)].fg, Color::Cyan);
+    assert!(
+        buffer[(14, 6)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    assert!(
+        buffer[(2, 7)]
+            .modifier
+            .contains(ratatui::style::Modifier::ITALIC)
+    );
+    assert_eq!(buffer[(6, 12)].fg, Color::Cyan);
+    assert_eq!(buffer[(0, 14)].fg, Color::Cyan);
+}

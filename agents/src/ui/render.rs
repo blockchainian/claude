@@ -294,17 +294,18 @@ impl View {
             "" => "No prompt available.",
             prompt => prompt,
         };
-        let mut prompt_body = textwrap::wrap(prompt_text, width)
-            .into_iter()
-            .map(|s| Line::from(s.into_owned()))
-            .collect::<Vec<_>>();
+        let mut prompt_body = super::markdown::render(prompt_text, width);
         if prompt_body.len() > 2 {
             prompt_body.truncate(2);
             prompt_body[1] = "…".dim().into();
         }
         items.extend(prompt_body.into_iter().map(Item::from));
         items.extend(session.queued.iter().map(|queued| {
-            truncate_line_with_ellipsis_if_overflow(Line::from(queued.clone()), width).into()
+            let first = super::markdown::render(queued, width)
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            truncate_line_with_ellipsis_if_overflow(first, width).into()
         }));
 
         // Claude Code appends an exit marker to the output file when the
@@ -368,9 +369,9 @@ impl View {
             }
             items.extend([Line::default().into(), Line::from(header).into()]);
             items.extend(
-                textwrap::wrap(message, width)
+                super::markdown::render(message, width)
                     .into_iter()
-                    .map(|s| Line::from(s.into_owned()).into()),
+                    .map(Item::from),
             );
         }
 

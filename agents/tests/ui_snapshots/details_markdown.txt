@@ -1,0 +1,21 @@
+Task details
+
+Markdown task
+● Working
+
+Prompt
+Use cargo and tests
+• queued prompt
+
+Last message
+Result
+
+Built agents.
+
+cargo test
+
+Model: Unknown
+Reasoning: Unknown
+
+Project
+/tmp/project
