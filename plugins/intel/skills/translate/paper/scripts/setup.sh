@@ -8,7 +8,7 @@ CHECK=0
 VENV="${MINERU_VENV:-$HOME/.local/share/intel/translate-paper/mineru}"
 missing=()
 
-[ -d "$HERE/../../translate-epub/scripts" ] || missing+=("the translate-epub skill next to this one")
+[ -d "$HERE/../../epub/scripts" ] || missing+=("the translate-epub skill next to this one")
 if [ ! -x "$VENV/bin/mineru-kit" ]; then
   if [ "$CHECK" -eq 1 ]; then missing+=("MinerU ($VENV)"); else
     echo "installing MinerU into $VENV ..." >&2
@@ -21,6 +21,6 @@ if [ ! -d "$HERE/node_modules/katex" ]; then
   if [ "$CHECK" -eq 1 ]; then missing+=("katex (npm install in $HERE)"); else (cd "$HERE" && npm install --silent); fi
 fi
 command -v pdfinfo >/dev/null || missing+=("pdfinfo (brew install poppler)")
-if [ "$CHECK" -eq 1 ]; then "$HERE/../../translate-epub/scripts/setup.sh" --check; else "$HERE/../../translate-epub/scripts/setup.sh"; fi
+if [ "$CHECK" -eq 1 ]; then "$HERE/../../epub/scripts/setup.sh" --check; else "$HERE/../../epub/scripts/setup.sh"; fi
 if [ ${#missing[@]} -gt 0 ]; then echo "missing: ${missing[*]}"; exit 1; fi
 echo "translate-paper ready: MinerU $("$VENV/bin/mineru-kit" version 2>/dev/null | head -1)"

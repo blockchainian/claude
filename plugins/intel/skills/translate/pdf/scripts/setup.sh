@@ -5,7 +5,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
-"$HERE/../../translate-epub/scripts/setup.sh" "$@"
+"$HERE/../../epub/scripts/setup.sh" "$@"
 
 if [ -d "$HERE/node_modules/@mozilla/readability" ] && [ -d "$HERE/node_modules/jsdom" ]; then
   echo "present: readability, jsdom"

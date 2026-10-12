@@ -12,8 +12,8 @@ import fs from "node:fs";
 
 import { fileURLToPath } from "node:url";
 
-import { runCodex } from "../../translate-epub/scripts/translate.mjs";
-import { loadEnvFile } from "../../fetch-x-mentions/scripts/env.mjs";
+import { runCodex } from "../../epub/scripts/translate.mjs";
+import { loadEnvFile } from "../../../fetch-x-mentions/scripts/env.mjs";
 
 export const rules = (context) => `You are a professional technical translator (English -> Simplified Chinese) translating
 ${context} for Chinese readers. Everything you need is in the message: do not run commands, do not read or write

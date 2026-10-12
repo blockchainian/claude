@@ -26,10 +26,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def translate_skill_scripts():
     """The translate-epub skill's scripts dir: the sibling skill in this plugin, else the newest installed copy."""
-    sibling = os.path.join(HERE, "..", "..", "translate-epub", "scripts")
+    sibling = os.path.join(HERE, "..", "..", "epub", "scripts")
     if os.path.exists(os.path.join(sibling, "render.py")):
         return sibling
-    vers = glob.glob(os.path.expanduser("~/.claude/plugins/cache/blockchainian/intel/*/skills/translate-epub/scripts"))
+    vers = glob.glob(os.path.expanduser("~/.claude/plugins/cache/blockchainian/intel/*/skills/translate/epub/scripts"))
     key = lambda p: tuple(int(x) for x in re.findall(r"\d+", p.split("/intel/")[1].split("/")[0]))
     return max(vers, key=key)
 

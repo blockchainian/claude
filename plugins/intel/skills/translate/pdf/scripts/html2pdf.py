@@ -13,7 +13,7 @@
 import argparse, re, shutil, subprocess, sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "translate-epub" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "epub" / "scripts"))
 from render import chrome_binary  # noqa: E402
 
 W, H = 427.92, 660  # the reference book traction.pdf

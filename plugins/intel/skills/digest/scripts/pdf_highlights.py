@@ -35,7 +35,7 @@ def load(path):
 
 
 fs = load(HERE / "fetch_source.py")
-rd = load(HERE.parent.parent / "translate-epub" / "scripts" / "render.py")  # the book format: css, Chrome print, background
+rd = load(HERE.parent.parent / "translate" / "epub" / "scripts" / "render.py")  # the book format: css, Chrome print, background
 ch = load(HERE / "charts.py")  # ```chart blocks -> figures
 
 MARKER_RE = re.compile(r"⟦[^⟧]*⟧")  # the invisible page markers a translate-built PDF carries

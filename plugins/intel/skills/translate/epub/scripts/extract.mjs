@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
-import { loadEnvFile, stateDir } from "../../fetch-x-mentions/scripts/env.mjs";
+import { loadEnvFile, stateDir } from "../../../fetch-x-mentions/scripts/env.mjs";
 
 export const IMG_TOKEN = "⟦IMG:{}⟧"; // placeholder for a figure/equation stored as an image, kept verbatim through translation
 export const IMG_TOKEN_RE = /⟦IMG:[^⟧]+⟧/g;

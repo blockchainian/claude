@@ -12,8 +12,8 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stateDir } from "../../fetch-x-mentions/scripts/env.mjs";
-import { buildPrompt, checkOutput, cjkCount, runCodex } from "../../translate-epub/scripts/translate.mjs";
+import { stateDir } from "../../../fetch-x-mentions/scripts/env.mjs";
+import { buildPrompt, checkOutput, cjkCount, runCodex } from "../../epub/scripts/translate.mjs";
 
 const katex = createRequire(import.meta.url)("katex");
 

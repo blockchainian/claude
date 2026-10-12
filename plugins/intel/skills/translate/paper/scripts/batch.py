@@ -24,7 +24,7 @@ lock = threading.Lock()
 
 
 def state_root():
-    env = HERE.parents[1] / "fetch-x-mentions" / "scripts" / "env.mjs"
+    env = HERE.parents[2] / "fetch-x-mentions" / "scripts" / "env.mjs"
     return Path(json.loads(subprocess.check_output(["node", str(env)], text=True))["state"])
 
 

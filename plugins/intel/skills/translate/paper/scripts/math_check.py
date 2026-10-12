@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("render", HERE.parents[1] / "translate-epub" / "scripts" / "render.py")
+spec = importlib.util.spec_from_file_location("render", HERE.parents[1] / "epub" / "scripts" / "render.py")
 render = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(render)
 

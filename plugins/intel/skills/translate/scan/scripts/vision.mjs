@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { dataDir } from "../../fetch-x-mentions/scripts/env.mjs";
+import { dataDir } from "../../../fetch-x-mentions/scripts/env.mjs";
 
 const SOURCE = path.join(path.dirname(fileURLToPath(import.meta.url)), "vision_ocr.swift");
 

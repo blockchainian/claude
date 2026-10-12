@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pyDumps, pyStrip } from "./extract.mjs";
-import { loadEnvFile, tmpDir } from "../../fetch-x-mentions/scripts/env.mjs";
+import { loadEnvFile, tmpDir } from "../../../fetch-x-mentions/scripts/env.mjs";
 
 export const RULES = `You are a professional literary translator (English -> Simplified Chinese) working on a published
 non-fiction book. Everything you need is in the message: do not run commands, do not read or write files.
