@@ -715,6 +715,31 @@ fn delete_dialog_number_shortcuts_follow_codex() {
 }
 
 #[test]
+fn details_branch_uses_session_title_color() {
+    let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
+    row.git_branch = Some("main".into());
+    let color = style::thread_color(&row.id);
+    let mut view = View::new(Grouping::Project, true);
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 40, 18);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, Utc::now());
+    let project_y = (0..area.height)
+        .find(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, *y)].symbol())
+                .collect::<String>()
+                .starts_with("Project · ")
+        })
+        .expect("Project header");
+    for (offset, symbol) in "main".chars().enumerate() {
+        let cell = &buf[(10 + offset as u16, project_y)];
+        assert_eq!(cell.symbol(), symbol.to_string());
+        assert_eq!(cell.fg, color);
+    }
+}
+
+#[test]
 fn details_branch_pull_request_snapshot() {
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
     row.git_branch = Some("main".into());

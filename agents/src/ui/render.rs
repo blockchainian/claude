@@ -401,7 +401,10 @@ impl View {
             link
         });
         if let Some(branch) = &session.git_branch {
-            project.extend([" · ".dim(), branch.clone().into()]);
+            project.extend([
+                " · ".dim(),
+                Span::styled(branch.clone(), self.title_style(&session.id)),
+            ]);
         }
         items.extend([
             Line::default().into(),
