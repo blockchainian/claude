@@ -3,10 +3,10 @@ Task details · PR task · ○ Inactive
 Prompt
 PR task
 
-Branch  main · #833
-
 Project
 /tmp/project
+
+Branch  main · #833
 
 Model: Unknown
 

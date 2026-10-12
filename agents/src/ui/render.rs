@@ -259,9 +259,9 @@ impl View {
         };
         let width = usize::from(area.width.max(1));
         let (status, dot) = Self::status(session);
-        // Sections top to bottom: title, prompt, background, the newer of
-        // latest activity and last message, model, branch, project. Whatever
-        // does not fit is cut at the bottom and marked with an ellipsis.
+        // Sections top to bottom: title, prompt, the newer of latest activity
+        // and last message, background, needs attention, project, branch, model.
+        // Whatever does not fit is cut at the bottom and marked with an ellipsis.
         let mut header = Line::from(vec!["Task details".bold(), " · ".dim()]);
         let suffix = Line::from(vec![" · ".dim(), dot, " ".into(), status.into()]);
         let title_width = width.saturating_sub(header.width() + suffix.width());
@@ -317,35 +317,6 @@ impl View {
             truncate_line_with_ellipsis_if_overflow(first, width).into()
         }));
 
-        // Claude Code appends an exit marker to the output file when the
-        // command ends, which lands before the completion notification does.
-        let boxes = session
-            .background
-            .iter()
-            .map(|task| (task, tail_lines(&task.output, 1)))
-            .filter(|(_, lines)| {
-                !lines
-                    .last()
-                    .is_some_and(|last| last.starts_with("[exited with code"))
-            })
-            .collect::<Vec<_>>();
-        if !boxes.is_empty() {
-            items.extend([Line::default().into(), "Background".dim().into()]);
-            items.extend(
-                boxes
-                    .into_iter()
-                    .map(|(task, output)| Item::Background { task, output }),
-            );
-        }
-
-        if session.status == SessionStatus::NeedsInput {
-            items.extend([
-                Line::default().into(),
-                "Needs attention".red().into(),
-                "Open task to review.".dim().into(),
-                "Waiting for your response.".into(),
-            ]);
-        }
         // Latest activity and Last message share one slot and follow the
         // clock: whichever of the latest tool call and the last reply is newer.
         let activity = session
@@ -384,6 +355,42 @@ impl View {
             );
         }
 
+        // Claude Code appends an exit marker to the output file when the
+        // command ends, which lands before the completion notification does.
+        let boxes = session
+            .background
+            .iter()
+            .map(|task| (task, tail_lines(&task.output, 1)))
+            .filter(|(_, lines)| {
+                !lines
+                    .last()
+                    .is_some_and(|last| last.starts_with("[exited with code"))
+            })
+            .collect::<Vec<_>>();
+        if !boxes.is_empty() {
+            items.extend([Line::default().into(), "Background".dim().into()]);
+            items.extend(
+                boxes
+                    .into_iter()
+                    .map(|(task, output)| Item::Background { task, output }),
+            );
+        }
+
+        if session.status == SessionStatus::NeedsInput {
+            items.extend([
+                Line::default().into(),
+                "Needs attention".red().into(),
+                "Open task to review.".dim().into(),
+                "Waiting for your response.".into(),
+            ]);
+        }
+
+        items.extend([
+            Line::default().into(),
+            "Project".dim().into(),
+            session.cwd.display().to_string().into(),
+        ]);
+
         if let Some(branch) = &session.git_branch {
             items.push(Line::default().into());
             if let Some(pr) = &session.pr {
@@ -404,11 +411,6 @@ impl View {
                 items.extend(["Branch".dim().into(), branch.clone().into()]);
             }
         }
-        items.extend([
-            Line::default().into(),
-            "Project".dim().into(),
-            session.cwd.display().to_string().into(),
-        ]);
 
         let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
         if let Some(effort) = &session.effort {
