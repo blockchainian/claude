@@ -165,6 +165,21 @@ impl App {
                     self.view.set_notice(Some(notice));
                 }
             }
+            Action::Rename { id, name } => {
+                if let Some(session) = self.session(&id) {
+                    if let Some(path) = session.transcript {
+                        match crate::sessions::rename(&path, &id, &name) {
+                            Ok(()) => self.refresh(),
+                            Err(error) => self
+                                .view
+                                .set_notice(Some(format!("Failed to rename: {error}"))),
+                        }
+                    } else {
+                        self.view
+                            .set_notice(Some("Cannot rename: session has no transcript".into()));
+                    }
+                }
+            }
             Action::Hide(_) => {}
             Action::TogglePin { id, pinned } => {
                 self.preferences.pinned.retain(|pinned_id| pinned_id != &id);

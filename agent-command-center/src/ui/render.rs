@@ -27,6 +27,14 @@ struct CenterLayout {
     footer: Rect,
 }
 impl View {
+    fn editor_text(&self) -> &str {
+        if self.rename_target.is_some() {
+            &self.rename
+        } else {
+            &self.search
+        }
+    }
+
     fn center_layout(&self, area: Rect) -> CenterLayout {
         let footer_height = u16::from(area.height >= 2);
         let header_height = if area.height >= 6 { 3 } else { 0 };
@@ -48,7 +56,11 @@ impl View {
         } else {
             [body, Rect::default(), Rect::default()]
         };
-        let search = row(list, 0, u16::from(self.searching));
+        let search = row(
+            list,
+            0,
+            u16::from(self.searching || self.rename_target.is_some()),
+        );
         let list = row(
             list,
             search.height,
@@ -65,13 +77,16 @@ impl View {
     }
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout = self.center_layout(area);
-        if !self.searching || self.help || layout.search.is_empty() {
+        if !(self.searching || self.rename_target.is_some())
+            || self.help
+            || layout.search.is_empty()
+        {
             return None;
         }
         let available = usize::from(layout.search.width).saturating_sub(10);
         Some((
             layout.search.x
-                + (9 + visible_suffix(&self.search, available).width())
+                + (9 + visible_suffix(self.editor_text(), available).width())
                     .min(usize::from(layout.search.width.saturating_sub(1)))
                     as u16,
             layout.search.y,
@@ -102,7 +117,7 @@ impl View {
             })
             .collect::<Vec<_>>();
         let mut tabs = inset(row(layout.header, 1, 1));
-        let filter_hint = if self.searching {
+        let filter_hint = if self.searching || self.rename_target.is_some() {
             Line::default()
         } else {
             hint_line(&[("tab/⇧tab", "filter")])
@@ -126,13 +141,21 @@ impl View {
             inset(row(layout.header, 2, 1)),
             buf,
         );
-        if self.searching {
+        if self.searching || self.rename_target.is_some() {
             buf.set_style(layout.search, super::style::active_tab_style());
             let available = usize::from(layout.search.width).saturating_sub(10);
             line(
                 vec![
-                    "Search › ".cyan().bold(),
-                    visible_suffix(&self.search, available).to_owned().into(),
+                    if self.rename_target.is_some() {
+                        "Rename › "
+                    } else {
+                        "Search › "
+                    }
+                    .cyan()
+                    .bold(),
+                    visible_suffix(self.editor_text(), available)
+                        .to_owned()
+                        .into(),
                 ],
                 layout.search,
                 buf,

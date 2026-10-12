@@ -16,6 +16,8 @@ impl View {
     pub(super) fn center_footer_hints(&self) -> Line<'static> {
         if self.help {
             hint_line(&[("esc", "back")])
+        } else if self.rename_target.is_some() {
+            hint_line(&[("esc", "back"), ("enter", "rename")])
         } else if self.searching {
             hint_line(&[("esc", "back"), ("enter", "open")])
         } else {

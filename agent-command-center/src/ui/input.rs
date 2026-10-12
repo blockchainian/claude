@@ -48,6 +48,33 @@ impl View {
             }
             return None;
         }
+        if self.rename_target.is_some() {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('c')
+                    if key.code == KeyCode::Esc
+                        || key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    self.rename_target = None;
+                    self.rename.clear();
+                    self.reconcile_selection();
+                }
+                KeyCode::Enter if !self.rename.trim().is_empty() => {
+                    let id = self.rename_target.take().expect("rename target is set");
+                    let name = self.rename.trim().to_owned();
+                    self.rename.clear();
+                    self.reconcile_selection();
+                    return Some(Action::Rename { id, name });
+                }
+                KeyCode::Char(c) if plain => self.rename.push(c),
+                KeyCode::Backspace => {
+                    if let Some((offset, _)) = self.rename.grapheme_indices(true).next_back() {
+                        self.rename.truncate(offset);
+                    }
+                }
+                _ => {}
+            }
+            return None;
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Some(Action::Quit);
         }
@@ -149,7 +176,15 @@ impl View {
                 return Some(Action::New(self.selected_row().map(|s| s.cwd.clone())));
             }
             KeyCode::Char('w') => return Some(Action::Unsupported("New worktree")),
-            KeyCode::Char('r') => return Some(Action::Unsupported("Rename")),
+            KeyCode::Char('r') => {
+                if let Some(session) = self.selected_row() {
+                    let id = session.id.clone();
+                    self.rename = session.display_title().to_owned();
+                    self.rename_target = Some(id);
+                    self.search.clear();
+                    self.searching = false;
+                }
+            }
             KeyCode::Char('a') => return Some(Action::Unsupported("Archive")),
             KeyCode::Backspace => return Some(Action::Unsupported("Delete")),
             KeyCode::Char('o') => return self.selected_id().map(|id| Action::Resume(id.into())),

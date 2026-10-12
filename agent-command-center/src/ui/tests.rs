@@ -246,10 +246,9 @@ fn actions_and_hide_move_to_next_visible_row() {
         Some(Action::Hide("42".into()))
     );
     assert_eq!(view.selected_id(), Some("44"));
-    assert_eq!(
-        key(&mut view, KeyCode::Char('r')),
-        Some(Action::Unsupported("Rename"))
-    );
+    assert_eq!(key(&mut view, KeyCode::Char('r')), None);
+    assert!(screen(&view, 88, 16).contains("Rename › Needs an answer"));
+    key(&mut view, KeyCode::Esc);
     assert_eq!(
         key(&mut view, KeyCode::Backspace),
         Some(Action::Unsupported("Delete"))
@@ -441,4 +440,113 @@ fn details_name_a_missing_prompt() {
     let mut view = View::new(Grouping::Project, false);
     view.set_sessions(vec![row], false);
     assert!(screen(&view, 160, 24).contains("No prompt available."));
+}
+
+#[test]
+fn rename_edits_title_and_commits_trimmed_text() {
+    let mut view = fixture();
+    assert_eq!(key(&mut view, KeyCode::Char('r')), None);
+    assert!(screen(&view, 88, 16).contains("Rename › Current task"));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((23, 3)));
+    for c in " updated  ".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Rename {
+            id: "42".into(),
+            name: "Current task updated".into()
+        })
+    );
+    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+}
+
+#[test]
+fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
+    let mut view = fixture();
+    let hints = view.center_footer_hints().to_string();
+    key(&mut view, KeyCode::Char('r'));
+    assert_eq!(
+        view.center_footer_hints().to_string(),
+        "esc back  enter rename"
+    );
+    for code in [
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::PageUp,
+        KeyCode::PageDown,
+        KeyCode::Home,
+        KeyCode::End,
+        KeyCode::Tab,
+        KeyCode::Right,
+        KeyCode::F(3),
+    ] {
+        assert_eq!(key(&mut view, code), None);
+        assert_eq!(view.selected_id(), Some("42"));
+    }
+    for _ in 0..12 {
+        key(&mut view, KeyCode::Backspace);
+    }
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    for c in " e\u{301}".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    key(&mut view, KeyCode::Backspace);
+    assert!(screen(&view, 88, 16).contains("Rename ›"));
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    key(&mut view, KeyCode::Esc);
+    assert_eq!(view.center_footer_hints().to_string(), hints);
+    assert_eq!(view.rows[view.selected].display_title(), "Current task");
+    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+}
+
+#[test]
+fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
+    let mut view = fixture();
+    view.status_filter = 3;
+    key(&mut view, KeyCode::Char('r'));
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Inactive;
+    view.set_sessions(rows, false);
+    assert_eq!(view.selected_id(), Some("42"));
+    assert!(screen(&view, 88, 16).contains("Rename › Current task"));
+    view.hide("42");
+    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    let mut view = fixture();
+    key(&mut view, KeyCode::Char('r'));
+    view.set_sessions(vec![], true);
+    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert_eq!(key(&mut view, KeyCode::Char('r')), None);
+    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+}
+
+#[test]
+fn live_center_rename_active() {
+    let mut view = View::default();
+    view.set_sessions(
+        vec![session("42", "Task to find", SessionStatus::Ready, 120)],
+        false,
+    );
+    key(&mut view, KeyCode::Char('r'));
+    assert_eq!(
+        screen(&view, 88, 16),
+        include_str!("../../tests/ui_snapshots/live_center_rename_active.txt")
+    );
+    let area = Rect::new(0, 0, 88, 16);
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf);
+    assert_eq!(buf[(2, 3)].fg, Color::Cyan);
+    assert!(
+        buf[(2, 3)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    assert_eq!(
+        buf[(80, 3)].style(),
+        Style::default()
+            .fg(Color::Reset)
+            .bg(Color::Reset)
+            .underline_color(Color::Reset)
+            .patch(super::style::active_tab_style())
+    );
 }

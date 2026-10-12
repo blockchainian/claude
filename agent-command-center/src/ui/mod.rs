@@ -50,6 +50,8 @@ pub struct View {
     status_filter: usize,
     search: String,
     searching: bool,
+    rename_target: Option<String>,
+    rename: String,
     help: bool,
     loading: bool,
     has_more: bool,
@@ -98,6 +100,8 @@ impl View {
             status_filter: 0,
             search: String::new(),
             searching: false,
+            rename_target: None,
+            rename: String::new(),
             help: false,
             loading: false,
             has_more: false,
@@ -199,7 +203,8 @@ impl View {
             .enumerate()
             .filter(|(_, s)| {
                 !self.hidden.contains(&s.id)
-                    && filter.is_none_or(|f| f == s.status)
+                    && (self.rename_target.as_deref() == Some(&s.id)
+                        || filter.is_none_or(|f| f == s.status))
                     && (search.is_empty()
                         || format!(
                             "{} {} {} {}",
@@ -241,6 +246,14 @@ impl View {
     }
     fn reconcile_selection(&mut self) {
         let visible = self.selectable_indices();
+        if let Some(id) = &self.rename_target
+            && !visible
+                .iter()
+                .any(|i| self.rows.get(*i).is_some_and(|s| &s.id == id))
+        {
+            self.rename_target = None;
+            self.rename.clear();
+        }
         if !visible.contains(&self.selected) {
             self.selected = visible.first().copied().unwrap_or(usize::MAX);
         }
