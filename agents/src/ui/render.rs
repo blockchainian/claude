@@ -442,6 +442,7 @@ impl View {
                 ..inner
             };
             Paragraph::new(output.into_iter().map(Line::from).collect::<Vec<_>>())
+                .style(Style::default().dim())
                 .render(inner, buf);
             offset += height;
         }

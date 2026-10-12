@@ -951,12 +951,15 @@ fn details_background_boxes_tail_and_clip_output() {
 }
 
 #[test]
-fn background_box_dims_border_but_not_title() {
+fn background_box_dims_border_and_output_but_not_title() {
     use ratatui::style::Modifier;
+    use std::io::Write;
+    let mut output = tempfile::NamedTempFile::new().unwrap();
+    writeln!(output, "tick").unwrap();
     let mut row = session("background", "Background task", SessionStatus::Ready, 120);
     row.background.push(crate::model::BackgroundTask {
         description: "Run checks".into(),
-        output: "/nonexistent/output".into(),
+        output: output.path().into(),
         started_at: Utc::now(),
     });
     let mut view = View::new(Grouping::Project, false);
@@ -971,6 +974,8 @@ fn background_box_dims_border_but_not_title() {
     assert!(buf[(30, top)].modifier.contains(Modifier::DIM));
     assert_eq!(buf[(2, top)].symbol(), "R");
     assert!(!buf[(2, top)].modifier.contains(Modifier::DIM));
+    assert_eq!(buf[(2, top + 1)].symbol(), "t");
+    assert!(buf[(2, top + 1)].modifier.contains(Modifier::DIM));
 }
 
 #[test]
