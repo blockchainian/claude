@@ -393,11 +393,11 @@ fn details_include_attention_and_clip_messages() {
             .any(|line| line.contains("Model: claude-opus · high"))
     );
     assert!(!rendered.contains("Reasoning"));
-    let area = Rect::new(0, 0, 38, 25);
+    let area = Rect::new(0, 0, 38, 22);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
-    assert_eq!(buf[(0, 24)].symbol(), "…");
-    let title_cell = &buf[(0, 2)];
+    assert_eq!(buf[(0, 21)].symbol(), "…");
+    let title_cell = &buf[(15, 0)];
     assert!(title_cell.modifier.contains(ratatui::style::Modifier::BOLD));
     assert_eq!(title_cell.fg, Color::Reset);
 }
@@ -892,6 +892,31 @@ fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
 }
 
 #[test]
+fn details_header_truncates_only_the_title() {
+    let mut row = session(
+        "header",
+        "A very long session title that exceeds the panel width",
+        SessionStatus::Working,
+        0,
+    );
+    row.prompt = "Current prompt".into();
+    let rendered = queued_details(row, 15);
+    assert_eq!(
+        rendered,
+        include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
+    );
+    let lines = rendered.lines().collect::<Vec<_>>();
+    assert_eq!(lines[0], "Task details · A very long … · ● Working");
+    assert_eq!(lines[1], "");
+    assert_eq!(lines[2], "Prompt");
+    assert!(
+        !lines[1..]
+            .iter()
+            .any(|line| { line.contains("A very long") || line.contains("● Working") })
+    );
+}
+
+#[test]
 fn details_prompt_shows_queued_entries_in_order() {
     let mut row = session("queue", "Queue task", SessionStatus::Working, 0);
     row.prompt = "Current prompt".into();
@@ -908,9 +933,9 @@ fn details_prompt_keeps_second_wrapped_line_before_ellipsis() {
     row.prompt = format!("{} {} {}", "a".repeat(40), "b".repeat(40), "c".repeat(40));
     let rendered = queued_details(row, 15);
     let lines = rendered.lines().collect::<Vec<_>>();
-    assert_eq!(lines[6], "a".repeat(40));
-    assert_eq!(lines[7], format!("{}…", "b".repeat(39)));
-    assert_eq!(lines[8], "");
+    assert_eq!(lines[3], "a".repeat(40));
+    assert_eq!(lines[4], format!("{}…", "b".repeat(39)));
+    assert_eq!(lines[5], "");
 }
 
 #[test]
@@ -919,9 +944,9 @@ fn details_prompt_keeps_exactly_two_wrapped_lines_unchanged() {
     row.prompt = format!("{} {}", "a".repeat(40), "b".repeat(40));
     let rendered = queued_details(row, 15);
     let lines = rendered.lines().collect::<Vec<_>>();
-    assert_eq!(lines[6], "a".repeat(40));
-    assert_eq!(lines[7], "b".repeat(40));
-    assert_eq!(lines[8], "");
+    assert_eq!(lines[3], "a".repeat(40));
+    assert_eq!(lines[4], "b".repeat(40));
+    assert_eq!(lines[5], "");
 }
 
 #[test]
@@ -985,7 +1010,7 @@ fn details_background_boxes_tail_and_clip_output() {
         queued_details(row.clone(), 22),
         include_str!("../../tests/ui_snapshots/details_background_long_title.txt")
     );
-    let clipped = queued_details(row, 17);
+    let clipped = queued_details(row, 14);
     assert!(clipped.contains("Background\n╭"));
     assert!(clipped.contains("Last message"));
     assert!(!clipped.contains("Project"));
@@ -1091,17 +1116,17 @@ fn details_markdown_snapshot() {
         rendered,
         include_str!("../../tests/ui_snapshots/details_markdown.txt")
     );
-    assert_eq!(buffer[(4, 6)].fg, Color::Cyan);
+    assert_eq!(buffer[(4, 3)].fg, Color::Cyan);
     assert!(
-        buffer[(14, 6)]
+        buffer[(14, 3)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, 7)]
+        buffer[(2, 4)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, 12)].fg, Color::Cyan);
-    assert_eq!(buffer[(0, 14)].fg, Color::Cyan);
+    assert_eq!(buffer[(6, 9)].fg, Color::Cyan);
+    assert_eq!(buffer[(0, 11)].fg, Color::Cyan);
 }

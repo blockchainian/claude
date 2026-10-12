@@ -1,7 +1,4 @@
-Task details
-
-Background task
-○ Ready
+Task details · Background task · ○ Ready
 
 Prompt
 Background task

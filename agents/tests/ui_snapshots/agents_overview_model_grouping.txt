@@ -1,18 +1,18 @@
   Agent command center  Group: Model  g
    All 4   Needs you 0   Working 0   Ready 4   Inactive 0                          tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                               │ Task details
+      Tasks                                               │ Task details · Legacy task · ○ Ready
   Unknown  1                                              │
-  › ○ Legacy task                                         │ Legacy task
-                                                          │ ○ Ready
+  › ○ Legacy task                                         │ Prompt
+                                                          │ Legacy task
   model-a  2                                              │
-    ○ Recent task                                         │ Prompt
-    ○ Older task                                          │ Legacy task
+    ○ Recent task                                         │ Project
+    ○ Older task                                          │ /tmp/project
                                                           │
-  model-b  1                                              │ Project
-    ○ Other model                                         │ /tmp/project
+  model-b  1                                              │ Model: Unknown
+    ○ Other model                                         │
                                                           │
-                                                          │ Model: Unknown
+                                                          │
                                                           │
                                                           │
                                                           │

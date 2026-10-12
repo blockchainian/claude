@@ -1,7 +1,4 @@
-Task details
-
-Activity task
-○ Ready
+Task details · Activity task · ○ Ready
 
 Prompt · 42 messages · 10m 5s
 Activity task

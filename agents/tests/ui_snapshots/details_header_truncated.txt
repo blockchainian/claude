@@ -1,0 +1,9 @@
+Task details · A very long … · ● Working
+
+Prompt
+Current prompt
+
+Project
+/tmp/project
+
+Model: Unknown
