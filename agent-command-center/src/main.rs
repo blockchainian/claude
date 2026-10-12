@@ -3,6 +3,7 @@ mod model;
 mod sessions;
 mod state;
 mod terminal_background;
+mod theme;
 mod ui;
 
 fn main() {
