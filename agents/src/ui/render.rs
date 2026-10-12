@@ -433,6 +433,11 @@ impl View {
                 .title(title);
             let inner = block.inner(box_area);
             block.render(box_area, buf);
+            let inner = Rect {
+                x: inner.x + 1,
+                width: inner.width.saturating_sub(1),
+                ..inner
+            };
             Paragraph::new(output.into_iter().map(Line::from).collect::<Vec<_>>())
                 .render(inner, buf);
             offset += height;
