@@ -35,6 +35,8 @@ const TASK_FILTERS: &[(&str, Option<SessionStatus>)] = &[
 struct Viewport {
     scroll: usize,
     page_height: usize,
+    /// Screen cell of the selection marker drawn by the last render.
+    marker: Option<(u16, u16)>,
 }
 
 pub struct View {
@@ -159,6 +161,11 @@ impl View {
     pub fn set_notice(&mut self, notice: Option<String>) {
         self.notice = notice;
     }
+    /// Where the `›` of the selected row was drawn last, so the terminal cursor can rest on it.
+    pub fn marker_pos(&self) -> Option<(u16, u16)> {
+        self.viewport.borrow().marker
+    }
+
     pub fn grouping(&self) -> Grouping {
         self.grouping
     }
