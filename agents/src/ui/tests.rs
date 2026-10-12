@@ -447,7 +447,7 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
     assert_eq!(view.search, "task");
     key(&mut view, KeyCode::Esc);
     assert!(!view.searching);
-    assert_eq!(key(&mut view, KeyCode::Esc), Some(Action::Quit));
+    assert_eq!(key(&mut view, KeyCode::Esc), Some(Action::Back));
 }
 #[test]
 fn actions_and_hide_move_to_next_visible_row() {

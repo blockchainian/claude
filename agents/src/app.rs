@@ -85,6 +85,7 @@ pub struct App {
     /// Set when the user chose to hand the terminal to a `claude` process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
+    last_session: Option<String>,
 }
 
 impl App {
@@ -100,6 +101,7 @@ impl App {
             view,
             sessions: Vec::new(),
             launch: None,
+            last_session: None,
         }
     }
 
@@ -221,6 +223,14 @@ impl App {
         };
         match action {
             Action::Quit => return true,
+            Action::Back => {
+                let Some(session) = self.last_session.as_deref().and_then(|id| self.session(id))
+                else {
+                    return true;
+                };
+                let id = session.id.clone();
+                return self.launch_claude(session, &["--resume", &id]);
+            }
             Action::ShowMore => {
                 self.store.show_more();
                 self.view.set_loading(true);
@@ -331,6 +341,7 @@ impl App {
         };
         let mut command = Command::new("claude");
         command.args(args).current_dir(cwd);
+        self.last_session = Some(session.id);
         self.launch = Some(command);
         true
     }
@@ -351,4 +362,111 @@ fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 
 pub fn config_dir_exists(config_dir: &Path) -> bool {
     config_dir.is_dir()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::SessionStatus;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    fn fixture() -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+            include_str!("../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut app = App::new(dir.path().to_owned());
+        app.refresh();
+        assert_eq!(app.sessions.len(), 1);
+        app.sessions[0].cwd = dir.path().to_owned();
+        app.sessions[0].status = SessionStatus::Ready;
+        app.view.set_sessions(app.sessions.clone(), false);
+        (dir, app)
+    }
+
+    fn key(app: &mut App, code: KeyCode) -> bool {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    fn assert_resume(app: &App) {
+        let command = app.launch.as_ref().expect("session should resume");
+        assert_eq!(command.get_program(), "claude");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["--resume", app.sessions[0].id.as_str()]
+        );
+        assert_eq!(
+            command.get_current_dir(),
+            Some(app.sessions[0].cwd.as_path())
+        );
+    }
+
+    #[test]
+    fn escape_without_launched_session_quits() {
+        let (_dir, mut app) = fixture();
+        assert!(key(&mut app, KeyCode::Esc));
+        assert!(app.launch.is_none());
+    }
+
+    #[test]
+    fn escape_resumes_last_opened_session() {
+        let (_dir, mut app) = fixture();
+        assert!(key(&mut app, KeyCode::Enter));
+        app.launch.take().unwrap();
+        // True leaves the dashboard for either quit or launch; the command distinguishes them.
+        assert!(key(&mut app, KeyCode::Esc));
+        assert_resume(&app);
+    }
+
+    #[test]
+    fn escape_after_session_removed_quits() {
+        let (_dir, mut app) = fixture();
+        assert!(key(&mut app, KeyCode::Enter));
+        app.launch.take().unwrap();
+        app.sessions.clear();
+        app.view.set_sessions(Vec::new(), false);
+        assert!(key(&mut app, KeyCode::Esc));
+        assert!(app.launch.is_none());
+    }
+
+    #[test]
+    fn escape_remembers_resume_and_fork_but_not_new() {
+        for code in [KeyCode::Char('o'), KeyCode::Char('f')] {
+            let (_dir, mut app) = fixture();
+            assert!(key(&mut app, code));
+            app.launch.take().unwrap();
+            assert!(key(&mut app, KeyCode::Char('n')));
+            app.launch.take().unwrap();
+            assert!(key(&mut app, KeyCode::Esc));
+            assert_resume(&app);
+        }
+        let (_dir, mut app) = fixture();
+        assert!(key(&mut app, KeyCode::Char('n')));
+        app.launch.take().unwrap();
+        assert!(key(&mut app, KeyCode::Esc));
+        assert!(app.launch.is_none());
+    }
+
+    #[test]
+    fn escape_with_missing_directory_stays_in_dashboard() {
+        let (dir, mut app) = fixture();
+        assert!(key(&mut app, KeyCode::Enter));
+        app.launch.take().unwrap();
+        app.sessions[0].cwd = dir.path().join("missing");
+        assert!(!key(&mut app, KeyCode::Esc));
+        assert!(app.launch.is_none());
+    }
+
+    #[test]
+    fn control_c_after_open_quits() {
+        let (_dir, mut app) = fixture();
+        assert!(key(&mut app, KeyCode::Enter));
+        app.launch.take().unwrap();
+        assert!(app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        assert!(app.launch.is_none());
+    }
 }

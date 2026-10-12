@@ -140,7 +140,9 @@ pub enum Action {
     Unsupported(&'static str),
     /// "Show more" was activated: load the next page of inactive sessions.
     ShowMore,
-    /// Esc on the top level, or ctrl-c.
+    /// Esc on the top level: return to the last launched session, or quit.
+    Back,
+    /// Ctrl-c.
     Quit,
 }
 

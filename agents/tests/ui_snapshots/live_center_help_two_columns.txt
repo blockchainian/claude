@@ -10,7 +10,7 @@
   pgup   Page up      f          Fork
   pgdn   Page down    r          Rename
   ⌃c     Quit         x          Stop
-                      a          Archive
+  esc    Back         a          Archive
                       h          Hide
                       backspace  Delete
                       p          Pin/unpin

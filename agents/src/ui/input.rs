@@ -199,7 +199,7 @@ impl View {
                     .unwrap_or(usize::MAX)
             }
             KeyCode::Enter | KeyCode::Right => return self.activate(),
-            KeyCode::Esc => return Some(Action::Quit),
+            KeyCode::Esc => return Some(Action::Back),
             KeyCode::Char('g') => {
                 self.grouping = self.grouping.next();
                 self.viewport.borrow_mut().scroll = 0;
