@@ -226,7 +226,7 @@ impl App {
             Action::Back => {
                 let Some(session) = self.last_session.as_deref().and_then(|id| self.session(id))
                 else {
-                    return true;
+                    return self.launch_new(None);
                 };
                 let id = session.id.clone();
                 return self.launch_claude(session, &["--resume", &id]);
@@ -247,14 +247,7 @@ impl App {
                 }
             }
             Action::New(cwd) => {
-                let cwd = cwd
-                    .filter(|cwd| cwd.is_dir())
-                    .or_else(|| std::env::current_dir().ok())
-                    .unwrap_or_else(|| PathBuf::from("/"));
-                let mut command = Command::new("claude");
-                command.current_dir(cwd);
-                self.launch = Some(command);
-                return true;
+                return self.launch_new(cwd);
             }
             Action::Rename { id, name } => {
                 if let Some(session) = self.session(&id) {
@@ -312,6 +305,17 @@ impl App {
             }
         }
         false
+    }
+
+    fn launch_new(&mut self, cwd: Option<PathBuf>) -> bool {
+        let cwd = cwd
+            .filter(|cwd| cwd.is_dir())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("/"));
+        let mut command = Command::new("claude");
+        command.current_dir(cwd);
+        self.launch = Some(command);
+        true
     }
 
     fn session(&self, id: &str) -> Option<Session> {
@@ -406,10 +410,17 @@ mod tests {
     }
 
     #[test]
-    fn escape_without_launched_session_quits() {
+    fn escape_without_launched_session_opens_new_session() {
         let (_dir, mut app) = fixture();
         assert!(key(&mut app, KeyCode::Esc));
-        assert!(app.launch.is_none());
+        let command = app.launch.as_ref().expect("new session should launch");
+        assert_eq!(command.get_program(), "claude");
+        assert_eq!(command.get_args().len(), 0);
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::env::current_dir().unwrap().as_path())
+        );
+        assert!(app.last_session.is_none());
     }
 
     #[test]
@@ -423,14 +434,22 @@ mod tests {
     }
 
     #[test]
-    fn escape_after_session_removed_quits() {
+    fn escape_after_session_removed_opens_new_session() {
         let (_dir, mut app) = fixture();
         assert!(key(&mut app, KeyCode::Enter));
         app.launch.take().unwrap();
+        let last_session = app.last_session.clone();
         app.sessions.clear();
         app.view.set_sessions(Vec::new(), false);
         assert!(key(&mut app, KeyCode::Esc));
-        assert!(app.launch.is_none());
+        let command = app.launch.as_ref().expect("new session should launch");
+        assert_eq!(command.get_program(), "claude");
+        assert_eq!(command.get_args().len(), 0);
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::env::current_dir().unwrap().as_path())
+        );
+        assert_eq!(app.last_session, last_session);
     }
 
     #[test]
@@ -448,7 +467,8 @@ mod tests {
         assert!(key(&mut app, KeyCode::Char('n')));
         app.launch.take().unwrap();
         assert!(key(&mut app, KeyCode::Esc));
-        assert!(app.launch.is_none());
+        assert!(app.launch.is_some());
+        assert!(app.last_session.is_none());
     }
 
     #[test]
