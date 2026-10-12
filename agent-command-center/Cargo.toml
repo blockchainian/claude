@@ -1,0 +1,25 @@
+[package]
+name = "claude-agents"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Agent command center for Claude Code sessions"
+publish = false
+
+[[bin]]
+name = "claude-agents"
+path = "src/main.rs"
+
+[dependencies]
+chrono = "0.4"
+crossterm = "0.29"
+libc = "0.2"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "unstable-widget-ref"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+textwrap = "0.16"
+unicode-segmentation = "1"
+unicode-width = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

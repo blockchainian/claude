@@ -1,0 +1,270 @@
+//! Terminal loop: polls the session sources, renders the view and executes its actions.
+
+use crate::model::Action;
+use crate::model::Session;
+use crate::sessions::Snapshot;
+use crate::sessions::Store;
+use crate::state::Preferences;
+use crate::ui::View;
+use crossterm::event::Event;
+use crossterm::event::KeyEvent;
+use crossterm::terminal;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use std::io;
+use std::os::unix::process::CommandExt;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::Duration;
+use std::time::Instant;
+
+const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+pub struct App {
+    config_dir: PathBuf,
+    store: Store,
+    preferences: Preferences,
+    view: View,
+    sessions: Vec<Session>,
+    /// Set when the user chose to leave the dashboard for a `claude` process.
+    launch: Option<Command>,
+}
+
+impl App {
+    pub fn new(config_dir: PathBuf) -> Self {
+        let preferences = Preferences::load(&config_dir);
+        let mut view = View::new(preferences.grouping, true);
+        view.set_pinned(&preferences.pinned);
+        view.set_loading(true);
+        Self {
+            store: Store::new(config_dir.clone()),
+            config_dir,
+            preferences,
+            view,
+            sessions: Vec::new(),
+            launch: None,
+        }
+    }
+
+    pub fn run(mut self) -> io::Result<()> {
+        let mut terminal = enter_terminal()?;
+        let result = self.event_loop(&mut terminal);
+        leave_terminal(terminal)?;
+        result?;
+        if let Some(mut command) = self.launch.take() {
+            // exec only returns on failure.
+            let error = command.exec();
+            eprintln!(
+                "claude-agents: failed to start {:?}: {error}",
+                command.get_program()
+            );
+            std::process::exit(1);
+        }
+        Ok(())
+    }
+
+    fn event_loop(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) -> io::Result<()> {
+        let mut last_refresh = Instant::now() - REFRESH_INTERVAL;
+        loop {
+            if last_refresh.elapsed() >= REFRESH_INTERVAL {
+                self.refresh();
+                last_refresh = Instant::now();
+            }
+            terminal.draw(|frame| {
+                let area = frame.area();
+                self.view.render(area, frame.buffer_mut());
+                if let Some((x, y)) = self.view.cursor_pos(area) {
+                    frame.set_cursor_position((x, y));
+                }
+            })?;
+            if crossterm::event::poll(POLL_INTERVAL)? {
+                match crossterm::event::read()? {
+                    Event::Key(key)
+                        if self.handle_key(key) => {
+                            return Ok(());
+                        }
+                    Event::Resize(..) => {}
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn refresh(&mut self) {
+        let Snapshot { sessions, has_more } = self.store.refresh();
+        self.sessions = sessions.clone();
+        self.view.set_loading(false);
+        self.view.set_sessions(sessions, has_more);
+    }
+
+    /// Returns true when the dashboard should close.
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        let Some(action) = self.view.handle_key(key) else {
+            return false;
+        };
+        match action {
+            Action::Quit => return true,
+            Action::ShowMore => {
+                self.store.show_more();
+                self.view.set_loading(true);
+                self.refresh();
+            }
+            Action::Open(id) => {
+                if let Some(session) = self.session(&id) {
+                    if session.process.is_some() {
+                        let notice = jump_to(&session);
+                        self.view.set_notice(Some(notice));
+                    } else {
+                        return self.launch_claude(session, &["--resume", &id]);
+                    }
+                }
+            }
+            Action::Resume(id) => {
+                if let Some(session) = self.session(&id) {
+                    return self.launch_claude(session, &["--resume", &id]);
+                }
+            }
+            Action::Fork(id) => {
+                if let Some(session) = self.session(&id) {
+                    return self.launch_claude(session, &["--resume", &id, "--fork-session"]);
+                }
+            }
+            Action::New(cwd) => {
+                let cwd = cwd
+                    .filter(|cwd| cwd.is_dir())
+                    .or_else(|| std::env::current_dir().ok())
+                    .unwrap_or_else(|| PathBuf::from("/"));
+                let mut command = Command::new("claude");
+                command.current_dir(cwd);
+                self.launch = Some(command);
+                return true;
+            }
+            Action::Stop(id) => {
+                if let Some(session) = self.session(&id) {
+                    let notice = match session.process.as_ref() {
+                        Some(process) => {
+                            // SIGINT interrupts the running turn, like ctrl-c in that session.
+                            let sent = unsafe { libc::kill(process.pid as i32, libc::SIGINT) } == 0;
+                            if sent {
+                                format!("Interrupted {}", session.display_title())
+                            } else {
+                                format!("Could not signal pid {}", process.pid)
+                            }
+                        }
+                        None => "Session is not running".to_owned(),
+                    };
+                    self.view.set_notice(Some(notice));
+                }
+            }
+            Action::Hide(_) => {}
+            Action::TogglePin { id, pinned } => {
+                self.preferences.pinned.retain(|pinned_id| pinned_id != &id);
+                if pinned {
+                    self.preferences.pinned.push(id);
+                }
+                self.save_preferences();
+                self.view.set_pinned(&self.preferences.pinned);
+            }
+            Action::PersistGrouping(grouping) => {
+                self.preferences.grouping = grouping;
+                self.save_preferences();
+            }
+            Action::Unsupported(what) => {
+                self.view.set_notice(Some(format!(
+                    "{what} is not supported for Claude Code sessions"
+                )));
+            }
+        }
+        false
+    }
+
+    fn session(&self, id: &str) -> Option<Session> {
+        self.sessions
+            .iter()
+            .find(|session| session.id == id)
+            .cloned()
+    }
+
+    fn save_preferences(&mut self) {
+        if let Err(error) = self.preferences.save(&self.config_dir) {
+            self.view
+                .set_notice(Some(format!("Failed to save preferences: {error}")));
+        }
+    }
+
+    /// Leaves the dashboard and replaces it with `claude <args>` in the session's directory.
+    fn launch_claude(&mut self, session: Session, args: &[&str]) -> bool {
+        let cwd = if session.cwd.is_dir() {
+            session.cwd.clone()
+        } else {
+            self.view.set_notice(Some(format!(
+                "Directory no longer exists: {}",
+                session.cwd.display()
+            )));
+            return false;
+        };
+        let mut command = Command::new("claude");
+        command.args(args).current_dir(cwd);
+        self.launch = Some(command);
+        true
+    }
+}
+
+/// Switches the attached tmux client to the pane the session runs in.
+fn jump_to(session: &Session) -> String {
+    let Some(process) = session.process.as_ref() else {
+        return "Session is not running".to_owned();
+    };
+    let Some(target) = process.tmux.as_deref() else {
+        return format!("Session runs in another terminal (pid {})", process.pid);
+    };
+    if std::env::var_os("TMUX").is_none() {
+        return format!("Session runs in tmux pane {target}; attach tmux to jump there");
+    }
+    let Some((window, pane)) = target.rsplit_once('.') else {
+        return format!("Unexpected tmux target {target}");
+    };
+    let Some((tmux_session, _)) = window.split_once(':') else {
+        return format!("Unexpected tmux target {target}");
+    };
+    for args in [
+        vec!["switch-client", "-t", tmux_session],
+        vec!["select-window", "-t", window],
+        vec!["select-pane", "-t", pane],
+    ] {
+        match Command::new("tmux").args(&args).output() {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                return format!(
+                    "tmux {} failed: {}",
+                    args[0],
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            Err(error) => return format!("tmux unavailable: {error}"),
+        }
+    }
+    format!("Switched to {}", session.display_title())
+}
+
+fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
+    terminal::enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, terminal::EnterAlternateScreen)?;
+    Terminal::new(CrosstermBackend::new(stdout))
+}
+
+fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+    terminal::disable_raw_mode()?;
+    crossterm::execute!(terminal.backend_mut(), terminal::LeaveAlternateScreen)?;
+    terminal.show_cursor()
+}
+
+pub fn config_dir_exists(config_dir: &Path) -> bool {
+    config_dir.is_dir()
+}
