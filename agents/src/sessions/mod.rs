@@ -2,6 +2,9 @@
 
 mod registry;
 mod transcript;
+mod watcher;
+
+pub use watcher::watch;
 
 use crate::model::{Process, Session, SessionStatus};
 use chrono::{DateTime, Utc};
@@ -455,6 +458,55 @@ mod tests {
         file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000 + age))
             .unwrap();
         path
+    }
+
+    #[test]
+    #[ignore = "reads real config; set AGENTS_BENCH_CONFIG explicitly"]
+    fn measure_refresh() {
+        let config = std::env::var_os("AGENTS_BENCH_CONFIG").expect("AGENTS_BENCH_CONFIG required");
+        let mut store = Store::new(config.into());
+        let start = std::time::Instant::now();
+        let snapshot = store.refresh();
+        let cold = start.elapsed();
+        let start = std::time::Instant::now();
+        for _ in 0..20 {
+            std::hint::black_box(store.refresh());
+        }
+        eprintln!(
+            "refresh cold={cold:?} warm_mean={:?} transcripts={} cached={} sessions={}",
+            start.elapsed() / 20,
+            store.index.len(),
+            store.summaries.len(),
+            snapshot.sessions.len()
+        );
+    }
+
+    #[test]
+    fn changing_one_transcript_preserves_other_cached_allocations() {
+        let dir = tempfile::tempdir().unwrap();
+        let first_id = "00000000-0000-0000-0000-000000000001";
+        let first = transcript(dir.path(), first_id, 1);
+        let second = transcript(dir.path(), "00000000-0000-0000-0000-000000000002", 2);
+        let mut store = Store::new(dir.path().into());
+        store.refresh();
+        let first_prompt = store.summaries[&first].summary.prompt.as_ptr() as usize;
+        let second_prompt = store.summaries[&second].summary.prompt.as_ptr() as usize;
+        let title = FIXTURE.lines().nth(2).unwrap();
+        writeln!(
+            fs::OpenOptions::new().append(true).open(&first).unwrap(),
+            "{title}"
+        )
+        .unwrap();
+        store.refresh();
+        // A parsed summary allocates its prompt while the previous cached one still lives.
+        assert_ne!(
+            store.summaries[&first].summary.prompt.as_ptr() as usize,
+            first_prompt
+        );
+        assert_eq!(
+            store.summaries[&second].summary.prompt.as_ptr() as usize,
+            second_prompt
+        );
     }
 
     #[test]

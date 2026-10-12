@@ -1,5 +1,6 @@
 mod app;
 mod model;
+mod refresh;
 mod repository;
 mod sessions;
 mod state;
