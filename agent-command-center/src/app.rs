@@ -13,7 +13,6 @@ use crossterm::terminal;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::io;
-use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -29,7 +28,8 @@ pub struct App {
     preferences: Preferences,
     view: View,
     sessions: Vec<Session>,
-    /// Set when the user chose to leave the dashboard for a `claude` process.
+    /// Set when the user chose to hand the terminal to a `claude` process; the dashboard
+    /// returns once it exits.
     launch: Option<Command>,
 }
 
@@ -50,33 +50,38 @@ impl App {
     }
 
     pub fn run(mut self) -> io::Result<()> {
-        let mut terminal = enter_terminal()?;
-        // Raw mode is on, so the terminal's reply reaches us instead of the screen.
-        let light = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
-            .ok()
-            .flatten()
-            .is_some_and(terminal_background::is_light);
-        crate::ui::set_light_background(light);
-        crate::theme::use_default_accents(light);
-        if let Some(path) = self.preferences.theme.clone()
-            && let Err(error) = crate::theme::use_theme_file(&path)
-        {
-            self.view
-                .set_notice(Some(format!("Theme not loaded: {error}")));
+        loop {
+            let mut terminal = enter_terminal()?;
+            // Raw mode is on, so the terminal's reply reaches us instead of the screen.
+            let light = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
+                .ok()
+                .flatten()
+                .is_some_and(terminal_background::is_light);
+            crate::ui::set_light_background(light);
+            crate::theme::use_default_accents(light);
+            if let Some(path) = self.preferences.theme.clone()
+                && let Err(error) = crate::theme::use_theme_file(&path)
+            {
+                self.view
+                    .set_notice(Some(format!("Theme not loaded: {error}")));
+            }
+            let result = self.event_loop(&mut terminal);
+            leave_terminal(terminal)?;
+            result?;
+            let Some(mut command) = self.launch.take() else {
+                return Ok(());
+            };
+            // The dashboard comes back when claude exits, so Ctrl+D in claude returns here.
+            let notice = match command.status() {
+                Ok(status) if status.success() => None,
+                Ok(status) => Some(format!("claude exited with {status}")),
+                Err(error) => Some(format!(
+                    "Failed to start {:?}: {error}",
+                    command.get_program()
+                )),
+            };
+            self.view.set_notice(notice);
         }
-        let result = self.event_loop(&mut terminal);
-        leave_terminal(terminal)?;
-        result?;
-        if let Some(mut command) = self.launch.take() {
-            // exec only returns on failure.
-            let error = command.exec();
-            eprintln!(
-                "claude-agents: failed to start {:?}: {error}",
-                command.get_program()
-            );
-            std::process::exit(1);
-        }
-        Ok(())
     }
 
     fn event_loop(
@@ -206,7 +211,7 @@ impl App {
         }
     }
 
-    /// Leaves the dashboard and replaces it with `claude <args>` in the session's directory.
+    /// Hands the terminal to `claude <args>` in the session's directory until it exits.
     fn launch_claude(&mut self, session: Session, args: &[&str]) -> bool {
         let cwd = if session.cwd.is_dir() {
             session.cwd.clone()
