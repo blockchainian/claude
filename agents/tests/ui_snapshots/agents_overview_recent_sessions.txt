@@ -1,5 +1,5 @@
   Agent command center  Group: Project  g
-   All 10   Needs you 0   Working 0   Ready 0   Inactive 10
+   All 10   Ready 0   Working 0   Needs you 0   Inactive 10
   ────────────────────────────────────────────────────────────────────────────
       Tasks                                            Status         Updated
   /  10

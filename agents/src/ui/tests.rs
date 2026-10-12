@@ -104,6 +104,37 @@ fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
     );
 }
 #[test]
+fn tabs_cycle_in_display_order_and_filter_by_label() {
+    let mut view = fixture();
+    assert_eq!(TASK_FILTERS[view.status_filter], ("All", None));
+    assert_eq!(view.visible_indices().len(), 6);
+    let filters = [
+        ("Ready", SessionStatus::Ready, 2),
+        ("Working", SessionStatus::Working, 1),
+        ("Needs you", SessionStatus::NeedsInput, 2),
+        ("Inactive", SessionStatus::Inactive, 1),
+    ];
+    for (label, status, count) in filters {
+        key(&mut view, KeyCode::Tab);
+        assert_eq!(TASK_FILTERS[view.status_filter], (label, Some(status)));
+        assert_eq!(view.visible_indices().len(), count);
+        assert!(
+            view.visible_indices()
+                .iter()
+                .all(|&index| view.rows[index].status == status)
+        );
+    }
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(TASK_FILTERS[view.status_filter], ("All", None));
+    for (label, status, _) in filters.into_iter().rev() {
+        view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+        assert_eq!(TASK_FILTERS[view.status_filter], (label, Some(status)));
+        assert_eq!(view.selected_row().unwrap().status, status);
+    }
+    key(&mut view, KeyCode::BackTab);
+    assert_eq!(TASK_FILTERS[view.status_filter], ("All", None));
+}
+#[test]
 fn live_center_status_filter() {
     let mut view = simple_fixture();
     key(&mut view, KeyCode::BackTab);
@@ -523,7 +554,10 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
 #[test]
 fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
     let mut view = fixture();
-    view.status_filter = 3;
+    view.status_filter = TASK_FILTERS
+        .iter()
+        .position(|(_, status)| *status == Some(SessionStatus::Ready))
+        .unwrap();
     key(&mut view, KeyCode::Char('r'));
     let mut rows = view.rows.clone();
     rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Inactive;

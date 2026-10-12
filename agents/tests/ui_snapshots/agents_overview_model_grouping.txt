@@ -1,5 +1,5 @@
   Agent command center  Group: Model  g
-   All 4   Needs you 0   Working 0   Ready 4   Inactive 0                          tab/⇧tab filter
+   All 4   Ready 4   Working 0   Needs you 0   Inactive 0                          tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                               │ Task details · ○ Ready · Legacy task
   Unknown  1                                              │

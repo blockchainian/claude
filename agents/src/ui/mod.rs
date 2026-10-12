@@ -27,9 +27,9 @@ use unicode_width::UnicodeWidthStr;
 
 const TASK_FILTERS: &[(&str, Option<SessionStatus>)] = &[
     ("All", None),
-    ("Needs you", Some(SessionStatus::NeedsInput)),
-    ("Working", Some(SessionStatus::Working)),
     ("Ready", Some(SessionStatus::Ready)),
+    ("Working", Some(SessionStatus::Working)),
+    ("Needs you", Some(SessionStatus::NeedsInput)),
     ("Inactive", Some(SessionStatus::Inactive)),
 ];
 
