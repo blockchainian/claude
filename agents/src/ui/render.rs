@@ -323,9 +323,9 @@ impl View {
             let label = if messages == 1 { "message" } else { "messages" };
             header.extend([
                 " · ".dim(),
-                format_duration((end - start).num_seconds().max(0)).dim(),
-                " · ".dim(),
                 format!("{messages} {label}").dim(),
+                " · ".dim(),
+                format_duration((end - start).num_seconds().max(0)).dim(),
             ]);
         }
         let mut prompt = vec![Line::default(), Line::from(header)];
