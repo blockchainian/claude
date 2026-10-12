@@ -430,6 +430,7 @@ impl View {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
+                .border_style(Style::default().dim())
                 .title(title);
             let inner = block.inner(box_area);
             block.render(box_area, buf);
