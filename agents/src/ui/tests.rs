@@ -920,7 +920,7 @@ fn queued_details(row: Session, height: u16) -> String {
 fn details_background_boxes_tail_and_clip_output() {
     use std::io::Write;
     let mut output = tempfile::NamedTempFile::new().unwrap();
-    writeln!(output, "discard\nfirst\n{}\nlast", "x".repeat(80)).unwrap();
+    writeln!(output, "discard\nfirst\nlast\n{}", "x".repeat(80)).unwrap();
     let mut row = session("background", "Background task", SessionStatus::Ready, 120);
     row.background = vec![
         crate::model::BackgroundTask {

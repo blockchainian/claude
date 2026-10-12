@@ -11,7 +11,7 @@ Project
 
 Background
 ╭ A very long description A very long… ╮
-│ last                                 │
+│ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
 ╰──────────────────────────────────────╯
 ╭ Waiting for output ──────────────────╮
 ╰──────────────────────────────────────╯

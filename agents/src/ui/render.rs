@@ -433,9 +433,10 @@ impl View {
                 .title(title);
             let inner = block.inner(box_area);
             block.render(box_area, buf);
+            // One column of padding on both sides keeps output off the borders.
             let inner = Rect {
                 x: inner.x + 1,
-                width: inner.width.saturating_sub(1),
+                width: inner.width.saturating_sub(2),
                 ..inner
             };
             Paragraph::new(output.into_iter().map(Line::from).collect::<Vec<_>>())
