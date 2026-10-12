@@ -430,12 +430,15 @@ impl View {
             }
             let height = box_height(output.len()).min(available - offset);
             let box_area = row(area, (details_start + offset) as u16, height as u16);
+            // Title: description, then how long the command has been running.
             // One space keeps the title off the corner glyph on both sides.
+            let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
             let mut title = truncate_line_with_ellipsis_if_overflow(
                 Line::from(task.description.clone()),
-                usize::from(box_area.width.saturating_sub(4)),
+                usize::from(box_area.width.saturating_sub(4))
+                    .saturating_sub(elapsed.chars().count() + " · ".chars().count()),
             );
-            title.spans.push(" ".into());
+            title.spans.extend([" · ".dim(), elapsed.dim(), " ".into()]);
             // Without output the task is just its titled top rule, which has no
             // corner glyph, so the rule itself leads the title.
             let borders = if output.is_empty() {
