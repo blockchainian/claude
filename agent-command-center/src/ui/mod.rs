@@ -43,7 +43,6 @@ struct DeleteDialog {
     id: String,
     title: String,
     confirm: bool,
-    live: bool,
 }
 
 pub struct View {

@@ -219,7 +219,6 @@ impl View {
                         id: session.id.clone(),
                         title: session.display_title().to_owned(),
                         confirm: false,
-                        live: session.process.is_some(),
                     });
                 }
             }

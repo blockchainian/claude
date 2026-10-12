@@ -618,7 +618,7 @@ fn delete_dialog_locks_list_and_supports_movement_keys() {
 }
 
 #[test]
-fn delete_live_rows_show_stop_description_and_ignore_show_more() {
+fn delete_live_rows_open_the_dialog_and_ignore_show_more() {
     let mut view = fixture();
     view.rows[view.selected].process = Some(crate::model::Process {
         pid: 123,
@@ -629,7 +629,7 @@ fn delete_live_rows_show_stop_description_and_ignore_show_more() {
     });
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
     assert!(view.delete_dialog.is_some());
-    assert!(screen(&view, 120, 24).contains("This stops the running session"));
+    assert!(screen(&view, 120, 24).contains("This stops any running work in this task"));
     assert_eq!(key(&mut view, KeyCode::Down), None);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
