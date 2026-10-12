@@ -399,7 +399,7 @@ impl View {
         let boxes = session
             .background
             .iter()
-            .map(|task| (task, tail_lines(&task.output, 3)))
+            .map(|task| (task, tail_lines(&task.output, 1)))
             .collect::<Vec<_>>();
         let details_height = details.len()
             + boxes
@@ -420,10 +420,13 @@ impl View {
             }
             let height = (2 + output.len()).min(available - offset);
             let box_area = row(area, (details_start + offset) as u16, height as u16);
-            let title = truncate_line_with_ellipsis_if_overflow(
+            // One space keeps the title off the corner glyph on both sides.
+            let mut title = truncate_line_with_ellipsis_if_overflow(
                 Line::from(task.description.clone()),
                 usize::from(box_area.width.saturating_sub(4)),
             );
+            title.spans.insert(0, " ".into());
+            title.spans.push(" ".into());
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
