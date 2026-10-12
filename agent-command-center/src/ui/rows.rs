@@ -134,7 +134,9 @@ impl View {
                     "Pinned".to_owned()
                 } else {
                     match self.grouping {
-                        Grouping::Project => format_directory_display(&task.cwd),
+                        Grouping::Project => {
+                            format_directory_display(&self.project_groups[index].heading)
+                        }
                         Grouping::Status => task.status.label().to_owned(),
                         Grouping::Model => task.model_name().to_owned(),
                     }

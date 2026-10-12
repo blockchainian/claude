@@ -110,6 +110,24 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
         {
             summary.timestamp = Some(timestamp.with_timezone(&Utc));
         }
+        // A head chunk swallowed by one huge record still leaves these in the tail.
+        if summary.cwd.is_none() {
+            summary.cwd = record["cwd"]
+                .as_str()
+                .filter(|cwd| !cwd.is_empty())
+                .map(PathBuf::from);
+        }
+        if matches!(record["type"].as_str(), Some("user" | "assistant")) {
+            if summary.cwd.is_none() {
+                summary.cwd = record["cwd"]
+                    .as_str()
+                    .filter(|cwd| !cwd.is_empty())
+                    .map(PathBuf::from);
+            }
+            if summary.git_branch.is_none() {
+                summary.git_branch = text(&record, "gitBranch");
+            }
+        }
         match record["type"].as_str() {
             Some("ai-title") => {
                 if let Some(title) = text(&record, "aiTitle") {
@@ -202,6 +220,41 @@ mod tests {
         let len = large.as_file().metadata().unwrap().len();
         assert!(len > 2 * CHUNK);
         assert_summary(&read(large.path(), len).unwrap());
+    }
+
+    #[test]
+    fn cwd_and_branch_come_from_the_tail_when_a_huge_record_fills_the_head() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let lines: Vec<_> = FIXTURE.lines().collect();
+        let huge = format!(
+            r#"{{"type":"file-history-snapshot","snapshot":"{}"}}"#,
+            "x".repeat(CHUNK as usize + 1)
+        );
+        writeln!(file, "{huge}").unwrap();
+        for _ in 0..2000 {
+            writeln!(file, "{}", lines[2]).unwrap();
+        }
+        for line in &lines[1..] {
+            writeln!(file, "{line}").unwrap();
+        }
+        let len = file.as_file().metadata().unwrap().len();
+        let summary = read(file.path(), len).unwrap();
+        let records = FIXTURE
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        let with_cwd = records
+            .iter()
+            .find(|record| record["cwd"].is_string())
+            .unwrap();
+        assert_eq!(
+            summary.cwd.as_deref(),
+            with_cwd["cwd"].as_str().map(Path::new)
+        );
+        assert_eq!(
+            summary.git_branch.as_deref(),
+            with_cwd["gitBranch"].as_str()
+        );
     }
 
     #[test]

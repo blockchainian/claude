@@ -1,5 +1,6 @@
 mod app;
 mod model;
+mod repository;
 mod sessions;
 mod state;
 mod terminal_background;
