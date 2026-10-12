@@ -7,10 +7,10 @@ Prompt
 Background task
 
 Background
-╭ A very long description A ver… ── 0s ╮
+╭ A very long description A very… · 0s ╮
 │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
 ╰──────────────────────────────────────╯
-╶ Waiting for output ── 0s ────────────╴
+╶ Waiting for output · 0s ─────────────╴
 
 Last message
 Checking the project
