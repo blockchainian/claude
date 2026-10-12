@@ -6,7 +6,7 @@ Queue task
 Prompt
 Current prompt Current prompt Current
 …
-Queued prompt that extends beyond the p…
+Queued prompt that extends beyond the
 
 Model: Unknown
 Reasoning: Unknown

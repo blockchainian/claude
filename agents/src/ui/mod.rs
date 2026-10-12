@@ -4,6 +4,7 @@ mod hints;
 mod hyperlink;
 mod input;
 mod line_truncation;
+mod markdown;
 mod navigation;
 mod render;
 mod rows;
