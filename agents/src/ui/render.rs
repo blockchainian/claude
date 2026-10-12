@@ -336,12 +336,12 @@ impl View {
                 "Waiting for your response.".into(),
             ]);
         }
-        // Latest activity and Last message share one slot: the running tool
-        // while a turn runs, the last reply otherwise.
+        // Latest activity and Last message share one slot and follow the
+        // clock: whichever of the latest tool call and the last reply is newer.
         let activity = session
             .activity
             .as_ref()
-            .filter(|_| session.status == SessionStatus::Working);
+            .filter(|activity| session.last_message_at.is_none_or(|at| activity.at > at));
         if let Some(activity) = activity {
             let wrapped = textwrap::wrap(&activity.label, width);
             let mut label = wrapped
