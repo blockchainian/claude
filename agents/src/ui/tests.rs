@@ -779,8 +779,7 @@ fn details_activity_only_while_working() {
         include_str!("../../tests/ui_snapshots/details_activity_working.txt")
     );
     assert!(rendered.contains("Latest activity · 7s ago"));
-    assert!(rendered.contains("Last message · 1h ago"));
-    assert!(rendered.find("Run checks") < rendered.find("Last message"));
+    assert!(!rendered.contains("Last message"));
     row.activity.as_mut().unwrap().label =
         "Run checks on every changed surface in the project".into();
     view.set_sessions(vec![row.clone()], false);
