@@ -3,15 +3,15 @@ Task details
 PR task
 ○ Inactive
 
-Model: Unknown
-Reasoning: Unknown
-
-Project
-/tmp/project
+Prompt
+PR task
 
 Branch
 main
 
-Prompt
-PR task
+Project
+/tmp/project
+
+Model: Unknown
+Reasoning: Unknown
 

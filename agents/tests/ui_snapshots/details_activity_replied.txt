@@ -3,14 +3,14 @@ Task details
 Activity task
 ● Working
 
-Model: Unknown
-Reasoning: Unknown
-
-Project
-/tmp/project
+Prompt · 42 messages · 1h 10m
+Activity task
 
 Last message · 3s ago
 Checking the project
 
-Prompt · 42 messages · 1h 10m
-Activity task
+Project
+/tmp/project
+
+Model: Unknown
+Reasoning: Unknown

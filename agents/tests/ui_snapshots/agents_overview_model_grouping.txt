@@ -6,14 +6,14 @@
   › ○ Legacy task                                         │ Legacy task
                                                           │ ○ Ready
   model-a  2                                              │
-    ○ Recent task                                         │ Model: Unknown
-    ○ Older task                                          │ Reasoning: Unknown
+    ○ Recent task                                         │ Prompt
+    ○ Older task                                          │ Legacy task
                                                           │
   model-b  1                                              │ Project
     ○ Other model                                         │ /tmp/project
                                                           │
-                                                          │ Prompt
-                                                          │ Legacy task
+                                                          │ Model: Unknown
+                                                          │ Reasoning: Unknown
                                                           │
                                                           │
                                                           │

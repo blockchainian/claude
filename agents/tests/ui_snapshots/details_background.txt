@@ -3,11 +3,8 @@ Task details
 Background task
 ○ Ready
 
-Model: Unknown
-Reasoning: Unknown
-
-Project
-/tmp/project
+Prompt
+Background task
 
 Background
 ╭ Run checks ── 0s ────────────────────╮
@@ -18,5 +15,8 @@ Background
 Last message
 Checking the project
 
-Prompt
-Background task
+Project
+/tmp/project
+
+Model: Unknown
+Reasoning: Unknown
