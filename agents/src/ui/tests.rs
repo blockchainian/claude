@@ -367,7 +367,7 @@ fn details_include_attention_and_clip_messages() {
     let rendered = screen(&view, 160, 50);
     for label in [
         "Model: claude-opus",
-        "Branch",
+        "Project · main",
         "main",
         "Needs attention",
         "Open task to review.",
@@ -384,9 +384,9 @@ fn details_include_attention_and_clip_messages() {
         .position(|line| line.trim_end().ends_with("/tmp/project"));
     assert!(position("Prompt") < position("Last message"));
     assert!(position("Last message") < position("Needs attention"));
-    assert!(position("Needs attention") < project);
-    assert!(project < position("Branch"));
-    assert!(position("Branch") < position("Model: claude-opus"));
+    assert!(position("Needs attention") < position("Project ·"));
+    assert!(position("Project ·") < project);
+    assert!(project < position("Model: claude-opus"));
     assert!(
         rendered
             .lines()
@@ -759,9 +759,28 @@ fn details_branch_pull_request_snapshot() {
         render(&view),
         include_str!("../../tests/ui_snapshots/details_branch_pr.txt")
     );
+    for width in [13, 15, 40] {
+        let area = Rect::new(5, 8, width, 18);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, Utc::now());
+        let link_cells = buf
+            .content
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| {
+                cell.symbol()
+                    .contains("\x1b]8;;https://github.com/example-user/example-app/pull/833")
+            })
+            .map(|(index, _)| index % usize::from(width))
+            .collect::<Vec<_>>();
+        assert_eq!(link_cells, if width >= 15 { vec![10] } else { vec![] });
+    }
     row.git_branch = None;
+    view.set_sessions(vec![row.clone()], false);
+    assert!(render(&view).contains("Project · #833"));
+    row.pr = None;
     view.set_sessions(vec![row], false);
-    assert!(!render(&view).contains("#833"));
+    assert!(render(&view).contains("\nProject\n/tmp/project\n"));
 }
 
 #[test]

@@ -3,11 +3,8 @@ Task details · ○ Inactive · PR task
 Prompt
 PR task
 
-Project
+Project · main
 /tmp/project
-
-Branch
-main
 
 Model: Unknown
 
