@@ -953,7 +953,7 @@ fn details_background_boxes_tail_and_clip_output() {
 }
 
 #[test]
-fn background_box_dims_border_and_output_but_not_title() {
+fn background_box_dims_border_but_not_title_or_output() {
     use ratatui::style::Modifier;
     use std::io::Write;
     let mut output = tempfile::NamedTempFile::new().unwrap();
@@ -977,7 +977,7 @@ fn background_box_dims_border_and_output_but_not_title() {
     assert_eq!(buf[(2, top)].symbol(), "R");
     assert!(!buf[(2, top)].modifier.contains(Modifier::DIM));
     assert_eq!(buf[(2, top + 1)].symbol(), "t");
-    assert!(buf[(2, top + 1)].modifier.contains(Modifier::DIM));
+    assert!(!buf[(2, top + 1)].modifier.contains(Modifier::DIM));
 }
 
 #[test]
