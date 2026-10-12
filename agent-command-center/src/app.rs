@@ -5,6 +5,7 @@ use crate::model::Session;
 use crate::sessions::Snapshot;
 use crate::sessions::Store;
 use crate::state::Preferences;
+use crate::terminal_background;
 use crate::ui::View;
 use crossterm::event::Event;
 use crossterm::event::KeyEvent;
@@ -50,6 +51,12 @@ impl App {
 
     pub fn run(mut self) -> io::Result<()> {
         let mut terminal = enter_terminal()?;
+        // Raw mode is on, so the terminal's reply reaches us instead of the screen.
+        if let Ok(Some(background)) =
+            terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
+        {
+            crate::ui::set_light_background(terminal_background::is_light(background));
+        }
         let result = self.event_loop(&mut terminal);
         leave_terminal(terminal)?;
         result?;
