@@ -1,21 +1,28 @@
 //! Asks the terminal for its default background (OSC 11) so the selection fill suits light and dark themes.
 
-use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Read;
 use std::io::Write;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
 use std::time::Duration;
 use std::time::Instant;
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(250);
 const MAX_REPLY_BYTES: usize = 4096;
+const POLL_STEP: Duration = Duration::from_millis(10);
 
 /// Queries the terminal on `/dev/tty`; the terminal must be in raw mode so the reply is not echoed.
 /// Returns `None` when the terminal does not answer within the timeout.
+///
+/// The tty is read without blocking: macOS `poll()` reports `/dev/tty` ready even when nothing is
+/// pending, so a blocking read would wait for the user's first keystroke and swallow it.
 pub fn query(timeout: Duration) -> io::Result<Option<(u8, u8, u8)>> {
-    let mut tty = OpenOptions::new().read(true).write(true).open("/dev/tty")?;
+    let mut tty = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open("/dev/tty")?;
     tty.write_all(b"\x1B]11;?\x1B\\")?;
     tty.flush()?;
     let deadline = Instant::now() + timeout;
@@ -24,38 +31,20 @@ pub fn query(timeout: Duration) -> io::Result<Option<(u8, u8, u8)>> {
         if let Some(color) = parse_osc_background(&buffer) {
             return Ok(Some(color));
         }
-        let now = Instant::now();
-        if now >= deadline || buffer.len() >= MAX_REPLY_BYTES {
-            return Ok(None);
-        }
-        if !poll_readable(&tty, deadline - now)? {
+        if Instant::now() >= deadline || buffer.len() >= MAX_REPLY_BYTES {
             return Ok(None);
         }
         let mut chunk = [0_u8; 256];
-        let read = tty.read(&mut chunk)?;
-        if read == 0 {
-            return Ok(None);
+        match tty.read(&mut chunk) {
+            Ok(0) => return Ok(None),
+            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                std::thread::sleep(POLL_STEP);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
         }
-        buffer.extend_from_slice(&chunk[..read]);
     }
-}
-
-fn poll_readable(tty: &File, timeout: Duration) -> io::Result<bool> {
-    let mut fds = libc::pollfd {
-        fd: tty.as_raw_fd(),
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    let millis = timeout.as_millis().min(i32::MAX as u128) as i32;
-    let ready = unsafe { libc::poll(&mut fds, 1, millis) };
-    if ready < 0 {
-        let error = io::Error::last_os_error();
-        if error.kind() == io::ErrorKind::Interrupted {
-            return Ok(true);
-        }
-        return Err(error);
-    }
-    Ok(ready > 0)
 }
 
 pub fn is_light((r, g, b): (u8, u8, u8)) -> bool {
