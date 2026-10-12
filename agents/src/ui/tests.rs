@@ -8,6 +8,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         name: None,
         title: title.into(),
         prompt: title.into(),
+        queued: Vec::new(),
         prompt_at: None,
         turn_messages: 0,
         last_record_at: None,
@@ -871,4 +872,45 @@ fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
             assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
         }
     }
+}
+
+#[test]
+fn details_prompt_shows_queued_entries_in_order() {
+    let mut row = session("queue", "Queue task", SessionStatus::Working, 0);
+    row.prompt = "Current prompt".into();
+    row.queued = vec!["First queued prompt".into(), "Second queued prompt".into()];
+    assert_eq!(
+        queued_details(row, 15),
+        include_str!("../../tests/ui_snapshots/details_queued.txt")
+    );
+}
+
+#[test]
+fn details_prompt_truncates_long_queued_entry() {
+    let mut row = session("queue", "Queue task", SessionStatus::Working, 0);
+    row.prompt = "Current prompt ".repeat(12);
+    row.queued = vec!["Queued prompt that extends beyond the panel width".into()];
+    assert_eq!(
+        queued_details(row, 15),
+        include_str!("../../tests/ui_snapshots/details_queued_truncated.txt")
+    );
+}
+
+fn queued_details(row: Session, height: u16) -> String {
+    let mut view = View::default();
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 40, height);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, Utc::now());
+    buf.content
+        .chunks(40)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

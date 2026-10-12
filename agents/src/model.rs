@@ -73,6 +73,7 @@ pub struct Session {
     pub title: String,
     /// Latest real user prompt, up to 512 chars, for the details panel.
     pub prompt: String,
+    pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
     pub last_record_at: Option<DateTime<Utc>>,

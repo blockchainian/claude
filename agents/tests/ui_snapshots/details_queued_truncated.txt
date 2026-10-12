@@ -1,0 +1,15 @@
+Task details
+
+Queue task
+● Working
+
+Model: Unknown
+Reasoning: Unknown
+
+Project
+/tmp/project
+
+Prompt
+Current prompt Current prompt Current
+…
+Queued prompt that extends beyond the p…

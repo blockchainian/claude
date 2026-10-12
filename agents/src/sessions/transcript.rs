@@ -1,6 +1,7 @@
 use crate::model::{Activity, PullRequest};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -13,6 +14,7 @@ pub(super) struct Summary {
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
     pub prompt: String,
+    pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
     pub ai_title: Option<String>,
@@ -76,6 +78,53 @@ fn records(bytes: &[u8]) -> impl DoubleEndedIterator<Item = Value> + '_ {
         .filter(|record| record["isSidechain"] != true)
 }
 
+enum QueueOperation {
+    Enqueue(String),
+    Dequeue,
+    Remove(String),
+}
+
+impl QueueOperation {
+    fn from_record(record: &Value) -> Option<Self> {
+        if record["type"] != "queue-operation" {
+            return None;
+        }
+        match record["operation"].as_str()? {
+            "enqueue" => Some(Self::Enqueue(record["content"].as_str()?.to_owned())),
+            "dequeue" => Some(Self::Dequeue),
+            "remove" => Some(Self::Remove(record["content"].as_str()?.to_owned())),
+            _ => None,
+        }
+    }
+}
+
+fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
+    let mut queue = VecDeque::new();
+    for operation in operations.into_iter().rev() {
+        match operation {
+            QueueOperation::Enqueue(content) => queue.push_back(content),
+            QueueOperation::Dequeue => {
+                queue.pop_front();
+            }
+            QueueOperation::Remove(content) => {
+                if let Some(index) = queue.iter().position(|item| item == &content) {
+                    queue.remove(index);
+                }
+            }
+        }
+    }
+    queue
+        .into_iter()
+        .filter(|content| !content.trim_start().starts_with('<'))
+        .map(|content| {
+            preview(&content)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect()
+}
+
 fn read_messages(
     file: &mut File,
     mut start: u64,
@@ -84,6 +133,10 @@ fn read_messages(
 ) -> io::Result<()> {
     let mut prompt_found = false;
     let mut turn_messages = 0;
+    let mut operations = Vec::new();
+    let mut next_user = None;
+    let mut dequeued_user = None;
+    let mut quiet_point = false;
     loop {
         // Keep the incomplete first line for the next block instead of dropping it.
         let skip = if start == 0 {
@@ -95,6 +148,22 @@ fn read_messages(
                 .map_or(bytes.len(), |index| index + 1)
         };
         for record in records(&bytes[skip..]).rev() {
+            if !quiet_point {
+                if record["type"] == "user" {
+                    next_user = content_text(&record, false);
+                }
+                if let Some(operation) = QueueOperation::from_record(&record) {
+                    // Enqueue → dequeue → matching user means FIFO had nothing
+                    // older pending before this enqueue; replay can start here.
+                    quiet_point = matches!(&operation, QueueOperation::Enqueue(content)
+                        if dequeued_user.as_ref() == Some(content));
+                    dequeued_user = match &operation {
+                        QueueOperation::Dequeue => next_user.clone(),
+                        _ => None,
+                    };
+                    operations.push(operation);
+                }
+            }
             let at = record["timestamp"]
                 .as_str()
                 .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
@@ -142,11 +211,17 @@ fn read_messages(
                 summary.last_message = Some(preview(&message));
                 summary.last_message_at = at;
             }
-            if prompt_found && summary.last_message.is_some() && summary.activity.is_some() {
+            if prompt_found
+                && summary.last_message.is_some()
+                && summary.activity.is_some()
+                && quiet_point
+            {
+                summary.queued = queued_prompts(operations);
                 return Ok(());
             }
         }
         if start == 0 {
+            summary.queued = queued_prompts(operations);
             return Ok(());
         }
         bytes.truncate(skip);
@@ -321,6 +396,128 @@ mod tests {
         for _ in 0..bytes.div_ceil(traffic.len()) {
             file.write_all(traffic.as_bytes()).unwrap();
         }
+    }
+
+    fn queue(file: &mut impl Write, operation: &str, content: &str) {
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "queue-operation", "operation": operation,
+                "timestamp": "2026-10-12T10:00:00Z", "content": content,
+                "reason": "absorbed_mid_turn", "commandUuid": "command", "deliveryId": "delivery"
+            })
+        )
+        .unwrap();
+    }
+
+    fn user(file: &mut impl Write, content: &str) {
+        let mut record: Value = serde_json::from_str(FIXTURE.lines().next().unwrap()).unwrap();
+        record["message"]["content"] = content.into();
+        writeln!(file, "{record}").unwrap();
+    }
+
+    fn idle_prompt(file: &mut impl Write) {
+        queue(file, "enqueue", "Current prompt");
+        queue(file, "dequeue", "");
+        user(file, "Current prompt");
+        writeln!(file, "{}", FIXTURE.lines().nth(1).unwrap()).unwrap();
+        write_tool_traffic(file, 1);
+    }
+
+    fn summary(file: &tempfile::NamedTempFile) -> Summary {
+        read(file.path(), file.as_file().metadata().unwrap().len()).unwrap()
+    }
+
+    #[test]
+    fn idle_prompt_has_no_queued_prompts() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        assert_eq!(summary(&file).prompt, "Current prompt");
+        assert!(summary(&file).queued.is_empty());
+    }
+
+    #[test]
+    fn running_prompt_keeps_queue_order_and_removes_absorbed_content() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        queue(&mut file, "enqueue", "A");
+        queue(&mut file, "enqueue", "B");
+        assert_eq!(summary(&file).queued, ["A", "B"]);
+        queue(&mut file, "remove", "A");
+        assert_eq!(summary(&file).queued, ["B"]);
+        queue(&mut file, "remove", "absent");
+        assert_eq!(summary(&file).queued, ["B"]);
+    }
+
+    #[test]
+    fn dequeue_of_current_prompt_walks_back_to_previous_quiet_point() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        queue(&mut file, "enqueue", "A");
+        queue(&mut file, "enqueue", "B");
+        queue(&mut file, "dequeue", "");
+        user(&mut file, "A");
+        let result = summary(&file);
+        assert_eq!(result.prompt, "A");
+        assert_eq!(result.queued, ["B"]);
+    }
+
+    #[test]
+    fn system_items_are_hidden_but_consume_their_dequeue() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        queue(
+            &mut file,
+            "enqueue",
+            "  <task-notification>done</task-notification>",
+        );
+        queue(&mut file, "enqueue", "A");
+        queue(&mut file, "enqueue", "<other-session>hello</other-session>");
+        assert_eq!(summary(&file).queued, ["A"]);
+        queue(&mut file, "dequeue", "");
+        user(&mut file, "  <task-notification>done</task-notification>");
+        assert_eq!(summary(&file).queued, ["A"]);
+        queue(&mut file, "dequeue", "");
+        user(&mut file, "A");
+        assert!(summary(&file).queued.is_empty());
+    }
+
+    #[test]
+    fn queue_reconstruction_crosses_chunk_boundaries() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        write_tool_traffic(&mut file, 3 * CHUNK as usize);
+        queue(&mut file, "enqueue", "A");
+        write_tool_traffic(&mut file, CHUNK as usize);
+        queue(&mut file, "enqueue", "B");
+        write_tool_traffic(&mut file, CHUNK as usize);
+        queue(&mut file, "dequeue", "");
+        user(&mut file, "A");
+        write_tool_traffic(&mut file, CHUNK as usize);
+        assert_eq!(summary(&file).queued, ["B"]);
+    }
+
+    #[test]
+    fn queue_without_quiet_point_replays_from_start_and_previews_after_matching() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let prefix = "中".repeat(512);
+        queue(&mut file, "enqueue", &format!("{prefix}A"));
+        queue(&mut file, "enqueue", &format!("{prefix}B"));
+        queue(&mut file, "remove", &format!("{prefix}B"));
+        queue(&mut file, "enqueue", "A\n\tB\0C");
+        assert_eq!(summary(&file).queued, [prefix, "A BC".into()]);
+    }
+
+    #[test]
+    fn remove_deletes_only_the_first_matching_item() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        for content in ["A", "B", "A"] {
+            queue(&mut file, "enqueue", content);
+        }
+        queue(&mut file, "remove", "A");
+        assert_eq!(summary(&file).queued, ["B", "A"]);
     }
 
     #[test]
