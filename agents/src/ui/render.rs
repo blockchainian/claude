@@ -336,9 +336,13 @@ impl View {
                 "Waiting for your response.".into(),
             ]);
         }
-        if session.status == SessionStatus::Working
-            && let Some(activity) = &session.activity
-        {
+        // Latest activity and Last message share one slot: the running tool
+        // while a turn runs, the last reply otherwise.
+        let activity = session
+            .activity
+            .as_ref()
+            .filter(|_| session.status == SessionStatus::Working);
+        if let Some(activity) = activity {
             let wrapped = textwrap::wrap(&activity.label, width);
             let mut label = wrapped
                 .first()
@@ -356,7 +360,7 @@ impl View {
                 truncate_line_with_ellipsis_if_overflow(Line::from(label), width),
             ]);
         }
-        if let Some(message) = &session.last_message {
+        if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
             let mut header = vec!["Last message".dim()];
             if let Some(at) = session.last_message_at {
                 header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
