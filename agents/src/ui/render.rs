@@ -429,7 +429,12 @@ impl View {
                 break;
             }
             let height = box_height(output.len()).min(available - offset);
-            let box_area = row(area, (details_start + offset) as u16, height as u16);
+            let mut box_area = row(area, (details_start + offset) as u16, height as u16);
+            // A bare rule stops one column short of the box edges on both sides.
+            if output.is_empty() {
+                box_area.x += 1;
+                box_area.width = box_area.width.saturating_sub(2);
+            }
             // Title: description, then how long the command has been running.
             // One space keeps the title off the corner glyph on both sides.
             let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
