@@ -10,10 +10,10 @@ Project
 /tmp/project
 
 Background
-╭ A very long description A very long… ╮
+╭ A very long description A very… · 0s ╮
 │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
 ╰──────────────────────────────────────╯
-─ Waiting for output ───────────────────
+─ Waiting for output · 0s ──────────────
 
 Last message
 Checking the project
