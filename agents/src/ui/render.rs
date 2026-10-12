@@ -342,6 +342,9 @@ impl View {
             prompt_body[1] = "…".dim().into();
         }
         prompt.extend(prompt_body);
+        prompt.extend(session.queued.iter().map(|queued| {
+            truncate_line_with_ellipsis_if_overflow(Line::from(queued.clone()), width)
+        }));
         // Activity sits above the prompt and takes the height the prompt leaves over.
         let mut details = Vec::new();
         if session.status == SessionStatus::NeedsInput {

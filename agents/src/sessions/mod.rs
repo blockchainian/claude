@@ -429,6 +429,7 @@ fn session(
         name: None,
         title,
         prompt: summary.prompt,
+        queued: summary.queued,
         prompt_at: summary.prompt_at,
         turn_messages: summary.turn_messages,
         last_record_at: summary.timestamp,
