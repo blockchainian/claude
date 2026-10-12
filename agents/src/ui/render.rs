@@ -358,14 +358,21 @@ impl View {
                 "Waiting for your response.".into(),
             ]);
         }
-        if !session.background.is_empty() {
-            details.extend([Line::default(), "Background".dim().into()]);
-        }
+        // Claude Code appends an exit marker to the output file when the
+        // command ends, which lands before the completion notification does.
         let boxes = session
             .background
             .iter()
             .map(|task| (task, tail_lines(&task.output, 1)))
+            .filter(|(_, lines)| {
+                !lines
+                    .last()
+                    .is_some_and(|last| last.starts_with("[exited with code"))
+            })
             .collect::<Vec<_>>();
+        if !boxes.is_empty() {
+            details.extend([Line::default(), "Background".dim().into()]);
+        }
         let mut activity_lines = Vec::new();
         // Latest activity and Last message share one slot and follow the
         // clock: whichever of the latest tool call and the last reply is newer.

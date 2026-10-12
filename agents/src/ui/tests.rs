@@ -981,6 +981,22 @@ fn background_box_dims_border_but_not_title_or_output() {
 }
 
 #[test]
+fn background_task_whose_output_ended_is_hidden() {
+    use std::io::Write;
+    let mut output = tempfile::NamedTempFile::new().unwrap();
+    writeln!(output, "tick\n\n[exited with code 0]").unwrap();
+    let mut row = session("background", "Background task", SessionStatus::Ready, 120);
+    row.background.push(crate::model::BackgroundTask {
+        description: "Run checks".into(),
+        output: output.path().into(),
+        started_at: Utc::now(),
+    });
+    let rendered = queued_details(row, 19);
+    assert!(!rendered.contains("\nBackground\n"));
+    assert!(!rendered.contains("Run checks"));
+}
+
+#[test]
 fn background_redraw_follows_selection() {
     let mut first = session("first", "First", SessionStatus::Ready, 0);
     first.background.push(crate::model::BackgroundTask {
