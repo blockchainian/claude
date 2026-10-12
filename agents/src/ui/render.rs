@@ -1,4 +1,4 @@
-use super::formatting::{format_relative_time, visible_suffix};
+use super::formatting::{format_duration, format_relative_time, visible_suffix};
 use super::hints::hint_line;
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
@@ -312,7 +312,23 @@ impl View {
             }
         }
         let width = usize::from(area.width.max(1));
-        let mut prompt = vec![Line::default(), "Prompt".dim().into()];
+        let mut header = vec!["Prompt".dim()];
+        if let Some(start) = session.prompt_at {
+            let end = if session.status == SessionStatus::Working {
+                now
+            } else {
+                session.last_record_at.unwrap_or(start)
+            };
+            let messages = session.turn_messages;
+            let label = if messages == 1 { "msg" } else { "msgs" };
+            header.extend([
+                " · ".dim(),
+                format!("{messages} {label}").dim(),
+                " · ".dim(),
+                format_duration((end - start).num_seconds().max(0)).dim(),
+            ]);
+        }
+        let mut prompt = vec![Line::default(), Line::from(header)];
         let prompt_text = match session.prompt.trim() {
             "" => "No prompt available.",
             prompt => prompt,

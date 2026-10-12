@@ -13,6 +13,8 @@ pub(super) struct Summary {
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
     pub prompt: String,
+    pub prompt_at: Option<DateTime<Utc>>,
+    pub turn_messages: usize,
     pub ai_title: Option<String>,
     pub custom_title: Option<String>,
     pub last_prompt: Option<String>,
@@ -81,6 +83,7 @@ fn read_messages(
     summary: &mut Summary,
 ) -> io::Result<()> {
     let mut prompt_found = false;
+    let mut turn_messages = 0;
     loop {
         // Keep the incomplete first line for the next block instead of dropping it.
         let skip = if start == 0 {
@@ -92,6 +95,13 @@ fn read_messages(
                 .map_or(bytes.len(), |index| index + 1)
         };
         for record in records(&bytes[skip..]).rev() {
+            let at = record["timestamp"]
+                .as_str()
+                .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&Utc));
+            if !prompt_found && record["type"] == "assistant" {
+                turn_messages += 1;
+            }
             if !prompt_found
                 && record["type"] == "user"
                 && let Some(prompt) = content_text(&record, false)
@@ -99,12 +109,10 @@ fn read_messages(
                 && !prompt.trim_start().starts_with('<')
             {
                 summary.prompt = preview(&prompt);
+                summary.prompt_at = at;
+                summary.turn_messages = turn_messages;
                 prompt_found = true;
             }
-            let at = record["timestamp"]
-                .as_str()
-                .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-                .map(|value| value.with_timezone(&Utc));
             // The latest tool call, finished or not; the panel shows it while it
             // is newer than the last reply.
             if summary.activity.is_none()
@@ -313,6 +321,51 @@ mod tests {
         for _ in 0..bytes.div_ceil(traffic.len()) {
             file.write_all(traffic.as_bytes()).unwrap();
         }
+    }
+
+    #[test]
+    fn turn_counts_only_assistant_records_after_the_latest_prompt() {
+        for large in [false, true] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            file.write_all(FIXTURE.as_bytes()).unwrap();
+            let mut prompt: Value = serde_json::from_str(FIXTURE.lines().next().unwrap()).unwrap();
+            prompt["message"]["content"] = "Current turn".into();
+            prompt["timestamp"] = "2026-10-12T10:00:00Z".into();
+            writeln!(file, "{prompt}").unwrap();
+            let mut assistant: Value =
+                serde_json::from_str(FIXTURE.lines().nth(1).unwrap()).unwrap();
+            for block in [
+                serde_json::json!({"type": "thinking", "thinking": "Planning"}),
+                serde_json::json!({"type": "text", "text": "Checking"}),
+                serde_json::json!({"type": "tool_use", "id": "tool", "name": "Read", "input": {}}),
+            ] {
+                assistant["message"]["content"] = serde_json::json!([block]);
+                writeln!(file, "{assistant}").unwrap();
+            }
+            let before = file.as_file().metadata().unwrap().len();
+            write_tool_traffic(&mut file, if large { 3 * CHUNK as usize } else { 1 });
+            let len = file.as_file().metadata().unwrap().len();
+            let traffic = std::fs::read(file.path()).unwrap();
+            let tool_calls = records(&traffic[before as usize..])
+                .filter(|record| record["type"] == "assistant")
+                .count();
+            let summary = read(file.path(), len).unwrap();
+            assert_eq!(summary.prompt, "Current turn");
+            assert_eq!(summary.turn_messages, 3 + tool_calls);
+            assert_eq!(
+                summary.prompt_at,
+                Some("2026-10-12T10:00:00Z".parse().unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn turn_without_a_prompt_has_no_timestamp_or_messages() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        write_tool_traffic(&mut file, 3 * CHUNK as usize);
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(summary.prompt_at, None);
+        assert_eq!(summary.turn_messages, 0);
     }
 
     #[test]

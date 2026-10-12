@@ -429,6 +429,9 @@ fn session(
         name: None,
         title,
         prompt: summary.prompt,
+        prompt_at: summary.prompt_at,
+        turn_messages: summary.turn_messages,
+        last_record_at: summary.timestamp,
         model: summary.model,
         effort: summary.effort,
         git_branch: summary.git_branch,
@@ -602,6 +605,15 @@ mod tests {
         assert_eq!(session.transcript.as_ref(), Some(&path));
         assert_eq!(session.title, "Codex manager 停止时线程处理");
         assert!(session.process.is_some());
+        assert_eq!(
+            session.prompt_at,
+            Some("2026-10-06T16:39:12.595Z".parse().unwrap())
+        );
+        assert_eq!(session.turn_messages, 1);
+        assert_eq!(
+            session.last_record_at,
+            Some("2026-10-06T16:39:29.554Z".parse().unwrap())
+        );
         assert_eq!(
             snapshot
                 .sessions

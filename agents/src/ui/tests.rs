@@ -8,6 +8,9 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         name: None,
         title: title.into(),
         prompt: title.into(),
+        prompt_at: None,
+        turn_messages: 0,
+        last_record_at: None,
         model: None,
         effort: None,
         git_branch: None,
@@ -747,6 +750,9 @@ fn details_branch_pull_request_snapshot() {
 fn details_activity_follows_the_clock() {
     let now = Utc::now();
     let mut row = session("activity", "Activity task", SessionStatus::Working, 7);
+    row.prompt_at = Some(now - Duration::seconds(4200));
+    row.turn_messages = 42;
+    row.last_record_at = Some(now - Duration::seconds(3595));
     row.activity = Some(crate::model::Activity {
         label: "Run checks".into(),
         at: now - Duration::seconds(7),
@@ -792,6 +798,10 @@ fn details_activity_follows_the_clock() {
     row.status = SessionStatus::Ready;
     view.set_sessions(vec![row.clone()], false);
     assert!(render(&view).contains("Latest activity · 7s ago"));
+    assert_eq!(
+        render(&view),
+        include_str!("../../tests/ui_snapshots/details_activity_ready.txt")
+    );
     row.status = SessionStatus::Working;
     row.last_message_at = Some(now - Duration::seconds(3));
     view.set_sessions(vec![row.clone()], false);
@@ -801,4 +811,64 @@ fn details_activity_follows_the_clock() {
         replied,
         include_str!("../../tests/ui_snapshots/details_activity_replied.txt")
     );
+}
+
+#[test]
+fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
+    let now: chrono::DateTime<Utc> = "2026-10-12T12:00:00Z".parse().unwrap();
+    for (status, prompt_at, last_record_at, count, expected) in [
+        (
+            SessionStatus::Working,
+            Some(now - Duration::seconds(45)),
+            None,
+            1,
+            "Prompt · 1 msg · 45s",
+        ),
+        (
+            SessionStatus::Ready,
+            Some(now),
+            Some(now - Duration::seconds(1)),
+            0,
+            "Prompt · 0 msgs · 0s",
+        ),
+        (
+            SessionStatus::Working,
+            Some(now + Duration::seconds(1)),
+            None,
+            0,
+            "Prompt · 0 msgs · 0s",
+        ),
+        (SessionStatus::Ready, None, Some(now), 0, "Prompt"),
+    ] {
+        let mut row = session("turn", "Turn task", status, 0);
+        row.prompt_at = prompt_at;
+        row.last_record_at = last_record_at;
+        row.turn_messages = count;
+        let mut view = View::default();
+        view.set_sessions(vec![row], false);
+        let area = Rect::new(0, 0, 40, 24);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, now);
+        let header = buf
+            .content
+            .chunks(40)
+            .find(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .starts_with("Prompt")
+            })
+            .unwrap();
+        assert_eq!(
+            header
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end(),
+            expected
+        );
+        for cell in &header[..expected.chars().count()] {
+            assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
+        }
+    }
 }
