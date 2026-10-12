@@ -44,8 +44,7 @@ impl Preferences {
     pub fn save(&self, config_dir: &Path) -> io::Result<()> {
         fs::create_dir_all(config_dir)?;
         let destination = config_dir.join("agents.json");
-        let temporary =
-            config_dir.join(format!(".agents-{}.tmp", std::process::id()));
+        let temporary = config_dir.join(format!(".agents-{}.tmp", std::process::id()));
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)

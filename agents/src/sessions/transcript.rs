@@ -65,17 +65,71 @@ fn content_text(record: &Value, last: bool) -> Option<String> {
     }
 }
 
-fn records(bytes: &[u8]) -> impl Iterator<Item = Value> + '_ {
+fn records(bytes: &[u8]) -> impl DoubleEndedIterator<Item = Value> + '_ {
     bytes
         .split(|byte| *byte == b'\n')
         .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
         .filter(|record| record["isSidechain"] != true)
 }
 
+fn read_messages(
+    file: &mut File,
+    mut start: u64,
+    mut bytes: Vec<u8>,
+    summary: &mut Summary,
+) -> io::Result<()> {
+    let mut prompt_found = false;
+    loop {
+        // Keep the incomplete first line for the next block instead of dropping it.
+        let skip = if start == 0 {
+            0
+        } else {
+            bytes
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(bytes.len(), |index| index + 1)
+        };
+        for record in records(&bytes[skip..]).rev() {
+            if !prompt_found
+                && record["type"] == "user"
+                && let Some(prompt) = content_text(&record, false)
+                && !prompt.trim().is_empty()
+                && !prompt.trim_start().starts_with('<')
+            {
+                summary.prompt = preview(&prompt);
+                prompt_found = true;
+            }
+            if summary.last_message.is_none()
+                && record["type"] == "assistant"
+                && let Some(message) = content_text(&record, true)
+            {
+                summary.last_message = Some(preview(&message));
+            }
+            if prompt_found && summary.last_message.is_some() {
+                return Ok(());
+            }
+        }
+        if start == 0 {
+            return Ok(());
+        }
+        bytes.truncate(skip);
+        let previous = start.saturating_sub(CHUNK);
+        file.seek(SeekFrom::Start(previous))?;
+        let mut block = Vec::new();
+        (&mut *file)
+            .take(start - previous)
+            .read_to_end(&mut block)?;
+        block.extend_from_slice(&bytes);
+        bytes = block;
+        start = previous;
+    }
+}
+
 pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
     let mut file = File::open(path)?;
     let mut head = Vec::new();
     let mut tail = Vec::new();
+    let mut tail_skip = 0;
     if len <= 2 * CHUNK {
         (&mut file).take(2 * CHUNK).read_to_end(&mut head)?;
     } else {
@@ -83,14 +137,13 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
         // The preceding byte tells whether the tail begins on a complete line.
         file.seek(SeekFrom::Start(len - CHUNK - 1))?;
         (&mut file).take(CHUNK + 1).read_to_end(&mut tail)?;
-        let skip = if tail.first() == Some(&b'\n') {
+        tail_skip = if tail.first() == Some(&b'\n') {
             1
         } else {
             tail.iter()
                 .position(|byte| *byte == b'\n')
                 .map_or(tail.len(), |index| index + 1)
         };
-        tail.drain(..skip);
     }
     let mut summary = Summary::default();
     for record in records(&head) {
@@ -107,17 +160,13 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
         if summary.git_branch.is_none() {
             summary.git_branch = text(&record, "gitBranch");
         }
-        if summary.prompt.is_empty()
-            && record["type"] == "user"
-            && let Some(prompt) = content_text(&record, false)
-            && !prompt.trim().is_empty()
-            && !prompt.trim_start().starts_with('<')
-        {
-            summary.prompt = preview(&prompt);
-        }
     }
-    let tail = if len <= 2 * CHUNK { &head } else { &tail };
-    for record in records(tail) {
+    let metadata = if len <= 2 * CHUNK {
+        &head[..]
+    } else {
+        &tail[tail_skip..]
+    };
+    for record in records(metadata) {
         summary.record_pr(&record);
         if let Some(timestamp) = record["timestamp"]
             .as_str()
@@ -160,9 +209,6 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
                 }
             }
             Some("assistant") => {
-                if let Some(message) = content_text(&record, true) {
-                    summary.last_message = Some(preview(&message));
-                }
                 if let Some(model) =
                     text(&record, "requestedModel").or_else(|| text(&record["message"], "model"))
                 {
@@ -174,6 +220,11 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
             }
             _ => {}
         }
+    }
+    if len <= 2 * CHUNK {
+        read_messages(&mut file, 0, head, &mut summary)?;
+    } else {
+        read_messages(&mut file, len - CHUNK - 1, tail, &mut summary)?;
     }
     Ok(summary)
 }
@@ -218,6 +269,96 @@ mod tests {
     }
 
     const PR: &str = include_str!("../../tests/fixtures/pr-link.jsonl");
+
+    fn write_tool_traffic(file: &mut impl Write, bytes: usize) {
+        let tool_use = serde_json::json!({
+            "type": "assistant",
+            "message": {"content": [{"type": "tool_use", "id": "tool", "name": "Read", "input": {}}]}
+        });
+        let tool_result = serde_json::json!({
+            "type": "user",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "tool", "content": "x".repeat(1024)}]}
+        });
+        let traffic = format!("{tool_use}\n{tool_result}\n");
+        for _ in 0..bytes.div_ceil(traffic.len()) {
+            file.write_all(traffic.as_bytes()).unwrap();
+        }
+    }
+
+    #[test]
+    fn messages_survive_multiple_chunks_of_tool_traffic() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(FIXTURE.as_bytes()).unwrap();
+        write_tool_traffic(&mut file, 3 * CHUNK as usize);
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        let expected = read_fixture();
+        assert_eq!(summary.prompt, expected.prompt);
+        assert_eq!(summary.last_message, expected.last_message);
+        // Older replies must not restore metadata outside the original tail.
+        assert_eq!(summary.model, None);
+        assert_eq!(summary.effort, None);
+        assert_eq!(summary.timestamp, None);
+    }
+
+    fn read_fixture() -> Summary {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(FIXTURE.as_bytes()).unwrap();
+        read(file.path(), file.as_file().metadata().unwrap().len()).unwrap()
+    }
+
+    #[test]
+    fn prompt_is_the_last_real_user_message() {
+        for large in [false, true] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            file.write_all(FIXTURE.as_bytes()).unwrap();
+            if large {
+                write_tool_traffic(&mut file, 3 * CHUNK as usize);
+            }
+            let mut user: Value = serde_json::from_str(FIXTURE.lines().next().unwrap()).unwrap();
+            user["message"]["content"] = "second prompt".into();
+            writeln!(file, "{user}").unwrap();
+            for content in ["", "  ", "  <system-reminder>skip</system-reminder>"] {
+                user["message"]["content"] = content.into();
+                writeln!(file, "{user}").unwrap();
+            }
+            user["message"]["content"] = "sidechain prompt".into();
+            user["isSidechain"] = true.into();
+            writeln!(file, "{user}").unwrap();
+            let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+            assert_eq!(summary.prompt, "second prompt");
+            assert_eq!(summary.last_message, read_fixture().last_message);
+        }
+    }
+
+    #[test]
+    fn messages_straddling_chunk_boundaries_are_whole() {
+        for kind in ["user", "assistant"] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            file.write_all(FIXTURE.as_bytes()).unwrap();
+            write_tool_traffic(&mut file, 2 * CHUNK as usize);
+            let message = format!("boundary {kind} {}", "中".repeat(CHUNK as usize));
+            let mut record: Value = serde_json::from_str(
+                FIXTURE
+                    .lines()
+                    .nth(usize::from(kind == "assistant"))
+                    .unwrap(),
+            )
+            .unwrap();
+            record["message"]["content"] = if kind == "user" {
+                message.clone().into()
+            } else {
+                serde_json::json!([{"type": "text", "text": message}])
+            };
+            writeln!(file, "{record}").unwrap();
+            write_tool_traffic(&mut file, CHUNK as usize / 2);
+            let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+            if kind == "user" {
+                assert_eq!(summary.prompt, preview(&message));
+            } else {
+                assert_eq!(summary.last_message, Some(preview(&message)));
+            }
+        }
+    }
 
     #[test]
     fn pull_request_absent() {
