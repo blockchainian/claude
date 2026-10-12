@@ -1,0 +1,22 @@
+Task details
+
+Background task
+○ Ready
+
+Model: Unknown
+Reasoning: Unknown
+
+Project
+/tmp/project
+
+Background
+╭A very long description A very long…──╮
+│first                                 │
+│xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx│
+│last                                  │
+╰──────────────────────────────────────╯
+╭Waiting for output────────────────────╮
+╰──────────────────────────────────────╯
+
+Prompt
+Background task

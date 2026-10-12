@@ -183,7 +183,9 @@ impl App {
             {
                 terminal.set_cursor_position((x, y))?;
             }
-            match receiver.recv_timeout(schedule.timeout(Instant::now())) {
+            match receiver
+                .recv_timeout(schedule.redraw_timeout(Instant::now(), self.view.has_background()))
+            {
                 Ok(Input::Terminal(event)) => match event? {
                     Event::Key(key) if self.handle_key(key) => return Ok(()),
                     _ => {}

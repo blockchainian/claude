@@ -443,6 +443,7 @@ fn session(
         last_message: summary.last_message,
         last_message_at: summary.last_message_at,
         activity: summary.activity,
+        background: summary.background,
         last_prompt: summary.last_prompt,
         transcript: path,
     }

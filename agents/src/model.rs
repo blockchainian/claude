@@ -63,6 +63,13 @@ pub struct Activity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackgroundTask {
+    pub description: String,
+    pub output: PathBuf,
+    pub started_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Session {
     /// Claude Code session id (the transcript file stem).
     pub id: String,
@@ -88,6 +95,7 @@ pub struct Session {
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub background: Vec<BackgroundTask>,
     /// Latest user prompt, up to 512 chars.
     pub last_prompt: Option<String>,
     pub transcript: Option<PathBuf>,

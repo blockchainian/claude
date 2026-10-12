@@ -1,7 +1,7 @@
-use crate::model::{Activity, PullRequest};
+use crate::model::{Activity, BackgroundTask, PullRequest};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -23,6 +23,7 @@ pub(super) struct Summary {
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub background: Vec<BackgroundTask>,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
@@ -141,6 +142,81 @@ fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
         .collect()
 }
 
+fn background_result(content: &str) -> Option<(String, PathBuf)> {
+    let task = if let Some(rest) = content.strip_prefix("Command running in background with ID: ") {
+        rest.split_once('.')?.0
+    } else {
+        content
+            .strip_prefix("Command was moved to the background (ID: ")?
+            .split_once(')')?
+            .0
+    };
+    let output = content.split_once("Output is being written to: ")?.1;
+    let output = output.split_once(". ").map_or(output, |(path, _)| path);
+    let output = output.strip_suffix('.').unwrap_or(output);
+    (!task.is_empty() && !output.is_empty()).then(|| (task.to_owned(), PathBuf::from(output)))
+}
+
+#[derive(Default)]
+struct Background {
+    completed: HashSet<String>,
+    pending: HashMap<String, (String, PathBuf)>,
+    tasks: Vec<BackgroundTask>,
+}
+
+impl Background {
+    fn record(&mut self, record: &Value, at: Option<DateTime<Utc>>, pairing_only: bool) {
+        if record["type"] == "attachment" {
+            let attachment = &record["attachment"];
+            if attachment["type"] == "queued_command"
+                && attachment["commandMode"] == "task-notification"
+                && let Some(prompt) = attachment["prompt"].as_str()
+                && let Some((_, rest)) = prompt.split_once("<task-id>")
+                && let Some((task, _)) = rest.split_once("</task-id>")
+            {
+                self.completed.insert(task.to_owned());
+            }
+        }
+        let Some(blocks) = record["message"]["content"].as_array() else {
+            return;
+        };
+        for block in blocks.iter().rev() {
+            if !pairing_only
+                && record["type"] == "user"
+                && block["type"] == "tool_result"
+                && let Some(id) = block["tool_use_id"].as_str()
+                && let Some(content) = block["content"].as_str()
+                && let Some((task, output)) = background_result(content)
+                && !self.completed.contains(&task)
+            {
+                self.pending.insert(id.to_owned(), (task, output));
+            }
+            if record["type"] == "assistant"
+                && block["type"] == "tool_use"
+                && block["name"] == "Bash"
+                && let Some(id) = block["id"].as_str()
+                && let Some((_, output)) = self.pending.remove(id)
+                && let Some(started_at) = at
+                && let Some(description) = block["input"]["description"]
+                    .as_str()
+                    .filter(|description| !description.trim().is_empty())
+                    .or_else(|| block["input"]["command"].as_str()?.lines().next())
+            {
+                self.tasks.push(BackgroundTask {
+                    description: description.to_owned(),
+                    output,
+                    started_at,
+                });
+            }
+        }
+    }
+
+    fn finish(mut self) -> Vec<BackgroundTask> {
+        self.tasks.reverse();
+        self.tasks
+    }
+}
+
 fn read_messages(
     file: &mut File,
     mut start: u64,
@@ -156,6 +232,8 @@ fn read_messages(
     let mut next_user = None;
     let mut dequeued_user = None;
     let mut quiet_point = false;
+    let mut background = Background::default();
+    let mut pairing_only = false;
     loop {
         // Keep the incomplete first line for the next block instead of dropping it.
         let skip = if start == 0 {
@@ -187,6 +265,7 @@ fn read_messages(
                 .as_str()
                 .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
                 .map(|value| value.with_timezone(&Utc));
+            background.record(&record, at, pairing_only);
             if !prompt_found && record["type"] == "assistant" {
                 turn_messages += 1;
             }
@@ -248,11 +327,18 @@ fn read_messages(
                 && summary.activity.is_some()
                 && quiet_point
             {
-                summary.queued = queued_prompts(operations);
-                return Ok(());
+                // Tasks before this existing stopping point are intentionally invisible.
+                // Only an already-seen result may extend the walk to its tool use.
+                pairing_only = true;
+                if background.pending.is_empty() {
+                    summary.background = background.finish();
+                    summary.queued = queued_prompts(operations);
+                    return Ok(());
+                }
             }
         }
         if start == 0 {
+            summary.background = background.finish();
             summary.queued = queued_prompts(operations);
             return Ok(());
         }
@@ -459,6 +545,147 @@ mod tests {
 
     fn summary(file: &tempfile::NamedTempFile) -> Summary {
         read(file.path(), file.as_file().metadata().unwrap().len()).unwrap()
+    }
+
+    fn background_start(file: &mut impl Write, task: &str, description: Option<&str>, moved: bool) {
+        let mut input =
+            serde_json::json!({"command": "sleep 5\necho done", "description": description});
+        if !moved {
+            input["run_in_background"] = true.into();
+        }
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "assistant", "timestamp": "2026-10-12T12:00:00Z",
+                "message": {"content": [{"type": "tool_use", "id": format!("tool-{task}"),
+                    "name": "Bash", "input": input}]}
+            })
+        )
+        .unwrap();
+        let text = if moved {
+            format!(
+                "Command was moved to the background (ID: {task}). Output is being written to: /tmp/x/{task}.output. More details."
+            )
+        } else {
+            format!(
+                "Command running in background with ID: {task}. Output is being written to: /tmp/x/{task}.output. More details."
+            )
+        };
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({
+                "type": "user", "message": {"content": [{"type": "tool_result",
+                    "tool_use_id": format!("tool-{task}"), "content": text}]}
+            })
+        )
+        .unwrap();
+    }
+
+    fn background_finish(file: &mut impl Write, task: &str) {
+        writeln!(file, "{}", serde_json::json!({"type": "attachment", "attachment": {
+            "type": "queued_command", "commandMode": "task-notification",
+            "prompt": format!("<task-notification>\n<task-id>{task}</task-id>\n<status>completed</status>\n</task-notification>")
+        }})).unwrap();
+    }
+
+    #[test]
+    fn background_task_records_description_output_and_start_time() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        background_start(&mut file, "b1", Some("Wait five seconds"), false);
+        let tasks = summary(&file).background;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].description, "Wait five seconds");
+        assert_eq!(tasks[0].output, PathBuf::from("/tmp/x/b1.output"));
+        assert_eq!(
+            tasks[0].started_at,
+            "2026-10-12T12:00:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        background_finish(&mut file, "b1");
+        assert!(summary(&file).background.is_empty());
+    }
+
+    #[test]
+    fn moved_background_task_uses_first_command_line() {
+        for description in [None, Some(""), Some("  ")] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            idle_prompt(&mut file);
+            background_start(&mut file, "b2", description, true);
+            assert_eq!(summary(&file).background[0].description, "sleep 5");
+        }
+    }
+
+    #[test]
+    fn background_tasks_keep_start_order_and_ignore_queue_notifications() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        background_start(&mut file, "b1", Some("First"), false);
+        background_start(&mut file, "b2", Some("Second"), false);
+        let tasks = summary(&file).background;
+        assert_eq!(
+            tasks
+                .iter()
+                .map(|task| task.description.as_str())
+                .collect::<Vec<_>>(),
+            ["First", "Second"]
+        );
+        queue(
+            &mut file,
+            "enqueue",
+            "<task-notification><task-id>b2</task-id></task-notification>",
+        );
+        assert_eq!(summary(&file).background.len(), 2);
+        background_finish(&mut file, "b1");
+        let tasks = summary(&file).background;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].description, "Second");
+    }
+
+    #[test]
+    fn background_tasks_survive_later_turns_within_existing_walk() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        background_start(&mut file, "b1", Some("Earlier turn"), false);
+        user(&mut file, "Next prompt");
+        assert_eq!(summary(&file).background.len(), 1);
+    }
+
+    #[test]
+    fn background_tasks_before_existing_quiet_point_are_not_scanned() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        background_start(&mut file, "b1", Some("Earlier task"), false);
+        idle_prompt(&mut file);
+        assert!(summary(&file).background.is_empty());
+    }
+
+    #[test]
+    fn background_pairing_can_cross_existing_stopping_point() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        background_start(&mut file, "earlier", Some("Out of range"), false);
+        let mut task = Vec::new();
+        background_start(&mut task, "pending", Some("Pair across boundary"), false);
+        let newline = task.iter().position(|byte| *byte == b'\n').unwrap() + 1;
+        file.write_all(&task[..newline]).unwrap();
+        idle_prompt(&mut file);
+        file.write_all(&task[newline..]).unwrap();
+        let tasks = summary(&file).background;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].description, "Pair across boundary");
+    }
+
+    #[test]
+    fn background_pairing_crosses_chunks() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        let mut task = Vec::new();
+        background_start(&mut task, "b1", Some("Across chunks"), false);
+        let newline = task.iter().position(|byte| *byte == b'\n').unwrap() + 1;
+        file.write_all(&task[..newline]).unwrap();
+        write_tool_traffic(&mut file, 3 * CHUNK as usize);
+        file.write_all(&task[newline..]).unwrap();
+        assert_eq!(summary(&file).background[0].description, "Across chunks");
     }
 
     #[test]

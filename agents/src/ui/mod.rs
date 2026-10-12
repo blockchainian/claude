@@ -182,6 +182,10 @@ impl View {
     pub fn grouping(&self) -> Grouping {
         self.grouping
     }
+    pub fn has_background(&self) -> bool {
+        self.selected_row()
+            .is_some_and(|session| !session.background.is_empty())
+    }
     pub fn selected_id(&self) -> Option<&str> {
         self.selected_row().map(|s| s.id.as_str())
     }
