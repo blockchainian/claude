@@ -662,10 +662,11 @@ fn live_center_delete_dialog() {
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(buf[(6, 7)].modifier.contains(ratatui::style::Modifier::DIM));
-    assert!(
-        buf[(6, 9)]
-            .modifier
-            .contains(ratatui::style::Modifier::REVERSED)
+    let selected = buf[(6, 10)].style();
+    let expected = super::style::selection_style();
+    assert_eq!(
+        (selected.fg, selected.bg, selected.add_modifier),
+        (expected.fg, expected.bg, expected.add_modifier)
     );
     for width in 0..100 {
         for height in 0..16 {

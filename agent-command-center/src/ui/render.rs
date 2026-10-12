@@ -214,7 +214,10 @@ impl View {
             lines.push(Line::from(text.into_owned().dim()));
         }
         lines.push(Line::default());
-        for (confirm, label) in [(false, "Cancel"), (true, "Permanently delete task and child agents")] {
+        for (confirm, label) in [
+            (false, "Cancel"),
+            (true, "Permanently delete task and child agents"),
+        ] {
             let selected = dialog.confirm == confirm;
             let text = format!(
                 "{} {}. {label}",
