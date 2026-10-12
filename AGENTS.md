@@ -11,7 +11,7 @@ This repo is the `blockchainian` plugin marketplace for Claude Code and Codex, a
 - .claude-plugin/ -- the Claude Code catalog
 - .agents/plugins/ -- the Codex catalog
 - plugins/ -- one directory per plugin
-- agent-command-center/ -- `claude-agents`, the Rust session dashboard
+- agents/ -- `agents`, the Rust session dashboard
 - tests/ -- the marketplace suite
 
 ## Development
