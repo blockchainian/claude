@@ -210,7 +210,11 @@ impl View {
         }
         let width = usize::from(area.width.max(1));
         let mut prompt = vec![Line::default(), "Prompt".dim().into()];
-        let mut prompt_body = textwrap::wrap(&session.prompt, width)
+        let prompt_text = match session.prompt.trim() {
+            "" => "No prompt available.",
+            prompt => prompt,
+        };
+        let mut prompt_body = textwrap::wrap(prompt_text, width)
             .into_iter()
             .map(|s| Line::from(s.into_owned()))
             .collect::<Vec<_>>();
