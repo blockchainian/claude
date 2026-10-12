@@ -391,6 +391,12 @@ impl View {
         }
 
         let mut project = vec!["Project".dim()];
+        if let Some(branch) = &session.git_branch {
+            project.extend([
+                " · ".dim(),
+                Span::styled(branch.clone(), self.title_style(&session.id)),
+            ]);
+        }
         let link = session.pr.as_ref().and_then(|pr| {
             let label = format!("#{}", pr.number);
             project.push(" · ".dim());
@@ -400,12 +406,6 @@ impl View {
             project.push(Span::styled(label, self.title_style(&session.id)));
             link
         });
-        if let Some(branch) = &session.git_branch {
-            project.extend([
-                " · ".dim(),
-                Span::styled(branch.clone(), self.title_style(&session.id)),
-            ]);
-        }
         items.extend([
             Line::default().into(),
             Item::Link {

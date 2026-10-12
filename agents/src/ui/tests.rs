@@ -737,11 +737,11 @@ fn details_branch_and_pull_request_use_session_title_color() {
         })
         .expect("Project header");
     for (offset, symbol) in "main".chars().enumerate() {
-        let cell = &buf[(17 + offset as u16, project_y)];
+        let cell = &buf[(10 + offset as u16, project_y)];
         assert_eq!(cell.symbol(), symbol.to_string());
         assert_eq!(cell.fg, color);
     }
-    for x in 10..14 {
+    for x in 17..21 {
         assert_eq!(buf[(x, project_y)].fg, color);
     }
 }
@@ -791,7 +791,7 @@ fn details_branch_pull_request_snapshot() {
         render(&view),
         include_str!("../../tests/ui_snapshots/details_branch_pr.txt")
     );
-    for width in [13, 15, 40] {
+    for width in [13, 15, 20, 21, 40] {
         let area = Rect::new(5, 8, width, 18);
         let mut buf = Buffer::empty(area);
         view.render_details(area, &mut buf, Utc::now());
@@ -805,7 +805,7 @@ fn details_branch_pull_request_snapshot() {
             })
             .map(|(index, _)| index % usize::from(width))
             .collect::<Vec<_>>();
-        assert_eq!(link_cells, if width >= 15 { vec![10] } else { vec![] });
+        assert_eq!(link_cells, if width >= 21 { vec![17] } else { vec![] });
     }
     row.git_branch = None;
     view.set_sessions(vec![row.clone()], false);
