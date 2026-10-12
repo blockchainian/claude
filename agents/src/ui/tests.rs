@@ -385,9 +385,9 @@ fn details_include_attention_and_clip_messages() {
         .position(|line| line.trim_end().ends_with("/tmp/project"));
     assert!(position("Prompt") < position("Last message"));
     assert!(position("Needs attention") < position("Last message"));
-    assert!(position("Last message") < project);
-    assert!(project < position("Branch"));
-    assert!(position("Branch") < position("Model: claude-opus"));
+    assert!(position("Last message") < position("Model: claude-opus"));
+    assert!(position("Model: claude-opus") < position("Branch"));
+    assert!(position("Branch") < project);
     let area = Rect::new(0, 0, 38, 25);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());

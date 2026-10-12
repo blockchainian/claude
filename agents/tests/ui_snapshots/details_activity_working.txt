@@ -9,8 +9,8 @@ Activity task
 Latest activity · 7s ago
 Run checks
 
-Project
-/tmp/project
-
 Model: Unknown
 Reasoning: Unknown
+
+Project
+/tmp/project

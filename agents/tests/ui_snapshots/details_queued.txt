@@ -8,8 +8,8 @@ Current prompt
 First queued prompt
 Second queued prompt
 
-Project
-/tmp/project
-
 Model: Unknown
 Reasoning: Unknown
+
+Project
+/tmp/project

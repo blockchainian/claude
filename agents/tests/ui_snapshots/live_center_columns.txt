@@ -9,11 +9,11 @@
   /tmp/project  4                                                                                                     │ Prompt
     ○ A longer task title that uses the available column                                      Ready           5m ago  │ Current task
     ● Failed task                                                                             Needs input     1h ago  │
-    ● Working task                                                                            Working         1d ago  │ Project
-    ○ Unloaded task                                                                           Inactive        2d ago  │ /tmp/project
+    ● Working task                                                                            Working         1d ago  │ Model: Unknown
+    ○ Unloaded task                                                                           Inactive        2d ago  │ Reasoning: Unknown
                                                                                                                       │
-                                                                                                                      │ Model: Unknown
-                                                                                                                      │ Reasoning: Unknown
+                                                                                                                      │ Project
+                                                                                                                      │ /tmp/project
                                                                                                                       │
                                                                                                                       │
                                                                                                                       │

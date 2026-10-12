@@ -9,11 +9,11 @@
     ○ Recent task                                         │ Prompt
     ○ Older task                                          │ Legacy task
                                                           │
-  model-b  1                                              │ Project
-    ○ Other model                                         │ /tmp/project
+  model-b  1                                              │ Model: Unknown
+    ○ Other model                                         │ Reasoning: Unknown
                                                           │
-                                                          │ Model: Unknown
-                                                          │ Reasoning: Unknown
+                                                          │ Project
+                                                          │ /tmp/project
                                                           │
                                                           │
                                                           │
