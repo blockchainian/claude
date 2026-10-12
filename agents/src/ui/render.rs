@@ -404,7 +404,7 @@ impl View {
         let details_height = details.len()
             + boxes
                 .iter()
-                .map(|(_, lines)| 2 + lines.len())
+                .map(|(_, lines)| box_height(lines.len()))
                 .sum::<usize>();
         let details_start = lines.len();
         let text_height = details.len().min(available);
@@ -418,17 +418,25 @@ impl View {
             if offset >= available {
                 break;
             }
-            let height = (2 + output.len()).min(available - offset);
+            let height = box_height(output.len()).min(available - offset);
             let box_area = row(area, (details_start + offset) as u16, height as u16);
             // One space keeps the title off the corner glyph on both sides.
             let mut title = truncate_line_with_ellipsis_if_overflow(
                 Line::from(task.description.clone()),
                 usize::from(box_area.width.saturating_sub(4)),
             );
-            title.spans.insert(0, " ".into());
             title.spans.push(" ".into());
+            // Without output the task is just its titled top rule, which has no
+            // corner glyph, so the rule itself leads the title.
+            let borders = if output.is_empty() {
+                title.spans.insert(0, "─ ".dim());
+                Borders::TOP
+            } else {
+                title.spans.insert(0, " ".into());
+                Borders::ALL
+            };
             let block = Block::default()
-                .borders(Borders::ALL)
+                .borders(borders)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().dim())
                 .title_style(Style::default().not_dim())
@@ -459,4 +467,9 @@ impl View {
             super::hyperlink::hyperlink(buf, area, url);
         }
     }
+}
+
+/// Rows a background box takes: a bare top rule without output, a full box otherwise.
+fn box_height(lines: usize) -> usize {
+    if lines == 0 { 1 } else { 2 + lines }
 }
