@@ -15,7 +15,6 @@ pub(super) struct Entry {
     pub proc_start: Option<String>,
     pub version: Option<String>,
     pub kind: Option<String>,
-    pub tmux: Option<String>,
     pub name: Option<String>,
     pub name_source: Option<String>,
     pub updated_at: Option<i64>,

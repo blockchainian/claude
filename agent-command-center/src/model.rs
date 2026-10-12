@@ -46,8 +46,6 @@ pub struct Process {
     pub status: String,
     /// `interactive`, `bg`, `daemon` or `daemon-worker`.
     pub kind: Option<String>,
-    /// tmux target as `session:@window.%pane`, when the session runs inside tmux.
-    pub tmux: Option<String>,
     pub version: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
 }
@@ -101,8 +99,6 @@ pub enum Action {
     Fork(String),
     /// `n`: start a new session in the given directory.
     New(Option<PathBuf>),
-    /// `x`: interrupt the running turn of a working session.
-    Stop(String),
     /// `h`: hide the session until the next launch.
     Hide(String),
     /// `p`: pin or unpin the session.

@@ -189,12 +189,7 @@ impl View {
             KeyCode::Backspace => return Some(Action::Unsupported("Delete")),
             KeyCode::Char('o') => return self.selected_id().map(|id| Action::Resume(id.into())),
             KeyCode::Char('f') => return self.selected_id().map(|id| Action::Fork(id.into())),
-            KeyCode::Char('x') => {
-                return self
-                    .selected_row()
-                    .filter(|s| s.status == SessionStatus::Working)
-                    .map(|s| Action::Stop(s.id.clone()));
-            }
+            KeyCode::Char('x') => return Some(Action::Unsupported("Stop")),
             KeyCode::Char('h') => {
                 let id = self.selected_id()?.to_owned();
                 self.hide(&id);
