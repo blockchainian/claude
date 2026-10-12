@@ -390,32 +390,27 @@ impl View {
             ]);
         }
 
+        let mut project = vec!["Project".dim()];
+        let link = session.pr.as_ref().and_then(|pr| {
+            let label = format!("#{}", pr.number);
+            project.push(" · ".dim());
+            let prefix_width = Line::from(project.clone()).width();
+            let link = line_width_fits(prefix_width + label.len(), width)
+                .then(|| (prefix_width as u16, label.len() as u16, pr.url.clone()));
+            project.push(label.into());
+            link
+        });
+        if let Some(branch) = &session.git_branch {
+            project.extend([" · ".dim(), branch.clone().into()]);
+        }
         items.extend([
             Line::default().into(),
-            "Project".dim().into(),
+            Item::Link {
+                line: Line::from(project),
+                link,
+            },
             session.cwd.display().to_string().into(),
         ]);
-
-        if let Some(branch) = &session.git_branch {
-            items.push(Line::default().into());
-            if let Some(pr) = &session.pr {
-                let label = format!("#{}", pr.number);
-                let prefix_width = 8 + branch.width() + 3;
-                let link = (line_width_fits(prefix_width + label.len(), width))
-                    .then(|| (prefix_width as u16, label.len() as u16, pr.url.clone()));
-                items.push(Item::Branch {
-                    line: Line::from(vec![
-                        "Branch  ".dim(),
-                        branch.clone().into(),
-                        " · ".dim(),
-                        label.into(),
-                    ]),
-                    link,
-                });
-            } else {
-                items.extend(["Branch".dim().into(), branch.clone().into()]);
-            }
-        }
 
         let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
         if let Some(effort) = &session.effort {
@@ -434,7 +429,7 @@ impl View {
             let item_area = row(area, offset as u16, height as u16);
             match item {
                 Item::Text(text) => line(text, item_area, buf),
-                Item::Branch { line: text, link } => {
+                Item::Link { line: text, link } => {
                     line(text, item_area, buf);
                     if let Some((x, width, url)) = link {
                         super::hyperlink::hyperlink(
@@ -465,7 +460,7 @@ fn line_width_fits(line_width: usize, width: usize) -> bool {
 /// One row-aligned piece of the details panel.
 enum Item<'a> {
     Text(Line<'static>),
-    Branch {
+    Link {
         line: Line<'static>,
         /// Column offset, width and target of the pull request link.
         link: Option<(u16, u16, String)>,
@@ -479,7 +474,7 @@ enum Item<'a> {
 impl Item<'_> {
     fn height(&self) -> usize {
         match self {
-            Self::Text(_) | Self::Branch { .. } => 1,
+            Self::Text(_) | Self::Link { .. } => 1,
             Self::Background { output, .. } => box_height(output.len()),
         }
     }
