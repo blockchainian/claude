@@ -208,19 +208,21 @@ impl View {
                 branch.clone().into(),
             ]);
         }
-        lines.extend([Line::default(), "Prompt".dim().into()]);
         let width = usize::from(area.width.max(1));
-        let mut prompt = textwrap::wrap(&session.prompt, width)
+        let mut prompt = vec![Line::default(), "Prompt".dim().into()];
+        let mut prompt_body = textwrap::wrap(&session.prompt, width)
             .into_iter()
             .map(|s| Line::from(s.into_owned()))
             .collect::<Vec<_>>();
-        if prompt.len() > 2 {
-            prompt.truncate(2);
-            prompt[1] = "…".dim().into();
+        if prompt_body.len() > 2 {
+            prompt_body.truncate(2);
+            prompt_body[1] = "…".dim().into();
         }
-        lines.extend(prompt);
+        prompt.extend(prompt_body);
+        // Activity sits above the prompt and takes the height the prompt leaves over.
+        let mut details = Vec::new();
         if session.status == SessionStatus::NeedsInput {
-            lines.extend([
+            details.extend([
                 Line::default(),
                 "Needs attention".red().into(),
                 "Open task to review.".dim().into(),
@@ -228,21 +230,22 @@ impl View {
             ]);
         }
         if let Some(message) = &session.last_message {
-            let mut message_lines = vec![Line::default(), "Last message".dim().into()];
-            message_lines.extend(
+            details.extend([Line::default(), "Last message".dim().into()]);
+            details.extend(
                 textwrap::wrap(message, width)
                     .into_iter()
                     .map(|s| Line::from(s.into_owned())),
             );
-            let available = usize::from(area.height).saturating_sub(lines.len());
-            if message_lines.len() > available {
-                message_lines.truncate(available);
-                if let Some(last) = message_lines.last_mut() {
-                    *last = "…".dim().into();
-                }
-            }
-            lines.extend(message_lines);
         }
+        let available = usize::from(area.height).saturating_sub(lines.len() + prompt.len());
+        if details.len() > available {
+            details.truncate(available);
+            if let Some(last) = details.last_mut() {
+                *last = "…".dim().into();
+            }
+        }
+        lines.extend(details);
+        lines.extend(prompt);
         lines.truncate(usize::from(area.height));
         for (offset, text) in lines.into_iter().enumerate() {
             line(text, row(area, offset as u16, 1), buf);
