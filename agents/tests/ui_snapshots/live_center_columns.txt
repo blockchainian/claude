@@ -1,7 +1,7 @@
   Agent command center  Group: Project  g
    All 6   Needs you 2   Working 1   Ready 2   Inactive 1                                                                                      tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                                                                   Status         Updated  │ Task details · Current task · ○ Ready
+      Tasks                                                                                   Status         Updated  │ Task details · ○ Ready · Current task
   Pinned  2                                                                                                           │
   › ○ Current task                                                                            Ready              now  │ Prompt
     ● Needs an answer                                                                         Needs input     2h ago  │ Current task

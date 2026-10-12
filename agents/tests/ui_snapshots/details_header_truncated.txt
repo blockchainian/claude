@@ -1,4 +1,4 @@
-Task details · A very long … · ● Working
+Task details · ● Working · A very long …
 
 Prompt
 Current prompt
