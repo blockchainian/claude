@@ -341,7 +341,7 @@ fn styles_and_unicode_clipping() {
 }
 
 #[test]
-fn details_include_process_attention_and_clip_messages() {
+fn details_include_attention_and_clip_messages() {
     let mut row = session("details", "Details task", SessionStatus::NeedsInput, 120);
     row.model = Some("claude-opus".into());
     row.effort = Some("high".into());
@@ -364,8 +364,6 @@ fn details_include_process_attention_and_clip_messages() {
         "Reasoning: high",
         "Branch",
         "main",
-        "Process",
-        "pid 123 · tmux work:@1.%2 · v2.0",
         "Needs attention",
         "Open task to review.",
         "Waiting for your response.",
