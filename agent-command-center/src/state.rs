@@ -5,17 +5,22 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Preferences {
     pub grouping: Grouping,
     pub pinned: Vec<String>,
+    /// A `.tmTheme` file whose accents color the session titles.
+    pub theme: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Serialize)]
 struct StoredPreferences {
     grouping: String,
     pinned: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    theme: Option<PathBuf>,
 }
 
 impl Preferences {
@@ -32,6 +37,7 @@ impl Preferences {
         Self {
             grouping,
             pinned: stored.pinned,
+            theme: stored.theme,
         }
     }
 
@@ -50,6 +56,7 @@ impl Preferences {
                 &StoredPreferences {
                     grouping: self.grouping.as_str().into(),
                     pinned: self.pinned.clone(),
+                    theme: self.theme.clone(),
                 },
             )?;
             file.write_all(b"\n")?;
@@ -74,6 +81,7 @@ mod tests {
         let preferences = Preferences {
             grouping: Grouping::Model,
             pinned: vec!["second".into(), "first".into()],
+            theme: Some(PathBuf::from("custom.tmTheme")),
         };
         preferences.save(dir.path()).unwrap();
         assert_eq!(Preferences::load(dir.path()), preferences);

@@ -50,16 +50,5 @@ pub(super) fn accent_color() -> Color {
     Color::Cyan
 }
 pub(super) fn thread_color(id: &str) -> Color {
-    let hash = id.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-    });
-    let palette = [
-        Color::Indexed(81),
-        Color::Indexed(114),
-        Color::Indexed(180),
-        Color::Indexed(176),
-        Color::Indexed(110),
-        Color::Indexed(215),
-    ];
-    palette[(hash % palette.len() as u64) as usize]
+    crate::theme::color_for_id(id)
 }

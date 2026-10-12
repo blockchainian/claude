@@ -52,10 +52,17 @@ impl App {
     pub fn run(mut self) -> io::Result<()> {
         let mut terminal = enter_terminal()?;
         // Raw mode is on, so the terminal's reply reaches us instead of the screen.
-        if let Ok(Some(background)) =
-            terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
+        let light = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
+            .ok()
+            .flatten()
+            .is_some_and(terminal_background::is_light);
+        crate::ui::set_light_background(light);
+        crate::theme::use_default_accents(light);
+        if let Some(path) = self.preferences.theme.clone()
+            && let Err(error) = crate::theme::use_theme_file(&path)
         {
-            crate::ui::set_light_background(terminal_background::is_light(background));
+            self.view
+                .set_notice(Some(format!("Theme not loaded: {error}")));
         }
         let result = self.event_loop(&mut terminal);
         leave_terminal(terminal)?;
