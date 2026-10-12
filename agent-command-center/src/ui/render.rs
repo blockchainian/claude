@@ -207,16 +207,6 @@ impl View {
                 branch.clone().into(),
             ]);
         }
-        if let Some(process) = &session.process {
-            let mut label = format!("pid {}", process.pid);
-            if let Some(target) = &process.tmux {
-                label.push_str(&format!(" · tmux {target}"));
-            }
-            if let Some(version) = &process.version {
-                label.push_str(&format!(" · v{version}"));
-            }
-            lines.extend([Line::default(), "Process".dim().into(), label.into()]);
-        }
         lines.extend([Line::default(), "Prompt".dim().into()]);
         let width = usize::from(area.width.max(1));
         let mut prompt = textwrap::wrap(&session.prompt, width)
