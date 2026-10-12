@@ -5,7 +5,7 @@ Queue task
 
 Prompt
 Current prompt Current prompt Current
-…
+prompt Current prompt Current prompt…
 Queued prompt that extends beyond the
 
 Model: Unknown
