@@ -1,5 +1,5 @@
 [package]
-name = "claude-agents"
+name = "agents"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
@@ -7,7 +7,7 @@ description = "Agent command center for Claude Code sessions"
 publish = false
 
 [[bin]]
-name = "claude-agents"
+name = "agents"
 path = "src/main.rs"
 
 [dependencies]

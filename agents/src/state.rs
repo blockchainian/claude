@@ -25,7 +25,7 @@ struct StoredPreferences {
 
 impl Preferences {
     pub fn load(config_dir: &Path) -> Self {
-        let Some(stored) = fs::read(config_dir.join("agent-command-center.json"))
+        let Some(stored) = fs::read(config_dir.join("agents.json"))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<StoredPreferences>(&bytes).ok())
         else {
@@ -43,9 +43,9 @@ impl Preferences {
 
     pub fn save(&self, config_dir: &Path) -> io::Result<()> {
         fs::create_dir_all(config_dir)?;
-        let destination = config_dir.join("agent-command-center.json");
+        let destination = config_dir.join("agents.json");
         let temporary =
-            config_dir.join(format!(".agent-command-center-{}.tmp", std::process::id()));
+            config_dir.join(format!(".agents-{}.tmp", std::process::id()));
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -86,7 +86,7 @@ mod tests {
         preferences.save(dir.path()).unwrap();
         assert_eq!(Preferences::load(dir.path()), preferences);
         preferences.save(dir.path()).unwrap();
-        fs::write(dir.path().join("agent-command-center.json"), b"broken").unwrap();
+        fs::write(dir.path().join("agents.json"), b"broken").unwrap();
         assert_eq!(Preferences::load(dir.path()), Preferences::default());
     }
 }

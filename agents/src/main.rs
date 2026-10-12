@@ -11,13 +11,13 @@ fn main() {
     let config_dir = sessions::config_dir();
     if !app::config_dir_exists(&config_dir) {
         eprintln!(
-            "claude-agents: no Claude Code config directory at {}",
+            "agents: no Claude Code config directory at {}",
             config_dir.display()
         );
         std::process::exit(1);
     }
     if let Err(error) = app::App::new(config_dir).run() {
-        eprintln!("claude-agents: {error}");
+        eprintln!("agents: {error}");
         std::process::exit(1);
     }
 }
