@@ -436,9 +436,11 @@ impl View {
             let mut title = truncate_line_with_ellipsis_if_overflow(
                 Line::from(task.description.clone()),
                 usize::from(box_area.width.saturating_sub(4))
-                    .saturating_sub(elapsed.chars().count() + " ─ ".chars().count()),
+                    .saturating_sub(elapsed.chars().count() + " ─── ".chars().count()),
             );
-            title.spans.extend([" ─ ".dim(), elapsed.dim(), " ".into()]);
+            title
+                .spans
+                .extend([" ─── ".dim(), elapsed.dim(), " ".into()]);
             // Without output the task is just its titled top rule, which has no
             // corner glyph, so the rule itself leads the title.
             let borders = if output.is_empty() {
