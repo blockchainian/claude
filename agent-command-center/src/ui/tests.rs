@@ -371,6 +371,9 @@ fn details_include_attention_and_clip_messages() {
     ] {
         assert!(rendered.contains(label), "{label}");
     }
+    let position = |label: &str| rendered.lines().position(|line| line.contains(label));
+    assert!(position("Last message") < position("Prompt"));
+    assert!(position("Needs attention") < position("Last message"));
     let area = Rect::new(0, 0, 38, 25);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf);
