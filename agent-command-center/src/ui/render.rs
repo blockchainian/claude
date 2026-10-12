@@ -79,6 +79,7 @@ impl View {
     }
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
+        self.viewport.borrow_mut().marker = None;
         let layout = self.center_layout(area);
         let inset = |area: Rect| area.inner(Margin::new(2, 0));
         line(

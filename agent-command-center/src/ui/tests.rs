@@ -405,3 +405,28 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
     key(&mut view, KeyCode::Esc);
     assert!(!view.help);
 }
+
+#[test]
+fn marker_pos_follows_the_selected_row_and_clears_on_help() {
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(
+        vec![
+            session("a", "First", SessionStatus::Ready, 10),
+            session("b", "Second", SessionStatus::Ready, 20),
+        ],
+        false,
+    );
+    let area = Rect::new(0, 0, 80, 12);
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf);
+    let (x, y) = view.marker_pos().unwrap();
+    assert_eq!(buf[(x, y)].symbol(), "›");
+    view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    view.render(area, &mut buf);
+    let (x2, y2) = view.marker_pos().unwrap();
+    assert_eq!((x2, y2), (x, y + 1));
+    assert_eq!(buf[(x2, y2)].symbol(), "›");
+    view.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+    view.render(area, &mut buf);
+    assert_eq!(view.marker_pos(), None);
+}

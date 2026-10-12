@@ -119,6 +119,9 @@ impl View {
                         "Show more"
                     };
                     let marker = if selected { "›" } else { " " };
+                    if selected {
+                        state.marker = Some((rect.x, rect.y));
+                    }
                     line(
                         Line::from(format!("{marker}   {label}")).style(style),
                         rect,
@@ -183,6 +186,9 @@ impl View {
             let (status, mut dot) = Self::status(task);
             if index == self.selected {
                 dot.style = style;
+            }
+            if index == self.selected {
+                state.marker = Some((rect.x, rect.y));
             }
             line(
                 Line::from(if index == self.selected { "›" } else { " " }).style(style),

@@ -96,6 +96,13 @@ impl App {
                     frame.set_cursor_position((x, y));
                 }
             })?;
+            // The hidden cursor otherwise rests wherever the last repainted cell was, and a
+            // terminal's cursor-line guide follows it there; park it on the selected row's marker.
+            if self.view.cursor_pos(terminal.get_frame().area()).is_none()
+                && let Some((x, y)) = self.view.marker_pos()
+            {
+                terminal.set_cursor_position((x, y))?;
+            }
             if crossterm::event::poll(POLL_INTERVAL)? {
                 match crossterm::event::read()? {
                     Event::Key(key) if self.handle_key(key) => {
