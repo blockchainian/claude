@@ -14,7 +14,9 @@ pub(super) fn hint_line(items: &[(&str, &str)]) -> Line<'static> {
 }
 impl View {
     pub(super) fn center_footer_hints(&self) -> Line<'static> {
-        if self.help {
+        if self.delete_dialog.is_some() {
+            hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
+        } else if self.help {
             hint_line(&[("esc", "back")])
         } else if self.rename_target.is_some() {
             hint_line(&[("esc", "back"), ("enter", "rename")])

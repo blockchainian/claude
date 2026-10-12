@@ -39,6 +39,13 @@ struct Viewport {
     marker: Option<(u16, u16)>,
 }
 
+struct DeleteDialog {
+    id: String,
+    title: String,
+    confirm: bool,
+    live: bool,
+}
+
 pub struct View {
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
@@ -52,6 +59,7 @@ pub struct View {
     searching: bool,
     rename_target: Option<String>,
     rename: String,
+    delete_dialog: Option<DeleteDialog>,
     help: bool,
     loading: bool,
     has_more: bool,
@@ -102,6 +110,7 @@ impl View {
             searching: false,
             rename_target: None,
             rename: String::new(),
+            delete_dialog: None,
             help: false,
             loading: false,
             has_more: false,

@@ -252,10 +252,7 @@ fn actions_and_hide_move_to_next_visible_row() {
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     assert!(screen(&view, 88, 16).contains("Rename › Needs an answer"));
     key(&mut view, KeyCode::Esc);
-    assert_eq!(
-        key(&mut view, KeyCode::Backspace),
-        Some(Action::Unsupported("Delete"))
-    );
+
     assert_eq!(
         key(&mut view, KeyCode::Char('g')),
         Some(Action::PersistGrouping(Grouping::Status))
@@ -551,4 +548,129 @@ fn live_center_rename_active() {
             .underline_color(Color::Reset)
             .patch(super::style::active_tab_style())
     );
+}
+
+#[test]
+fn delete_dialog_defaults_to_cancel_and_requires_enter() {
+    let mut view = fixture();
+    assert_eq!(key(&mut view, KeyCode::Backspace), None);
+    assert!(!view.delete_dialog.as_ref().unwrap().confirm);
+    assert_eq!(
+        view.center_footer_hints().to_string(),
+        "↑/↓ move  enter select  esc back"
+    );
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(view.delete_dialog.is_none());
+    key(&mut view, KeyCode::Backspace);
+    assert_eq!(key(&mut view, KeyCode::Down), None);
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Delete("42".into()))
+    );
+    assert!(view.delete_dialog.is_none());
+    key(&mut view, KeyCode::Backspace);
+    key(&mut view, KeyCode::Esc);
+    assert!(view.delete_dialog.is_none());
+    key(&mut view, KeyCode::Backspace);
+    assert_eq!(key(&mut view, KeyCode::Char('2')), None);
+    assert!(view.delete_dialog.as_ref().unwrap().confirm);
+    for code in [
+        KeyCode::Char('o'),
+        KeyCode::Char('n'),
+        KeyCode::Right,
+        KeyCode::Char(' '),
+    ] {
+        assert_eq!(key(&mut view, code), None);
+        assert!(view.delete_dialog.is_some());
+    }
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Delete("42".into()))
+    );
+}
+
+#[test]
+fn delete_dialog_locks_list_and_supports_movement_keys() {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Backspace);
+    for code in [
+        KeyCode::Down,
+        KeyCode::Up,
+        KeyCode::Char('j'),
+        KeyCode::Char('k'),
+        KeyCode::PageDown,
+        KeyCode::PageUp,
+        KeyCode::End,
+        KeyCode::Home,
+        KeyCode::Char('o'),
+        KeyCode::Char('n'),
+    ] {
+        assert_eq!(key(&mut view, code), None);
+        assert_eq!(view.selected_id(), Some("42"));
+    }
+    for c in ['n', 'p', 'j', 'k'] {
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)),
+            None
+        );
+        assert_eq!(view.selected_id(), Some("42"));
+    }
+}
+
+#[test]
+fn delete_live_rows_show_stop_description_and_ignore_show_more() {
+    let mut view = fixture();
+    view.rows[view.selected].process = Some(crate::model::Process {
+        pid: 123,
+        status: "idle".into(),
+        kind: None,
+        version: None,
+        started_at: None,
+    });
+    assert_eq!(key(&mut view, KeyCode::Backspace), None);
+    assert!(view.delete_dialog.is_some());
+    assert!(screen(&view, 120, 24).contains("This stops the running session"));
+    assert_eq!(key(&mut view, KeyCode::Down), None);
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Delete("42".into()))
+    );
+    view.has_more = true;
+    view.selected = usize::MAX;
+    assert_eq!(key(&mut view, KeyCode::Backspace), None);
+    assert!(view.delete_dialog.is_none());
+}
+
+#[test]
+fn live_center_delete_dialog() {
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(
+        vec![session("44", "Unloaded task", SessionStatus::Inactive, 120)],
+        false,
+    );
+    key(&mut view, KeyCode::Backspace);
+    assert_eq!(
+        screen(&view, 88, 16),
+        include_str!("../../tests/ui_snapshots/live_center_delete_dialog.txt")
+    );
+    let area = Rect::new(0, 0, 88, 16);
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf);
+    assert!(
+        buf[(6, 6)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    assert!(buf[(6, 7)].modifier.contains(ratatui::style::Modifier::DIM));
+    assert!(
+        buf[(6, 9)]
+            .modifier
+            .contains(ratatui::style::Modifier::REVERSED)
+    );
+    for width in 0..100 {
+        for height in 0..16 {
+            let area = Rect::new(5, 8, width, height);
+            view.render(area, &mut Buffer::empty(area));
+        }
+    }
 }

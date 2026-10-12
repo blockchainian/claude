@@ -107,7 +107,9 @@ pub enum Action {
     PersistGrouping(Grouping),
     /// `r`: set the session display name.
     Rename { id: String, name: String },
-    /// `w`, `a`, backspace: no Claude Code equivalent yet; show the notice.
+    /// Backspace, then confirmation: permanently delete the session transcript.
+    Delete(String),
+    /// `w`, `a`: no Claude Code equivalent yet; show the notice.
     Unsupported(&'static str),
     /// "Show more" was activated: load the next page of inactive sessions.
     ShowMore,

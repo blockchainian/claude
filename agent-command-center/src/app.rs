@@ -174,6 +174,27 @@ impl App {
                     }
                 }
             }
+            Action::Delete(id) => {
+                self.refresh();
+                if let Some(session) = self.session(&id) {
+                    if session.transcript.is_none() {
+                        self.view.set_notice(Some("Nothing to delete".into()));
+                    } else {
+                        match crate::sessions::delete_session(&self.config_dir, &session) {
+                            Ok(()) => {
+                                self.view.hide(&id);
+                                self.refresh();
+                            }
+                            Err(error) => {
+                                self.refresh();
+                                self.view.set_notice(Some(format!("Failed to delete: {error}")));
+                            }
+                        }
+                    }
+                } else {
+                    self.view.set_notice(Some("Nothing to delete".into()));
+                }
+            }
             Action::Hide(_) => {}
             Action::TogglePin { id, pinned } => {
                 self.preferences.pinned.retain(|pinned_id| pinned_id != &id);

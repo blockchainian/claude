@@ -1,0 +1,16 @@
+  Agent command center  Group: Project  g
+   All 1   Needs you 0   Working 0   Ready 0   Inactive 1              tab/⇧tab filter
+  ────────────────────────────────────────────────────────────────────────────────────
+      Tasks                                                    Status         Updated
+  /tmp/project  1
+  › ┌──────────────────────────────────────────────────────────────────────────────┐o
+    │ Permanently delete “Unloaded task”?                                          │
+    │ This permanently deletes the session's transcript. This cannot be undone.    │
+    │                                                                              │
+    │ › 1. Cancel                                                                  │
+    │   2. Permanently delete session                                              │
+    └──────────────────────────────────────────────────────────────────────────────┘
+
+
+
+  ↑/↓ move  enter select  esc back
