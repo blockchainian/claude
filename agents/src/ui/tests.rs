@@ -46,6 +46,16 @@ fn screen(view: &View, width: u16, height: u16) -> String {
 fn key(view: &mut View, code: KeyCode) -> Option<Action> {
     view.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
 }
+fn assert_empty_task_list(view: &View) {
+    let area = Rect::new(0, 0, 80, 12);
+    let mut buf = Buffer::empty(area);
+    view.render_center_rows(area, &mut buf, Utc::now());
+    assert!(buf.content.iter().all(|cell| cell.symbol() == " "));
+    let rendered = screen(view, 80, 12);
+    for message in ["Loading tasks…", "No tasks yet", "No matching tasks"] {
+        assert!(!rendered.contains(message), "{message}");
+    }
+}
 fn fixture() -> View {
     let mut view = View::new(Grouping::Project, false);
     view.set_sessions(
@@ -138,7 +148,7 @@ fn active_tab_lists_all_sessions_except_inactive() {
     );
     let rendered = screen(&view, 100, 16);
     assert!(rendered.contains("Active 0"));
-    assert!(rendered.contains("No matching tasks"));
+    assert_empty_task_list(&view);
 }
 
 #[test]
@@ -632,13 +642,13 @@ fn details_include_attention_and_clip_messages() {
 #[test]
 fn empty_states_notices_and_help_only_handle_close_keys() {
     let mut view = View::default();
-    assert!(screen(&view, 80, 12).contains("No tasks yet"));
+    assert_empty_task_list(&view);
     view.set_loading(true);
-    assert!(screen(&view, 80, 12).contains("Loading tasks…"));
+    assert_empty_task_list(&view);
     view.set_sessions(vec![session("a", "Alpha", SessionStatus::Ready, 1)], false);
     key(&mut view, KeyCode::Char('/'));
     key(&mut view, KeyCode::Char('z'));
-    assert!(screen(&view, 80, 12).contains("No matching tasks"));
+    assert_empty_task_list(&view);
     key(&mut view, KeyCode::Esc);
     view.set_notice(Some("Notice".into()));
     assert!(screen(&view, 80, 12).ends_with("  Notice"));
