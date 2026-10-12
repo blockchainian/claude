@@ -209,16 +209,12 @@ impl View {
         ) {
             lines.push(Line::from(text.into_owned().bold()));
         }
-        let description = if dialog.live {
-            "This stops the running session, then permanently deletes its transcript. This cannot be undone."
-        } else {
-            "This permanently deletes the session's transcript. This cannot be undone."
-        };
+        let description = "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.";
         for text in textwrap::wrap(description, content_width) {
             lines.push(Line::from(text.into_owned().dim()));
         }
         lines.push(Line::default());
-        for (confirm, label) in [(false, "Cancel"), (true, "Permanently delete session")] {
+        for (confirm, label) in [(false, "Cancel"), (true, "Permanently delete task and child agents")] {
             let selected = dialog.confirm == confirm;
             let text = format!(
                 "{} {}. {label}",
