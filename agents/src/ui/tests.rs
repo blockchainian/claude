@@ -378,16 +378,16 @@ fn details_include_attention_and_clip_messages() {
         assert!(rendered.contains(label), "{label}");
     }
     let position = |label: &str| rendered.lines().position(|line| line.contains(label));
-    assert!(position("Prompt") < position("Last message"));
-    assert!(position("Needs attention") < position("Last message"));
-    assert!(position("Last message") < position("Branch"));
     // "Project" names the grouping in the header and the path heads the task
     // list, so find the details line that ends with the path.
     let project = rendered
         .lines()
         .position(|line| line.trim_end().ends_with("/tmp/project"));
-    assert!(position("Branch") < project);
-    assert!(project < position("Model: claude-opus"));
+    assert!(position("Prompt") < position("Last message"));
+    assert!(position("Needs attention") < position("Last message"));
+    assert!(position("Last message") < project);
+    assert!(project < position("Branch"));
+    assert!(position("Branch") < position("Model: claude-opus"));
     let area = Rect::new(0, 0, 38, 25);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());

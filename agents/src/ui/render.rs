@@ -260,7 +260,7 @@ impl View {
         let width = usize::from(area.width.max(1));
         let (status, dot) = Self::status(session);
         // Sections top to bottom: title, prompt, background, the newer of
-        // latest activity and last message, branch, project, model. Whatever
+        // latest activity and last message, project, branch, model. Whatever
         // does not fit is cut at the bottom and marked with an ellipsis.
         let mut items: Vec<Item> = vec![
             "Task details".bold().into(),
@@ -374,6 +374,11 @@ impl View {
             );
         }
 
+        items.extend([
+            Line::default().into(),
+            "Project".dim().into(),
+            session.cwd.display().to_string().into(),
+        ]);
         if let Some(branch) = &session.git_branch {
             items.push(Line::default().into());
             if let Some(pr) = &session.pr {
@@ -395,9 +400,6 @@ impl View {
             }
         }
         items.extend([
-            Line::default().into(),
-            "Project".dim().into(),
-            session.cwd.display().to_string().into(),
             Line::default().into(),
             Line::from(vec![
                 "Model: ".dim(),
