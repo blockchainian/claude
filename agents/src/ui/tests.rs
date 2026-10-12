@@ -364,7 +364,7 @@ fn details_include_attention_and_clip_messages() {
     row.last_message = Some("message ".repeat(60));
     let mut view = View::new(Grouping::Project, false);
     view.set_sessions(vec![row], false);
-    let rendered = screen(&view, 160, 36);
+    let rendered = screen(&view, 160, 50);
     for label in [
         "Model: claude-opus",
         "Reasoning: high",
@@ -378,8 +378,16 @@ fn details_include_attention_and_clip_messages() {
         assert!(rendered.contains(label), "{label}");
     }
     let position = |label: &str| rendered.lines().position(|line| line.contains(label));
-    assert!(position("Last message") < position("Prompt"));
+    assert!(position("Prompt") < position("Last message"));
     assert!(position("Needs attention") < position("Last message"));
+    assert!(position("Last message") < position("Branch"));
+    // "Project" names the grouping in the header and the path heads the task
+    // list, so find the details line that ends with the path.
+    let project = rendered
+        .lines()
+        .position(|line| line.trim_end().ends_with("/tmp/project"));
+    assert!(position("Branch") < project);
+    assert!(project < position("Model: claude-opus"));
     let area = Rect::new(0, 0, 38, 25);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
@@ -947,9 +955,9 @@ fn details_background_boxes_tail_and_clip_output() {
     );
     let clipped = queued_details(row, 17);
     assert!(clipped.contains("Background\n╭"));
-    assert!(!clipped.contains("Last message"));
-    assert!(clipped.contains("…\n\nPrompt"));
-    assert!(!clipped.contains("Waiting for output"));
+    assert!(clipped.contains("Last message"));
+    assert!(!clipped.contains("Project"));
+    assert!(clipped.ends_with("\n…"));
 }
 
 #[test]

@@ -6,14 +6,14 @@
   › ○ Current task                                                                            Ready              now  │ Current task
     ● Needs an answer                                                                         Needs input     2h ago  │ ○ Ready
                                                                                                                       │
-  /tmp/project  4                                                                                                     │ Model: Unknown
-    ○ A longer task title that uses the available column                                      Ready           5m ago  │ Reasoning: Unknown
+  /tmp/project  4                                                                                                     │ Prompt
+    ○ A longer task title that uses the available column                                      Ready           5m ago  │ Current task
     ● Failed task                                                                             Needs input     1h ago  │
     ● Working task                                                                            Working         1d ago  │ Project
     ○ Unloaded task                                                                           Inactive        2d ago  │ /tmp/project
                                                                                                                       │
-                                                                                                                      │ Prompt
-                                                                                                                      │ Current task
+                                                                                                                      │ Model: Unknown
+                                                                                                                      │ Reasoning: Unknown
                                                                                                                       │
                                                                                                                       │
                                                                                                                       │

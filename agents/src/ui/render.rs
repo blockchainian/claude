@@ -257,62 +257,22 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
+        let width = usize::from(area.width.max(1));
         let (status, dot) = Self::status(session);
-        let mut lines = vec![
+        // Sections top to bottom: title, prompt, background, the newer of
+        // latest activity and last message, branch, project, model. Whatever
+        // does not fit is cut at the bottom and marked with an ellipsis.
+        let mut items: Vec<Item> = vec![
             "Task details".bold().into(),
-            Line::default(),
+            Line::default().into(),
             Line::from(Span::styled(
                 session.display_title().to_owned(),
                 self.title_style(&session.id).bold(),
-            )),
-            Line::from(vec![dot, " ".into(), status.into()]),
-            Line::default(),
-            Line::from(vec![
-                "Model: ".dim(),
-                session.model_name().to_owned().into(),
-            ]),
-            Line::from(vec![
-                "Reasoning: ".dim(),
-                session
-                    .effort
-                    .as_deref()
-                    .unwrap_or("Unknown")
-                    .to_owned()
-                    .into(),
-            ]),
-            Line::default(),
-            "Project".dim().into(),
-            session.cwd.display().to_string().into(),
+            ))
+            .into(),
+            Line::from(vec![dot, " ".into(), status.into()]).into(),
         ];
-        let mut pr_link = None;
-        if let Some(branch) = &session.git_branch {
-            lines.push(Line::default());
-            if let Some(pr) = &session.pr {
-                let label = format!("#{}", pr.number);
-                let prefix_width = 8 + branch.width() + 3;
-                let line_width = prefix_width + label.len();
-                if lines.len() < usize::from(area.height) && line_width <= usize::from(area.width) {
-                    pr_link = Some((
-                        Rect::new(
-                            area.x + prefix_width as u16,
-                            area.y + lines.len() as u16,
-                            label.len() as u16,
-                            1,
-                        ),
-                        &pr.url,
-                    ));
-                }
-                lines.push(Line::from(vec![
-                    "Branch  ".dim(),
-                    branch.clone().into(),
-                    " · ".dim(),
-                    label.into(),
-                ]));
-            } else {
-                lines.extend(["Branch".dim().into(), branch.clone().into()]);
-            }
-        }
-        let width = usize::from(area.width.max(1));
+
         let mut header = vec!["Prompt".dim()];
         if let Some(start) = session.prompt_at {
             let end = if session.status == SessionStatus::Working {
@@ -329,7 +289,7 @@ impl View {
                 format_duration((end - start).num_seconds().max(0)).dim(),
             ]);
         }
-        let mut prompt = vec![Line::default(), Line::from(header)];
+        items.extend([Line::default().into(), Line::from(header).into()]);
         let prompt_text = match session.prompt.trim() {
             "" => "No prompt available.",
             prompt => prompt,
@@ -342,22 +302,11 @@ impl View {
             prompt_body.truncate(2);
             prompt_body[1] = "…".dim().into();
         }
-        prompt.extend(prompt_body);
-        prompt.extend(session.queued.iter().map(|queued| {
-            truncate_line_with_ellipsis_if_overflow(Line::from(queued.clone()), width)
+        items.extend(prompt_body.into_iter().map(Item::from));
+        items.extend(session.queued.iter().map(|queued| {
+            truncate_line_with_ellipsis_if_overflow(Line::from(queued.clone()), width).into()
         }));
-        // Everything between the header and the prompt takes the height the
-        // prompt leaves over: Needs attention, Background, then the newer of
-        // Latest activity and Last message.
-        let mut details = Vec::new();
-        if session.status == SessionStatus::NeedsInput {
-            details.extend([
-                Line::default(),
-                "Needs attention".red().into(),
-                "Open task to review.".dim().into(),
-                "Waiting for your response.".into(),
-            ]);
-        }
+
         // Claude Code appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
         let boxes = session
@@ -371,9 +320,22 @@ impl View {
             })
             .collect::<Vec<_>>();
         if !boxes.is_empty() {
-            details.extend([Line::default(), "Background".dim().into()]);
+            items.extend([Line::default().into(), "Background".dim().into()]);
+            items.extend(
+                boxes
+                    .into_iter()
+                    .map(|(task, output)| Item::Background { task, output }),
+            );
         }
-        let mut activity_lines = Vec::new();
+
+        if session.status == SessionStatus::NeedsInput {
+            items.extend([
+                Line::default().into(),
+                "Needs attention".red().into(),
+                "Open task to review.".dim().into(),
+                "Waiting for your response.".into(),
+            ]);
+        }
         // Latest activity and Last message share one slot and follow the
         // clock: whichever of the latest tool call and the last reply is newer.
         let activity = session
@@ -388,14 +350,15 @@ impl View {
             if wrapped.len() > 1 {
                 label.push('…');
             }
-            activity_lines.extend([
-                Line::default(),
+            items.extend([
+                Line::default().into(),
                 Line::from(vec![
                     "Latest activity".dim(),
                     " · ".dim(),
                     format_relative_time(now, Some(activity.at)).dim(),
-                ]),
-                truncate_line_with_ellipsis_if_overflow(Line::from(label), width),
+                ])
+                .into(),
+                truncate_line_with_ellipsis_if_overflow(Line::from(label), width).into(),
             ]);
         }
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
@@ -403,95 +366,171 @@ impl View {
             if let Some(at) = session.last_message_at {
                 header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
             }
-            activity_lines.extend([Line::default(), Line::from(header)]);
-            activity_lines.extend(
+            items.extend([Line::default().into(), Line::from(header).into()]);
+            items.extend(
                 textwrap::wrap(message, width)
                     .into_iter()
-                    .map(|s| Line::from(s.into_owned())),
+                    .map(|s| Line::from(s.into_owned()).into()),
             );
         }
-        let available = usize::from(area.height).saturating_sub(lines.len() + prompt.len());
-        let boxes_height = boxes
-            .iter()
-            .map(|(_, lines)| box_height(lines.len()))
-            .sum::<usize>();
-        let details_height = details.len() + boxes_height + activity_lines.len();
-        let details_start = lines.len();
-        let text_height = details.len().min(available);
-        details.truncate(text_height);
-        lines.extend(details);
-        for (offset, text) in lines.into_iter().enumerate() {
-            line(text, row(area, offset as u16, 1), buf);
+
+        if let Some(branch) = &session.git_branch {
+            items.push(Line::default().into());
+            if let Some(pr) = &session.pr {
+                let label = format!("#{}", pr.number);
+                let prefix_width = 8 + branch.width() + 3;
+                let link = (line_width_fits(prefix_width + label.len(), width))
+                    .then(|| (prefix_width as u16, label.len() as u16, pr.url.clone()));
+                items.push(Item::Branch {
+                    line: Line::from(vec![
+                        "Branch  ".dim(),
+                        branch.clone().into(),
+                        " · ".dim(),
+                        label.into(),
+                    ]),
+                    link,
+                });
+            } else {
+                items.extend(["Branch".dim().into(), branch.clone().into()]);
+            }
         }
-        let mut offset = text_height;
-        for (task, output) in boxes {
+        items.extend([
+            Line::default().into(),
+            "Project".dim().into(),
+            session.cwd.display().to_string().into(),
+            Line::default().into(),
+            Line::from(vec![
+                "Model: ".dim(),
+                session.model_name().to_owned().into(),
+            ])
+            .into(),
+            Line::from(vec![
+                "Reasoning: ".dim(),
+                session
+                    .effort
+                    .as_deref()
+                    .unwrap_or("Unknown")
+                    .to_owned()
+                    .into(),
+            ])
+            .into(),
+        ]);
+
+        let total = items.iter().map(Item::height).sum::<usize>();
+        let available = usize::from(area.height);
+        let mut offset = 0;
+        for item in items {
             if offset >= available {
                 break;
             }
-            let height = box_height(output.len()).min(available - offset);
-            let box_area = row(area, (details_start + offset) as u16, height as u16);
-            // Title: description, then how long the command has been running.
-            // One space keeps the title off the corner glyph on both sides.
-            let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
-            let mut title = truncate_line_with_ellipsis_if_overflow(
-                Line::from(task.description.clone()),
-                usize::from(box_area.width.saturating_sub(4))
-                    .saturating_sub(elapsed.chars().count() + " ── ".chars().count()),
-            );
-            title
-                .spans
-                .extend([" ── ".dim(), elapsed.dim(), " ".into()]);
-            // Without output the task is just its titled top rule, which has no
-            // corner glyph, so the rule itself leads the title; half-width
-            // glyphs at both ends keep it visually inside the box edges.
-            let borders = if output.is_empty() {
-                title.spans.insert(0, "╶ ".dim());
-                Borders::TOP
-            } else {
-                title.spans.insert(0, " ".into());
-                Borders::ALL
-            };
-            let block = Block::default()
-                .borders(borders)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().dim())
-                .title_style(Style::default().not_dim())
-                .title(title);
-            let inner = block.inner(box_area);
-            block.render(box_area, buf);
-            if output.is_empty() && box_area.width > 0 {
-                buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
+            let height = item.height().min(available - offset);
+            let item_area = row(area, offset as u16, height as u16);
+            match item {
+                Item::Text(text) => line(text, item_area, buf),
+                Item::Branch { line: text, link } => {
+                    line(text, item_area, buf);
+                    if let Some((x, width, url)) = link {
+                        super::hyperlink::hyperlink(
+                            buf,
+                            Rect::new(item_area.x + x, item_area.y, width, 1),
+                            &url,
+                        );
+                    }
+                }
+                Item::Background { task, output } => {
+                    render_background(task, output, now, item_area, buf);
+                }
             }
-            // One column of padding on both sides keeps output off the borders.
-            let inner = Rect {
-                x: inner.x + 1,
-                width: inner.width.saturating_sub(2),
-                ..inner
-            };
-            Paragraph::new(output.into_iter().map(Line::from).collect::<Vec<_>>())
-                .render(inner, buf);
             offset += height;
         }
-        for text in activity_lines {
-            if offset >= available {
-                break;
-            }
-            line(text, row(area, (details_start + offset) as u16, 1), buf);
-            offset += 1;
-        }
-        if details_height > available && available > 0 {
-            let last = row(area, (details_start + available - 1) as u16, 1);
+        if total > available && available > 0 {
+            let last = row(area, (available - 1) as u16, 1);
             Clear.render(last, buf);
             line("…".dim(), last, buf);
         }
-        let prompt_start = details_start + details_height.min(available);
-        for (offset, text) in prompt.into_iter().enumerate() {
-            line(text, row(area, (prompt_start + offset) as u16, 1), buf);
-        }
-        if let Some((area, url)) = pr_link {
-            super::hyperlink::hyperlink(buf, area, url);
+    }
+}
+
+fn line_width_fits(line_width: usize, width: usize) -> bool {
+    line_width <= width
+}
+
+/// One row-aligned piece of the details panel.
+enum Item<'a> {
+    Text(Line<'static>),
+    Branch {
+        line: Line<'static>,
+        /// Column offset, width and target of the pull request link.
+        link: Option<(u16, u16, String)>,
+    },
+    Background {
+        task: &'a crate::model::BackgroundTask,
+        output: Vec<String>,
+    },
+}
+
+impl Item<'_> {
+    fn height(&self) -> usize {
+        match self {
+            Self::Text(_) | Self::Branch { .. } => 1,
+            Self::Background { output, .. } => box_height(output.len()),
         }
     }
+}
+
+impl<T: Into<Line<'static>>> From<T> for Item<'_> {
+    fn from(text: T) -> Self {
+        Self::Text(text.into())
+    }
+}
+
+/// A running background command: its description and elapsed time on the top
+/// rule, the last output line inside when there is one.
+fn render_background(
+    task: &crate::model::BackgroundTask,
+    output: Vec<String>,
+    now: chrono::DateTime<chrono::Utc>,
+    box_area: Rect,
+    buf: &mut Buffer,
+) {
+    // One space keeps the title off the corner glyph on both sides.
+    let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
+    let mut title = truncate_line_with_ellipsis_if_overflow(
+        Line::from(task.description.clone()),
+        usize::from(box_area.width.saturating_sub(4))
+            .saturating_sub(elapsed.chars().count() + " ── ".chars().count()),
+    );
+    title
+        .spans
+        .extend([" ── ".dim(), elapsed.dim(), " ".into()]);
+    // Without output the task is just its titled top rule, which has no
+    // corner glyph, so the rule itself leads the title; half-width
+    // glyphs at both ends keep it visually inside the box edges.
+    let borders = if output.is_empty() {
+        title.spans.insert(0, "╶ ".dim());
+        Borders::TOP
+    } else {
+        title.spans.insert(0, " ".into());
+        Borders::ALL
+    };
+    let block = Block::default()
+        .borders(borders)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().dim())
+        .title_style(Style::default().not_dim())
+        .title(title);
+    let inner = block.inner(box_area);
+    block.render(box_area, buf);
+    if output.is_empty() && box_area.width > 0 {
+        buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
+    }
+    // One column of padding on both sides keeps output off the borders.
+    let inner = Rect {
+        x: inner.x + 1,
+        width: inner.width.saturating_sub(2),
+        ..inner
+    };
+    Paragraph::new(output.into_iter().map(Line::from).collect::<Vec<_>>()).render(inner, buf);
 }
 
 /// Rows a background box takes: a bare top rule without output, a full box otherwise.

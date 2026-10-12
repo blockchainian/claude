@@ -3,13 +3,13 @@ Task details
 Queue task
 ● Working
 
-Model: Unknown
-Reasoning: Unknown
-
-Project
-/tmp/project
-
 Prompt
 Current prompt
 First queued prompt
 Second queued prompt
+
+Project
+/tmp/project
+
+Model: Unknown
+Reasoning: Unknown
