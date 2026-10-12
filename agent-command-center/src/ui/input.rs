@@ -53,7 +53,10 @@ impl View {
                     KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') => {
                         dialog.confirm = !dialog.confirm;
                     }
-                    KeyCode::Home | KeyCode::PageUp | KeyCode::Char('1') => dialog.confirm = false,
+                    // Codex's number shortcuts: 1 accepts Cancel at once; the delete item
+                    // requires explicit confirmation, so 2 only selects it.
+                    KeyCode::Char('1') => self.delete_dialog = None,
+                    KeyCode::Home | KeyCode::PageUp => dialog.confirm = false,
                     KeyCode::End | KeyCode::PageDown | KeyCode::Char('2') => dialog.confirm = true,
                     _ => {}
                 }
