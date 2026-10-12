@@ -376,24 +376,6 @@ impl View {
             );
         }
 
-        items.extend([
-            Line::default().into(),
-            Line::from(vec![
-                "Model: ".dim(),
-                session.model_name().to_owned().into(),
-            ])
-            .into(),
-            Line::from(vec![
-                "Reasoning: ".dim(),
-                session
-                    .effort
-                    .as_deref()
-                    .unwrap_or("Unknown")
-                    .to_owned()
-                    .into(),
-            ])
-            .into(),
-        ]);
         if let Some(branch) = &session.git_branch {
             items.push(Line::default().into());
             if let Some(pr) = &session.pr {
@@ -419,6 +401,12 @@ impl View {
             "Project".dim().into(),
             session.cwd.display().to_string().into(),
         ]);
+
+        let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
+        if let Some(effort) = &session.effort {
+            model.extend([" · ".dim(), effort.clone().into()]);
+        }
+        items.extend([Line::default().into(), Line::from(model).into()]);
 
         let total = items.iter().map(Item::height).sum::<usize>();
         let available = usize::from(area.height);

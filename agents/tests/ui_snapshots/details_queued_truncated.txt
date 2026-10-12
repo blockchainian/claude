@@ -8,8 +8,7 @@ Current prompt Current prompt Current
 prompt Current prompt Current prompt…
 Queued prompt that extends beyond the
 
-Model: Unknown
-Reasoning: Unknown
-
 Project
 /tmp/project
+
+Model: Unknown

@@ -6,12 +6,11 @@ PR task
 Prompt
 PR task
 
-Model: Unknown
-Reasoning: Unknown
-
 Branch
 main
 
 Project
 /tmp/project
+
+Model: Unknown
 

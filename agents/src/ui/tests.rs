@@ -367,7 +367,6 @@ fn details_include_attention_and_clip_messages() {
     let rendered = screen(&view, 160, 50);
     for label in [
         "Model: claude-opus",
-        "Reasoning: high",
         "Branch",
         "main",
         "Needs attention",
@@ -385,9 +384,15 @@ fn details_include_attention_and_clip_messages() {
         .position(|line| line.trim_end().ends_with("/tmp/project"));
     assert!(position("Prompt") < position("Last message"));
     assert!(position("Needs attention") < position("Last message"));
-    assert!(position("Last message") < position("Model: claude-opus"));
-    assert!(position("Model: claude-opus") < position("Branch"));
+    assert!(position("Last message") < position("Branch"));
     assert!(position("Branch") < project);
+    assert!(project < position("Model: claude-opus"));
+    assert!(
+        rendered
+            .lines()
+            .any(|line| line.contains("Model: claude-opus · high"))
+    );
+    assert!(!rendered.contains("Reasoning"));
     let area = Rect::new(0, 0, 38, 25);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
@@ -737,6 +742,9 @@ fn details_branch_pull_request_snapshot() {
             })
             .collect::<Vec<_>>()
             .join("\n")
+            .trim_end_matches('\n')
+            .to_owned()
+            + "\n\n"
     };
     assert_eq!(
         render(&view),
@@ -944,6 +952,8 @@ fn queued_details(row: Session, height: u16) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+        .trim_end_matches('\n')
+        .to_owned()
 }
 
 #[test]
@@ -1074,7 +1084,9 @@ fn details_markdown_snapshot() {
                 .to_owned()
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n")
+        .trim_end_matches('\n')
+        .to_owned();
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_markdown.txt")

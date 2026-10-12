@@ -14,8 +14,7 @@ Built agents.
 
 cargo test
 
-Model: Unknown
-Reasoning: Unknown
-
 Project
 /tmp/project
+
+Model: Unknown
