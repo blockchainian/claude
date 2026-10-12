@@ -9,8 +9,7 @@ Activity task
 Last message · 3s ago
 Checking the project
 
-Model: Unknown
-Reasoning: Unknown
-
 Project
 /tmp/project
+
+Model: Unknown

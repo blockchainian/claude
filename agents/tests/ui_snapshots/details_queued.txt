@@ -8,8 +8,7 @@ Current prompt
 First queued prompt
 Second queued prompt
 
-Model: Unknown
-Reasoning: Unknown
-
 Project
 /tmp/project
+
+Model: Unknown

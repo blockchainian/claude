@@ -6,12 +6,10 @@ PR task
 Prompt
 PR task
 
-Model: Unknown
-Reasoning: Unknown
-
 Branch  main · #833
 
 Project
 /tmp/project
 
+Model: Unknown
 
