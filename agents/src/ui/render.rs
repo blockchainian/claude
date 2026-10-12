@@ -1,7 +1,8 @@
-use super::formatting::{format_duration, format_relative_time, visible_suffix};
+use super::formatting::{format_duration, format_relative_time, tail_lines, visible_suffix};
 use super::hints::hint_line;
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
+use ratatui::widgets::{Block, BorderType, Borders};
 
 pub(super) fn row(area: Rect, offset: u16, height: u16) -> Rect {
     let offset = offset.min(area.height);
@@ -391,18 +392,56 @@ impl View {
                     .map(|s| Line::from(s.into_owned())),
             );
         }
-        let available = usize::from(area.height).saturating_sub(lines.len() + prompt.len());
-        if details.len() > available {
-            details.truncate(available);
-            if let Some(last) = details.last_mut() {
-                *last = "…".dim().into();
-            }
+        if !session.background.is_empty() {
+            details.extend([Line::default(), "Background".dim().into()]);
         }
+        let available = usize::from(area.height).saturating_sub(lines.len() + prompt.len());
+        let boxes = session
+            .background
+            .iter()
+            .map(|task| (task, tail_lines(&task.output, 3)))
+            .collect::<Vec<_>>();
+        let details_height = details.len()
+            + boxes
+                .iter()
+                .map(|(_, lines)| 2 + lines.len())
+                .sum::<usize>();
+        let details_start = lines.len();
+        let text_height = details.len().min(available);
+        details.truncate(text_height);
         lines.extend(details);
-        lines.extend(prompt);
-        lines.truncate(usize::from(area.height));
         for (offset, text) in lines.into_iter().enumerate() {
             line(text, row(area, offset as u16, 1), buf);
+        }
+        let mut offset = text_height;
+        for (task, output) in boxes {
+            if offset >= available {
+                break;
+            }
+            let height = (2 + output.len()).min(available - offset);
+            let box_area = row(area, (details_start + offset) as u16, height as u16);
+            let title = truncate_line_with_ellipsis_if_overflow(
+                Line::from(task.description.clone()),
+                usize::from(box_area.width.saturating_sub(4)),
+            );
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(title);
+            let inner = block.inner(box_area);
+            block.render(box_area, buf);
+            Paragraph::new(output.into_iter().map(Line::from).collect::<Vec<_>>())
+                .render(inner, buf);
+            offset += height;
+        }
+        if details_height > available && available > 0 {
+            let last = row(area, (details_start + available - 1) as u16, 1);
+            Clear.render(last, buf);
+            line("…".dim(), last, buf);
+        }
+        let prompt_start = details_start + details_height.min(available);
+        for (offset, text) in prompt.into_iter().enumerate() {
+            line(text, row(area, (prompt_start + offset) as u16, 1), buf);
         }
         if let Some((area, url)) = pr_link {
             super::hyperlink::hyperlink(buf, area, url);

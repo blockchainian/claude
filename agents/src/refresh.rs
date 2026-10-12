@@ -31,6 +31,15 @@ impl RefreshSchedule {
             .saturating_duration_since(now)
     }
 
+    pub fn redraw_timeout(&self, now: Instant, background: bool) -> Duration {
+        let timeout = self.timeout(now);
+        if background {
+            timeout.min(Duration::from_secs(1))
+        } else {
+            timeout
+        }
+    }
+
     pub fn due(&self, now: Instant) -> bool {
         self.timeout(now).is_zero()
     }
@@ -76,5 +85,23 @@ mod tests {
         assert!(schedule.due(start + POLLING_INTERVAL));
         schedule.refreshed(start + POLLING_INTERVAL);
         assert_eq!(schedule.timeout(start + POLLING_INTERVAL), POLLING_INTERVAL);
+    }
+}
+
+#[cfg(test)]
+mod redraw_tests {
+    use super::*;
+
+    #[test]
+    fn background_redraw_does_not_refresh_sessions_or_wake_idle_view() {
+        let now = Instant::now();
+        let schedule = RefreshSchedule::new(now, FALLBACK_INTERVAL);
+        assert_eq!(schedule.redraw_timeout(now, true), Duration::from_secs(1));
+        assert!(!schedule.due(now + Duration::from_secs(1)));
+        assert_eq!(schedule.redraw_timeout(now, false), FALLBACK_INTERVAL);
+        assert_eq!(
+            schedule.redraw_timeout(now + Duration::from_millis(4500), true),
+            Duration::from_millis(500)
+        );
     }
 }

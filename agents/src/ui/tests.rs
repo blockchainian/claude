@@ -22,6 +22,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         last_message: None,
         last_message_at: None,
         activity: None,
+        background: Vec::new(),
         last_prompt: None,
         transcript: None,
     }
@@ -913,4 +914,61 @@ fn queued_details(row: Session, height: u16) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn details_background_boxes_tail_and_clip_output() {
+    use std::io::Write;
+    let mut output = tempfile::NamedTempFile::new().unwrap();
+    writeln!(output, "discard\nfirst\n{}\nlast", "x".repeat(80)).unwrap();
+    let mut row = session("background", "Background task", SessionStatus::Ready, 120);
+    row.background = vec![
+        crate::model::BackgroundTask {
+            description: "Run checks".into(),
+            output: output.path().into(),
+            started_at: Utc::now(),
+        },
+        crate::model::BackgroundTask {
+            description: "Waiting for output".into(),
+            output: output.path().with_extension("missing"),
+            started_at: Utc::now(),
+        },
+    ];
+    let rendered = queued_details(row.clone(), 22);
+    assert_eq!(
+        rendered,
+        include_str!("../../tests/ui_snapshots/details_background.txt")
+    );
+    row.background[0].description = "A very long description ".repeat(5);
+    assert_eq!(
+        queued_details(row.clone(), 22),
+        include_str!("../../tests/ui_snapshots/details_background_long_title.txt")
+    );
+    let clipped = queued_details(row, 19);
+    assert!(clipped.contains("Background\n╭"));
+    assert!(clipped.contains("…\n\nPrompt"));
+    assert!(!clipped.contains("Waiting for output"));
+}
+
+#[test]
+fn background_redraw_follows_selection() {
+    let mut first = session("first", "First", SessionStatus::Ready, 0);
+    first.background.push(crate::model::BackgroundTask {
+        description: "Running".into(),
+        output: "/tmp/unused.output".into(),
+        started_at: Utc::now(),
+    });
+    let mut view = View::default();
+    view.set_sessions(
+        vec![
+            first,
+            session("second", "Second", SessionStatus::Ready, 120),
+        ],
+        false,
+    );
+    assert!(view.has_background());
+    key(&mut view, KeyCode::Down);
+    assert!(!view.has_background());
+    view.set_sessions(Vec::new(), false);
+    assert!(!view.has_background());
 }
