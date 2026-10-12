@@ -675,3 +675,22 @@ fn live_center_delete_dialog() {
         }
     }
 }
+
+#[test]
+fn delete_dialog_number_shortcuts_follow_codex() {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Backspace);
+    assert!(view.delete_dialog.is_some());
+    assert_eq!(key(&mut view, KeyCode::Char('1')), None);
+    assert!(view.delete_dialog.is_none(), "1 accepts Cancel at once");
+    key(&mut view, KeyCode::Backspace);
+    assert_eq!(key(&mut view, KeyCode::Char('2')), None);
+    assert!(
+        view.delete_dialog.is_some(),
+        "2 only selects the delete item"
+    );
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Delete("42".into()))
+    );
+}
