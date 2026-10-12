@@ -159,12 +159,6 @@ impl App {
                 self.launch = Some(command);
                 return true;
             }
-            Action::Stop(id) => {
-                if let Some(session) = self.session(&id) {
-                    let notice = interrupt(&session);
-                    self.view.set_notice(Some(notice));
-                }
-            }
             Action::Rename { id, name } => {
                 if let Some(session) = self.session(&id) {
                     if let Some(path) = session.transcript {
@@ -231,47 +225,6 @@ impl App {
         command.args(args).current_dir(cwd);
         self.launch = Some(command);
         true
-    }
-}
-
-/// Splits `session:@window.%pane` into its window and pane targets.
-fn tmux_target(target: &str) -> Option<(&str, &str, &str)> {
-    let (window, pane) = target.rsplit_once('.')?;
-    let (tmux_session, _) = window.split_once(':')?;
-    Some((tmux_session, window, pane))
-}
-
-fn tmux(args: &[&str]) -> Result<String, String> {
-    match Command::new("tmux").args(args).output() {
-        Ok(output) if output.status.success() => {
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-        }
-        Ok(output) => Err(format!(
-            "tmux {} failed: {}",
-            args[0],
-            String::from_utf8_lossy(&output.stderr).trim()
-        )),
-        Err(error) => Err(format!("tmux unavailable: {error}")),
-    }
-}
-
-/// Stops the running turn the way the user would: Esc in the session's pane.
-fn interrupt(session: &Session) -> String {
-    let Some(process) = session.process.as_ref() else {
-        return "Session is not running".to_owned();
-    };
-    let Some(target) = process.tmux.as_deref() else {
-        return format!(
-            "Session runs outside tmux (pid {}); press esc there",
-            process.pid
-        );
-    };
-    let Some((_, _, pane)) = tmux_target(target) else {
-        return format!("Unexpected tmux target {target}");
-    };
-    match tmux(&["send-keys", "-t", pane, "Escape"]) {
-        Ok(_) => format!("Sent esc to {}", session.display_title()),
-        Err(error) => error,
     }
 }
 

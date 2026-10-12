@@ -233,7 +233,10 @@ fn actions_and_hide_move_to_next_visible_row() {
         key(&mut view, KeyCode::Right),
         Some(Action::Open("42".into()))
     );
-    assert_eq!(key(&mut view, KeyCode::Char('x')), None);
+    assert_eq!(
+        key(&mut view, KeyCode::Char('x')),
+        Some(Action::Unsupported("Stop"))
+    );
     assert_eq!(
         key(&mut view, KeyCode::Char('p')),
         Some(Action::TogglePin {
@@ -349,7 +352,6 @@ fn details_include_attention_and_clip_messages() {
         pid: 123,
         status: "waiting".into(),
         kind: None,
-        tmux: Some("work:@1.%2".into()),
         version: Some("2.0".into()),
         started_at: None,
     });

@@ -140,7 +140,6 @@ impl Store {
                 pid,
                 status: entry.status.unwrap_or_default(),
                 kind: entry.kind,
-                tmux: entry.tmux,
                 version: entry.version,
                 started_at: entry.started_at.and_then(DateTime::from_timestamp_millis),
             });
