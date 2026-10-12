@@ -934,17 +934,17 @@ fn details_background_boxes_tail_and_clip_output() {
             started_at: Utc::now(),
         },
     ];
-    let rendered = queued_details(row.clone(), 22);
+    let rendered = queued_details(row.clone(), 20);
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_background.txt")
     );
     row.background[0].description = "A very long description ".repeat(5);
     assert_eq!(
-        queued_details(row.clone(), 22),
+        queued_details(row.clone(), 20),
         include_str!("../../tests/ui_snapshots/details_background_long_title.txt")
     );
-    let clipped = queued_details(row, 19);
+    let clipped = queued_details(row, 17);
     assert!(clipped.contains("Background\n╭"));
     assert!(clipped.contains("…\n\nPrompt"));
     assert!(!clipped.contains("Waiting for output"));

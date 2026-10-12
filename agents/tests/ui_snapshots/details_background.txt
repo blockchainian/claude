@@ -10,12 +10,10 @@ Project
 /tmp/project
 
 Background
-╭Run checks────────────────────────────╮
-│first                                 │
-│xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx│
+╭ Run checks ──────────────────────────╮
 │last                                  │
 ╰──────────────────────────────────────╯
-╭Waiting for output────────────────────╮
+╭ Waiting for output ──────────────────╮
 ╰──────────────────────────────────────╯
 
 Prompt
