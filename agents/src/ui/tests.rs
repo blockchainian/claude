@@ -895,6 +895,28 @@ fn details_prompt_shows_queued_entries_in_order() {
 }
 
 #[test]
+fn details_prompt_keeps_second_wrapped_line_before_ellipsis() {
+    let mut row = session("prompt", "Prompt task", SessionStatus::Working, 0);
+    row.prompt = format!("{} {} {}", "a".repeat(40), "b".repeat(40), "c".repeat(40));
+    let rendered = queued_details(row, 15);
+    let lines = rendered.lines().collect::<Vec<_>>();
+    assert_eq!(lines[6], "a".repeat(40));
+    assert_eq!(lines[7], format!("{}…", "b".repeat(39)));
+    assert_eq!(lines[8], "");
+}
+
+#[test]
+fn details_prompt_keeps_exactly_two_wrapped_lines_unchanged() {
+    let mut row = session("prompt", "Prompt task", SessionStatus::Working, 0);
+    row.prompt = format!("{} {}", "a".repeat(40), "b".repeat(40));
+    let rendered = queued_details(row, 15);
+    let lines = rendered.lines().collect::<Vec<_>>();
+    assert_eq!(lines[6], "a".repeat(40));
+    assert_eq!(lines[7], "b".repeat(40));
+    assert_eq!(lines[8], "");
+}
+
+#[test]
 fn details_prompt_truncates_long_queued_entry() {
     let mut row = session("queue", "Queue task", SessionStatus::Working, 0);
     row.prompt = "Current prompt ".repeat(12);
