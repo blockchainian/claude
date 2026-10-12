@@ -744,7 +744,7 @@ fn details_branch_pull_request_snapshot() {
 }
 
 #[test]
-fn details_activity_only_while_working() {
+fn details_activity_follows_the_clock() {
     let now = Utc::now();
     let mut row = session("activity", "Activity task", SessionStatus::Working, 7);
     row.activity = Some(crate::model::Activity {
@@ -786,12 +786,19 @@ fn details_activity_only_while_working() {
     let clipped = render(&view);
     assert!(clipped.contains("Run checks on every changed surface in…"));
     assert!(!clipped.contains("surface in the project"));
+    // The slot follows the clock, not the session status: a newer tool call
+    // still shows once the session is idle, and a newer reply replaces it.
+    row.activity.as_mut().unwrap().label = "Run checks".into();
     row.status = SessionStatus::Ready;
-    view.set_sessions(vec![row], false);
-    let idle = render(&view);
-    assert!(!idle.contains("Latest activity"));
+    view.set_sessions(vec![row.clone()], false);
+    assert!(render(&view).contains("Latest activity · 7s ago"));
+    row.status = SessionStatus::Working;
+    row.last_message_at = Some(now - Duration::seconds(3));
+    view.set_sessions(vec![row.clone()], false);
+    let replied = render(&view);
+    assert!(!replied.contains("Latest activity"));
     assert_eq!(
-        idle,
-        include_str!("../../tests/ui_snapshots/details_activity_idle.txt")
+        replied,
+        include_str!("../../tests/ui_snapshots/details_activity_replied.txt")
     );
 }

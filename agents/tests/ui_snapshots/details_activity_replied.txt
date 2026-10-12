@@ -1,7 +1,7 @@
 Task details
 
 Activity task
-○ Ready
+● Working
 
 Model: Unknown
 Reasoning: Unknown
@@ -9,7 +9,7 @@ Reasoning: Unknown
 Project
 /tmp/project
 
-Last message · 1h ago
+Last message · 3s ago
 Checking the project
 
 Prompt
