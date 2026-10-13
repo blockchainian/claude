@@ -34,7 +34,9 @@ pub(super) fn render_with_options(
                     Tag::Emphasis => writer.styles.push(style.italic()),
                     Tag::Strong => writer.styles.push(style.bold()),
                     Tag::Strikethrough => writer.styles.push(style.crossed_out()),
-                    Tag::Link { .. } => writer.styles.push(style.cyan().underlined()),
+                    Tag::Link { .. } => writer
+                        .styles
+                        .push(style.fg(crate::theme::link_color()).underlined()),
                     Tag::BlockQuote => {
                         writer.separate();
                         writer.styles.push(style.green());
@@ -100,7 +102,9 @@ pub(super) fn render_with_options(
             Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
                 writer.push(&text, writer.style())
             }
-            Event::Code(text) => writer.push(&text, writer.style().cyan()),
+            Event::Code(text) => {
+                writer.push(&text, writer.style().fg(crate::theme::inline_code_color()))
+            }
             Event::SoftBreak => writer.push(" ", writer.style()),
             Event::HardBreak => writer.flush(),
             Event::Rule => {
@@ -223,16 +227,27 @@ mod tests {
 
     #[test]
     fn inline_styles() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        crate::theme::set_background(Some((0xa1, 0xca, 0xdc)), true);
+        crate::theme::use_default_accents(true);
         let lines = render(
             "`code` **bold** *italic* ~~gone~~ [label](https://example.com)",
             80,
         );
         for (text, color, modifier) in [
-            ("code", Some(Color::Cyan), Modifier::empty()),
+            (
+                "code",
+                Some(Color::Rgb(0x40, 0xa0, 0x2b)),
+                Modifier::empty(),
+            ),
             ("bold", None, Modifier::BOLD),
             ("italic", None, Modifier::ITALIC),
             ("gone", None, Modifier::CROSSED_OUT),
-            ("label", Some(Color::Cyan), Modifier::UNDERLINED),
+            (
+                "label",
+                Some(Color::Rgb(0x16, 0x4f, 0x9f)),
+                Modifier::UNDERLINED,
+            ),
         ] {
             let span = lines[0]
                 .spans

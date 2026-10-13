@@ -338,6 +338,7 @@ mod log_markdown {
 
     #[test]
     fn prose_uses_markdown_and_preserves_base_and_inline_styles() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         for kind in [Kind::User, Kind::Model, Kind::Agent] {
             let base = super::super::style::log_styles(&kind).1;
             let buffer = body_buffer(
@@ -347,10 +348,10 @@ mod log_markdown {
             );
             assert_eq!(body_text(&buffer), "plain code bold link");
             assert_eq!(buffer[(17, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert_eq!(buffer[(23, 0)].fg, Color::Cyan);
+            assert_eq!(buffer[(23, 0)].fg, crate::theme::inline_code_color());
             assert_eq!(buffer[(28, 0)].fg, base.fg.unwrap_or(Color::Reset));
             assert!(buffer[(28, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buffer[(33, 0)].fg, Color::Cyan);
+            assert_eq!(buffer[(33, 0)].fg, crate::theme::link_color());
             assert!(buffer[(33, 0)].modifier.contains(Modifier::UNDERLINED));
         }
     }
@@ -395,11 +396,12 @@ mod log_markdown {
 
     #[test]
     fn cut_inline_code_keeps_colour_through_the_ellipsis() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         for kind in [Kind::User, Kind::Model, Kind::Agent] {
             let buffer = body_buffer(kind, "ok `abcdefghijklmnop`", 10);
             assert_eq!(body_text(&buffer), "ok abcdef…");
             for x in 20..27 {
-                assert_eq!(buffer[(x, 0)].fg, Color::Cyan);
+                assert_eq!(buffer[(x, 0)].fg, crate::theme::inline_code_color());
             }
         }
     }

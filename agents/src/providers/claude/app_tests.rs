@@ -77,7 +77,7 @@ fn terminal_theme_events_update_background_and_accents() {
     )
     .unwrap();
     app.preferences.theme = Some(file.path().to_owned());
-    app.apply_background(true);
+    app.apply_background(None, true);
     assert!(crate::ui::light_background());
     assert_eq!(
         crate::theme::accent(0),

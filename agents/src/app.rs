@@ -124,11 +124,13 @@ impl App {
         loop {
             let mut terminal = enter_terminal()?;
             // Raw mode is on, so the terminal's reply reaches us instead of the screen.
-            let light = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
+            let background = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
                 .ok()
-                .flatten()
-                .is_some_and(terminal_background::is_light);
-            self.apply_background(light);
+                .flatten();
+            self.apply_background(
+                background,
+                background.is_some_and(terminal_background::is_light),
+            );
             let result = self.event_loop(&mut terminal);
             leave_terminal(terminal)?;
             result?;
@@ -237,8 +239,10 @@ impl App {
         }
     }
 
-    fn apply_background(&mut self, light: bool) {
+    /// `background` is the terminal's reported color, when known.
+    fn apply_background(&mut self, background: Option<(u8, u8, u8)>, light: bool) {
         crate::ui::set_light_background(light);
+        crate::theme::set_background(background, light);
         crate::theme::use_default_accents(light);
         if let Some(path) = &self.preferences.theme
             && let Err(error) = crate::theme::use_theme_file(path, light)
@@ -253,7 +257,7 @@ impl App {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
             Event::ThemeChanged(theme) => {
-                self.apply_background(theme == Theme::Light);
+                self.apply_background(None, theme == Theme::Light);
                 return false;
             }
             _ => return false,

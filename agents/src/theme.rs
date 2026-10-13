@@ -34,16 +34,105 @@ const DARK: &[Rgb] = &[
     (146, 102, 142),
 ];
 
+/// Codex's accent for links and unthemed inline code, on light and on dark backgrounds.
+const LIGHT_TEXT_ACCENT: Rgb = (28, 100, 200);
+const DARK_TEXT_ACCENT: Rgb = (99, 168, 248);
+
+/// Inline code in Codex's default syntax themes, Catppuccin Latte and Catppuccin Mocha.
+const LIGHT_INLINE_CODE: Rgb = (0x40, 0xa0, 0x2b);
+const DARK_INLINE_CODE: Rgb = (0xa6, 0xe3, 0xa1);
+
+/// The scopes Codex looks up, in order, for the inline code color of a syntax theme.
+const INLINE_CODE_SCOPES: [&str; 2] = [
+    "markup.inline.raw.string.markdown",
+    "markup.raw.inline.markdown",
+];
+
+/// The WCAG contrast Codex keeps between accent text and the terminal background.
+const MIN_TEXT_CONTRAST: f64 = 4.5;
+
 #[cfg(test)]
 pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 static ACCENTS: Mutex<Vec<Rgb>> = Mutex::new(Vec::new());
+static TEXT_ACCENT: Mutex<Rgb> = Mutex::new(DARK_TEXT_ACCENT);
+/// The theme's inline code color; `None` when the theme has none, so the text accent stands in.
+static INLINE_CODE: Mutex<Option<Rgb>> = Mutex::new(Some(DARK_INLINE_CODE));
+
+fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 pub fn use_default_accents(light_background: bool) {
     set_accents(
         if light_background { LIGHT } else { DARK }.to_vec(),
         light_background,
     );
+    *locked(&INLINE_CODE) = Some(if light_background {
+        LIGHT_INLINE_CODE
+    } else {
+        DARK_INLINE_CODE
+    });
+}
+
+/// Picks the text accent for the terminal background, darkening or lightening it toward black or
+/// white until it reaches the minimum contrast, as Codex does.
+pub fn set_background(background: Option<Rgb>, light_background: bool) {
+    let preferred = if light_background {
+        LIGHT_TEXT_ACCENT
+    } else {
+        DARK_TEXT_ACCENT
+    };
+    *locked(&TEXT_ACCENT) =
+        background.map_or(preferred, |background| readable_on(preferred, background));
+}
+
+fn readable_on(preferred: Rgb, background: Rgb) -> Rgb {
+    if contrast(preferred, background) >= MIN_TEXT_CONTRAST {
+        return preferred;
+    }
+    let endpoint = if contrast((0, 0, 0), background) >= contrast((255, 255, 255), background) {
+        (0, 0, 0)
+    } else {
+        (255, 255, 255)
+    };
+    (1..=255_u8)
+        .map(|step| blend(endpoint, preferred, f32::from(step) / 255.0))
+        .find(|candidate| contrast(*candidate, background) >= MIN_TEXT_CONTRAST)
+        .unwrap_or(endpoint)
+}
+
+fn blend(top: Rgb, bottom: Rgb, alpha: f32) -> Rgb {
+    let channel =
+        |top: u8, bottom: u8| (f32::from(top) * alpha + f32::from(bottom) * (1.0 - alpha)) as u8;
+    (
+        channel(top.0, bottom.0),
+        channel(top.1, bottom.1),
+        channel(top.2, bottom.2),
+    )
+}
+
+/// WCAG contrast ratio.
+fn contrast(a: Rgb, b: Rgb) -> f64 {
+    let luminance = |(r, g, b): Rgb| {
+        0.2126 * linear_channel(r) + 0.7152 * linear_channel(g) + 0.0722 * linear_channel(b)
+    };
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+pub fn link_color() -> Color {
+    let (r, g, b) = *locked(&TEXT_ACCENT);
+    Color::Rgb(r, g, b)
+}
+
+pub fn inline_code_color() -> Color {
+    match *locked(&INLINE_CODE) {
+        Some((r, g, b)) => Color::Rgb(r, g, b),
+        None => link_color(),
+    }
 }
 
 /// Darkest first on a light background and lightest first on a dark one.
@@ -66,6 +155,7 @@ pub fn use_theme_file(path: &Path, light_background: bool) -> Result<(), String>
         return Err(format!("{}: no accent colors", path.display()));
     }
     set_accents(accents, light_background);
+    *locked(&INLINE_CODE) = theme_inline_code(&theme);
     Ok(())
 }
 
@@ -81,19 +171,21 @@ pub fn accent(slot: usize) -> Color {
 
 /// OKLab lightness, which follows how light a color looks to people.
 fn lightness((r, g, b): Rgb) -> f64 {
-    let linear = |channel: u8| {
-        let channel = f64::from(channel) / 255.0;
-        if channel <= 0.04045 {
-            channel / 12.92
-        } else {
-            ((channel + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    let (r, g, b) = (linear(r), linear(g), linear(b));
+    let (r, g, b) = (linear_channel(r), linear_channel(g), linear_channel(b));
     let l = (0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b).cbrt();
     let m = (0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b).cbrt();
     let s = (0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b).cbrt();
     0.210_454_255_3 * l + 0.793_617_785 * m - 0.004_072_046_8 * s
+}
+
+/// An sRGB channel in linear light.
+fn linear_channel(channel: u8) -> f64 {
+    let channel = f64::from(channel) / 255.0;
+    if channel <= 0.04045 {
+        channel / 12.92
+    } else {
+        ((channel + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 /// Every scope foreground in file order, deduplicated, excluding the base text and background
@@ -144,6 +236,35 @@ fn theme_accents(theme: &plist::Value) -> Vec<Rgb> {
         }
     }
     colors
+}
+
+/// The foreground the theme gives the first of `INLINE_CODE_SCOPES` it styles, matched the way
+/// Codex matches a lone scope: a selector entry applies when it names that scope or one of its
+/// parents, the entry with the most parts wins, and a later rule wins a tie.
+fn theme_inline_code(theme: &plist::Value) -> Option<Rgb> {
+    let rules = theme.as_dictionary()?.get("settings")?.as_array()?;
+    INLINE_CODE_SCOPES.iter().find_map(|name| {
+        rules
+            .iter()
+            .filter_map(|rule| {
+                let foreground = rule
+                    .as_dictionary()?
+                    .get("settings")?
+                    .as_dictionary()?
+                    .get("foreground")?
+                    .as_string()
+                    .and_then(parse_hex_color)?;
+                let parts = scope(rule)?
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|entry| *name == *entry || name.starts_with(&format!("{entry}.")))
+                    .map(|entry| entry.split('.').count())
+                    .max()?;
+                Some((parts, foreground))
+            })
+            .max_by_key(|(parts, _)| *parts)
+            .map(|(_, foreground)| foreground)
+    })
 }
 
 /// A selector list such as `comment, comment.line` selects `name` when one entry is that scope
@@ -220,5 +341,65 @@ mod tests {
             theme_accents(&theme),
             vec![(0xa7, 0x1d, 0x5d), (0x18, 0x36, 0x91)]
         );
+    }
+
+    #[test]
+    fn inline_code_takes_a_single_scope_rule_as_codex_does() {
+        let theme = |rules: &str| -> plist::Value {
+            let xml = format!(
+                r##"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>settings</key><array>
+<dict><key>settings</key><dict><key>foreground</key><string>#323232</string></dict></dict>
+{rules}</array></dict></plist>"##
+            );
+            plist::from_bytes(xml.as_bytes()).unwrap()
+        };
+        let rule = |scope: &str, color: &str| {
+            format!(
+                "<dict><key>scope</key><string>{scope}</string><key>settings</key><dict><key>foreground</key><string>{color}</string></dict></dict>\n"
+            )
+        };
+        let nested = rule("text.html.markdown markup.raw.inline", "#111111");
+        assert_eq!(theme_inline_code(&theme(&nested)), None);
+        let rules = [
+            nested.clone(),
+            rule("markup", "#222222"),
+            rule(
+                "punctuation.definition.raw.markdown, markup.inline.raw.string.markdown",
+                "#40a02b",
+            ),
+            rule("markup.raw", "#333333"),
+        ]
+        .concat();
+        assert_eq!(theme_inline_code(&theme(&rules)), Some((0x40, 0xa0, 0x2b)));
+        assert_eq!(
+            theme_inline_code(&theme(&[nested, rule("markup.raw", "#333333")].concat())),
+            Some((0x33, 0x33, 0x33))
+        );
+    }
+
+    #[test]
+    fn text_accent_darkens_until_it_reads_on_the_background() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        set_background(Some((0xa1, 0xca, 0xdc)), true);
+        assert_eq!(link_color(), Color::Rgb(0x16, 0x4f, 0x9f));
+        set_background(Some((0x00, 0x04, 0x09)), false);
+        assert_eq!(link_color(), Color::Rgb(99, 168, 248));
+        set_background(None, false);
+        assert_eq!(link_color(), Color::Rgb(99, 168, 248));
+        set_background(None, true);
+        assert_eq!(link_color(), Color::Rgb(28, 100, 200));
+    }
+
+    #[test]
+    fn inline_code_follows_the_theme_or_the_text_accent() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        set_background(None, false);
+        use_default_accents(true);
+        assert_eq!(inline_code_color(), Color::Rgb(0x40, 0xa0, 0x2b));
+        use_default_accents(false);
+        assert_eq!(inline_code_color(), Color::Rgb(0xa6, 0xe3, 0xa1));
+        *INLINE_CODE.lock().unwrap() = None;
+        assert_eq!(inline_code_color(), link_color());
     }
 }

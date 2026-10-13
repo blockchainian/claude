@@ -1796,6 +1796,7 @@ fn details_activity_uses_tool_color() {
 
 #[test]
 fn details_message_uses_model_color_under_markdown() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     use ratatui::style::Modifier;
     let now = Utc::now();
     let mut row = session("message", "Message task", SessionStatus::Ready, 0);
@@ -1827,7 +1828,7 @@ fn details_message_uses_model_color_under_markdown() {
         assert_eq!(
             cell.fg,
             if (6..10).contains(&offset) {
-                Color::Cyan
+                crate::theme::inline_code_color()
             } else {
                 Color::Yellow
             }
@@ -2345,6 +2346,7 @@ fn background_redraw_follows_selection() {
 
 #[test]
 fn details_markdown_snapshot() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let mut row = session("markdown", "Markdown task", SessionStatus::Working, 0);
     row.prompt = "Use `cargo` and **tests**".into();
     row.queued = vec!["- *queued* prompt".into()];
@@ -2375,7 +2377,7 @@ fn details_markdown_snapshot() {
         rendered,
         include_str!("../../tests/ui_snapshots/details_markdown.txt")
     );
-    assert_eq!(buffer[(4, 3)].fg, Color::Cyan);
+    assert_eq!(buffer[(4, 3)].fg, crate::theme::inline_code_color());
     assert!(
         buffer[(14, 3)]
             .modifier
@@ -2386,7 +2388,7 @@ fn details_markdown_snapshot() {
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, 9)].fg, Color::Cyan);
+    assert_eq!(buffer[(6, 9)].fg, crate::theme::link_color());
     assert_eq!(buffer[(0, 11)].fg, Color::Cyan);
 }
 
@@ -3455,6 +3457,7 @@ mod log_search {
 
     #[test]
     fn input_live_match_highlight_keep_and_escape() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         let (mut view, now) = log_fixture();
         let template = view.log[0].clone();
         view.log = [
@@ -3484,7 +3487,7 @@ mod log_search {
         assert!(!text(&buf).contains("t........"));
         for x in 23..30 {
             assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buf[(x, 1)].fg, Color::Cyan);
+            assert_eq!(buf[(x, 1)].fg, crate::theme::inline_code_color());
         }
         key(&mut view, KeyCode::Enter);
         let buf = panel(&view, now);
@@ -3501,6 +3504,7 @@ mod log_search {
 
     #[test]
     fn atoms_filters_order_and_unicode_styles() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         use crate::log::Kind;
         let (mut view, now) = log_fixture();
         let template = view.log[0].clone();
@@ -3557,7 +3561,7 @@ mod log_search {
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain café link"));
         for x in 23..27 {
-            assert_eq!(buf[(x, 1)].fg, Color::Cyan);
+            assert_eq!(buf[(x, 1)].fg, crate::theme::inline_code_color());
             assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
         }
         assert!(buf[(28, 1)].modifier.contains(Modifier::UNDERLINED));
