@@ -1535,6 +1535,38 @@ fn delete_dialog_number_shortcuts_follow_codex() {
 }
 
 #[test]
+fn task_titles_take_the_next_accent_when_first_shown_and_keep_it() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let mut view = test_view(Grouping::Project, true);
+    let first = vec![
+        session("a", "Alpha task", SessionStatus::Ready, 10),
+        session("b", "Bravo task", SessionStatus::Ready, 20),
+        session("c", "Charlie task", SessionStatus::Ready, 30),
+    ];
+    view.set_sessions(first.clone(), false);
+    let title_color = |view: &View, title: &str| {
+        let area = Rect::new(0, 0, 80, 12);
+        let mut buf = Buffer::empty(area);
+        view.render_center_rows(area, &mut buf, Utc::now());
+        (0..area.height)
+            .find_map(|y| {
+                let line: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+                let x = line.find(title)?;
+                Some(buf[(line[..x].chars().count() as u16, y)].fg)
+            })
+            .expect(title)
+    };
+    assert_eq!(title_color(&view, "Bravo task"), style::thread_color(1));
+    assert_eq!(title_color(&view, "Charlie task"), style::thread_color(2));
+    let mut second = first;
+    second.push(session("d", "Delta task", SessionStatus::Ready, 0));
+    view.set_sessions(second, false);
+    assert_eq!(title_color(&view, "Delta task"), style::thread_color(3));
+    assert_eq!(title_color(&view, "Bravo task"), style::thread_color(1));
+    assert_eq!(title_color(&view, "Charlie task"), style::thread_color(2));
+}
+
+#[test]
 fn details_branch_and_pull_request_use_session_title_color() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
@@ -1543,7 +1575,7 @@ fn details_branch_and_pull_request_use_session_title_color() {
         number: 833,
         url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
     });
-    let color = style::thread_color(&row.id.id);
+    let color = style::thread_color(0);
     let mut view = test_view(Grouping::Project, true);
     view.status_filter = 4;
     view.set_sessions(vec![row], false);

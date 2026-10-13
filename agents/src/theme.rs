@@ -1,4 +1,5 @@
-//! Identity colors for session titles, drawn from a syntax theme's accents the way Codex does.
+//! Identity colors for session titles, drawn from a syntax theme's accents the way Codex does and
+//! ordered from darkest to lightest.
 //! The default theme follows the terminal background; a `.tmTheme` file in the preferences replaces it.
 
 use ratatui::style::Color;
@@ -50,7 +51,8 @@ pub fn use_default_accents(light_background: bool) {
     set_accents(if light_background { LIGHT } else { MOCHA }.to_vec());
 }
 
-fn set_accents(accents: Vec<Rgb>) {
+fn set_accents(mut accents: Vec<Rgb>) {
+    accents.sort_by(|a, b| lightness(*a).total_cmp(&lightness(*b)));
     *ACCENTS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = accents;
@@ -68,17 +70,31 @@ pub fn use_theme_file(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Picks the same accent for the same id every time, like Codex's thread colors: FNV-1a over the id.
-pub fn color_for_id(id: &str) -> Color {
+/// The accent in `slot`, counting from the darkest and wrapping around the palette.
+pub fn accent(slot: usize) -> Color {
     let accents = ACCENTS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let accents = if accents.is_empty() { MOCHA } else { &accents };
-    let hash = id.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-    });
-    let (r, g, b) = accents[(hash % accents.len() as u64) as usize];
+    let (r, g, b) = accents[slot % accents.len()];
     Color::Rgb(r, g, b)
+}
+
+/// OKLab lightness, which follows how light a color looks to people.
+fn lightness((r, g, b): Rgb) -> f64 {
+    let linear = |channel: u8| {
+        let channel = f64::from(channel) / 255.0;
+        if channel <= 0.04045 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (linear(r), linear(g), linear(b));
+    let l = (0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b).cbrt();
+    let m = (0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b).cbrt();
+    let s = (0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b).cbrt();
+    0.210_454_255_3 * l + 0.793_617_785 * m - 0.004_072_046_8 * s
 }
 
 /// Every scope foreground in file order, deduplicated, excluding the base text and background
@@ -158,13 +174,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_palettes_reach_every_accent() {
+    fn accents_run_from_darkest_to_lightest_and_wrap() {
         let _guard = TEST_LOCK.lock().unwrap();
+        set_accents(vec![(255, 255, 255), (0, 0, 0), (128, 128, 128)]);
+        let slots: Vec<_> = (0..4).map(accent).collect();
+        assert_eq!(
+            slots,
+            [
+                Color::Rgb(0, 0, 0),
+                Color::Rgb(128, 128, 128),
+                Color::Rgb(255, 255, 255),
+                Color::Rgb(0, 0, 0),
+            ]
+        );
         for palette in [LIGHT, MOCHA] {
             set_accents(palette.to_vec());
-            let assigned: std::collections::HashSet<_> =
-                (0..512).map(|id| color_for_id(&id.to_string())).collect();
-            assert_eq!(assigned.len(), palette.len());
+            let lightness: Vec<_> = (0..palette.len())
+                .map(|slot| match accent(slot) {
+                    Color::Rgb(r, g, b) => lightness((r, g, b)),
+                    other => panic!("{other:?}"),
+                })
+                .collect();
+            assert!(lightness.is_sorted(), "{lightness:?}");
         }
     }
 

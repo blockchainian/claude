@@ -54,6 +54,13 @@ impl View {
             return;
         }
         let entries = self.center_rows(&indices, self.grouping);
+        // Hand out accents top to bottom before drawing; the selected row is drawn without its accent
+        // but still takes its turn.
+        for entry in &entries {
+            if let CenterRow::Task(index) | CenterRow::Parent(index) = entry {
+                self.title_color(&self.rows[*index].id);
+            }
+        }
         let selected = entries
             .iter()
             .position(|row| match row {

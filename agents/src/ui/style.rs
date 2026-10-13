@@ -79,8 +79,8 @@ pub(super) fn inactive_tab_style() -> Style {
 pub(super) fn accent_color() -> Color {
     Color::Cyan
 }
-pub(super) fn thread_color(id: &str) -> Color {
-    crate::theme::color_for_id(id)
+pub(super) fn thread_color(slot: usize) -> Color {
+    crate::theme::accent(slot)
 }
 
 /// Label and body styles for transcript events, using terminal palette colors.

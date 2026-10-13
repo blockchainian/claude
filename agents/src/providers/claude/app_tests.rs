@@ -57,14 +57,14 @@ fn terminal_theme_events_update_background_and_accents() {
     let (_dir, mut app) = fixture();
     crate::ui::set_light_background(false);
     crate::theme::use_default_accents(false);
-    let dark = crate::theme::color_for_id("theme-test");
+    let dark = crate::theme::accent(0);
     assert!(!app.handle_event(Event::ThemeChanged(Theme::Light)));
     assert!(crate::ui::light_background());
-    let light = crate::theme::color_for_id("theme-test");
+    let light = crate::theme::accent(0);
     assert_ne!(light, dark);
     assert!(!app.handle_event(Event::ThemeChanged(Theme::Dark)));
     assert!(!crate::ui::light_background());
-    assert_eq!(crate::theme::color_for_id("theme-test"), dark);
+    assert_eq!(crate::theme::accent(0), dark);
 
     let file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(
@@ -80,14 +80,14 @@ fn terminal_theme_events_update_background_and_accents() {
     app.apply_background(true);
     assert!(crate::ui::light_background());
     assert_eq!(
-        crate::theme::color_for_id("theme-test"),
+        crate::theme::accent(0),
         ratatui::style::Color::Rgb(0x12, 0x34, 0x56)
     );
     for theme in [Theme::Light, Theme::Dark] {
         assert!(!app.handle_event(Event::ThemeChanged(theme)));
         assert_eq!(crate::ui::light_background(), theme == Theme::Light);
         assert_eq!(
-            crate::theme::color_for_id("theme-test"),
+            crate::theme::accent(0),
             ratatui::style::Color::Rgb(0x12, 0x34, 0x56)
         );
     }

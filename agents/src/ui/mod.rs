@@ -122,6 +122,8 @@ pub struct View {
     has_more: bool,
     notice: Option<String>,
     viewport: RefCell<Viewport>,
+    /// Accent slot of each task, handed out in the order tasks are first shown.
+    title_slots: RefCell<HashMap<SessionKey, usize>>,
 }
 
 impl Default for View {
@@ -182,6 +184,7 @@ impl View {
             has_more: false,
             notice: None,
             viewport: RefCell::new(Viewport::default()),
+            title_slots: RefCell::new(HashMap::new()),
         }
     }
 
@@ -439,9 +442,16 @@ impl View {
             self.set_selected(visible.first().copied().unwrap_or(usize::MAX));
         }
     }
+    /// Gives a task the next accent the first time it is shown, so neighbors differ and the task
+    /// keeps its color while the list changes.
+    fn title_color(&self, id: &SessionKey) -> Color {
+        let mut slots = self.title_slots.borrow_mut();
+        let next = slots.len();
+        style::thread_color(*slots.entry(id.clone()).or_insert(next))
+    }
     fn title_style(&self, id: &SessionKey) -> Style {
         if self.use_colors {
-            Style::default().fg(style::thread_color(&id.id))
+            Style::default().fg(self.title_color(id))
         } else {
             Style::default()
         }
