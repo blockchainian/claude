@@ -3,7 +3,7 @@
 use crate::model::Action;
 use crate::model::Session;
 use crate::providers::SessionKey;
-use crate::providers::{Snapshot, claude::ClaudeProvider};
+use crate::providers::Snapshot;
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
 use crate::sessions::Hub;
 use crate::state::Preferences;
@@ -15,7 +15,6 @@ use crossterm::terminal;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::io;
-use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{
@@ -27,7 +26,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-// Bounds reader shutdown before handing the terminal to Claude.
+// Bounds reader shutdown before handing the terminal to a provider process.
 const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(250);
 
 enum Input {
@@ -83,7 +82,7 @@ pub struct App {
     preferences: Preferences,
     view: View,
     sessions: Vec<Session>,
-    /// Set when the user chose to hand the terminal to a `claude` process; the dashboard
+    /// Set when the user chose to hand the terminal to a provider process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
     last_session: Option<SessionKey>,
@@ -98,17 +97,18 @@ struct LogStamp {
     modified: std::time::SystemTime,
     length: u64,
     count: usize,
-    filter: crate::sessions::log::Filter,
+    filter: crate::log::Filter,
 }
 
 impl App {
-    pub fn new(config_dir: PathBuf) -> Self {
+    pub fn new(hub: Hub, config_dir: PathBuf) -> Self {
         let preferences = Preferences::load(&config_dir);
         let mut view = View::new(preferences.grouping, true);
         view.set_pinned(&preferences.pinned);
         view.set_loading(true);
+        view.set_capabilities(hub.capabilities());
         Self {
-            hub: Hub::new(vec![Box::new(ClaudeProvider::new(config_dir.clone()))]),
+            hub,
             config_dir,
             preferences,
             view,
@@ -135,10 +135,13 @@ impl App {
             let Some(mut command) = self.launch.take() else {
                 return Ok(());
             };
-            // The dashboard comes back when claude exits, so Ctrl+D in claude returns here.
+            // The dashboard comes back when the launched process exits.
             let notice = match command.status() {
                 Ok(status) if status.success() => None,
-                Ok(status) => Some(format!("claude exited with {status}")),
+                Ok(status) => Some(format!(
+                    "{} exited with {status}",
+                    command.get_program().to_string_lossy()
+                )),
                 Err(error) => Some(format!(
                     "Failed to start {:?}: {error}",
                     command.get_program()
@@ -154,9 +157,16 @@ impl App {
     ) -> io::Result<()> {
         let (sender, receiver) = mpsc::channel();
         let filesystem = sender.clone();
-        let mut watcher = match crate::sessions::watch(&self.config_dir, move |event| {
-            let _ = filesystem.send(Input::Filesystem(event.map(|_| ())));
-        }) {
+        let watch = self
+            .hub
+            .watch_roots()
+            .map_err(notify::Error::io)
+            .and_then(|roots| {
+                crate::sessions::watch(&roots, move |event| {
+                    let _ = filesystem.send(Input::Filesystem(event.map(|_| ())));
+                })
+            });
+        let mut watcher = match watch {
             Ok(watcher) => Some(watcher),
             Err(error) => {
                 self.view
@@ -253,9 +263,7 @@ impl App {
         self.view.log.last().is_some_and(|event| {
             matches!(
                 event.kind,
-                crate::sessions::log::Kind::Tool
-                    | crate::sessions::log::Kind::Error
-                    | crate::sessions::log::Kind::Denied
+                crate::log::Kind::Tool | crate::log::Kind::Error | crate::log::Kind::Denied
             ) && event.ended_at.is_none()
                 && !event.body.ends_with(" *")
         }) && self
@@ -282,10 +290,10 @@ impl App {
                 Some((
                     session.id.clone(),
                     session.transcript.clone()?,
-                    session.parent.is_some(),
+                    session.clone(),
                 ))
             });
-        let Some((session, path, subagent)) = selected else {
+        let Some((session, path, selected_session)) = selected else {
             self.log_stamp = None;
             self.full_log_stamp = None;
             self.view.log.clear();
@@ -293,7 +301,7 @@ impl App {
             return;
         };
         if self.view.log_search.active() {
-            let load = || -> io::Result<Option<(LogStamp, Vec<crate::sessions::log::Event>)>> {
+            let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
                 let metadata = std::fs::metadata(&path)?;
                 let stamp = LogStamp {
                     session: session.clone(),
@@ -301,16 +309,16 @@ impl App {
                     modified: metadata.modified()?,
                     length: metadata.len(),
                     count: usize::MAX,
-                    filter: crate::sessions::log::Filter::default(),
+                    filter: crate::log::Filter::default(),
                 };
                 if self.full_log_stamp.as_ref() == Some(&stamp) {
                     return Ok(None);
                 }
-                let events = crate::sessions::log::tail_filtered(
-                    &path,
+                let events = self.hub.provider(session.provider).log(
+                    &selected_session,
                     usize::MAX,
-                    &crate::sessions::log::Filter::default(),
-                    subagent,
+                    &crate::log::Filter::default(),
+                    selected_session.parent.is_some(),
                 )?;
                 Ok(Some((stamp, events)))
             };
@@ -339,7 +347,7 @@ impl App {
             return;
         }
         self.full_log_stamp = None;
-        let load = || -> io::Result<Option<(LogStamp, Vec<crate::sessions::log::Event>)>> {
+        let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
             let metadata = std::fs::metadata(&path)?;
             let stamp = LogStamp {
                 session: session.clone(),
@@ -352,13 +360,12 @@ impl App {
             if self.log_stamp.as_ref() == Some(&stamp) {
                 return Ok(None);
             }
-            let events = if !subagent
-                && self.view.log_filter == crate::sessions::log::Filter::default()
-            {
-                crate::sessions::log::tail(&path, count)?
-            } else {
-                crate::sessions::log::tail_filtered(&path, count, &self.view.log_filter, subagent)?
-            };
+            let events = self.hub.provider(session.provider).log(
+                &selected_session,
+                count,
+                &self.view.log_filter,
+                selected_session.parent.is_some(),
+            )?;
             Ok(Some((stamp, events)))
         };
         match load() {
@@ -418,7 +425,7 @@ impl App {
                     return self.launch_new(None);
                 };
                 let id = session.id.clone();
-                return self.launch_claude(session, &["--resume", &id.id]);
+                return self.launch_session(Action::Resume(id), session);
             }
             Action::ShowMore => {
                 self.hub.show_more();
@@ -427,12 +434,12 @@ impl App {
             }
             Action::Open(id) | Action::Resume(id) => {
                 if let Some(session) = self.session(&id) {
-                    return self.launch_claude(session, &["--resume", &id.id]);
+                    return self.launch_session(Action::Resume(id), session);
                 }
             }
             Action::Fork(id) => {
                 if let Some(session) = self.session(&id) {
-                    return self.launch_claude(session, &["--resume", &id.id, "--fork-session"]);
+                    return self.launch_session(Action::Fork(id), session);
                 }
             }
             Action::New(cwd) => {
@@ -440,8 +447,8 @@ impl App {
             }
             Action::Rename { id, name } => {
                 if let Some(session) = self.session(&id) {
-                    if let Some(path) = session.transcript {
-                        match crate::sessions::rename(&path, &id.id, &name) {
+                    if session.transcript.is_some() {
+                        match self.hub.provider(id.provider).rename(&session, &name) {
                             Ok(()) => self.refresh(),
                             Err(error) => self
                                 .view
@@ -462,7 +469,7 @@ impl App {
                     if session.transcript.is_none() {
                         self.view.set_notice(Some("Nothing to delete".into()));
                     } else {
-                        match crate::sessions::delete_session(&self.config_dir, &session) {
+                        match self.hub.provider(id.provider).delete(&session) {
                             Ok(()) => {
                                 self.view.hide(&id);
                                 self.refresh();
@@ -500,14 +507,16 @@ impl App {
     }
 
     fn launch_new(&mut self, cwd: Option<PathBuf>) -> bool {
-        let cwd = cwd
-            .filter(|cwd| cwd.is_dir())
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("/"));
-        let mut command = Command::new("claude");
-        command.current_dir(cwd);
-        self.launch = Some(command);
-        true
+        let selected = self.view.selected_id().and_then(|id| self.session(id));
+        let provider = selected.as_ref().map_or_else(
+            || self.hub.default_provider(),
+            |session| session.id.provider,
+        );
+        self.launch = self
+            .hub
+            .provider(provider)
+            .launch(&Action::New(cwd), selected.as_ref());
+        self.launch.is_some()
     }
 
     fn session(&self, id: &SessionKey) -> Option<Session> {
@@ -524,25 +533,27 @@ impl App {
         }
     }
 
-    /// Hands the terminal to `claude <args>` in the session's directory until it exits.
-    fn launch_claude(&mut self, session: Session, args: &[&str]) -> bool {
+    /// Hands the terminal to the selected session's provider process.
+    fn launch_session(&mut self, action: Action, session: Session) -> bool {
         if session.parent.is_some() {
             return false;
         }
-        let cwd = if session.cwd.is_dir() {
-            session.cwd.clone()
-        } else {
+        if !session.cwd.is_dir() {
             self.view.set_notice(Some(format!(
                 "Directory no longer exists: {}",
                 session.cwd.display()
             )));
             return false;
-        };
-        let mut command = Command::new("claude");
-        command.args(args).current_dir(cwd);
-        self.last_session = Some(session.id);
-        self.launch = Some(command);
-        true
+        }
+        self.launch = self
+            .hub
+            .provider(session.id.provider)
+            .launch(&action, Some(&session));
+        if self.launch.is_some() {
+            self.last_session = Some(session.id);
+            return true;
+        }
+        false
     }
 }
 
@@ -587,633 +598,6 @@ fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::R
     reports
 }
 
-pub fn config_dir_exists(config_dir: &Path) -> bool {
-    config_dir.is_dir()
-}
-
 #[cfg(test)]
-mod tests {
-    fn session_key(id: &str) -> crate::providers::SessionKey {
-        crate::providers::SessionKey {
-            provider: crate::providers::ProviderId::Claude,
-            id: id.into(),
-        }
-    }
-    use super::*;
-    use crate::model::SessionStatus;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-    pub(super) fn fixture() -> (tempfile::TempDir, App) {
-        let dir = tempfile::tempdir().unwrap();
-        let project = dir.path().join("projects/project");
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::write(
-            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
-            include_str!("../tests/fixtures/transcript.jsonl"),
-        )
-        .unwrap();
-        let mut app = App::new(dir.path().to_owned());
-        app.refresh();
-        assert_eq!(app.sessions.len(), 1);
-        app.sessions[0].cwd = dir.path().to_owned();
-        app.sessions[0].status = SessionStatus::Ready;
-        app.view.set_sessions(app.sessions.clone(), false);
-        app.refresh_log(8);
-        (dir, app)
-    }
-
-    pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
-        let quit = app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-        app.refresh_log(8);
-        quit
-    }
-
-    fn assert_resume(app: &App) {
-        let command = app.launch.as_ref().expect("session should resume");
-        assert_eq!(command.get_program(), "claude");
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            ["--resume", app.sessions[0].id.id.as_str()]
-        );
-        assert_eq!(
-            command.get_current_dir(),
-            Some(app.sessions[0].cwd.as_path())
-        );
-    }
-
-    #[test]
-    fn terminal_theme_events_update_background_and_accents() {
-        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-        let (_dir, mut app) = fixture();
-        crate::ui::set_light_background(false);
-        crate::theme::use_default_accents(false);
-        let dark = crate::theme::color_for_id("theme-test");
-        assert!(!app.handle_event(Event::ThemeChanged(Theme::Light)));
-        assert!(crate::ui::light_background());
-        let light = crate::theme::color_for_id("theme-test");
-        assert_ne!(light, dark);
-        assert!(!app.handle_event(Event::ThemeChanged(Theme::Dark)));
-        assert!(!crate::ui::light_background());
-        assert_eq!(crate::theme::color_for_id("theme-test"), dark);
-
-        let file = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(
-            file.path(),
-            r##"<?xml version="1.0"?>
-<plist version="1.0"><dict><key>settings</key><array>
-<dict><key>scope</key><string>keyword</string><key>settings</key>
-<dict><key>foreground</key><string>#123456</string></dict></dict>
-</array></dict></plist>"##,
-        )
-        .unwrap();
-        app.preferences.theme = Some(file.path().to_owned());
-        app.apply_background(true);
-        assert!(crate::ui::light_background());
-        assert_eq!(
-            crate::theme::color_for_id("theme-test"),
-            ratatui::style::Color::Rgb(0x12, 0x34, 0x56)
-        );
-        for theme in [Theme::Light, Theme::Dark] {
-            assert!(!app.handle_event(Event::ThemeChanged(theme)));
-            assert_eq!(crate::ui::light_background(), theme == Theme::Light);
-            assert_eq!(
-                crate::theme::color_for_id("theme-test"),
-                ratatui::style::Color::Rgb(0x12, 0x34, 0x56)
-            );
-        }
-        crate::theme::use_default_accents(false);
-    }
-
-    #[test]
-    fn task_log_cache_rereads_when_event_count_changes() {
-        let (_dir, mut app) = fixture();
-        key(&mut app, KeyCode::BackTab);
-        app.refresh();
-        app.refresh_log(8);
-        let path = app.sessions[0].transcript.clone().unwrap();
-        let payload = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, payload.repeat(20)).unwrap();
-        for (height, count) in [(24, 8), (40, 12), (60, 20), (19, 0), (24, 8)] {
-            app.refresh_log(
-                app.view
-                    .log_event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
-            );
-            assert_eq!(app.view.log.len(), count);
-        }
-    }
-
-    pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) {
-        let area = ratatui::layout::Rect::new(0, 0, 120, 24);
-        let mut buffer = ratatui::buffer::Buffer::empty(area);
-        app.view.render(area, &mut buffer);
-        app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
-            kind,
-            column: 2,
-            row: 14,
-            modifiers: KeyModifiers::NONE,
-        }));
-    }
-
-    #[test]
-    fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
-        use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
-        let (_dir, mut app) = fixture();
-        let path = app.sessions[0].transcript.clone().unwrap();
-        let payload = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, payload.repeat(20)).unwrap();
-        app.refresh_log(8);
-        scroll_log(&mut app, ScrollUp);
-        app.refresh_log(8);
-        assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
-        assert_eq!(app.view.log.len(), 9);
-        let cached = app.view.log.clone();
-        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-        std::fs::write(&path, payload.replace("Codex", "CODEX").repeat(20)).unwrap();
-        std::fs::File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(modified)
-            .unwrap();
-        app.refresh_log(8);
-        assert_eq!(app.view.log, cached);
-        scroll_log(&mut app, ScrollDown);
-        app.refresh_log(8);
-        assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
-        assert_eq!(app.view.log.len(), 8);
-        assert_ne!(app.view.log, cached[1..]);
-    }
-
-    #[test]
-    fn task_log_growth_keeps_distance_from_end() {
-        use crossterm::event::MouseEventKind::ScrollUp;
-        let (_dir, mut app) = fixture();
-        let path = app.sessions[0].transcript.clone().unwrap();
-        let payload = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, payload.repeat(20)).unwrap();
-        app.refresh_log(8);
-        scroll_log(&mut app, ScrollUp);
-        app.refresh_log(8);
-        let before = app.view.log.clone();
-        std::fs::write(
-            &path,
-            payload.repeat(20) + &payload.replace("Codex", "CODEX"),
-        )
-        .unwrap();
-        app.refresh_log(8);
-        assert_eq!(app.view.log_scroll(), 1);
-        assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
-        assert_ne!(app.view.log, before);
-    }
-
-    #[test]
-    fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
-        use std::io::Write;
-        let (_dir, mut app) = fixture();
-        let path = app.sessions[0].transcript.clone().unwrap();
-        let payload = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, payload.repeat(20)).unwrap();
-        app.refresh_log(1);
-        app.view.handle_key(crossterm::event::KeyEvent::new(
-            KeyCode::Char('r'),
-            KeyModifiers::CONTROL,
-        ));
-        app.refresh_log(1);
-        for c in "Codex".chars() {
-            key(&mut app, KeyCode::Char(c));
-        }
-        app.refresh_log(1);
-        assert_eq!(app.view.matching_log_count(), 20);
-        for _ in 0..30 {
-            scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
-        }
-        app.refresh_log(1);
-        assert_eq!(app.view.log_scroll(), 19);
-        let cached = app.view.log.clone();
-        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-        std::fs::write(&path, payload.replace("Codex", "other").repeat(20)).unwrap();
-        std::fs::File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(modified)
-            .unwrap();
-        key(&mut app, KeyCode::Backspace);
-        app.refresh_log(1);
-        assert_eq!(
-            app.view.log, cached,
-            "query changes reuse cached transcript"
-        );
-        key(&mut app, KeyCode::Char('x'));
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
-        writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T16:40:00Z", "content":"Codex timeout"})).unwrap();
-        app.refresh_log(1);
-        assert_eq!(app.view.matching_log_count(), 1);
-        assert_eq!(app.view.log.last().unwrap().body, "Codex timeout");
-        key(&mut app, KeyCode::Esc);
-        app.refresh_log(1);
-        assert_eq!(app.view.log.len(), 1);
-    }
-
-    #[test]
-    fn task_log_scroll_clamps_at_transcript_start() {
-        use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
-        let (_dir, mut app) = fixture();
-        assert_eq!(app.view.log.len(), 2);
-        app.refresh_log(1);
-        for _ in 0..5 {
-            scroll_log(&mut app, ScrollUp);
-        }
-        app.refresh_log(1);
-        assert_eq!(app.view.log.len(), 2);
-        scroll_log(&mut app, ScrollDown);
-        app.refresh_log(1);
-        assert_eq!(app.log_stamp.as_ref().unwrap().count, 1);
-        assert_eq!(app.view.log.len(), 1);
-        // A transcript shorter than the visible window clamps all the way to zero.
-        scroll_log(&mut app, ScrollUp);
-        app.refresh_log(8);
-        app.refresh_log(8);
-        assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
-    }
-
-    #[test]
-    fn task_log_cache_uses_selection_length_and_mtime() {
-        use std::io::Write;
-        let (_dir, mut app) = fixture();
-        key(&mut app, KeyCode::BackTab);
-        app.refresh();
-        app.refresh_log(8);
-        assert_eq!(app.view.log.len(), 2);
-        let path = app.sessions[0].transcript.clone().unwrap();
-        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-        let original = std::fs::read_to_string(&path).unwrap();
-        let changed = original.replace("Codex", "CODEX");
-        assert_eq!(original.len(), changed.len());
-        std::fs::write(&path, &changed).unwrap();
-        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-        file.set_modified(modified).unwrap();
-        let cached = app.view.log.clone();
-        app.refresh_log(8);
-        assert_eq!(app.view.log, cached);
-        file.set_modified(modified + Duration::from_secs(1))
-            .unwrap();
-        app.refresh_log(8);
-        assert_ne!(app.view.log, cached);
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
-        writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T16:40:00Z", "content":"queued"})).unwrap();
-        file.set_modified(modified + Duration::from_secs(1))
-            .unwrap();
-        app.refresh();
-        app.refresh_log(8);
-        assert_eq!(app.sessions.len(), 1);
-        assert!(
-            app.view.selected_id().is_some(),
-            "selected disappeared after refresh"
-        );
-        assert_eq!(app.view.log.last().unwrap().body, "queued");
-    }
-
-    #[test]
-    fn task_log_reloads_on_keyboard_selection_and_clears_without_transcript() {
-        let (dir, mut app) = fixture();
-        let mut second = app.sessions[0].clone();
-        second.id = session_key("second");
-        second.updated_at -= chrono::Duration::seconds(1);
-        let path = dir.path().join("second.jsonl");
-        std::fs::write(&path, serde_json::json!({"type":"user", "timestamp":"2026-10-06T16:40:00Z", "message":{"content":"second prompt"}}).to_string()).unwrap();
-        second.transcript = Some(path);
-        let mut third = second.clone();
-        third.id = session_key("third");
-        third.updated_at -= chrono::Duration::seconds(1);
-        third.transcript = None;
-        app.sessions.extend([second, third]);
-        app.view.set_sessions(app.sessions.clone(), false);
-        app.refresh_log(8);
-        key(&mut app, KeyCode::Down);
-        assert_eq!(app.view.log_session.as_ref(), Some(&session_key("second")));
-        assert_eq!(app.view.log[0].body, "second prompt");
-        key(&mut app, KeyCode::Down);
-        assert!(app.view.log.is_empty());
-        assert!(app.view.log_session.is_none());
-    }
-
-    #[test]
-    fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
-        let (dir, mut app) = fixture();
-        let parent = app.sessions[0].clone();
-        let parent_log = app.view.log.clone();
-        let mut child = parent.clone();
-        child.id = session_key("agent-abf695d5995bd43ab");
-        child.parent = Some(parent.id.clone());
-        child.process = None;
-        child.status = SessionStatus::Working;
-        let path = dir.path().join("agent-abf695d5995bd43ab.jsonl");
-        std::fs::write(&path, include_str!("../tests/fixtures/subagent.jsonl")).unwrap();
-        child.transcript = Some(path);
-        app.sessions.push(child.clone());
-        app.view.set_sessions(app.sessions.clone(), false);
-        key(&mut app, KeyCode::Down);
-        assert_eq!(app.view.selected_id(), Some(&child.id));
-        assert_eq!(app.view.log_session.as_ref(), Some(&child.id));
-        assert_eq!(app.log_stamp.as_ref().unwrap().session, child.id);
-        assert!(app.view.log[0].body.starts_with("SubagentHandback"));
-        app.handle_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('r'),
-            KeyModifiers::CONTROL,
-        )));
-        app.refresh_log(8);
-        assert_eq!(app.full_log_stamp.as_ref().unwrap().session, child.id);
-        assert!(app.view.log[0].body.starts_with("SubagentHandback"));
-        key(&mut app, KeyCode::Esc);
-        key(&mut app, KeyCode::Up);
-        assert_eq!(app.view.log_session.as_ref(), Some(&parent.id));
-        assert_eq!(app.log_stamp.as_ref().unwrap().session, parent.id);
-        assert_eq!(app.view.log, parent_log);
-    }
-
-    #[test]
-    fn working_subagent_log_ticks_without_process_and_ready_log_stops() {
-        let (dir, mut app) = fixture();
-        let path = dir.path().join("running-subagent.jsonl");
-        std::fs::write(
-            &path,
-            include_str!("../tests/fixtures/automode_blocked.jsonl")
-                .lines()
-                .next()
-                .unwrap(),
-        )
-        .unwrap();
-        let session = &mut app.sessions[0];
-        session.parent = Some(session_key("parent"));
-        session.process = None;
-        session.status = SessionStatus::Working;
-        app.view.log = crate::sessions::log::tail(&path, 8).unwrap();
-        assert!(app.log_ticks());
-        app.sessions[0].status = SessionStatus::Ready;
-        assert!(!app.log_ticks());
-    }
-
-    fn subagent_fixture() -> (tempfile::TempDir, App, Session) {
-        let (dir, mut app) = fixture();
-        let mut child = app.sessions[0].clone();
-        child.id = session_key("agent-abf695d5995bd43ab");
-        child.parent = Some(app.sessions[0].id.clone());
-        child.process = None;
-        let path = dir.path().join(format!("{}.jsonl", child.id.id));
-        std::fs::write(&path, include_str!("../tests/fixtures/subagent.jsonl")).unwrap();
-        child.transcript = Some(path);
-        app.sessions.push(child.clone());
-        app.view.set_sessions(app.sessions.clone(), false);
-        key(&mut app, KeyCode::Down);
-        assert_eq!(app.view.selected_id(), Some(&child.id));
-        (dir, app, child)
-    }
-
-    fn assert_subagent_action_ignored(make_action: impl FnOnce(&SessionKey) -> Action) {
-        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-        let (dir, mut app, child) = subagent_fixture();
-        key(&mut app, KeyCode::Up);
-        let selected = app.view.selected_id().unwrap().to_owned();
-        assert_ne!(selected, child.id);
-        let sessions = app.sessions.clone();
-        let preferences = app.preferences.clone();
-        let log = app.view.log.clone();
-        let path = child.transcript.as_ref().unwrap();
-        let transcript = std::fs::read(path).unwrap();
-        let meta = path.with_extension("meta.json");
-        std::fs::write(&meta, r#"{"description":"Check files","name":"worker"}"#).unwrap();
-        let metadata = std::fs::read(&meta).unwrap();
-        let area = ratatui::layout::Rect::new(0, 0, 120, 30);
-        let mut before = ratatui::buffer::Buffer::empty(area);
-        app.view.render_at(area, &mut before, child.updated_at);
-        assert!(!app.handle_action(Some(make_action(&child.id))));
-        let mut after = ratatui::buffer::Buffer::empty(area);
-        app.view.render_at(area, &mut after, child.updated_at);
-        assert_eq!(after, before);
-        assert_eq!(app.sessions, sessions);
-        assert_eq!(app.preferences, preferences);
-        assert_eq!(app.view.log, log);
-        assert_eq!(app.view.selected_id(), Some(&selected));
-        assert!(app.launch.is_none());
-        assert!(app.last_session.is_none());
-        assert_eq!(std::fs::read(path).unwrap(), transcript);
-        assert!(!path.with_extension("").exists());
-        assert_eq!(std::fs::read(meta).unwrap(), metadata);
-        assert!(!dir.path().join("agents.json").exists());
-    }
-
-    #[test]
-    fn subagent_open_is_ignored() {
-        assert_subagent_action_ignored(|id| Action::Open(id.clone()));
-    }
-
-    #[test]
-    fn subagent_resume_is_ignored() {
-        assert_subagent_action_ignored(|id| Action::Resume(id.clone()));
-    }
-
-    #[test]
-    fn subagent_fork_is_ignored() {
-        assert_subagent_action_ignored(|id| Action::Fork(id.clone()));
-    }
-
-    #[test]
-    fn subagent_rename_is_ignored() {
-        assert_subagent_action_ignored(|id| Action::Rename {
-            id: id.clone(),
-            name: "Rename".into(),
-        });
-    }
-
-    #[test]
-    fn subagent_delete_is_ignored() {
-        assert_subagent_action_ignored(|id| Action::Delete(id.clone()));
-    }
-
-    #[test]
-    fn subagent_pin_is_ignored() {
-        for pinned in [false, true] {
-            assert_subagent_action_ignored(|id| Action::TogglePin {
-                id: id.clone(),
-                pinned,
-            });
-        }
-    }
-
-    #[test]
-    fn subagent_launch_is_ignored_before_directory_validation() {
-        let (_dir, mut app, mut child) = subagent_fixture();
-        child.cwd = child.cwd.join("missing");
-        assert!(!app.launch_claude(child.clone(), &["--resume", &child.id.id]));
-        assert!(app.launch.is_none());
-        assert!(app.last_session.is_none());
-        let area = ratatui::layout::Rect::new(0, 0, 120, 30);
-        let mut buffer = ratatui::buffer::Buffer::empty(area);
-        app.view.render_at(area, &mut buffer, child.updated_at);
-        assert!(
-            !buffer
-                .content
-                .iter()
-                .map(|c| c.symbol())
-                .collect::<String>()
-                .contains("Directory no longer exists")
-        );
-    }
-
-    #[test]
-    fn escape_without_launched_session_opens_new_session() {
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Esc));
-        let command = app.launch.as_ref().expect("new session should launch");
-        assert_eq!(command.get_program(), "claude");
-        assert_eq!(command.get_args().len(), 0);
-        assert_eq!(
-            command.get_current_dir(),
-            Some(std::env::current_dir().unwrap().as_path())
-        );
-        assert!(app.last_session.is_none());
-    }
-
-    #[test]
-    fn escape_resumes_last_opened_session() {
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Enter));
-        app.launch.take().unwrap();
-        // True leaves the dashboard for either quit or launch; the command distinguishes them.
-        assert!(key(&mut app, KeyCode::Esc));
-        assert_resume(&app);
-    }
-
-    #[test]
-    fn escape_after_session_removed_opens_new_session() {
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Enter));
-        app.launch.take().unwrap();
-        let last_session = app.last_session.clone();
-        app.sessions.clear();
-        app.view.set_sessions(Vec::new(), false);
-        assert!(key(&mut app, KeyCode::Esc));
-        let command = app.launch.as_ref().expect("new session should launch");
-        assert_eq!(command.get_program(), "claude");
-        assert_eq!(command.get_args().len(), 0);
-        assert_eq!(
-            command.get_current_dir(),
-            Some(std::env::current_dir().unwrap().as_path())
-        );
-        assert_eq!(app.last_session, last_session);
-    }
-
-    #[test]
-    fn escape_remembers_resume_and_fork_but_not_new() {
-        for code in [KeyCode::Char('o'), KeyCode::Char('f')] {
-            let (_dir, mut app) = fixture();
-            assert!(key(&mut app, code));
-            app.launch.take().unwrap();
-            assert!(key(&mut app, KeyCode::Char('n')));
-            app.launch.take().unwrap();
-            assert!(key(&mut app, KeyCode::Esc));
-            assert_resume(&app);
-        }
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Char('n')));
-        app.launch.take().unwrap();
-        assert!(key(&mut app, KeyCode::Esc));
-        assert!(app.launch.is_some());
-        assert!(app.last_session.is_none());
-    }
-
-    #[test]
-    fn escape_with_missing_directory_stays_in_dashboard() {
-        let (dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Enter));
-        app.launch.take().unwrap();
-        app.sessions[0].cwd = dir.path().join("missing");
-        assert!(!key(&mut app, KeyCode::Esc));
-        assert!(app.launch.is_none());
-    }
-
-    #[test]
-    fn control_c_after_open_quits() {
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Enter));
-        app.launch.take().unwrap();
-        assert!(app.handle_event(Event::Key(KeyEvent::new(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL
-        ))));
-        assert!(app.launch.is_none());
-    }
-}
-
-#[cfg(test)]
-mod log_filters {
-    use super::tests::{fixture, key, scroll_log};
-    use crate::sessions::log::Kind;
-    use crossterm::event::KeyCode;
-    use crossterm::event::MouseEventKind::ScrollUp;
-
-    #[test]
-    fn tool_filter_loads_matching_count_and_caches_by_filter() {
-        let (_dir, mut app) = fixture();
-        let path = app.sessions[0].transcript.clone().unwrap();
-        let mut records: Vec<serde_json::Value> =
-            include_str!("../tests/fixtures/transcript.jsonl")
-                .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-        let mut tool = records[1].clone();
-        tool["message"]["id"] = "tool-call".into();
-        tool["message"]["content"] = serde_json::json!([{
-            "type":"tool_use", "id":"read", "name":"Read", "input":{"file_path":"src/main.rs"}
-        }]);
-        records.insert(1, tool);
-        let payload = records
-            .iter()
-            .map(|record| format!("{record}\n"))
-            .collect::<String>();
-        std::fs::write(&path, payload.repeat(20)).unwrap();
-        app.refresh_log(8);
-        key(&mut app, KeyCode::Char('t'));
-        assert_eq!(app.view.log.len(), 8);
-        assert!(app.view.log.iter().all(|event| event.kind == Kind::Tool));
-        scroll_log(&mut app, ScrollUp);
-        app.refresh_log(8);
-        assert_eq!(app.view.log.len(), 9);
-        assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
-        let cached = app.view.log.clone();
-        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-        std::fs::write(&path, payload.replace("main.rs", "test.rs").repeat(20)).unwrap();
-        std::fs::File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(modified)
-            .unwrap();
-        app.refresh_log(8);
-        assert_eq!(app.view.log, cached);
-        for _ in 0..30 {
-            scroll_log(&mut app, ScrollUp);
-        }
-        app.refresh_log(8);
-        assert_eq!(app.view.log.len(), 20);
-        assert_eq!(app.view.log_scroll(), 12);
-        key(&mut app, KeyCode::Char('*'));
-        assert_eq!(app.view.log_scroll(), 0);
-        assert!(app.view.log.iter().any(|event| event.kind != Kind::Tool));
-        key(&mut app, KeyCode::Char('t'));
-        assert_eq!(app.view.log.len(), 8);
-        assert!(
-            app.view
-                .log
-                .iter()
-                .all(|event| event.path.as_deref() == Some("src/test.rs"))
-        );
-    }
-}
+#[path = "providers/claude/app_tests.rs"]
+mod tests;

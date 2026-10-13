@@ -396,7 +396,7 @@ impl View {
                 truncate_line_with_ellipsis_if_overflow(
                     Line::from(Span::styled(
                         label,
-                        style::log_styles(&crate::sessions::log::Kind::Tool).1,
+                        style::log_styles(&crate::log::Kind::Tool).1,
                     )),
                     width,
                 )
@@ -411,7 +411,7 @@ impl View {
             }
             items.extend([Line::default().into(), Line::from(header).into()]);
             let start = items.len();
-            let body_style = style::log_styles(&crate::sessions::log::Kind::Model).1;
+            let body_style = style::log_styles(&crate::log::Kind::Model).1;
             items.extend(
                 super::markdown::render(message, width)
                     .into_iter()
@@ -426,7 +426,7 @@ impl View {
             bodies.push(start..items.len());
         }
 
-        // Claude Code appends an exit marker to the output file when the
+        // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
         let boxes = session
             .background
@@ -584,15 +584,9 @@ impl View {
                         .latest_activity()
                         .filter(|_| child.status == SessionStatus::Working);
                     let (text, kind) = if let Some(activity) = activity {
-                        (
-                            Some(activity.label.as_str()),
-                            crate::sessions::log::Kind::Tool,
-                        )
+                        (Some(activity.label.as_str()), crate::log::Kind::Tool)
                     } else {
-                        (
-                            child.last_message.as_deref(),
-                            crate::sessions::log::Kind::Model,
-                        )
+                        (child.last_message.as_deref(), crate::log::Kind::Model)
                     };
                     let body = truncate_line_with_ellipsis_if_overflow(
                         Line::from(Span::styled(
@@ -756,7 +750,7 @@ fn render_background(
 ) {
     let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
     let description_style = if task.waits_for_codex {
-        style::log_styles(&crate::sessions::log::Kind::Model).1
+        style::log_styles(&crate::log::Kind::Model).1
     } else {
         Style::default()
     };

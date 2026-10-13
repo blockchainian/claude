@@ -19,7 +19,7 @@ pub use style::light_background;
 pub use style::set_light_background;
 
 use crate::model::{Action, Grouping, Session, SessionStatus};
-use crate::providers::SessionKey;
+use crate::providers::{Capabilities, ProviderId, SessionKey};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -30,7 +30,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Clear, Paragraph, Widget},
 };
-use std::{cell::RefCell, collections::HashSet, path::Path, path::PathBuf};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    path::Path,
+    path::PathBuf,
+};
 use unicode_width::UnicodeWidthStr;
 
 const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
@@ -93,10 +98,11 @@ struct DeleteDialog {
 }
 
 pub struct View {
-    pub(crate) log: Vec<crate::sessions::log::Event>,
+    pub(crate) log: Vec<crate::log::Event>,
     pub(crate) log_session: Option<SessionKey>,
-    pub(crate) log_filter: crate::sessions::log::Filter,
+    pub(crate) log_filter: crate::log::Filter,
     pub(crate) log_search: log_search::LogSearch,
+    capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
     selected: usize,
@@ -150,8 +156,9 @@ impl View {
         Self {
             log: Vec::new(),
             log_session: None,
-            log_filter: crate::sessions::log::Filter::default(),
+            log_filter: crate::log::Filter::default(),
             log_search: log_search::LogSearch::default(),
+            capabilities: HashMap::new(),
             rows: Vec::new(),
             project_groups: Vec::new(),
             selected: usize::MAX,
@@ -171,6 +178,10 @@ impl View {
             notice: None,
             viewport: RefCell::new(Viewport::default()),
         }
+    }
+
+    pub fn set_capabilities(&mut self, capabilities: HashMap<ProviderId, Capabilities>) {
+        self.capabilities = capabilities;
     }
 
     /// Replace rows while retaining the selected session and view preferences.

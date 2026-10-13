@@ -1,7 +1,7 @@
 use super::formatting::{format_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
-use crate::sessions::log::{Event, Kind};
+use crate::log::{Event, Kind};
 use chrono::{DateTime, Local, Utc};
 
 const CLOCK_FORMAT: &str = "%H:%M:%S";
@@ -173,6 +173,7 @@ pub(super) fn body_line(event: &Event, body_width: usize) -> Line<'static> {
     let body_style = super::style::log_styles(&event.kind).1;
     let body = event.body.split_whitespace().collect::<Vec<_>>().join(" ");
     if matches!(event.kind, Kind::User | Kind::Model | Kind::Agent) {
+        let body = super::line_truncation::abbreviate_paths_in_text(&body, body_width);
         super::markdown::render(&body, usize::MAX)
             .into_iter()
             .next()
@@ -259,7 +260,7 @@ mod log_markdown {
             ),
         )
         .unwrap();
-        let events = crate::sessions::log::tail(file.path(), 8).unwrap();
+        let events = crate::providers::claude::log::tail(file.path(), 8).unwrap();
         let event = events.last().unwrap();
         assert_eq!(event.kind, Kind::Tool);
         assert!(event.ended_at.is_none());
@@ -313,6 +314,18 @@ mod log_markdown {
         for kind in [Kind::User, Kind::Model, Kind::Agent] {
             assert_eq!(body_text(&body_buffer(kind.clone(), " \n ", 20)), "");
             assert_eq!(body_text(&body_buffer(kind, "`code`", 0)), "");
+        }
+    }
+
+    #[test]
+    fn prose_paths_shrink_before_the_line_is_cut() {
+        for kind in [Kind::User, Kind::Model, Kind::Agent] {
+            let buffer = body_buffer(
+                kind,
+                "Report: /private/tmp/claude-501/report.md 1. done",
+                35,
+            );
+            assert_eq!(body_text(&buffer), "Report: /p…/t…/c…/report.md 1. done");
         }
     }
 

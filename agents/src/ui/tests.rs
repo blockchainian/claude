@@ -199,7 +199,7 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
 
 #[test]
 fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
-    use crate::sessions::log::Kind;
+    use crate::log::Kind;
     let (mut view, now) = log_fixture();
     let mut event = view.log.last().unwrap().clone();
     event.kind = Kind::Tool;
@@ -502,7 +502,7 @@ fn mouse_tab_wheel_accepts_space_between_tabs() {
 
 #[test]
 fn mouse_list_click_uses_last_render_scroll_offset() {
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(
         (0..50)
             .map(|i| {
@@ -611,7 +611,7 @@ fn assert_empty_task_list(view: &View) {
     }
 }
 fn fixture() -> View {
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(
         vec![
             session("42", "Current task", SessionStatus::Ready, -3600),
@@ -637,7 +637,7 @@ fn fixture() -> View {
     view
 }
 fn simple_fixture() -> View {
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(
         vec![
             session("42", "Current task", SessionStatus::Ready, 120),
@@ -673,7 +673,7 @@ fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
 }
 #[test]
 fn active_tab_lists_all_sessions_except_inactive() {
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(
         vec![
             session("working", "Working session", SessionStatus::Working, 1),
@@ -880,7 +880,7 @@ fn live_center_status_filter() {
 }
 #[test]
 fn live_center_search_active() {
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(
         vec![session("42", "Task to find", SessionStatus::Ready, 120)],
         false,
@@ -924,7 +924,7 @@ fn leaving_inactive_reconciles_show_more_selection() {
 
 #[test]
 fn empty_active_tab_does_not_page_inactive_sessions() {
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(
         vec![session("42", "Recent task", SessionStatus::Inactive, 120)],
         true,
@@ -937,7 +937,7 @@ fn empty_active_tab_does_not_page_inactive_sessions() {
 fn live_center_show_more() {
     let mut view = View {
         status_filter: 4,
-        ..View::default()
+        ..test_view(Grouping::Project, true)
     };
     view.set_sessions(
         vec![session("42", "Recent task", SessionStatus::Inactive, 120)],
@@ -954,7 +954,7 @@ fn live_center_show_more() {
 }
 #[test]
 fn agents_overview_model_grouping() {
-    let mut view = View::new(Grouping::Model, false);
+    let mut view = test_view(Grouping::Model, false);
     let rows = [
         ("Older task", Some("model-a"), 4),
         ("Other model", Some("model-b"), 3),
@@ -979,7 +979,7 @@ fn agents_overview_model_grouping() {
 fn agents_overview_recent_sessions_twelve_rows_delta() {
     let mut view = View {
         status_filter: 4,
-        ..View::default()
+        ..test_view(Grouping::Project, true)
     };
     view.set_sessions(
         (1..=12)
@@ -1085,7 +1085,7 @@ fn actions_and_hide_move_to_next_visible_row() {
 fn paging_tracks_headings_and_never_wraps() {
     let mut view = View {
         status_filter: 4,
-        ..View::default()
+        ..test_view(Grouping::Project, true)
     };
     view.set_sessions(
         (0..30)
@@ -1174,7 +1174,7 @@ fn details_include_attention_and_clip_messages() {
     });
     row.prompt = "prompt ".repeat(40);
     row.last_message = Some("message ".repeat(60));
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.status_filter = 3;
     view.set_sessions(vec![row], false);
     let rendered = screen(&view, 160, 50);
@@ -1217,7 +1217,7 @@ fn details_include_attention_and_clip_messages() {
 
 #[test]
 fn empty_states_notices_and_help_only_handle_close_keys() {
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     assert_empty_task_list(&view);
     view.set_loading(true);
     assert_empty_task_list(&view);
@@ -1243,7 +1243,7 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
 
 #[test]
 fn marker_pos_follows_the_selected_row_and_clears_on_help() {
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(
         vec![
             session("a", "First", SessionStatus::Ready, 10),
@@ -1270,7 +1270,7 @@ fn marker_pos_follows_the_selected_row_and_clears_on_help() {
 fn details_name_a_missing_prompt() {
     let mut row = session("blank", "Blank task", SessionStatus::Ready, 10);
     row.prompt = String::new();
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![row], false);
     assert!(screen(&view, 160, 24).contains("No prompt available."));
 }
@@ -1362,7 +1362,7 @@ fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
 
 #[test]
 fn live_center_rename_active() {
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(
         vec![session("42", "Task to find", SessionStatus::Ready, 120)],
         false,
@@ -1483,7 +1483,7 @@ fn delete_live_rows_open_the_dialog_and_ignore_show_more() {
 #[test]
 fn live_center_delete_dialog() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.status_filter = 4;
     view.set_sessions(
         vec![session("44", "Unloaded task", SessionStatus::Inactive, 120)],
@@ -1544,7 +1544,7 @@ fn details_branch_and_pull_request_use_session_title_color() {
         url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
     });
     let color = style::thread_color(&row.id.id);
-    let mut view = View::new(Grouping::Project, true);
+    let mut view = test_view(Grouping::Project, true);
     view.status_filter = 4;
     view.set_sessions(vec![row], false);
     let area = Rect::new(0, 0, 40, 18);
@@ -1572,7 +1572,7 @@ fn details_branch_and_pull_request_use_session_title_color() {
 fn details_branch_pull_request_snapshot() {
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
     row.git_branch = Some("main".into());
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.status_filter = 4;
     view.set_sessions(vec![row.clone()], false);
     let area = Rect::new(0, 0, 40, 18);
@@ -1651,7 +1651,7 @@ fn details_activity_follows_the_clock() {
     });
     row.last_message = Some("Checking the project".into());
     row.last_message_at = Some(now - Duration::hours(1));
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![row.clone()], false);
     let render = |view: &View| {
         let area = Rect::new(0, 0, 40, 24);
@@ -1716,7 +1716,7 @@ fn details_activity_uses_tool_color() {
     });
     row.last_message = Some("Checking the project".into());
     row.last_message_at = Some(now - Duration::minutes(5));
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![row], false);
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
@@ -1750,7 +1750,7 @@ fn details_message_uses_model_color_under_markdown() {
     });
     row.last_message = Some("Plain `code` **bold** *italic*\n\nSecond paragraph".into());
     row.last_message_at = Some(now - Duration::minutes(2));
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![row], false);
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
@@ -1822,7 +1822,7 @@ fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
         row.prompt_at = prompt_at;
         row.last_record_at = last_record_at;
         row.turn_messages = count;
-        let mut view = View::default();
+        let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
         let area = Rect::new(0, 0, 40, 24);
         let mut buf = Buffer::empty(area);
@@ -1913,7 +1913,7 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
         .map(|letter| letter.to_string().repeat(40))
         .collect::<Vec<_>>();
     row.prompt = wrapped.join(" ");
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![row], false);
     let area = Rect::new(0, 0, 40, 6);
     let now = Utc::now();
@@ -1957,7 +1957,7 @@ fn details_prompt_truncates_long_queued_entry() {
 }
 
 fn queued_details(row: Session, height: u16) -> String {
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![row], false);
     let area = Rect::new(0, 0, 40, height);
     let mut buf = Buffer::empty(area);
@@ -2048,7 +2048,7 @@ fn details_background_includes_only_working_subagents() {
     nested.id = session_key("agent-nested");
     nested.parent = Some(worker.id.clone());
     nested.title = "Nested agent".into();
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![parent, worker, idle, other, nested], false);
     view.selected = view
         .rows
@@ -2078,10 +2078,7 @@ fn details_background_includes_only_working_subagents() {
     let (x, y) = rendered_cell(&rendered, "Read files");
     assert_eq!(
         buf[(x, y)].fg,
-        style::log_styles(&crate::sessions::log::Kind::Tool)
-            .1
-            .fg
-            .unwrap()
+        style::log_styles(&crate::log::Kind::Tool).1.fg.unwrap()
     );
     view.selected = view
         .rows
@@ -2131,7 +2128,7 @@ fn background_box_dims_border_but_not_title_or_output() {
         output: output.path().into(),
         started_at: Utc::now(),
     });
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![row], false);
     let area = Rect::new(0, 0, 40, 20);
     let mut buf = Buffer::empty(area);
@@ -2164,7 +2161,7 @@ fn details_background_codex_wait_uses_model_color_only_for_description() {
                 output: output.path().into(),
                 started_at: Utc::now(),
             });
-            let mut view = View::default();
+            let mut view = test_view(Grouping::Project, true);
             view.set_sessions(vec![row], false);
             let area = Rect::new(0, 0, 40, 20);
             let mut buf = Buffer::empty(area);
@@ -2221,7 +2218,7 @@ fn background_redraw_follows_selection() {
         output: "/tmp/unused.output".into(),
         started_at: Utc::now(),
     });
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(
         vec![
             first,
@@ -2243,7 +2240,7 @@ fn details_markdown_snapshot() {
     row.queued = vec!["- *queued* prompt".into()];
     row.last_message =
         Some("## Result\n\nBuilt [agents](https://example.com).\n\n```\ncargo test\n```".into());
-    let mut view = View::default();
+    let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![row], false);
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 21)).unwrap();
     terminal
@@ -2284,7 +2281,7 @@ fn details_markdown_snapshot() {
 }
 
 fn log_fixture() -> (View, chrono::DateTime<Utc>) {
-    use crate::sessions::log::{Event, Kind};
+    use crate::log::{Event, Kind};
     use chrono::TimeZone;
     let now = chrono::Local
         .with_ymd_and_hms(2026, 10, 12, 12, 0, 0)
@@ -2299,7 +2296,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         label: None,
         started_at: None,
     });
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![row], false);
     view.log_session = Some(session_key("log"));
     view.log = [
@@ -2363,7 +2360,8 @@ fn task_log_labels_are_left_aligned_in_seven_columns() {
 
 #[test]
 fn task_log_denied_snapshot() {
-    use crate::sessions::log::{Kind, tail};
+    use crate::log::Kind;
+    use crate::providers::claude::log::tail;
     let (mut view, now) = log_fixture();
     view.log.truncate(1);
     for (fixture, age, end) in [
@@ -2509,7 +2507,7 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
 
 #[test]
 fn task_log_uses_cctail_colours_and_highlights_latest_time() {
-    use crate::sessions::log::Kind;
+    use crate::log::Kind;
     use ratatui::style::Modifier;
     let (mut view, now) = log_fixture();
     view.log.truncate(5);
@@ -2595,7 +2593,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
 
 #[test]
 fn task_log_preserves_time_when_truncated() {
-    use crate::sessions::log::Kind;
+    use crate::log::Kind;
     use ratatui::style::Modifier;
     let (view, now) = log_fixture();
     let area = Rect::new(0, 0, 100, 25);
@@ -2631,7 +2629,7 @@ fn task_log_preserves_time_when_truncated() {
 
 #[test]
 fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
-    use crate::sessions::log::Kind;
+    use crate::log::Kind;
     let (mut view, now) = log_fixture();
     view.log.truncate(3);
     view.log[0].kind = Kind::Tool;
@@ -2672,8 +2670,8 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
 #[test]
 fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
     let (mut view, now) = log_fixture();
-    let first = crate::sessions::log::Event {
-        kind: crate::sessions::log::Kind::User,
+    let first = crate::log::Event {
+        kind: crate::log::Kind::User,
         body: "Discarded event".into(),
         path: None,
         started_at: now - Duration::seconds(180),
@@ -2822,7 +2820,7 @@ mod details_budget {
                 waits_for_codex: false,
             });
         }
-        let mut view = View::default();
+        let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
         let rows = panel(&view);
         assert!(rows.iter().any(|line| line == "Queued work"));
@@ -2839,7 +2837,7 @@ mod details_budget {
     fn tiny_panel_keeps_plain_bottom_cut() {
         let mut row = session("tiny", "Tiny task", SessionStatus::NeedsInput, 0);
         row.prompt = "First row\n\nSecond row\n\nThird row".into();
-        let mut view = View::default();
+        let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
         let area = Rect::new(0, 0, 120, 6);
         let mut buf = Buffer::empty(area);
@@ -2882,7 +2880,7 @@ mod details_budget {
             super::super::markdown::render(row.last_message.as_ref().unwrap(), 120).len(),
             6
         );
-        let mut view = View::default();
+        let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
         let rest = panel(&view);
         for header in ["Prompt", "Last message", "Needs attention"] {
@@ -2933,7 +2931,7 @@ mod details_curtain {
                 .collect::<Vec<_>>()
                 .join("  \n"),
         );
-        let mut view = View::default();
+        let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
         view
     }
@@ -3123,7 +3121,7 @@ mod details_curtain {
 fn path_abbreviation_in_details_preserves_last_component() {
     let mut task = session("path", "Path task", SessionStatus::Ready, 0);
     task.cwd = "/Users/visitor/Code/.worktrees/agents-panel".into();
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![task], false);
     let area = Rect::new(0, 0, 26, 20);
     let mut buf = Buffer::empty(area);
@@ -3147,7 +3145,7 @@ fn path_abbreviation_in_details_preserves_last_component() {
 fn path_abbreviation_in_group_header_preserves_last_component() {
     let mut task = session("path", "Path task", SessionStatus::Ready, 0);
     task.cwd = "/Users/visitor/Code/.worktrees/agents-panel".into();
-    let mut view = View::new(Grouping::Project, false);
+    let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![task], false);
     let area = Rect::new(0, 0, 30, 6);
     let mut buf = Buffer::empty(area);
@@ -3200,7 +3198,7 @@ mod log_path_abbrev {
 
 mod log_filters {
     use super::*;
-    use crate::sessions::log::Kind;
+    use crate::log::Kind;
 
     fn fixture() -> (View, chrono::DateTime<Utc>) {
         let (mut view, now) = log_fixture();
@@ -3395,7 +3393,7 @@ mod log_search {
 
     #[test]
     fn atoms_filters_order_and_unicode_styles() {
-        use crate::sessions::log::Kind;
+        use crate::log::Kind;
         let (mut view, now) = log_fixture();
         let template = view.log[0].clone();
         view.log = [
@@ -3443,7 +3441,7 @@ mod log_search {
         assert_eq!(view.matching_log_count(), 1);
         assert!(!text(&panel(&view, now)).contains("timeout alone"));
         key(&mut view, KeyCode::Esc);
-        view.log_filter = crate::sessions::log::Filter::default();
+        view.log_filter = crate::log::Filter::default();
         open(&mut view);
         for c in "cafe".chars() {
             key(&mut view, KeyCode::Char(c));
@@ -3667,7 +3665,7 @@ mod subagent_rows {
         let mut newer = session("agent-newer", "Review results", SessionStatus::Ready, 0);
         newer.parent = Some(parent.id.clone());
         newer.updated_at = now;
-        let mut view = View::new(Grouping::Project, false);
+        let mut view = test_view(Grouping::Project, false);
         view.set_sessions(vec![newer, older, parent], false);
         view
     }
@@ -4132,4 +4130,69 @@ mod subagent_actions {
             include_str!("../../tests/ui_snapshots/agents_overview_subagent_selected.txt")
         );
     }
+}
+
+#[test]
+fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
+    let mut view = fixture();
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Claude,
+        Capabilities::default(),
+    )]));
+    for (code, name) in [
+        (KeyCode::Enter, "Resume"),
+        (KeyCode::Right, "Resume"),
+        (KeyCode::Char('o'), "Resume"),
+        (KeyCode::Char('f'), "Fork"),
+        (KeyCode::Char('n'), "New session"),
+        (KeyCode::Char('r'), "Rename"),
+        (KeyCode::Backspace, "Delete"),
+    ] {
+        assert_eq!(key(&mut view, code), Some(Action::Unsupported(name)));
+        assert!(view.rename_target.is_none());
+        assert!(view.delete_dialog.is_none());
+    }
+}
+
+#[test]
+fn unsupported_provider_mouse_activation_emits_notice() {
+    let mut view = fixture();
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Claude,
+        Capabilities::default(),
+    )]));
+    let rendered = screen(&view, 120, 40);
+    let second = view.selectable_indices()[1];
+    let (x, y) = rendered_cell(&rendered, view.rows[second].display_title());
+    assert_eq!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y)),
+        Some(Action::Unsupported("Resume"))
+    );
+}
+
+#[test]
+fn missing_provider_capabilities_do_not_allow_actions() {
+    let mut view = fixture();
+    view.set_capabilities(HashMap::new());
+    assert_eq!(
+        key(&mut view, KeyCode::Char('o')),
+        Some(Action::Unsupported("Resume"))
+    );
+}
+
+fn test_view(grouping: Grouping, use_colors: bool) -> View {
+    let mut view = View::new(grouping, use_colors);
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Claude,
+        Capabilities {
+            resume: true,
+            fork: true,
+            new: true,
+            rename: true,
+            delete: true,
+            stop: false,
+            archive: false,
+        },
+    )]));
+    view
 }

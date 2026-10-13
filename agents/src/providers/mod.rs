@@ -1,7 +1,8 @@
 pub(crate) mod claude;
 
-use crate::model::Session;
-use std::{fmt, str::FromStr};
+use crate::log;
+use crate::model::{Action, Session};
+use std::{fmt, io, path::PathBuf, process::Command, str::FromStr};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ProviderId {
@@ -64,18 +65,32 @@ pub struct Snapshot {
 }
 
 pub trait Provider {
-    #[allow(
-        dead_code,
-        reason = "Action dispatch is separate from snapshot refresh"
-    )]
     fn id(&self) -> ProviderId;
-    #[allow(
-        dead_code,
-        reason = "Action dispatch is separate from snapshot refresh"
-    )]
+    /// Directories watched for changes; missing directories are skipped.
+    fn watch_roots(&self) -> io::Result<Vec<PathBuf>>;
     fn capabilities(&self) -> Capabilities;
     /// Returns this provider's sessions, including children with provider-qualified parents.
     fn refresh(&mut self, pages: usize) -> Snapshot;
+    fn log(
+        &self,
+        session: &Session,
+        count: usize,
+        filter: &log::Filter,
+        sidechains: bool,
+    ) -> io::Result<Vec<log::Event>>;
+    /// Returns a resume, fork or new-session command when available.
+    fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command>;
+    fn rename(&self, session: &Session, name: &str) -> io::Result<()>;
+    fn delete(&self, session: &Session) -> io::Result<()>;
+}
+
+pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {
+    let provider = claude::ClaudeProvider::from_config()?;
+    let preferences_dir = provider.preferences_dir();
+    Ok((
+        crate::sessions::Hub::new(vec![Box::new(provider)]),
+        preferences_dir,
+    ))
 }
 
 #[cfg(test)]

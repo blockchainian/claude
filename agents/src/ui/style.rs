@@ -59,8 +59,8 @@ pub(super) fn thread_color(id: &str) -> Color {
 }
 
 /// Label and body styles for transcript events, using terminal palette colors.
-pub(super) fn log_styles(kind: &crate::sessions::log::Kind) -> (Style, Style) {
-    use crate::sessions::log::Kind;
+pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
+    use crate::log::Kind;
     let body = match kind {
         Kind::User | Kind::QueuedUser => Style::default(),
         Kind::Model | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
@@ -70,7 +70,7 @@ pub(super) fn log_styles(kind: &crate::sessions::log::Kind) -> (Style, Style) {
     (body.bold(), body)
 }
 
-pub(super) fn log_time_style(kind: &crate::sessions::log::Kind, last: bool) -> Style {
+pub(super) fn log_time_style(kind: &crate::log::Kind, last: bool) -> Style {
     if last {
         log_styles(kind).1.bold()
     } else {

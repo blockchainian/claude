@@ -1,4 +1,5 @@
 mod app;
+mod log;
 mod model;
 mod providers;
 mod refresh;
@@ -10,15 +11,9 @@ mod theme;
 mod ui;
 
 fn main() {
-    let config_dir = sessions::config_dir();
-    if !app::config_dir_exists(&config_dir) {
-        eprintln!(
-            "agents: no Claude Code config directory at {}",
-            config_dir.display()
-        );
-        std::process::exit(1);
-    }
-    if let Err(error) = app::App::new(config_dir).run() {
+    let result = providers::configured()
+        .and_then(|(hub, preferences_dir)| app::App::new(hub, preferences_dir).run());
+    if let Err(error) = result {
         eprintln!("agents: {error}");
         std::process::exit(1);
     }

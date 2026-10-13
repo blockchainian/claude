@@ -5,7 +5,7 @@ mod registry;
 mod subagents;
 mod transcript;
 
-use crate::model::{Process, Session, SessionStatus};
+use crate::model::{Action, Process, Session, SessionStatus};
 use crate::providers::{Capabilities, Provider, ProviderId, SessionKey, Snapshot};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
@@ -13,6 +13,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::SystemTime;
 use transcript::Summary;
 
@@ -172,7 +173,7 @@ fn stop_process(entry: &registry::Entry) -> io::Result<()> {
     ))
 }
 
-pub fn config_dir() -> PathBuf {
+fn config_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("CLAUDE_CONFIG_DIR") {
         return PathBuf::from(path);
     }
@@ -209,6 +210,24 @@ impl ClaudeProvider {
             index: HashMap::new(),
             summaries: HashMap::new(),
         }
+    }
+
+    pub fn from_config() -> io::Result<Self> {
+        let config_dir = config_dir();
+        if !config_dir.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "no Claude Code config directory at {}",
+                    config_dir.display()
+                ),
+            ));
+        }
+        Ok(Self::new(config_dir))
+    }
+
+    pub fn preferences_dir(&self) -> PathBuf {
+        self.config_dir.clone()
     }
 
     fn snapshot(&mut self, pages: usize) -> Snapshot {
@@ -459,6 +478,15 @@ impl Provider for ClaudeProvider {
         ProviderId::Claude
     }
 
+    fn watch_roots(&self) -> io::Result<Vec<PathBuf>> {
+        let sessions = self.config_dir.join("sessions");
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(&sessions)?;
+        Ok(vec![sessions, self.config_dir.join("projects")])
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             resume: true,
@@ -473,6 +501,59 @@ impl Provider for ClaudeProvider {
 
     fn refresh(&mut self, pages: usize) -> Snapshot {
         self.snapshot(pages)
+    }
+    fn log(
+        &self,
+        session: &Session,
+        count: usize,
+        filter: &crate::log::Filter,
+        sidechains: bool,
+    ) -> io::Result<Vec<crate::log::Event>> {
+        let path = session
+            .transcript
+            .as_deref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Session has no transcript"))?;
+        log::tail_filtered(path, count, filter, sidechains)
+    }
+
+    fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command> {
+        let mut command = Command::new("claude");
+        match action {
+            Action::New(cwd) => {
+                let cwd = cwd
+                    .clone()
+                    .filter(|cwd| cwd.is_dir())
+                    .or_else(|| std::env::current_dir().ok())
+                    .unwrap_or_else(|| PathBuf::from("/"));
+                command.current_dir(cwd);
+            }
+            Action::Open(_) | Action::Resume(_) | Action::Fork(_) | Action::Back => {
+                let session = session?;
+                if session.parent.is_some() || !session.cwd.is_dir() {
+                    return None;
+                }
+                command
+                    .args(["--resume", &session.id.id])
+                    .current_dir(&session.cwd);
+                if matches!(action, Action::Fork(_)) {
+                    command.arg("--fork-session");
+                }
+            }
+            _ => return None,
+        }
+        Some(command)
+    }
+
+    fn rename(&self, session: &Session, name: &str) -> io::Result<()> {
+        let path = session
+            .transcript
+            .as_deref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "session has no transcript"))?;
+        rename(path, &session.id.id, name)
+    }
+
+    fn delete(&self, session: &Session) -> io::Result<()> {
+        delete_session(&self.config_dir, session)
     }
 }
 
@@ -579,6 +660,80 @@ mod tests {
                 archive: true,
             }
         );
+    }
+
+    #[test]
+    fn provider_watch_roots_and_actions_preserve_session_behavior() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "00000000-0000-0000-0000-000000000001";
+        let path = transcript(dir.path(), id, 0);
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        assert_eq!(
+            provider.watch_roots().unwrap(),
+            vec![dir.path().join("sessions"), dir.path().join("projects")]
+        );
+        assert_eq!(
+            fs::metadata(dir.path().join("sessions"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        let mut session = provider.refresh(1).sessions.remove(0);
+        session.cwd = dir.path().into();
+        let resume = provider
+            .launch(&Action::Resume(session.id.clone()), Some(&session))
+            .unwrap();
+        assert_eq!(resume.get_program(), "claude");
+        assert_eq!(resume.get_args().collect::<Vec<_>>(), ["--resume", id]);
+        assert_eq!(resume.get_current_dir(), Some(dir.path()));
+        let fork = provider
+            .launch(&Action::Fork(session.id.clone()), Some(&session))
+            .unwrap();
+        assert_eq!(
+            fork.get_args().collect::<Vec<_>>(),
+            ["--resume", id, "--fork-session"]
+        );
+        let new = provider
+            .launch(&Action::New(Some(dir.path().into())), Some(&session))
+            .unwrap();
+        assert_eq!(new.get_current_dir(), Some(dir.path()));
+        assert_eq!(new.get_args().count(), 0);
+        assert_eq!(
+            provider
+                .log(&session, 8, &crate::log::Filter::default(), false)
+                .unwrap(),
+            log::tail(&path, 8).unwrap()
+        );
+        provider.rename(&session, "Provider title").unwrap();
+        assert_eq!(
+            provider.refresh(1).sessions[0].display_title(),
+            "Provider title"
+        );
+        session.parent = Some(session.id.clone());
+        assert!(
+            provider
+                .launch(&Action::Resume(session.id.clone()), Some(&session))
+                .is_none()
+        );
+        session.parent = None;
+        session.cwd = dir.path().join("missing");
+        assert!(
+            provider
+                .launch(&Action::Resume(session.id.clone()), Some(&session))
+                .is_none()
+        );
+        provider.delete(&session).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn watch_roots_reports_sessions_directory_creation_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("sessions"), "occupied").unwrap();
+        let provider = ClaudeProvider::new(dir.path().into());
+        assert!(provider.watch_roots().is_err());
     }
 
     #[test]

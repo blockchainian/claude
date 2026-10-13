@@ -146,8 +146,18 @@ impl View {
             self.search.clear();
             self.searching = false;
         }
+        if !self.selected_capabilities().resume {
+            return Some(Action::Unsupported("Resume"));
+        }
         Some(Action::Open(id))
     }
+    fn selected_capabilities(&self) -> Capabilities {
+        self.selected_id()
+            .and_then(|key| self.capabilities.get(&key.provider))
+            .copied()
+            .unwrap_or_default()
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
         if key.kind == KeyEventKind::Release {
             return None;
@@ -330,7 +340,7 @@ impl View {
         }
         match key.code {
             KeyCode::Char(hotkey @ ('*' | 'm' | 't' | 'u' | 'e')) => {
-                use crate::sessions::log::Kind;
+                use crate::log::Kind;
                 let kinds: &[Kind] = match hotkey {
                     '*' => &[],
                     'm' => &[Kind::Model, Kind::Agent],
@@ -339,7 +349,7 @@ impl View {
                     'e' => &[Kind::Error, Kind::Denied],
                     _ => unreachable!(),
                 };
-                let mut filter = crate::sessions::log::Filter::default();
+                let mut filter = crate::log::Filter::default();
                 filter.toggle(kinds);
                 if self.log_filter != filter {
                     self.log_filter = filter;
@@ -374,11 +384,25 @@ impl View {
                 return Some(Action::PersistGrouping(self.grouping));
             }
             KeyCode::Char('n') => {
+                let capabilities = self
+                    .selected_id()
+                    .map(|_| self.selected_capabilities())
+                    .or_else(|| {
+                        (self.capabilities.len() == 1)
+                            .then(|| *self.capabilities.values().next().expect("one provider"))
+                    })
+                    .unwrap_or_default();
+                if !capabilities.new {
+                    return Some(Action::Unsupported("New session"));
+                }
                 return Some(Action::New(self.selected_row().map(|s| s.cwd.clone())));
             }
             KeyCode::Char('w') => return Some(Action::Unsupported("New worktree")),
             KeyCode::Char('r') => {
                 if let Some(session) = self.selected_row() {
+                    if !self.selected_capabilities().rename {
+                        return Some(Action::Unsupported("Rename"));
+                    }
                     let id = session.id.clone();
                     let title = session.display_title().to_owned();
                     self.rename.set_text(&title);
@@ -390,6 +414,9 @@ impl View {
             KeyCode::Char('a') => return Some(Action::Unsupported("Archive")),
             KeyCode::Backspace => {
                 if let Some(session) = self.selected_row() {
+                    if !self.selected_capabilities().delete {
+                        return Some(Action::Unsupported("Delete"));
+                    }
                     self.delete_dialog = Some(DeleteDialog {
                         id: session.id.clone(),
                         title: session.display_title().to_owned(),
@@ -397,8 +424,22 @@ impl View {
                     });
                 }
             }
-            KeyCode::Char('o') => return self.selected_id().map(|id| Action::Resume(id.clone())),
-            KeyCode::Char('f') => return self.selected_id().map(|id| Action::Fork(id.clone())),
+            KeyCode::Char('o') => {
+                let id = self.selected_id()?.clone();
+                return Some(if self.selected_capabilities().resume {
+                    Action::Resume(id)
+                } else {
+                    Action::Unsupported("Resume")
+                });
+            }
+            KeyCode::Char('f') => {
+                let id = self.selected_id()?.clone();
+                return Some(if self.selected_capabilities().fork {
+                    Action::Fork(id)
+                } else {
+                    Action::Unsupported("Fork")
+                });
+            }
             KeyCode::Char('x') => return Some(Action::Unsupported("Stop")),
             KeyCode::Char('h') => {
                 let id = self.selected_id()?.to_owned();

@@ -122,9 +122,9 @@ impl Session {
 pub enum Action {
     /// Enter: jump to a live session's terminal, or resume an inactive one.
     Open(SessionKey),
-    /// `o`: resume the session in this terminal (`claude --resume <id>`).
+    /// `o`: resume the session in this terminal.
     Resume(SessionKey),
-    /// `f`: resume as a new session id (`claude --resume <id> --fork-session`).
+    /// `f`: resume as a new session id.
     Fork(SessionKey),
     /// `n`: start a new session in the given directory.
     New(Option<PathBuf>),
@@ -138,7 +138,7 @@ pub enum Action {
     Rename { id: SessionKey, name: String },
     /// Backspace, then confirmation: permanently delete the session transcript.
     Delete(SessionKey),
-    /// `w`, `a`: no Claude Code equivalent yet; show the notice.
+    /// Unsupported provider operations show a notice.
     Unsupported(&'static str),
     /// "Show more" was activated: load the next page of inactive sessions.
     ShowMore,
