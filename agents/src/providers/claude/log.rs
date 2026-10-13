@@ -1,4 +1,4 @@
-use crate::log::{Event, Filter, Kind};
+use crate::log::{Event, Filter, Kind, participant_text};
 use chrono::{DateTime, Utc};
 use std::{io, path::Path};
 
@@ -34,16 +34,18 @@ fn tool_detail(name: &str, input: &serde_json::Value) -> String {
         "SendMessage" => {
             let message = input_text(input, "summary")
                 .or_else(|| input_text(input, "message").and_then(|text| text.lines().next()));
-            [input_text(input, "to"), message]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" ")
+            participant_text(input_text(input, "to"), message.unwrap_or(""))
         }
-        "SubagentHandback" => input_text(input, "message")
-            .and_then(|text| text.lines().next())
-            .unwrap_or("")
-            .to_owned(),
+        "Agent" | "Task" => participant_text(
+            input_text(input, "name"),
+            default_detail(input).map(|(_, text)| text).unwrap_or(""),
+        ),
+        "SubagentHandback" => participant_text(
+            input_text(input, "name"),
+            input_text(input, "message")
+                .and_then(|text| text.lines().next())
+                .unwrap_or(""),
+        ),
         _ => default_detail(input)
             .map(|(_, text)| text)
             .unwrap_or("")
@@ -70,7 +72,8 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     if matches!(
         name,
         "Bash" | "WebFetch" | "SendMessage" | "SubagentHandback"
-    ) {
+    ) || (matches!(name, "Agent" | "Task") && input_text(input, "name").is_some())
+    {
         Some(tool_label(name, &tool_detail(name, input)))
     } else {
         Some(input_text(input, "description").unwrap_or(name).to_owned())
@@ -406,7 +409,7 @@ fn wrapped_message(text: &str) -> Option<(Kind, String)> {
     let (opening, rest) = text.trim().strip_prefix('<')?.split_once('>')?;
     let tag = opening.split_whitespace().next()?;
     let kind = match tag {
-        "agent-message" => Kind::Agent,
+        "agent-message" | "teammate-message" => Kind::Agent,
         "cross-session-message" => Kind::Session,
         _ => return None,
     };
@@ -431,13 +434,19 @@ fn wrapped_message(text: &str) -> Option<(Kind, String)> {
         inner
     };
     let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
-    let body = if kind == Kind::Session {
-        let name = opening.split_once(" from-name=\"")?.1.split_once('"')?.0;
-        format!("({name}) {body}")
-    } else {
-        body
+    let attribute = |key: &str| {
+        opening
+            .split_once(&format!(" {key}=\""))?
+            .1
+            .split_once('"')
+            .map(|(value, _)| value)
     };
-    Some((kind, body))
+    let name = match tag {
+        "cross-session-message" => Some(attribute("from-name")?),
+        "teammate-message" => attribute("teammate_id"),
+        _ => attribute("from-name").or_else(|| attribute("from")),
+    };
+    Some((kind, participant_text(name, &body)))
 }
 
 fn pasted_content(mut text: &str) -> Option<String> {
@@ -502,8 +511,8 @@ mod tests {
         let expected = [
             "mkdir, cd, ls, wc, head",
             "找那个会话",
-            "SendMessage hide-idle-teammates 问 line_truncation.rs 是不是它在改",
-            "SendMessage team-lead Report: /tmp/research",
+            "SendMessage (hide-idle-teammates) 问 line_truncation.rs 是不是它在改",
+            "SendMessage (team-lead) Report: /tmp/research",
             "SubagentHandback Report: /tmp/research",
             "WebFetch code.claude.com/docs/en/hooks",
             "cd, ls, sed, wc",
@@ -521,6 +530,94 @@ mod tests {
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
             assert_eq!(summary.activity.unwrap().label, expected);
+        }
+    }
+
+    #[test]
+    fn real_agent_names_in_log_and_activity() {
+        let expected = [
+            "Agent (reviewer) Review files",
+            "SubagentHandback Checks passed.",
+            "(worker-id) Checks passed.",
+            "(team-lead) Review files.",
+            "(peer-session) Checks passed.",
+        ];
+        for (line, expected) in include_str!("../../../tests/fixtures/claude-agent-names.jsonl")
+            .lines()
+            .zip(expected)
+        {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), line).unwrap();
+            let events = tail(file.path(), 8).unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].body, expected);
+            let record: Value = serde_json::from_str(line).unwrap();
+            if record["type"] == "assistant" {
+                let len = file.as_file().metadata().unwrap().len();
+                let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
+                assert_eq!(summary.activity.unwrap().label, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn task_names_and_named_handbacks_share_log_and_activity_format() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-agent-names.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        for (mut record, tool_name, expected) in [
+            (records[0].clone(), "Task", "Task (reviewer) Review files"),
+            (
+                records[1].clone(),
+                "SubagentHandback",
+                "SubagentHandback (reviewer) Checks passed.",
+            ),
+        ] {
+            let block = &mut record["message"]["content"][0];
+            block["name"] = tool_name.into();
+            block["input"]["name"] = "reviewer".into();
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), record.to_string()).unwrap();
+            assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
+            let summary = super::super::transcript::read_subagent(
+                file.path(),
+                file.as_file().metadata().unwrap().len(),
+            )
+            .unwrap();
+            assert_eq!(summary.activity.unwrap().label, expected);
+        }
+    }
+
+    #[test]
+    fn agent_names_without_details_or_names_keep_clean_spacing() {
+        let record: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/claude-agent-names.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        for name in ["Agent", "Task", "SendMessage", "SubagentHandback"] {
+            for (participant, expected) in [
+                ("reviewer", format!("{name} (reviewer)")),
+                (" ", name.to_owned()),
+            ] {
+                let mut record = record.clone();
+                let block = &mut record["message"]["content"][0];
+                block["name"] = name.into();
+                block["input"] =
+                    json!({if name == "SendMessage" { "to" } else { "name" }: participant});
+                let file = tempfile::NamedTempFile::new().unwrap();
+                std::fs::write(file.path(), record.to_string()).unwrap();
+                assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
+                let summary = super::super::transcript::read_subagent(
+                    file.path(),
+                    file.as_file().metadata().unwrap().len(),
+                )
+                .unwrap();
+                assert_eq!(summary.activity.unwrap().label, expected);
+            }
         }
     }
 
@@ -947,7 +1044,7 @@ mod tests {
             (
                 &events[2..4],
                 Kind::Agent,
-                "Report: /private/tmp/claude-501/mit-dl/agent6.md - Source: css.csail.mit.edu/6.5660/2026/",
+                "(a113c3cb9c1482c7a) Report: /private/tmp/claude-501/mit-dl/agent6.md - Source: css.csail.mit.edu/6.5660/2026/",
             ),
             (
                 &events[4..6],
@@ -1009,7 +1106,7 @@ mod tests {
         assert_eq!(events[0].kind, Kind::Agent);
         assert_eq!(
             events[0].body,
-            "Report without harness The report follows: details"
+            "(agent) Report without harness The report follows: details"
         );
     }
 

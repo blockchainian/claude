@@ -1,5 +1,13 @@
 use chrono::{DateTime, Utc};
 
+pub(crate) fn participant_text(name: Option<&str>, body: &str) -> String {
+    match name.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) if body.is_empty() => format!("({name})"),
+        Some(name) => format!("({name}) {body}"),
+        None => body.to_owned(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     User,

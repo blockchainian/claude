@@ -1,4 +1,4 @@
-use crate::log::{Event, Filter, Kind};
+use crate::log::{Event, Filter, Kind, participant_text};
 use crate::model::Activity;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -109,6 +109,19 @@ fn tool_body(payload: &Value) -> Option<String> {
             .as_str()
             .and_then(|text| serde_json::from_str::<Value>(text).ok())
             .and_then(|args| {
+                let tool = name.rsplit('.').next().unwrap_or(name);
+                let participant = match tool {
+                    "spawn_agent" => Some("task_name"),
+                    "send_message" | "followup_task" | "interrupt_agent" => Some("target"),
+                    "resume_agent" | "close_agent" => Some("id"),
+                    _ => None,
+                };
+                if let Some(key) = participant {
+                    return Some(participant_text(
+                        args[key].as_str(),
+                        args["message"].as_str().unwrap_or(""),
+                    ));
+                }
                 ["cmd", "command", "path", "file_path", "query"]
                     .iter()
                     .find_map(|key| args[*key].as_str().map(str::to_owned))
@@ -253,6 +266,60 @@ mod tests {
     fn fixture() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-rollout.jsonl")
     }
+    #[test]
+    fn real_agent_names_in_log_and_activity() {
+        for (line, expected) in include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
+            .lines()
+            .zip([
+                "spawn_agent (real_scan) Review files.",
+                "send_message (/root) Review files.",
+                "followup_task (ux_probe) Review files.",
+            ])
+        {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), line).unwrap();
+            let events = tail_filtered(file.path(), 8, &Filter::default()).unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].body, expected);
+            assert_eq!(
+                summary(file.path()).unwrap().activity.unwrap().label,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn agent_targets_without_messages_and_namespaced_calls() {
+        let record: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/codex-agent-names.jsonl")
+                .lines()
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        for (name, key) in [
+            ("collaboration.send_message", "target"),
+            ("interrupt_agent", "target"),
+            ("resume_agent", "id"),
+            ("close_agent", "id"),
+        ] {
+            let mut record = record.clone();
+            record["payload"]["name"] = name.into();
+            record["payload"]["arguments"] = serde_json::json!({key:"reviewer"}).to_string().into();
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), record.to_string()).unwrap();
+            let expected = format!("{name} (reviewer)");
+            assert_eq!(
+                tail_filtered(file.path(), 1, &Filter::default()).unwrap()[0].body,
+                expected
+            );
+            assert_eq!(
+                summary(file.path()).unwrap().activity.unwrap().label,
+                expected
+            );
+        }
+    }
+
     #[test]
     fn exec_summary_keeps_missing_input_and_existing_fallback() {
         assert_eq!(
