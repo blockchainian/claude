@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { fakeDaemon, send } from "./helpers/fake-daemon.mjs";
 import { parentProcesses, resolveSessionId } from "../codex-manager/session.mjs";
 
@@ -1412,6 +1413,62 @@ test("requests the daemon sends for an attached session are left to the client i
     await home.close();
   }
 });
+
+// Copied read-only from state_5.sqlite; tests use only the saved rows and a temporary database.
+const spawnEdges = JSON.parse(readFileSync(new URL("./fixtures/thread-spawn-edges.json", import.meta.url), "utf8"));
+
+for (const outcome of ["success", "error", "unexpected", "missing database"]) {
+  test(`detach releases open spawned descendants on its connection: ${outcome}`, { timeout: 20_000 }, async () => {
+    const home = await tempHome();
+    const root = spawnEdges[0].parent_thread_id;
+    const open = spawnEdges.filter((edge) => edge.status === "open");
+    const closedRoot = spawnEdges.find((edge) => edge.status === "closed").parent_thread_id;
+    if (outcome !== "missing database") {
+      const db = new DatabaseSync(path.join(home.home, "state_5.sqlite"));
+      try {
+        db.exec("CREATE TABLE thread_spawn_edges (parent_thread_id TEXT NOT NULL, child_thread_id TEXT NOT NULL PRIMARY KEY, status TEXT NOT NULL)");
+        const insert = db.prepare("INSERT INTO thread_spawn_edges VALUES (?, ?, ?)");
+        for (const edge of spawnEdges) insert.run(edge.parent_thread_id, edge.child_thread_id, edge.status);
+      } finally { db.close(); }
+    }
+    await mkdir(home.dir, { recursive: true });
+    await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ threads: [root, closedRoot].map((id) => ({ id, lastStatus: "completed" })) }));
+    const script = daemonScript();
+    const requests = [];
+    const daemon = await fakeDaemon((message, socket) => {
+      if (message.method === "thread/unsubscribe") {
+        requests.push({ threadId: message.params.threadId, socket });
+        if (message.params.threadId === open[0].child_thread_id && outcome !== "success") {
+          send(socket, outcome === "error" ? { id: message.id, error: { code: -32000, message: "child unsubscribe failed" } } : { id: message.id, result: { status: "surprise" } });
+          return;
+        }
+      }
+      script.handler(message, socket);
+    });
+    const mcp = new McpChild(home.home, daemon.socketPath, { CODEX_HOME: home.home });
+    try {
+      const detached = await mcp.call("detach", { threadId: root });
+      assert.equal(detached.isError, false, detached.text);
+      assert.deepEqual(detached.json, { threadId: root, detached: true, status: "unsubscribed" });
+      const expected = outcome === "missing database" ? [root] : [root, ...open.map((edge) => edge.child_thread_id)];
+      assert.deepEqual(requests.map((request) => request.threadId).sort(), expected.sort());
+      assert.equal(requests[0].threadId, root);
+      assert.ok(requests.every((request) => request.socket === requests[0].socket));
+      assert.equal((await mcp.call("list", {})).json.threads.find((thread) => thread.id === root).detached, true);
+      if (outcome === "error" || outcome === "unexpected") {
+        await waitFor(() => mcp.stderr.includes(open[0].child_thread_id));
+      }
+      if (outcome === "missing database") await waitFor(() => mcp.stderr.includes("state_5.sqlite"));
+      requests.length = 0;
+      assert.equal((await mcp.call("detach", { threadId: closedRoot })).isError, false);
+      assert.deepEqual(requests.map((request) => request.threadId), [closedRoot]);
+    } finally {
+      await mcp.close();
+      await daemon.close();
+      await home.close();
+    }
+  });
+}
 
 test("detach unsubscribes a finished thread, refuses a running one, and send picks the thread up again", { timeout: 20_000 }, async () => {
   const home = await tempHome();

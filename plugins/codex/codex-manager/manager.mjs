@@ -5,6 +5,7 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
@@ -544,6 +545,35 @@ class Manager {
     const client = await this.connect();
     const { status } = await client.request("thread/unsubscribe", { threadId });
     this.updateThread(threadId, { detached: true });
+    const databasePath = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "state_5.sqlite");
+    let descendants;
+    try {
+      const { DatabaseSync } = await import("node:sqlite");
+      const database = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        descendants = database.prepare(`
+          WITH RECURSIVE descendants(id) AS (
+            SELECT child_thread_id FROM thread_spawn_edges WHERE parent_thread_id = ? AND status = 'open'
+            UNION
+            SELECT edge.child_thread_id FROM thread_spawn_edges edge
+            JOIN descendants ON edge.parent_thread_id = descendants.id WHERE edge.status = 'open'
+          )
+          SELECT id FROM descendants WHERE id != ?
+        `).all(threadId, threadId);
+      } finally {
+        database.close();
+      }
+    } catch (error) {
+      log(`cannot read spawned descendants from ${databasePath}: ${error.message}`);
+    }
+    for (const { id } of descendants ?? []) {
+      try {
+        const response = await client.request("thread/unsubscribe", { threadId: id });
+        if (response?.status !== "unsubscribed") throw new Error(`unexpected unsubscribe response: ${JSON.stringify(response)}`);
+      } catch (error) {
+        log(`cannot unsubscribe spawned descendant ${id}: ${error.message}`);
+      }
+    }
     return { threadId, detached: true, status };
   }
 
