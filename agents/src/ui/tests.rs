@@ -1514,6 +1514,7 @@ fn task_log_denied_snapshot() {
     for (fixture, age, end) in [
         ("automode_blocked.jsonl", 110, 105),
         ("safety_check.jsonl", 100, 95),
+        ("automode_blocked_dangerous.jsonl", 90, 85),
     ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures")

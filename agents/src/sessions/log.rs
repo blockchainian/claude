@@ -121,7 +121,7 @@ impl Log {
                                             .and_then(|text| text.split_once("Reason: ["))
                                             .and_then(|(_, text)| text.split_once(']'))
                                             .map(|(reason, _)| reason)
-                                            .unwrap_or("classifier")
+                                            .unwrap_or("dangerous")
                                             .to_owned(),
                                     );
                                 } else if record["permissionDecision"]["reasonType"]
@@ -242,7 +242,7 @@ impl Log {
             .find_map(|key| input[key].as_str().filter(|text| !text.trim().is_empty()))
             .unwrap_or("");
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
-            format!("{name} denied: {reason}")
+            format!("{name}: {reason}")
         } else if detail.is_empty() {
             name.to_owned()
         } else if name == "Bash" {
@@ -478,7 +478,20 @@ mod tests {
         let events = events_from(records);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Bash denied: Create Unsafe Agents");
+        assert_eq!(events[0].body, "Bash: Create Unsafe Agents");
+        assert_eq!(events[0].ended_at, Some(end));
+    }
+
+    #[test]
+    fn automode_blocked_without_brackets_is_denied_as_dangerous() {
+        let records = denial_records(include_str!(
+            "../../tests/fixtures/automode_blocked_dangerous.jsonl"
+        ));
+        let end = records[1]["timestamp"].as_str().unwrap().parse().unwrap();
+        let events = events_from(records);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, Kind::Denied);
+        assert_eq!(events[0].body, "Edit: dangerous");
         assert_eq!(events[0].ended_at, Some(end));
     }
 
@@ -491,7 +504,7 @@ mod tests {
         records.push(reply);
         let events = events_from(records);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Bash denied: safety check");
+        assert_eq!(events[0].body, "Bash: safety check");
         assert_eq!(events[0].ended_at, Some(end));
         assert_eq!(events[1].previous_end, Some(end));
     }
@@ -514,14 +527,14 @@ mod tests {
     }
 
     #[test]
-    fn automode_reason_without_complete_brackets_uses_classifier() {
+    fn automode_reason_without_complete_brackets_uses_dangerous() {
         for text in ["denied", "Reason: [unfinished"] {
             let mut records =
                 denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
             records[1]["message"]["content"][0]["content"] = text.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Denied);
-            assert_eq!(events[0].body, "Bash denied: classifier");
+            assert_eq!(events[0].body, "Bash: dangerous");
         }
     }
 
@@ -542,7 +555,7 @@ mod tests {
             let events = events_from(records);
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].kind, Kind::Denied);
-            assert!(events[0].body.contains("Bash denied: Create Unsafe Agents"));
+            assert!(events[0].body.contains("Bash: Create Unsafe Agents"));
             assert!(events[0].body.contains("Read"));
         }
     }

@@ -14,9 +14,9 @@
                                                             │
   ────────────────────────────────────────────────────────────────────────────────────────────────
   11:58:00 User    Please inspect the task
-       15s Denied  Bash denied: Create Unsafe Agents
-       10s Denied  Bash denied: safety check
-
+       15s Denied  Bash: Create Unsafe Agents
+       10s Denied  Bash: safety check
+       10s Denied  Edit: dangerous
 
 
 
