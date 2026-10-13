@@ -1,11 +1,8 @@
 use super::*;
 use nucleo_matcher::{
     Config, Matcher, Utf32Str,
-    pattern::{CaseMatching, Normalization, Pattern},
+    pattern::{Atom, AtomKind, CaseMatching, Normalization, Pattern},
 };
-
-// Twenty points per query character rejects scattered letters while keeping abbreviations.
-const MIN_SCORE_PER_CHAR: u32 = 20;
 
 pub(crate) struct LogSearch {
     pub query: String,
@@ -40,18 +37,21 @@ impl LogSearch {
     }
 
     fn pattern(&self) -> Pattern {
-        Pattern::parse(&self.query, CaseMatching::Smart, Normalization::Smart)
-    }
-
-    fn cutoff(&self, pattern: &Pattern) -> u32 {
-        // Count parsed needles so fzf operators and whitespace do not raise the cutoff.
-        MIN_SCORE_PER_CHAR
-            * pattern
-                .atoms
-                .iter()
-                .filter(|atom| !atom.negative)
-                .map(|atom| atom.needle_text().len() as u32)
-                .sum::<u32>()
+        let mut pattern = Pattern::default();
+        pattern.atoms = self
+            .query
+            .split_whitespace()
+            .map(|word| {
+                Atom::new(
+                    word,
+                    CaseMatching::Smart,
+                    Normalization::Smart,
+                    AtomKind::Substring,
+                    false,
+                )
+            })
+            .collect();
+        pattern
     }
 
     pub(super) fn indices(&self, text: &str) -> Vec<u32> {
@@ -82,7 +82,6 @@ impl View {
 
     pub(crate) fn rematch_log(&mut self) {
         let pattern = self.log_search.pattern();
-        let cutoff = self.log_search.cutoff(&pattern);
         let mut matcher = self.log_search.matcher.borrow_mut();
         let mut buffer = Vec::new();
         self.log_search.matches = self
@@ -93,7 +92,6 @@ impl View {
             .filter_map(|(index, body)| {
                 pattern
                     .score(Utf32Str::new(body, &mut buffer), &mut matcher)
-                    .filter(|score| *score >= cutoff)
                     .map(|_| index)
             })
             .collect();
