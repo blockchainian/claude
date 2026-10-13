@@ -3591,22 +3591,46 @@ mod input_row {
 
     #[test]
     fn search_prompt_cells_and_whole_row_style_match() {
-        for width in [14, 24, 88] {
-            let (task, task_row, log, log_row, _, _) = rendered_inputs(width, "你好 query", false);
-            assert_eq!(task_row.x, log_row.x);
-            assert_eq!(task_row.width, log_row.width);
-            for x in 0..task_row.width {
-                let task_cell = &task[(task_row.x + x, task_row.y)];
-                let log_cell = &log[(log_row.x + x, log_row.y)];
-                assert_eq!(task_cell, log_cell, "width={width}, column={x}");
-                assert_eq!(
-                    task_cell.bg,
-                    super::super::style::active_tab_style()
-                        .bg
-                        .unwrap_or(Color::Reset)
-                );
-            }
+        for (no_color, colors, light) in [
+            (false, true, false),
+            (false, true, true),
+            (true, true, false),
+            (false, false, false),
+        ] {
+            let style = super::super::style::selection_style_for(no_color, colors, light);
+            super::super::style::with_selection_style(style, || {
+                for width in [14, 24, 88] {
+                    let (task, task_row, log, log_row, _, _) =
+                        rendered_inputs(width, "你好 query", false);
+                    assert_eq!(task_row.x, log_row.x);
+                    assert_eq!(task_row.width, log_row.width);
+                    for x in 0..task_row.width {
+                        let task_cell = &task[(task_row.x + x, task_row.y)];
+                        let log_cell = &log[(log_row.x + x, log_row.y)];
+                        assert_eq!(task_cell, log_cell, "width={width}, column={x}");
+                        assert_eq!(
+                            task_cell.bg,
+                            super::super::style::active_tab_style()
+                                .bg
+                                .unwrap_or(Color::Reset)
+                        );
+                    }
+                }
+            });
         }
+    }
+
+    #[test]
+    fn search_prompt_keeps_cyan_and_light_background_for_wide_text() {
+        use super::super::style::{selection_style_for, with_selection_style};
+        let light = selection_style_for(false, true, true);
+        with_selection_style(light, || {
+            let (task, row, _, _, _, _) = rendered_inputs(24, "你好", false);
+            assert_eq!(task[(row.x, row.y)].fg, Color::Cyan);
+            for x in row.x..row.right() {
+                assert_eq!(task[(x, row.y)].bg, Color::Indexed(111));
+            }
+        });
     }
 
     #[test]

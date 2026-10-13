@@ -15,6 +15,7 @@ pub fn set_light_background(light: bool) {
     LIGHT_BACKGROUND.store(light, Ordering::Relaxed);
 }
 
+#[cfg(not(test))]
 pub(super) fn selection_style() -> Style {
     let term = std::env::var("TERM").unwrap_or_default();
     selection_style_for(
@@ -24,6 +25,30 @@ pub(super) fn selection_style() -> Style {
             || std::env::var_os("COLORTERM").is_some(),
         LIGHT_BACKGROUND.load(Ordering::Relaxed),
     )
+}
+
+#[cfg(test)]
+thread_local! {
+    static SELECTION_STYLE: std::cell::Cell<Style> =
+        std::cell::Cell::new(selection_style_for(false, true, false));
+}
+
+#[cfg(test)]
+pub(super) fn selection_style() -> Style {
+    SELECTION_STYLE.get()
+}
+
+/// Supplies a terminal style for one test without changing the process environment.
+#[cfg(test)]
+pub(super) fn with_selection_style<T>(style: Style, run: impl FnOnce() -> T) -> T {
+    struct Restore(Style);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SELECTION_STYLE.set(self.0);
+        }
+    }
+    let _restore = Restore(SELECTION_STYLE.replace(style));
+    run()
 }
 
 pub(super) fn selection_style_for(no_color: bool, colors: bool, light: bool) -> Style {

@@ -37,9 +37,13 @@ pub(super) fn render_input_row(
     area: Rect,
     buf: &mut Buffer,
 ) {
-    buf.set_style(area, super::style::active_tab_style());
+    let style = super::style::active_tab_style();
+    buf.set_style(area, style);
     let (text, _) = input_row(prompt, edit, area);
     line(text, area, buf);
+    // Wide graphemes reset their continuation cells while rendering. Apply the row fill
+    // afterward as well, preserving the prompt's foreground color.
+    buf.set_style(area, Style { fg: None, ..style });
 }
 
 pub(super) struct CenterLayout {
