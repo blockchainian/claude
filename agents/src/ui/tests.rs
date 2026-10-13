@@ -1837,25 +1837,55 @@ fn details_prompt_shows_queued_entries_in_order() {
 }
 
 #[test]
-fn details_prompt_keeps_second_wrapped_line_before_ellipsis() {
+fn details_prompt_renders_all_wrapped_lines() {
     let mut row = session("prompt", "Prompt task", SessionStatus::Working, 0);
     row.prompt = format!("{} {} {}", "a".repeat(40), "b".repeat(40), "c".repeat(40));
     let rendered = queued_details(row, 15);
     let lines = rendered.lines().collect::<Vec<_>>();
     assert_eq!(lines[3], "a".repeat(40));
-    assert_eq!(lines[4], format!("{}…", "b".repeat(39)));
-    assert_eq!(lines[5], "");
+    assert_eq!(lines[4], "b".repeat(40));
+    assert_eq!(lines[5], "c".repeat(40));
+    assert_eq!(lines[6], "");
+    assert!(!rendered.contains('…'));
 }
 
 #[test]
-fn details_prompt_keeps_exactly_two_wrapped_lines_unchanged() {
+fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     let mut row = session("prompt", "Prompt task", SessionStatus::Working, 0);
-    row.prompt = format!("{} {}", "a".repeat(40), "b".repeat(40));
-    let rendered = queued_details(row, 15);
-    let lines = rendered.lines().collect::<Vec<_>>();
-    assert_eq!(lines[3], "a".repeat(40));
-    assert_eq!(lines[4], "b".repeat(40));
-    assert_eq!(lines[5], "");
+    let wrapped = ('a'..='h')
+        .map(|letter| letter.to_string().repeat(40))
+        .collect::<Vec<_>>();
+    row.prompt = wrapped.join(" ");
+    let mut view = View::default();
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 40, 6);
+    let now = Utc::now();
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, now);
+    let line = |buf: &Buffer, y: u16| {
+        (0..area.width)
+            .map(|x| buf[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    };
+    assert_eq!(line(&buf, 3), wrapped[0]);
+    assert_eq!(line(&buf, 4), wrapped[1]);
+    assert_eq!(line(&buf, 5), "…");
+    for expected in &wrapped[2..] {
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x, area.y));
+        buf.reset();
+        view.render_details(area, &mut buf, now);
+        assert_eq!(line(&buf, 4), *expected);
+        assert_eq!(line(&buf, 5), "…");
+    }
+    let total = view.viewport.borrow().details_total_rows;
+    for _ in 0..total {
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x, area.y));
+    }
+    buf.reset();
+    view.render_details(area, &mut buf, now);
+    assert_eq!(line(&buf, 5), "Model: Unknown");
 }
 
 #[test]

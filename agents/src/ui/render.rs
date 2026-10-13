@@ -1,6 +1,6 @@
 use super::formatting::{format_duration, format_relative_time, tail_lines, visible_suffix};
 use super::hints::hint_line;
-use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
+use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
 use ratatui::widgets::{Block, BorderType, Borders};
 
@@ -334,12 +334,7 @@ impl View {
             "" => "No prompt available.",
             prompt => prompt,
         };
-        let mut prompt_body = super::markdown::render(prompt_text, width);
-        if prompt_body.len() > 2 {
-            prompt_body.truncate(2);
-            prompt_body[1] = truncate_line_to_width(std::mem::take(&mut prompt_body[1]), width - 1);
-            prompt_body[1].spans.push("…".dim());
-        }
+        let prompt_body = super::markdown::render(prompt_text, width);
         items.extend(prompt_body.into_iter().map(Item::from));
         items.extend(session.queued.iter().map(|queued| {
             let first = super::markdown::render(queued, width)
