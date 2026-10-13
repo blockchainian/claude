@@ -327,7 +327,12 @@ impl Provider for CodexProvider {
         ProviderId::Codex
     }
     fn capabilities(&self) -> Capabilities {
-        Capabilities::default()
+        Capabilities {
+            resume: true,
+            fork: true,
+            new: true,
+            ..Capabilities::default()
+        }
     }
     fn watch_roots(&self) -> io::Result<Vec<PathBuf>> {
         Ok(["sessions", "archived_sessions", "thread-writer-locks"]
@@ -359,8 +364,36 @@ impl Provider for CodexProvider {
             .map(|path| rollout::tail_filtered(path, count, filter))
             .unwrap_or_else(|| Ok(vec![]))
     }
-    fn launch(&self, _: &Action, _: Option<&Session>) -> Option<Command> {
-        None
+    fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command> {
+        if session.is_some_and(|session| session.parent.is_some()) {
+            return None;
+        }
+        let mut command = Command::new("codex");
+        match action {
+            Action::New(cwd) => {
+                let cwd = match cwd {
+                    Some(cwd) if cwd.is_dir() => cwd.clone(),
+                    _ => std::env::current_dir().ok()?,
+                };
+                command.current_dir(cwd);
+            }
+            Action::Open(_) | Action::Resume(_) | Action::Fork(_) | Action::Back => {
+                let session = session?;
+                if !session.cwd.is_dir() {
+                    return None;
+                }
+                let subcommand = if matches!(action, Action::Fork(_)) {
+                    "fork"
+                } else {
+                    "resume"
+                };
+                command
+                    .args([subcommand, &session.id.id])
+                    .current_dir(&session.cwd);
+            }
+            _ => return None,
+        }
+        Some(command)
     }
     fn rename(&self, _: &Session, _: &str) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())

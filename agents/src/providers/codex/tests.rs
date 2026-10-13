@@ -42,14 +42,144 @@ fn reads_named_columns_and_pages_inactive_threads() {
             id: "thread-12".into()
         })
     );
-    assert_eq!(provider.capabilities(), Capabilities::default());
-    assert!(
-        provider
-            .launch(&Action::Resume(session.id.clone()), Some(session))
-            .is_none()
-    );
     assert!(provider.rename(session, "name").is_err());
     assert!(provider.delete(session).is_err());
+}
+
+#[test]
+fn launches_top_level_threads_in_their_cwd() {
+    let (dir, mut provider) = fixture();
+    let mut session = provider.refresh(1).sessions.remove(0);
+    session.cwd = dir.path().into();
+    for (action, args) in [
+        (
+            Action::Resume(session.id.clone()),
+            vec!["resume", session.id.id.as_str()],
+        ),
+        (
+            Action::Open(session.id.clone()),
+            vec!["resume", session.id.id.as_str()],
+        ),
+        (Action::Back, vec!["resume", session.id.id.as_str()]),
+        (
+            Action::Fork(session.id.clone()),
+            vec!["fork", session.id.id.as_str()],
+        ),
+        (Action::New(Some(session.cwd.clone())), vec![]),
+    ] {
+        let command = provider.launch(&action, Some(&session)).unwrap();
+        assert_eq!(command.get_program(), "codex");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), args);
+        assert_eq!(command.get_current_dir(), Some(dir.path()));
+    }
+}
+
+#[test]
+fn launch_rejects_children_missing_sessions_and_missing_cwd() {
+    let (dir, mut provider) = fixture();
+    let mut session = provider.refresh(1).sessions.remove(0);
+    session.cwd = dir.path().into();
+    for action in [
+        Action::Resume(session.id.clone()),
+        Action::Fork(session.id.clone()),
+    ] {
+        assert!(provider.launch(&action, None).is_none());
+        session.cwd = dir.path().join("missing");
+        assert!(provider.launch(&action, Some(&session)).is_none());
+        session.cwd = dir.path().into();
+    }
+    for parent in [
+        key("parent".into()),
+        SessionKey {
+            provider: ProviderId::Claude,
+            id: "parent".into(),
+        },
+    ] {
+        session.parent = Some(parent);
+        for action in [
+            Action::Resume(session.id.clone()),
+            Action::Fork(session.id.clone()),
+            Action::Open(session.id.clone()),
+            Action::Back,
+            Action::New(Some(session.cwd.clone())),
+        ] {
+            assert!(provider.launch(&action, Some(&session)).is_none());
+        }
+    }
+    session.parent = None;
+    assert!(provider.launch(&Action::Quit, Some(&session)).is_none());
+}
+
+#[test]
+fn new_session_uses_requested_cwd_or_current_directory() {
+    let (dir, provider) = fixture();
+    let current = std::env::current_dir().unwrap();
+    for (cwd, expected) in [
+        (Some(dir.path().to_owned()), dir.path().to_owned()),
+        (None, current.clone()),
+        (Some(dir.path().join("missing")), current),
+    ] {
+        let command = provider.launch(&Action::New(cwd), None).unwrap();
+        assert_eq!(command.get_program(), "codex");
+        assert_eq!(command.get_args().count(), 0);
+        assert_eq!(command.get_current_dir(), Some(expected.as_path()));
+    }
+}
+
+#[test]
+fn capabilities_gate_codex_actions_in_the_view() {
+    use crate::{model::Grouping, ui::View};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let (_dir, mut provider) = fixture();
+    assert_eq!(
+        provider.capabilities(),
+        Capabilities {
+            resume: true,
+            fork: true,
+            new: true,
+            ..Capabilities::default()
+        }
+    );
+    let mut session = provider.refresh(1).sessions.remove(0);
+    session.status = SessionStatus::Ready;
+    let mut view = View::new(Grouping::Project, false);
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Codex,
+        provider.capabilities(),
+    )]));
+    view.set_sessions(vec![session.clone()], false);
+    for (code, expected) in [
+        (KeyCode::Enter, Action::Open(session.id.clone())),
+        (KeyCode::Char('o'), Action::Resume(session.id.clone())),
+        (KeyCode::Char('f'), Action::Fork(session.id.clone())),
+        (KeyCode::Char('n'), Action::New(Some(session.cwd.clone()))),
+        (KeyCode::Char('r'), Action::Unsupported("Rename")),
+        (KeyCode::Backspace, Action::Unsupported("Delete")),
+    ] {
+        assert_eq!(
+            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
+            Some(expected)
+        );
+    }
+    let mut parent = session.clone();
+    parent.id = key("parent".into());
+    parent.status = SessionStatus::Inactive;
+    session.parent = Some(parent.id.clone());
+    view.set_sessions(vec![parent, session.clone()], false);
+    assert_eq!(view.selected_id(), Some(&session.id));
+    for code in [
+        KeyCode::Enter,
+        KeyCode::Char('o'),
+        KeyCode::Char('f'),
+        KeyCode::Char('r'),
+        KeyCode::Backspace,
+    ] {
+        assert_eq!(
+            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
+            None
+        );
+    }
 }
 
 #[test]
