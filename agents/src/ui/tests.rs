@@ -1482,6 +1482,19 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
 }
 
 #[test]
+fn task_log_labels_have_seven_columns() {
+    let (view, now) = log_fixture();
+    let rendered = log_screen(&view, 100, 25, now);
+    assert!(
+        rendered
+            .lines()
+            .nth(15)
+            .unwrap()
+            .starts_with("  User    Please")
+    );
+}
+
+#[test]
 fn task_log_tall_running_snapshot() {
     let (view, now) = log_fixture();
     assert_eq!(
@@ -1613,7 +1626,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (19, Color::Reset, true),
     ] {
         let label = &buf[(2, y)];
-        let body = &buf[(9, y)];
+        let body = &buf[(10, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
         assert_eq!(label.modifier.contains(Modifier::BOLD), bold, "row {y}");
@@ -1630,6 +1643,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     for (kind, colour) in [
         (Kind::User, Color::Reset),
         (Kind::Model, Color::Yellow),
+        (Kind::Agent, Color::Yellow),
+        (Kind::Session, Color::Yellow),
         (Kind::Tool, Color::Blue),
         (Kind::Error, Color::Red),
         (Kind::QueuedUser, Color::Reset),
@@ -1639,10 +1654,24 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         let foreground = (colour != Color::Reset).then_some(colour);
         assert_eq!(label_style.fg, foreground);
         assert_eq!(body_style.fg, foreground);
+        let expected_label = match kind {
+            Kind::Agent => "Agent",
+            Kind::Session => "Session",
+            _ => "",
+        };
         view.log.last_mut().unwrap().kind = kind;
+        if !expected_label.is_empty() {
+            assert!(
+                log_screen(&view, 100, 25, now)
+                    .lines()
+                    .nth(19)
+                    .unwrap()
+                    .starts_with(&format!("  {expected_label:<7} Also"))
+            );
+        }
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        for x in [2, 9] {
+        for x in [2, 10] {
             let cell = &buf[(x, 19)];
             assert_eq!(cell.fg, colour);
             assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 2);
@@ -1669,6 +1698,8 @@ fn task_log_preserves_time_when_truncated() {
     for kind in [
         Kind::User,
         Kind::Model,
+        Kind::Agent,
+        Kind::Session,
         Kind::QueuedUser,
         Kind::QueuedSystem,
     ] {

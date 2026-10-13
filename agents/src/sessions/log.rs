@@ -5,6 +5,8 @@ use std::{io, path::Path};
 pub enum Kind {
     User,
     Model,
+    Agent,
+    Session,
     Tool,
     Error,
     QueuedUser,
@@ -119,11 +121,13 @@ impl Log {
                     )
                 });
                 if record["isMeta"] != true
-                    && let Some(text) = text.filter(|text| {
-                        !text.trim().is_empty() && !text.trim_start().starts_with('<')
-                    })
+                    && let Some(text) = text.filter(|text| !text.trim().is_empty())
                 {
-                    self.push(Kind::User, text, at);
+                    if let Some((kind, body)) = wrapped_message(&text) {
+                        self.push(kind, body, at);
+                    } else if !text.trim_start().starts_with('<') {
+                        self.push(Kind::User, text, at);
+                    }
                 }
             }
             Some("assistant") => {
@@ -165,7 +169,10 @@ impl Log {
                     } else {
                         (Kind::QueuedUser, text)
                     };
-                    self.push(kind, body.to_owned(), at);
+                    let body = wrapped_message(body)
+                        .map(|(_, body)| body)
+                        .unwrap_or_else(|| body.to_owned());
+                    self.push(kind, body, at);
                 }
             }
             _ => {}
@@ -253,6 +260,46 @@ impl Log {
     }
 }
 
+/// Extracts the visible text of supported harness messages.
+fn wrapped_message(text: &str) -> Option<(Kind, String)> {
+    let (opening, rest) = text.trim().strip_prefix('<')?.split_once('>')?;
+    let tag = opening.split_whitespace().next()?;
+    let kind = match tag {
+        "pasted_content" => Kind::User,
+        "agent-message" => Kind::Agent,
+        "cross-session-message" => Kind::Session,
+        _ => return None,
+    };
+    let (inner, closing) = rest.rsplit_once("</")?;
+    let closing = closing.strip_suffix('>')?;
+    if closing != tag && !(tag == "pasted_content" && closing == opening) {
+        return None;
+    }
+    let inner = inner.trim();
+    let report;
+    let body = if kind == Kind::Agent && inner.starts_with("[Subagent hand-back]") {
+        if let Some(line) = inner
+            .lines()
+            .position(|line| line.trim_end().ends_with("The report follows:"))
+        {
+            report = inner.lines().skip(line + 1).collect::<Vec<_>>().join("\n");
+            report.as_str()
+        } else {
+            inner
+        }
+    } else {
+        inner
+    };
+    let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let body = if kind == Kind::Session {
+        let name = opening.split_once(" from-name=\"")?.1.split_once('"')?.0;
+        format!("{name}: {body}")
+    } else {
+        body
+    };
+    Some((kind, body))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,6 +377,75 @@ mod tests {
         }
         file
     }
+    fn wrapped_fixture() -> tempfile::NamedTempFile {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for (second, content) in [
+            (
+                1,
+                "<pasted_content id=\"paste-1\">\n  first line\n  second line\n</pasted_content id=\"paste-1\">",
+            ),
+            (
+                3,
+                "<agent-message from=\"a113c3cb9c1482c7a\">\n[Subagent hand-back] The text below is the final report of a subagent. The report follows:\n  Report: /private/tmp/claude-501/mit-dl/agent6.md\n  - Source: css.csail.mit.edu/6.5660/2026/\n</agent-message>",
+            ),
+            (
+                5,
+                "<cross-session-message from=\"uds:/tmp/cc-socks/71065.sock\" from-name=\"translate-pdf\" from-mode=\"prompting\">\ntranslate-pdf pilots ready for review.\n</cross-session-message>",
+            ),
+        ] {
+            writeln!(file, "{}", json!({"type":"queue-operation", "timestamp":at(second).to_rfc3339(), "operation":"enqueue", "content":content})).unwrap();
+            writeln!(file, "{}", record("user", second + 1, json!(content))).unwrap();
+        }
+        for content in [
+            "<task-notification>finished</task-notification>",
+            "  <system-reminder>hidden</system-reminder>",
+            "<unknown>hidden</unknown>",
+        ] {
+            writeln!(file, "{}", record("user", 7, json!(content))).unwrap();
+        }
+        file
+    }
+
+    #[test]
+    fn wrapped_messages_extract_bodies_and_keep_queue_origin() {
+        let file = wrapped_fixture();
+        let events = tail(file.path(), 20).unwrap();
+        assert_eq!(events.len(), 6);
+        for (pair, kind, body) in [
+            (&events[0..2], Kind::User, "first line second line"),
+            (
+                &events[2..4],
+                Kind::Agent,
+                "Report: /private/tmp/claude-501/mit-dl/agent6.md - Source: css.csail.mit.edu/6.5660/2026/",
+            ),
+            (
+                &events[4..6],
+                Kind::Session,
+                "translate-pdf: translate-pdf pilots ready for review.",
+            ),
+        ] {
+            assert_eq!(pair[0].kind, Kind::QueuedSystem);
+            assert_eq!(pair[1].kind, kind);
+            for event in pair {
+                assert_eq!(event.body, body);
+                assert_eq!(event.ended_at, None);
+            }
+        }
+    }
+
+    #[test]
+    fn agent_report_without_harness_keeps_the_whole_inner_text() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{}", record("user", 1, json!([{"type":"text", "text":"<agent-message from=\"agent\">\n  Report without harness\n  The report follows:\n  details\n</agent-message>"}]))).unwrap();
+        let events = tail(file.path(), 1).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, Kind::Agent);
+        assert_eq!(
+            events[0].body,
+            "Report without harness The report follows: details"
+        );
+    }
+
     #[test]
     fn groups_interleaved_parallel_calls_and_tracks_predecessors() {
         let file = fixture();
@@ -365,7 +481,7 @@ mod tests {
         assert_eq!(events[3].ended_at, Some(at(38)));
         assert_eq!(events[4].body, "next task");
         assert_eq!(events[4].started_at, at(40));
-        assert_eq!(events[5].body, "<agent-message>finished</agent-message>");
+        assert_eq!(events[5].body, "finished");
         assert_eq!(events[5].started_at, at(42));
         assert_eq!(
             events[6].body,
@@ -538,9 +654,9 @@ mod tests {
     #[test]
     fn other_queued_tags_keep_their_content_and_kind() {
         for content in [
-            "<agent-message>finished</agent-message>",
-            "<cross-session-message>finished</cross-session-message>",
-            "<pasted_content>finished</pasted_content>",
+            "<system-reminder>finished</system-reminder>",
+            "<unknown>finished</unknown>",
+            "<agent-message-extra>finished</agent-message-extra>",
         ] {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             writeln!(file, "{}", json!({"type":"queue-operation", "timestamp":at(2).to_rfc3339(), "operation":"enqueue", "content":content})).unwrap();
