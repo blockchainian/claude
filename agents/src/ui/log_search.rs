@@ -5,7 +5,7 @@ use nucleo_matcher::{
 };
 
 pub(crate) struct LogSearch {
-    pub query: String,
+    pub(super) query: line_edit::LineEdit,
     pub editing: bool,
     matches: Vec<usize>,
     bodies: Vec<String>,
@@ -15,7 +15,7 @@ pub(crate) struct LogSearch {
 impl Default for LogSearch {
     fn default() -> Self {
         Self {
-            query: String::new(),
+            query: line_edit::LineEdit::default(),
             editing: false,
             matches: Vec::new(),
             bodies: Vec::new(),
@@ -40,6 +40,7 @@ impl LogSearch {
         let mut pattern = Pattern::default();
         pattern.atoms = self
             .query
+            .text()
             .split_whitespace()
             .map(|word| {
                 Atom::new(

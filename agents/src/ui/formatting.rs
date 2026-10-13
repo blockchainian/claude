@@ -1,7 +1,6 @@
 use super::*;
 use chrono::{DateTime, Utc};
 use std::io::{Read, Seek, SeekFrom};
-use unicode_segmentation::UnicodeSegmentation;
 
 pub(super) fn tail_lines(path: &Path, count: usize) -> Vec<String> {
     if count == 0 {
@@ -69,19 +68,6 @@ pub(super) fn format_duration(seconds: i64) -> String {
     } else {
         format!("{}h {}m", seconds / 3600, seconds % 3600 / 60)
     }
-}
-
-pub(super) fn visible_suffix(input: &str, available: usize) -> &str {
-    let mut start = input.len();
-    let mut width = 0;
-    for (offset, grapheme) in input.grapheme_indices(true).rev() {
-        if width + grapheme.width() > available {
-            break;
-        }
-        width += grapheme.width();
-        start = offset;
-    }
-    &input[start..]
 }
 
 #[cfg(test)]

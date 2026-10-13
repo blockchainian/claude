@@ -832,7 +832,7 @@ fn refresh_keeps_tab_when_selected_session_is_hidden_only_by_search() {
     view.set_sessions(rows, false);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
-    assert_eq!(view.search, "Current");
+    assert_eq!(view.search.text(), "Current");
     assert_eq!(view.selected_id(), None);
 }
 
@@ -992,14 +992,14 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
         key(&mut view, KeyCode::Char(c));
     }
     key(&mut view, KeyCode::Char('j'));
-    assert_eq!(view.search, "taskj");
+    assert_eq!(view.search.text(), "taskj");
     key(&mut view, KeyCode::Backspace);
-    assert_eq!(view.search, "task");
+    assert_eq!(view.search.text(), "task");
     let id = view.selected_id().unwrap().to_owned();
     view.set_sessions(view.rows.clone(), false);
     assert_eq!(view.selected_id(), Some(id.as_str()));
     assert!(view.searching);
-    assert_eq!(view.search, "task");
+    assert_eq!(view.search.text(), "task");
     key(&mut view, KeyCode::Esc);
     assert!(!view.searching);
     assert_eq!(key(&mut view, KeyCode::Esc), Some(Action::Back));
@@ -3348,6 +3348,74 @@ mod log_search {
                 ("n", "new")
             ])
             .to_string()
+        );
+    }
+}
+
+mod line_edit {
+    use super::*;
+
+    #[test]
+    fn task_search_movement_does_not_reach_list_handlers() {
+        let mut view = fixture();
+        key(&mut view, KeyCode::F(3));
+        key(&mut view, KeyCode::Down);
+        let selected = view.selected;
+        for code in [KeyCode::Home, KeyCode::End, KeyCode::Right, KeyCode::Left] {
+            assert_eq!(key(&mut view, code), None);
+            assert_eq!(view.selected, selected);
+        }
+        for c in ['b', 'f', 'k'] {
+            assert_eq!(
+                view.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)),
+                None
+            );
+            assert_eq!(view.selected, selected);
+        }
+    }
+
+    #[test]
+    fn task_search_kill_stays_on_selected_row() {
+        let mut view = fixture();
+        key(&mut view, KeyCode::Char('/'));
+        for c in "task".chars() {
+            key(&mut view, KeyCode::Char(c));
+        }
+        key(&mut view, KeyCode::Down);
+        let selected = view.selected;
+        key(&mut view, KeyCode::Left);
+        view.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+        assert_eq!(view.search.text(), "tas");
+        assert_eq!(view.selected, selected);
+    }
+
+    #[test]
+    fn log_search_caret_follows_cjk_inset_text() {
+        let (mut view, now) = log_fixture();
+        view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        for c in "你好".chars() {
+            key(&mut view, KeyCode::Char(c));
+        }
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let y = view.center_layout(area).log.bottom() - 1;
+        assert_eq!(buf[(10, y)].symbol(), "你");
+        assert_eq!(buf[(12, y)].symbol(), "好");
+        assert_eq!(view.cursor_pos(area), Some((14, y)));
+    }
+
+    #[test]
+    fn rename_inserts_in_the_middle() {
+        let mut view = fixture();
+        key(&mut view, KeyCode::Char('r'));
+        let title = view.rename.text().to_owned();
+        key(&mut view, KeyCode::Left);
+        key(&mut view, KeyCode::Char('X'));
+        let mut expected = title;
+        expected.insert(expected.len() - 1, 'X');
+        assert!(
+            matches!(key(&mut view, KeyCode::Enter), Some(Action::Rename { name, .. }) if name == expected)
         );
     }
 }

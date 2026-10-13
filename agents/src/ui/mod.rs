@@ -3,6 +3,7 @@ mod formatting;
 mod hints;
 mod hyperlink;
 mod input;
+mod line_edit;
 mod line_truncation;
 mod log;
 mod log_search;
@@ -103,10 +104,10 @@ pub struct View {
     pinned: Vec<String>,
     hidden: HashSet<String>,
     status_filter: usize,
-    search: String,
+    search: line_edit::LineEdit,
     searching: bool,
     rename_target: Option<String>,
-    rename: String,
+    rename: line_edit::LineEdit,
     delete_dialog: Option<DeleteDialog>,
     help: bool,
     loading: bool,
@@ -158,10 +159,10 @@ impl View {
             pinned: Vec::new(),
             hidden: HashSet::new(),
             status_filter: 0,
-            search: String::new(),
+            search: line_edit::LineEdit::default(),
             searching: false,
             rename_target: None,
-            rename: String::new(),
+            rename: line_edit::LineEdit::default(),
             delete_dialog: None,
             help: false,
             loading: false,
@@ -278,7 +279,7 @@ impl View {
         }
     }
     fn visible_indices(&self) -> Vec<usize> {
-        let search = self.search.to_lowercase();
+        let search = self.search.text().to_lowercase();
         let filter = TASK_FILTERS[self.status_filter].1;
         let (mut pinned, mut visible): (Vec<_>, Vec<_>) = self
             .rows

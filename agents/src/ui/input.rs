@@ -1,5 +1,4 @@
 use super::*;
-use unicode_segmentation::UnicodeSegmentation;
 
 impl View {
     fn set_filter(&mut self, idx: usize) {
@@ -202,20 +201,16 @@ impl View {
                     self.rename.clear();
                     self.reconcile_selection();
                 }
-                KeyCode::Enter if !self.rename.trim().is_empty() => {
+                KeyCode::Enter if !self.rename.text().trim().is_empty() => {
                     let id = self.rename_target.take().expect("rename target is set");
-                    let name = self.rename.trim().to_owned();
+                    let name = self.rename.text().trim().to_owned();
                     self.rename.clear();
                     self.reconcile_selection();
                     return Some(Action::Rename { id, name });
                 }
-                KeyCode::Char(c) if plain => self.rename.push(c),
-                KeyCode::Backspace => {
-                    if let Some((offset, _)) = self.rename.grapheme_indices(true).next_back() {
-                        self.rename.truncate(offset);
-                    }
+                _ => {
+                    self.rename.handle(key);
                 }
-                _ => {}
             }
             return None;
         }
@@ -226,15 +221,13 @@ impl View {
             match key.code {
                 KeyCode::Esc => self.log_search.clear(),
                 KeyCode::Enter => self.log_search.editing = false,
-                KeyCode::Char(c) if plain => self.log_search.query.push(c),
-                KeyCode::Backspace => {
-                    if let Some((offset, _)) =
-                        self.log_search.query.grapheme_indices(true).next_back()
+                _ => {
+                    let before = self.log_search.query.text().to_owned();
+                    if !self.log_search.query.handle(key) || self.log_search.query.text() == before
                     {
-                        self.log_search.query.truncate(offset);
+                        return None;
                     }
                 }
-                _ => return None,
             }
             self.rematch_log();
             self.viewport.borrow_mut().log_scroll = 0;
@@ -250,34 +243,30 @@ impl View {
             return None;
         }
         if self.searching {
+            let before = self.search.text().to_owned();
+            if self.search.handle(key) {
+                if self.search.text() != before {
+                    if (plain && matches!(key.code, KeyCode::Char(_)))
+                        || key.code == KeyCode::Backspace
+                    {
+                        let selected = self
+                            .selectable_indices()
+                            .first()
+                            .copied()
+                            .unwrap_or(usize::MAX);
+                        self.set_selected(selected);
+                    } else {
+                        self.reconcile_selection();
+                    }
+                    self.viewport.borrow_mut().scroll = 0;
+                }
+                return None;
+            }
             match key.code {
                 KeyCode::Esc => {
                     self.search.clear();
                     self.searching = false;
                     self.reconcile_selection();
-                    return None;
-                }
-                KeyCode::Char(c) if plain => {
-                    self.search.push(c);
-                    let selected = self
-                        .selectable_indices()
-                        .first()
-                        .copied()
-                        .unwrap_or(usize::MAX);
-                    self.set_selected(selected);
-                    self.viewport.borrow_mut().scroll = 0;
-                    return None;
-                }
-                KeyCode::Backspace => {
-                    if let Some((offset, _)) = self.search.grapheme_indices(true).next_back() {
-                        self.search.truncate(offset);
-                    }
-                    let selected = self
-                        .selectable_indices()
-                        .first()
-                        .copied()
-                        .unwrap_or(usize::MAX);
-                    self.set_selected(selected);
                     return None;
                 }
                 KeyCode::F(3) => {
@@ -369,7 +358,8 @@ impl View {
             KeyCode::Char('r') => {
                 if let Some(session) = self.selected_row() {
                     let id = session.id.clone();
-                    self.rename = session.display_title().to_owned();
+                    let title = session.display_title().to_owned();
+                    self.rename.set_text(&title);
                     self.rename_target = Some(id);
                     self.search.clear();
                     self.searching = false;

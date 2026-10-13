@@ -7,6 +7,10 @@ use chrono::{DateTime, Local, Utc};
 const CLOCK_FORMAT: &str = "%H:%M:%S";
 const CLOCK_WIDTH: usize = 8;
 
+pub(super) fn search_input_rect(area: Rect) -> Rect {
+    super::render::row(area, area.height.saturating_sub(1), 1)
+}
+
 impl View {
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
         if area.is_empty() {
@@ -20,16 +24,16 @@ impl View {
             return;
         }
         if self.log_search.active() && area.height > 1 {
-            let input = super::render::row(area, area.height - 1, 1);
+            let input = search_input_rect(area);
             if self.log_search.editing {
                 buf.set_style(input, super::style::active_tab_style());
-                let query = super::formatting::visible_suffix(
-                    &self.log_search.query,
-                    usize::from(area.width).saturating_sub(9),
-                );
+                let (query, _) = self
+                    .log_search
+                    .query
+                    .window(usize::from(input.width.saturating_sub(8)));
                 Line::from(format!("search: {query}")).render(input, buf);
             } else {
-                Line::from(self.log_search.query.clone())
+                Line::from(self.log_search.query.text().to_owned())
                     .dim()
                     .right_aligned()
                     .render(input, buf);

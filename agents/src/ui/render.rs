@@ -1,4 +1,4 @@
-use super::formatting::{format_duration, format_relative_time, tail_lines, visible_suffix};
+use super::formatting::{format_duration, format_relative_time, tail_lines};
 use super::hints::hint_line;
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
@@ -29,7 +29,7 @@ pub(super) struct CenterLayout {
     pub(super) log: Rect,
 }
 impl View {
-    fn editor_text(&self) -> &str {
+    fn editor(&self) -> &line_edit::LineEdit {
         if self.rename_target.is_some() {
             &self.rename
         } else {
@@ -102,13 +102,14 @@ impl View {
             && self.delete_dialog.is_none()
             && !layout.log.is_empty()
         {
-            let available = usize::from(layout.log.width).saturating_sub(9);
+            let input = log::search_input_rect(layout.log.inner(Margin::new(2, 0)));
+            let (_, caret) = self
+                .log_search
+                .query
+                .window(usize::from(input.width.saturating_sub(8)));
             return Some((
-                layout.log.x
-                    + (8 + visible_suffix(&self.log_search.query, available).width())
-                        .min(usize::from(layout.log.width.saturating_sub(1)))
-                        as u16,
-                layout.log.bottom() - 1,
+                input.x + (8 + caret).min(input.width.saturating_sub(1)),
+                input.y,
             ));
         }
         if !(self.searching || self.rename_target.is_some())
@@ -118,10 +119,10 @@ impl View {
         {
             return None;
         }
-        let available = usize::from(layout.search.width).saturating_sub(10);
+        let available = usize::from(layout.search.width).saturating_sub(9);
         Some((
             layout.search.x
-                + (9 + visible_suffix(self.editor_text(), available).width())
+                + (9 + usize::from(self.editor().window(available).1))
                     .min(usize::from(layout.search.width.saturating_sub(1)))
                     as u16,
             layout.search.y,
@@ -189,7 +190,7 @@ impl View {
         );
         if self.searching || self.rename_target.is_some() {
             buf.set_style(layout.search, super::style::active_tab_style());
-            let available = usize::from(layout.search.width).saturating_sub(10);
+            let available = usize::from(layout.search.width).saturating_sub(9);
             line(
                 vec![
                     if self.rename_target.is_some() {
@@ -199,9 +200,7 @@ impl View {
                     }
                     .cyan()
                     .bold(),
-                    visible_suffix(self.editor_text(), available)
-                        .to_owned()
-                        .into(),
+                    self.editor().window(available).0.to_owned().into(),
                 ],
                 layout.search,
                 buf,
