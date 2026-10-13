@@ -1610,7 +1610,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (16, Color::Yellow, true),
         (17, Color::Blue, true),
         (18, Color::Red, true),
-        (19, Color::Reset, false),
+        (19, Color::Blue, true),
     ] {
         let label = &buf[(2, y)];
         let body = &buf[(9, y)];
@@ -1632,7 +1632,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (Kind::Model, Color::Yellow),
         (Kind::Tool, Color::Blue),
         (Kind::Error, Color::Red),
-        (Kind::Queued, Color::Reset),
+        (Kind::Queued, Color::Blue),
     ] {
         view.log.last_mut().unwrap().kind = kind;
         let mut buf = Buffer::empty(area);

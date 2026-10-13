@@ -57,15 +57,10 @@ pub(super) fn thread_color(id: &str) -> Color {
 pub(super) fn log_styles(kind: &crate::sessions::log::Kind) -> (Style, Style) {
     use crate::sessions::log::Kind;
     let body = match kind {
-        Kind::User | Kind::Queued => Style::default(),
+        Kind::User => Style::default(),
         Kind::Model => Style::default().fg(Color::Yellow),
-        Kind::Tool => Style::default().fg(Color::Blue),
+        Kind::Tool | Kind::Queued => Style::default().fg(Color::Blue),
         Kind::Error => Style::default().fg(Color::Red),
     };
-    let label = if matches!(kind, Kind::Queued) {
-        body
-    } else {
-        body.bold()
-    };
-    (label, body)
+    (body.bold(), body)
 }
