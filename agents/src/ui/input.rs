@@ -3,6 +3,9 @@ use unicode_segmentation::UnicodeSegmentation;
 
 impl View {
     fn set_filter(&mut self, idx: usize) {
+        if self.status_filter != idx {
+            self.viewport.borrow_mut().details_scroll = 0;
+        }
         self.status_filter = idx;
         self.viewport.borrow_mut().scroll = 0;
         self.reconcile_selection();
@@ -17,7 +20,7 @@ impl View {
             return None;
         }
         let position = (mouse.column, mouse.row).into();
-        let (tab, over_tabs, over_list, entry) = {
+        let (tab, over_tabs, over_list, over_details, entry) = {
             let viewport = self.viewport.borrow();
             let tab = viewport
                 .tabs
@@ -32,6 +35,7 @@ impl View {
                 tab,
                 viewport.tab_bar.contains(position),
                 viewport.list.contains(position),
+                viewport.details.contains(position),
                 entry,
             )
         };
@@ -41,11 +45,12 @@ impl View {
                     self.set_filter(idx);
                 } else if let Some(entry) = entry {
                     let entries = self.center_rows(&self.selectable_indices(), self.grouping);
-                    self.selected = match entries.get(entry) {
+                    let selected = match entries.get(entry) {
                         Some(super::navigation::CenterRow::Task(index)) => *index,
                         Some(super::navigation::CenterRow::ShowMore) => usize::MAX,
                         _ => return None,
                     };
+                    self.set_selected(selected);
                     return self.activate();
                 }
             }
@@ -60,6 +65,16 @@ impl View {
                     self.set_filter(idx);
                 } else if over_list {
                     self.move_selection(forward);
+                } else if over_details {
+                    let mut viewport = self.viewport.borrow_mut();
+                    let max = viewport
+                        .details_total_rows
+                        .saturating_sub(usize::from(viewport.details.height));
+                    viewport.details_scroll = if forward {
+                        viewport.details_scroll.saturating_add(1).min(max)
+                    } else {
+                        viewport.details_scroll.saturating_sub(1).min(max)
+                    };
                 }
             }
             _ => {}
@@ -76,11 +91,12 @@ impl View {
             .iter()
             .position(|i| *i == self.selected)
             .unwrap_or(0);
-        self.selected = visible[if forward {
+        let selected = visible[if forward {
             (current + 1) % visible.len()
         } else {
             current.checked_sub(1).unwrap_or(visible.len() - 1)
         }];
+        self.set_selected(selected);
     }
     fn activate(&mut self) -> Option<Action> {
         if self.selected == usize::MAX
@@ -186,11 +202,12 @@ impl View {
                 }
                 KeyCode::Char(c) if plain => {
                     self.search.push(c);
-                    self.selected = self
+                    let selected = self
                         .selectable_indices()
                         .first()
                         .copied()
                         .unwrap_or(usize::MAX);
+                    self.set_selected(selected);
                     self.viewport.borrow_mut().scroll = 0;
                     return None;
                 }
@@ -198,11 +215,12 @@ impl View {
                     if let Some((offset, _)) = self.search.grapheme_indices(true).next_back() {
                         self.search.truncate(offset);
                     }
-                    self.selected = self
+                    let selected = self
                         .selectable_indices()
                         .first()
                         .copied()
                         .unwrap_or(usize::MAX);
+                    self.set_selected(selected);
                     return None;
                 }
                 KeyCode::F(3) => {
@@ -248,18 +266,20 @@ impl View {
             KeyCode::PageUp => self.page_selection(false),
             KeyCode::PageDown => self.page_selection(true),
             KeyCode::Home => {
-                self.selected = self
+                let selected = self
                     .selectable_indices()
                     .first()
                     .copied()
-                    .unwrap_or(usize::MAX)
+                    .unwrap_or(usize::MAX);
+                self.set_selected(selected);
             }
             KeyCode::End => {
-                self.selected = self
+                let selected = self
                     .selectable_indices()
                     .last()
                     .copied()
-                    .unwrap_or(usize::MAX)
+                    .unwrap_or(usize::MAX);
+                self.set_selected(selected);
             }
             KeyCode::Enter | KeyCode::Right => return self.activate(),
             KeyCode::Esc => return Some(Action::Back),

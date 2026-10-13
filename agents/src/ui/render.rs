@@ -124,6 +124,7 @@ impl View {
     ) {
         Clear.render(area, buf);
         self.viewport.borrow_mut().marker = None;
+        self.viewport.borrow_mut().details = Rect::default();
         let layout = self.center_layout(area);
         let inset = |area: Rect| area.inner(Margin::new(2, 0));
         line(
@@ -282,9 +283,12 @@ impl View {
         buf: &mut Buffer,
         now: chrono::DateTime<chrono::Utc>,
     ) {
+        self.viewport.borrow_mut().details = Rect::default();
+        self.viewport.borrow_mut().details_total_rows = 0;
         let Some(session) = self.selected_row() else {
             return;
         };
+        self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
         let (status, dot) = Self::status(session);
         // Sections top to bottom: title, prompt, the newer of latest activity
@@ -451,32 +455,42 @@ impl View {
 
         let total = items.iter().map(Item::height).sum::<usize>();
         let available = usize::from(area.height);
+        let scroll = {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.details_total_rows = total;
+            viewport.details_scroll = viewport.details_scroll.min(total.saturating_sub(available));
+            viewport.details_scroll
+        };
+        let content_area = Rect::new(0, 0, area.width, total as u16);
+        let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         for item in items {
-            if offset >= available {
-                break;
-            }
-            let height = item.height().min(available - offset);
-            let item_area = row(area, offset as u16, height as u16);
+            let height = item.height();
+            let item_area = row(content_area, offset as u16, height as u16);
             match item {
-                Item::Text(text) => line(text, item_area, buf),
+                Item::Text(text) => line(text, item_area, &mut content),
                 Item::Link { line: text, link } => {
-                    line(text, item_area, buf);
+                    line(text, item_area, &mut content);
                     if let Some((x, width, url)) = link {
                         super::hyperlink::hyperlink(
-                            buf,
+                            &mut content,
                             Rect::new(item_area.x + x, item_area.y, width, 1),
                             &url,
                         );
                     }
                 }
                 Item::Background { task, output } => {
-                    render_background(task, output, now, item_area, buf);
+                    render_background(task, output, now, item_area, &mut content);
                 }
             }
             offset += height;
         }
-        if total > available && available > 0 {
+        for y in 0..available.min(total - scroll) {
+            for x in 0..area.width {
+                buf[(area.x + x, area.y + y as u16)] = content[(x, (scroll + y) as u16)].clone();
+            }
+        }
+        if total - scroll > available && available > 0 {
             let last = row(area, (available - 1) as u16, 1);
             Clear.render(last, buf);
             line("…".dim(), last, buf);

@@ -135,6 +135,164 @@ fn rendered_cell(rendered: &str, text: &str) -> (u16, u16) {
         .unwrap_or_else(|| panic!("missing rendered text: {text}"))
 }
 
+fn overflowing_details() -> View {
+    let mut view = fixture();
+    let selected = &mut view.rows[view.selected];
+    selected.status = SessionStatus::NeedsInput;
+    selected.prompt = "A long prompt that wraps across several rows. ".repeat(8);
+    selected.last_message = Some("First reply row\n\nSecond reply row".into());
+    selected.transcript = Some(selected.cwd.join("session.jsonl"));
+    view
+}
+
+fn details_panel(view: &View) -> Buffer {
+    let mut buf = Buffer::empty(Rect::new(0, 0, 120, 24));
+    view.render_at(buf.area, &mut buf, view.rows[view.selected].updated_at);
+    let area = view.viewport.borrow().details;
+    let mut panel = Buffer::empty(Rect::new(0, 0, area.width, area.height));
+    for y in 0..area.height {
+        for x in 0..area.width {
+            panel[(x, y)] = buf[(area.x + x, area.y + y)].clone();
+        }
+    }
+    panel
+}
+
+#[test]
+fn mouse_details_wheel_shifts_rendered_rows() {
+    let mut view = overflowing_details();
+    let before = details_panel(&view);
+    let rect = view.viewport.borrow().details;
+    assert!(!rect.is_empty());
+    let selected = view.selected;
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    assert_eq!(view.viewport.borrow().details_scroll, 1);
+    assert_eq!(view.selected, selected);
+    let after = details_panel(&view);
+    // The last visible row is reserved for the overflow marker.
+    for y in 0..rect.height - 2 {
+        for x in 0..rect.width {
+            assert_eq!(after[(x, y)], before[(x, y + 1)], "cell {x},{y}");
+        }
+    }
+    assert_ne!(before, after);
+}
+
+#[test]
+fn mouse_details_wheel_clamps_and_clears_end_marker() {
+    let mut view = overflowing_details();
+    details_panel(&view);
+    let rect = view.viewport.borrow().details;
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
+    assert_eq!(view.viewport.borrow().details_scroll, 0);
+    let total = view.viewport.borrow().details_total_rows;
+    for _ in 0..total + 2 {
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    }
+    assert_eq!(
+        view.viewport.borrow().details_scroll,
+        total.saturating_sub(usize::from(rect.height))
+    );
+    let panel = details_panel(&view);
+    let last = (0..rect.width)
+        .map(|x| panel[(x, rect.height - 1)].symbol())
+        .collect::<String>();
+    assert!(last.starts_with("Model: "), "{last}");
+    assert!(!last.contains('…'));
+}
+
+#[test]
+fn mouse_details_scroll_resets_with_selection_and_filter() {
+    for code in [KeyCode::Down, KeyCode::End, KeyCode::PageDown, KeyCode::Tab] {
+        let mut view = overflowing_details();
+        details_panel(&view);
+        let rect = view.viewport.borrow().details;
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+        assert_eq!(view.viewport.borrow().details_scroll, 1);
+        key(&mut view, code);
+        assert_eq!(view.viewport.borrow().details_scroll, 0, "{code:?}");
+    }
+    let mut view = overflowing_details();
+    details_panel(&view);
+    let rect = view.viewport.borrow().details;
+    let id = view.selected_id().unwrap().to_owned();
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    let (_, tab) = view.viewport.borrow().tabs[3];
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), tab.x, tab.y));
+    assert_eq!(view.selected_id(), Some(id.as_str()));
+    assert_eq!(view.viewport.borrow().details_scroll, 0);
+}
+
+#[test]
+fn details_scroll_preserves_background_cells_and_hyperlinks() {
+    use std::io::Write;
+    let mut output = tempfile::NamedTempFile::new().unwrap();
+    writeln!(output, "Background output").unwrap();
+    let mut view = overflowing_details();
+    let selected = &mut view.rows[view.selected];
+    selected.background.push(crate::model::BackgroundTask {
+        description: "Run checks".into(),
+        output: output.path().into(),
+        started_at: selected.updated_at,
+    });
+    selected.pr = Some(crate::model::PullRequest {
+        number: 833,
+        url: "https://example.com/pull/833".into(),
+    });
+    let now = selected.updated_at;
+    let full_area = Rect::new(7, 4, 43, 60);
+    let mut full = Buffer::empty(full_area);
+    view.render_details(full_area, &mut full, now);
+    let top = (full_area.y..full_area.bottom())
+        .find(|y| full[(full_area.x, *y)].symbol() == "╭")
+        .unwrap();
+    let area = Rect::new(7, 4, 43, 10);
+    view.viewport.borrow_mut().details_scroll = usize::from(top + 1 - full_area.y);
+    let mut clipped = Buffer::empty(area);
+    view.render_details(area, &mut clipped, now);
+    assert_eq!(clipped[(area.x, area.y)].symbol(), "│");
+    let scroll = view.viewport.borrow().details_scroll as u16;
+    for y in area.y..area.bottom() - 1 {
+        for x in area.x..area.right() {
+            assert_eq!(clipped[(x, y)], full[(x, y + scroll)]);
+        }
+    }
+    view.viewport.borrow_mut().details_scroll = usize::MAX;
+    view.render_details(area, &mut clipped, now);
+    let link = clipped
+        .content
+        .iter()
+        .find(|cell| cell.symbol().contains("https://example.com/pull/833"))
+        .expect("visible pull request hyperlink");
+    assert!(full.content.contains(link));
+    assert!(matches!(
+        link.diff_option,
+        ratatui::buffer::CellDiffOption::ForcedWidth(_)
+    ));
+}
+
+#[test]
+fn details_scroll_tracks_session_identity_across_refreshes() {
+    let mut view = overflowing_details();
+    details_panel(&view);
+    let rect = view.viewport.borrow().details;
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    let id = view.selected_id().unwrap().to_owned();
+    let mut rows = view.rows.clone();
+    rows.push(session(
+        "recent",
+        "Recent",
+        SessionStatus::NeedsInput,
+        -7200,
+    ));
+    view.set_sessions(rows.clone(), false);
+    assert_eq!(view.selected_id(), Some(id.as_str()));
+    assert_eq!(view.viewport.borrow().details_scroll, 1);
+    rows.retain(|row| row.id != id);
+    view.set_sessions(rows, false);
+    assert_eq!(view.viewport.borrow().details_scroll, 0);
+}
+
 #[test]
 fn mouse_list_click_selects_and_opens_second_task() {
     let mut view = fixture();

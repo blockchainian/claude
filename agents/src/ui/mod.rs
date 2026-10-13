@@ -64,6 +64,9 @@ struct Viewport {
     list: Rect,
     list_rows: Rect,
     first_entry: usize,
+    details: Rect,
+    details_scroll: usize,
+    details_total_rows: usize,
     /// Screen cell of the selection marker drawn by the last render.
     marker: Option<(u16, u16)>,
 }
@@ -154,6 +157,7 @@ impl View {
     /// Replace rows while retaining the selected session and view preferences.
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
         let selected = self.selected_id().map(str::to_owned);
+        let status_filter = self.status_filter;
         let show_more = self.selected == usize::MAX && self.has_more;
         sessions.sort_by(|a, b| {
             a.status
@@ -186,6 +190,9 @@ impl View {
             })
         };
         self.reconcile_selection();
+        if self.selected_id() != selected.as_deref() || self.status_filter != status_filter {
+            self.viewport.borrow_mut().details_scroll = 0;
+        }
     }
 
     pub fn set_loading(&mut self, loading: bool) {
@@ -205,10 +212,11 @@ impl View {
         self.hidden.insert(id.to_owned());
         if selected {
             let visible = self.selectable_indices();
-            self.selected = visible
+            let selected = visible
                 .get(position.min(visible.len().saturating_sub(1)))
                 .copied()
                 .unwrap_or(usize::MAX);
+            self.set_selected(selected);
         }
         self.reconcile_selection();
     }
@@ -297,6 +305,13 @@ impl View {
         }
         visible
     }
+    fn set_selected(&mut self, selected: usize) {
+        if self.selected != selected {
+            self.viewport.borrow_mut().details_scroll = 0;
+        }
+        self.selected = selected;
+    }
+
     fn reconcile_selection(&mut self) {
         let visible = self.selectable_indices();
         if let Some(id) = &self.rename_target
@@ -308,7 +323,7 @@ impl View {
             self.rename.clear();
         }
         if !visible.contains(&self.selected) {
-            self.selected = visible.first().copied().unwrap_or(usize::MAX);
+            self.set_selected(visible.first().copied().unwrap_or(usize::MAX));
         }
     }
     fn title_style(&self, id: &str) -> Style {

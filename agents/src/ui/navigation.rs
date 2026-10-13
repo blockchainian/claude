@@ -78,6 +78,6 @@ impl View {
         })
         .min(entries.len().saturating_sub(height));
         drop(state);
-        self.selected = selected;
+        self.set_selected(selected);
     }
 }
