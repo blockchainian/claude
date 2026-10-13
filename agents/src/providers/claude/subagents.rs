@@ -68,7 +68,7 @@ impl Metadata {
         if last["type"] == "user"
             && text
                 .as_deref()
-                .is_some_and(|text| text.trim() == "[Request interrupted by user]")
+                .is_some_and(|text| text.trim().starts_with("[Request interrupted by user"))
         {
             return None;
         }
@@ -296,6 +296,15 @@ mod tests {
     fn interruption_finishes() {
         let mut rows = records();
         rows[1]["message"]["content"] = json!("[Request interrupted by user]");
+        rows[1].as_object_mut().unwrap().remove("toolUseResult");
+        assert_eq!(status(rows, false, false, true), None);
+    }
+
+    #[test]
+    fn interruption_during_tool_use_finishes() {
+        let mut rows = records();
+        rows[1]["message"]["content"] =
+            json!([{"type":"text","text":"[Request interrupted by user for tool use]"}]);
         rows[1].as_object_mut().unwrap().remove("toolUseResult");
         assert_eq!(status(rows, false, false, true), None);
     }
