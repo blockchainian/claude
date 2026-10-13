@@ -1461,14 +1461,16 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         ended_at: end.map(|age| now - Duration::seconds(age)),
         previous_end: Some(now - Duration::seconds(age + 5)),
     }).collect();
-    let mut reference = None;
+    let mut previous_end = None;
     for event in &mut view.log {
         if event.kind == Kind::Model {
-            event.previous_end = reference;
+            event.previous_end = previous_end;
         }
-        if matches!(event.kind, Kind::User | Kind::Model) {
-            reference = Some(event.started_at);
-        }
+        previous_end = if matches!(event.kind, Kind::Tool | Kind::Error) {
+            event.ended_at
+        } else {
+            Some(event.started_at)
+        };
     }
     (view, now)
 }

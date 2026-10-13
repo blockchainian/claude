@@ -19,7 +19,7 @@
        15s Error   Bash failed check
   11:59:00 Queue   Also inspect the tests
         5s Tool    Bash run a background job *
-    1m 10s Model   A long response whose whitespace collapses and whose body must be truncated be…
+  11:59:20 Model   A long response whose whitespace collapses and whose body must be truncated be…
        35s Tool    Bash run tests
 
   ? help  esc back  ↑/↓ move  enter open  n new
