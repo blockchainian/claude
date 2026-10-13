@@ -205,7 +205,11 @@ impl Log {
             .iter()
             .find_map(|key| input[key].as_str().filter(|text| !text.trim().is_empty()))
             .unwrap_or("");
-        let call = format!("{name} {detail}");
+        let call = if detail.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{name} {detail}")
+        };
         let mut entry = if let Some(index) = self.batch.take() {
             self.entries.remove(index)
         } else {
@@ -443,6 +447,29 @@ mod tests {
         assert_eq!(
             events[0].body,
             "Report without harness The report follows: details"
+        );
+    }
+
+    #[test]
+    fn parallel_calls_without_details_have_no_separator_after_names() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for r in [
+            tool(
+                1,
+                "batch",
+                "a",
+                "mcp__plugin_codex_codex-manager__detach",
+                json!({}),
+            ),
+            tool(2, "batch", "b", "TaskUpdate", json!({})),
+        ] {
+            writeln!(file, "{r}").unwrap();
+        }
+        let events = tail(file.path(), 1).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].body,
+            "mcp__plugin_codex_codex-manager__detach，TaskUpdate"
         );
     }
 
