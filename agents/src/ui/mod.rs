@@ -64,6 +64,8 @@ struct Viewport {
     list: Rect,
     list_rows: Rect,
     first_entry: usize,
+    log: Rect,
+    log_scroll: usize,
     details: Rect,
     details_scroll: usize,
     details_total_rows: usize,
@@ -190,6 +192,9 @@ impl View {
             })
         };
         self.reconcile_selection();
+        if self.selected_id() != selected.as_deref() {
+            self.viewport.borrow_mut().log_scroll = 0;
+        }
         if self.selected_id() != selected.as_deref() || self.status_filter != status_filter {
             self.viewport.borrow_mut().details_scroll = 0;
         }
@@ -305,9 +310,20 @@ impl View {
         }
         visible
     }
+    pub(crate) fn log_scroll(&self) -> usize {
+        self.viewport.borrow().log_scroll
+    }
+
+    pub(crate) fn clamp_log_scroll(&mut self, max: usize) {
+        let mut viewport = self.viewport.borrow_mut();
+        viewport.log_scroll = viewport.log_scroll.min(max);
+    }
+
     fn set_selected(&mut self, selected: usize) {
         if self.selected != selected {
-            self.viewport.borrow_mut().details_scroll = 0;
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.details_scroll = 0;
+            viewport.log_scroll = 0;
         }
         self.selected = selected;
     }

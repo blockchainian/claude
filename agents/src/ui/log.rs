@@ -16,18 +16,25 @@ impl View {
         if self.log_session.as_deref() != Some(session.id.as_str()) {
             return;
         }
-        let events = &self.log[self
-            .log
-            .len()
-            .saturating_sub(usize::from(area.height.saturating_sub(2)))..];
+        let scroll = self.log_scroll();
+        let end = self.log.len().saturating_sub(scroll);
+        let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
+        let events = &self.log[start..end];
         let times: Vec<_> = events
             .iter()
             .enumerate()
-            .map(|(index, event)| event_time(event, session, index + 1 == events.len(), now))
+            .map(|(index, event)| {
+                event_time(
+                    event,
+                    session,
+                    scroll == 0 && index + 1 == events.len(),
+                    now,
+                )
+            })
             .collect();
         let time_width = times.iter().map(|time| time.width()).max().unwrap_or(0);
         for (index, (event, time)) in events.iter().zip(&times).enumerate() {
-            let last = index + 1 == events.len();
+            let last = scroll == 0 && index + 1 == events.len();
             render_event(
                 event,
                 time,

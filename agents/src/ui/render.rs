@@ -125,6 +125,7 @@ impl View {
         Clear.render(area, buf);
         self.viewport.borrow_mut().marker = None;
         self.viewport.borrow_mut().details = Rect::default();
+        self.viewport.borrow_mut().log = Rect::default();
         let layout = self.center_layout(area);
         let inset = |area: Rect| area.inner(Margin::new(2, 0));
         line(
@@ -223,6 +224,7 @@ impl View {
         if !layout.details.is_empty() {
             self.render_details(layout.details, buf, now);
         }
+        self.viewport.borrow_mut().log = layout.log;
         self.render_log(inset(layout.log), buf, now);
         if let Some(dialog) = &self.delete_dialog {
             self.render_delete_dialog(dialog, layout.list, buf);

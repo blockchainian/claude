@@ -263,7 +263,8 @@ impl App {
             })
     }
 
-    fn refresh_log(&mut self, count: usize) {
+    fn refresh_log(&mut self, visible: usize) {
+        let count = visible.saturating_add(self.view.log_scroll());
         let selected = self
             .view
             .selected_id()
@@ -290,7 +291,12 @@ impl App {
             Ok(Some((stamp, crate::sessions::log::tail(&path, count)?)))
         };
         match load() {
-            Ok(Some((stamp, events))) => {
+            Ok(Some((mut stamp, events))) => {
+                if events.len() < count {
+                    self.view
+                        .clamp_log_scroll(events.len().saturating_sub(visible));
+                    stamp.count = visible.saturating_add(self.view.log_scroll());
+                }
                 self.log_stamp = Some(stamp);
                 self.view.log = events;
                 self.view.log_session = Some(session);
@@ -596,6 +602,92 @@ mod tests {
             );
             assert_eq!(app.view.log.len(), count);
         }
+    }
+
+    fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) {
+        let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        app.view.render(area, &mut buffer);
+        app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column: 2,
+            row: 14,
+            modifiers: KeyModifiers::NONE,
+        }));
+    }
+
+    #[test]
+    fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
+        use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
+        let (_dir, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let payload = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, payload.repeat(20)).unwrap();
+        app.refresh_log(8);
+        scroll_log(&mut app, ScrollUp);
+        app.refresh_log(8);
+        assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
+        assert_eq!(app.view.log.len(), 9);
+        let cached = app.view.log.clone();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::fs::write(&path, payload.replace("Codex", "CODEX").repeat(20)).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        app.refresh_log(8);
+        assert_eq!(app.view.log, cached);
+        scroll_log(&mut app, ScrollDown);
+        app.refresh_log(8);
+        assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
+        assert_eq!(app.view.log.len(), 8);
+        assert_ne!(app.view.log, cached[1..]);
+    }
+
+    #[test]
+    fn task_log_growth_keeps_distance_from_end() {
+        use crossterm::event::MouseEventKind::ScrollUp;
+        let (_dir, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let payload = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, payload.repeat(20)).unwrap();
+        app.refresh_log(8);
+        scroll_log(&mut app, ScrollUp);
+        app.refresh_log(8);
+        let before = app.view.log.clone();
+        std::fs::write(
+            &path,
+            payload.repeat(20) + &payload.replace("Codex", "CODEX"),
+        )
+        .unwrap();
+        app.refresh_log(8);
+        assert_eq!(app.view.log_scroll(), 1);
+        assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
+        assert_ne!(app.view.log, before);
+    }
+
+    #[test]
+    fn task_log_scroll_clamps_at_transcript_start() {
+        use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
+        let (_dir, mut app) = fixture();
+        assert_eq!(app.view.log.len(), 2);
+        app.refresh_log(1);
+        for _ in 0..5 {
+            scroll_log(&mut app, ScrollUp);
+        }
+        app.refresh_log(1);
+        assert_eq!(app.view.log.len(), 2);
+        scroll_log(&mut app, ScrollDown);
+        app.refresh_log(1);
+        assert_eq!(app.log_stamp.as_ref().unwrap().count, 1);
+        assert_eq!(app.view.log.len(), 1);
+        // A transcript shorter than the visible window clamps all the way to zero.
+        scroll_log(&mut app, ScrollUp);
+        app.refresh_log(8);
+        app.refresh_log(8);
+        assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
     }
 
     #[test]

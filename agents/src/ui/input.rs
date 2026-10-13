@@ -20,7 +20,7 @@ impl View {
             return None;
         }
         let position = (mouse.column, mouse.row).into();
-        let (tab, over_tabs, over_list, over_details, entry) = {
+        let (tab, over_tabs, over_list, over_details, over_log, entry) = {
             let viewport = self.viewport.borrow();
             let tab = viewport
                 .tabs
@@ -36,6 +36,7 @@ impl View {
                 viewport.tab_bar.contains(position),
                 viewport.list.contains(position),
                 viewport.details.contains(position),
+                viewport.log.contains(position),
                 entry,
             )
         };
@@ -65,6 +66,13 @@ impl View {
                     self.set_filter(idx);
                 } else if over_list {
                     self.move_selection(forward);
+                } else if over_log {
+                    let mut viewport = self.viewport.borrow_mut();
+                    viewport.log_scroll = if forward {
+                        viewport.log_scroll.saturating_sub(1)
+                    } else {
+                        viewport.log_scroll.saturating_add(1)
+                    };
                 } else if over_details {
                     let mut viewport = self.viewport.borrow_mut();
                     let max = viewport

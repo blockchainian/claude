@@ -179,6 +179,79 @@ fn mouse_details_wheel_shifts_rendered_rows() {
 }
 
 #[test]
+fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
+    let (mut view, now) = log_fixture();
+    let mut older = view.log[0].clone();
+    older.body = "Older event".into();
+    view.log.insert(0, older);
+    let before = log_screen(&view, 100, 25, now);
+    let rect = view.center_layout(Rect::new(0, 0, 100, 25)).log;
+    assert!(before.contains("35s Tool    run tests"), "{before}");
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x + 2, rect.y + 1));
+    let after = log_screen(&view, 100, 25, now);
+    assert!(after.contains("Older event"), "{after}");
+    assert!(!after.contains("run tests"));
+    for y in rect.y + 1..rect.bottom() - 3 {
+        assert_eq!(
+            before.lines().nth(y as usize),
+            after.lines().nth(y as usize + 1)
+        );
+    }
+    // A tool at the visible edge must use its recorded duration, even if unfinished.
+    view.log[7] = view.log[8].clone();
+    view.log[7].body = "Earlier unfinished tool".into();
+    let after = log_screen(&view, 100, 25, now);
+    assert!(
+        after.contains("5s Tool    Earlier unfinished tool"),
+        "{after}"
+    );
+    assert!(!after.contains("35s Tool"));
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
+    assert!(log_screen(&view, 100, 25, now).contains("35s Tool    run tests"));
+}
+
+#[test]
+fn mouse_log_wheel_down_at_end_stays_at_end() {
+    let (mut view, now) = log_fixture();
+    let before = log_screen(&view, 100, 25, now);
+    let rect = view.center_layout(Rect::new(0, 0, 100, 25)).log;
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
+    assert_eq!(before, log_screen(&view, 100, 25, now));
+}
+
+#[test]
+fn mouse_log_scroll_tracks_selected_session_identity() {
+    let mut view = overflowing_details();
+    details_panel(&view);
+    let rect = view.viewport.borrow().log;
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
+    assert_eq!(view.log_scroll(), 1);
+    let id = view.selected_id().unwrap().to_owned();
+    let mut rows = view.rows.clone();
+    rows.push(session(
+        "recent",
+        "Recent",
+        SessionStatus::NeedsInput,
+        -7200,
+    ));
+    view.set_sessions(rows.clone(), false);
+    assert_eq!(view.selected_id(), Some(id.as_str()));
+    assert_eq!(view.log_scroll(), 1);
+    rows.retain(|row| row.id != id);
+    for row in &mut rows {
+        row.transcript = Some(row.cwd.join("session.jsonl"));
+    }
+    view.set_sessions(rows, false);
+    assert_eq!(view.log_scroll(), 0);
+    details_panel(&view);
+    let rect = view.viewport.borrow().log;
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
+    assert_eq!(view.log_scroll(), 1);
+    key(&mut view, KeyCode::Down);
+    assert_eq!(view.log_scroll(), 0);
+}
+
+#[test]
 fn mouse_details_wheel_clamps_and_clears_end_marker() {
     let mut view = overflowing_details();
     details_panel(&view);
