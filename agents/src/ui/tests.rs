@@ -446,21 +446,34 @@ fn mouse_list_wheel_uses_keyboard_selection() {
 }
 
 #[test]
-fn mouse_tab_wheel_switches_filters_without_wrapping() {
+fn mouse_tab_wheel_switches_filters_and_resets_scroll() {
     let mut view = fixture();
     screen(&view, 120, 40);
     let (_, rect) = view.viewport.borrow().tabs[0];
-    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
-    assert_eq!(view.status_filter, 0);
     view.viewport.borrow_mut().scroll = 7;
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
     assert_eq!(view.status_filter, 1);
     assert_eq!(view.viewport.borrow().scroll, 0);
     view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
     assert_eq!(view.status_filter, 0);
-    for _ in 0..TASK_FILTERS.len() + 1 {
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-    }
+}
+
+#[test]
+fn mouse_tab_wheel_down_wraps_from_last_to_first() {
+    let mut view = fixture();
+    view.status_filter = TASK_FILTERS.len() - 1;
+    screen(&view, 120, 40);
+    let (_, rect) = view.viewport.borrow().tabs[0];
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    assert_eq!(view.status_filter, 0);
+}
+
+#[test]
+fn mouse_tab_wheel_up_wraps_from_first_to_last() {
+    let mut view = fixture();
+    screen(&view, 120, 40);
+    let (_, rect) = view.viewport.borrow().tabs[0];
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
     assert_eq!(view.status_filter, TASK_FILTERS.len() - 1);
 }
 
