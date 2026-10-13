@@ -1181,7 +1181,7 @@ fn details_include_attention_and_clip_messages() {
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
     assert_eq!(buf[(0, 21)].symbol(), "…");
-    let title_cell = &buf[(16, 0)];
+    let title_cell = &buf[(0, 0)];
     assert!(title_cell.modifier.contains(ratatui::style::Modifier::BOLD));
     assert_eq!(title_cell.fg, Color::Reset);
 }
@@ -1820,38 +1820,35 @@ fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
     }
 }
 
-#[test]
-fn details_header_starts_with_status() {
-    let row = session("header", "Header task", SessionStatus::Working, 0);
-    let rendered = queued_details(row, 15);
-    let header = rendered.lines().next().unwrap();
-    assert!(header.starts_with("● Working · "), "{header}");
-    assert!(!header.contains("Task details"));
-}
+mod details_header {
+    use super::*;
 
-#[test]
-fn details_header_truncates_only_the_title() {
-    let mut row = session(
-        "header",
-        "A very long session title that exceeds the panel width",
-        SessionStatus::Working,
-        0,
-    );
-    row.prompt = "Current prompt".into();
-    let rendered = queued_details(row, 15);
-    assert_eq!(
-        rendered,
-        include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
-    );
-    let lines = rendered.lines().collect::<Vec<_>>();
-    assert_eq!(lines[0], "● Working · A very long session title t…");
-    assert_eq!(lines[1], "");
-    assert_eq!(lines[2], "Prompt");
-    assert!(
-        !lines[1..]
-            .iter()
-            .any(|line| { line.contains("A very long") || line.contains("● Working") })
-    );
+    #[test]
+    fn title_precedes_status() {
+        let row = session("header", "Header task", SessionStatus::Working, 0);
+        let rendered = queued_details(row, 15);
+        assert_eq!(rendered.lines().next().unwrap(), "Header task ● Working");
+    }
+
+    #[test]
+    fn truncates_title_and_preserves_trailing_status() {
+        let mut row = session(
+            "header",
+            "A very long session title that exceeds the panel width",
+            SessionStatus::Working,
+            0,
+        );
+        row.prompt = "Current prompt".into();
+        let rendered = queued_details(row, 15);
+        let header = rendered.lines().next().unwrap();
+        let title = header.strip_suffix(" ● Working").expect("visible status");
+        assert!(title.ends_with('…'), "{title}");
+        assert_eq!(header, "A very long session title tha… ● Working");
+        assert_eq!(
+            rendered,
+            include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
+        );
+    }
 }
 
 #[test]
