@@ -3,7 +3,10 @@ use chrono::{DateTime, Utc};
 use std::{io, path::Path};
 
 pub(super) fn tool_hidden(name: &str) -> bool {
-    matches!(name, "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet")
+    matches!(
+        name,
+        "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet" | "ListAgents"
+    )
 }
 
 fn input_text<'a>(input: &'a serde_json::Value, key: &str) -> Option<&'a str> {
@@ -1107,7 +1110,13 @@ mod tests {
 
     #[test]
     fn task_list_tools_produce_no_events() {
-        for name in ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"] {
+        for name in [
+            "TaskCreate",
+            "TaskUpdate",
+            "TaskList",
+            "TaskGet",
+            "ListAgents",
+        ] {
             assert!(events_from(vec![tool(1, "call", "task", name, json!({}))]).is_empty());
         }
     }
@@ -1137,7 +1146,13 @@ mod tests {
 
     #[test]
     fn task_list_tool_results_cannot_make_error_or_denied_rows() {
-        for name in ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"] {
+        for name in [
+            "TaskCreate",
+            "TaskUpdate",
+            "TaskList",
+            "TaskGet",
+            "ListAgents",
+        ] {
             let mut records = denial_records(include_str!(
                 "../../../tests/fixtures/automode_blocked.jsonl"
             ));

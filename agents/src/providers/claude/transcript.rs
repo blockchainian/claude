@@ -1180,6 +1180,7 @@ mod tests {
                     "TaskUpdate",
                     "TaskList",
                     "TaskGet",
+                    "ListAgents",
                     "TaskStop",
                 ] {
                     for description in [None, Some("Update tasks")] {
