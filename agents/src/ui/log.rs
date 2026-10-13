@@ -73,8 +73,9 @@ fn render_event(event: &Event, time: &str, last: bool, area: Rect, buf: &mut Buf
         time_width as u16,
         1,
     );
+    let (label_style, body_style) = super::style::log_styles(&event.kind);
     let time_style = if last {
-        Style::default().fg(Color::Yellow).bold()
+        body_style.bold()
     } else {
         Style::default().dim()
     };
@@ -92,7 +93,6 @@ fn render_event(event: &Event, time: &str, last: bool, area: Rect, buf: &mut Buf
         Kind::Error => "Error",
         Kind::Queued => "Queued",
     };
-    let (label_style, body_style) = super::style::log_styles(&event.kind);
     let label = format!("{label:<6} ");
     let label_width = label.width().min(content_width);
     Line::from(Span::styled(label, label_style))

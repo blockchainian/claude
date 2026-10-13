@@ -1627,19 +1627,19 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         assert!(buf[(97, y)].modifier.contains(Modifier::DIM));
         assert!(!buf[(97, y)].modifier.contains(Modifier::BOLD));
     }
-    for kind in [
-        Kind::User,
-        Kind::Model,
-        Kind::Tool,
-        Kind::Error,
-        Kind::Queued,
+    for (kind, colour) in [
+        (Kind::User, Color::Reset),
+        (Kind::Model, Color::Yellow),
+        (Kind::Tool, Color::Blue),
+        (Kind::Error, Color::Red),
+        (Kind::Queued, Color::Reset),
     ] {
         view.log.last_mut().unwrap().kind = kind;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let time = &buf[(97, 19)];
         assert_ne!(time.symbol(), " ");
-        assert_eq!(time.fg, Color::Yellow);
+        assert_eq!(time.fg, colour);
         assert!(time.modifier.contains(Modifier::BOLD));
         assert!(!time.modifier.contains(Modifier::DIM));
     }
