@@ -4,7 +4,7 @@ use super::formatting::{
 use super::hints::hint_line;
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
-use ratatui::widgets::{Block, BorderType, Borders};
+use ratatui::widgets::{Block, Borders};
 
 pub(super) fn row(area: Rect, offset: u16, height: u16) -> Rect {
     let offset = offset.min(area.height);
@@ -461,6 +461,8 @@ impl View {
                     .map(|(task, output)| Item::Background { task, output }),
             );
             items.extend(subagents.into_iter().map(Item::Subagent));
+            // Tasks showing output come first; each group keeps its order.
+            items[start..].sort_by_key(|item| item.height() == 1);
             background = start..items.len();
         }
 
@@ -607,32 +609,20 @@ impl View {
                     render_background(task, output, now, item_area, &mut content);
                 }
                 Item::Subagent(child) => {
-                    let activity = child
-                        .latest_activity()
-                        .filter(|_| child.status == SessionStatus::Working);
-                    let (text, kind) = if let Some(activity) = activity {
-                        (Some(activity.label.as_str()), activity.kind.clone())
-                    } else {
-                        (child.last_message.as_deref(), crate::log::Kind::Model)
-                    };
-                    let body = truncate_line_with_ellipsis_if_overflow(
-                        Line::from(Span::styled(
-                            text.unwrap_or_default()
-                                .lines()
-                                .next()
-                                .unwrap_or_default()
-                                .to_owned(),
-                            style::log_styles(&kind).1,
-                        )),
-                        usize::from(item_area.width.saturating_sub(4)),
-                    );
+                    let (text, kind) = subagent_line(child);
+                    let body = (!text.is_empty()).then(|| {
+                        truncate_line_with_ellipsis_if_overflow(
+                            Line::from(Span::styled(text.to_owned(), style::log_styles(&kind).1)),
+                            usize::from(item_area.width.saturating_sub(2)),
+                        )
+                    });
                     let elapsed = child
                         .started_at
                         .map(|at| format_duration((now - at).num_seconds().max(0)));
                     render_background_box(
                         &child.title,
                         elapsed.as_deref(),
-                        vec![body],
+                        body.into_iter().collect(),
                         item_area,
                         &mut content,
                     );
@@ -754,7 +744,7 @@ impl Item<'_> {
         match self {
             Self::Text(_) | Self::Link { .. } => 1,
             Self::Background { output, .. } => box_height(output.len()),
-            Self::Subagent(_) => box_height(1),
+            Self::Subagent(child) => box_height(usize::from(!subagent_line(child).0.is_empty())),
         }
     }
 }
@@ -765,8 +755,25 @@ impl<T: Into<Line<'static>>> From<T> for Item<'_> {
     }
 }
 
+/// The first line of a working subagent's current tool call, or of its last
+/// message when it is between calls, with the log kind that styles it.
+fn subagent_line(child: &Session) -> (&str, crate::log::Kind) {
+    let activity = child
+        .latest_activity()
+        .filter(|_| child.status == SessionStatus::Working);
+    let (text, kind) = if let Some(activity) = activity {
+        (Some(activity.label.as_str()), activity.kind.clone())
+    } else {
+        (child.last_message.as_deref(), crate::log::Kind::Model)
+    };
+    (
+        text.unwrap_or_default().lines().next().unwrap_or_default(),
+        kind,
+    )
+}
+
 /// A running background command: its description and elapsed time on the top
-/// rule, the last output line inside when there is one.
+/// rule, the last output line below it when there is one.
 fn render_background(
     task: &crate::model::BackgroundTask,
     output: Vec<String>,
@@ -791,7 +798,8 @@ fn render_background_box(
     box_area: Rect,
     buf: &mut Buffer,
 ) {
-    // One space keeps the title off the corner glyph on both sides.
+    // The rule leads the title and ends the row with half-width glyphs; a
+    // space keeps the title off both.
     let mut title = truncate_line_with_ellipsis_if_overflow(
         Line::from(description.to_owned()),
         usize::from(box_area.width.saturating_sub(4)).saturating_sub(
@@ -801,40 +809,30 @@ fn render_background_box(
     if let Some(elapsed) = elapsed {
         title.spans.extend([" · ".dim(), elapsed.to_owned().dim()]);
     }
+    title.spans.insert(0, "╶ ".dim());
     title.spans.push(" ".into());
-    // Without output the task is just its titled top rule, which has no
-    // corner glyph, so the rule itself leads the title; half-width
-    // glyphs at both ends keep it visually inside the box edges.
-    let borders = if output.is_empty() {
-        title.spans.insert(0, "╶ ".dim());
-        Borders::TOP
-    } else {
-        title.spans.insert(0, " ".into());
-        Borders::ALL
-    };
     let block = Block::default()
-        .borders(borders)
-        .border_type(BorderType::Rounded)
+        .borders(Borders::TOP)
         .border_style(Style::default().dim())
         .title_style(Style::default().not_dim())
         .title(title);
     let inner = block.inner(box_area);
     block.render(box_area, buf);
-    if output.is_empty() && box_area.width > 0 {
+    if box_area.width > 0 {
         buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
     }
-    // One column of padding on both sides keeps output off the borders.
+    // Output lines up with the title text under the rule.
     let inner = Rect {
-        x: inner.x + 1,
+        x: inner.x + 2,
         width: inner.width.saturating_sub(2),
         ..inner
     };
     Paragraph::new(output).render(inner, buf);
 }
 
-/// Rows a background box takes: a bare top rule without output, a full box otherwise.
+/// Rows a background task takes: its titled rule and the output lines below.
 fn box_height(lines: usize) -> usize {
-    if lines == 0 { 1 } else { 2 + lines }
+    1 + lines
 }
 
 fn wrap_details(text: &str, width: usize, markdown: bool) -> Vec<Line<'static>> {

@@ -335,13 +335,13 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
     let mut full = Buffer::empty(full_area);
     view.render_details(full_area, &mut full, now);
     let top = (full_area.y..full_area.bottom())
-        .find(|y| full[(full_area.x, *y)].symbol() == "╭")
+        .find(|y| full[(full_area.x, *y)].symbol() == "╶")
         .unwrap();
     let area = Rect::new(7, 4, 43, 10);
     view.viewport.borrow_mut().details_scroll.offset = usize::from(top - full_area.y);
     let mut clipped = Buffer::empty(area);
     view.render_details(area, &mut clipped, now);
-    assert_eq!(clipped[(area.x, area.y + 1)].symbol(), "│");
+    assert_eq!(clipped[(area.x + 2, area.y + 1)].symbol(), "B");
     let scroll = view.viewport.borrow().details_scroll.offset as u16;
     for y in area.y + 1..area.bottom() - 1 {
         for x in area.x..area.right() {
@@ -2150,13 +2150,13 @@ fn details_background_boxes_tail_and_clip_output() {
     row.last_message = Some("Checking the project".into());
     row.background = vec![
         crate::model::BackgroundTask {
-            description: "Run checks".into(),
-            output: output.path().into(),
+            description: "Waiting for output".into(),
+            output: output.path().with_extension("missing"),
             started_at: Utc::now(),
         },
         crate::model::BackgroundTask {
-            description: "Waiting for output".into(),
-            output: output.path().with_extension("missing"),
+            description: "Run checks".into(),
+            output: output.path().into(),
             started_at: Utc::now(),
         },
     ];
@@ -2166,13 +2166,13 @@ fn details_background_boxes_tail_and_clip_output() {
         rendered,
         include_str!("../../tests/ui_snapshots/details_background.txt")
     );
-    row.background[0].description = "A very long description ".repeat(5);
+    row.background[1].description = "A very long description ".repeat(5);
     assert_eq!(
         queued_details(row.clone(), 22),
         include_str!("../../tests/ui_snapshots/details_background_long_title.txt")
     );
     let clipped = queued_details(row, 14);
-    assert!(clipped.contains("Background\n╭"));
+    assert!(clipped.contains("Background\n╶"));
     assert!(clipped.contains("Last message"));
     assert!(!clipped.contains("Project"));
     assert!(clipped.ends_with("\n…"));
@@ -2294,7 +2294,7 @@ fn background_box_dims_border_but_not_title_or_output() {
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
     let top = (0..20)
-        .find(|y| buf[(0, *y)].symbol() == "╭")
+        .find(|y| buf[(0, *y)].symbol() == "╶")
         .expect("box top border");
     assert!(buf[(0, top)].modifier.contains(Modifier::DIM));
     assert!(buf[(30, top)].modifier.contains(Modifier::DIM));
@@ -2935,10 +2935,10 @@ mod details_budget {
         assert!(rows.iter().any(|line| line == "Queued work"));
         assert!(
             rows.iter()
-                .any(|line| line.starts_with("╭") && line.contains("Check 2"))
+                .any(|line| line.starts_with("╶") && line.contains("Check 3"))
         );
-        assert!(!rows.iter().any(|line| line.contains("Check 3")));
-        assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
+        assert!(!rows.iter().any(|line| line.contains("Check 4")));
+        assert_eq!(rows.iter().filter(|line| *line == "…").count(), 2);
         assert!(rows[23].starts_with("Model:"));
     }
 

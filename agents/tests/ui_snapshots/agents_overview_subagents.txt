@@ -7,14 +7,14 @@
     └ ○ Review results                           Ready              now  │ Parent task
     └ ● Check files                              Working         1m ago  │
                                                                          │ Background
-                                                                         │ ╭ Check files ────────────────────────────╮
-                                                                         │ │                                         │
-                                                                         │ ╰─────────────────────────────────────────╯
+                                                                         │ ╶ Check files ────────────────────────────╴
                                                                          │
                                                                          │ Project
                                                                          │ /tmp/project
                                                                          │
                                                                          │ Model: parent-model
+                                                                         │
+                                                                         │
                                                                          │
                                                                          │
                                                                          │

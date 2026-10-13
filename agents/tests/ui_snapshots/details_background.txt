@@ -7,9 +7,8 @@ Last message
 Checking the project
 
 Background
-╭ Run checks · 0s ─────────────────────╮
-│ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
-╰──────────────────────────────────────╯
+╶ Run checks · 0s ─────────────────────╴
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ╶ Waiting for output · 0s ─────────────╴
 
 Project
