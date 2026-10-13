@@ -104,6 +104,38 @@ pub(crate) fn truncate_line_with_ellipsis_if_overflow(
 }
 
 pub(super) fn abbreviate_path(path: &str, max_width: usize) -> String {
+    let path = abbreviate_directories(path, max_width);
+    if display_width(&path) <= max_width {
+        return path;
+    }
+
+    let separator = std::path::MAIN_SEPARATOR.to_string();
+    let mut components: Vec<String> = path.split(&separator).map(str::to_owned).collect();
+    let Some(last) = components
+        .iter()
+        .rposition(|component| !component.is_empty())
+    else {
+        return path;
+    };
+    let tail = components[last].clone();
+    let boundaries: Vec<usize> = tail
+        .grapheme_indices(true)
+        .map(|(index, _)| index)
+        .collect();
+    for &end in boundaries.iter().skip(1).rev() {
+        let abbreviated = format!("{}…", &tail[..end]);
+        components[last] = abbreviated;
+        let candidate = components.join(&separator);
+        if display_width(&candidate) <= max_width {
+            return candidate;
+        }
+    }
+    components.join(&separator)
+}
+
+/// Shrinks a path's directory components from the left until it fits, keeping
+/// the last component whole even when it still does not fit.
+fn abbreviate_directories(path: &str, max_width: usize) -> String {
     let path = super::formatting::format_directory_display(std::path::Path::new(path));
     if display_width(&path) <= max_width {
         return path;
@@ -141,21 +173,34 @@ pub(super) fn abbreviate_path(path: &str, max_width: usize) -> String {
             }
         }
     }
-
-    let tail = components[last].clone();
-    let boundaries: Vec<usize> = tail
-        .grapheme_indices(true)
-        .map(|(index, _)| index)
-        .collect();
-    for &end in boundaries.iter().skip(1).rev() {
-        let abbreviated = format!("{}…", &tail[..end]);
-        components[last] = abbreviated;
-        let candidate = components.join(&separator);
-        if display_width(&candidate) <= max_width {
-            return candidate;
-        }
-    }
     components.join(&separator)
+}
+
+/// Abbreviates the directories of absolute and home paths in prose, left to
+/// right, until the text fits or every path's directories are shrunk.
+pub(super) fn abbreviate_paths_in_text(text: &str, max_width: usize) -> String {
+    let mut overflow = display_width(text).saturating_sub(max_width);
+    if overflow == 0 {
+        return text.to_owned();
+    }
+    text.split(' ')
+        .map(|word| {
+            let path = word
+                .trim_start_matches(['`', '(', '"', '\''])
+                .trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':']);
+            let is_path =
+                (path.starts_with('/') || path.starts_with("~/")) && path[1..].contains('/');
+            if overflow == 0 || !is_path {
+                return word.to_owned();
+            }
+            let start = word.len() - word.trim_start_matches(['`', '(', '"', '\'']).len();
+            let width = display_width(path);
+            let shrunk = abbreviate_directories(path, width.saturating_sub(overflow));
+            overflow = overflow.saturating_sub(width.saturating_sub(display_width(&shrunk)));
+            format!("{}{shrunk}{}", &word[..start], &word[start + path.len()..])
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -220,6 +265,32 @@ mod tests {
         assert_eq!(
             abbreviate_path("e\u{301}cole/project", 10),
             "e\u{301}…/project"
+        );
+    }
+
+    #[test]
+    fn prose_paths_shrink_directories_only_as_far_as_the_overflow() {
+        let text = "Report: /private/tmp/claude-501/report.md 1. done";
+        assert_eq!(abbreviate_paths_in_text(text, display_width(text)), text);
+        assert_eq!(
+            abbreviate_paths_in_text(text, 44),
+            "Report: /p…/tmp/claude-501/report.md 1. done"
+        );
+        assert_eq!(
+            abbreviate_paths_in_text(text, 10),
+            "Report: /p…/t…/c…/report.md 1. done"
+        );
+    }
+
+    #[test]
+    fn prose_paths_keep_surrounding_punctuation_and_skip_non_paths() {
+        assert_eq!(
+            abbreviate_paths_in_text("see a/b/c and `/tmp/project/x.md`.", 1),
+            "see a/b/c and `/t…/p…/x.md`."
+        );
+        assert_eq!(
+            abbreviate_paths_in_text("/report.md and https://example.com/a/b", 1),
+            "/report.md and https://example.com/a/b"
         );
     }
 }
