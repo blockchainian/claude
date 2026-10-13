@@ -1,4 +1,4 @@
-# ABOUTME: CI for the plugins — the codex-manager node suite, the marketplace manifest suite, and the feature hooks and ship scripts.
+# ABOUTME: CI for the plugins — the codex-manager node suite, the marketplace manifest suite, and the feature ship scripts.
 name: test
 on:
   push:

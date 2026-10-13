@@ -43,14 +43,6 @@ ship, the plan template and memory.
 | `ux-autofixer` | Opus 5.5 medium | Fix the PR threads labelled `claude-code-ux` in the UX workstream's worktree, push, reply, resolve |
 | `ux-verifier` | Sonnet low | Drive a scripted UI scenario (browse or iOS simulator) and return a verdict with evidence paths |
 
-## Hooks
-
-| Hook | Event | What it does |
-|---|---|---|
-| `subagent-no-spawn` | `SubagentStart` | Tells every subagent it cannot spawn agents and that background commands never wake it |
-| `deny-foreground-poll` | `PreToolUse` Bash | Rewrites foreground waits (`until`/`while` loops, `tail -f`, `sleep` ≥ 10 s) to `run_in_background`; subagents exempt |
-| `deny-blocking-taskoutput` | `PreToolUse` TaskOutput | Denies blocking `TaskOutput`; the task notification re-invokes the session instead |
-
 ## What the plan carries
 
 Everything ship needs to know about the project is in the plan, so a repo
@@ -71,9 +63,7 @@ the production merge gate (step 8) whenever the branch has a PR.
 /plugin install feature@blockchainian
 ```
 
-Requires the [codex](../codex/README.md) plugin (its `codex-manager` MCP server) for the codex workstream, `jq`
-for the hooks and `uv` for `watch-ci.sh`. If the same hooks are also wired in `~/.claude/settings.json`,
-remove them there; otherwise each fires twice.
+Requires the [codex](../codex/README.md) plugin (its `codex-manager` MCP server) for the codex workstream and `uv` for `watch-ci.sh`.
 
 ## Tests
 
@@ -81,8 +71,7 @@ remove them there; otherwise each fires twice.
 npm run test:feature
 ```
 
-Runs `hooks/tests/hooks.test.sh` (every case in `hooks/tests/fixture/cases.jsonl` through the
-three hook scripts), `skills/ship/tests/plan-checkers.test.sh` (the two plan checkers against
+Runs `skills/ship/tests/plan-checkers.test.sh` (the two plan checkers against
 fixture plans in a throwaway repo), `skills/ship/tests/workstream.test.sh` (open, check,
 merge and base against a throwaway repo), `skills/ship/tests/watch-ci.test.sh` (the CI-watch
 poller against a stubbed `gh`), and `skills/retro/tests/retro.test.sh` (the retro

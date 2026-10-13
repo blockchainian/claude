@@ -93,7 +93,7 @@ on every machine that already has it, however much its code moved.
 ```
 npm test              # every suite
 npm run test:codex    # codex-manager against a fake app-server daemon
-npm run test:feature  # the feature plugin's hooks, plan checkers, workstream.sh, watch-ci and retro
+npm run test:feature  # the feature plugin's plan checkers, workstream.sh, watch-ci and retro
 npm run test:proxy    # the proxy plugin's capture logic and WireGuard key derivation
 npm run test:intel    # the intel plugin's skills; the render suites need Chrome and uv
 npm run test:web      # the heap-snapshot diff and the design check; needs uv
