@@ -96,6 +96,7 @@ struct LogStamp {
     modified: std::time::SystemTime,
     length: u64,
     count: usize,
+    filter: crate::sessions::log::Filter,
 }
 
 impl App {
@@ -284,11 +285,17 @@ impl App {
                 modified: metadata.modified()?,
                 length: metadata.len(),
                 count,
+                filter: self.view.log_filter.clone(),
             };
             if self.log_stamp.as_ref() == Some(&stamp) {
                 return Ok(None);
             }
-            Ok(Some((stamp, crate::sessions::log::tail(&path, count)?)))
+            let events = if self.view.log_filter == crate::sessions::log::Filter::default() {
+                crate::sessions::log::tail(&path, count)?
+            } else {
+                crate::sessions::log::tail_filtered(&path, count, &self.view.log_filter)?
+            };
+            Ok(Some((stamp, events)))
         };
         match load() {
             Ok(Some((mut stamp, events))) => {
@@ -505,7 +512,7 @@ mod tests {
     use crate::model::SessionStatus;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    fn fixture() -> (tempfile::TempDir, App) {
+    pub(super) fn fixture() -> (tempfile::TempDir, App) {
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("projects/project");
         std::fs::create_dir_all(&project).unwrap();
@@ -524,7 +531,7 @@ mod tests {
         (dir, app)
     }
 
-    fn key(app: &mut App, code: KeyCode) -> bool {
+    pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
         let quit = app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
         app.refresh_log(8);
         quit
@@ -604,7 +611,7 @@ mod tests {
         }
     }
 
-    fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) {
+    pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) {
         let area = ratatui::layout::Rect::new(0, 0, 120, 24);
         let mut buffer = ratatui::buffer::Buffer::empty(area);
         app.view.render(area, &mut buffer);
@@ -836,5 +843,71 @@ mod tests {
             KeyModifiers::CONTROL
         ))));
         assert!(app.launch.is_none());
+    }
+}
+
+#[cfg(test)]
+mod log_filters {
+    use super::tests::{fixture, key, scroll_log};
+    use crate::sessions::log::Kind;
+    use crossterm::event::KeyCode;
+    use crossterm::event::MouseEventKind::ScrollUp;
+
+    #[test]
+    fn tool_filter_loads_matching_count_and_caches_by_filter() {
+        let (_dir, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let mut records: Vec<serde_json::Value> =
+            include_str!("../tests/fixtures/transcript.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let mut tool = records[1].clone();
+        tool["message"]["id"] = "tool-call".into();
+        tool["message"]["content"] = serde_json::json!([{
+            "type":"tool_use", "id":"read", "name":"Read", "input":{"file_path":"src/main.rs"}
+        }]);
+        records.insert(1, tool);
+        let payload = records
+            .iter()
+            .map(|record| format!("{record}\n"))
+            .collect::<String>();
+        std::fs::write(&path, payload.repeat(20)).unwrap();
+        app.refresh_log(8);
+        key(&mut app, KeyCode::Char('t'));
+        assert_eq!(app.view.log.len(), 8);
+        assert!(app.view.log.iter().all(|event| event.kind == Kind::Tool));
+        scroll_log(&mut app, ScrollUp);
+        app.refresh_log(8);
+        assert_eq!(app.view.log.len(), 9);
+        assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
+        let cached = app.view.log.clone();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::fs::write(&path, payload.replace("main.rs", "test.rs").repeat(20)).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        app.refresh_log(8);
+        assert_eq!(app.view.log, cached);
+        for _ in 0..30 {
+            scroll_log(&mut app, ScrollUp);
+        }
+        app.refresh_log(8);
+        assert_eq!(app.view.log.len(), 20);
+        assert_eq!(app.view.log_scroll(), 12);
+        key(&mut app, KeyCode::Char('t'));
+        assert_eq!(app.view.log_scroll(), 0);
+        assert!(app.view.log.iter().any(|event| event.kind != Kind::Tool));
+        key(&mut app, KeyCode::Char('t'));
+        assert_eq!(app.view.log.len(), 8);
+        assert!(
+            app.view
+                .log
+                .iter()
+                .all(|event| event.path.as_deref() == Some("src/test.rs"))
+        );
     }
 }

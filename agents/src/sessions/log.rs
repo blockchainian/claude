@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use std::{io, path::Path};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     User,
     Model,
@@ -13,22 +13,47 @@ pub enum Kind {
     QueuedUser,
     QueuedSystem,
 }
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Filter(std::collections::HashSet<Kind>);
+
+impl Filter {
+    pub fn toggle(&mut self, kinds: &[Kind]) {
+        if kinds.iter().all(|kind| self.0.contains(kind)) {
+            self.0.retain(|kind| !kinds.contains(kind));
+        } else {
+            self.0.extend(kinds.iter().cloned());
+        }
+    }
+
+    pub fn matches(&self, kind: &Kind) -> bool {
+        self.0.is_empty() || self.0.contains(kind)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
     pub kind: Kind,
     pub body: String,
+    pub path: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     /// The preceding event's end, including hidden turn starters for Model replies.
     pub previous_end: Option<DateTime<Utc>>,
 }
 pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
+    tail_filtered(path, count, &Filter::default())
+}
+
+pub fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::Result<Vec<Event>> {
     if count == 0 {
         return Ok(Vec::new());
     }
     let mut file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();
-    let mut log = Log::default();
+    let mut log = Log {
+        filter: filter.clone(),
+        ..Log::default()
+    };
     super::transcript::walk_records(&mut file, len, Vec::new(), |record| {
         log.record(record, count)
     })?;
@@ -44,12 +69,15 @@ pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             _ => Some(event.started_at),
         };
     }
+    events.retain(|event| filter.matches(&event.kind));
     let skip = events.len().saturating_sub(count);
     Ok(events.into_iter().skip(skip).collect())
 }
 
 #[derive(Default)]
 struct Log {
+    filter: Filter,
+    matching: usize,
     entries: Vec<Entry>,
     results: std::collections::HashMap<String, ResultAt>,
     assistant: Option<String>,
@@ -71,7 +99,14 @@ struct ResultAt {
 
 impl Log {
     fn ready(&self, count: usize) -> bool {
-        self.entries.len() > count && self.batch.is_none_or(|index| index > count)
+        self.matching > count
+            && self.batch.is_none_or(|index| {
+                self.entries[..index]
+                    .iter()
+                    .filter(|entry| self.filter.matches(&entry.event.kind))
+                    .count()
+                    > count
+            })
     }
 
     fn record(&mut self, record: serde_json::Value, count: usize) -> bool {
@@ -217,10 +252,12 @@ impl Log {
 
     fn push(&mut self, kind: Kind, body: String, started_at: DateTime<Utc>) {
         let ended_at = matches!(kind, Kind::Tool).then_some(started_at);
+        self.matching += usize::from(self.filter.matches(&kind));
         self.entries.push(Entry {
             event: Event {
                 kind,
                 body,
+                path: None,
                 started_at,
                 ended_at,
                 previous_end: None,
@@ -242,11 +279,21 @@ impl Log {
         let result = block["id"].as_str().and_then(|id| self.results.get(id));
         let detail = ["description", "file_path", "prompt", "query", "message"]
             .iter()
-            .find_map(|key| input[key].as_str().filter(|text| !text.trim().is_empty()))
-            .unwrap_or("");
+            .find_map(|key| {
+                input[key]
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(|text| (*key, text))
+            });
+        let path = detail
+            .filter(|(key, _)| *key == "file_path")
+            .filter(|_| name != "Bash" && self.batch.is_none())
+            .filter(|_| result.is_none_or(|result| result.denial.is_none()))
+            .map(|(_, path)| path.to_owned());
+        let detail = detail.map(|(_, text)| text).unwrap_or("");
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
             format!("{name}: {reason}")
-        } else if detail.is_empty() {
+        } else if detail.is_empty() || path.is_some() {
             name.to_owned()
         } else if name == "Bash" {
             detail.to_owned()
@@ -254,12 +301,15 @@ impl Log {
             format!("{name} {detail}")
         };
         let mut entry = if let Some(index) = self.batch.take() {
-            self.entries.remove(index)
+            let entry = self.entries.remove(index);
+            self.matching -= usize::from(self.filter.matches(&entry.event.kind));
+            entry
         } else {
             Entry {
                 event: Event {
                     kind: Kind::Tool,
                     body: String::new(),
+                    path: None,
                     started_at: at,
                     ended_at: None,
                     previous_end: None,
@@ -275,6 +325,11 @@ impl Log {
             .strip_suffix(" *")
             .filter(|_| entry.background)
             .unwrap_or(&entry.event.body);
+        let body = match entry.event.path.take() {
+            Some(path) => format!("{body} {path}"),
+            None => body.to_owned(),
+        };
+        entry.event.path = path;
         entry.event.body = if body.is_empty() {
             call
         } else {
@@ -303,6 +358,7 @@ impl Log {
             entry.missing = true;
             entry.event.ended_at = None;
         }
+        self.matching += usize::from(self.filter.matches(&entry.event.kind));
         self.batch = Some(self.entries.len());
         self.entries.push(entry);
     }
@@ -904,6 +960,24 @@ mod tests {
     }
 
     #[test]
+    fn file_path_is_stored_separately_from_the_tool_name() {
+        for name in ["Read", "Edit", "Write"] {
+            let events = events_from(vec![tool(
+                1,
+                "call",
+                "file",
+                name,
+                json!({"file_path":"~/Users/project/src/main.rs"}),
+            )]);
+            assert_eq!(events[0].body, name);
+            assert_eq!(
+                events[0].path.as_deref(),
+                Some("~/Users/project/src/main.rs")
+            );
+        }
+    }
+
+    #[test]
     fn bash_description_replaces_only_the_exact_tool_name() {
         for (name, input, expected) in [
             (
@@ -1248,5 +1322,45 @@ mod tests {
             ["before", "after"]
         );
         assert_eq!(events[1].previous_end, Some(at(1)));
+    }
+}
+
+#[cfg(test)]
+mod log_filters {
+    use super::*;
+
+    #[test]
+    fn filtered_tail_keeps_batch_kinds_and_event_times() {
+        for payload in [
+            include_str!("../../tests/fixtures/automode_blocked.jsonl"),
+            include_str!("../../tests/fixtures/safety_check.jsonl"),
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        ] {
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), payload).unwrap();
+            let all = tail(file.path(), usize::MAX).unwrap();
+            for kinds in [
+                &[Kind::Model, Kind::Agent][..],
+                &[Kind::Tool],
+                &[Kind::Error, Kind::Denied],
+                &[Kind::User, Kind::QueuedUser],
+                &[],
+            ] {
+                let mut filter = Filter::default();
+                filter.toggle(kinds);
+                let matching: Vec<_> = all
+                    .iter()
+                    .filter(|event| filter.matches(&event.kind))
+                    .cloned()
+                    .collect();
+                for count in [0, 1, 2, 8] {
+                    let expected = &matching[matching.len().saturating_sub(count)..];
+                    assert_eq!(
+                        tail_filtered(file.path(), count, &filter).unwrap(),
+                        expected
+                    );
+                }
+            }
+        }
     }
 }

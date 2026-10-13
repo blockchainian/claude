@@ -75,6 +75,10 @@ impl View {
                 "View",
                 &[("tab/⇧tab", "Filter"), ("f3", "Search"), ("g", "Group")],
             ),
+            group(
+                "Log",
+                &[("m", "Model"), ("t", "Tool"), ("u", "User"), ("e", "Error")],
+            ),
         ];
         let mut lines = vec!["Task shortcuts".bold().into(), Line::default()];
         for line in super::shortcut_help::group_lines(groups, width) {

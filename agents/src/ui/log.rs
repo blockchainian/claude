@@ -20,9 +20,14 @@ impl View {
             return;
         }
         let scroll = self.log_scroll();
-        let end = self.log.len().saturating_sub(scroll);
+        let matching: Vec<_> = self
+            .log
+            .iter()
+            .filter(|event| self.log_filter.matches(&event.kind))
+            .collect();
+        let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
-        let events = &self.log[start..end];
+        let events = &matching[start..end];
         for (index, event) in events.iter().enumerate() {
             let last = scroll == 0 && index + 1 == events.len();
             let time = event_time(event, session, last, now);

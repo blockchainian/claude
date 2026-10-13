@@ -2179,7 +2179,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Model, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
-        kind, body: body.into(), started_at: now - Duration::seconds(age),
+        kind, body: body.into(), path: None, started_at: now - Duration::seconds(age),
         ended_at: end.map(|age| now - Duration::seconds(age)),
         previous_end: Some(now - Duration::seconds(age + 5)),
     }).collect();
@@ -2542,6 +2542,7 @@ fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
     let first = crate::sessions::log::Event {
         kind: crate::sessions::log::Kind::User,
         body: "Discarded event".into(),
+        path: None,
         started_at: now - Duration::seconds(180),
         ended_at: None,
         previous_end: None,
@@ -3031,4 +3032,150 @@ fn path_abbreviation_in_group_header_preserves_last_component() {
         .find(|row| row.starts_with('/'))
         .unwrap();
     assert_eq!(heading, "/U…/v…/C…/.w…/agents-panel  1");
+}
+
+mod log_path_abbrev {
+    use super::*;
+
+    #[test]
+    fn read_path_is_abbreviated_to_the_available_body_width() {
+        let (mut view, now) = log_fixture();
+        let mut event = view.log[2].clone();
+        event.body = "Read".into();
+        let home = std::env::var_os("HOME").expect("HOME");
+        event.path = Some(
+            std::path::Path::new(&home)
+                .join("Users/workspace/project/main.rs")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        view.log = vec![event];
+        let area = Rect::new(0, 0, 41, 3);
+        let mut buf = Buffer::empty(area);
+        view.render_log(area, &mut buf, now);
+        let row = buf
+            .content
+            .chunks(41)
+            .nth(1)
+            .unwrap()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(row.contains("Tool    Read ~/U…/w…/p…/main.rs"), "{row}");
+    }
+}
+
+mod log_filters {
+    use super::*;
+    use crate::sessions::log::Kind;
+
+    fn fixture() -> (View, chrono::DateTime<Utc>) {
+        let (mut view, now) = log_fixture();
+        let template = view.log[0].clone();
+        view.log = [
+            Kind::User,
+            Kind::Model,
+            Kind::Agent,
+            Kind::Session,
+            Kind::Tool,
+            Kind::Error,
+            Kind::Denied,
+            Kind::QueuedUser,
+            Kind::QueuedSystem,
+        ]
+        .into_iter()
+        .map(|kind| {
+            let mut event = template.clone();
+            event.body = format!("row-{kind:?}-body");
+            event.kind = kind;
+            event
+        })
+        .collect();
+        (view, now)
+    }
+
+    fn rows(view: &View, now: chrono::DateTime<Utc>) -> String {
+        let area = Rect::new(0, 0, 120, 15);
+        let mut buffer = Buffer::empty(area);
+        view.render_log(area, &mut buffer, now);
+        buffer.content.iter().map(|cell| cell.symbol()).collect()
+    }
+
+    #[test]
+    fn model_toggle_filters_render_and_restores_all_rows() {
+        let (mut view, now) = fixture();
+        let all = rows(&view, now);
+        view.viewport.borrow_mut().log_scroll = 3;
+        key(&mut view, KeyCode::Char('m'));
+        assert_eq!(view.log_scroll(), 0);
+        let filtered = rows(&view, now);
+        for event in &view.log {
+            assert_eq!(
+                filtered.contains(&event.body),
+                matches!(event.kind, Kind::Model | Kind::Agent)
+            );
+        }
+        key(&mut view, KeyCode::Char('m'));
+        assert_eq!(rows(&view, now), all);
+    }
+
+    #[test]
+    fn sets_combine_and_stay_selected_across_sessions() {
+        let (mut view, now) = fixture();
+        for hotkey in ['t', 'u', 'e'] {
+            key(&mut view, KeyCode::Char(hotkey));
+        }
+        let mut second = view.rows[0].clone();
+        second.id = "second".into();
+        let first = view.rows[0].clone();
+        view.set_sessions(vec![first, second], false);
+        let index = view.rows.iter().position(|row| row.id == "second").unwrap();
+        view.set_selected(index);
+        view.log_session = Some("second".into());
+        let filtered = rows(&view, now);
+        for event in &view.log {
+            assert_eq!(
+                filtered.contains(&event.body),
+                matches!(
+                    event.kind,
+                    Kind::Tool | Kind::User | Kind::QueuedUser | Kind::Error | Kind::Denied
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn overlays_do_not_toggle_filters() {
+        for opener in [
+            KeyCode::Char('?'),
+            KeyCode::Char('/'),
+            KeyCode::Char('r'),
+            KeyCode::Backspace,
+        ] {
+            let (mut view, now) = fixture();
+            key(&mut view, opener);
+            for hotkey in ['m', 't', 'u', 'e'] {
+                key(&mut view, KeyCode::Char(hotkey));
+            }
+            key(&mut view, KeyCode::Esc);
+            let rendered = rows(&view, now);
+            assert!(view.log.iter().all(|event| rendered.contains(&event.body)));
+        }
+    }
+
+    #[test]
+    fn help_has_log_column_right_of_view() {
+        let mut view = simple_fixture();
+        key(&mut view, KeyCode::Char('?'));
+        let rendered = screen(&view, 100, 24);
+        let headings = rendered
+            .lines()
+            .find(|line| line.contains("Navigate"))
+            .unwrap();
+        assert!(headings.find("Log").unwrap() > headings.find("View").unwrap());
+        assert_eq!(
+            rendered,
+            include_str!("../../tests/ui_snapshots/live_center_help_log.txt")
+        );
+    }
 }

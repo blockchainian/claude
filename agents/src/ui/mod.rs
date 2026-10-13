@@ -92,6 +92,7 @@ struct DeleteDialog {
 pub struct View {
     pub(crate) log: Vec<crate::sessions::log::Event>,
     pub(crate) log_session: Option<String>,
+    pub(crate) log_filter: crate::sessions::log::Filter,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
     selected: usize,
@@ -145,6 +146,7 @@ impl View {
         Self {
             log: Vec::new(),
             log_session: None,
+            log_filter: crate::sessions::log::Filter::default(),
             rows: Vec::new(),
             project_groups: Vec::new(),
             selected: usize::MAX,
