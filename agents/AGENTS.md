@@ -1,9 +1,9 @@
 # AGENTS.md
 
-> Read `README.md` before working here.  
-> Install the binary after every change; the user runs the `agents` on PATH, not the source.
+> Before working here, read `README.md`.  
+> The user runs the installed `agents`, never the source.
 
-`agents` is the Rust terminal dashboard that lists every Claude Code and Codex session on this machine in the layout of `codex agents`.
+This directory is `agents`, the Rust terminal dashboard that lists every Claude Code and Codex session on this machine in the layout of `codex agents`.
 
 ## Modules
 
@@ -13,10 +13,15 @@
 - src/sessions/ -- merged snapshots and filesystem notifications
 - src/log.rs -- task log events and filters
 - src/ui/ -- rendering, input and the task log panel
-- tests/fixtures/ -- real transcript and rollout payloads
-- tests/ui_snapshots/ -- rendered screens the UI tests compare against
+- tests/ -- real payload fixtures and rendered UI snapshots
+
+## Development
+
+- A rendering change updates the snapshots it moves in `tests/ui_snapshots/`.
 
 ## Checks
+
+The gate every change passes:
 
 - **tests**: `cargo test`
 - **lint**: `cargo clippy --all-targets`
@@ -24,10 +29,16 @@
 
 ## Tests
 
-- A rendering change updates the snapshots it moves in `tests/ui_snapshots/`.
+- Run the relevant tests.
+
+## Version control
+
+- Commit and push, then install the binary in the same turn.
 
 ## Tools
 
 ### Install
 
-- `cargo install --path . --locked` — installs the built binary to `~/.cargo/bin/agents`; run it in the same turn as the commit.
+> Install into `~/.cargo/bin`, the `agents` on PATH.
+
+- `cargo install --path . --locked` — builds and installs the current source
