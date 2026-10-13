@@ -6,18 +6,18 @@
   › ○ Parent task                                Ready           2m ago  │ Prompt
     └ ● Check files                              Working         1m ago  │ Parent task
     └ ○ Review results                           Ready              now  │
+                                                                         │ Background
+                                                                         │ ╭ Check files ────────────────────────────╮
+                                                                         │ │                                         │
+                                                                         │ ╰─────────────────────────────────────────╯
+                                                                         │ ╭ Review results ─────────────────────────╮
+                                                                         │ │                                         │
+                                                                         │ ╰─────────────────────────────────────────╯
+                                                                         │
                                                                          │ Project
                                                                          │ /tmp/project
                                                                          │
                                                                          │ Model: parent-model
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
-                                                                         │
                                                                          │
                                                                          │
                                                                          │

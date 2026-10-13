@@ -1,0 +1,18 @@
+Ready ○ Parent
+
+Prompt
+Parent
+
+Background
+╶ Run checks · 10s ────────────────────╴
+╭ Check files · 1m 5s ─────────────────╮
+│ Read files                           │
+╰──────────────────────────────────────╯
+╭ Review files · 2m 5s ────────────────╮
+│ Review complete                      │
+╰──────────────────────────────────────╯
+
+Project
+/tmp/project
+
+Model: Unknown

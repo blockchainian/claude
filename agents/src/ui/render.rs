@@ -375,10 +375,7 @@ impl View {
 
         // Latest activity and Last message share one slot and follow the
         // clock: whichever of the latest tool call and the last reply is newer.
-        let activity = session
-            .activity
-            .as_ref()
-            .filter(|activity| session.last_message_at.is_none_or(|at| activity.at > at));
+        let activity = session.latest_activity();
         if let Some(activity) = activity {
             let wrapped = textwrap::wrap(&activity.label, width);
             let mut label = wrapped
@@ -442,7 +439,8 @@ impl View {
             })
             .collect::<Vec<_>>();
         let mut background = items.len()..items.len();
-        if !boxes.is_empty() {
+        let subagents = self.subagents_for(session).collect::<Vec<_>>();
+        if !boxes.is_empty() || !subagents.is_empty() {
             items.extend([Line::default().into(), "Background".dim().into()]);
             let start = items.len();
             items.extend(
@@ -450,6 +448,7 @@ impl View {
                     .into_iter()
                     .map(|(task, output)| Item::Background { task, output }),
             );
+            items.extend(subagents.into_iter().map(Item::Subagent));
             background = start..items.len();
         }
 
@@ -580,6 +579,44 @@ impl View {
                 Item::Background { task, output } => {
                     render_background(task, output, now, item_area, &mut content);
                 }
+                Item::Subagent(child) => {
+                    let activity = child
+                        .latest_activity()
+                        .filter(|_| child.status == SessionStatus::Working);
+                    let (text, kind) = if let Some(activity) = activity {
+                        (
+                            Some(activity.label.as_str()),
+                            crate::sessions::log::Kind::Tool,
+                        )
+                    } else {
+                        (
+                            child.last_message.as_deref(),
+                            crate::sessions::log::Kind::Model,
+                        )
+                    };
+                    let body = truncate_line_with_ellipsis_if_overflow(
+                        Line::from(Span::styled(
+                            text.unwrap_or_default()
+                                .lines()
+                                .next()
+                                .unwrap_or_default()
+                                .to_owned(),
+                            style::log_styles(&kind).1,
+                        )),
+                        usize::from(item_area.width.saturating_sub(4)),
+                    );
+                    let elapsed = child
+                        .started_at
+                        .map(|at| format_duration((now - at).num_seconds().max(0)));
+                    render_background_box(
+                        &child.title,
+                        elapsed.as_deref(),
+                        Style::default(),
+                        vec![body],
+                        item_area,
+                        &mut content,
+                    );
+                }
             }
             offset += height;
         }
@@ -685,6 +722,7 @@ enum Item<'a> {
         /// Column offset, width and target of the pull request link.
         link: Option<(u16, u16, String)>,
     },
+    Subagent(&'a Session),
     Background {
         task: &'a crate::model::BackgroundTask,
         output: Vec<String>,
@@ -696,6 +734,7 @@ impl Item<'_> {
         match self {
             Self::Text(_) | Self::Link { .. } => 1,
             Self::Background { output, .. } => box_height(output.len()),
+            Self::Subagent(_) => box_height(1),
         }
     }
 }
@@ -715,19 +754,41 @@ fn render_background(
     box_area: Rect,
     buf: &mut Buffer,
 ) {
-    // One space keeps the title off the corner glyph on both sides.
     let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
     let description_style = if task.waits_for_codex {
         style::log_styles(&crate::sessions::log::Kind::Model).1
     } else {
         Style::default()
     };
-    let mut title = truncate_line_with_ellipsis_if_overflow(
-        Line::from(Span::styled(task.description.clone(), description_style)),
-        usize::from(box_area.width.saturating_sub(4))
-            .saturating_sub(elapsed.chars().count() + " · ".chars().count()),
+    render_background_box(
+        &task.description,
+        Some(&elapsed),
+        description_style,
+        output.into_iter().map(Line::from).collect(),
+        box_area,
+        buf,
     );
-    title.spans.extend([" · ".dim(), elapsed.dim(), " ".into()]);
+}
+
+fn render_background_box(
+    description: &str,
+    elapsed: Option<&str>,
+    description_style: Style,
+    output: Vec<Line<'static>>,
+    box_area: Rect,
+    buf: &mut Buffer,
+) {
+    // One space keeps the title off the corner glyph on both sides.
+    let mut title = truncate_line_with_ellipsis_if_overflow(
+        Line::from(Span::styled(description.to_owned(), description_style)),
+        usize::from(box_area.width.saturating_sub(4)).saturating_sub(
+            elapsed.map_or(0, |elapsed| elapsed.chars().count() + " · ".chars().count()),
+        ),
+    );
+    if let Some(elapsed) = elapsed {
+        title.spans.extend([" · ".dim(), elapsed.to_owned().dim()]);
+    }
+    title.spans.push(" ".into());
     // Without output the task is just its titled top rule, which has no
     // corner glyph, so the rule itself leads the title; half-width
     // glyphs at both ends keep it visually inside the box edges.
@@ -755,7 +816,7 @@ fn render_background(
         width: inner.width.saturating_sub(2),
         ..inner
     };
-    Paragraph::new(output.into_iter().map(Line::from).collect::<Vec<_>>()).render(inner, buf);
+    Paragraph::new(output).render(inner, buf);
 }
 
 /// Rows a background box takes: a bare top rule without output, a full box otherwise.

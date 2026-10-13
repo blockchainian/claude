@@ -457,6 +457,7 @@ impl Store {
             };
             let mut child = session(file.id, summary, Some(path), modified.into());
             child.parent = Some(parent.id.clone());
+            child.started_at = metadata.created().ok().map(DateTime::<Utc>::from);
             child.title = meta.title();
             child.prompt = child.title.clone();
             child.name = meta.name();
@@ -522,6 +523,7 @@ fn session(
         status: SessionStatus::Inactive,
         process: None,
         updated_at,
+        started_at: None,
         last_message: summary.last_message,
         last_message_at: summary.last_message_at,
         activity: summary.activity,

@@ -396,6 +396,70 @@ mod tests {
     }
 
     #[test]
+    fn discovered_subagent_start_time_survives_transcript_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = registry::tests::fixture(dir.path());
+        let parent = transcript(dir.path(), entry["sessionId"].as_str().unwrap(), 0);
+        fs::write(dir.path().join("sessions/live.json"), entry.to_string()).unwrap();
+        let agents = parent.with_extension("").join("subagents");
+        fs::create_dir_all(&agents).unwrap();
+        let path = agents.join("agent-x.jsonl");
+        fs::write(&path, pending()[0].to_string()).unwrap();
+        let created: chrono::DateTime<chrono::Utc> =
+            fs::metadata(&path).unwrap().created().unwrap().into();
+        let mut store = Store::new(dir.path().into());
+        for elapsed in [60, 120] {
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(
+                    std::time::SystemTime::from(created) + std::time::Duration::from_secs(elapsed),
+                )
+                .unwrap();
+            let snapshot = store.refresh();
+            let child = snapshot
+                .sessions
+                .iter()
+                .find(|s| s.parent.is_some())
+                .unwrap();
+            assert_eq!(child.started_at, Some(created));
+            assert_eq!(child.activity.as_ref().unwrap().label, "Check directory");
+        }
+        fs::write(agents.join("agent-x.meta.json"), r#"{"description":"Review files","name":"reviewer","taskKind":"in_process_teammate","teamName":"review"}"#).unwrap();
+        fs::create_dir_all(dir.path().join("teams/review")).unwrap();
+        fs::write(
+            dir.path().join("teams/review/config.json"),
+            r#"{"members":[{"name":"reviewer"}]}"#,
+        )
+        .unwrap();
+        let mut rows = pending();
+        let mut reply = text_end(json!("end_turn"), "Review complete").remove(0);
+        reply["timestamp"] = json!("2026-10-06T09:36:06Z");
+        rows.push(reply);
+        fs::write(
+            &path,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        let snapshot = store.refresh();
+        let child = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.parent.is_some())
+            .unwrap();
+        assert_eq!(child.status, SessionStatus::Ready);
+        assert_eq!(child.title, "Review files");
+        assert_eq!(child.last_message.as_deref(), Some("Review complete"));
+        assert!(child.latest_activity().is_none());
+        fs::write(&path, FIXTURE).unwrap();
+        assert!(store.refresh().sessions.iter().all(|s| s.parent.is_none()));
+    }
+
+    #[test]
     fn reads_at_most_one_tail_chunk_of_24_mb() {
         struct Counted {
             inner: std::io::Cursor<Vec<u8>>,

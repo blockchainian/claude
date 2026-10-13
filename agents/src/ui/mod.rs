@@ -256,9 +256,16 @@ impl View {
         self.grouping
     }
     pub fn has_background(&self) -> bool {
-        self.selected_row()
-            .is_some_and(|session| !session.background.is_empty())
+        self.selected_row().is_some_and(|session| {
+            !session.background.is_empty() || self.subagents_for(session).next().is_some()
+        })
     }
+    fn subagents_for<'a>(&'a self, session: &'a Session) -> impl Iterator<Item = &'a Session> {
+        self.rows.iter().filter(move |child| {
+            session.parent.is_none() && child.parent.as_deref() == Some(session.id.as_str())
+        })
+    }
+
     pub fn selected_id(&self) -> Option<&str> {
         self.selected_row().map(|s| s.id.as_str())
     }

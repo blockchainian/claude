@@ -94,6 +94,8 @@ pub struct Session {
     pub status: SessionStatus,
     pub process: Option<Process>,
     pub updated_at: DateTime<Utc>,
+    /// Creation time of the subagent transcript.
+    pub started_at: Option<DateTime<Utc>>,
     /// Latest assistant text, up to 512 chars.
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
@@ -112,6 +114,12 @@ impl Session {
             self.name.as_deref().unwrap_or(&self.title)
         };
         title.trim().lines().next().unwrap_or("Untitled session")
+    }
+
+    pub fn latest_activity(&self) -> Option<&Activity> {
+        self.activity
+            .as_ref()
+            .filter(|activity| self.last_message_at.is_none_or(|at| activity.at > at))
     }
 
     pub fn model_name(&self) -> &str {

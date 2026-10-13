@@ -565,6 +565,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         status,
         process: None,
         updated_at: Utc::now() - Duration::seconds(age),
+        started_at: None,
         last_message: None,
         last_message_at: None,
         activity: None,
@@ -1982,6 +1983,103 @@ fn details_background_boxes_tail_and_clip_output() {
     assert!(clipped.contains("Last message"));
     assert!(!clipped.contains("Project"));
     assert!(clipped.ends_with("\n…"));
+}
+
+#[test]
+fn details_background_includes_live_subagents() {
+    let now = Utc::now();
+    let mut parent = session("parent", "Parent", SessionStatus::Ready, 0);
+    let output = tempfile::NamedTempFile::new().unwrap();
+    parent.background.push(crate::model::BackgroundTask {
+        waits_for_codex: false,
+        description: "Run checks".into(),
+        output: output.path().into(),
+        started_at: now - Duration::seconds(10),
+    });
+    let mut worker = session("agent-worker", "Check files", SessionStatus::Working, 0);
+    worker.parent = Some(parent.id.clone());
+    worker.started_at = Some(now - Duration::seconds(65));
+    worker.activity = Some(crate::model::Activity {
+        label: "Read files\nextra line".into(),
+        at: now,
+    });
+    let mut idle = session("agent-idle", "Review files", SessionStatus::Ready, 0);
+    idle.parent = Some(parent.id.clone());
+    idle.started_at = Some(now - Duration::seconds(125));
+    idle.last_message = Some("Review complete\nextra line".into());
+    // Ready teammates can retain activity from their previous turn.
+    idle.activity = worker.activity.clone();
+    let mut other = worker.clone();
+    other.id = "agent-other".into();
+    other.parent = Some("other".into());
+    other.title = "Unrelated agent".into();
+    let mut nested = worker.clone();
+    nested.id = "agent-nested".into();
+    nested.parent = Some(worker.id.clone());
+    nested.title = "Nested agent".into();
+    let mut view = View::default();
+    view.set_sessions(vec![parent, worker, idle, other, nested], false);
+    view.selected = view.rows.iter().position(|s| s.id == "parent").unwrap();
+    assert!(view.has_background());
+    let area = Rect::new(0, 0, 40, 24);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, now);
+    let rendered = buf
+        .content
+        .chunks(40)
+        .map(|row| {
+            row.iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        rendered.trim_end_matches('\n'),
+        include_str!("../../tests/ui_snapshots/details_subagents.txt")
+    );
+    for (text, kind) in [
+        ("Read files", crate::sessions::log::Kind::Tool),
+        ("Review complete", crate::sessions::log::Kind::Model),
+    ] {
+        let (x, y) = rendered_cell(&rendered, text);
+        assert_eq!(buf[(x, y)].fg, style::log_styles(&kind).1.fg.unwrap());
+    }
+    view.selected = view
+        .rows
+        .iter()
+        .position(|s| s.id == "agent-worker")
+        .unwrap();
+    assert!(!view.has_background());
+    buf.reset();
+    view.render_details(area, &mut buf, now);
+    assert!(!buf.content.chunks(40).any(|row| {
+        row.iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+            .contains("Background")
+    }));
+    view.rows[view.selected]
+        .background
+        .push(crate::model::BackgroundTask {
+            waits_for_codex: false,
+            description: "Worker command".into(),
+            output: output.path().into(),
+            started_at: now,
+        });
+    assert!(view.has_background());
+    buf.reset();
+    view.render_details(area, &mut buf, now);
+    let text = buf
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("Worker command · 0s"));
+    assert!(!text.contains("Nested agent"));
+    assert!(!text.contains("Review files"));
 }
 
 #[test]
@@ -3683,7 +3781,13 @@ mod subagent_rows {
         let rendered = screen(&view, 120, 30);
         assert!(rendered.contains("Parent task"));
         assert!(rendered.contains("└ ● Check files"));
-        assert!(!rendered.contains("Review results"));
+        assert!(
+            !rendered.lines().any(|line| line
+                .split('│')
+                .next()
+                .unwrap()
+                .contains("Review results"))
+        );
         set_filter(&mut view, 2);
         assert!(ids(&view).is_empty());
         set_filter(&mut view, 1);
