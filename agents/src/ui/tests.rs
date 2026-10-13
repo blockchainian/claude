@@ -3832,26 +3832,77 @@ mod subagent_rows {
     }
 
     #[test]
-    fn renders_children_in_age_order_with_own_status() {
+    fn children_follow_same_newest_first_order_as_top_level_rows() {
+        let mut view = fixture();
+        let mut rows = view.rows.clone();
+        let mut middle = session("agent-middle", "Middle task", SessionStatus::Working, 30);
+        middle.parent = Some(session_key("parent"));
+        middle.updated_at = rows
+            .iter()
+            .find(|s| s.id == session_key("agent-newer"))
+            .unwrap()
+            .updated_at
+            - Duration::seconds(30);
+        rows.push(middle);
+        view.set_sessions(rows, false);
+        for grouping in [Grouping::Project, Grouping::Model] {
+            view.grouping = grouping;
+            assert_eq!(
+                ids(&view),
+                ["parent", "agent-newer", "agent-middle", "agent-older"]
+            );
+        }
+    }
+
+    #[test]
+    fn top_level_rows_and_siblings_break_update_ties_by_id() {
+        let now = "2026-10-13T12:00:00Z".parse().unwrap();
+        let mut rows = Vec::new();
+        for (id, status) in [
+            ("b", SessionStatus::Working),
+            ("a", SessionStatus::Ready),
+            ("c", SessionStatus::Working),
+        ] {
+            let mut row = session(id, id, status, 0);
+            row.updated_at = now;
+            rows.push(row);
+        }
+        let mut view = test_view(Grouping::Project, false);
+        for grouping in [Grouping::Project, Grouping::Model] {
+            view.grouping = grouping;
+            view.set_sessions(rows.clone(), false);
+            assert_eq!(ids(&view), ["a", "b", "c"]);
+            let mut children = rows.clone();
+            for child in &mut children {
+                child.parent = Some(session_key("parent"));
+            }
+            children.push(session("parent", "Parent", SessionStatus::Ready, 0));
+            view.set_sessions(children, false);
+            assert_eq!(ids(&view), ["parent", "a", "b", "c"]);
+        }
+    }
+
+    #[test]
+    fn renders_children_newest_first_with_own_status() {
         let view = fixture();
-        assert_eq!(ids(&view), ["parent", "agent-older", "agent-newer"]);
+        assert_eq!(ids(&view), ["parent", "agent-newer", "agent-older"]);
         let rendered = screen(&view, 120, 30);
         let parent = rendered
             .lines()
             .position(|l| l.contains("› ○ Parent task"))
             .unwrap();
         let lines: Vec<_> = rendered.lines().collect();
-        assert!(lines[parent + 1].contains("└ ● Check files"), "{rendered}");
-        assert!(lines[parent + 1].contains("Working"));
-        assert!(lines[parent + 2].contains("└ ○ Review results"));
-        assert!(lines[parent + 2].contains("Ready"));
+        assert!(lines[parent + 2].contains("└ ● Check files"), "{rendered}");
+        assert!(lines[parent + 2].contains("Working"));
+        assert!(lines[parent + 1].contains("└ ○ Review results"));
+        assert!(lines[parent + 1].contains("Ready"));
     }
 
     #[test]
     fn tabs_filter_each_status_and_refresh_keeps_child_selected() {
         let mut view = fixture();
         for (tab, expected) in [
-            (0, vec!["parent", "agent-older", "agent-newer"]),
+            (0, vec!["parent", "agent-newer", "agent-older"]),
             (1, vec!["parent", "agent-newer"]),
             (2, vec!["agent-older"]),
             (3, vec![]),
@@ -3873,7 +3924,7 @@ mod subagent_rows {
         view.set_sessions(rows, false);
         assert_eq!(view.status_filter, 1);
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
-        assert_eq!(ids(&view), ["agent-older", "agent-newer"]);
+        assert_eq!(ids(&view), ["agent-newer", "agent-older"]);
     }
 
     #[test]
@@ -3980,7 +4031,7 @@ mod subagent_rows {
                 let expected = if grouping == Grouping::Status {
                     vec!["agent-older", "parent", "agent-newer"]
                 } else {
-                    vec!["parent", "agent-older", "agent-newer"]
+                    vec!["parent", "agent-newer", "agent-older"]
                 };
                 assert_eq!(ids(&view), expected);
                 let entries = view.center_rows(&view.visible_indices(), grouping);
@@ -4015,7 +4066,7 @@ mod subagent_rows {
             let expected = if grouping == Grouping::Status {
                 vec!["agent-older", "other", "parent", "agent-newer"]
             } else {
-                vec!["other", "parent", "agent-older", "agent-newer"]
+                vec!["other", "parent", "agent-newer", "agent-older"]
             };
             assert_eq!(ids(&view), expected);
         }
@@ -4023,7 +4074,7 @@ mod subagent_rows {
         view.set_pinned(&[session_key("parent")]);
         assert_eq!(
             ids(&view),
-            ["parent", "agent-older", "agent-newer", "other"]
+            ["parent", "agent-newer", "agent-older", "other"]
         );
     }
 
@@ -4076,6 +4127,7 @@ mod subagent_rows {
     fn keyboard_and_mouse_select_child_and_show_details() {
         let mut view = fixture();
         key(&mut view, KeyCode::Down);
+        key(&mut view, KeyCode::Down);
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         let panel = details_panel(&view);
         let header: String = (0..panel.area.width)
@@ -4088,11 +4140,11 @@ mod subagent_rows {
         let (x, y) = rendered_cell(&rendered, "Review results");
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
         assert_eq!(view.selected_id(), Some(&session_key("agent-newer")));
-        view.handle_mouse(mouse(MouseEventKind::ScrollUp, x, y));
-        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, x, y));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
+        view.handle_mouse(mouse(MouseEventKind::ScrollUp, x, y));
         assert_eq!(view.selected_id(), Some(&session_key("agent-newer")));
-        key(&mut view, KeyCode::Up);
+        key(&mut view, KeyCode::Down);
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
     }
 
@@ -4151,7 +4203,7 @@ mod subagent_rows {
             let mut buf = Buffer::empty(area);
             view.render_center_rows(area, &mut buf, "2026-10-13T12:00:00Z".parse().unwrap());
             let row = (0..area.height)
-                .find(|&y| buf[(2, y)].symbol() == "└")
+                .find(|&y| buf[(2, y)].symbol() == "└" && buf[(4, y)].symbol() == "●")
                 .unwrap();
             assert_eq!(buf[(4, row)].symbol(), "●");
             assert_eq!(buf[(6, row)].symbol(), "界");
@@ -4178,6 +4230,7 @@ mod subagent_actions {
 
     fn fixture() -> View {
         let mut view = subagent_rows::fixture();
+        key(&mut view, KeyCode::Down);
         key(&mut view, KeyCode::Down);
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         view

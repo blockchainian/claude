@@ -20,6 +20,7 @@ pub use style::set_light_background;
 
 use crate::model::{Action, Grouping, Session, SessionStatus};
 use crate::providers::{Capabilities, ProviderId, SessionKey};
+use chrono::{DateTime, Utc};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -151,6 +152,10 @@ impl ProjectGroup {
     }
 }
 
+fn session_order(session: &Session) -> (std::cmp::Reverse<DateTime<Utc>>, &SessionKey) {
+    (std::cmp::Reverse(session.updated_at), &session.id)
+}
+
 impl View {
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
@@ -192,8 +197,7 @@ impl View {
         sessions.sort_by(|a, b| {
             a.status
                 .cmp(&b.status)
-                .then_with(|| b.updated_at.cmp(&a.updated_at))
-                .then_with(|| a.id.cmp(&b.id))
+                .then_with(|| session_order(a).cmp(&session_order(b)))
         });
         self.project_groups = sessions.iter().map(ProjectGroup::for_session).collect();
         self.rows = sessions;
@@ -348,7 +352,7 @@ impl View {
             }
         }
         for siblings in children.values_mut() {
-            siblings.sort_by_key(|&index| (self.rows[index].updated_at, &self.rows[index].id));
+            siblings.sort_by_key(|&index| session_order(&self.rows[index]));
         }
         let (mut pinned, mut visible): (Vec<_>, Vec<_>) = self
             .rows
@@ -368,19 +372,12 @@ impl View {
             .partition(|i| self.is_pinned(*i));
         pinned.sort_by_key(|i| self.pinned.iter().position(|id| *id == self.rows[*i].id));
         match self.grouping {
-            Grouping::Project => visible.sort_by_key(|i| {
-                (
-                    &self.project_groups[*i].key,
-                    std::cmp::Reverse(self.rows[*i].updated_at),
-                )
-            }),
+            Grouping::Project => visible
+                .sort_by_key(|i| (&self.project_groups[*i].key, session_order(&self.rows[*i]))),
             Grouping::Status => {}
-            Grouping::Model => visible.sort_by_key(|i| {
-                (
-                    self.rows[*i].model_name(),
-                    std::cmp::Reverse(self.rows[*i].updated_at),
-                )
-            }),
+            Grouping::Model => {
+                visible.sort_by_key(|i| (self.rows[*i].model_name(), session_order(&self.rows[*i])))
+            }
         }
         pinned.extend(visible);
         let mut rows = Vec::new();

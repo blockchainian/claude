@@ -4,8 +4,8 @@
       Tasks                                      Status         Updated  │ Working · Check files
   /tmp/project  3                                                        │
     ○ Parent task                                Ready           2m ago  │ Prompt
-  › └ ● Check files                              Working         1m ago  │ Check files
-    └ ○ Review results                           Ready              now  │
+    └ ○ Review results                           Ready              now  │ Check files
+  › └ ● Check files                              Working         1m ago  │
                                                                          │ Project
                                                                          │ /tmp/child-project
                                                                          │
