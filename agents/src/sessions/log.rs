@@ -245,6 +245,8 @@ impl Log {
             format!("{name} denied: {reason}")
         } else if detail.is_empty() {
             name.to_owned()
+        } else if name == "Bash" {
+            detail.to_owned()
         } else {
             format!("{name} {detail}")
         };
@@ -831,6 +833,62 @@ mod tests {
     }
 
     #[test]
+    fn bash_description_replaces_only_the_exact_tool_name() {
+        for (name, input, expected) in [
+            (
+                "Bash",
+                json!({"description":"看 dot 仓库和引用位置"}),
+                "看 dot 仓库和引用位置",
+            ),
+            ("Bash", json!({}), "Bash"),
+            ("Bash", json!({"description":" \n "}), "Bash"),
+            (
+                "Read",
+                json!({"description":"inspect files"}),
+                "Read inspect files",
+            ),
+            (
+                "bash",
+                json!({"description":"inspect files"}),
+                "bash inspect files",
+            ),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file, "{}", tool(1, "call", "a", name, input)).unwrap();
+            let events = tail(file.path(), 1).unwrap();
+            assert_eq!(events[0].kind, Kind::Tool);
+            assert_eq!(events[0].body, expected);
+        }
+    }
+
+    #[test]
+    fn parallel_calls_apply_bash_description_per_call() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for r in [
+            tool(
+                1,
+                "batch",
+                "a",
+                "Bash",
+                json!({"description":"inspect files"}),
+            ),
+            tool(2, "batch", "b", "Bash", json!({})),
+            tool(
+                3,
+                "batch",
+                "c",
+                "Read",
+                json!({"description":"read config"}),
+            ),
+        ] {
+            writeln!(file, "{r}").unwrap();
+        }
+        let events = tail(file.path(), 1).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].body, "inspect files，Bash，Read read config");
+    }
+
+    #[test]
     fn parallel_calls_without_details_have_no_separator_after_names() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         for r in [
@@ -883,7 +941,7 @@ mod tests {
         assert_eq!(events[2].body, "Read src/main.rs，Grep needle");
         assert_eq!(events[2].started_at, at(30));
         assert_eq!(events[2].ended_at, Some(at(35)));
-        assert_eq!(events[3].body, "Bash build *");
+        assert_eq!(events[3].body, "build *");
         assert_eq!(events[3].started_at, at(36));
         assert_eq!(events[3].ended_at, Some(at(38)));
         assert_eq!(events[4].body, "next task");
