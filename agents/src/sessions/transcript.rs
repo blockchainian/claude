@@ -203,6 +203,14 @@ impl Background {
                     .or_else(|| block["input"]["command"].as_str()?.lines().next())
             {
                 self.tasks.push(BackgroundTask {
+                    waits_for_codex: block["input"]["command"]
+                        .as_str()
+                        .and_then(|command| shell_words::split(command).ok())
+                        .is_some_and(|argv| {
+                            argv.get(1).is_some_and(|path| {
+                                Path::new(path).ends_with("codex-manager/manager.mjs")
+                            }) && argv.get(2).is_some_and(|argument| argument == "await")
+                        }),
                     description: description.to_owned(),
                     output,
                     started_at,
@@ -565,8 +573,17 @@ mod tests {
     }
 
     fn background_start(file: &mut impl Write, task: &str, description: Option<&str>, moved: bool) {
-        let mut input =
-            serde_json::json!({"command": "sleep 5\necho done", "description": description});
+        background_command(file, task, description, moved, "sleep 5\necho done");
+    }
+
+    fn background_command(
+        file: &mut impl Write,
+        task: &str,
+        description: Option<&str>,
+        moved: bool,
+        command: &str,
+    ) {
+        let mut input = serde_json::json!({"command": command, "description": description});
         if !moved {
             input["run_in_background"] = true.into();
         }
@@ -622,6 +639,33 @@ mod tests {
         );
         background_finish(&mut file, "b1");
         assert!(summary(&file).background.is_empty());
+    }
+
+    #[test]
+    fn background_task_detects_codex_wait_from_shell_arguments() {
+        for (command, expected) in [
+            (
+                r#"node "/Users/x/.claude/plugins/cache/blockchainian/codex/0.20.2/codex-manager/manager.mjs" await --thread 01a1336e-ac44-7562-b8b3-5e6d9d536968"#,
+                true,
+            ),
+            (r#"node "/some path/codex-manager/manager.mjs" await"#, true),
+            ("node 'relative/codex-manager/manager.mjs' await", true),
+            ("sleep 5", false),
+            ("node /tmp/other/manager.mjs await", false),
+            ("node /tmp/codex-manager/manager.mjs send", false),
+            ("node /tmp/not-codex-manager/manager.mjs await", false),
+            ("node /tmp/codex-manager/manager.mjs", false),
+            (r#"node "/tmp/codex-manager/manager.mjs await"#, false),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            idle_prompt(&mut file);
+            background_command(&mut file, "b1", Some("Wait for Codex"), false, command);
+            let tasks = summary(&file).background;
+            assert_eq!(tasks.len(), 1);
+            assert_eq!(tasks[0].waits_for_codex, expected, "{command}");
+            background_finish(&mut file, "b1");
+            assert!(summary(&file).background.is_empty());
+        }
     }
 
     #[test]

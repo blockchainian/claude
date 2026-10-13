@@ -304,6 +304,7 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
     let mut view = overflowing_details();
     let selected = &mut view.rows[view.selected];
     selected.background.push(crate::model::BackgroundTask {
+        waits_for_codex: false,
         description: "Run checks".into(),
         output: output.path().into(),
         started_at: selected.updated_at,
@@ -1803,11 +1804,13 @@ fn details_background_boxes_tail_and_clip_output() {
     row.last_message = Some("Checking the project".into());
     row.background = vec![
         crate::model::BackgroundTask {
+            waits_for_codex: false,
             description: "Run checks".into(),
             output: output.path().into(),
             started_at: Utc::now(),
         },
         crate::model::BackgroundTask {
+            waits_for_codex: false,
             description: "Waiting for output".into(),
             output: output.path().with_extension("missing"),
             started_at: Utc::now(),
@@ -1839,6 +1842,7 @@ fn background_box_dims_border_but_not_title_or_output() {
     writeln!(output, "tick").unwrap();
     let mut row = session("background", "Background task", SessionStatus::Ready, 120);
     row.background.push(crate::model::BackgroundTask {
+        waits_for_codex: false,
         description: "Run checks".into(),
         output: output.path().into(),
         started_at: Utc::now(),
@@ -1860,12 +1864,61 @@ fn background_box_dims_border_but_not_title_or_output() {
 }
 
 #[test]
+fn details_background_codex_wait_uses_model_color_only_for_description() {
+    use ratatui::style::Modifier;
+    use std::io::Write;
+    for has_output in [false, true] {
+        for waits_for_codex in [false, true] {
+            let mut output = tempfile::NamedTempFile::new().unwrap();
+            if has_output {
+                writeln!(output, "tick").unwrap();
+            }
+            let mut row = session("background", "Background task", SessionStatus::Ready, 120);
+            row.background.push(crate::model::BackgroundTask {
+                waits_for_codex,
+                description: "Wait for Codex".into(),
+                output: output.path().into(),
+                started_at: Utc::now(),
+            });
+            let mut view = View::default();
+            view.set_sessions(vec![row], false);
+            let area = Rect::new(0, 0, 40, 20);
+            let mut buf = Buffer::empty(area);
+            view.render_details(area, &mut buf, Utc::now());
+            let top = (0..area.height)
+                .find(|y| buf[(2, *y)].symbol() == "W")
+                .expect("background description");
+            let expected = if waits_for_codex {
+                Color::Yellow
+            } else {
+                Color::Reset
+            };
+            for (offset, character) in "Wait for Codex".chars().enumerate() {
+                let cell = &buf[(2 + offset as u16, top)];
+                assert_eq!(cell.symbol(), character.to_string());
+                assert_eq!(
+                    cell.fg, expected,
+                    "wait={waits_for_codex}, output={has_output}"
+                );
+                assert!(!cell.modifier.contains(Modifier::DIM));
+            }
+            for x in 16..21 {
+                let cell = &buf[(x, top)];
+                assert_eq!(cell.fg, Color::Reset);
+                assert!(cell.modifier.contains(Modifier::DIM));
+            }
+        }
+    }
+}
+
+#[test]
 fn background_task_whose_output_ended_is_hidden() {
     use std::io::Write;
     let mut output = tempfile::NamedTempFile::new().unwrap();
     writeln!(output, "tick\n\n[exited with code 0]").unwrap();
     let mut row = session("background", "Background task", SessionStatus::Ready, 120);
     row.background.push(crate::model::BackgroundTask {
+        waits_for_codex: false,
         description: "Run checks".into(),
         output: output.path().into(),
         started_at: Utc::now(),
@@ -1879,6 +1932,7 @@ fn background_task_whose_output_ended_is_hidden() {
 fn background_redraw_follows_selection() {
     let mut first = session("first", "First", SessionStatus::Ready, 0);
     first.background.push(crate::model::BackgroundTask {
+        waits_for_codex: false,
         description: "Running".into(),
         output: "/tmp/unused.output".into(),
         started_at: Utc::now(),

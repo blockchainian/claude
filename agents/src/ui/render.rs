@@ -544,8 +544,13 @@ fn render_background(
 ) {
     // One space keeps the title off the corner glyph on both sides.
     let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
+    let description_style = if task.waits_for_codex {
+        style::log_styles(&crate::sessions::log::Kind::Model).1
+    } else {
+        Style::default()
+    };
     let mut title = truncate_line_with_ellipsis_if_overflow(
-        Line::from(task.description.clone()),
+        Line::from(Span::styled(task.description.clone(), description_style)),
         usize::from(box_area.width.saturating_sub(4))
             .saturating_sub(elapsed.chars().count() + " · ".chars().count()),
     );
