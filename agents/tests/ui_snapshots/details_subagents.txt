@@ -8,9 +8,6 @@ Background
 ╭ Check files · 1m 5s ─────────────────╮
 │ Read files                           │
 ╰──────────────────────────────────────╯
-╭ Review files · 2m 5s ────────────────╮
-│ Review complete                      │
-╰──────────────────────────────────────╯
 
 Project
 /tmp/project

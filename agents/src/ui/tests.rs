@@ -1987,7 +1987,7 @@ fn details_background_boxes_tail_and_clip_output() {
 }
 
 #[test]
-fn details_background_includes_live_subagents() {
+fn details_background_includes_only_working_subagents() {
     let now = Utc::now();
     let mut parent = session("parent", "Parent", SessionStatus::Ready, 0);
     let output = tempfile::NamedTempFile::new().unwrap();
@@ -2041,13 +2041,14 @@ fn details_background_includes_live_subagents() {
         rendered.trim_end_matches('\n'),
         include_str!("../../tests/ui_snapshots/details_subagents.txt")
     );
-    for (text, kind) in [
-        ("Read files", crate::sessions::log::Kind::Tool),
-        ("Review complete", crate::sessions::log::Kind::Model),
-    ] {
-        let (x, y) = rendered_cell(&rendered, text);
-        assert_eq!(buf[(x, y)].fg, style::log_styles(&kind).1.fg.unwrap());
-    }
+    let (x, y) = rendered_cell(&rendered, "Read files");
+    assert_eq!(
+        buf[(x, y)].fg,
+        style::log_styles(&crate::sessions::log::Kind::Tool)
+            .1
+            .fg
+            .unwrap()
+    );
     view.selected = view
         .rows
         .iter()

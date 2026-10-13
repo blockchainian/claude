@@ -264,7 +264,9 @@ impl View {
     }
     fn subagents_for<'a>(&'a self, session: &'a Session) -> impl Iterator<Item = &'a Session> {
         self.rows.iter().filter(move |child| {
-            session.parent.is_none() && child.parent.as_deref() == Some(session.id.as_str())
+            session.parent.is_none()
+                && child.parent.as_deref() == Some(session.id.as_str())
+                && child.status == SessionStatus::Working
         })
     }
 
