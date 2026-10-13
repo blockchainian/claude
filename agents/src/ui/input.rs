@@ -45,13 +45,23 @@ impl View {
                     self.set_filter(idx);
                 } else if let Some(entry) = entry {
                     let entries = self.center_rows(&self.selectable_indices(), self.grouping);
-                    let selected = match entries.get(entry) {
+                    let task = match entries.get(entry) {
                         Some(super::navigation::CenterRow::Task(index)) => *index,
-                        Some(super::navigation::CenterRow::ShowMore) => usize::MAX,
+                        Some(super::navigation::CenterRow::ShowMore) => {
+                            self.set_selected(usize::MAX);
+                            return self.activate();
+                        }
                         _ => return None,
                     };
-                    self.set_selected(selected);
-                    return self.activate();
+                    let now = Instant::now();
+                    let double = self.last_click.take().is_some_and(|(last, at)| {
+                        last == task && now.duration_since(at) < DOUBLE_CLICK_INTERVAL
+                    });
+                    self.set_selected(task);
+                    if double {
+                        return self.activate();
+                    }
+                    self.last_click = Some((task, now));
                 }
             }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {

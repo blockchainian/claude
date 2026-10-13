@@ -36,6 +36,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
     path::PathBuf,
+    time::{Duration, Instant},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -53,6 +54,9 @@ const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     ("Needs you", &[SessionStatus::NeedsInput]),
     ("Inactive", &[SessionStatus::Inactive]),
 ];
+
+/// Longest gap between two clicks on one task that still opens it.
+const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
 
 fn tab_for_status(status: Option<SessionStatus>, current_tab: usize) -> usize {
     match status {
@@ -122,6 +126,8 @@ pub struct View {
     has_more: bool,
     notice: Option<String>,
     viewport: RefCell<Viewport>,
+    /// Task row and time of the last left click in the list.
+    last_click: Option<(usize, Instant)>,
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
 }
@@ -184,6 +190,7 @@ impl View {
             has_more: false,
             notice: None,
             viewport: RefCell::new(Viewport::default()),
+            last_click: None,
             title_slots: RefCell::new(HashMap::new()),
         }
     }
