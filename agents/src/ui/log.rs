@@ -87,7 +87,9 @@ fn render_event(
     } else {
         Style::default().dim()
     };
-    Line::from(Span::styled(time.to_owned(), time_style)).render(time_area, buf);
+    Line::from(Span::styled(time.to_owned(), time_style))
+        .right_aligned()
+        .render(time_area, buf);
     let content_width = width.saturating_sub(time_width + 1);
     if content_width == 0 {
         return;
