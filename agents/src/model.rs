@@ -81,7 +81,7 @@ pub struct Session {
     pub status: SessionStatus,
     pub process: Option<Process>,
     pub updated_at: DateTime<Utc>,
-    /// Creation time of the subagent transcript.
+    /// Start of the session or thread, independent of its process and activity.
     pub started_at: Option<DateTime<Utc>>,
     /// Latest assistant text, up to 512 chars.
     pub last_message: Option<String>,

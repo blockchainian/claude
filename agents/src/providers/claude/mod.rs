@@ -202,6 +202,7 @@ pub struct ClaudeProvider {
     config_dir: PathBuf,
     index: HashMap<String, Transcript>,
     summaries: HashMap<PathBuf, CachedSummary>,
+    starts: HashMap<PathBuf, Option<DateTime<Utc>>>,
     background: background::Tasks,
 }
 
@@ -211,6 +212,7 @@ impl ClaudeProvider {
             config_dir,
             index: HashMap::new(),
             summaries: HashMap::new(),
+            starts: HashMap::new(),
             background: background::Tasks::default(),
         }
     }
@@ -396,8 +398,22 @@ impl ClaudeProvider {
             } else {
                 transcript::read
             };
+            let start = match self.starts.get(&file.path).copied() {
+                Some(start) => start,
+                None => match transcript::start_time(&file.path) {
+                    Ok(start) => {
+                        self.starts.insert(file.path.clone(), start);
+                        start
+                    }
+                    Err(error) => {
+                        eprintln!("agents: Claude transcript start: {error}");
+                        return None;
+                    }
+                },
+            };
             match read(&file.path, file.len) {
-                Ok(summary) => {
+                Ok(mut summary) => {
+                    summary.started_at = start;
                     self.summaries.insert(
                         file.path.clone(),
                         CachedSummary {
@@ -472,7 +488,6 @@ impl ClaudeProvider {
             };
             let mut child = session(file.id, summary, Some(path), modified.into());
             child.parent = Some(parent.id.clone());
-            child.started_at = metadata.created().ok().map(DateTime::<Utc>::from);
             child.title = meta.title();
             child.prompt = child.title.clone();
             child.name = meta.name();
@@ -625,7 +640,7 @@ fn session(
         status: SessionStatus::Inactive,
         process: None,
         updated_at,
-        started_at: None,
+        started_at: summary.started_at,
         last_message: summary.last_message,
         last_message_at: summary.last_message_at,
         activity: summary.activity,
@@ -652,6 +667,51 @@ mod tests {
         file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000 + age))
             .unwrap();
         path
+    }
+
+    #[test]
+    fn transcript_start_is_cached_across_refreshes() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "00000000-0000-4000-8000-000000000001";
+        let path = transcript(dir.path(), id, 0);
+        fs::write(
+            &path,
+            include_str!("../../../tests/fixtures/claude-start.jsonl"),
+        )
+        .unwrap();
+        let expected = Some("2026-10-06T16:39:12.595Z".parse().unwrap());
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        assert_eq!(provider.refresh(1).sessions[0].started_at, expected);
+        // Re-reading this head would now select birthtime.
+        fs::write(
+            &path,
+            include_str!("../../../tests/fixtures/claude-start-fork.jsonl"),
+        )
+        .unwrap();
+        assert_eq!(provider.refresh(1).sessions[0].started_at, expected);
+    }
+
+    #[test]
+    fn fork_start_uses_birthtime_and_title_only_stays_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "00000000-0000-4000-8000-000000000001";
+        let path = transcript(dir.path(), id, 0);
+        fs::write(
+            &path,
+            include_str!("../../../tests/fixtures/claude-start-fork.jsonl"),
+        )
+        .unwrap();
+        let expected = fs::metadata(&path)
+            .unwrap()
+            .created()
+            .ok()
+            .map(DateTime::<Utc>::from);
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        assert_eq!(provider.refresh(1).sessions[0].started_at, expected);
+        let title = FIXTURE.lines().nth(2).unwrap();
+        let other = transcript(dir.path(), "00000000-0000-4000-8000-000000000002", 1);
+        fs::write(other, title).unwrap();
+        assert_eq!(provider.refresh(1).sessions[0].started_at, None);
     }
 
     #[test]

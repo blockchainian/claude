@@ -1855,10 +1855,81 @@ mod details_header {
     use super::*;
 
     #[test]
+    fn elapsed_wall_time_follows_redraw_for_every_row_kind() {
+        let now = "2026-10-13T12:00:00Z"
+            .parse::<chrono::DateTime<Utc>>()
+            .unwrap();
+        for provider in [ProviderId::Claude, ProviderId::Codex] {
+            for child in [false, true] {
+                for (age, expected) in [
+                    (-1, "0s"),
+                    (0, "0s"),
+                    (45, "45s"),
+                    (60, "1m 0s"),
+                    (725, "12m 5s"),
+                    (3599, "59m 59s"),
+                    (3600, "1h 0m"),
+                    (11520, "3h 12m"),
+                    (86399, "23h 59m"),
+                    (86400, "1d 0h"),
+                    (183600, "2d 3h"),
+                ] {
+                    let mut row = session("header", "Fix login bug", SessionStatus::Working, 0);
+                    row.id.provider = provider;
+                    row.parent = child.then(|| SessionKey {
+                        provider: ProviderId::Claude,
+                        id: "parent".into(),
+                    });
+                    row.started_at = Some(now - Duration::seconds(age));
+                    let mut view = test_view(Grouping::Project, true);
+                    let id = row.id.clone();
+                    let parent = session("parent", "Parent", SessionStatus::Ready, 0);
+                    view.set_sessions(vec![parent, row], false);
+                    view.selected = view.rows.iter().position(|row| row.id == id).unwrap();
+                    let area = Rect::new(0, 0, 80, 15);
+                    for advance in [0, 86401] {
+                        let mut buf = Buffer::empty(area);
+                        view.render_details(area, &mut buf, now + Duration::seconds(advance));
+                        let header = buf.content[..80]
+                            .iter()
+                            .map(|c| c.symbol())
+                            .collect::<String>();
+                        if advance == 0 {
+                            assert_eq!(
+                                header.trim_end(),
+                                format!("Working ● Fix login bug · {expected}")
+                            );
+                        } else {
+                            assert!(header.contains("d "), "{header}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn status_precedes_title() {
         let row = session("header", "Header task", SessionStatus::Working, 0);
         let rendered = queued_details(row, 15);
         assert_eq!(rendered.lines().next().unwrap(), "Working ● Header task");
+    }
+
+    #[test]
+    fn truncated_title_keeps_elapsed_time() {
+        let now = "2026-10-13T12:00:00Z".parse().unwrap();
+        let mut row = session(
+            "header",
+            "A very long session title that exceeds the panel width",
+            SessionStatus::Working,
+            0,
+        );
+        row.prompt = "Current prompt".into();
+        row.started_at = Some(now - Duration::seconds(11520));
+        assert_eq!(
+            details_at(row, 15, now),
+            include_str!("../../tests/ui_snapshots/details_header_elapsed.txt")
+        );
     }
 
     #[test]
@@ -1957,11 +2028,15 @@ fn details_prompt_truncates_long_queued_entry() {
 }
 
 fn queued_details(row: Session, height: u16) -> String {
+    details_at(row, height, Utc::now())
+}
+
+fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
     let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![row], false);
     let area = Rect::new(0, 0, 40, height);
     let mut buf = Buffer::empty(area);
-    view.render_details(area, &mut buf, Utc::now());
+    view.render_details(area, &mut buf, now);
     buf.content
         .chunks(40)
         .map(|row| {

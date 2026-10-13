@@ -229,7 +229,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         status: SessionStatus::Inactive,
         process: None,
         updated_at,
-        started_at: time(row, "created_at")?,
+        started_at: column::<i64>(row, "created_at_ms")?.and_then(DateTime::from_timestamp_millis),
         last_message: None,
         last_message_at: None,
         activity: None,

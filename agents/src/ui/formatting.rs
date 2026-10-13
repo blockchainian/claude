@@ -60,6 +60,15 @@ pub(super) fn format_relative_time(reference: DateTime<Utc>, ts: Option<DateTime
         format!("{}d ago", seconds / 86400)
     }
 }
+pub(super) fn format_session_duration(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    if seconds >= 86400 {
+        format!("{}d {}h", seconds / 86400, seconds % 86400 / 3600)
+    } else {
+        format_duration(seconds)
+    }
+}
+
 pub(super) fn format_duration(seconds: i64) -> String {
     if seconds < 60 {
         format!("{seconds}s")

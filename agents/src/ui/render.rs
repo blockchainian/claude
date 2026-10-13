@@ -1,4 +1,6 @@
-use super::formatting::{format_duration, format_relative_time, tail_lines};
+use super::formatting::{
+    format_duration, format_relative_time, format_session_duration, tail_lines,
+};
 use super::hints::hint_line;
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
@@ -319,7 +321,13 @@ impl View {
         // Sections top to bottom: title, prompt, the newer of latest activity
         // and last message, background, needs attention, project, branch, model.
         let mut header = Line::from(vec![status.into(), " ".into(), dot, " ".into()]);
-        let title_width = width.saturating_sub(header.width());
+        let elapsed = session
+            .started_at
+            .map(|at| format!(" · {}", format_session_duration((now - at).num_seconds())));
+        let elapsed_width = elapsed
+            .as_deref()
+            .map_or(0, unicode_width::UnicodeWidthStr::width);
+        let title_width = width.saturating_sub(header.width() + elapsed_width);
         let title_style = self.title_style(&session.id).bold();
         let title = if title_width <= 1 {
             Line::from(Span::styled("…", title_style))
@@ -333,6 +341,9 @@ impl View {
             )
         };
         header.spans.extend(title.spans);
+        if let Some(elapsed) = elapsed {
+            header.spans.push(elapsed.dim());
+        }
         line(header, row(area, 0, area.height.min(1)), buf);
         let content_top = area.y + area.height.min(1);
         let area = Rect::new(

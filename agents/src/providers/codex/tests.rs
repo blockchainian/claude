@@ -28,7 +28,15 @@ fn reads_named_columns_and_pages_inactive_threads() {
     assert_eq!(session.prompt, "Inspect the project");
     assert_eq!(session.git_branch.as_deref(), Some("example-branch"));
     assert!(session.model.is_some());
-    assert!(session.started_at.is_some());
+    let db = Connection::open(_dir.path().join("state_5.sqlite")).unwrap();
+    let created: i64 = db
+        .query_row(
+            "SELECT created_at_ms FROM threads WHERE id = 'thread-0'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(session.started_at, DateTime::from_timestamp_millis(created));
     assert_eq!(session.status, SessionStatus::Inactive);
     let child = all
         .sessions

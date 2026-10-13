@@ -354,6 +354,10 @@ mod tests {
         assert_eq!(child.last_message.as_deref(), Some("Still checking"));
         assert_eq!(child.activity.as_ref().unwrap().label, "Check directory");
         assert_eq!(child.status, crate::model::SessionStatus::Working);
+        assert_eq!(
+            child.started_at,
+            Some(rows[0]["timestamp"].as_str().unwrap().parse().unwrap())
+        );
         let cached = store.summaries[&path]
             .summary
             .last_message
@@ -431,7 +435,10 @@ mod tests {
                 .iter()
                 .find(|s| s.parent.is_some())
                 .unwrap();
-            assert_eq!(child.started_at, Some(created));
+            assert_eq!(
+                child.started_at,
+                Some(pending()[0]["timestamp"].as_str().unwrap().parse().unwrap())
+            );
             assert_eq!(child.activity.as_ref().unwrap().label, "Check directory");
         }
         fs::write(agents.join("agent-x.meta.json"), r#"{"description":"Review files","name":"reviewer","taskKind":"in_process_teammate","teamName":"review"}"#).unwrap();
@@ -461,6 +468,10 @@ mod tests {
             .unwrap();
         assert_eq!(child.status, SessionStatus::Ready);
         assert_eq!(child.title, "Review files");
+        assert_eq!(
+            child.started_at,
+            Some(rows[0]["timestamp"].as_str().unwrap().parse().unwrap())
+        );
         assert_eq!(child.last_message.as_deref(), Some("Review complete"));
         assert!(child.latest_activity().is_none());
         fs::write(&path, FIXTURE).unwrap();

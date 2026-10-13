@@ -3,13 +3,14 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 const CHUNK: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Summary {
+    pub started_at: Option<DateTime<Utc>>,
     pub subagent_records: Vec<Value>,
     pub cwd: Option<PathBuf>,
     pub git_branch: Option<String>,
@@ -30,6 +31,32 @@ pub(super) struct Summary {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
+}
+
+/// Reads only through the first timestamped record, including sidechains.
+pub(super) fn start_time(path: &Path) -> io::Result<Option<DateTime<Utc>>> {
+    for line in BufReader::new(File::open(path)?).lines() {
+        let line = line?;
+        let Ok(record) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let Some(timestamp) = record.get("timestamp") else {
+            continue;
+        };
+        if record.get("forkedFrom").is_some() {
+            return Ok(File::open(path)?.metadata()?.created().ok().map(Into::into));
+        }
+        let timestamp = timestamp.as_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Transcript timestamp must be a string",
+            )
+        })?;
+        return DateTime::parse_from_rfc3339(timestamp)
+            .map(|at| Some(at.with_timezone(&Utc)))
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error));
+    }
+    Ok(None)
 }
 
 impl Summary {
