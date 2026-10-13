@@ -798,8 +798,8 @@ fn render_background_box(
     box_area: Rect,
     buf: &mut Buffer,
 ) {
-    // A rule cell leads the title and at least one ends the row; a space
-    // keeps the title off both.
+    // A rule cell leads the title and a half-width glyph ends the row; a
+    // space keeps the title off both.
     let mut title = truncate_line_with_ellipsis_if_overflow(
         Line::from(description.to_owned()),
         usize::from(box_area.width.saturating_sub(4)).saturating_sub(
@@ -818,6 +818,9 @@ fn render_background_box(
         .title(title);
     let inner = block.inner(box_area);
     block.render(box_area, buf);
+    if box_area.width > 0 {
+        buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
+    }
     // Output lines up with the title text under the rule.
     let inner = Rect {
         x: inner.x + 2,
