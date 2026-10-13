@@ -6,6 +6,7 @@ mod subagents;
 mod transcript;
 
 use crate::model::{Process, Session, SessionStatus};
+use crate::providers::{ProviderId, SessionKey};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -74,7 +75,7 @@ pub fn delete_session(config_dir: &Path, session: &Session) -> io::Result<()> {
         let path = directory.join(format!("{pid}.json"));
         let entry: registry::Entry = serde_json::from_slice(&fs::read(&path)?)?;
         if entry.pid != Some(pid)
-            || entry.session_id.as_deref() != Some(&session.id)
+            || entry.session_id.as_deref() != Some(session.id.id.as_str())
             || entry.started_at != process.started_at.map(|time| time.timestamp_millis())
         {
             return Err(io::Error::other("Session registry changed"));
@@ -503,7 +504,10 @@ fn session(
             .to_owned()
     });
     Session {
-        id,
+        id: SessionKey {
+            provider: ProviderId::Claude,
+            id,
+        },
         parent: None,
         cwd,
         name: None,
@@ -626,7 +630,7 @@ mod tests {
                 .iter()
                 .all(|session| session.status == SessionStatus::Inactive)
         );
-        assert!(first.sessions[0].id.ends_with("000000000024"));
+        assert!(first.sessions[0].id.id.ends_with("000000000024"));
         assert_eq!(store.summaries.len(), 10);
         let cached = store
             .summaries
@@ -676,7 +680,7 @@ mod tests {
         let session = snapshot
             .sessions
             .iter()
-            .find(|session| session.id == id)
+            .find(|session| session.id.id == id)
             .unwrap();
         assert_eq!(session.status, SessionStatus::Ready);
         assert_eq!(session.name.as_deref(), Some("translate-papers"));
@@ -701,7 +705,7 @@ mod tests {
             snapshot
                 .sessions
                 .iter()
-                .filter(|session| session.id == id)
+                .filter(|session| session.id.id == id)
                 .count(),
             1
         );
@@ -715,7 +719,7 @@ mod tests {
         let session = snapshot
             .sessions
             .iter()
-            .find(|session| session.id == id)
+            .find(|session| session.id.id == id)
             .unwrap();
         assert!(session.name.is_none());
         assert_eq!(session.title, "Codex manager 停止时线程处理");

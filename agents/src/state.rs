@@ -1,6 +1,7 @@
 //! Persisted command-center preferences.
 
 use crate::model::Grouping;
+use crate::providers::SessionKey;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Preferences {
     pub grouping: Grouping,
-    pub pinned: Vec<String>,
+    pub pinned: Vec<SessionKey>,
     /// A `.tmTheme` file whose accents color the session titles.
     pub theme: Option<PathBuf>,
 }
@@ -36,7 +37,11 @@ impl Preferences {
         };
         Self {
             grouping,
-            pinned: stored.pinned,
+            pinned: stored
+                .pinned
+                .into_iter()
+                .filter_map(|value| value.parse().ok())
+                .collect(),
             theme: stored.theme,
         }
     }
@@ -54,7 +59,7 @@ impl Preferences {
                 &mut file,
                 &StoredPreferences {
                     grouping: self.grouping.as_str().into(),
-                    pinned: self.pinned.clone(),
+                    pinned: self.pinned.iter().map(ToString::to_string).collect(),
                     theme: self.theme.clone(),
                 },
             )?;
@@ -74,12 +79,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unprefixed_pins_are_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("agents.json"),
+            r#"{"grouping":"model","pinned":["old-id","claude:kept","codex:unknown","claude:"]}"#,
+        )
+        .unwrap();
+        let preferences = Preferences::load(dir.path());
+        assert_eq!(preferences.grouping, Grouping::Model);
+        assert_eq!(
+            preferences
+                .pinned
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["claude:kept"]
+        );
+        preferences.save(dir.path()).unwrap();
+        let stored: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
+        assert_eq!(stored["pinned"], serde_json::json!(["claude:kept"]));
+    }
+
+    #[test]
     fn preferences_round_trip_and_corrupt_defaults() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(Preferences::load(dir.path()), Preferences::default());
         let preferences = Preferences {
             grouping: Grouping::Model,
-            pinned: vec!["second".into(), "first".into()],
+            pinned: vec![
+                "claude:second".parse().unwrap(),
+                "claude:first".parse().unwrap(),
+            ],
             theme: Some(PathBuf::from("custom.tmTheme")),
         };
         preferences.save(dir.path()).unwrap();

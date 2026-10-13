@@ -1,3 +1,10 @@
+fn session_key(id: &str) -> SessionKey {
+    SessionKey {
+        provider: crate::providers::ProviderId::Claude,
+        id: id.into(),
+    }
+}
+
 use super::*;
 use chrono::{Duration, Utc};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
@@ -244,7 +251,7 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
         -7200,
     ));
     view.set_sessions(rows.clone(), false);
-    assert_eq!(view.selected_id(), Some(id.as_str()));
+    assert_eq!(view.selected_id(), Some(&id));
     assert_eq!(view.log_scroll(), 1);
     rows.retain(|row| row.id != id);
     for row in &mut rows {
@@ -295,7 +302,7 @@ fn mouse_details_scroll_resets_with_selection_and_filter() {
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
     let (_, tab) = view.viewport.borrow().tabs[3];
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), tab.x, tab.y));
-    assert_eq!(view.selected_id(), Some(id.as_str()));
+    assert_eq!(view.selected_id(), Some(&id));
     assert_eq!(
         view.viewport
             .borrow()
@@ -371,7 +378,7 @@ fn details_scroll_tracks_session_identity_across_refreshes() {
         -7200,
     ));
     view.set_sessions(rows.clone(), false);
-    assert_eq!(view.selected_id(), Some(id.as_str()));
+    assert_eq!(view.selected_id(), Some(&id));
     assert_eq!(
         view.viewport
             .borrow()
@@ -548,7 +555,7 @@ fn mouse_list_ignores_overlays() {
 
 fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
     Session {
-        id: id.into(),
+        id: session_key(id),
         parent: None,
         cwd: "/tmp/project".into(),
         name: None,
@@ -621,8 +628,12 @@ fn fixture() -> View {
         ],
         false,
     );
-    view.set_pinned(&["42".into(), "44".into()]);
-    view.selected = view.rows.iter().position(|s| s.id == "42").unwrap();
+    view.set_pinned(&[session_key("42"), session_key("44")]);
+    view.selected = view
+        .rows
+        .iter()
+        .position(|s| s.id == session_key("42"))
+        .unwrap();
     view
 }
 fn simple_fixture() -> View {
@@ -733,14 +744,17 @@ fn tabs_cycle_in_display_order_and_filter_by_label() {
 fn refresh_follows_selected_ready_session_to_working_tab() {
     let mut view = fixture();
     key(&mut view, KeyCode::Tab);
-    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
     let mut rows = view.rows.clone();
-    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Working;
+    rows.iter_mut()
+        .find(|s| s.id == session_key("42"))
+        .unwrap()
+        .status = SessionStatus::Working;
 
     view.set_sessions(rows, false);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Working");
-    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
 }
 
 #[test]
@@ -749,14 +763,17 @@ fn refresh_follows_selected_needs_input_session_to_ready_tab() {
     for _ in 0..3 {
         key(&mut view, KeyCode::Tab);
     }
-    assert_eq!(view.selected_id(), Some("44"));
+    assert_eq!(view.selected_id(), Some(&session_key("44")));
     let mut rows = view.rows.clone();
-    rows.iter_mut().find(|s| s.id == "44").unwrap().status = SessionStatus::Ready;
+    rows.iter_mut()
+        .find(|s| s.id == session_key("44"))
+        .unwrap()
+        .status = SessionStatus::Ready;
 
     view.set_sessions(rows, false);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
-    assert_eq!(view.selected_id(), Some("44"));
+    assert_eq!(view.selected_id(), Some(&session_key("44")));
 }
 
 #[test]
@@ -765,14 +782,17 @@ fn refresh_returns_to_active_when_selected_working_session_becomes_inactive() {
     for _ in 0..2 {
         key(&mut view, KeyCode::Tab);
     }
-    assert_eq!(view.selected_id(), Some("46"));
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
     let mut rows = view.rows.clone();
-    rows.iter_mut().find(|s| s.id == "46").unwrap().status = SessionStatus::Inactive;
+    rows.iter_mut()
+        .find(|s| s.id == session_key("46"))
+        .unwrap()
+        .status = SessionStatus::Inactive;
 
     view.set_sessions(rows, false);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
     assert_eq!(view.selected, view.visible_indices()[0]);
 }
 
@@ -782,13 +802,18 @@ fn refresh_returns_to_active_when_selected_working_session_disappears() {
     for _ in 0..2 {
         key(&mut view, KeyCode::Tab);
     }
-    assert_eq!(view.selected_id(), Some("46"));
-    let rows = view.rows.iter().filter(|s| s.id != "46").cloned().collect();
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
+    let rows = view
+        .rows
+        .iter()
+        .filter(|s| s.id != session_key("46"))
+        .cloned()
+        .collect();
 
     view.set_sessions(rows, true);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
     assert_eq!(view.selected, view.visible_indices()[0]);
 }
 
@@ -796,24 +821,30 @@ fn refresh_returns_to_active_when_selected_working_session_disappears() {
 fn refresh_keeps_selected_session_on_active_when_ready_becomes_working() {
     let mut view = fixture();
     let mut rows = view.rows.clone();
-    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Working;
+    rows.iter_mut()
+        .find(|s| s.id == session_key("42"))
+        .unwrap()
+        .status = SessionStatus::Working;
 
     view.set_sessions(rows, false);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
 }
 
 #[test]
 fn refresh_selects_first_active_session_when_selection_becomes_inactive() {
     let mut view = fixture();
     let mut rows = view.rows.clone();
-    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Inactive;
+    rows.iter_mut()
+        .find(|s| s.id == session_key("42"))
+        .unwrap()
+        .status = SessionStatus::Inactive;
 
     view.set_sessions(rows, false);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.selected_id(), Some("44"));
+    assert_eq!(view.selected_id(), Some(&session_key("44")));
     assert_eq!(view.selected, view.visible_indices()[0]);
 }
 
@@ -825,9 +856,9 @@ fn refresh_keeps_tab_when_selected_session_is_hidden_only_by_search() {
     for c in "Current".chars() {
         key(&mut view, KeyCode::Char(c));
     }
-    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
     let mut rows = view.rows.clone();
-    let selected = rows.iter_mut().find(|s| s.id == "42").unwrap();
+    let selected = rows.iter_mut().find(|s| s.id == session_key("42")).unwrap();
     selected.title = "Other task".into();
     selected.prompt = "Other task".into();
 
@@ -888,7 +919,7 @@ fn leaving_inactive_reconciles_show_more_selection() {
     key(&mut view, KeyCode::Tab);
 
     assert_eq!(view.selected, view.visible_indices()[0]);
-    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
 }
 
 #[test]
@@ -999,7 +1030,7 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
     assert_eq!(view.search.text(), "task");
     let id = view.selected_id().unwrap().to_owned();
     view.set_sessions(view.rows.clone(), false);
-    assert_eq!(view.selected_id(), Some(id.as_str()));
+    assert_eq!(view.selected_id(), Some(&id));
     assert!(view.searching);
     assert_eq!(view.search.text(), "task");
     key(&mut view, KeyCode::Esc);
@@ -1011,15 +1042,15 @@ fn actions_and_hide_move_to_next_visible_row() {
     let mut view = fixture();
     assert_eq!(
         key(&mut view, KeyCode::Char('o')),
-        Some(Action::Resume("42".into()))
+        Some(Action::Resume(session_key("42")))
     );
     assert_eq!(
         key(&mut view, KeyCode::Char('f')),
-        Some(Action::Fork("42".into()))
+        Some(Action::Fork(session_key("42")))
     );
     assert_eq!(
         key(&mut view, KeyCode::Right),
-        Some(Action::Open("42".into()))
+        Some(Action::Open(session_key("42")))
     );
     assert_eq!(
         key(&mut view, KeyCode::Char('x')),
@@ -1028,15 +1059,15 @@ fn actions_and_hide_move_to_next_visible_row() {
     assert_eq!(
         key(&mut view, KeyCode::Char('p')),
         Some(Action::TogglePin {
-            id: "42".into(),
+            id: session_key("42"),
             pinned: false
         })
     );
     assert_eq!(
         key(&mut view, KeyCode::Char('h')),
-        Some(Action::Hide("42".into()))
+        Some(Action::Hide(session_key("42")))
     );
-    assert_eq!(view.selected_id(), Some("44"));
+    assert_eq!(view.selected_id(), Some(&session_key("44")));
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     assert!(screen(&view, 88, 16).contains("Rename › Needs an answer"));
     key(&mut view, KeyCode::Esc);
@@ -1075,9 +1106,9 @@ fn paging_tracks_headings_and_never_wraps() {
     );
     screen(&view, 110, 18);
     key(&mut view, KeyCode::PageDown);
-    assert_eq!(view.selected_id(), Some("10"));
+    assert_eq!(view.selected_id(), Some(&session_key("10")));
     key(&mut view, KeyCode::PageUp);
-    assert_eq!(view.selected_id(), Some("0"));
+    assert_eq!(view.selected_id(), Some(&session_key("0")));
     for _ in 0..40 {
         key(&mut view, KeyCode::PageDown);
         screen(&view, 110, 18);
@@ -1086,7 +1117,7 @@ fn paging_tracks_headings_and_never_wraps() {
     key(&mut view, KeyCode::PageDown);
     assert_eq!(view.selected_id(), None);
     key(&mut view, KeyCode::Down);
-    assert_eq!(view.selected_id(), Some("0"));
+    assert_eq!(view.selected_id(), Some(&session_key("0")));
 }
 #[test]
 fn styles_and_unicode_clipping() {
@@ -1258,7 +1289,7 @@ fn rename_edits_title_and_commits_trimmed_text() {
     assert_eq!(
         key(&mut view, KeyCode::Enter),
         Some(Action::Rename {
-            id: "42".into(),
+            id: session_key("42"),
             name: "Current task updated".into()
         })
     );
@@ -1286,7 +1317,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
         KeyCode::F(3),
     ] {
         assert_eq!(key(&mut view, code), None);
-        assert_eq!(view.selected_id(), Some("42"));
+        assert_eq!(view.selected_id(), Some(&session_key("42")));
     }
     for _ in 0..12 {
         key(&mut view, KeyCode::Backspace);
@@ -1313,12 +1344,15 @@ fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
         .unwrap();
     key(&mut view, KeyCode::Char('r'));
     let mut rows = view.rows.clone();
-    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Inactive;
+    rows.iter_mut()
+        .find(|s| s.id == session_key("42"))
+        .unwrap()
+        .status = SessionStatus::Inactive;
     view.set_sessions(rows, false);
-    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
     assert!(screen(&view, 88, 16).contains("Rename › Current task"));
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
-    view.hide("42");
+    view.hide(&session_key("42"));
     assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
     let mut view = fixture();
     key(&mut view, KeyCode::Char('r'));
@@ -1374,7 +1408,7 @@ fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     assert_eq!(key(&mut view, KeyCode::Down), None);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
-        Some(Action::Delete("42".into()))
+        Some(Action::Delete(session_key("42")))
     );
     assert!(view.delete_dialog.is_none());
     key(&mut view, KeyCode::Backspace);
@@ -1394,7 +1428,7 @@ fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     }
     assert_eq!(
         key(&mut view, KeyCode::Enter),
-        Some(Action::Delete("42".into()))
+        Some(Action::Delete(session_key("42")))
     );
 }
 
@@ -1415,14 +1449,14 @@ fn delete_dialog_locks_list_and_supports_movement_keys() {
         KeyCode::Char('n'),
     ] {
         assert_eq!(key(&mut view, code), None);
-        assert_eq!(view.selected_id(), Some("42"));
+        assert_eq!(view.selected_id(), Some(&session_key("42")));
     }
     for c in ['n', 'p', 'j', 'k'] {
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)),
             None
         );
-        assert_eq!(view.selected_id(), Some("42"));
+        assert_eq!(view.selected_id(), Some(&session_key("42")));
     }
 }
 
@@ -1442,7 +1476,7 @@ fn delete_live_rows_open_the_dialog_and_ignore_show_more() {
     assert_eq!(key(&mut view, KeyCode::Down), None);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
-        Some(Action::Delete("42".into()))
+        Some(Action::Delete(session_key("42")))
     );
     view.has_more = true;
     view.selected = usize::MAX;
@@ -1500,7 +1534,7 @@ fn delete_dialog_number_shortcuts_follow_codex() {
     );
     assert_eq!(
         key(&mut view, KeyCode::Enter),
-        Some(Action::Delete("42".into()))
+        Some(Action::Delete(session_key("42")))
     );
 }
 
@@ -1513,7 +1547,7 @@ fn details_branch_and_pull_request_use_session_title_color() {
         number: 833,
         url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
     });
-    let color = style::thread_color(&row.id);
+    let color = style::thread_color(&row.id.id);
     let mut view = View::new(Grouping::Project, true);
     view.status_filter = 4;
     view.set_sessions(vec![row], false);
@@ -2011,16 +2045,20 @@ fn details_background_includes_only_working_subagents() {
     // Ready teammates can retain activity from their previous turn.
     idle.activity = worker.activity.clone();
     let mut other = worker.clone();
-    other.id = "agent-other".into();
-    other.parent = Some("other".into());
+    other.id = session_key("agent-other");
+    other.parent = Some(session_key("other"));
     other.title = "Unrelated agent".into();
     let mut nested = worker.clone();
-    nested.id = "agent-nested".into();
+    nested.id = session_key("agent-nested");
     nested.parent = Some(worker.id.clone());
     nested.title = "Nested agent".into();
     let mut view = View::default();
     view.set_sessions(vec![parent, worker, idle, other, nested], false);
-    view.selected = view.rows.iter().position(|s| s.id == "parent").unwrap();
+    view.selected = view
+        .rows
+        .iter()
+        .position(|s| s.id == session_key("parent"))
+        .unwrap();
     assert!(view.has_background());
     let area = Rect::new(0, 0, 40, 24);
     let mut buf = Buffer::empty(area);
@@ -2052,7 +2090,7 @@ fn details_background_includes_only_working_subagents() {
     view.selected = view
         .rows
         .iter()
-        .position(|s| s.id == "agent-worker")
+        .position(|s| s.id == session_key("agent-worker"))
         .unwrap();
     assert!(!view.has_background());
     buf.reset();
@@ -2269,7 +2307,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
     });
     let mut view = View::new(Grouping::Project, false);
     view.set_sessions(vec![row], false);
-    view.log_session = Some("log".into());
+    view.log_session = Some(session_key("log"));
     view.log = [
         (Kind::User, "Please\n  inspect the task", 120, None),
         (Kind::Model, "I will check the files", 110, None),
@@ -2386,7 +2424,7 @@ fn task_log_short_terminal_keeps_ten_log_rows() {
     view.rows[view.selected].transcript = Some("/tmp/task-log.jsonl".into());
     let (log, _) = log_fixture();
     view.log = log.log;
-    view.log_session = view.selected_id().map(str::to_owned);
+    view.log_session = view.selected_id().cloned();
     let layout = view.center_layout(Rect::new(0, 0, 160, 22));
     assert_eq!(layout.log.height, 10);
     assert!(screen(&view, 160, 22).contains("Please inspect"));
@@ -3243,12 +3281,16 @@ mod log_filters {
             key(&mut view, KeyCode::Char(hotkey));
             assert_eq!(view.log_scroll(), 0);
             let mut second = view.rows[0].clone();
-            second.id = "second".into();
+            second.id = session_key("second");
             let first = view.rows[0].clone();
             view.set_sessions(vec![first, second], false);
-            let index = view.rows.iter().position(|row| row.id == "second").unwrap();
+            let index = view
+                .rows
+                .iter()
+                .position(|row| row.id == session_key("second"))
+                .unwrap();
             view.set_selected(index);
-            view.log_session = Some("second".into());
+            view.log_session = Some(session_key("second"));
             let filtered = rows(&view, now);
             for event in &view.log {
                 assert_eq!(filtered.contains(&event.body), kinds.contains(&event.kind));
@@ -3432,11 +3474,15 @@ mod log_search {
         view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y + 1));
         assert_eq!(view.log_scroll(), 1);
         let mut second = view.rows[0].clone();
-        second.id = "second".into();
+        second.id = session_key("second");
         view.set_sessions(vec![view.rows[0].clone(), second], false);
-        let index = view.rows.iter().position(|row| row.id == "second").unwrap();
+        let index = view
+            .rows
+            .iter()
+            .position(|row| row.id == session_key("second"))
+            .unwrap();
         view.set_selected(index);
-        view.log_session = Some("second".into());
+        view.log_session = Some(session_key("second"));
         let buf = panel(&view, now);
         assert!(!text(&buf).contains("Search › "));
         assert_eq!(
@@ -3656,7 +3702,7 @@ mod subagent_rows {
     fn ids(view: &View) -> Vec<&str> {
         view.visible_indices()
             .iter()
-            .map(|&i| view.rows[i].id.as_str())
+            .map(|&i| view.rows[i].id.id.as_str())
             .collect()
     }
 
@@ -3692,13 +3738,16 @@ mod subagent_rows {
         set_filter(&mut view, 2);
         let mut rows = view.rows.clone();
         rows.iter_mut()
-            .find(|s| s.id == "agent-older")
+            .find(|s| s.id == session_key("agent-older"))
             .unwrap()
             .status = SessionStatus::Ready;
-        rows.iter_mut().find(|s| s.id == "parent").unwrap().status = SessionStatus::Working;
+        rows.iter_mut()
+            .find(|s| s.id == session_key("parent"))
+            .unwrap()
+            .status = SessionStatus::Working;
         view.set_sessions(rows, false);
         assert_eq!(view.status_filter, 1);
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         assert_eq!(ids(&view), ["agent-older", "agent-newer"]);
     }
 
@@ -3722,33 +3771,41 @@ mod subagent_rows {
         let mut view = fixture();
         let mut rows = view.rows.clone();
         let mut other = session("other", "Other task", SessionStatus::Working, 0);
-        other.updated_at =
-            rows.iter().find(|s| s.id == "parent").unwrap().updated_at - Duration::seconds(1);
+        other.updated_at = rows
+            .iter()
+            .find(|s| s.id == session_key("parent"))
+            .unwrap()
+            .updated_at
+            - Duration::seconds(1);
         rows.push(other);
         view.set_sessions(rows, false);
         set_filter(&mut view, 2);
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         let rendered = screen(&view, 120, 30);
         let (x, y) = rendered_cell(&rendered, "Parent task");
         assert!(
             view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y))
                 .is_none()
         );
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         key(&mut view, KeyCode::Down);
-        assert_eq!(view.selected_id(), Some("other"));
+        assert_eq!(view.selected_id(), Some(&session_key("other")));
         key(&mut view, KeyCode::Up);
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         key(&mut view, KeyCode::Home);
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         key(&mut view, KeyCode::PageDown);
-        assert_eq!(view.selected_id(), Some("other"));
+        assert_eq!(view.selected_id(), Some(&session_key("other")));
         key(&mut view, KeyCode::PageUp);
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         let mut buf = Buffer::empty(Rect::new(0, 0, 120, 30));
         view.render_at(buf.area, &mut buf, "2026-10-13T12:00:00Z".parse().unwrap());
         assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
-        view.selected = view.rows.iter().position(|s| s.id == "parent").unwrap();
+        view.selected = view
+            .rows
+            .iter()
+            .position(|s| s.id == session_key("parent"))
+            .unwrap();
         assert_eq!(view.selected_id(), None);
         assert_eq!(key(&mut view, KeyCode::Enter), None);
     }
@@ -3793,7 +3850,7 @@ mod subagent_rows {
         let mut view = fixture();
         for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
             view.grouping = grouping;
-            for pins in [vec![], vec!["parent".into()]] {
+            for pins in [vec![], vec![session_key("parent")]] {
                 view.set_pinned(&pins);
                 let expected = if grouping == Grouping::Status {
                     vec!["agent-older", "parent", "agent-newer"]
@@ -3820,7 +3877,7 @@ mod subagent_rows {
         other.updated_at = view
             .rows
             .iter()
-            .find(|s| s.id == "parent")
+            .find(|s| s.id == session_key("parent"))
             .unwrap()
             .updated_at
             + Duration::seconds(30);
@@ -3838,7 +3895,7 @@ mod subagent_rows {
             assert_eq!(ids(&view), expected);
         }
         view.grouping = Grouping::Project;
-        view.set_pinned(&["parent".into()]);
+        view.set_pinned(&[session_key("parent")]);
         assert_eq!(
             ids(&view),
             ["parent", "agent-older", "agent-newer", "other"]
@@ -3851,8 +3908,12 @@ mod subagent_rows {
         let mut rows = view.rows.clone();
         let mut other = session("other", "Other task", SessionStatus::Working, 0);
         other.model = Some("parent-model".into());
-        other.updated_at =
-            rows.iter().find(|s| s.id == "parent").unwrap().updated_at + Duration::seconds(30);
+        other.updated_at = rows
+            .iter()
+            .find(|s| s.id == session_key("parent"))
+            .unwrap()
+            .updated_at
+            + Duration::seconds(30);
         rows.push(other);
         view.set_sessions(rows, false);
         for grouping in [Grouping::Project, Grouping::Model] {
@@ -3874,11 +3935,11 @@ mod subagent_rows {
                 "parent-model  2 of 4"
             };
             assert!(rendered.contains(heading), "{rendered}");
-            view.set_pinned(&["parent".into()]);
+            view.set_pinned(&[session_key("parent")]);
             assert_eq!(ids(&view), ["agent-older", "other"]);
             assert!(screen(&view, 120, 30).contains("Pinned  1 of 3"));
         }
-        view.hide("agent-older");
+        view.hide(&session_key("agent-older"));
         assert_eq!(ids(&view), ["other"]);
         assert!(!screen(&view, 120, 30).contains("Parent task"));
         let rendered = screen(&view, 160, 30);
@@ -3890,7 +3951,7 @@ mod subagent_rows {
     fn keyboard_and_mouse_select_child_and_show_details() {
         let mut view = fixture();
         key(&mut view, KeyCode::Down);
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         let panel = details_panel(&view);
         let header: String = (0..panel.area.width)
             .map(|x| panel[(x, 0)].symbol())
@@ -3901,13 +3962,13 @@ mod subagent_rows {
         assert!(!rendered.contains("Needs attention"));
         let (x, y) = rendered_cell(&rendered, "Review results");
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
-        assert_eq!(view.selected_id(), Some("agent-newer"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-newer")));
         view.handle_mouse(mouse(MouseEventKind::ScrollUp, x, y));
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, x, y));
-        assert_eq!(view.selected_id(), Some("agent-newer"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-newer")));
         key(&mut view, KeyCode::Up);
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
     }
 
     #[test]
@@ -3938,7 +3999,7 @@ mod subagent_rows {
     #[test]
     fn children_disappear_with_hidden_or_missing_parent() {
         let mut view = fixture();
-        view.hide("parent");
+        view.hide(&session_key("parent"));
         assert!(ids(&view).is_empty());
         view.hidden.clear();
         let rows = view
@@ -3957,7 +4018,7 @@ mod subagent_rows {
         let child = view
             .rows
             .iter_mut()
-            .find(|s| s.id == "agent-older")
+            .find(|s| s.id == session_key("agent-older"))
             .unwrap();
         child.title = "界".repeat(100);
         for width in [12, 55, 57, 80] {
@@ -3993,12 +4054,12 @@ mod subagent_actions {
     fn fixture() -> View {
         let mut view = subagent_rows::fixture();
         key(&mut view, KeyCode::Down);
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         view
     }
 
     fn assert_unchanged(view: &View, before: &str) {
-        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         assert!(view.rename_target.is_none());
         assert!(view.rename.text().is_empty());
         assert!(view.delete_dialog.is_none());

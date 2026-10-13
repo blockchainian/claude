@@ -397,8 +397,8 @@ impl View {
                     });
                 }
             }
-            KeyCode::Char('o') => return self.selected_id().map(|id| Action::Resume(id.into())),
-            KeyCode::Char('f') => return self.selected_id().map(|id| Action::Fork(id.into())),
+            KeyCode::Char('o') => return self.selected_id().map(|id| Action::Resume(id.clone())),
+            KeyCode::Char('f') => return self.selected_id().map(|id| Action::Fork(id.clone())),
             KeyCode::Char('x') => return Some(Action::Unsupported("Stop")),
             KeyCode::Char('h') => {
                 let id = self.selected_id()?.to_owned();

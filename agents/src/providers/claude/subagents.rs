@@ -335,8 +335,8 @@ mod tests {
             .find(|s| s.parent.is_some())
             .unwrap();
         assert_eq!(snapshot.sessions.len(), 2);
-        assert_eq!(child.parent.as_deref(), Some(id));
-        assert_eq!(child.id, "agent-x");
+        assert_eq!(child.parent.as_ref().map(|key| key.id.as_str()), Some(id));
+        assert_eq!(child.id.id, "agent-x");
         assert_eq!(child.transcript.as_ref(), Some(&path));
         assert_eq!(child.process, None);
         assert_eq!(child.title, "Check files");

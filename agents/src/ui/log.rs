@@ -20,7 +20,7 @@ impl View {
             return;
         };
         super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
-        if self.log_session.as_deref() != Some(session.id.as_str()) {
+        if self.log_session.as_ref() != Some(&session.id) {
             return;
         }
         if self.log_search.active() && area.height > 1 {
@@ -238,7 +238,10 @@ mod log_markdown {
         .unwrap();
         let mut store = crate::sessions::Store::new(dir.path().to_owned());
         let mut session = store.refresh().sessions.remove(0);
-        session.parent = Some("parent".into());
+        session.parent = Some(crate::providers::SessionKey {
+            provider: crate::providers::ProviderId::Claude,
+            id: "parent".into(),
+        });
         session.process = None;
         session.status = SessionStatus::Working;
         let file = tempfile::NamedTempFile::new().unwrap();

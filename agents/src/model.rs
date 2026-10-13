@@ -1,5 +1,6 @@
 //! Sessions as the command center sees them, independent of where they were read from.
 
+use crate::providers::SessionKey;
 use chrono::DateTime;
 use chrono::Utc;
 use std::path::PathBuf;
@@ -72,10 +73,10 @@ pub struct BackgroundTask {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Session {
-    /// Claude Code session id (the transcript file stem).
-    pub id: String,
+    /// Provider-qualified session identity.
+    pub id: SessionKey,
     /// Parent session id for a subagent.
-    pub parent: Option<String>,
+    pub parent: Option<SessionKey>,
     pub cwd: PathBuf,
     /// Name the user gave the session (`/rename` or `--name`).
     pub name: Option<String>,
@@ -134,23 +135,23 @@ impl Session {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {
     /// Enter: jump to a live session's terminal, or resume an inactive one.
-    Open(String),
+    Open(SessionKey),
     /// `o`: resume the session in this terminal (`claude --resume <id>`).
-    Resume(String),
+    Resume(SessionKey),
     /// `f`: resume as a new session id (`claude --resume <id> --fork-session`).
-    Fork(String),
+    Fork(SessionKey),
     /// `n`: start a new session in the given directory.
     New(Option<PathBuf>),
     /// `h`: hide the session until the next launch.
-    Hide(String),
+    Hide(SessionKey),
     /// `p`: pin or unpin the session.
-    TogglePin { id: String, pinned: bool },
+    TogglePin { id: SessionKey, pinned: bool },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
     /// `r`: set the session display name.
-    Rename { id: String, name: String },
+    Rename { id: SessionKey, name: String },
     /// Backspace, then confirmation: permanently delete the session transcript.
-    Delete(String),
+    Delete(SessionKey),
     /// `w`, `a`: no Claude Code equivalent yet; show the notice.
     Unsupported(&'static str),
     /// "Show more" was activated: load the next page of inactive sessions.

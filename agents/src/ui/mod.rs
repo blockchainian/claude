@@ -19,6 +19,7 @@ pub use style::light_background;
 pub use style::set_light_background;
 
 use crate::model::{Action, Grouping, Session, SessionStatus};
+use crate::providers::SessionKey;
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -86,14 +87,14 @@ struct DetailsScroll {
 }
 
 struct DeleteDialog {
-    id: String,
+    id: SessionKey,
     title: String,
     confirm: bool,
 }
 
 pub struct View {
     pub(crate) log: Vec<crate::sessions::log::Event>,
-    pub(crate) log_session: Option<String>,
+    pub(crate) log_session: Option<SessionKey>,
     pub(crate) log_filter: crate::sessions::log::Filter,
     pub(crate) log_search: log_search::LogSearch,
     rows: Vec<Session>,
@@ -101,12 +102,12 @@ pub struct View {
     selected: usize,
     grouping: Grouping,
     use_colors: bool,
-    pinned: Vec<String>,
-    hidden: HashSet<String>,
+    pinned: Vec<SessionKey>,
+    hidden: HashSet<SessionKey>,
     status_filter: usize,
     search: line_edit::LineEdit,
     searching: bool,
-    rename_target: Option<String>,
+    rename_target: Option<SessionKey>,
     rename: line_edit::LineEdit,
     delete_dialog: Option<DeleteDialog>,
     help: bool,
@@ -174,7 +175,7 @@ impl View {
 
     /// Replace rows while retaining the selected session and view preferences.
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
-        let selected = self.selected_id().map(str::to_owned);
+        let selected = self.selected_id().cloned();
         let status_filter = self.status_filter;
         let show_more = self.selected == usize::MAX && self.has_more;
         sessions.sort_by(|a, b| {
@@ -187,13 +188,13 @@ impl View {
         self.rows = sessions;
         self.has_more = has_more;
         let selected_index = selected
-            .as_deref()
-            .and_then(|id| self.rows.iter().position(|s| s.id == id));
+            .as_ref()
+            .and_then(|id| self.rows.iter().position(|s| &s.id == id));
         if selected.is_some()
             && selected_index.is_none_or(|index| !self.visible_indices().contains(&index))
         {
             let status = selected_index.map(|index| self.rows[index].status);
-            self.status_filter = if self.rename_target.as_deref() == selected.as_deref()
+            self.status_filter = if self.rename_target.as_ref() == selected.as_ref()
                 && status == Some(SessionStatus::Inactive)
             {
                 TASK_FILTERS.len() - 1
@@ -212,11 +213,11 @@ impl View {
             })
         };
         self.reconcile_selection();
-        if self.selected_id() != selected.as_deref() {
+        if self.selected_id() != selected.as_ref() {
             self.log_search.clear();
             self.viewport.borrow_mut().log_scroll = 0;
         }
-        if self.selected_id() != selected.as_deref() || self.status_filter != status_filter {
+        if self.selected_id() != selected.as_ref() || self.status_filter != status_filter {
             self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
         }
     }
@@ -224,11 +225,11 @@ impl View {
     pub fn set_loading(&mut self, loading: bool) {
         self.loading = loading;
     }
-    pub fn set_pinned(&mut self, ids: &[String]) {
+    pub fn set_pinned(&mut self, ids: &[SessionKey]) {
         self.pinned = ids.to_vec();
         self.reconcile_selection();
     }
-    pub fn hide(&mut self, id: &str) {
+    pub fn hide(&mut self, id: &SessionKey) {
         let visible = self.selectable_indices();
         let position = visible
             .iter()
@@ -265,13 +266,13 @@ impl View {
     fn subagents_for<'a>(&'a self, session: &'a Session) -> impl Iterator<Item = &'a Session> {
         self.rows.iter().filter(move |child| {
             session.parent.is_none()
-                && child.parent.as_deref() == Some(session.id.as_str())
+                && child.parent.as_ref() == Some(&session.id)
                 && child.status == SessionStatus::Working
         })
     }
 
-    pub fn selected_id(&self) -> Option<&str> {
-        self.selected_row().map(|s| s.id.as_str())
+    pub fn selected_id(&self) -> Option<&SessionKey> {
+        self.selected_row().map(|s| &s.id)
     }
     fn selected_is_subagent(&self) -> bool {
         self.selected_row()
@@ -283,12 +284,12 @@ impl View {
             .filter(|_| self.visible_indices().contains(&self.selected))
     }
     fn group_index(&self, index: usize) -> Option<usize> {
-        match self.rows[index].parent.as_deref() {
+        match self.rows[index].parent.as_ref() {
             None => Some(index),
             Some(parent) => self
                 .rows
                 .iter()
-                .position(|s| s.parent.is_none() && s.id == parent),
+                .position(|s| s.parent.is_none() && &s.id == parent),
         }
     }
     fn is_pinned(&self, index: usize) -> bool {
@@ -326,9 +327,9 @@ impl View {
                 .to_lowercase()
                 .contains(&search)
         };
-        let mut children = std::collections::HashMap::<&str, Vec<usize>>::new();
+        let mut children = std::collections::HashMap::<&SessionKey, Vec<usize>>::new();
         for (index, session) in self.rows.iter().enumerate() {
-            if let Some(parent) = session.parent.as_deref()
+            if let Some(parent) = session.parent.as_ref()
                 && !self.hidden.contains(&session.id)
                 && filter.contains(&session.status)
             {
@@ -346,7 +347,7 @@ impl View {
                 s.parent.is_none()
                     && !self.hidden.contains(&s.id)
                     && ((filter.contains(&s.status) && matches(s))
-                        || children.get(s.id.as_str()).is_some_and(|indices| {
+                        || children.get(&s.id).is_some_and(|indices| {
                             indices
                                 .iter()
                                 .any(|&i| matches(s) || matches(&self.rows[i]))
@@ -376,7 +377,7 @@ impl View {
             if filter.contains(&self.rows[parent].status) {
                 rows.push(parent);
             }
-            if let Some(siblings) = children.get(self.rows[parent].id.as_str()) {
+            if let Some(siblings) = children.get(&self.rows[parent].id) {
                 rows.extend(
                     siblings
                         .iter()
@@ -430,9 +431,9 @@ impl View {
             self.set_selected(visible.first().copied().unwrap_or(usize::MAX));
         }
     }
-    fn title_style(&self, id: &str) -> Style {
+    fn title_style(&self, id: &SessionKey) -> Style {
         if self.use_colors {
-            Style::default().fg(style::thread_color(id))
+            Style::default().fg(style::thread_color(&id.id))
         } else {
             Style::default()
         }

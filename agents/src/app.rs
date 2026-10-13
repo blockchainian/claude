@@ -2,6 +2,7 @@
 
 use crate::model::Action;
 use crate::model::Session;
+use crate::providers::SessionKey;
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
 use crate::sessions::Snapshot;
 use crate::sessions::Store;
@@ -85,14 +86,14 @@ pub struct App {
     /// Set when the user chose to hand the terminal to a `claude` process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
-    last_session: Option<String>,
+    last_session: Option<SessionKey>,
     log_stamp: Option<LogStamp>,
     full_log_stamp: Option<LogStamp>,
 }
 
 #[derive(PartialEq, Eq)]
 struct LogStamp {
-    session: String,
+    session: SessionKey,
     path: PathBuf,
     modified: std::time::SystemTime,
     length: u64,
@@ -260,7 +261,7 @@ impl App {
         }) && self
             .view
             .selected_id()
-            .and_then(|id| self.sessions.iter().find(|s| s.id == id))
+            .and_then(|id| self.sessions.iter().find(|s| &s.id == id))
             .is_some_and(|session| {
                 if session.parent.is_some() {
                     session.status == crate::model::SessionStatus::Working
@@ -276,7 +277,7 @@ impl App {
         let selected = self
             .view
             .selected_id()
-            .and_then(|id| self.sessions.iter().find(|session| session.id == id))
+            .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
             .and_then(|session| {
                 Some((
                     session.id.clone(),
@@ -412,12 +413,12 @@ impl App {
         match action {
             Action::Quit => return true,
             Action::Back => {
-                let Some(session) = self.last_session.as_deref().and_then(|id| self.session(id))
+                let Some(session) = self.last_session.as_ref().and_then(|id| self.session(id))
                 else {
                     return self.launch_new(None);
                 };
                 let id = session.id.clone();
-                return self.launch_claude(session, &["--resume", &id]);
+                return self.launch_claude(session, &["--resume", &id.id]);
             }
             Action::ShowMore => {
                 self.store.show_more();
@@ -426,12 +427,12 @@ impl App {
             }
             Action::Open(id) | Action::Resume(id) => {
                 if let Some(session) = self.session(&id) {
-                    return self.launch_claude(session, &["--resume", &id]);
+                    return self.launch_claude(session, &["--resume", &id.id]);
                 }
             }
             Action::Fork(id) => {
                 if let Some(session) = self.session(&id) {
-                    return self.launch_claude(session, &["--resume", &id, "--fork-session"]);
+                    return self.launch_claude(session, &["--resume", &id.id, "--fork-session"]);
                 }
             }
             Action::New(cwd) => {
@@ -440,7 +441,7 @@ impl App {
             Action::Rename { id, name } => {
                 if let Some(session) = self.session(&id) {
                     if let Some(path) = session.transcript {
-                        match crate::sessions::rename(&path, &id, &name) {
+                        match crate::sessions::rename(&path, &id.id, &name) {
                             Ok(()) => self.refresh(),
                             Err(error) => self
                                 .view
@@ -509,10 +510,10 @@ impl App {
         true
     }
 
-    fn session(&self, id: &str) -> Option<Session> {
+    fn session(&self, id: &SessionKey) -> Option<Session> {
         self.sessions
             .iter()
-            .find(|session| session.id == id)
+            .find(|session| &session.id == id)
             .cloned()
     }
 
@@ -592,6 +593,12 @@ pub fn config_dir_exists(config_dir: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    fn session_key(id: &str) -> crate::providers::SessionKey {
+        crate::providers::SessionKey {
+            provider: crate::providers::ProviderId::Claude,
+            id: id.into(),
+        }
+    }
     use super::*;
     use crate::model::SessionStatus;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -626,7 +633,7 @@ mod tests {
         assert_eq!(command.get_program(), "claude");
         assert_eq!(
             command.get_args().collect::<Vec<_>>(),
-            ["--resume", app.sessions[0].id.as_str()]
+            ["--resume", app.sessions[0].id.id.as_str()]
         );
         assert_eq!(
             command.get_current_dir(),
@@ -877,20 +884,20 @@ mod tests {
     fn task_log_reloads_on_keyboard_selection_and_clears_without_transcript() {
         let (dir, mut app) = fixture();
         let mut second = app.sessions[0].clone();
-        second.id = "second".into();
+        second.id = session_key("second");
         second.updated_at -= chrono::Duration::seconds(1);
         let path = dir.path().join("second.jsonl");
         std::fs::write(&path, serde_json::json!({"type":"user", "timestamp":"2026-10-06T16:40:00Z", "message":{"content":"second prompt"}}).to_string()).unwrap();
         second.transcript = Some(path);
         let mut third = second.clone();
-        third.id = "third".into();
+        third.id = session_key("third");
         third.updated_at -= chrono::Duration::seconds(1);
         third.transcript = None;
         app.sessions.extend([second, third]);
         app.view.set_sessions(app.sessions.clone(), false);
         app.refresh_log(8);
         key(&mut app, KeyCode::Down);
-        assert_eq!(app.view.log_session.as_deref(), Some("second"));
+        assert_eq!(app.view.log_session.as_ref(), Some(&session_key("second")));
         assert_eq!(app.view.log[0].body, "second prompt");
         key(&mut app, KeyCode::Down);
         assert!(app.view.log.is_empty());
@@ -903,7 +910,7 @@ mod tests {
         let parent = app.sessions[0].clone();
         let parent_log = app.view.log.clone();
         let mut child = parent.clone();
-        child.id = "agent-abf695d5995bd43ab".into();
+        child.id = session_key("agent-abf695d5995bd43ab");
         child.parent = Some(parent.id.clone());
         child.process = None;
         child.status = SessionStatus::Working;
@@ -913,8 +920,8 @@ mod tests {
         app.sessions.push(child.clone());
         app.view.set_sessions(app.sessions.clone(), false);
         key(&mut app, KeyCode::Down);
-        assert_eq!(app.view.selected_id(), Some(child.id.as_str()));
-        assert_eq!(app.view.log_session.as_deref(), Some(child.id.as_str()));
+        assert_eq!(app.view.selected_id(), Some(&child.id));
+        assert_eq!(app.view.log_session.as_ref(), Some(&child.id));
         assert_eq!(app.log_stamp.as_ref().unwrap().session, child.id);
         assert!(app.view.log[0].body.starts_with("SubagentHandback"));
         app.handle_event(Event::Key(KeyEvent::new(
@@ -926,7 +933,7 @@ mod tests {
         assert!(app.view.log[0].body.starts_with("SubagentHandback"));
         key(&mut app, KeyCode::Esc);
         key(&mut app, KeyCode::Up);
-        assert_eq!(app.view.log_session.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(app.view.log_session.as_ref(), Some(&parent.id));
         assert_eq!(app.log_stamp.as_ref().unwrap().session, parent.id);
         assert_eq!(app.view.log, parent_log);
     }
@@ -944,7 +951,7 @@ mod tests {
         )
         .unwrap();
         let session = &mut app.sessions[0];
-        session.parent = Some("parent".into());
+        session.parent = Some(session_key("parent"));
         session.process = None;
         session.status = SessionStatus::Working;
         app.view.log = crate::sessions::log::tail(&path, 8).unwrap();
@@ -956,20 +963,20 @@ mod tests {
     fn subagent_fixture() -> (tempfile::TempDir, App, Session) {
         let (dir, mut app) = fixture();
         let mut child = app.sessions[0].clone();
-        child.id = "agent-abf695d5995bd43ab".into();
+        child.id = session_key("agent-abf695d5995bd43ab");
         child.parent = Some(app.sessions[0].id.clone());
         child.process = None;
-        let path = dir.path().join(format!("{}.jsonl", child.id));
+        let path = dir.path().join(format!("{}.jsonl", child.id.id));
         std::fs::write(&path, include_str!("../tests/fixtures/subagent.jsonl")).unwrap();
         child.transcript = Some(path);
         app.sessions.push(child.clone());
         app.view.set_sessions(app.sessions.clone(), false);
         key(&mut app, KeyCode::Down);
-        assert_eq!(app.view.selected_id(), Some(child.id.as_str()));
+        assert_eq!(app.view.selected_id(), Some(&child.id));
         (dir, app, child)
     }
 
-    fn assert_subagent_action_ignored(make_action: impl FnOnce(&str) -> Action) {
+    fn assert_subagent_action_ignored(make_action: impl FnOnce(&SessionKey) -> Action) {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         let (dir, mut app, child) = subagent_fixture();
         key(&mut app, KeyCode::Up);
@@ -993,7 +1000,7 @@ mod tests {
         assert_eq!(app.sessions, sessions);
         assert_eq!(app.preferences, preferences);
         assert_eq!(app.view.log, log);
-        assert_eq!(app.view.selected_id(), Some(selected.as_str()));
+        assert_eq!(app.view.selected_id(), Some(&selected));
         assert!(app.launch.is_none());
         assert!(app.last_session.is_none());
         assert_eq!(std::fs::read(path).unwrap(), transcript);
@@ -1004,37 +1011,37 @@ mod tests {
 
     #[test]
     fn subagent_open_is_ignored() {
-        assert_subagent_action_ignored(|id| Action::Open(id.into()));
+        assert_subagent_action_ignored(|id| Action::Open(id.clone()));
     }
 
     #[test]
     fn subagent_resume_is_ignored() {
-        assert_subagent_action_ignored(|id| Action::Resume(id.into()));
+        assert_subagent_action_ignored(|id| Action::Resume(id.clone()));
     }
 
     #[test]
     fn subagent_fork_is_ignored() {
-        assert_subagent_action_ignored(|id| Action::Fork(id.into()));
+        assert_subagent_action_ignored(|id| Action::Fork(id.clone()));
     }
 
     #[test]
     fn subagent_rename_is_ignored() {
         assert_subagent_action_ignored(|id| Action::Rename {
-            id: id.into(),
+            id: id.clone(),
             name: "Rename".into(),
         });
     }
 
     #[test]
     fn subagent_delete_is_ignored() {
-        assert_subagent_action_ignored(|id| Action::Delete(id.into()));
+        assert_subagent_action_ignored(|id| Action::Delete(id.clone()));
     }
 
     #[test]
     fn subagent_pin_is_ignored() {
         for pinned in [false, true] {
             assert_subagent_action_ignored(|id| Action::TogglePin {
-                id: id.into(),
+                id: id.clone(),
                 pinned,
             });
         }
@@ -1044,7 +1051,7 @@ mod tests {
     fn subagent_launch_is_ignored_before_directory_validation() {
         let (_dir, mut app, mut child) = subagent_fixture();
         child.cwd = child.cwd.join("missing");
-        assert!(!app.launch_claude(child.clone(), &["--resume", &child.id]));
+        assert!(!app.launch_claude(child.clone(), &["--resume", &child.id.id]));
         assert!(app.launch.is_none());
         assert!(app.last_session.is_none());
         let area = ratatui::layout::Rect::new(0, 0, 120, 30);
