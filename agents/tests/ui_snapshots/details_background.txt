@@ -1,4 +1,4 @@
-Background task ○ Ready
+Ready ○ Background task
 
 Prompt
 Background task

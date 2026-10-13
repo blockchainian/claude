@@ -1,4 +1,4 @@
-Queue task ● Working
+Working ● Queue task
 
 Prompt
 Current prompt

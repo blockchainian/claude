@@ -295,10 +295,10 @@ impl View {
         let (status, dot) = Self::status(session);
         // Sections top to bottom: title, prompt, the newer of latest activity
         // and last message, background, needs attention, project, branch, model.
-        let suffix = Line::from(vec![" ".into(), dot, " ".into(), status.into()]);
-        let title_width = width.saturating_sub(suffix.width());
+        let mut header = Line::from(vec![status.into(), " ".into(), dot, " ".into()]);
+        let title_width = width.saturating_sub(header.width());
         let title_style = self.title_style(&session.id).bold();
-        let mut header = if title_width <= 1 {
+        let title = if title_width <= 1 {
             Line::from(Span::styled("…", title_style))
         } else {
             truncate_line_with_ellipsis_if_overflow(
@@ -309,7 +309,7 @@ impl View {
                 title_width,
             )
         };
-        header.spans.extend(suffix.spans);
+        header.spans.extend(title.spans);
         let mut items: Vec<Item> = vec![header.into()];
 
         let mut header = vec!["Prompt".dim()];
