@@ -17,11 +17,17 @@ impl View {
             return;
         }
         let events = &self.log[self.log.len().saturating_sub(8)..];
-        for (index, event) in events.iter().enumerate() {
-            let time = event_time(event, session, index + 1 == events.len(), now);
+        let times: Vec<_> = events
+            .iter()
+            .enumerate()
+            .map(|(index, event)| event_time(event, session, index + 1 == events.len(), now))
+            .collect();
+        let time_width = times.iter().map(|time| time.width()).max().unwrap_or(0);
+        for (index, (event, time)) in events.iter().zip(&times).enumerate() {
             render_event(
                 event,
-                &time,
+                time,
+                time_width,
                 super::render::row(area, index as u16 + 1, 1),
                 buf,
             );
@@ -59,25 +65,21 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
     format_duration((end - previous).num_seconds().max(0))
 }
 
-fn render_event(event: &Event, time: &str, area: Rect, buf: &mut Buffer) {
+fn render_event(event: &Event, time: &str, time_width: usize, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
     let width = usize::from(area.width);
-    let time_width = time.width().min(width);
-    let time_area = Rect::new(
-        area.right() - time_width as u16,
-        area.y,
-        time_width as u16,
-        1,
-    );
+    let time_width = time_width.min(width);
+    let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
     Line::from(time.to_owned().dim())
         .right_aligned()
         .render(time_area, buf);
-    let content_width = width.saturating_sub(time_width + 3);
+    let content_width = width.saturating_sub(time_width + 1);
     if content_width == 0 {
         return;
     }
+    let content_x = area.x + time_width as u16 + 1;
     let label = match event.kind {
         Kind::User => "User",
         Kind::Model => "Model",
@@ -89,12 +91,12 @@ fn render_event(event: &Event, time: &str, area: Rect, buf: &mut Buffer) {
     let label = format!("{label:<6} ");
     let label_width = label.width().min(content_width);
     Line::from(Span::styled(label, label_style))
-        .render(Rect::new(area.x, area.y, label_width as u16, 1), buf);
+        .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
     let body_width = content_width.saturating_sub(label_width);
     let body = event.body.split_whitespace().collect::<Vec<_>>().join(" ");
     truncate_line_with_ellipsis_if_overflow(Line::from(Span::styled(body, body_style)), body_width)
         .render(
-            Rect::new(area.x + label_width as u16, area.y, body_width as u16, 1),
+            Rect::new(content_x + label_width as u16, area.y, body_width as u16, 1),
             buf,
         );
 }
