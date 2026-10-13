@@ -318,17 +318,22 @@ impl View {
             return None;
         }
         match key.code {
-            KeyCode::Char(hotkey @ ('m' | 't' | 'u' | 'e')) => {
+            KeyCode::Char(hotkey @ ('*' | 'm' | 't' | 'u' | 'e')) => {
                 use crate::sessions::log::Kind;
                 let kinds: &[Kind] = match hotkey {
+                    '*' => &[],
                     'm' => &[Kind::Model, Kind::Agent],
                     't' => &[Kind::Tool],
                     'u' => &[Kind::User, Kind::QueuedUser],
                     'e' => &[Kind::Error, Kind::Denied],
                     _ => unreachable!(),
                 };
-                self.log_filter.toggle(kinds);
-                self.viewport.borrow_mut().log_scroll = 0;
+                let mut filter = crate::sessions::log::Filter::default();
+                filter.toggle(kinds);
+                if self.log_filter != filter {
+                    self.log_filter = filter;
+                    self.viewport.borrow_mut().log_scroll = 0;
+                }
             }
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(false),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(true),

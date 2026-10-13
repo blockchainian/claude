@@ -3102,7 +3102,7 @@ mod log_filters {
     }
 
     #[test]
-    fn model_toggle_filters_render_and_restores_all_rows() {
+    fn model_selection_stays_active_and_all_restores_rows() {
         let (mut view, now) = fixture();
         let all = rows(&view, now);
         view.viewport.borrow_mut().log_scroll = 3;
@@ -3115,37 +3115,48 @@ mod log_filters {
                 matches!(event.kind, Kind::Model | Kind::Agent)
             );
         }
+        view.viewport.borrow_mut().log_scroll = 3;
         key(&mut view, KeyCode::Char('m'));
+        assert_eq!(view.log_scroll(), 3);
+        view.viewport.borrow_mut().log_scroll = 0;
+        assert_eq!(rows(&view, now), filtered);
+        view.viewport.borrow_mut().log_scroll = 3;
+        key(&mut view, KeyCode::Char('*'));
+        assert_eq!(view.log_scroll(), 0);
         assert_eq!(rows(&view, now), all);
+        view.viewport.borrow_mut().log_scroll = 3;
+        key(&mut view, KeyCode::Char('*'));
+        assert_eq!(view.log_scroll(), 3);
     }
 
     #[test]
-    fn sets_combine_and_stay_selected_across_sessions() {
-        let (mut view, now) = fixture();
-        for hotkey in ['t', 'u', 'e'] {
+    fn kind_selection_replaces_previous_set_and_persists_across_sessions() {
+        for (hotkey, kinds) in [
+            ('t', vec![Kind::Tool]),
+            ('u', vec![Kind::User, Kind::QueuedUser]),
+            ('e', vec![Kind::Error, Kind::Denied]),
+        ] {
+            let (mut view, now) = fixture();
+            key(&mut view, KeyCode::Char('m'));
+            view.viewport.borrow_mut().log_scroll = 3;
             key(&mut view, KeyCode::Char(hotkey));
-        }
-        let mut second = view.rows[0].clone();
-        second.id = "second".into();
-        let first = view.rows[0].clone();
-        view.set_sessions(vec![first, second], false);
-        let index = view.rows.iter().position(|row| row.id == "second").unwrap();
-        view.set_selected(index);
-        view.log_session = Some("second".into());
-        let filtered = rows(&view, now);
-        for event in &view.log {
-            assert_eq!(
-                filtered.contains(&event.body),
-                matches!(
-                    event.kind,
-                    Kind::Tool | Kind::User | Kind::QueuedUser | Kind::Error | Kind::Denied
-                )
-            );
+            assert_eq!(view.log_scroll(), 0);
+            let mut second = view.rows[0].clone();
+            second.id = "second".into();
+            let first = view.rows[0].clone();
+            view.set_sessions(vec![first, second], false);
+            let index = view.rows.iter().position(|row| row.id == "second").unwrap();
+            view.set_selected(index);
+            view.log_session = Some("second".into());
+            let filtered = rows(&view, now);
+            for event in &view.log {
+                assert_eq!(filtered.contains(&event.body), kinds.contains(&event.kind));
+            }
         }
     }
 
     #[test]
-    fn overlays_do_not_toggle_filters() {
+    fn overlays_do_not_change_filters() {
         for opener in [
             KeyCode::Char('?'),
             KeyCode::Char('/'),
@@ -3214,20 +3225,6 @@ mod log_search {
             event
         })
         .to_vec();
-        let pattern = nucleo_matcher::pattern::Pattern::parse(
-            "timeout",
-            nucleo_matcher::pattern::CaseMatching::Smart,
-            nucleo_matcher::pattern::Normalization::Smart,
-        );
-        let mut matcher = nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT);
-        let mut scratch = Vec::new();
-        let junk_score = pattern
-            .score(
-                nucleo_matcher::Utf32Str::new(&view.log[2].body, &mut scratch),
-                &mut matcher,
-            )
-            .expect("junk still matches fuzzily");
-        assert!(junk_score < 20 * 7);
         open(&mut view);
         assert!(text(&panel(&view, now)).contains("search: "));
         assert!(
@@ -3235,7 +3232,7 @@ mod log_search {
                 .to_string()
                 .contains("enter keep")
         );
-        for c in "timeout".chars() {
+        for c in "time out".chars() {
             key(&mut view, KeyCode::Char(c));
         }
         let buf = panel(&view, now);
@@ -3252,9 +3249,9 @@ mod log_search {
         assert!(buf[(99, 11)].modifier.contains(Modifier::DIM));
         assert!(!text(&buf).contains("search: "));
         open(&mut view);
-        assert!(text(&panel(&view, now)).contains("search: timeout"));
+        assert!(text(&panel(&view, now)).contains("search: time out"));
         key(&mut view, KeyCode::Backspace);
-        assert!(text(&panel(&view, now)).contains("search: timeou"));
+        assert!(text(&panel(&view, now)).contains("search: time ou"));
         key(&mut view, KeyCode::Esc);
         assert!(text(&panel(&view, now)).contains("unrelated"));
     }
@@ -3265,7 +3262,7 @@ mod log_search {
         let (mut view, now) = log_fixture();
         let template = view.log[0].clone();
         view.log = [
-            (Kind::Model, "timeout connection"),
+            (Kind::Model, "timeout connection out"),
             (Kind::Tool, "timeout alone"),
             (Kind::Error, "timeout connection"),
             (Kind::User, "plain `café` [link](url)"),
@@ -3280,10 +3277,16 @@ mod log_search {
         .collect();
         for (query, expected) in [
             ("timeout conn", vec![0, 2]),
-            ("'timeout", vec![0, 1, 2]),
-            ("^timeout", vec![0, 1, 2]),
-            ("connection$", vec![0, 2]),
-            ("!timeout", vec![3]),
+            ("conn timeout", vec![0, 2]),
+            ("time out", vec![0, 1, 2]),
+            ("tmo", vec![]),
+            ("  out\t time  ", vec![0, 1, 2]),
+            ("time missing", vec![]),
+            ("Timeout", vec![]),
+            ("'timeout", vec![]),
+            ("^timeout", vec![]),
+            ("connection$", vec![]),
+            ("!timeout", vec![]),
         ] {
             open(&mut view);
             for c in query.chars() {
@@ -3303,7 +3306,7 @@ mod log_search {
         assert_eq!(view.matching_log_count(), 1);
         assert!(!text(&panel(&view, now)).contains("timeout alone"));
         key(&mut view, KeyCode::Esc);
-        key(&mut view, KeyCode::Char('e'));
+        view.log_filter = crate::sessions::log::Filter::default();
         open(&mut view);
         for c in "cafe".chars() {
             key(&mut view, KeyCode::Char(c));

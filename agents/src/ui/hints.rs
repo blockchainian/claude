@@ -80,6 +80,7 @@ impl View {
             group(
                 "Log",
                 &[
+                    ("*", "All"),
                     ("m", "Model"),
                     ("t", "Tool"),
                     ("u", "User"),

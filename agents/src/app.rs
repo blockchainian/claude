@@ -995,7 +995,7 @@ mod log_filters {
         app.refresh_log(8);
         assert_eq!(app.view.log.len(), 20);
         assert_eq!(app.view.log_scroll(), 12);
-        key(&mut app, KeyCode::Char('t'));
+        key(&mut app, KeyCode::Char('*'));
         assert_eq!(app.view.log_scroll(), 0);
         assert!(app.view.log.iter().any(|event| event.kind != Kind::Tool));
         key(&mut app, KeyCode::Char('t'));
