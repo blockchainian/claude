@@ -121,13 +121,13 @@ impl Log {
                                             .and_then(|text| text.split_once("Reason: ["))
                                             .and_then(|(_, text)| text.split_once(']'))
                                             .map(|(reason, _)| reason)
-                                            .unwrap_or("dangerous")
+                                            .unwrap_or("Dangerous")
                                             .to_owned(),
                                     );
                                 } else if record["permissionDecision"]["reasonType"]
                                     == "safetyCheck"
                                 {
-                                    result.denial = Some("safety check".to_owned());
+                                    result.denial = Some("Safety Check".to_owned());
                                 }
                             }
                         }
@@ -491,7 +491,7 @@ mod tests {
         let events = events_from(records);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Edit: dangerous");
+        assert_eq!(events[0].body, "Edit: Dangerous");
         assert_eq!(events[0].ended_at, Some(end));
     }
 
@@ -504,7 +504,7 @@ mod tests {
         records.push(reply);
         let events = events_from(records);
         assert_eq!(events[0].kind, Kind::Denied);
-        assert_eq!(events[0].body, "Bash: safety check");
+        assert_eq!(events[0].body, "Bash: Safety Check");
         assert_eq!(events[0].ended_at, Some(end));
         assert_eq!(events[1].previous_end, Some(end));
     }
@@ -534,7 +534,7 @@ mod tests {
             records[1]["message"]["content"][0]["content"] = text.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Denied);
-            assert_eq!(events[0].body, "Bash: dangerous");
+            assert_eq!(events[0].body, "Bash: Dangerous");
         }
     }
 
