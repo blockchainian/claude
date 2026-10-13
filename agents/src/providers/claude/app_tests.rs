@@ -354,24 +354,51 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
 
 #[test]
 fn working_subagent_log_ticks_without_process_and_ready_log_stops() {
-    let (dir, mut app) = fixture();
+    let (dir, mut app, _child) = subagent_fixture();
     let path = dir.path().join("running-subagent.jsonl");
     std::fs::write(
         &path,
-        include_str!("../../../tests/fixtures/automode_blocked.jsonl")
-            .lines()
-            .next()
-            .unwrap(),
+        format!(
+            "{}{}\n",
+            include_str!("../../../tests/fixtures/transcript.jsonl"),
+            include_str!("../../../tests/fixtures/automode_blocked.jsonl")
+                .lines()
+                .next()
+                .unwrap()
+        ),
     )
     .unwrap();
-    let session = &mut app.sessions[0];
-    session.parent = Some(session_key("parent"));
-    session.process = None;
-    session.status = SessionStatus::Working;
-    app.view.log = crate::providers::claude::log::tail(&path, 8).unwrap();
-    assert!(app.log_ticks());
-    app.sessions[0].status = SessionStatus::Ready;
-    assert!(!app.log_ticks());
+    let now = chrono::Utc::now();
+    for (status, expected) in [
+        (SessionStatus::Working, Some(Duration::from_secs(1))),
+        (SessionStatus::Ready, None),
+    ] {
+        app.sessions[1].status = status;
+        app.view.set_sessions(app.sessions.clone(), false);
+        app.view.log = crate::providers::claude::log::tail(&path, 8).unwrap();
+        assert_eq!(app.view.log_redraw_in(now), expected);
+    }
+}
+
+#[test]
+fn last_prose_log_row_ticks_each_second_under_a_minute() {
+    let (_dir, mut app) = fixture();
+    let started_at = chrono::Utc::now();
+    app.view.log_session = Some(app.sessions[0].id.clone());
+    app.view.log = vec![crate::log::Event {
+        kind: crate::log::Kind::Model,
+        body: "done".into(),
+        path: None,
+        started_at,
+        ended_at: None,
+        previous_end: None,
+    }];
+    let at = |seconds| started_at + chrono::Duration::seconds(seconds);
+    assert_eq!(app.view.log_redraw_in(at(12)), Some(Duration::from_secs(1)));
+    assert_eq!(
+        app.view.log_redraw_in(at(125)),
+        Some(Duration::from_secs(55))
+    );
 }
 
 fn subagent_fixture() -> (tempfile::TempDir, App, Session) {

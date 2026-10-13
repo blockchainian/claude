@@ -209,10 +209,12 @@ impl App {
             {
                 terminal.set_cursor_position((x, y))?;
             }
-            match receiver.recv_timeout(schedule.redraw_timeout(
-                Instant::now(),
-                self.view.has_background() || self.log_ticks(),
-            )) {
+            let timeout = schedule.redraw_timeout(Instant::now(), self.view.has_background());
+            let timeout = self
+                .view
+                .log_redraw_in(chrono::Utc::now())
+                .map_or(timeout, |log| timeout.min(log));
+            match receiver.recv_timeout(timeout) {
                 Ok(Input::Terminal(event)) => {
                     if self.handle_event(event?) {
                         return Ok(());
@@ -257,27 +259,6 @@ impl App {
             _ => return false,
         };
         self.handle_action(action)
-    }
-
-    fn log_ticks(&self) -> bool {
-        self.view.log.last().is_some_and(|event| {
-            matches!(
-                event.kind,
-                crate::log::Kind::Tool | crate::log::Kind::Error | crate::log::Kind::Denied
-            ) && event.ended_at.is_none()
-                && !event.body.ends_with(" *")
-        }) && self
-            .view
-            .selected_id()
-            .and_then(|id| self.sessions.iter().find(|s| &s.id == id))
-            .is_some_and(|session| {
-                if session.parent.is_some() {
-                    session.status == crate::model::SessionStatus::Working
-                } else {
-                    session.process.is_some()
-                        && session.status != crate::model::SessionStatus::Inactive
-                }
-            })
     }
 
     fn refresh_log(&mut self, visible: usize) {

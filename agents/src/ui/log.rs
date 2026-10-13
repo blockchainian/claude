@@ -35,15 +35,7 @@ impl View {
             }
         }
         let scroll = self.log_scroll();
-        let matching: Vec<_> = self
-            .log
-            .iter()
-            .enumerate()
-            .filter(|(index, event)| {
-                self.log_filter.matches(&event.kind) && self.log_matches(*index)
-            })
-            .map(|(_, event)| event)
-            .collect();
+        let matching: Vec<_> = self.shown_log_events().collect();
         let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
         let events = &matching[start..end];
@@ -61,41 +53,100 @@ impl View {
             );
         }
     }
+
+    /// How long until the bottom log row's time reads differently, or `None` if it never does.
+    pub(crate) fn log_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
+        let session = self.selected_row()?;
+        if self.log_scroll() != 0 || self.log_session.as_ref() != Some(&session.id) {
+            return None;
+        }
+        let event = self.shown_log_events().last()?;
+        row_time_changes_in(&row_time(event, session, true), now)
+    }
+
+    fn shown_log_events(&self) -> impl Iterator<Item = &Event> {
+        self.log
+            .iter()
+            .enumerate()
+            .filter(|(index, event)| {
+                self.log_filter.matches(&event.kind) && self.log_matches(*index)
+            })
+            .map(|(_, event)| event)
+    }
 }
 
-fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) -> String {
-    let clock = || {
-        event
-            .started_at
-            .with_timezone(&Local)
-            .format(CLOCK_FORMAT)
-            .to_string()
-    };
+/// How a log row's time column reads.
+#[derive(Debug, PartialEq)]
+enum RowTime {
+    /// The wall-clock time the event started.
+    Clock(DateTime<Utc>),
+    /// A duration that no longer changes.
+    Settled(i64),
+    /// A duration still growing from the given start.
+    Running(DateTime<Utc>),
+    /// The time elapsed since the given moment, as "12s ago".
+    Ago(DateTime<Utc>),
+}
+
+fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
     if !matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) {
         return if last {
-            format_relative_time(now, Some(event.started_at))
+            RowTime::Ago(event.started_at)
         } else if event.kind == Kind::Model
             && let Some(reference) = event.previous_end
         {
-            format_duration((event.started_at - reference).num_seconds().max(0))
+            RowTime::Settled((event.started_at - reference).num_seconds().max(0))
         } else {
-            clock()
+            RowTime::Clock(event.started_at)
         };
     }
     let Some(previous) = event.previous_end else {
-        return clock();
+        return RowTime::Clock(event.started_at);
     };
     let background = event.body.ends_with(" *");
     let end = match event.ended_at {
         Some(end) => end,
         None if !last || background => event.started_at,
-        None if session.parent.is_some() && session.status == SessionStatus::Working => now,
+        None if session.parent.is_some() && session.status == SessionStatus::Working => {
+            return RowTime::Running(previous);
+        }
         None if session.process.is_none() || session.status == SessionStatus::Inactive => {
             session.last_record_at.unwrap_or(event.started_at)
         }
-        None => now,
+        None => return RowTime::Running(previous),
     };
-    format_duration((end - previous).num_seconds().max(0))
+    RowTime::Settled((end - previous).num_seconds().max(0))
+}
+
+fn format_row_time(time: &RowTime, now: DateTime<Utc>) -> String {
+    match *time {
+        RowTime::Clock(at) => at.with_timezone(&Local).format(CLOCK_FORMAT).to_string(),
+        RowTime::Settled(seconds) => format_duration(seconds),
+        RowTime::Running(start) => format_duration((now - start).num_seconds().max(0)),
+        RowTime::Ago(at) => format_relative_time(now, Some(at)),
+    }
+}
+
+/// How long until `format_row_time` reads differently, or `None` if it never does.
+fn row_time_changes_in(time: &RowTime, now: DateTime<Utc>) -> Option<std::time::Duration> {
+    match *time {
+        RowTime::Clock(_) | RowTime::Settled(_) => None,
+        RowTime::Running(_) => Some(std::time::Duration::from_secs(1)),
+        RowTime::Ago(at) => {
+            let seconds = (now - at).num_seconds().max(0) as u64;
+            let unit = match seconds {
+                0..60 => 1,
+                60..3600 => 60,
+                3600..86400 => 3600,
+                _ => 86400,
+            };
+            Some(std::time::Duration::from_secs(unit - seconds % unit))
+        }
+    }
+}
+
+fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) -> String {
+    format_row_time(&row_time(event, session, last), now)
 }
 
 fn render_event(
@@ -270,6 +321,19 @@ mod log_markdown {
         assert_eq!(event_time(event, &session, true, now), "2m 0s");
         session.status = SessionStatus::Ready;
         assert_eq!(event_time(event, &session, true, now), "30s");
+    }
+
+    #[test]
+    fn row_time_changes_when_its_text_would() {
+        let now = Utc::now();
+        let ago = |seconds| RowTime::Ago(now - chrono::Duration::seconds(seconds));
+        let secs = |seconds| Some(std::time::Duration::from_secs(seconds));
+        assert_eq!(row_time_changes_in(&ago(12), now), secs(1));
+        assert_eq!(row_time_changes_in(&ago(125), now), secs(55));
+        assert_eq!(row_time_changes_in(&ago(7300), now), secs(3500));
+        assert_eq!(row_time_changes_in(&RowTime::Running(now), now), secs(1));
+        assert_eq!(row_time_changes_in(&RowTime::Settled(5), now), None);
+        assert_eq!(row_time_changes_in(&RowTime::Clock(now), now), None);
     }
 
     #[test]
