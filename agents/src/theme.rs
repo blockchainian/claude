@@ -7,40 +7,45 @@ use std::sync::Mutex;
 
 type Rgb = (u8, u8, u8);
 
-/// Catppuccin Latte accents, for light backgrounds.
+/// Catppuccin Latte accents at 70% chroma, plus two hues filling its widest gaps, for light backgrounds.
 const LATTE: &[Rgb] = &[
-    (64, 160, 43),
-    (234, 118, 203),
-    (254, 100, 11),
-    (136, 57, 239),
-    (23, 146, 153),
-    (30, 102, 245),
-    (223, 142, 29),
-    (230, 69, 83),
-    (210, 15, 57),
-    (4, 165, 229),
-    (221, 120, 120),
-    (32, 159, 181),
-    (114, 135, 253),
-    (220, 138, 120),
+    (92, 154, 80),
+    (216, 135, 192),
+    (228, 123, 79),
+    (128, 85, 203),
+    (74, 141, 146),
+    (62, 111, 207),
+    (206, 150, 87),
+    (205, 97, 100),
+    (185, 68, 76),
+    (84, 163, 207),
+    (203, 132, 130),
+    (83, 155, 170),
+    (123, 141, 222),
+    (204, 146, 133),
+    (154, 145, 47),
+    (38, 165, 132),
 ];
 
-/// Catppuccin Mocha accents, for dark backgrounds.
+/// Catppuccin Mocha accents at 60% chroma and at most 0.75 OKLCH lightness, plus two hues filling
+/// its widest gaps, for dark backgrounds.
 const MOCHA: &[Rgb] = &[
-    (166, 227, 161),
-    (245, 194, 231),
-    (250, 179, 135),
-    (203, 166, 247),
-    (148, 226, 213),
-    (137, 180, 250),
-    (249, 226, 175),
-    (235, 160, 172),
-    (243, 139, 168),
-    (137, 220, 235),
-    (242, 205, 205),
-    (116, 199, 236),
-    (180, 190, 254),
-    (245, 224, 220),
+    (150, 185, 147),
+    (193, 164, 185),
+    (206, 164, 139),
+    (184, 163, 211),
+    (141, 184, 176),
+    (149, 175, 217),
+    (186, 173, 144),
+    (205, 160, 167),
+    (217, 154, 169),
+    (137, 183, 192),
+    (189, 168, 168),
+    (136, 182, 203),
+    (165, 171, 209),
+    (183, 171, 168),
+    (173, 178, 141),
+    (145, 185, 164),
 ];
 
 #[cfg(test)]
@@ -160,13 +165,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_palettes_reach_all_fourteen_accents() {
+    fn default_palettes_reach_all_sixteen_accents() {
         let _guard = TEST_LOCK.lock().unwrap();
         for palette in [LATTE, MOCHA] {
             set_accents(palette.to_vec());
             let assigned: std::collections::HashSet<_> =
                 (0..512).map(|id| color_for_id(&id.to_string())).collect();
-            assert_eq!(assigned.len(), 14);
+            assert_eq!(assigned.len(), 16);
         }
     }
 
