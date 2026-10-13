@@ -211,6 +211,35 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
 }
 
 #[test]
+fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
+    use crate::sessions::log::Kind;
+    let (mut view, now) = log_fixture();
+    let mut event = view.log.last().unwrap().clone();
+    event.kind = Kind::Tool;
+    event.ended_at = Some(event.started_at);
+    event.previous_end = Some(event.started_at - Duration::seconds(12));
+    view.log = (0..12)
+        .map(|index| {
+            let mut event = event.clone();
+            event.body = format!("Event {index:02}");
+            event
+        })
+        .collect();
+    view.log.last_mut().unwrap().previous_end = None;
+    let before = log_screen(&view, 100, 25, now);
+    let rect = view.viewport.borrow().log;
+    assert!(before.contains("11:59:30 Tool    Event 11"), "{before}");
+    assert!(before.contains("12s Tool    Event 10"), "{before}");
+    let (before_x, before_y) = rendered_cell(&before, "Event 10");
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x + 2, rect.y + 1));
+    let after = log_screen(&view, 100, 25, now);
+    assert!(!after.contains("Event 11"), "{after}");
+    let (after_x, after_y) = rendered_cell(&after, "Event 10");
+    assert_eq!(after_y, before_y + 1);
+    assert_eq!(after_x, before_x);
+}
+
+#[test]
 fn mouse_log_wheel_down_at_end_stays_at_end() {
     let (mut view, now) = log_fixture();
     let before = log_screen(&view, 100, 25, now);

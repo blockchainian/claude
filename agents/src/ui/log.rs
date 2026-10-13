@@ -4,6 +4,9 @@ use super::*;
 use crate::sessions::log::{Event, Kind};
 use chrono::{DateTime, Local, Utc};
 
+const CLOCK_FORMAT: &str = "%H:%M:%S";
+const CLOCK_WIDTH: usize = 8;
+
 impl View {
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
         if area.is_empty() {
@@ -20,25 +23,13 @@ impl View {
         let end = self.log.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
         let events = &self.log[start..end];
-        let times: Vec<_> = events
-            .iter()
-            .enumerate()
-            .map(|(index, event)| {
-                event_time(
-                    event,
-                    session,
-                    scroll == 0 && index + 1 == events.len(),
-                    now,
-                )
-            })
-            .collect();
-        let time_width = times.iter().map(|time| time.width()).max().unwrap_or(0);
-        for (index, (event, time)) in events.iter().zip(&times).enumerate() {
+        for (index, event) in events.iter().enumerate() {
             let last = scroll == 0 && index + 1 == events.len();
+            let time = event_time(event, session, last, now);
             render_event(
                 event,
-                time,
-                time_width,
+                &time,
+                CLOCK_WIDTH,
                 last,
                 super::render::row(area, index as u16 + 1, 1),
                 buf,
@@ -52,7 +43,7 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
         event
             .started_at
             .with_timezone(&Local)
-            .format("%H:%M:%S")
+            .format(CLOCK_FORMAT)
             .to_string()
     };
     if !matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) {
