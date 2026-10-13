@@ -1482,7 +1482,7 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
 }
 
 #[test]
-fn task_log_labels_have_seven_columns() {
+fn task_log_labels_are_right_aligned_in_seven_columns() {
     let (view, now) = log_fixture();
     let rendered = log_screen(&view, 100, 25, now);
     assert!(
@@ -1490,7 +1490,7 @@ fn task_log_labels_have_seven_columns() {
             .lines()
             .nth(15)
             .unwrap()
-            .starts_with("  User    Please")
+            .starts_with("     User Please")
     );
 }
 
@@ -1625,7 +1625,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (18, Color::Red, true),
         (19, Color::Reset, true),
     ] {
-        let label = &buf[(2, y)];
+        let label = &buf[(8, y)];
         let body = &buf[(10, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
@@ -1666,15 +1666,15 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
                     .lines()
                     .nth(19)
                     .unwrap()
-                    .starts_with(&format!("  {expected_label:<7} Also"))
+                    .starts_with(&format!("  {expected_label:>7} Also"))
             );
         }
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        for x in [2, 10] {
+        for x in [8, 10] {
             let cell = &buf[(x, 19)];
             assert_eq!(cell.fg, colour);
-            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 2);
+            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 8);
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
         let time = &buf[(97, 19)];

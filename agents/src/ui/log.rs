@@ -95,7 +95,7 @@ fn render_event(event: &Event, time: &str, last: bool, area: Rect, buf: &mut Buf
         Kind::Error => "Error",
         Kind::QueuedUser | Kind::QueuedSystem => "Queue",
     };
-    let label = format!("{label:<7} ");
+    let label = format!("{label:>7} ");
     let label_width = label.width().min(content_width);
     Line::from(Span::styled(label, label_style))
         .render(Rect::new(area.x, area.y, label_width as u16, 1), buf);
