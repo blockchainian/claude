@@ -185,15 +185,19 @@ pub(super) fn abbreviate_paths_in_text(text: &str, max_width: usize) -> String {
     }
     text.split(' ')
         .map(|word| {
-            let path = word
-                .trim_start_matches(['`', '(', '"', '\''])
-                .trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':']);
+            // A path starts at the first `/` or `~` after punctuation only, so
+            // `a/b` and `https://…` stay prose while `报告：/tmp/…` is a path.
+            let Some(start) = word.find(['/', '~']).filter(|&start| {
+                !word[..start].contains(|c: char| c.is_ascii_alphanumeric() || c == ':')
+            }) else {
+                return word.to_owned();
+            };
+            let path = word[start..].trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':']);
             let is_path =
                 (path.starts_with('/') || path.starts_with("~/")) && path[1..].contains('/');
             if overflow == 0 || !is_path {
                 return word.to_owned();
             }
-            let start = word.len() - word.trim_start_matches(['`', '(', '"', '\'']).len();
             let width = display_width(path);
             let shrunk = abbreviate_directories(path, width.saturating_sub(overflow));
             overflow = overflow.saturating_sub(width.saturating_sub(display_width(&shrunk)));
@@ -287,6 +291,10 @@ mod tests {
         assert_eq!(
             abbreviate_paths_in_text("see a/b/c and `/tmp/project/x.md`.", 1),
             "see a/b/c and `/t…/p…/x.md`."
+        );
+        assert_eq!(
+            abbreviate_paths_in_text("报告：/tmp/project/x.md", 1),
+            "报告：/t…/p…/x.md"
         );
         assert_eq!(
             abbreviate_paths_in_text("/report.md and https://example.com/a/b", 1),
