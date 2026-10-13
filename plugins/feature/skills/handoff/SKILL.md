@@ -2,9 +2,8 @@
 name: handoff
 description: >
   Write a mid-phase handoff when a session must stop before its phase's output exists —
-  quota exhausted, end of day, the context safety rail in the user's CLAUDE.md, or the
-  55-minute idle wake-up firing.
-  Use for "/feature:handoff", "write a handoff", or when the idle wake-up prompt says to. NOT at a
+  quota exhausted, end of day, or the context safety rail in the user's CLAUDE.md.
+  Use for "/feature:handoff" or "write a handoff". NOT at a
   phase end: a phase's output (plan.md, the PR, verdict JSONs) is its
   own record and needs no handoff.
 ---
@@ -58,9 +57,3 @@ redo** points at `sources.md`. The 40-line limit applies to the handoff, not to 
 files. Put the session id in **Stopped at**: the transcript under `~/.claude/projects/` holds every
 tool result, and the resumer can grep one specific result out of it without reading it all.
 
-## Idle wake-up
-
-A Stop hook in the dotfiles schedules a one-shot 55 minutes after every turn ends. If the session is
-still idle then, it fires "[idle-wakeup <session>] If still idle, write the handoff per the
-feature:handoff skill and end." The hook owns the scheduling: never create, delete or reschedule
-the wake-up yourself.
