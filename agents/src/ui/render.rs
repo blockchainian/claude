@@ -175,7 +175,7 @@ impl View {
                         !self.hidden.contains(&s.id)
                             && self.group_index(*index).is_some_and(|parent| {
                                 !self.hidden.contains(&self.rows[parent].id)
-                                    && group.contains(&self.rows[parent].status)
+                                    && group.contains(&s.status)
                             })
                     })
                     .count();

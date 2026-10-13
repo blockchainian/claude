@@ -3,6 +3,7 @@ use super::*;
 pub(super) enum CenterRow {
     Group(usize),
     Task(usize),
+    Parent(usize),
     Gap,
     ShowMore,
 }
@@ -22,6 +23,15 @@ impl View {
                     entries.push(CenterRow::Gap);
                 }
                 entries.push(CenterRow::Group(index));
+            }
+            if let Some(parent) = self.group_index(index)
+                && parent != index
+                && previous.is_none_or(|previous| {
+                    !self.same_group(grouping, previous, index)
+                        || self.group_index(previous) != Some(parent)
+                })
+            {
+                entries.push(CenterRow::Parent(parent));
             }
             entries.push(CenterRow::Task(index));
             previous = Some(index);

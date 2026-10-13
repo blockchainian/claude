@@ -192,12 +192,14 @@ impl View {
         if selected.is_some()
             && selected_index.is_none_or(|index| !self.visible_indices().contains(&index))
         {
-            self.status_filter = tab_for_status(
-                selected_index
-                    .and_then(|index| self.group_index(index))
-                    .map(|index| self.rows[index].status),
-                self.status_filter,
-            );
+            let status = selected_index.map(|index| self.rows[index].status);
+            self.status_filter = if self.rename_target.as_deref() == selected.as_deref()
+                && status == Some(SessionStatus::Inactive)
+            {
+                TASK_FILTERS.len() - 1
+            } else {
+                tab_for_status(status, self.status_filter)
+            };
         }
         self.selected = if show_more {
             usize::MAX
@@ -292,6 +294,9 @@ impl View {
             .is_some_and(|parent| self.pinned.contains(&self.rows[parent].id))
     }
     fn same_group(&self, grouping: Grouping, left: usize, right: usize) -> bool {
+        if grouping == Grouping::Status && self.rows[left].status != self.rows[right].status {
+            return false;
+        }
         let (Some(left), Some(right)) = (self.group_index(left), self.group_index(right)) else {
             return false;
         };
@@ -300,7 +305,7 @@ impl View {
         }
         match grouping {
             Grouping::Project => self.project_groups[left].key == self.project_groups[right].key,
-            Grouping::Status => self.rows[left].status == self.rows[right].status,
+            Grouping::Status => true,
             Grouping::Model => self.rows[left].model_name() == self.rows[right].model_name(),
         }
     }
@@ -323,6 +328,7 @@ impl View {
         for (index, session) in self.rows.iter().enumerate() {
             if let Some(parent) = session.parent.as_deref()
                 && !self.hidden.contains(&session.id)
+                && filter.contains(&session.status)
             {
                 children.entry(parent).or_default().push(index);
             }
@@ -337,11 +343,12 @@ impl View {
             .filter(|(_, s)| {
                 s.parent.is_none()
                     && !self.hidden.contains(&s.id)
-                    && (self.rename_target.as_deref() == Some(&s.id) || filter.contains(&s.status))
-                    && (matches(s)
-                        || children
-                            .get(s.id.as_str())
-                            .is_some_and(|indices| indices.iter().any(|&i| matches(&self.rows[i]))))
+                    && ((filter.contains(&s.status) && matches(s))
+                        || children.get(s.id.as_str()).is_some_and(|indices| {
+                            indices
+                                .iter()
+                                .any(|&i| matches(s) || matches(&self.rows[i]))
+                        }))
             })
             .map(|(i, _)| i)
             .partition(|i| self.is_pinned(*i));
@@ -364,7 +371,9 @@ impl View {
         pinned.extend(visible);
         let mut rows = Vec::new();
         for parent in pinned {
-            rows.push(parent);
+            if filter.contains(&self.rows[parent].status) {
+                rows.push(parent);
+            }
             if let Some(siblings) = children.get(self.rows[parent].id.as_str()) {
                 rows.extend(
                     siblings
@@ -373,6 +382,9 @@ impl View {
                         .filter(|&i| matches(&self.rows[parent]) || matches(&self.rows[i])),
                 );
             }
+        }
+        if self.grouping == Grouping::Status {
+            rows.sort_by_key(|&index| (!self.is_pinned(index), self.rows[index].status));
         }
         rows
     }

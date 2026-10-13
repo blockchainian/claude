@@ -1,0 +1,30 @@
+  Agent command center  Group: Project  g
+   Active 3   Ready 2   Working 1   Needs you 0   Inactive 0                                           tab/⇧tab filter
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+      Tasks                                      Status         Updated  │ Ready ○ Parent task
+  /tmp/project  2 of 3                                                   │
+  › ○ Parent task                                Ready           2m ago  │ Prompt
+    └ ○ Review results                           Ready              now  │ Parent task
+                                                                         │
+                                                                         │ Background
+                                                                         │ ╭ Check files ────────────────────────────╮
+                                                                         │ │                                         │
+                                                                         │ ╰─────────────────────────────────────────╯
+                                                                         │ ╭ Review results ─────────────────────────╮
+                                                                         │ │                                         │
+                                                                         │ ╰─────────────────────────────────────────╯
+                                                                         │
+                                                                         │ Project
+                                                                         │ /tmp/project
+                                                                         │
+                                                                         │ Model: parent-model
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+  ? help  esc back  ↑/↓ move  enter open  n new

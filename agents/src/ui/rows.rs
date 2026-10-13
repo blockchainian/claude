@@ -96,7 +96,9 @@ impl View {
         };
         for (offset, entry) in entries.iter().skip(start).take(height).enumerate() {
             let index = match entry {
-                CenterRow::Group(index) | CenterRow::Task(index) => *index,
+                CenterRow::Group(index) | CenterRow::Task(index) | CenterRow::Parent(index) => {
+                    *index
+                }
                 CenterRow::Gap => continue,
                 CenterRow::ShowMore => {
                     let rect = row(viewport, offset as u16, /*height*/ 1);
@@ -137,11 +139,13 @@ impl View {
                     "Pinned".to_owned()
                 } else {
                     match self.grouping {
-                        Grouping::Project => {
-                            format_directory_display(&self.project_groups[index].heading)
-                        }
+                        Grouping::Project => format_directory_display(
+                            &self.project_groups[self.group_index(index).unwrap()].heading,
+                        ),
                         Grouping::Status => task.status.label().to_owned(),
-                        Grouping::Model => task.model_name().to_owned(),
+                        Grouping::Model => self.rows[self.group_index(index).unwrap()]
+                            .model_name()
+                            .to_owned(),
                     }
                 };
                 let count = indices
@@ -171,7 +175,11 @@ impl View {
                 line(format!("{group}  {count}").dim(), rect, buf);
                 continue;
             }
-            let style = if index == self.selected {
+            let header = matches!(entry, CenterRow::Parent(_));
+            let selected = !header && index == self.selected;
+            let style = if header {
+                Style::default().dim()
+            } else if selected {
                 selection_style()
             } else {
                 Style::default()
@@ -184,14 +192,14 @@ impl View {
                 style,
             );
             let (status, mut dot) = Self::status(task);
-            if index == self.selected {
+            if selected || header {
                 dot.style = style;
             }
-            if index == self.selected {
+            if selected {
                 state.marker = Some((rect.x, rect.y));
             }
             line(
-                Line::from(if index == self.selected { "›" } else { " " }).style(style),
+                Line::from(if selected { "›" } else { " " }).style(style),
                 rect,
                 buf,
             );
@@ -222,7 +230,7 @@ impl View {
             let indent = title.width.min(indent);
             title.x += indent;
             title.width -= indent;
-            let title_style = if index == self.selected {
+            let title_style = if selected || header {
                 style
             } else {
                 self.title_style(&task.id)
@@ -236,11 +244,7 @@ impl View {
             if !updated.is_empty() {
                 let age = format_relative_time(reference, Some(task.updated_at));
                 Line::from(age)
-                    .style(if index == self.selected {
-                        style
-                    } else {
-                        style.dim()
-                    })
+                    .style(if selected { style } else { style.dim() })
                     .right_aligned()
                     .render(updated, buf);
             }

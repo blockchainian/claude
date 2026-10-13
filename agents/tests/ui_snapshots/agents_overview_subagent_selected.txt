@@ -1,5 +1,5 @@
   Agent command center  Group: Project  g
-   Active 3   Ready 3   Working 0   Needs you 0   Inactive 0                                           tab/⇧tab filter
+   Active 3   Ready 2   Working 1   Needs you 0   Inactive 0                                           tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                      Status         Updated  │ Working ● Check files
   /tmp/project  3                                                        │

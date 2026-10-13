@@ -1,0 +1,30 @@
+  Agent command center  Group: Project  g
+   Active 3   Ready 2   Working 1   Needs you 0   Inactive 0                                           tab/⇧tab filter
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+      Tasks                                      Status         Updated  │ Working ● Check files
+  /tmp/project  1 of 3                                                   │
+    ○ Parent task                                Ready           2m ago  │ Prompt
+  › └ ● Check files                              Working         1m ago  │ Check files
+                                                                         │
+                                                                         │ Project
+                                                                         │ /tmp/child-project
+                                                                         │
+                                                                         │ Model: child-model
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+  ? help  esc back  ↑/↓ move

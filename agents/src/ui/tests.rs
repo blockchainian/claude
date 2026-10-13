@@ -1317,6 +1317,7 @@ fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
     view.set_sessions(rows, false);
     assert_eq!(view.selected_id(), Some("42"));
     assert!(screen(&view, 88, 16).contains("Rename › Current task"));
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
     view.hide("42");
     assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
     let mut view = fixture();
@@ -3675,14 +3676,19 @@ mod subagent_rows {
     }
 
     #[test]
-    fn tabs_follow_parent_and_refresh_keeps_child_selected() {
+    fn tabs_filter_each_status_and_refresh_keeps_child_selected() {
         let mut view = fixture();
-        for tab in 0..TASK_FILTERS.len() {
+        for (tab, expected) in [
+            (0, vec!["parent", "agent-older", "agent-newer"]),
+            (1, vec!["parent", "agent-newer"]),
+            (2, vec!["agent-older"]),
+            (3, vec![]),
+            (4, vec![]),
+        ] {
             set_filter(&mut view, tab);
-            assert_eq!(ids(&view).len(), if tab <= 1 { 3 } else { 0 });
+            assert_eq!(ids(&view), expected);
         }
-        set_filter(&mut view, 1);
-        key(&mut view, KeyCode::Down);
+        set_filter(&mut view, 2);
         let mut rows = view.rows.clone();
         rows.iter_mut()
             .find(|s| s.id == "agent-older")
@@ -3690,11 +3696,95 @@ mod subagent_rows {
             .status = SessionStatus::Ready;
         rows.iter_mut().find(|s| s.id == "parent").unwrap().status = SessionStatus::Working;
         view.set_sessions(rows, false);
-        assert_eq!(view.status_filter, 2);
+        assert_eq!(view.status_filter, 1);
         assert_eq!(view.selected_id(), Some("agent-older"));
-        assert_eq!(ids(&view), ["parent", "agent-older", "agent-newer"]);
-        set_filter(&mut view, 1);
-        assert!(ids(&view).is_empty());
+        assert_eq!(ids(&view), ["agent-older", "agent-newer"]);
+    }
+
+    #[test]
+    fn tab_counts_use_each_rows_status() {
+        let view = fixture();
+        let rendered = screen(&view, 160, 30);
+        for label in [
+            "Active 3",
+            "Ready 2",
+            "Working 1",
+            "Needs you 0",
+            "Inactive 0",
+        ] {
+            assert!(rendered.contains(label), "{rendered}");
+        }
+    }
+
+    #[test]
+    fn selection_skips_dimmed_parent_headers() {
+        let mut view = fixture();
+        let mut rows = view.rows.clone();
+        let mut other = session("other", "Other task", SessionStatus::Working, 0);
+        other.updated_at =
+            rows.iter().find(|s| s.id == "parent").unwrap().updated_at - Duration::seconds(1);
+        rows.push(other);
+        view.set_sessions(rows, false);
+        set_filter(&mut view, 2);
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        let rendered = screen(&view, 120, 30);
+        let (x, y) = rendered_cell(&rendered, "Parent task");
+        assert!(
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y))
+                .is_none()
+        );
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        key(&mut view, KeyCode::Down);
+        assert_eq!(view.selected_id(), Some("other"));
+        key(&mut view, KeyCode::Up);
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        key(&mut view, KeyCode::Home);
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        key(&mut view, KeyCode::PageDown);
+        assert_eq!(view.selected_id(), Some("other"));
+        key(&mut view, KeyCode::PageUp);
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 120, 30));
+        view.render_at(buf.area, &mut buf, "2026-10-13T12:00:00Z".parse().unwrap());
+        assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+        view.selected = view.rows.iter().position(|s| s.id == "parent").unwrap();
+        assert_eq!(view.selected_id(), None);
+        assert_eq!(key(&mut view, KeyCode::Enter), None);
+    }
+
+    #[test]
+    fn filtered_snapshots() {
+        let mut view = fixture();
+        for (tab, expected) in [
+            (
+                1,
+                include_str!("../../tests/ui_snapshots/subagents_ready.txt"),
+            ),
+            (
+                2,
+                include_str!("../../tests/ui_snapshots/subagents_working.txt"),
+            ),
+        ] {
+            set_filter(&mut view, tab);
+            assert_eq!(screen(&view, 120, 30), expected);
+        }
+    }
+
+    #[test]
+    fn status_grouping_uses_child_status() {
+        let mut view = fixture();
+        view.grouping = Grouping::Status;
+        assert_eq!(ids(&view), ["agent-older", "parent", "agent-newer"]);
+        let rendered = screen(&view, 120, 30);
+        assert_eq!(
+            rendered
+                .lines()
+                .filter(|line| line.split('│').next().unwrap().contains("Parent task"))
+                .count(),
+            2
+        );
+        assert!(rendered.contains("Working  1"));
+        assert!(rendered.contains("Ready  2"));
     }
 
     #[test]
@@ -3704,14 +3794,19 @@ mod subagent_rows {
             view.grouping = grouping;
             for pins in [vec![], vec!["parent".into()]] {
                 view.set_pinned(&pins);
-                assert_eq!(ids(&view), ["parent", "agent-older", "agent-newer"]);
+                let expected = if grouping == Grouping::Status {
+                    vec!["agent-older", "parent", "agent-newer"]
+                } else {
+                    vec!["parent", "agent-older", "agent-newer"]
+                };
+                assert_eq!(ids(&view), expected);
                 let entries = view.center_rows(&view.visible_indices(), grouping);
                 assert_eq!(
                     entries
                         .iter()
                         .filter(|r| matches!(r, navigation::CenterRow::Group(_)))
                         .count(),
-                    1
+                    if grouping == Grouping::Status { 2 } else { 1 }
                 );
             }
         }
@@ -3734,16 +3829,60 @@ mod subagent_rows {
         view.set_sessions(rows, false);
         for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
             view.grouping = grouping;
-            assert_eq!(
-                ids(&view),
-                ["other", "parent", "agent-older", "agent-newer"]
-            );
+            let expected = if grouping == Grouping::Status {
+                vec!["agent-older", "other", "parent", "agent-newer"]
+            } else {
+                vec!["other", "parent", "agent-older", "agent-newer"]
+            };
+            assert_eq!(ids(&view), expected);
         }
+        view.grouping = Grouping::Project;
         view.set_pinned(&["parent".into()]);
         assert_eq!(
             ids(&view),
             ["parent", "agent-older", "agent-newer", "other"]
         );
+    }
+
+    #[test]
+    fn filtered_headers_keep_parent_order_group_and_pin() {
+        let mut view = fixture();
+        let mut rows = view.rows.clone();
+        let mut other = session("other", "Other task", SessionStatus::Working, 0);
+        other.model = Some("parent-model".into());
+        other.updated_at =
+            rows.iter().find(|s| s.id == "parent").unwrap().updated_at + Duration::seconds(30);
+        rows.push(other);
+        view.set_sessions(rows, false);
+        for grouping in [Grouping::Project, Grouping::Model] {
+            view.grouping = grouping;
+            set_filter(&mut view, 2);
+            view.set_pinned(&[]);
+            assert_eq!(ids(&view), ["other", "agent-older"]);
+            let rendered = screen(&view, 120, 30);
+            let lines: Vec<_> = rendered.lines().collect();
+            let parent = lines
+                .iter()
+                .position(|line| line.contains("○ Parent task"))
+                .unwrap();
+            assert!(lines[parent - 1].contains("Other task"));
+            assert!(lines[parent + 1].contains("└ ● Check files"));
+            let heading = if grouping == Grouping::Project {
+                "/tmp/project  2 of 4"
+            } else {
+                "parent-model  2 of 4"
+            };
+            assert!(rendered.contains(heading), "{rendered}");
+            view.set_pinned(&["parent".into()]);
+            assert_eq!(ids(&view), ["agent-older", "other"]);
+            assert!(screen(&view, 120, 30).contains("Pinned  1 of 3"));
+        }
+        view.hide("agent-older");
+        assert_eq!(ids(&view), ["other"]);
+        assert!(!screen(&view, 120, 30).contains("Parent task"));
+        let rendered = screen(&view, 160, 30);
+        assert!(rendered.contains("Active 3"));
+        assert!(rendered.contains("Working 1"));
     }
 
     #[test]
@@ -3789,10 +3928,10 @@ mod subagent_rows {
                 .contains("Review results"))
         );
         set_filter(&mut view, 2);
-        assert!(ids(&view).is_empty());
+        assert_eq!(ids(&view), ["agent-older"]);
         set_filter(&mut view, 1);
         view.search.set_text("Parent task");
-        assert_eq!(ids(&view), ["parent", "agent-older", "agent-newer"]);
+        assert_eq!(ids(&view), ["parent", "agent-newer"]);
     }
 
     #[test]
