@@ -1699,6 +1699,7 @@ fn details_activity_follows_the_clock() {
     row.turn_messages = 42;
     row.last_record_at = Some(now - Duration::seconds(3595));
     row.activity = Some(crate::model::Activity {
+        kind: crate::log::Kind::Tool,
         label: "Run checks".into(),
         at: now - Duration::seconds(7),
     });
@@ -1764,6 +1765,7 @@ fn details_activity_uses_tool_color() {
     let now = Utc::now();
     let mut row = session("activity", "Activity task", SessionStatus::Ready, 0);
     row.activity = Some(crate::model::Activity {
+        kind: crate::log::Kind::Tool,
         label: "Run checks".into(),
         at: now - Duration::minutes(2),
     });
@@ -1798,6 +1800,7 @@ fn details_message_uses_model_color_under_markdown() {
     let now = Utc::now();
     let mut row = session("message", "Message task", SessionStatus::Ready, 0);
     row.activity = Some(crate::model::Activity {
+        kind: crate::log::Kind::Tool,
         label: "Run checks".into(),
         at: now - Duration::minutes(5),
     });
@@ -2189,6 +2192,7 @@ fn details_background_includes_only_working_subagents() {
     worker.parent = Some(parent.id.clone());
     worker.started_at = Some(now - Duration::seconds(65));
     worker.activity = Some(crate::model::Activity {
+        kind: crate::log::Kind::Tool,
         label: "Read files\nextra line".into(),
         at: now,
     });
@@ -4444,4 +4448,96 @@ fn ask_user_question_details_snapshot() {
     row.pending_questions.push("cd 要不要显示？".into());
     view.set_sessions(vec![row], false);
     assert!(!render(&view).contains("Needs attention"));
+}
+
+#[test]
+fn pending_question_details_use_model_color_and_bold_attention_title() {
+    let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
+    row.pending_questions = vec!["Pick a color?".into()];
+    row.activity = Some(crate::model::Activity {
+        kind: crate::log::Kind::Model,
+        label: "Pick a color?".into(),
+        at: Utc::now(),
+    });
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 100, 40);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, Utc::now());
+    let mut questions = 0;
+    for cells in buf.content.chunks(100) {
+        let text = cells.iter().map(|cell| cell.symbol()).collect::<String>();
+        if text.trim_start().starts_with("Pick a color?") {
+            questions += 1;
+            assert_eq!(cells[0].fg, Color::Yellow);
+        }
+        if text.starts_with("Needs attention") {
+            assert_eq!(cells[0].fg, Color::LightRed);
+            assert!(cells[0].modifier.contains(ratatui::style::Modifier::BOLD));
+        }
+    }
+    assert_eq!(questions, 2);
+}
+
+#[test]
+fn pending_question_log_uses_model_color() {
+    use crate::providers::Provider;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dir = tempfile::tempdir().unwrap();
+    let codex = crate::providers::codex::CodexProvider::new(
+        dir.path().to_owned(),
+        dir.path().join("manager"),
+    );
+    for fixture in [
+        "tests/fixtures/claude-questions-pending.jsonl",
+        "tests/fixtures/codex-input/default-pending.jsonl",
+        "tests/fixtures/codex-input/plan-pending.jsonl",
+    ] {
+        let (mut view, now) = log_fixture();
+        let row = &mut view.rows[0];
+        let path = root.join(fixture);
+        row.transcript = Some(path.clone());
+        let events = if fixture.contains("codex-input") {
+            codex
+                .log(row, 8, &crate::log::Filter::default(), false)
+                .unwrap()
+        } else {
+            crate::providers::claude::log::tail(&path, 8).unwrap()
+        };
+        let question = events.last().unwrap();
+        assert_eq!(style::log_styles(&question.kind).1.fg, Some(Color::Yellow));
+        view.log = events;
+        let area = Rect::new(0, 0, 160, 40);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let question_row = buf
+            .content
+            .chunks(160)
+            .find(|cells| {
+                cells[11..18]
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .contains("Model")
+            })
+            .expect("question log row");
+        assert_eq!(question_row[19].fg, Color::Yellow);
+    }
+}
+
+#[test]
+fn attention_title_style_follows_terminal_background_and_color_support() {
+    for light in [false, true] {
+        for (no_color, colors) in [(false, true), (true, true), (false, false)] {
+            let style = style::attention_title_style_for(no_color, colors, light);
+            let expected = if no_color || !colors {
+                None
+            } else {
+                Some(if light { Color::Red } else { Color::LightRed })
+            };
+            assert_eq!(style.fg, expected);
+            assert!(style.add_modifier.contains(ratatui::style::Modifier::BOLD));
+            assert_eq!(style.bg, None);
+        }
+    }
 }

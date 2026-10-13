@@ -342,6 +342,12 @@ impl Log {
         } else {
             tool_label(name, &detail)
         };
+        let kind = crate::log::tool_kind(name);
+        if self.batch.is_some_and(|index| {
+            (self.entries[index].event.kind == Kind::Model) != (kind == Kind::Model)
+        }) {
+            self.batch = None;
+        }
         let mut entry = if let Some(index) = self.batch.take() {
             let entry = self.entries.remove(index);
             self.matching -= usize::from(self.filter.matches(&entry.event.kind));
@@ -349,7 +355,7 @@ impl Log {
         } else {
             Entry {
                 event: Event {
-                    kind: Kind::Tool,
+                    kind,
                     body: String::new(),
                     path: None,
                     started_at: at,
@@ -493,9 +499,12 @@ mod tests {
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].body, expected);
+            assert_eq!(events[0].kind, Kind::Model);
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();
-            assert_eq!(summary.activity.unwrap().label, expected);
+            let activity = summary.activity.unwrap();
+            assert_eq!(activity.label, expected);
+            assert_eq!(activity.kind, Kind::Model);
         }
     }
 

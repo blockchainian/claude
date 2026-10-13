@@ -15,16 +15,39 @@ pub fn set_light_background(light: bool) {
     LIGHT_BACKGROUND.store(light, Ordering::Relaxed);
 }
 
+fn terminal_style(style_for: fn(bool, bool, bool) -> Style) -> Style {
+    #[cfg(test)]
+    return style_for(false, true, false);
+
+    #[cfg(not(test))]
+    {
+        let term = std::env::var("TERM").unwrap_or_default();
+        style_for(
+            std::env::var_os("NO_COLOR").is_some(),
+            term.contains("256color")
+                || term.contains("truecolor")
+                || std::env::var_os("COLORTERM").is_some(),
+            LIGHT_BACKGROUND.load(Ordering::Relaxed),
+        )
+    }
+}
+
 #[cfg(not(test))]
 pub(super) fn selection_style() -> Style {
-    let term = std::env::var("TERM").unwrap_or_default();
-    selection_style_for(
-        std::env::var_os("NO_COLOR").is_some(),
-        term.contains("256color")
-            || term.contains("truecolor")
-            || std::env::var_os("COLORTERM").is_some(),
-        LIGHT_BACKGROUND.load(Ordering::Relaxed),
-    )
+    terminal_style(selection_style_for)
+}
+
+pub(super) fn attention_title_style() -> Style {
+    terminal_style(attention_title_style_for)
+}
+
+pub(super) fn attention_title_style_for(no_color: bool, colors: bool, light: bool) -> Style {
+    let style = Style::default().bold();
+    if no_color || !colors {
+        style
+    } else {
+        style.fg(if light { Color::Red } else { Color::LightRed })
+    }
 }
 
 #[cfg(test)]

@@ -409,10 +409,7 @@ impl View {
                 ])
                 .into(),
                 truncate_line_with_ellipsis_if_overflow(
-                    Line::from(Span::styled(
-                        label,
-                        style::log_styles(&crate::log::Kind::Tool).1,
-                    )),
+                    Line::from(Span::styled(label, style::log_styles(&activity.kind).1)),
                     width,
                 )
                 .into(),
@@ -469,7 +466,10 @@ impl View {
 
         if session.status == SessionStatus::NeedsInput {
             let start = items.len() + 1;
-            items.extend([Line::default().into(), "Needs attention".red().into()]);
+            items.extend([
+                Line::default().into(),
+                Span::styled("Needs attention", style::attention_title_style()).into(),
+            ]);
             if session.pending_questions.is_empty() {
                 items.extend([
                     "Open task to review.".dim().into(),
@@ -477,8 +477,14 @@ impl View {
                 ]);
             } else {
                 items.extend(session.pending_questions.iter().map(|question| {
-                    truncate_line_with_ellipsis_if_overflow(Line::from(question.clone()), width)
-                        .into()
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(Span::styled(
+                            question.clone(),
+                            style::log_styles(&crate::log::Kind::Model).1,
+                        )),
+                        width,
+                    )
+                    .into()
                 }));
             }
             bodies.push(start..items.len());
@@ -605,7 +611,7 @@ impl View {
                         .latest_activity()
                         .filter(|_| child.status == SessionStatus::Working);
                     let (text, kind) = if let Some(activity) = activity {
-                        (Some(activity.label.as_str()), crate::log::Kind::Tool)
+                        (Some(activity.label.as_str()), activity.kind.clone())
                     } else {
                         (child.last_message.as_deref(), crate::log::Kind::Model)
                     };

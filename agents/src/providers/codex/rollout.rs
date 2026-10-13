@@ -197,13 +197,18 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             summary.last_message_at = Some(at);
         }
         if summary.activity.is_none() && record["type"] == "response_item" {
-            let label = match payload["type"].as_str() {
-                Some("function_call" | "custom_tool_call") => tool_body(payload),
-                Some("reasoning") => Some("Thinking".to_owned()),
+            let activity = match payload["type"].as_str() {
+                Some("function_call" | "custom_tool_call") => tool_body(payload).map(|label| {
+                    (
+                        crate::log::tool_kind(payload["name"].as_str().unwrap()),
+                        label,
+                    )
+                }),
+                Some("reasoning") => Some((Kind::Tool, "Thinking".to_owned())),
                 _ => None,
             };
-            if let Some(label) = label {
-                summary.activity = Some(Activity { label, at });
+            if let Some((kind, label)) = activity {
+                summary.activity = Some(Activity { kind, label, at });
             }
         }
         !(boundary && summary.last_message.is_some() && summary.activity.is_some())
@@ -239,7 +244,11 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
                 let ended = payload["call_id"]
                     .as_str()
                     .and_then(|id| results.remove(id));
-                (Kind::Tool, body, ended)
+                (
+                    crate::log::tool_kind(payload["name"].as_str().unwrap()),
+                    body,
+                    ended,
+                )
             }
             (Some("response_item"), Some("message")) => {
                 let kind = match payload["role"].as_str() {
@@ -313,14 +322,14 @@ mod tests {
             let events = tail_filtered(&path, 100, &Filter::default()).unwrap();
             let question = events
                 .iter()
-                .find(|event| event.kind == Kind::Tool)
+                .find(|event| event.body == "Pick a color?")
                 .unwrap();
+            assert_eq!(question.kind, Kind::Model);
             assert_eq!(question.body, "Pick a color?");
             assert!(question.ended_at.is_none());
-            assert_eq!(
-                summary(&path).unwrap().activity.unwrap().label,
-                "Pick a color?"
-            );
+            let activity = summary(&path).unwrap().activity.unwrap();
+            assert_eq!(activity.label, "Pick a color?");
+            assert_eq!(activity.kind, Kind::Model);
         }
     }
 

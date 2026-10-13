@@ -45,6 +45,7 @@ pub struct PullRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Activity {
+    pub kind: crate::log::Kind,
     pub label: String,
     pub at: DateTime<Utc>,
 }

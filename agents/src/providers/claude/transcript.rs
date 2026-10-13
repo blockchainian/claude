@@ -496,13 +496,21 @@ fn read_messages(
             && record["type"] == "assistant"
             && let Some(at) = at
             && let Some(blocks) = record["message"]["content"].as_array()
-            && let Some(label) = blocks
+            && let Some((kind, label)) = blocks
                 .iter()
                 .rev()
                 .filter(|block| block["type"] == "tool_use")
-                .find_map(super::log::tool_activity)
+                .find_map(|block| {
+                    super::log::tool_activity(block).map(|label| {
+                        (
+                            crate::log::tool_kind(block["name"].as_str().unwrap()),
+                            label,
+                        )
+                    })
+                })
         {
             summary.activity = Some(Activity {
+                kind,
                 label: label.to_owned(),
                 at,
             });

@@ -1,6 +1,13 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
+pub(crate) fn tool_kind(name: &str) -> Kind {
+    match name.rsplit('.').next() {
+        Some("AskUserQuestion" | "request_user_input") => Kind::Model,
+        _ => Kind::Tool,
+    }
+}
+
 pub(crate) fn question_texts(input: &Value) -> Vec<String> {
     input["questions"]
         .as_array()
