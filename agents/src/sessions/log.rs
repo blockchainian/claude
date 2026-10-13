@@ -235,6 +235,9 @@ impl Log {
         let Some(name) = block["name"].as_str() else {
             return;
         };
+        if matches!(name, "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet") {
+            return;
+        }
         let input = &block["input"];
         let result = block["id"].as_str().and_then(|id| self.results.get(id));
         let detail = ["description", "file_path", "prompt", "query", "message"]
@@ -846,6 +849,61 @@ mod tests {
     }
 
     #[test]
+    fn task_list_tools_produce_no_events() {
+        for name in ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"] {
+            assert!(events_from(vec![tool(1, "call", "task", name, json!({}))]).is_empty());
+        }
+    }
+
+    #[test]
+    fn task_list_tools_preserve_the_bash_batch() {
+        let bash = tool(
+            1,
+            "batch",
+            "bash",
+            "Bash",
+            json!({"description":"inspect files"}),
+        );
+        let expected = events_from(vec![bash.clone(), result(3, "bash", false)]);
+        assert_eq!(expected.len(), 1);
+        for task_first in [false, true] {
+            let task = tool(1, "batch", "task", "TaskCreate", json!({}));
+            let mut mixed = bash.clone();
+            let blocks = mixed["message"]["content"].as_array_mut().unwrap();
+            blocks.insert(
+                usize::from(!task_first),
+                task["message"]["content"][0].clone(),
+            );
+            assert_eq!(events_from(vec![mixed, result(3, "bash", false)]), expected);
+        }
+    }
+
+    #[test]
+    fn task_list_tool_results_cannot_make_error_or_denied_rows() {
+        for name in ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"] {
+            let mut records =
+                denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+            records[0]["message"]["content"][0]["name"] = name.into();
+            assert!(events_from(records).is_empty());
+            assert!(
+                events_from(vec![
+                    tool(1, "call", "task", name, json!({})),
+                    result(2, "task", true)
+                ])
+                .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn task_stop_produces_a_tool_row() {
+        let events = events_from(vec![tool(1, "call", "task", "TaskStop", json!({}))]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, Kind::Tool);
+        assert_eq!(events[0].body, "TaskStop");
+    }
+
+    #[test]
     fn bash_description_replaces_only_the_exact_tool_name() {
         for (name, input, expected) in [
             (
@@ -912,7 +970,7 @@ mod tests {
                 "mcp__plugin_codex_codex-manager__detach",
                 json!({}),
             ),
-            tool(2, "batch", "b", "TaskUpdate", json!({})),
+            tool(2, "batch", "b", "TaskStop", json!({})),
         ] {
             writeln!(file, "{r}").unwrap();
         }
@@ -920,7 +978,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0].body,
-            "mcp__plugin_codex_codex-manager__detach，TaskUpdate"
+            "mcp__plugin_codex_codex-manager__detach，TaskStop"
         );
     }
 
