@@ -7,24 +7,17 @@ use std::sync::Mutex;
 
 type Rgb = (u8, u8, u8);
 
-/// Catppuccin Latte accents at 70% chroma, plus two hues filling its widest gaps, for light backgrounds.
-const LATTE: &[Rgb] = &[
-    (92, 154, 80),
-    (216, 135, 192),
-    (228, 123, 79),
-    (128, 85, 203),
-    (74, 141, 146),
-    (62, 111, 207),
-    (206, 150, 87),
-    (205, 97, 100),
-    (185, 68, 76),
-    (84, 163, 207),
-    (203, 132, 130),
-    (83, 155, 170),
-    (123, 141, 222),
-    (204, 146, 133),
-    (154, 145, 47),
-    (38, 165, 132),
+/// Eight accents for light backgrounds, chosen to differ from each other as much as possible while
+/// keeping a WCAG contrast of at least 4.5 on a light blue-gray terminal background.
+const LIGHT: &[Rgb] = &[
+    (161, 43, 1),
+    (91, 59, 0),
+    (23, 100, 7),
+    (4, 92, 114),
+    (12, 51, 160),
+    (109, 55, 174),
+    (89, 48, 93),
+    (156, 25, 108),
 ];
 
 /// Catppuccin Mocha accents at 60% chroma and at most 0.75 OKLCH lightness, plus two hues filling
@@ -54,7 +47,7 @@ pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 static ACCENTS: Mutex<Vec<Rgb>> = Mutex::new(Vec::new());
 
 pub fn use_default_accents(light_background: bool) {
-    set_accents(if light_background { LATTE } else { MOCHA }.to_vec());
+    set_accents(if light_background { LIGHT } else { MOCHA }.to_vec());
 }
 
 fn set_accents(accents: Vec<Rgb>) {
@@ -165,13 +158,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_palettes_reach_all_sixteen_accents() {
+    fn default_palettes_reach_every_accent() {
         let _guard = TEST_LOCK.lock().unwrap();
-        for palette in [LATTE, MOCHA] {
+        for palette in [LIGHT, MOCHA] {
             set_accents(palette.to_vec());
             let assigned: std::collections::HashSet<_> =
                 (0..512).map(|id| color_for_id(&id.to_string())).collect();
-            assert_eq!(assigned.len(), 16);
+            assert_eq!(assigned.len(), palette.len());
         }
     }
 

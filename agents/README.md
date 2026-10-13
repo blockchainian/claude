@@ -13,7 +13,7 @@ cargo build --release
 
 - `$CLAUDE_CONFIG_DIR` (default `~/.claude`) `/sessions/<pid>.json` — live sessions; an entry counts only when its pid is alive and its `procStart` matches the process.
 - `$CLAUDE_CONFIG_DIR/projects/*/<session-id>.jsonl` — transcripts; read in chunks, with the full event history cached during Task Log search.
-- `$CLAUDE_CONFIG_DIR/agents.json` — pins, grouping and an optional `theme`: a `.tmTheme` path whose accents color the session titles, as in Codex. Without it the titles use softened 16-color versions of Codex's defaults: Catppuccin Latte on a light terminal and Mocha on a dark one.
+- `$CLAUDE_CONFIG_DIR/agents.json` — pins, grouping and an optional `theme`: a `.tmTheme` path whose accents color the session titles, as in Codex. Without it the titles use eight high-contrast colors on a light terminal and a softened 16-color Catppuccin Mocha, Codex's dark default, on a dark one.
 
 Changes to the registry and transcripts refresh the dashboard after a 50 ms debounce. A full refresh every 5 seconds checks process liveness; unavailable filesystem notifications fall back to 1-second polling.
 
