@@ -4130,6 +4130,7 @@ mod subagent_rows {
             key(&mut view, KeyCode::Char(c));
         }
         assert_eq!(ids(&view), ["parent", "agent-older"]);
+        assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         let rendered = screen(&view, 120, 30);
         assert!(rendered.contains("Parent task"));
         assert!(rendered.contains("└ ● Check files"));

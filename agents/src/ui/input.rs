@@ -281,10 +281,12 @@ impl View {
                     if (plain && matches!(key.code, KeyCode::Char(_)))
                         || key.code == KeyCode::Backspace
                     {
-                        let selected = self
-                            .selectable_indices()
-                            .first()
+                        let selectable = self.selectable_indices();
+                        let selected = selectable
+                            .iter()
                             .copied()
+                            .find(|&i| self.rows.get(i).is_some_and(|s| self.matches_search(s)))
+                            .or_else(|| selectable.first().copied())
                             .unwrap_or(usize::MAX);
                         self.set_selected(selected);
                     } else {

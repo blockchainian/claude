@@ -330,21 +330,22 @@ impl View {
             Grouping::Model => self.rows[left].model_name() == self.rows[right].model_name(),
         }
     }
-    fn visible_indices(&self) -> Vec<usize> {
+    fn matches_search(&self, s: &Session) -> bool {
         let search = self.search.text().to_lowercase();
+        search.is_empty()
+            || format!(
+                "{} {} {} {}",
+                s.name.as_deref().unwrap_or(""),
+                s.title,
+                s.prompt,
+                s.cwd.display()
+            )
+            .to_lowercase()
+            .contains(&search)
+    }
+    fn visible_indices(&self) -> Vec<usize> {
         let filter = TASK_FILTERS[self.status_filter].1;
-        let matches = |s: &Session| {
-            search.is_empty()
-                || format!(
-                    "{} {} {} {}",
-                    s.name.as_deref().unwrap_or(""),
-                    s.title,
-                    s.prompt,
-                    s.cwd.display()
-                )
-                .to_lowercase()
-                .contains(&search)
-        };
+        let matches = |s: &Session| self.matches_search(s);
         let mut children = std::collections::HashMap::<&SessionKey, Vec<usize>>::new();
         for (index, session) in self.rows.iter().enumerate() {
             if let Some(parent) = session.parent.as_ref()
