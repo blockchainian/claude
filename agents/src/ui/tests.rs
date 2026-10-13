@@ -1646,6 +1646,92 @@ fn details_activity_follows_the_clock() {
 }
 
 #[test]
+fn details_activity_uses_tool_color() {
+    use ratatui::style::Modifier;
+    let now = Utc::now();
+    let mut row = session("activity", "Activity task", SessionStatus::Ready, 0);
+    row.activity = Some(crate::model::Activity {
+        label: "Run checks".into(),
+        at: now - Duration::minutes(2),
+    });
+    row.last_message = Some("Checking the project".into());
+    row.last_message_at = Some(now - Duration::minutes(5));
+    let mut view = View::default();
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 60, 24);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, now);
+    let header = "Latest activity · 2m ago";
+    let y = (0..area.height)
+        .find(|y| buf[(0, *y)].symbol() == "L")
+        .expect("activity header");
+    for (offset, character) in header.chars().enumerate() {
+        let cell = &buf[(offset as u16, y)];
+        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(cell.fg, Color::Reset);
+        assert!(cell.modifier.contains(Modifier::DIM));
+    }
+    for (offset, character) in "Run checks".chars().enumerate() {
+        let cell = &buf[(offset as u16, y + 1)];
+        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(cell.fg, Color::Blue);
+        assert!(!cell.modifier.contains(Modifier::DIM));
+    }
+}
+
+#[test]
+fn details_message_uses_model_color_under_markdown() {
+    use ratatui::style::Modifier;
+    let now = Utc::now();
+    let mut row = session("message", "Message task", SessionStatus::Ready, 0);
+    row.activity = Some(crate::model::Activity {
+        label: "Run checks".into(),
+        at: now - Duration::minutes(5),
+    });
+    row.last_message = Some("Plain `code` **bold** *italic*\n\nSecond paragraph".into());
+    row.last_message_at = Some(now - Duration::minutes(2));
+    let mut view = View::default();
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 60, 24);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, now);
+    let header = "Last message · 2m ago";
+    let y = (0..area.height)
+        .find(|y| buf[(0, *y)].symbol() == "L")
+        .expect("message header");
+    for (offset, character) in header.chars().enumerate() {
+        let cell = &buf[(offset as u16, y)];
+        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(cell.fg, Color::Reset);
+        assert!(cell.modifier.contains(Modifier::DIM));
+    }
+    for (offset, character) in "Plain code bold italic".chars().enumerate() {
+        let cell = &buf[(offset as u16, y + 1)];
+        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(
+            cell.fg,
+            if (6..10).contains(&offset) {
+                Color::Cyan
+            } else {
+                Color::Yellow
+            }
+        );
+        assert!(!cell.modifier.contains(Modifier::DIM));
+        if (11..15).contains(&offset) {
+            assert!(cell.modifier.contains(Modifier::BOLD));
+        }
+        if offset >= 16 {
+            assert!(cell.modifier.contains(Modifier::ITALIC));
+        }
+    }
+    for (offset, character) in "Second paragraph".chars().enumerate() {
+        let cell = &buf[(offset as u16, y + 3)];
+        assert_eq!(cell.symbol(), character.to_string());
+        assert_eq!(cell.fg, Color::Yellow);
+    }
+}
+
+#[test]
 fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
     let now: chrono::DateTime<Utc> = "2026-10-12T12:00:00Z".parse().unwrap();
     for (status, prompt_at, last_record_at, count, expected) in [

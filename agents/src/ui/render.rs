@@ -378,7 +378,14 @@ impl View {
                     format_relative_time(now, Some(activity.at)).dim(),
                 ])
                 .into(),
-                truncate_line_with_ellipsis_if_overflow(Line::from(label), width).into(),
+                truncate_line_with_ellipsis_if_overflow(
+                    Line::from(Span::styled(
+                        label,
+                        style::log_styles(&crate::sessions::log::Kind::Tool).1,
+                    )),
+                    width,
+                )
+                .into(),
             ]);
         }
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
@@ -387,9 +394,16 @@ impl View {
                 header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
             }
             items.extend([Line::default().into(), Line::from(header).into()]);
+            let body_style = style::log_styles(&crate::sessions::log::Kind::Model).1;
             items.extend(
                 super::markdown::render(message, width)
                     .into_iter()
+                    .map(|mut line| {
+                        for span in &mut line.spans {
+                            span.style = body_style.patch(span.style);
+                        }
+                        line
+                    })
                     .map(Item::from),
             );
         }
