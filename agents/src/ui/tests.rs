@@ -1606,11 +1606,11 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     for (y, colour, bold) in [
-        (15, Color::Cyan, true),
+        (15, Color::Reset, true),
         (16, Color::Yellow, true),
         (17, Color::Blue, true),
         (18, Color::Red, true),
-        (19, Color::Cyan, false),
+        (19, Color::Reset, false),
     ] {
         let label = &buf[(2, y)];
         let body = &buf[(9, y)];
