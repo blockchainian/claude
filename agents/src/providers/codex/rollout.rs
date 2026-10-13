@@ -261,10 +261,10 @@ mod tests {
         );
         assert_eq!(
             tool_body(
-                &serde_json::json!({"type":"custom_tool_call", "name":"exec", "input":"broken ("})
+                &serde_json::json!({"type":"custom_tool_call", "name":"exec", "input":"tools.exec_command({"})
             )
             .as_deref(),
-            Some("exec broken (")
+            Some("exec tools.exec_command({")
         );
     }
     #[test]
@@ -282,7 +282,7 @@ mod tests {
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
             vec![&Kind::User, &Kind::Tool, &Kind::Model]
         );
-        assert_eq!(events[1].body, "exec cargo test");
+        assert_eq!(events[1].body, "javascript");
         assert!(events[1].ended_at.is_some());
         assert_eq!(events[2].body, "Checks passed.");
         assert!(events[2].previous_end.is_some());

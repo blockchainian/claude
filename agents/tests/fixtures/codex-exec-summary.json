@@ -126,5 +126,9 @@
   {
     "input": "text(await tools.exec_command({cmd:\"unterminated",
     "expected": "exec text(await tools.exec_command({cmd:\"unterminated"
+  },
+  {
+    "input": "text(\"probe\");\n",
+    "expected": "javascript"
   }
 ]
