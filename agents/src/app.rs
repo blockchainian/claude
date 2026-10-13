@@ -262,7 +262,12 @@ impl App {
             .selected_id()
             .and_then(|id| self.sessions.iter().find(|s| s.id == id))
             .is_some_and(|session| {
-                session.process.is_some() && session.status != crate::model::SessionStatus::Inactive
+                if session.parent.is_some() {
+                    session.status == crate::model::SessionStatus::Working
+                } else {
+                    session.process.is_some()
+                        && session.status != crate::model::SessionStatus::Inactive
+                }
             })
     }
 
@@ -272,8 +277,14 @@ impl App {
             .view
             .selected_id()
             .and_then(|id| self.sessions.iter().find(|session| session.id == id))
-            .and_then(|session| Some((session.id.clone(), session.transcript.clone()?)));
-        let Some((session, path)) = selected else {
+            .and_then(|session| {
+                Some((
+                    session.id.clone(),
+                    session.transcript.clone()?,
+                    session.parent.is_some(),
+                ))
+            });
+        let Some((session, path, subagent)) = selected else {
             self.log_stamp = None;
             self.full_log_stamp = None;
             self.view.log.clear();
@@ -294,7 +305,12 @@ impl App {
                 if self.full_log_stamp.as_ref() == Some(&stamp) {
                     return Ok(None);
                 }
-                let events = crate::sessions::log::tail(&path, usize::MAX)?;
+                let events = crate::sessions::log::tail_filtered(
+                    &path,
+                    usize::MAX,
+                    &crate::sessions::log::Filter::default(),
+                    subagent,
+                )?;
                 Ok(Some((stamp, events)))
             };
             match load() {
@@ -335,10 +351,12 @@ impl App {
             if self.log_stamp.as_ref() == Some(&stamp) {
                 return Ok(None);
             }
-            let events = if self.view.log_filter == crate::sessions::log::Filter::default() {
+            let events = if !subagent
+                && self.view.log_filter == crate::sessions::log::Filter::default()
+            {
                 crate::sessions::log::tail(&path, count)?
             } else {
-                crate::sessions::log::tail_filtered(&path, count, &self.view.log_filter)?
+                crate::sessions::log::tail_filtered(&path, count, &self.view.log_filter, subagent)?
             };
             Ok(Some((stamp, events)))
         };
@@ -856,6 +874,62 @@ mod tests {
         key(&mut app, KeyCode::Down);
         assert!(app.view.log.is_empty());
         assert!(app.view.log_session.is_none());
+    }
+
+    #[test]
+    fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
+        let (dir, mut app) = fixture();
+        let parent = app.sessions[0].clone();
+        let parent_log = app.view.log.clone();
+        let mut child = parent.clone();
+        child.id = "agent-abf695d5995bd43ab".into();
+        child.parent = Some(parent.id.clone());
+        child.process = None;
+        child.status = SessionStatus::Working;
+        let path = dir.path().join("agent-abf695d5995bd43ab.jsonl");
+        std::fs::write(&path, include_str!("../tests/fixtures/subagent.jsonl")).unwrap();
+        child.transcript = Some(path);
+        app.sessions.push(child.clone());
+        app.view.set_sessions(app.sessions.clone(), false);
+        key(&mut app, KeyCode::Down);
+        assert_eq!(app.view.selected_id(), Some(child.id.as_str()));
+        assert_eq!(app.view.log_session.as_deref(), Some(child.id.as_str()));
+        assert_eq!(app.log_stamp.as_ref().unwrap().session, child.id);
+        assert!(app.view.log[0].body.starts_with("SubagentHandback"));
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('r'),
+            KeyModifiers::CONTROL,
+        )));
+        app.refresh_log(8);
+        assert_eq!(app.full_log_stamp.as_ref().unwrap().session, child.id);
+        assert!(app.view.log[0].body.starts_with("SubagentHandback"));
+        key(&mut app, KeyCode::Esc);
+        key(&mut app, KeyCode::Up);
+        assert_eq!(app.view.log_session.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(app.log_stamp.as_ref().unwrap().session, parent.id);
+        assert_eq!(app.view.log, parent_log);
+    }
+
+    #[test]
+    fn working_subagent_log_ticks_without_process_and_ready_log_stops() {
+        let (dir, mut app) = fixture();
+        let path = dir.path().join("running-subagent.jsonl");
+        std::fs::write(
+            &path,
+            include_str!("../tests/fixtures/automode_blocked.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        let session = &mut app.sessions[0];
+        session.parent = Some("parent".into());
+        session.process = None;
+        session.status = SessionStatus::Working;
+        app.view.log = crate::sessions::log::tail(&path, 8).unwrap();
+        assert!(app.log_ticks());
+        app.sessions[0].status = SessionStatus::Ready;
+        assert!(!app.log_ticks());
     }
 
     #[test]

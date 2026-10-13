@@ -293,15 +293,6 @@ impl Background {
 /// The callback returns false once it has all the records it needs.
 pub(super) fn walk_records(
     file: &mut (impl Read + Seek),
-    start: u64,
-    bytes: Vec<u8>,
-    visit: impl FnMut(Value) -> bool,
-) -> io::Result<()> {
-    walk_records_with_sidechains(file, start, bytes, false, visit)
-}
-
-fn walk_records_with_sidechains(
-    file: &mut (impl Read + Seek),
     mut start: u64,
     mut bytes: Vec<u8>,
     sidechains: bool,
@@ -358,7 +349,7 @@ fn read_messages(
     let mut quiet_point = false;
     let mut background = Background::default();
     let mut pairing_only = false;
-    walk_records_with_sidechains(file, start, bytes, sidechains, |record| {
+    walk_records(file, start, bytes, sidechains, |record| {
         if !quiet_point {
             if record["type"] == "user" {
                 next_user = content_text(&record, false);

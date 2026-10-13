@@ -170,7 +170,14 @@ impl View {
                 let count = self
                     .rows
                     .iter()
-                    .filter(|s| !self.hidden.contains(&s.id) && group.contains(&s.status))
+                    .enumerate()
+                    .filter(|(index, s)| {
+                        !self.hidden.contains(&s.id)
+                            && self.group_index(*index).is_some_and(|parent| {
+                                !self.hidden.contains(&self.rows[parent].id)
+                                    && group.contains(&self.rows[parent].status)
+                            })
+                    })
                     .count();
                 format!("{label} {count}")
             })

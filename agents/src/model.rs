@@ -106,7 +106,11 @@ pub struct Session {
 
 impl Session {
     pub fn display_title(&self) -> &str {
-        let title = self.name.as_deref().unwrap_or(&self.title);
+        let title = if self.parent.is_some() {
+            &self.title
+        } else {
+            self.name.as_deref().unwrap_or(&self.title)
+        };
         title.trim().lines().next().unwrap_or("Untitled session")
     }
 

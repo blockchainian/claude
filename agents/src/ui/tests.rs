@@ -3510,12 +3510,235 @@ fn task_log_search_active_snapshot() {
     );
 }
 
-#[test]
-fn snapshot_subagents_are_hidden_until_nested_rows_are_enabled() {
-    let mut view = View::new(Grouping::Project, false);
-    let parent = session("parent", "Parent", SessionStatus::Ready, 1);
-    let mut child = session("agent-x", "Child", SessionStatus::Working, 0);
-    child.parent = Some(parent.id.clone());
-    view.set_sessions(vec![parent.clone(), child], false);
-    assert_eq!(view.rows, vec![parent]);
+mod subagent_rows {
+    use super::*;
+
+    fn fixture() -> View {
+        let now = "2026-10-13T12:00:00Z".parse().unwrap();
+        let mut parent = session("parent", "Parent task", SessionStatus::Ready, 120);
+        parent.updated_at = now - Duration::minutes(2);
+        parent.model = Some("parent-model".into());
+        let mut older = session("agent-older", "Check files", SessionStatus::Working, 60);
+        older.parent = Some(parent.id.clone());
+        older.updated_at = now - Duration::minutes(1);
+        older.model = Some("child-model".into());
+        older.name = Some("worker".into());
+        older.cwd = "/tmp/child-project".into();
+        let mut newer = session("agent-newer", "Review results", SessionStatus::Ready, 0);
+        newer.parent = Some(parent.id.clone());
+        newer.updated_at = now;
+        let mut view = View::new(Grouping::Project, false);
+        view.set_sessions(vec![newer, older, parent], false);
+        view
+    }
+
+    fn screen(view: &View, width: u16, height: u16) -> String {
+        let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
+        view.render_at(buf.area, &mut buf, "2026-10-13T12:00:00Z".parse().unwrap());
+        buf.content
+            .chunks(usize::from(width))
+            .map(|row| {
+                row.iter()
+                    .map(|c| c.symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn set_filter(view: &mut View, tab: usize) {
+        view.status_filter = tab;
+        view.reconcile_selection();
+    }
+
+    fn ids(view: &View) -> Vec<&str> {
+        view.visible_indices()
+            .iter()
+            .map(|&i| view.rows[i].id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn renders_children_in_age_order_with_own_status() {
+        let view = fixture();
+        assert_eq!(ids(&view), ["parent", "agent-older", "agent-newer"]);
+        let rendered = screen(&view, 120, 30);
+        let parent = rendered
+            .lines()
+            .position(|l| l.contains("› ○ Parent task"))
+            .unwrap();
+        let lines: Vec<_> = rendered.lines().collect();
+        assert!(lines[parent + 1].contains("└ ● Check files"), "{rendered}");
+        assert!(lines[parent + 1].contains("Working"));
+        assert!(lines[parent + 2].contains("└ ○ Review results"));
+        assert!(lines[parent + 2].contains("Ready"));
+    }
+
+    #[test]
+    fn tabs_follow_parent_and_refresh_keeps_child_selected() {
+        let mut view = fixture();
+        for tab in 0..TASK_FILTERS.len() {
+            set_filter(&mut view, tab);
+            assert_eq!(ids(&view).len(), if tab <= 1 { 3 } else { 0 });
+        }
+        set_filter(&mut view, 1);
+        key(&mut view, KeyCode::Down);
+        let mut rows = view.rows.clone();
+        rows.iter_mut()
+            .find(|s| s.id == "agent-older")
+            .unwrap()
+            .status = SessionStatus::Ready;
+        rows.iter_mut().find(|s| s.id == "parent").unwrap().status = SessionStatus::Working;
+        view.set_sessions(rows, false);
+        assert_eq!(view.status_filter, 2);
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert_eq!(ids(&view), ["parent", "agent-older", "agent-newer"]);
+        set_filter(&mut view, 1);
+        assert!(ids(&view).is_empty());
+    }
+
+    #[test]
+    fn grouping_and_pins_follow_parent() {
+        let mut view = fixture();
+        for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
+            view.grouping = grouping;
+            for pins in [vec![], vec!["parent".into()]] {
+                view.set_pinned(&pins);
+                assert_eq!(ids(&view), ["parent", "agent-older", "agent-newer"]);
+                let entries = view.center_rows(&view.visible_indices(), grouping);
+                assert_eq!(
+                    entries
+                        .iter()
+                        .filter(|r| matches!(r, navigation::CenterRow::Group(_)))
+                        .count(),
+                    1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn children_keep_parents_position_among_other_sessions() {
+        let mut view = fixture();
+        let mut other = session("other", "Other task", SessionStatus::Ready, 0);
+        other.updated_at = view
+            .rows
+            .iter()
+            .find(|s| s.id == "parent")
+            .unwrap()
+            .updated_at
+            + Duration::seconds(30);
+        other.model = Some("parent-model".into());
+        let mut rows = view.rows.clone();
+        rows.push(other);
+        view.set_sessions(rows, false);
+        for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
+            view.grouping = grouping;
+            assert_eq!(
+                ids(&view),
+                ["other", "parent", "agent-older", "agent-newer"]
+            );
+        }
+        view.set_pinned(&["parent".into()]);
+        assert_eq!(
+            ids(&view),
+            ["parent", "agent-older", "agent-newer", "other"]
+        );
+    }
+
+    #[test]
+    fn keyboard_and_mouse_select_child_and_show_details() {
+        let mut view = fixture();
+        key(&mut view, KeyCode::Down);
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        let panel = details_panel(&view);
+        let header: String = (0..panel.area.width)
+            .map(|x| panel[(x, 0)].symbol())
+            .collect();
+        assert!(header.starts_with("Working ● Check files"), "{header}");
+        let rendered = screen(&view, 120, 30);
+        assert!(rendered.contains("Model: child-model"));
+        assert!(!rendered.contains("Needs attention"));
+        let (x, y) = rendered_cell(&rendered, "Review results");
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+        assert_eq!(view.selected_id(), Some("agent-newer"));
+        view.handle_mouse(mouse(MouseEventKind::ScrollUp, x, y));
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, x, y));
+        assert_eq!(view.selected_id(), Some("agent-newer"));
+        key(&mut view, KeyCode::Up);
+        assert_eq!(view.selected_id(), Some("agent-older"));
+    }
+
+    #[test]
+    fn search_child_title_includes_parent_and_only_matching_child() {
+        let mut view = fixture();
+        key(&mut view, KeyCode::Char('/'));
+        for c in "Check files".chars() {
+            key(&mut view, KeyCode::Char(c));
+        }
+        assert_eq!(ids(&view), ["parent", "agent-older"]);
+        let rendered = screen(&view, 120, 30);
+        assert!(rendered.contains("Parent task"));
+        assert!(rendered.contains("└ ● Check files"));
+        assert!(!rendered.contains("Review results"));
+        set_filter(&mut view, 2);
+        assert!(ids(&view).is_empty());
+        set_filter(&mut view, 1);
+        view.search.set_text("Parent task");
+        assert_eq!(ids(&view), ["parent", "agent-older", "agent-newer"]);
+    }
+
+    #[test]
+    fn children_disappear_with_hidden_or_missing_parent() {
+        let mut view = fixture();
+        view.hide("parent");
+        assert!(ids(&view).is_empty());
+        view.hidden.clear();
+        let rows = view
+            .rows
+            .iter()
+            .filter(|s| s.parent.is_some())
+            .cloned()
+            .collect();
+        view.set_sessions(rows, false);
+        assert!(ids(&view).is_empty());
+    }
+
+    #[test]
+    fn child_width_preserves_status_and_updated_columns() {
+        let mut view = fixture();
+        let child = view
+            .rows
+            .iter_mut()
+            .find(|s| s.id == "agent-older")
+            .unwrap();
+        child.title = "界".repeat(100);
+        for width in [12, 55, 57, 80] {
+            let area = Rect::new(0, 0, width, 10);
+            let mut buf = Buffer::empty(area);
+            view.render_center_rows(area, &mut buf, "2026-10-13T12:00:00Z".parse().unwrap());
+            let row = (0..area.height)
+                .find(|&y| buf[(2, y)].symbol() == "└")
+                .unwrap();
+            assert_eq!(buf[(4, row)].symbol(), "●");
+            assert_eq!(buf[(6, row)].symbol(), "界");
+            if width >= 57 {
+                let text: String = (0..width).map(|x| buf[(x, row)].symbol()).collect();
+                assert!(text.contains("Working"), "{text}");
+                assert!(text.contains("1m ago"), "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn overview_snapshot() {
+        let view = fixture();
+        assert_eq!(
+            screen(&view, 120, 30),
+            include_str!("../../tests/ui_snapshots/agents_overview_subagents.txt")
+        );
+    }
 }

@@ -41,10 +41,15 @@ pub struct Event {
     pub previous_end: Option<DateTime<Utc>>,
 }
 pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
-    tail_filtered(path, count, &Filter::default())
+    tail_filtered(path, count, &Filter::default(), false)
 }
 
-pub fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::Result<Vec<Event>> {
+pub fn tail_filtered(
+    path: &Path,
+    count: usize,
+    filter: &Filter,
+    sidechains: bool,
+) -> io::Result<Vec<Event>> {
     if count == 0 {
         return Ok(Vec::new());
     }
@@ -54,7 +59,7 @@ pub fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::Result<V
         filter: filter.clone(),
         ..Log::default()
     };
-    super::transcript::walk_records(&mut file, len, Vec::new(), |record| {
+    super::transcript::walk_records(&mut file, len, Vec::new(), sidechains, |record| {
         log.record(record, count)
     })?;
     let mut events: Vec<_> = log.entries.into_iter().map(|entry| entry.event).collect();
@@ -462,6 +467,26 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
     use std::io::Write;
+
+    #[test]
+    fn subagent_transcript_reads_sidechain_records_only_in_subagent_mode() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(include_bytes!("../../tests/fixtures/subagent.jsonl"))
+            .unwrap();
+        assert!(tail(file.path(), 8).unwrap().is_empty());
+        let events = tail_filtered(file.path(), 8, &Filter::default(), true).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, Kind::Tool);
+        assert!(events[0].body.starts_with("SubagentHandback"));
+        assert!(events[0].ended_at.is_some());
+        let mut filter = Filter::default();
+        filter.toggle(&[Kind::Model]);
+        assert!(
+            tail_filtered(file.path(), 8, &filter, true)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     fn at(second: u32) -> DateTime<Utc> {
         format!("2026-10-06T16:39:{second:02}Z").parse().unwrap()
@@ -1210,7 +1235,7 @@ mod tests {
             earliest: len,
         };
         let mut log = Log::default();
-        super::super::transcript::walk_records(&mut measured, len, Vec::new(), |record| {
+        super::super::transcript::walk_records(&mut measured, len, Vec::new(), false, |record| {
             log.record(record, 2)
         })
         .unwrap();
@@ -1356,7 +1381,7 @@ mod log_filters {
                 for count in [0, 1, 2, 8] {
                     let expected = &matching[matching.len().saturating_sub(count)..];
                     assert_eq!(
-                        tail_filtered(file.path(), count, &filter).unwrap(),
+                        tail_filtered(file.path(), count, &filter, false).unwrap(),
                         expected
                     );
                 }

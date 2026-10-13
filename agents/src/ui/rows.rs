@@ -195,17 +195,33 @@ impl View {
                 rect,
                 buf,
             );
+            let indent = if task.parent.is_some() { 2 } else { 0 };
+            if indent > 0 {
+                line(
+                    Line::from("└ ").style(style),
+                    Rect::new(
+                        rect.x + rect.width.min(2),
+                        rect.y,
+                        rect.width.saturating_sub(2).min(2),
+                        1,
+                    ),
+                    buf,
+                );
+            }
             line(
                 Line::from(dot),
                 Rect::new(
-                    rect.x + rect.width.min(/*other*/ 2),
+                    rect.x + rect.width.min(2 + indent),
                     rect.y,
-                    rect.width.saturating_sub(/*rhs*/ 2).min(/*other*/ 1),
+                    rect.width.saturating_sub(2 + indent).min(/*other*/ 1),
                     /*height*/ 1,
                 ),
                 buf,
             );
-            let (title, status_area, updated) = columns(rect);
+            let (mut title, status_area, updated) = columns(rect);
+            let indent = title.width.min(indent);
+            title.x += indent;
+            title.width -= indent;
             let title_style = if index == self.selected {
                 style
             } else {

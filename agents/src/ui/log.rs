@@ -89,6 +89,7 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
     let end = match event.ended_at {
         Some(end) => end,
         None if !last || background => event.started_at,
+        None if session.parent.is_some() && session.status == SessionStatus::Working => now,
         None if session.process.is_none() || session.status == SessionStatus::Inactive => {
             session.last_record_at.unwrap_or(event.started_at)
         }
@@ -223,6 +224,46 @@ mod log_markdown {
             .collect::<String>()
             .trim_end()
             .to_owned()
+    }
+
+    #[test]
+    fn working_subagent_tool_time_advances_without_process_and_ready_time_freezes() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut store = crate::sessions::Store::new(dir.path().to_owned());
+        let mut session = store.refresh().sessions.remove(0);
+        session.parent = Some("parent".into());
+        session.process = None;
+        session.status = SessionStatus::Working;
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            file.path(),
+            format!(
+                "{}{}\n",
+                include_str!("../../tests/fixtures/transcript.jsonl"),
+                include_str!("../../tests/fixtures/automode_blocked.jsonl")
+                    .lines()
+                    .next()
+                    .unwrap()
+            ),
+        )
+        .unwrap();
+        let events = crate::sessions::log::tail(file.path(), 8).unwrap();
+        let event = events.last().unwrap();
+        assert_eq!(event.kind, Kind::Tool);
+        assert!(event.ended_at.is_none());
+        let previous = event.previous_end.unwrap();
+        session.last_record_at = Some(previous + chrono::Duration::seconds(30));
+        let now = previous + chrono::Duration::seconds(120);
+        assert_eq!(event_time(event, &session, true, now), "2m 0s");
+        session.status = SessionStatus::Ready;
+        assert_eq!(event_time(event, &session, true, now), "30s");
     }
 
     #[test]

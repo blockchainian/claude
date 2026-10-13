@@ -174,7 +174,6 @@ impl View {
 
     /// Replace rows while retaining the selected session and view preferences.
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
-        sessions.retain(|session| session.parent.is_none());
         let selected = self.selected_id().map(str::to_owned);
         let status_filter = self.status_filter;
         let show_more = self.selected == usize::MAX && self.has_more;
@@ -194,7 +193,9 @@ impl View {
             && selected_index.is_none_or(|index| !self.visible_indices().contains(&index))
         {
             self.status_filter = tab_for_status(
-                selected_index.map(|index| self.rows[index].status),
+                selected_index
+                    .and_then(|index| self.group_index(index))
+                    .map(|index| self.rows[index].status),
                 self.status_filter,
             );
         }
@@ -266,10 +267,23 @@ impl View {
             .get(self.selected)
             .filter(|_| self.visible_indices().contains(&self.selected))
     }
+    fn group_index(&self, index: usize) -> Option<usize> {
+        match self.rows[index].parent.as_deref() {
+            None => Some(index),
+            Some(parent) => self
+                .rows
+                .iter()
+                .position(|s| s.parent.is_none() && s.id == parent),
+        }
+    }
     fn is_pinned(&self, index: usize) -> bool {
-        self.pinned.contains(&self.rows[index].id)
+        self.group_index(index)
+            .is_some_and(|parent| self.pinned.contains(&self.rows[parent].id))
     }
     fn same_group(&self, grouping: Grouping, left: usize, right: usize) -> bool {
+        let (Some(left), Some(right)) = (self.group_index(left), self.group_index(right)) else {
+            return false;
+        };
         if self.is_pinned(left) || self.is_pinned(right) {
             return self.is_pinned(left) && self.is_pinned(right);
         }
@@ -282,23 +296,41 @@ impl View {
     fn visible_indices(&self) -> Vec<usize> {
         let search = self.search.text().to_lowercase();
         let filter = TASK_FILTERS[self.status_filter].1;
+        let matches = |s: &Session| {
+            search.is_empty()
+                || format!(
+                    "{} {} {} {}",
+                    s.name.as_deref().unwrap_or(""),
+                    s.title,
+                    s.prompt,
+                    s.cwd.display()
+                )
+                .to_lowercase()
+                .contains(&search)
+        };
+        let mut children = std::collections::HashMap::<&str, Vec<usize>>::new();
+        for (index, session) in self.rows.iter().enumerate() {
+            if let Some(parent) = session.parent.as_deref()
+                && !self.hidden.contains(&session.id)
+            {
+                children.entry(parent).or_default().push(index);
+            }
+        }
+        for siblings in children.values_mut() {
+            siblings.sort_by_key(|&index| (self.rows[index].updated_at, &self.rows[index].id));
+        }
         let (mut pinned, mut visible): (Vec<_>, Vec<_>) = self
             .rows
             .iter()
             .enumerate()
             .filter(|(_, s)| {
-                !self.hidden.contains(&s.id)
+                s.parent.is_none()
+                    && !self.hidden.contains(&s.id)
                     && (self.rename_target.as_deref() == Some(&s.id) || filter.contains(&s.status))
-                    && (search.is_empty()
-                        || format!(
-                            "{} {} {} {}",
-                            s.name.as_deref().unwrap_or(""),
-                            s.title,
-                            s.prompt,
-                            s.cwd.display()
-                        )
-                        .to_lowercase()
-                        .contains(&search))
+                    && (matches(s)
+                        || children
+                            .get(s.id.as_str())
+                            .is_some_and(|indices| indices.iter().any(|&i| matches(&self.rows[i]))))
             })
             .map(|(i, _)| i)
             .partition(|i| self.is_pinned(*i));
@@ -319,7 +351,19 @@ impl View {
             }),
         }
         pinned.extend(visible);
-        pinned
+        let mut rows = Vec::new();
+        for parent in pinned {
+            rows.push(parent);
+            if let Some(siblings) = children.get(self.rows[parent].id.as_str()) {
+                rows.extend(
+                    siblings
+                        .iter()
+                        .copied()
+                        .filter(|&i| matches(&self.rows[parent]) || matches(&self.rows[i])),
+                );
+            }
+        }
+        rows
     }
     fn selectable_indices(&self) -> Vec<usize> {
         let mut visible = self.visible_indices();
