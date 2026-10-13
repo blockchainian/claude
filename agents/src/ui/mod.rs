@@ -4,6 +4,7 @@ mod hints;
 mod hyperlink;
 mod input;
 mod line_truncation;
+mod log;
 mod markdown;
 mod navigation;
 mod render;
@@ -25,13 +26,30 @@ use ratatui::{
 use std::{cell::RefCell, collections::HashSet, path::Path, path::PathBuf};
 use unicode_width::UnicodeWidthStr;
 
-const TASK_FILTERS: &[(&str, Option<SessionStatus>)] = &[
-    ("All", None),
-    ("Needs you", Some(SessionStatus::NeedsInput)),
-    ("Working", Some(SessionStatus::Working)),
-    ("Ready", Some(SessionStatus::Ready)),
-    ("Inactive", Some(SessionStatus::Inactive)),
+const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
+    (
+        "Active",
+        &[
+            SessionStatus::Working,
+            SessionStatus::Ready,
+            SessionStatus::NeedsInput,
+        ],
+    ),
+    ("Ready", &[SessionStatus::Ready]),
+    ("Working", &[SessionStatus::Working]),
+    ("Needs you", &[SessionStatus::NeedsInput]),
+    ("Inactive", &[SessionStatus::Inactive]),
 ];
+
+fn tab_for_status(status: Option<SessionStatus>, current_tab: usize) -> usize {
+    match status {
+        Some(status) if TASK_FILTERS[current_tab].1.contains(&status) => current_tab,
+        Some(SessionStatus::Ready) => 1,
+        Some(SessionStatus::Working) => 2,
+        Some(SessionStatus::NeedsInput) => 3,
+        Some(SessionStatus::Inactive) | None => 0,
+    }
+}
 
 #[derive(Default)]
 struct Viewport {
@@ -48,6 +66,8 @@ struct DeleteDialog {
 }
 
 pub struct View {
+    pub(crate) log: Vec<crate::sessions::log::Event>,
+    pub(crate) log_session: Option<String>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
     selected: usize,
@@ -99,6 +119,8 @@ impl ProjectGroup {
 impl View {
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
+            log: Vec::new(),
+            log_session: None,
             rows: Vec::new(),
             project_groups: Vec::new(),
             selected: usize::MAX,
@@ -133,17 +155,26 @@ impl View {
         self.project_groups = sessions.iter().map(ProjectGroup::for_session).collect();
         self.rows = sessions;
         self.has_more = has_more;
+        let selected_index = selected
+            .as_deref()
+            .and_then(|id| self.rows.iter().position(|s| s.id == id));
+        if selected.is_some()
+            && selected_index.is_none_or(|index| !self.visible_indices().contains(&index))
+        {
+            self.status_filter = tab_for_status(
+                selected_index.map(|index| self.rows[index].status),
+                self.status_filter,
+            );
+        }
         self.selected = if show_more {
             usize::MAX
         } else {
-            selected
-                .and_then(|id| self.rows.iter().position(|s| s.id == id))
-                .unwrap_or_else(|| {
-                    self.selectable_indices()
-                        .first()
-                        .copied()
-                        .unwrap_or(usize::MAX)
-                })
+            selected_index.unwrap_or_else(|| {
+                self.selectable_indices()
+                    .first()
+                    .copied()
+                    .unwrap_or(usize::MAX)
+            })
         };
         self.reconcile_selection();
     }
@@ -217,8 +248,7 @@ impl View {
             .enumerate()
             .filter(|(_, s)| {
                 !self.hidden.contains(&s.id)
-                    && (self.rename_target.as_deref() == Some(&s.id)
-                        || filter.is_none_or(|f| f == s.status))
+                    && (self.rename_target.as_deref() == Some(&s.id) || filter.contains(&s.status))
                     && (search.is_empty()
                         || format!(
                             "{} {} {} {}",
@@ -253,7 +283,7 @@ impl View {
     }
     fn selectable_indices(&self) -> Vec<usize> {
         let mut visible = self.visible_indices();
-        if self.has_more {
+        if self.has_more && TASK_FILTERS[self.status_filter].1 == [SessionStatus::Inactive] {
             visible.push(usize::MAX);
         }
         visible

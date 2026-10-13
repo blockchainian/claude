@@ -1,5 +1,6 @@
 //! Session sources: the live registry and transcripts.
 
+pub(crate) mod log;
 mod registry;
 mod transcript;
 mod watcher;

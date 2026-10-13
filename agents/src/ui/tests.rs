@@ -46,6 +46,16 @@ fn screen(view: &View, width: u16, height: u16) -> String {
 fn key(view: &mut View, code: KeyCode) -> Option<Action> {
     view.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
 }
+fn assert_empty_task_list(view: &View) {
+    let area = Rect::new(0, 0, 80, 12);
+    let mut buf = Buffer::empty(area);
+    view.render_center_rows(area, &mut buf, Utc::now());
+    assert!(buf.content.iter().all(|cell| cell.symbol() == " "));
+    let rendered = screen(view, 80, 12);
+    for message in ["Loading tasks…", "No tasks yet", "No matching tasks"] {
+        assert!(!rendered.contains(message), "{message}");
+    }
+}
 fn fixture() -> View {
     let mut view = View::new(Grouping::Project, false);
     view.set_sessions(
@@ -104,6 +114,184 @@ fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
     );
 }
 #[test]
+fn active_tab_lists_all_sessions_except_inactive() {
+    let mut view = View::default();
+    view.set_sessions(
+        vec![
+            session("working", "Working session", SessionStatus::Working, 1),
+            session("ready", "Ready session", SessionStatus::Ready, 1),
+            session(
+                "needs-input",
+                "Needs input session",
+                SessionStatus::NeedsInput,
+                1,
+            ),
+            session("inactive", "Inactive session", SessionStatus::Inactive, 1),
+        ],
+        false,
+    );
+    let rendered = screen(&view, 100, 16);
+    assert!(rendered.contains("Working session"));
+    assert!(rendered.contains("Ready session"));
+    assert!(rendered.contains("Needs input session"));
+    assert!(!rendered.contains("Inactive session"));
+    assert_eq!(view.visible_indices().len(), 3);
+    assert!(rendered.contains("Active 3"));
+    view.set_sessions(
+        vec![session(
+            "inactive",
+            "Inactive session",
+            SessionStatus::Inactive,
+            1,
+        )],
+        false,
+    );
+    let rendered = screen(&view, 100, 16);
+    assert!(rendered.contains("Active 0"));
+    assert_empty_task_list(&view);
+}
+
+#[test]
+fn tabs_cycle_in_display_order_and_filter_by_label() {
+    let mut view = fixture();
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.visible_indices().len(), 5);
+    let filters = [
+        ("Ready", SessionStatus::Ready, 2),
+        ("Working", SessionStatus::Working, 1),
+        ("Needs you", SessionStatus::NeedsInput, 2),
+        ("Inactive", SessionStatus::Inactive, 1),
+    ];
+    for (label, status, count) in filters {
+        key(&mut view, KeyCode::Tab);
+        assert_eq!(TASK_FILTERS[view.status_filter], (label, &[status][..]));
+        assert_eq!(view.visible_indices().len(), count);
+        assert!(
+            view.visible_indices()
+                .iter()
+                .all(|&index| view.rows[index].status == status)
+        );
+    }
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    for (label, status, _) in filters.into_iter().rev() {
+        view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+        assert_eq!(TASK_FILTERS[view.status_filter], (label, &[status][..]));
+        assert_eq!(view.selected_row().unwrap().status, status);
+    }
+    key(&mut view, KeyCode::BackTab);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+}
+#[test]
+fn refresh_follows_selected_ready_session_to_working_tab() {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(view.selected_id(), Some("42"));
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Working;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Working");
+    assert_eq!(view.selected_id(), Some("42"));
+}
+
+#[test]
+fn refresh_follows_selected_needs_input_session_to_ready_tab() {
+    let mut view = fixture();
+    for _ in 0..3 {
+        key(&mut view, KeyCode::Tab);
+    }
+    assert_eq!(view.selected_id(), Some("44"));
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "44").unwrap().status = SessionStatus::Ready;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    assert_eq!(view.selected_id(), Some("44"));
+}
+
+#[test]
+fn refresh_returns_to_active_when_selected_working_session_becomes_inactive() {
+    let mut view = fixture();
+    for _ in 0..2 {
+        key(&mut view, KeyCode::Tab);
+    }
+    assert_eq!(view.selected_id(), Some("46"));
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "46").unwrap().status = SessionStatus::Inactive;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected, view.visible_indices()[0]);
+}
+
+#[test]
+fn refresh_returns_to_active_when_selected_working_session_disappears() {
+    let mut view = fixture();
+    for _ in 0..2 {
+        key(&mut view, KeyCode::Tab);
+    }
+    assert_eq!(view.selected_id(), Some("46"));
+    let rows = view.rows.iter().filter(|s| s.id != "46").cloned().collect();
+
+    view.set_sessions(rows, true);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some("42"));
+    assert_eq!(view.selected, view.visible_indices()[0]);
+}
+
+#[test]
+fn refresh_keeps_selected_session_on_active_when_ready_becomes_working() {
+    let mut view = fixture();
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Working;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some("42"));
+}
+
+#[test]
+fn refresh_selects_first_active_session_when_selection_becomes_inactive() {
+    let mut view = fixture();
+    let mut rows = view.rows.clone();
+    rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Inactive;
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some("44"));
+    assert_eq!(view.selected, view.visible_indices()[0]);
+}
+
+#[test]
+fn refresh_keeps_tab_when_selected_session_is_hidden_only_by_search() {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Tab);
+    key(&mut view, KeyCode::Char('/'));
+    for c in "Current".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    assert_eq!(view.selected_id(), Some("42"));
+    let mut rows = view.rows.clone();
+    let selected = rows.iter_mut().find(|s| s.id == "42").unwrap();
+    selected.title = "Other task".into();
+    selected.prompt = "Other task".into();
+
+    view.set_sessions(rows, false);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    assert_eq!(view.search, "Current");
+    assert_eq!(view.selected_id(), None);
+}
+
+#[test]
 fn live_center_status_filter() {
     let mut view = simple_fixture();
     key(&mut view, KeyCode::BackTab);
@@ -130,8 +318,49 @@ fn live_center_search_active() {
     assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((15, 3)));
 }
 #[test]
-fn live_center_show_more() {
+fn show_more_is_only_listed_on_inactive() {
+    let mut view = fixture();
+    view.set_sessions(view.rows.clone(), true);
+    for (tab, (_, statuses)) in TASK_FILTERS.iter().enumerate() {
+        view.status_filter = tab;
+        view.reconcile_selection();
+        let inactive = *statuses == [SessionStatus::Inactive];
+        assert_eq!(view.selectable_indices().contains(&usize::MAX), inactive);
+        assert_eq!(screen(&view, 160, 22).contains("Show more"), inactive);
+    }
+}
+
+#[test]
+fn leaving_inactive_reconciles_show_more_selection() {
+    let mut view = fixture();
+    view.set_sessions(view.rows.clone(), true);
+    key(&mut view, KeyCode::BackTab);
+    key(&mut view, KeyCode::End);
+    assert_eq!(view.selected, usize::MAX);
+
+    key(&mut view, KeyCode::Tab);
+
+    assert_eq!(view.selected, view.visible_indices()[0]);
+    assert_eq!(view.selected_id(), Some("42"));
+}
+
+#[test]
+fn empty_active_tab_does_not_page_inactive_sessions() {
     let mut view = View::default();
+    view.set_sessions(
+        vec![session("42", "Recent task", SessionStatus::Inactive, 120)],
+        true,
+    );
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    assert!(!view.loading);
+}
+
+#[test]
+fn live_center_show_more() {
+    let mut view = View {
+        status_filter: 4,
+        ..View::default()
+    };
     view.set_sessions(
         vec![session("42", "Recent task", SessionStatus::Inactive, 120)],
         true,
@@ -170,7 +399,10 @@ fn agents_overview_model_grouping() {
 }
 #[test]
 fn agents_overview_recent_sessions_twelve_rows_delta() {
-    let mut view = View::default();
+    let mut view = View {
+        status_filter: 4,
+        ..View::default()
+    };
     view.set_sessions(
         (1..=12)
             .map(|i| {
@@ -187,7 +419,8 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
         true,
     );
     let rendered = screen(&view, 80, 24);
-    assert!(rendered.contains("All 12"));
+    assert!(rendered.contains("Active 0"));
+    assert!(rendered.contains("Inactive 12"));
     assert!(rendered.contains("/  12"));
     let expected = include_str!("../../tests/ui_snapshots/agents_overview_recent_sessions.txt");
     // The reference loads ten rows. Twelve rows change only counts and append Task 2 / Task 1.
@@ -224,7 +457,7 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
     assert_eq!(view.search, "task");
     key(&mut view, KeyCode::Esc);
     assert!(!view.searching);
-    assert_eq!(key(&mut view, KeyCode::Esc), Some(Action::Quit));
+    assert_eq!(key(&mut view, KeyCode::Esc), Some(Action::Back));
 }
 #[test]
 fn actions_and_hide_move_to_next_visible_row() {
@@ -272,14 +505,17 @@ fn actions_and_hide_move_to_next_visible_row() {
 }
 #[test]
 fn paging_tracks_headings_and_never_wraps() {
-    let mut view = View::default();
+    let mut view = View {
+        status_filter: 4,
+        ..View::default()
+    };
     view.set_sessions(
         (0..30)
             .map(|i| {
                 let mut row = session(
                     &i.to_string(),
                     &format!("Task {i}"),
-                    SessionStatus::Ready,
+                    SessionStatus::Inactive,
                     i,
                 );
                 if i >= 10 {
@@ -363,6 +599,7 @@ fn details_include_attention_and_clip_messages() {
     row.prompt = "prompt ".repeat(40);
     row.last_message = Some("message ".repeat(60));
     let mut view = View::new(Grouping::Project, false);
+    view.status_filter = 3;
     view.set_sessions(vec![row], false);
     let rendered = screen(&view, 160, 50);
     for label in [
@@ -405,13 +642,13 @@ fn details_include_attention_and_clip_messages() {
 #[test]
 fn empty_states_notices_and_help_only_handle_close_keys() {
     let mut view = View::default();
-    assert!(screen(&view, 80, 12).contains("No tasks yet"));
+    assert_empty_task_list(&view);
     view.set_loading(true);
-    assert!(screen(&view, 80, 12).contains("Loading tasks…"));
+    assert_empty_task_list(&view);
     view.set_sessions(vec![session("a", "Alpha", SessionStatus::Ready, 1)], false);
     key(&mut view, KeyCode::Char('/'));
     key(&mut view, KeyCode::Char('z'));
-    assert!(screen(&view, 80, 12).contains("No matching tasks"));
+    assert_empty_task_list(&view);
     key(&mut view, KeyCode::Esc);
     view.set_notice(Some("Notice".into()));
     assert!(screen(&view, 80, 12).ends_with("  Notice"));
@@ -523,7 +760,10 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
 #[test]
 fn rename_survives_status_refresh_but_drops_removed_or_hidden_target() {
     let mut view = fixture();
-    view.status_filter = 3;
+    view.status_filter = TASK_FILTERS
+        .iter()
+        .position(|(label, _)| *label == "Ready")
+        .unwrap();
     key(&mut view, KeyCode::Char('r'));
     let mut rows = view.rows.clone();
     rows.iter_mut().find(|s| s.id == "42").unwrap().status = SessionStatus::Inactive;
@@ -665,6 +905,7 @@ fn delete_live_rows_open_the_dialog_and_ignore_show_more() {
 #[test]
 fn live_center_delete_dialog() {
     let mut view = View::new(Grouping::Project, false);
+    view.status_filter = 4;
     view.set_sessions(
         vec![session("44", "Unloaded task", SessionStatus::Inactive, 120)],
         false,
@@ -715,10 +956,44 @@ fn delete_dialog_number_shortcuts_follow_codex() {
 }
 
 #[test]
+fn details_branch_and_pull_request_use_session_title_color() {
+    let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
+    row.git_branch = Some("main".into());
+    row.pr = Some(crate::model::PullRequest {
+        number: 833,
+        url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
+    });
+    let color = style::thread_color(&row.id);
+    let mut view = View::new(Grouping::Project, true);
+    view.status_filter = 4;
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 40, 18);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, Utc::now());
+    let project_y = (0..area.height)
+        .find(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, *y)].symbol())
+                .collect::<String>()
+                .starts_with("Project · ")
+        })
+        .expect("Project header");
+    for (offset, symbol) in "main".chars().enumerate() {
+        let cell = &buf[(10 + offset as u16, project_y)];
+        assert_eq!(cell.symbol(), symbol.to_string());
+        assert_eq!(cell.fg, color);
+    }
+    for x in 17..21 {
+        assert_eq!(buf[(x, project_y)].fg, color);
+    }
+}
+
+#[test]
 fn details_branch_pull_request_snapshot() {
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
     row.git_branch = Some("main".into());
     let mut view = View::new(Grouping::Project, false);
+    view.status_filter = 4;
     view.set_sessions(vec![row.clone()], false);
     let area = Rect::new(0, 0, 40, 18);
     let render = |view: &View| {
@@ -759,7 +1034,7 @@ fn details_branch_pull_request_snapshot() {
         render(&view),
         include_str!("../../tests/ui_snapshots/details_branch_pr.txt")
     );
-    for width in [13, 15, 40] {
+    for width in [13, 15, 20, 21, 40] {
         let area = Rect::new(5, 8, width, 18);
         let mut buf = Buffer::empty(area);
         view.render_details(area, &mut buf, Utc::now());
@@ -773,7 +1048,7 @@ fn details_branch_pull_request_snapshot() {
             })
             .map(|(index, _)| index % usize::from(width))
             .collect::<Vec<_>>();
-        assert_eq!(link_cells, if width >= 15 { vec![10] } else { vec![] });
+        assert_eq!(link_cells, if width >= 21 { vec![17] } else { vec![] });
     }
     row.git_branch = None;
     view.set_sessions(vec![row.clone()], false);
@@ -1149,4 +1424,200 @@ fn details_markdown_snapshot() {
     );
     assert_eq!(buffer[(6, 9)].fg, Color::Cyan);
     assert_eq!(buffer[(0, 11)].fg, Color::Cyan);
+}
+
+fn log_fixture() -> (View, chrono::DateTime<Utc>) {
+    use crate::sessions::log::{Event, Kind};
+    use chrono::TimeZone;
+    let now = chrono::Local
+        .with_ymd_and_hms(2026, 10, 12, 12, 0, 0)
+        .unwrap()
+        .with_timezone(&Utc);
+    let mut row = session("log", "Task log example", SessionStatus::Working, 0);
+    row.updated_at = now;
+    row.transcript = Some("/tmp/task-log.jsonl".into());
+    row.last_record_at = Some(now - Duration::seconds(10));
+    row.process = Some(crate::model::Process {
+        pid: 1,
+        status: "busy".into(),
+        kind: None,
+        version: None,
+        started_at: None,
+    });
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    view.log_session = Some("log".into());
+    view.log = [
+        (Kind::User, "Please\n  inspect the task", 120, None),
+        (Kind::Model, "I will check the files", 110, None),
+        (Kind::Tool, "Read src/main.rs，Read src/app.rs", 100, Some(90)),
+        (Kind::Error, "Bash failed check", 80, Some(70)),
+        (Kind::Queued, "Also inspect the tests", 60, None),
+        (Kind::Tool, "Bash run a background job *", 50, None),
+        (Kind::Model, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
+        (Kind::Tool, "Bash run tests", 30, None),
+    ].into_iter().map(|(kind, body, age, end)| Event {
+        kind, body: body.into(), started_at: now - Duration::seconds(age),
+        ended_at: end.map(|age| now - Duration::seconds(age)),
+        previous_end: Some(now - Duration::seconds(age + 5)),
+    }).collect();
+    (view, now)
+}
+
+fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) -> String {
+    let area = Rect::new(0, 0, width, height);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    buf.content
+        .chunks(usize::from(width))
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn task_log_tall_running_snapshot() {
+    let (view, now) = log_fixture();
+    assert_eq!(
+        log_screen(&view, 100, 24, now),
+        include_str!("../../tests/ui_snapshots/task_log_running.txt")
+    );
+}
+
+#[test]
+fn task_log_tall_finished_snapshot() {
+    let (mut view, now) = log_fixture();
+    view.log.last_mut().unwrap().ended_at = Some(now - Duration::seconds(5));
+    assert_eq!(
+        log_screen(&view, 100, 24, now),
+        include_str!("../../tests/ui_snapshots/task_log_finished.txt")
+    );
+}
+
+#[test]
+fn task_log_short_terminal_matches_existing_snapshot() {
+    let mut view = fixture();
+    view.rows[view.selected].transcript = Some("/tmp/task-log.jsonl".into());
+    let (log, _) = log_fixture();
+    view.log = log.log;
+    view.log_session = view.selected_id().map(str::to_owned);
+    assert_eq!(
+        screen(&view, 160, 22),
+        include_str!("../../tests/ui_snapshots/live_center_columns.txt")
+    );
+}
+
+#[test]
+fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
+    let (mut view, now) = log_fixture();
+    assert!(
+        log_screen(&view, 100, 24, now)
+            .lines()
+            .nth(22)
+            .unwrap()
+            .ends_with("35s")
+    );
+    assert!(
+        log_screen(&view, 100, 24, now + Duration::seconds(1))
+            .lines()
+            .nth(22)
+            .unwrap()
+            .ends_with("36s")
+    );
+    view.rows[view.selected].process = None;
+    assert!(
+        log_screen(&view, 100, 24, now)
+            .lines()
+            .nth(22)
+            .unwrap()
+            .ends_with("25s")
+    );
+    view.log.last_mut().unwrap().body.push_str(" *");
+    assert!(
+        log_screen(&view, 100, 24, now)
+            .lines()
+            .nth(22)
+            .unwrap()
+            .ends_with("5s")
+    );
+}
+
+#[test]
+fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel() {
+    let (mut view, now) = log_fixture();
+    view.log.pop();
+    assert!(
+        log_screen(&view, 100, 24, now)
+            .lines()
+            .nth(21)
+            .unwrap()
+            .ends_with("40s ago")
+    );
+    view.rows[view.selected].transcript = None;
+    let rendered = log_screen(&view, 100, 24, now);
+    assert!(!rendered.contains("Please inspect"));
+    assert!(!rendered.lines().nth(14).unwrap().contains('─'));
+    assert!(rendered.lines().nth(22).unwrap().contains('│'));
+}
+
+#[test]
+fn task_log_uses_terminal_styles_and_preserves_time_when_truncated() {
+    use crate::sessions::log::Kind;
+    use ratatui::style::Modifier;
+    let (view, now) = log_fixture();
+    let area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    assert_eq!(buf[(2, 15)].fg, style::accent_color());
+    assert!(buf[(2, 15)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(9, 15)].fg, style::accent_color());
+    assert!(buf[(2, 16)].modifier.contains(Modifier::BOLD));
+    assert!(
+        buf[(2, 17)]
+            .modifier
+            .contains(Modifier::DIM | Modifier::BOLD)
+    );
+    assert!(buf[(9, 17)].modifier.contains(Modifier::DIM));
+    assert_eq!(buf[(2, 18)].fg, Color::Red);
+    assert_eq!(buf[(9, 18)].fg, Color::Red);
+    assert_eq!(buf[(2, 19)].fg, style::accent_color());
+    assert!(!buf[(2, 19)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(86, 21)].symbol(), "…");
+    assert!(buf[(97, 21)].modifier.contains(Modifier::DIM));
+    for kind in [Kind::User, Kind::Model, Kind::Queued] {
+        let mut view = log_fixture().0;
+        let event = view.log.last_mut().unwrap();
+        event.kind = kind;
+        assert!(
+            log_screen(&view, 100, 24, now)
+                .lines()
+                .nth(22)
+                .unwrap()
+                .ends_with("30s ago")
+        );
+    }
+}
+
+#[test]
+fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
+    let (mut view, now) = log_fixture();
+    let first = crate::sessions::log::Event {
+        kind: crate::sessions::log::Kind::User,
+        body: "Discarded event".into(),
+        started_at: now - Duration::seconds(180),
+        ended_at: None,
+        previous_end: None,
+    };
+    view.log.insert(0, first);
+    assert!(!log_screen(&view, 100, 24, now).contains("Discarded event"));
+    view.selected = usize::MAX;
+    let rendered = log_screen(&view, 100, 24, now);
+    assert!(!rendered.contains("Please inspect"));
+    assert!(!rendered.lines().nth(14).unwrap().contains('─'));
 }

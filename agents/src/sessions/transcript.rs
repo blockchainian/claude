@@ -217,10 +217,51 @@ impl Background {
     }
 }
 
-fn read_messages(
-    file: &mut File,
+/// Walk complete transcript records newest first, retaining a split first line.
+/// The callback returns false once it has all the records it needs.
+pub(super) fn walk_records(
+    file: &mut (impl Read + Seek),
     mut start: u64,
     mut bytes: Vec<u8>,
+    mut visit: impl FnMut(Value) -> bool,
+) -> io::Result<()> {
+    let mut chunk = CHUNK;
+    loop {
+        // Keep the incomplete first line for the next block instead of dropping it.
+        let skip = if start == 0 {
+            0
+        } else {
+            bytes
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(bytes.len(), |index| index + 1)
+        };
+        for record in records(&bytes[skip..]).rev() {
+            if !visit(record) {
+                return Ok(());
+            }
+        }
+        if start == 0 {
+            return Ok(());
+        }
+        bytes.truncate(skip);
+        let previous = start.saturating_sub(chunk);
+        file.seek(SeekFrom::Start(previous))?;
+        let mut block = Vec::new();
+        (&mut *file)
+            .take(start - previous)
+            .read_to_end(&mut block)?;
+        block.extend_from_slice(&bytes);
+        bytes = block;
+        start = previous;
+        chunk = chunk.saturating_mul(2);
+    }
+}
+
+fn read_messages(
+    file: &mut File,
+    start: u64,
+    bytes: Vec<u8>,
     summary: &mut Summary,
 ) -> io::Result<()> {
     let mut prompt_found = false;
@@ -234,125 +275,101 @@ fn read_messages(
     let mut quiet_point = false;
     let mut background = Background::default();
     let mut pairing_only = false;
-    loop {
-        // Keep the incomplete first line for the next block instead of dropping it.
-        let skip = if start == 0 {
-            0
-        } else {
-            bytes
-                .iter()
-                .position(|byte| *byte == b'\n')
-                .map_or(bytes.len(), |index| index + 1)
-        };
-        for record in records(&bytes[skip..]).rev() {
-            if !quiet_point {
-                if record["type"] == "user" {
-                    next_user = content_text(&record, false);
-                }
-                if let Some(operation) = QueueOperation::from_record(&record) {
-                    // Enqueue → dequeue → matching user means FIFO had nothing
-                    // older pending before this enqueue; replay can start here.
-                    quiet_point = matches!(&operation, QueueOperation::Enqueue(content)
+    walk_records(file, start, bytes, |record| {
+        if !quiet_point {
+            if record["type"] == "user" {
+                next_user = content_text(&record, false);
+            }
+            if let Some(operation) = QueueOperation::from_record(&record) {
+                // Enqueue → dequeue → matching user means FIFO had nothing
+                // older pending before this enqueue; replay can start here.
+                quiet_point = matches!(&operation, QueueOperation::Enqueue(content)
                         if dequeued_user.as_ref() == Some(content));
-                    dequeued_user = match &operation {
-                        QueueOperation::Dequeue => next_user.clone(),
-                        _ => None,
-                    };
-                    operations.push(operation);
-                }
+                dequeued_user = match &operation {
+                    QueueOperation::Dequeue => next_user.clone(),
+                    _ => None,
+                };
+                operations.push(operation);
             }
-            let at = record["timestamp"]
-                .as_str()
-                .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-                .map(|value| value.with_timezone(&Utc));
-            background.record(&record, at, pairing_only);
-            if !prompt_found && record["type"] == "assistant" {
-                turn_messages += 1;
+        }
+        let at = record["timestamp"]
+            .as_str()
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc));
+        background.record(&record, at, pairing_only);
+        if !prompt_found && record["type"] == "assistant" {
+            turn_messages += 1;
+        }
+        if absorbed.is_some()
+            && record["type"] == "queue-operation"
+            && record["operation"] == "remove"
+            && record["commandUuid"].as_str() == absorbed.as_deref()
+        {
+            summary.prompt_at = at;
+            absorbed = None;
+        }
+        if !prompt_found
+            && let Some(prompt) = prompt_text(&record)
+            && !prompt.trim().is_empty()
+            && !prompt.trim_start().starts_with('<')
+        {
+            summary.prompt = preview(&prompt);
+            summary.prompt_at = at;
+            summary.turn_messages = turn_messages;
+            prompt_found = true;
+            if record["type"] == "attachment" {
+                absorbed = record["attachment"]["source_uuid"]
+                    .as_str()
+                    .map(str::to_owned);
             }
-            if absorbed.is_some()
-                && record["type"] == "queue-operation"
-                && record["operation"] == "remove"
-                && record["commandUuid"].as_str() == absorbed.as_deref()
-            {
-                summary.prompt_at = at;
-                absorbed = None;
-            }
-            if !prompt_found
-                && let Some(prompt) = prompt_text(&record)
-                && !prompt.trim().is_empty()
-                && !prompt.trim_start().starts_with('<')
-            {
-                summary.prompt = preview(&prompt);
-                summary.prompt_at = at;
-                summary.turn_messages = turn_messages;
-                prompt_found = true;
-                if record["type"] == "attachment" {
-                    absorbed = record["attachment"]["source_uuid"]
+        }
+        // The latest tool call, finished or not; the panel shows it while it
+        // is newer than the last reply.
+        if summary.activity.is_none()
+            && record["type"] == "assistant"
+            && let Some(at) = at
+            && let Some(blocks) = record["message"]["content"].as_array()
+            && let Some(label) = blocks
+                .iter()
+                .rev()
+                .filter(|block| block["type"] == "tool_use")
+                .find_map(|block| {
+                    block["input"]["description"]
                         .as_str()
-                        .map(str::to_owned);
-                }
-            }
-            // The latest tool call, finished or not; the panel shows it while it
-            // is newer than the last reply.
-            if summary.activity.is_none()
-                && record["type"] == "assistant"
-                && let Some(at) = at
-                && let Some(blocks) = record["message"]["content"].as_array()
-                && let Some(label) = blocks
-                    .iter()
-                    .rev()
-                    .filter(|block| block["type"] == "tool_use")
-                    .find_map(|block| {
-                        block["input"]["description"]
-                            .as_str()
-                            .filter(|value| !value.trim().is_empty())
-                            .or_else(|| block["name"].as_str())
-                    })
-            {
-                summary.activity = Some(Activity {
-                    label: label.to_owned(),
-                    at,
-                });
-            }
-            if summary.last_message.is_none()
-                && record["type"] == "assistant"
-                && let Some(message) = content_text(&record, true)
-            {
-                summary.last_message = Some(preview(&message));
-                summary.last_message_at = at;
-            }
-            if prompt_found
-                && absorbed.is_none()
-                && summary.last_message.is_some()
-                && summary.activity.is_some()
-                && quiet_point
-            {
-                // Tasks before this existing stopping point are intentionally invisible.
-                // Only an already-seen result may extend the walk to its tool use.
-                pairing_only = true;
-                if background.pending.is_empty() {
-                    summary.background = background.finish();
-                    summary.queued = queued_prompts(operations);
-                    return Ok(());
-                }
+                        .filter(|value| !value.trim().is_empty())
+                        .or_else(|| block["name"].as_str())
+                })
+        {
+            summary.activity = Some(Activity {
+                label: label.to_owned(),
+                at,
+            });
+        }
+        if summary.last_message.is_none()
+            && record["type"] == "assistant"
+            && let Some(message) = content_text(&record, true)
+        {
+            summary.last_message = Some(preview(&message));
+            summary.last_message_at = at;
+        }
+        if prompt_found
+            && absorbed.is_none()
+            && summary.last_message.is_some()
+            && summary.activity.is_some()
+            && quiet_point
+        {
+            // Tasks before this existing stopping point are intentionally invisible.
+            // Only an already-seen result may extend the walk to its tool use.
+            pairing_only = true;
+            if background.pending.is_empty() {
+                return false;
             }
         }
-        if start == 0 {
-            summary.background = background.finish();
-            summary.queued = queued_prompts(operations);
-            return Ok(());
-        }
-        bytes.truncate(skip);
-        let previous = start.saturating_sub(CHUNK);
-        file.seek(SeekFrom::Start(previous))?;
-        let mut block = Vec::new();
-        (&mut *file)
-            .take(start - previous)
-            .read_to_end(&mut block)?;
-        block.extend_from_slice(&bytes);
-        bytes = block;
-        start = previous;
-    }
+        true
+    })?;
+    summary.background = background.finish();
+    summary.queued = queued_prompts(operations);
+    Ok(())
 }
 
 pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {

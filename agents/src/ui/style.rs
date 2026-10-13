@@ -52,3 +52,24 @@ pub(super) fn accent_color() -> Color {
 pub(super) fn thread_color(id: &str) -> Color {
     crate::theme::color_for_id(id)
 }
+
+/// Label and body styles for transcript events, using terminal palette colors.
+pub(super) fn log_styles(kind: &crate::sessions::log::Kind) -> (Style, Style) {
+    use crate::sessions::log::Kind;
+    match kind {
+        Kind::User => (
+            Style::default().fg(accent_color()).bold(),
+            Style::default().fg(accent_color()),
+        ),
+        Kind::Model => (Style::default().bold(), Style::default()),
+        Kind::Tool => (Style::default().dim().bold(), Style::default().dim()),
+        Kind::Error => (
+            Style::default().fg(Color::Red),
+            Style::default().fg(Color::Red),
+        ),
+        Kind::Queued => (
+            Style::default().fg(accent_color()),
+            Style::default().fg(accent_color()),
+        ),
+    }
+}

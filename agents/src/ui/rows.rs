@@ -46,22 +46,10 @@ impl View {
             return;
         }
         let indices = self.selectable_indices();
-        let mut state = self.viewport.borrow_mut();
         if indices.is_empty() {
-            line(
-                if self.loading && self.rows.is_empty() {
-                    "Loading tasks…"
-                } else if self.rows.is_empty() {
-                    "No tasks yet"
-                } else {
-                    "No matching tasks"
-                }
-                .dim(),
-                area,
-                buf,
-            );
             return;
         }
+        let mut state = self.viewport.borrow_mut();
         let entries = self.center_rows(&indices, self.grouping);
         let selected = entries
             .iter()
