@@ -277,8 +277,10 @@ impl ClaudeProvider {
                 .as_deref()
                 .and_then(registry::from_registry)
                 .unwrap_or(SessionStatus::Ready);
+            // The registry only rewrites updatedAt on a status change, so a
+            // long busy turn keeps its start time unless the transcript is newer.
             if let Some(updated) = entry.updated_at.and_then(DateTime::from_timestamp_millis) {
-                session.updated_at = updated;
+                session.updated_at = session.last_record_at.map_or(updated, |at| at.max(updated));
             }
             session.process = entry.pid.map(|pid| Process {
                 pid,
@@ -932,6 +934,31 @@ mod tests {
             all.sessions
                 .windows(2)
                 .all(|pair| pair[0].updated_at > pair[1].updated_at)
+        );
+    }
+
+    #[test]
+    fn live_session_update_time_follows_transcript_activity_after_status_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut value = registry::tests::fixture(dir.path());
+        let id = value["sessionId"].as_str().unwrap().to_owned();
+        transcript(dir.path(), &id, 0);
+        let status_changed_at: DateTime<Utc> = "2026-10-06T16:39:12.595Z".parse().unwrap();
+        value["updatedAt"] = status_changed_at.timestamp_millis().into();
+        fs::write(
+            dir.path().join("sessions/live.json"),
+            serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
+        let snapshot = ClaudeProvider::new(dir.path().into()).refresh(1);
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id.id == id)
+            .unwrap();
+        assert_eq!(
+            session.updated_at,
+            "2026-10-06T16:39:29.554Z".parse::<DateTime<Utc>>().unwrap()
         );
     }
 
