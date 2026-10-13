@@ -87,6 +87,7 @@ pub struct App {
     launch: Option<Command>,
     last_session: Option<String>,
     log_stamp: Option<LogStamp>,
+    full_log_stamp: Option<LogStamp>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -114,6 +115,7 @@ impl App {
             launch: None,
             last_session: None,
             log_stamp: None,
+            full_log_stamp: None,
         }
     }
 
@@ -273,10 +275,53 @@ impl App {
             .and_then(|session| Some((session.id.clone(), session.transcript.clone()?)));
         let Some((session, path)) = selected else {
             self.log_stamp = None;
+            self.full_log_stamp = None;
             self.view.log.clear();
             self.view.log_session = None;
             return;
         };
+        if self.view.log_search.active() {
+            let load = || -> io::Result<Option<(LogStamp, Vec<crate::sessions::log::Event>)>> {
+                let metadata = std::fs::metadata(&path)?;
+                let stamp = LogStamp {
+                    session: session.clone(),
+                    path: path.clone(),
+                    modified: metadata.modified()?,
+                    length: metadata.len(),
+                    count: usize::MAX,
+                    filter: crate::sessions::log::Filter::default(),
+                };
+                if self.full_log_stamp.as_ref() == Some(&stamp) {
+                    return Ok(None);
+                }
+                let events = crate::sessions::log::tail(&path, usize::MAX)?;
+                Ok(Some((stamp, events)))
+            };
+            match load() {
+                Ok(loaded) => {
+                    if let Some((stamp, events)) = loaded {
+                        self.full_log_stamp = Some(stamp);
+                        self.view.log = events;
+                        self.view.prepare_log_search();
+                    }
+                    self.log_stamp = None;
+                    self.view.log_session = Some(session);
+                    self.view
+                        .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
+                }
+                Err(error) => {
+                    self.full_log_stamp = None;
+                    self.log_stamp = None;
+                    self.view.log.clear();
+                    self.view.prepare_log_search();
+                    self.view.log_session = None;
+                    self.view
+                        .set_notice(Some(format!("Failed to read task log: {error}")));
+                }
+            }
+            return;
+        }
+        self.full_log_stamp = None;
         let load = || -> io::Result<Option<(LogStamp, Vec<crate::sessions::log::Event>)>> {
             let metadata = std::fs::metadata(&path)?;
             let stamp = LogStamp {
@@ -673,6 +718,58 @@ mod tests {
         assert_eq!(app.view.log_scroll(), 1);
         assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
         assert_ne!(app.view.log, before);
+    }
+
+    #[test]
+    fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
+        use std::io::Write;
+        let (_dir, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let payload = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, payload.repeat(20)).unwrap();
+        app.refresh_log(1);
+        app.view.handle_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('r'),
+            KeyModifiers::CONTROL,
+        ));
+        app.refresh_log(1);
+        for c in "Codex".chars() {
+            key(&mut app, KeyCode::Char(c));
+        }
+        app.refresh_log(1);
+        assert_eq!(app.view.matching_log_count(), 20);
+        for _ in 0..30 {
+            scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
+        }
+        app.refresh_log(1);
+        assert_eq!(app.view.log_scroll(), 19);
+        let cached = app.view.log.clone();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::fs::write(&path, payload.replace("Codex", "other").repeat(20)).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        key(&mut app, KeyCode::Backspace);
+        app.refresh_log(1);
+        assert_eq!(
+            app.view.log, cached,
+            "query changes reuse cached transcript"
+        );
+        key(&mut app, KeyCode::Char('x'));
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T16:40:00Z", "content":"Codex timeout"})).unwrap();
+        app.refresh_log(1);
+        assert_eq!(app.view.matching_log_count(), 1);
+        assert_eq!(app.view.log.last().unwrap().body, "Codex timeout");
+        key(&mut app, KeyCode::Esc);
+        app.refresh_log(1);
+        assert_eq!(app.view.log.len(), 1);
     }
 
     #[test]

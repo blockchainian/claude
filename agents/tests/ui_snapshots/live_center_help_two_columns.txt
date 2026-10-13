@@ -16,9 +16,9 @@
                       p          Pin/unpin
 
   View                Log
-  tab/⇧tab  Filter    m  Model
-  f3        Search    t  Tool
-  g         Group     u  User
-                      e  Error
-
+  tab/⇧tab  Filter    m   Model
+  f3        Search    t   Tool
+  g         Group     u   User
+                      e   Error
+                      ⌃r  Search
   esc back

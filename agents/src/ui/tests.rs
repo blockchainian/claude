@@ -3179,3 +3179,172 @@ mod log_filters {
         );
     }
 }
+
+mod log_search {
+    use super::*;
+    use ratatui::style::Modifier;
+
+    fn open(view: &mut View) {
+        view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    }
+
+    fn panel(view: &View, now: chrono::DateTime<Utc>) -> Buffer {
+        let area = Rect::new(0, 0, 100, 12);
+        let mut buf = Buffer::empty(area);
+        view.render_log(area, &mut buf, now);
+        buf
+    }
+
+    fn text(buf: &Buffer) -> String {
+        buf.content.iter().map(|cell| cell.symbol()).collect()
+    }
+
+    #[test]
+    fn input_live_match_highlight_keep_and_escape() {
+        let (mut view, now) = log_fixture();
+        let template = view.log[0].clone();
+        view.log = [
+            "plain `timeout` **bold**",
+            "unrelated",
+            "t........i........m........e........o........u........t",
+        ]
+        .map(|body| {
+            let mut event = template.clone();
+            event.body = body.into();
+            event
+        })
+        .to_vec();
+        let pattern = nucleo_matcher::pattern::Pattern::parse(
+            "timeout",
+            nucleo_matcher::pattern::CaseMatching::Smart,
+            nucleo_matcher::pattern::Normalization::Smart,
+        );
+        let mut matcher = nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT);
+        let mut scratch = Vec::new();
+        let junk_score = pattern
+            .score(
+                nucleo_matcher::Utf32Str::new(&view.log[2].body, &mut scratch),
+                &mut matcher,
+            )
+            .expect("junk still matches fuzzily");
+        assert!(junk_score < 20 * 7);
+        open(&mut view);
+        assert!(text(&panel(&view, now)).contains("search: "));
+        assert!(
+            view.center_footer_hints()
+                .to_string()
+                .contains("enter keep")
+        );
+        for c in "timeout".chars() {
+            key(&mut view, KeyCode::Char(c));
+        }
+        let buf = panel(&view, now);
+        assert!(text(&buf).contains("plain timeout bold"));
+        assert!(!text(&buf).contains("unrelated"));
+        assert!(!text(&buf).contains("t........"));
+        for x in 23..30 {
+            assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buf[(x, 1)].fg, Color::Cyan);
+        }
+        key(&mut view, KeyCode::Enter);
+        let buf = panel(&view, now);
+        assert!(text(&buf).contains("timeout"));
+        assert!(buf[(99, 11)].modifier.contains(Modifier::DIM));
+        assert!(!text(&buf).contains("search: "));
+        open(&mut view);
+        assert!(text(&panel(&view, now)).contains("search: timeout"));
+        key(&mut view, KeyCode::Backspace);
+        assert!(text(&panel(&view, now)).contains("search: timeou"));
+        key(&mut view, KeyCode::Esc);
+        assert!(text(&panel(&view, now)).contains("unrelated"));
+    }
+
+    #[test]
+    fn atoms_filters_order_and_unicode_styles() {
+        use crate::sessions::log::Kind;
+        let (mut view, now) = log_fixture();
+        let template = view.log[0].clone();
+        view.log = [
+            (Kind::Model, "timeout connection"),
+            (Kind::Tool, "timeout alone"),
+            (Kind::Error, "timeout connection"),
+            (Kind::User, "plain `café` [link](url)"),
+        ]
+        .into_iter()
+        .map(|(kind, body)| {
+            let mut event = template.clone();
+            event.kind = kind;
+            event.body = body.into();
+            event
+        })
+        .collect();
+        for (query, expected) in [
+            ("timeout conn", vec![0, 2]),
+            ("'timeout", vec![0, 1, 2]),
+            ("^timeout", vec![0, 1, 2]),
+            ("connection$", vec![0, 2]),
+            ("!timeout", vec![3]),
+        ] {
+            open(&mut view);
+            for c in query.chars() {
+                key(&mut view, KeyCode::Char(c));
+            }
+            let matches: Vec<_> = (0..view.log.len())
+                .filter(|&i| view.log_matches(i))
+                .collect();
+            assert_eq!(matches, expected, "{query}");
+            key(&mut view, KeyCode::Esc);
+        }
+        key(&mut view, KeyCode::Char('e'));
+        open(&mut view);
+        for c in "timeout".chars() {
+            key(&mut view, KeyCode::Char(c));
+        }
+        assert_eq!(view.matching_log_count(), 1);
+        assert!(!text(&panel(&view, now)).contains("timeout alone"));
+        key(&mut view, KeyCode::Esc);
+        key(&mut view, KeyCode::Char('e'));
+        open(&mut view);
+        for c in "cafe".chars() {
+            key(&mut view, KeyCode::Char(c));
+        }
+        let buf = panel(&view, now);
+        assert!(text(&buf).contains("plain café link"));
+        for x in 23..27 {
+            assert_eq!(buf[(x, 1)].fg, Color::Cyan);
+            assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
+        }
+        assert!(buf[(28, 1)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buf[(28, 1)].modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn selection_change_clears_and_wheel_still_scrolls() {
+        let (mut view, now) = log_fixture();
+        open(&mut view);
+        key(&mut view, KeyCode::Char('a'));
+        screen(&view, 120, 40);
+        let rect = view.viewport.borrow().log;
+        view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y + 1));
+        assert_eq!(view.log_scroll(), 1);
+        let mut second = view.rows[0].clone();
+        second.id = "second".into();
+        view.set_sessions(vec![view.rows[0].clone(), second], false);
+        let index = view.rows.iter().position(|row| row.id == "second").unwrap();
+        view.set_selected(index);
+        view.log_session = Some("second".into());
+        let buf = panel(&view, now);
+        assert!(!text(&buf).contains("search: "));
+        assert_eq!(
+            view.center_footer_hints().to_string(),
+            super::super::hints::hint_line(&[
+                ("?", "help"),
+                ("esc", "back"),
+                ("↑/↓", "move"),
+                ("enter", "open"),
+                ("n", "new")
+            ])
+            .to_string()
+        );
+    }
+}

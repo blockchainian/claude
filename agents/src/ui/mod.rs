@@ -5,6 +5,7 @@ mod hyperlink;
 mod input;
 mod line_truncation;
 mod log;
+mod log_search;
 mod markdown;
 mod navigation;
 mod render;
@@ -93,6 +94,7 @@ pub struct View {
     pub(crate) log: Vec<crate::sessions::log::Event>,
     pub(crate) log_session: Option<String>,
     pub(crate) log_filter: crate::sessions::log::Filter,
+    pub(crate) log_search: log_search::LogSearch,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
     selected: usize,
@@ -147,6 +149,7 @@ impl View {
             log: Vec::new(),
             log_session: None,
             log_filter: crate::sessions::log::Filter::default(),
+            log_search: log_search::LogSearch::default(),
             rows: Vec::new(),
             project_groups: Vec::new(),
             selected: usize::MAX,
@@ -205,6 +208,7 @@ impl View {
         };
         self.reconcile_selection();
         if self.selected_id() != selected.as_deref() {
+            self.log_search.clear();
             self.viewport.borrow_mut().log_scroll = 0;
         }
         if self.selected_id() != selected.as_deref() || self.status_filter != status_filter {
@@ -333,6 +337,7 @@ impl View {
 
     fn set_selected(&mut self, selected: usize) {
         if self.selected != selected {
+            self.log_search.clear();
             let mut viewport = self.viewport.borrow_mut();
             viewport.details_scroll = DetailsScroll::default();
             viewport.log_scroll = 0;

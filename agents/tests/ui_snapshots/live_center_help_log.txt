@@ -4,11 +4,11 @@
   Task shortcuts
 
   Navigate            Tasks                      View                Log
-  ↑      Up           n          New             tab/⇧tab  Filter    m  Model
-  ↓      Down         w          New worktree    f3        Search    t  Tool
-  enter  Open         o          Resume          g         Group     u  User
-  pgup   Page up      f          Fork                                e  Error
-  pgdn   Page down    r          Rename
+  ↑      Up           n          New             tab/⇧tab  Filter    m   Model
+  ↓      Down         w          New worktree    f3        Search    t   Tool
+  enter  Open         o          Resume          g         Group     u   User
+  pgup   Page up      f          Fork                                e   Error
+  pgdn   Page down    r          Rename                              ⌃r  Search
   ⌃c     Quit         x          Stop
   esc    Back         a          Archive
                       h          Hide

@@ -19,11 +19,31 @@ impl View {
         if self.log_session.as_deref() != Some(session.id.as_str()) {
             return;
         }
+        if self.log_search.active() && area.height > 1 {
+            let input = super::render::row(area, area.height - 1, 1);
+            if self.log_search.editing {
+                buf.set_style(input, super::style::active_tab_style());
+                let query = super::formatting::visible_suffix(
+                    &self.log_search.query,
+                    usize::from(area.width).saturating_sub(9),
+                );
+                Line::from(format!("search: {query}")).render(input, buf);
+            } else {
+                Line::from(self.log_search.query.clone())
+                    .dim()
+                    .right_aligned()
+                    .render(input, buf);
+            }
+        }
         let scroll = self.log_scroll();
         let matching: Vec<_> = self
             .log
             .iter()
-            .filter(|event| self.log_filter.matches(&event.kind))
+            .enumerate()
+            .filter(|(index, event)| {
+                self.log_filter.matches(&event.kind) && self.log_matches(*index)
+            })
+            .map(|(_, event)| event)
             .collect();
         let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
@@ -38,6 +58,7 @@ impl View {
                 last,
                 super::render::row(area, index as u16 + 1, 1),
                 buf,
+                Some(&self.log_search),
             );
         }
     }
@@ -84,6 +105,7 @@ fn render_event(
     last: bool,
     area: Rect,
     buf: &mut Buffer,
+    search: Option<&super::log_search::LogSearch>,
 ) {
     if area.is_empty() {
         return;
@@ -91,7 +113,7 @@ fn render_event(
     let width = usize::from(area.width);
     let time_width = time_width.min(width);
     let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
-    let (label_style, body_style) = super::style::log_styles(&event.kind);
+    let (label_style, _) = super::style::log_styles(&event.kind);
     let time_style = super::style::log_time_style(&event.kind, last);
     Line::from(Span::styled(time.to_owned(), time_style))
         .right_aligned()
@@ -116,8 +138,41 @@ fn render_event(
     Line::from(Span::styled(label, label_style))
         .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
     let body_width = content_width.saturating_sub(label_width);
+    let mut body = body_line(event, body_width);
+    if let Some(search) = search.filter(|search| !search.query.is_empty()) {
+        let indices = search.indices(&body.to_string());
+        let mut offset = 0u32;
+        body.spans = body
+            .spans
+            .into_iter()
+            .flat_map(|span| {
+                let mut spans = Vec::new();
+                for grapheme in unicode_segmentation::UnicodeSegmentation::graphemes(
+                    span.content.as_ref(),
+                    true,
+                ) {
+                    let style = if indices.binary_search(&offset).is_ok() {
+                        span.style.bold()
+                    } else {
+                        span.style
+                    };
+                    spans.push(Span::styled(grapheme.to_owned(), style));
+                    offset += 1;
+                }
+                spans
+            })
+            .collect();
+    }
+    truncate_line_with_ellipsis_if_overflow(body, body_width).render(
+        Rect::new(content_x + label_width as u16, area.y, body_width as u16, 1),
+        buf,
+    );
+}
+
+pub(super) fn body_line(event: &Event, body_width: usize) -> Line<'static> {
+    let body_style = super::style::log_styles(&event.kind).1;
     let body = event.body.split_whitespace().collect::<Vec<_>>().join(" ");
-    let body = if matches!(event.kind, Kind::User | Kind::Model | Kind::Agent) {
+    if matches!(event.kind, Kind::User | Kind::Model | Kind::Agent) {
         super::markdown::render(&body, usize::MAX)
             .into_iter()
             .next()
@@ -139,11 +194,7 @@ fn render_event(
             body
         };
         Line::from(Span::styled(body, body_style))
-    };
-    truncate_line_with_ellipsis_if_overflow(body, body_width).render(
-        Rect::new(content_x + label_width as u16, area.y, body_width as u16, 1),
-        buf,
-    );
+    }
 }
 
 #[cfg(test)]
@@ -162,7 +213,7 @@ mod log_markdown {
             ended_at: None,
             previous_end: None,
         };
-        render_event(&event, "12:00:00", 8, false, area, &mut buffer);
+        render_event(&event, "12:00:00", 8, false, area, &mut buffer, None);
         buffer
     }
 

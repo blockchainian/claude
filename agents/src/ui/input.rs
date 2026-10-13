@@ -222,6 +222,33 @@ impl View {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Some(Action::Quit);
         }
+        if self.log_search.editing {
+            match key.code {
+                KeyCode::Esc => self.log_search.clear(),
+                KeyCode::Enter => self.log_search.editing = false,
+                KeyCode::Char(c) if plain => self.log_search.query.push(c),
+                KeyCode::Backspace => {
+                    if let Some((offset, _)) =
+                        self.log_search.query.grapheme_indices(true).next_back()
+                    {
+                        self.log_search.query.truncate(offset);
+                    }
+                }
+                _ => return None,
+            }
+            self.rematch_log();
+            self.viewport.borrow_mut().log_scroll = 0;
+            return None;
+        }
+        if !self.searching
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('r')
+        {
+            self.log_search.editing = true;
+            self.prepare_log_search();
+            self.viewport.borrow_mut().log_scroll = 0;
+            return None;
+        }
         if self.searching {
             match key.code {
                 KeyCode::Esc => {

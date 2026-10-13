@@ -20,6 +20,8 @@ impl View {
             hint_line(&[("esc", "back")])
         } else if self.rename_target.is_some() {
             hint_line(&[("esc", "back"), ("enter", "rename")])
+        } else if self.log_search.editing {
+            hint_line(&[("esc", "back"), ("enter", "keep")])
         } else if self.searching {
             hint_line(&[("esc", "back"), ("enter", "open")])
         } else {
@@ -77,7 +79,13 @@ impl View {
             ),
             group(
                 "Log",
-                &[("m", "Model"), ("t", "Tool"), ("u", "User"), ("e", "Error")],
+                &[
+                    ("m", "Model"),
+                    ("t", "Tool"),
+                    ("u", "User"),
+                    ("e", "Error"),
+                    ("⌃r", "Search"),
+                ],
             ),
         ];
         let mut lines = vec!["Task shortcuts".bold().into(), Line::default()];

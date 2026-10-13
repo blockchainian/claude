@@ -97,6 +97,20 @@ impl View {
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout = self.center_layout(area);
+        if self.log_search.editing
+            && !self.help
+            && self.delete_dialog.is_none()
+            && !layout.log.is_empty()
+        {
+            let available = usize::from(layout.log.width).saturating_sub(9);
+            return Some((
+                layout.log.x
+                    + (8 + visible_suffix(&self.log_search.query, available).width())
+                        .min(usize::from(layout.log.width.saturating_sub(1)))
+                        as u16,
+                layout.log.bottom() - 1,
+            ));
+        }
         if !(self.searching || self.rename_target.is_some())
             || self.delete_dialog.is_some()
             || self.help
