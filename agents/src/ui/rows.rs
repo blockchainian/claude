@@ -37,6 +37,10 @@ impl View {
         buf: &mut Buffer,
         reference: chrono::DateTime<chrono::Utc>,
     ) {
+        let mut state = self.viewport.borrow_mut();
+        state.list = area;
+        state.list_rows = Rect::default();
+        state.first_entry = 0;
         let row_width = area.width;
         let area = Rect {
             width: row_width.saturating_sub(/*rhs*/ 1),
@@ -49,7 +53,6 @@ impl View {
         if indices.is_empty() {
             return;
         }
-        let mut state = self.viewport.borrow_mut();
         let entries = self.center_rows(&indices, self.grouping);
         let selected = entries
             .iter()
@@ -86,6 +89,11 @@ impl View {
             start = selected.saturating_add(/*rhs*/ 1).saturating_sub(height);
         }
         state.scroll = start;
+        state.first_entry = start;
+        state.list_rows = Rect {
+            width: row_width,
+            ..viewport
+        };
         for (offset, entry) in entries.iter().skip(start).take(height).enumerate() {
             let index = match entry {
                 CenterRow::Group(index) | CenterRow::Task(index) => *index,

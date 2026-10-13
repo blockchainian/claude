@@ -114,8 +114,6 @@ fn mouse_tabs_ignore_other_events() {
         MouseEventKind::Up(MouseButton::Left),
         MouseEventKind::Drag(MouseButton::Left),
         MouseEventKind::Moved,
-        MouseEventKind::ScrollUp,
-        MouseEventKind::ScrollDown,
         MouseEventKind::ScrollLeft,
         MouseEventKind::ScrollRight,
     ] {
@@ -123,6 +121,169 @@ fn mouse_tabs_ignore_other_events() {
         assert_eq!(view.status_filter, 0);
         assert_eq!(view.selected, selected);
         assert_eq!(view.viewport.borrow().scroll, 7);
+    }
+}
+
+fn rendered_cell(rendered: &str, text: &str) -> (u16, u16) {
+    rendered
+        .lines()
+        .enumerate()
+        .find_map(|(y, line)| {
+            let x = line.find(text)?;
+            Some((line[..x].chars().count() as u16, y as u16))
+        })
+        .unwrap_or_else(|| panic!("missing rendered text: {text}"))
+}
+
+#[test]
+fn mouse_list_click_selects_and_opens_second_task() {
+    let mut view = fixture();
+    let rendered = screen(&view, 120, 40);
+    let second = view.selectable_indices()[1];
+    let id = view.rows[second].id.clone();
+    let (x, y) = rendered_cell(&rendered, view.rows[second].display_title());
+    assert!(matches!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y)),
+        Some(Action::Open(opened)) if opened == id
+    ));
+    assert_eq!(view.selected, second);
+}
+
+#[test]
+fn mouse_list_group_and_gap_clicks_do_nothing() {
+    let mut view = fixture();
+    let rendered = screen(&view, 120, 40);
+    let selected = view.selected;
+    let (x, y) = rendered_cell(&rendered, "Pinned");
+    let (_, next_group) = rendered_cell(&rendered, "/tmp/project");
+    for row in [y, next_group - 1] {
+        assert!(
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, row))
+                .is_none()
+        );
+        assert_eq!(view.selected, selected);
+    }
+}
+
+#[test]
+fn mouse_list_wheel_uses_keyboard_selection() {
+    let mut view = fixture();
+    let rendered = screen(&view, 120, 40);
+    let (x, y) = rendered_cell(&rendered, "Tasks");
+    let initial = view.selected;
+    key(&mut view, KeyCode::Down);
+    let next = view.selected;
+    key(&mut view, KeyCode::Up);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, x, y))
+            .is_none()
+    );
+    assert_eq!(view.selected, next);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::ScrollUp, x, y))
+            .is_none()
+    );
+    assert_eq!(view.selected, initial);
+}
+
+#[test]
+fn mouse_tab_wheel_switches_filters_without_wrapping() {
+    let mut view = fixture();
+    screen(&view, 120, 40);
+    let (_, rect) = view.viewport.borrow().tabs[0];
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
+    assert_eq!(view.status_filter, 0);
+    view.viewport.borrow_mut().scroll = 7;
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    assert_eq!(view.status_filter, 1);
+    assert_eq!(view.viewport.borrow().scroll, 0);
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
+    assert_eq!(view.status_filter, 0);
+    for _ in 0..TASK_FILTERS.len() + 1 {
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    }
+    assert_eq!(view.status_filter, TASK_FILTERS.len() - 1);
+}
+
+#[test]
+fn mouse_list_show_more_click_activates_once() {
+    let mut view = fixture();
+    view.status_filter = TASK_FILTERS.len() - 1;
+    view.has_more = true;
+    view.reconcile_selection();
+    let rendered = screen(&view, 120, 40);
+    let (x, y) = rendered_cell(&rendered, "Show more");
+    assert!(matches!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y)),
+        Some(Action::ShowMore)
+    ));
+    assert_eq!(view.selected, usize::MAX);
+    assert!(view.loading);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y))
+            .is_none()
+    );
+}
+
+#[test]
+fn mouse_tab_wheel_accepts_space_between_tabs() {
+    let mut view = fixture();
+    screen(&view, 120, 40);
+    let (_, rect) = view.viewport.borrow().tabs[0];
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.right(), rect.y));
+    assert_eq!(view.status_filter, 1);
+}
+
+#[test]
+fn mouse_list_click_uses_last_render_scroll_offset() {
+    let mut view = View::default();
+    view.set_sessions(
+        (0..50)
+            .map(|i| {
+                session(
+                    &format!("task-{i}"),
+                    &format!("Task {i:02}"),
+                    SessionStatus::Ready,
+                    i,
+                )
+            })
+            .collect(),
+        false,
+    );
+    key(&mut view, KeyCode::End);
+    let rendered = screen(&view, 120, 40);
+    let target = view.selectable_indices()[48];
+    let (x, y) = rendered_cell(&rendered, view.rows[target].display_title());
+    assert!(view.viewport.borrow().scroll > 0);
+    view.viewport.borrow_mut().scroll = 0;
+    assert!(
+        matches!(view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y)), Some(Action::Open(id)) if id == view.rows[target].id)
+    );
+    assert_eq!(view.selected, target);
+}
+
+#[test]
+fn mouse_list_ignores_overlays() {
+    for overlay in [
+        KeyCode::Char('?'),
+        KeyCode::Char('/'),
+        KeyCode::Char('r'),
+        KeyCode::Backspace,
+    ] {
+        let mut view = fixture();
+        let rendered = screen(&view, 120, 40);
+        let second = view.selectable_indices()[1];
+        let (x, y) = rendered_cell(&rendered, view.rows[second].display_title());
+        key(&mut view, overlay);
+        let selected = view.selected;
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::ScrollDown,
+            MouseEventKind::ScrollUp,
+        ] {
+            assert!(view.handle_mouse(mouse(kind, x, y)).is_none());
+            assert_eq!(view.selected, selected);
+        }
     }
 }
 

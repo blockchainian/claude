@@ -159,6 +159,7 @@ impl View {
             );
             tabs.width = tabs.width.saturating_sub(width + 2);
         }
+        self.viewport.borrow_mut().tab_bar = tabs;
         self.viewport.borrow_mut().tabs = super::selection_tabs::render_filled_tab_bar(
             &labels.iter().map(String::as_str).collect::<Vec<_>>(),
             self.status_filter,

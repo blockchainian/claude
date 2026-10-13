@@ -60,6 +60,10 @@ struct Viewport {
     scroll: usize,
     page_height: usize,
     tabs: Vec<(usize, Rect)>,
+    tab_bar: Rect,
+    list: Rect,
+    list_rows: Rect,
+    first_entry: usize,
     /// Screen cell of the selection marker drawn by the last render.
     marker: Option<(u16, u16)>,
 }

@@ -16,17 +16,53 @@ impl View {
         {
             return None;
         }
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-            let tab = self
-                .viewport
-                .borrow()
+        let position = (mouse.column, mouse.row).into();
+        let (tab, over_tabs, over_list, entry) = {
+            let viewport = self.viewport.borrow();
+            let tab = viewport
                 .tabs
                 .iter()
-                .find(|(_, rect)| rect.contains((mouse.column, mouse.row).into()))
+                .find(|(_, rect)| rect.contains(position))
                 .map(|(idx, _)| *idx);
-            if let Some(idx) = tab {
-                self.set_filter(idx);
+            let entry = viewport
+                .list_rows
+                .contains(position)
+                .then(|| viewport.first_entry + usize::from(mouse.row - viewport.list_rows.y));
+            (
+                tab,
+                viewport.tab_bar.contains(position),
+                viewport.list.contains(position),
+                entry,
+            )
+        };
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(idx) = tab {
+                    self.set_filter(idx);
+                } else if let Some(entry) = entry {
+                    let entries = self.center_rows(&self.selectable_indices(), self.grouping);
+                    self.selected = match entries.get(entry) {
+                        Some(super::navigation::CenterRow::Task(index)) => *index,
+                        Some(super::navigation::CenterRow::ShowMore) => usize::MAX,
+                        _ => return None,
+                    };
+                    return self.activate();
+                }
             }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let forward = mouse.kind == MouseEventKind::ScrollDown;
+                if over_tabs {
+                    let idx = if forward {
+                        (self.status_filter + 1).min(TASK_FILTERS.len() - 1)
+                    } else {
+                        self.status_filter.saturating_sub(1)
+                    };
+                    self.set_filter(idx);
+                } else if over_list {
+                    self.move_selection(forward);
+                }
+            }
+            _ => {}
         }
         None
     }
