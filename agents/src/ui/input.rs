@@ -78,9 +78,9 @@ impl View {
                 } else if over_log {
                     let mut viewport = self.viewport.borrow_mut();
                     viewport.log_scroll = if forward {
-                        viewport.log_scroll.saturating_sub(1)
-                    } else {
                         viewport.log_scroll.saturating_add(1)
+                    } else {
+                        viewport.log_scroll.saturating_sub(1)
                     };
                 } else if over_details {
                     let mut viewport = self.viewport.borrow_mut();

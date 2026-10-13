@@ -132,7 +132,7 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     let payload = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, payload.repeat(20)).unwrap();
     app.refresh_log(8);
-    scroll_log(&mut app, ScrollUp);
+    scroll_log(&mut app, ScrollDown);
     app.refresh_log(8);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
     assert_eq!(app.view.log.len(), 9);
@@ -147,7 +147,7 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
         .unwrap();
     app.refresh_log(8);
     assert_eq!(app.view.log, cached);
-    scroll_log(&mut app, ScrollDown);
+    scroll_log(&mut app, ScrollUp);
     app.refresh_log(8);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
     assert_eq!(app.view.log.len(), 8);
@@ -156,13 +156,13 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
 
 #[test]
 fn task_log_growth_keeps_distance_from_end() {
-    use crossterm::event::MouseEventKind::ScrollUp;
+    use crossterm::event::MouseEventKind::ScrollDown;
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, payload.repeat(20)).unwrap();
     app.refresh_log(8);
-    scroll_log(&mut app, ScrollUp);
+    scroll_log(&mut app, ScrollDown);
     app.refresh_log(8);
     let before = app.view.log.clone();
     std::fs::write(
@@ -195,7 +195,7 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     app.refresh_log(1);
     assert_eq!(app.view.matching_log_count(), 20);
     for _ in 0..30 {
-        scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollUp);
+        scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollDown);
     }
     app.refresh_log(1);
     assert_eq!(app.view.log_scroll(), 19);
@@ -235,16 +235,16 @@ fn task_log_scroll_clamps_at_transcript_start() {
     assert_eq!(app.view.log.len(), 2);
     app.refresh_log(1);
     for _ in 0..5 {
-        scroll_log(&mut app, ScrollUp);
+        scroll_log(&mut app, ScrollDown);
     }
     app.refresh_log(1);
     assert_eq!(app.view.log.len(), 2);
-    scroll_log(&mut app, ScrollDown);
+    scroll_log(&mut app, ScrollUp);
     app.refresh_log(1);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 1);
     assert_eq!(app.view.log.len(), 1);
     // A transcript shorter than the visible window clamps all the way to zero.
-    scroll_log(&mut app, ScrollUp);
+    scroll_log(&mut app, ScrollDown);
     app.refresh_log(8);
     app.refresh_log(8);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
@@ -600,7 +600,7 @@ mod log_filters {
     use super::{fixture, key, scroll_log};
     use crate::log::Kind;
     use crossterm::event::KeyCode;
-    use crossterm::event::MouseEventKind::ScrollUp;
+    use crossterm::event::MouseEventKind::ScrollDown;
 
     #[test]
     fn tool_filter_loads_matching_count_and_caches_by_filter() {
@@ -626,7 +626,7 @@ mod log_filters {
         key(&mut app, KeyCode::Char('t'));
         assert_eq!(app.view.log.len(), 8);
         assert!(app.view.log.iter().all(|event| event.kind == Kind::Tool));
-        scroll_log(&mut app, ScrollUp);
+        scroll_log(&mut app, ScrollDown);
         app.refresh_log(8);
         assert_eq!(app.view.log.len(), 9);
         assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
@@ -642,7 +642,7 @@ mod log_filters {
         app.refresh_log(8);
         assert_eq!(app.view.log, cached);
         for _ in 0..30 {
-            scroll_log(&mut app, ScrollUp);
+            scroll_log(&mut app, ScrollDown);
         }
         app.refresh_log(8);
         assert_eq!(app.view.log.len(), 20);

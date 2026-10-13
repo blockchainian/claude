@@ -38,9 +38,8 @@ impl View {
         let matching: Vec<_> = self.shown_log_events().collect();
         let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
-        let events = &matching[start..end];
-        for (index, event) in events.iter().enumerate() {
-            let last = scroll == 0 && index + 1 == events.len();
+        for (index, event) in matching[start..end].iter().rev().enumerate() {
+            let last = scroll == 0 && index == 0;
             let time = event_time(event, session, last, now);
             render_event(
                 event,
@@ -54,7 +53,7 @@ impl View {
         }
     }
 
-    /// How long until the bottom log row's time reads differently, or `None` if it never does.
+    /// How long until the top log row's time reads differently, or `None` if it never does.
     pub(crate) fn log_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
         let session = self.selected_row()?;
         if self.log_scroll() != 0 || self.log_session.as_ref() != Some(&session.id) {
