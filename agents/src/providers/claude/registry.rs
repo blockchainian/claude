@@ -1,3 +1,4 @@
+use crate::model::SessionStatus;
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -13,12 +14,23 @@ pub(super) struct Entry {
     pub cwd: Option<String>,
     pub started_at: Option<i64>,
     pub proc_start: Option<String>,
-    pub version: Option<String>,
+    #[serde(rename = "version")]
+    _version: Option<String>,
     pub kind: Option<String>,
     pub name: Option<String>,
     pub name_source: Option<String>,
     pub updated_at: Option<i64>,
     pub status: Option<String>,
+}
+
+/// Maps the status strings written by Claude Code's session registry.
+pub(super) fn from_registry(status: &str) -> Option<SessionStatus> {
+    match status {
+        "waiting" => Some(SessionStatus::NeedsInput),
+        "busy" | "shell" => Some(SessionStatus::Working),
+        "idle" => Some(SessionStatus::Ready),
+        _ => None,
+    }
 }
 
 pub(super) fn process_starts(pids: &[u32]) -> HashMap<u32, Vec<DateTime<Utc>>> {

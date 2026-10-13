@@ -1,5 +1,6 @@
 pub(crate) mod claude;
 
+use crate::model::Session;
 use std::{fmt, str::FromStr};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -44,6 +45,37 @@ impl FromStr for SessionKey {
             id: id.to_owned(),
         })
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Capabilities {
+    pub resume: bool,
+    pub fork: bool,
+    pub new: bool,
+    pub rename: bool,
+    pub delete: bool,
+    pub stop: bool,
+    pub archive: bool,
+}
+
+pub struct Snapshot {
+    pub sessions: Vec<Session>,
+    pub has_more: bool,
+}
+
+pub trait Provider {
+    #[allow(
+        dead_code,
+        reason = "Action dispatch is separate from snapshot refresh"
+    )]
+    fn id(&self) -> ProviderId;
+    #[allow(
+        dead_code,
+        reason = "Action dispatch is separate from snapshot refresh"
+    )]
+    fn capabilities(&self) -> Capabilities;
+    /// Returns this provider's sessions, including children with provider-qualified parents.
+    fn refresh(&mut self, pages: usize) -> Snapshot;
 }
 
 #[cfg(test)]

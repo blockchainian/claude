@@ -123,7 +123,8 @@ impl Metadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::claude::{Store, registry, tests::transcript};
+    use crate::providers::Provider;
+    use crate::providers::claude::{ClaudeProvider, registry, tests::transcript};
     use serde_json::{Value, json};
     use std::{
         fs,
@@ -327,8 +328,13 @@ mod tests {
         )
         .unwrap();
         fs::write(agents.join("agent-done.jsonl"), FIXTURE).unwrap();
-        let mut store = Store::new(dir.path().into());
-        let snapshot = store.refresh();
+        let mut store = ClaudeProvider::new(dir.path().into());
+        let snapshot = store.refresh(1);
+        let merged =
+            crate::sessions::Hub::new(vec![Box::new(ClaudeProvider::new(dir.path().into()))])
+                .refresh();
+        assert_eq!(merged.sessions, snapshot.sessions);
+        assert_eq!(merged.has_more, snapshot.has_more);
         let child = snapshot
             .sessions
             .iter()
@@ -354,7 +360,7 @@ mod tests {
             .as_ref()
             .unwrap()
             .as_ptr();
-        assert_eq!(store.refresh().sessions, snapshot.sessions);
+        assert_eq!(store.refresh(1).sessions, snapshot.sessions);
         assert_eq!(
             store.summaries[&path]
                 .summary
@@ -372,7 +378,7 @@ mod tests {
             "\n{reply}"
         )
         .unwrap();
-        let changed = store.refresh();
+        let changed = store.refresh(1);
         assert_eq!(
             changed
                 .sessions
@@ -384,7 +390,7 @@ mod tests {
             Some("Checking again")
         );
         fs::write(agents.join("agent-x.meta.json"), r#"{"name":"renamed"}"#).unwrap();
-        let changed = store.refresh();
+        let changed = store.refresh(1);
         let child = changed
             .sessions
             .iter()
@@ -393,7 +399,7 @@ mod tests {
         assert_eq!(child.title, "renamed");
         assert_eq!(child.prompt, "renamed");
         fs::remove_file(dir.path().join("sessions/live.json")).unwrap();
-        assert!(store.refresh().sessions.iter().all(|s| s.parent.is_none()));
+        assert!(store.refresh(1).sessions.iter().all(|s| s.parent.is_none()));
         assert!(!store.summaries.contains_key(&path));
     }
 
@@ -409,7 +415,7 @@ mod tests {
         fs::write(&path, pending()[0].to_string()).unwrap();
         let created: chrono::DateTime<chrono::Utc> =
             fs::metadata(&path).unwrap().created().unwrap().into();
-        let mut store = Store::new(dir.path().into());
+        let mut store = ClaudeProvider::new(dir.path().into());
         for elapsed in [60, 120] {
             fs::File::options()
                 .write(true)
@@ -419,7 +425,7 @@ mod tests {
                     std::time::SystemTime::from(created) + std::time::Duration::from_secs(elapsed),
                 )
                 .unwrap();
-            let snapshot = store.refresh();
+            let snapshot = store.refresh(1);
             let child = snapshot
                 .sessions
                 .iter()
@@ -447,7 +453,7 @@ mod tests {
                 .join("\n"),
         )
         .unwrap();
-        let snapshot = store.refresh();
+        let snapshot = store.refresh(1);
         let child = snapshot
             .sessions
             .iter()
@@ -458,7 +464,7 @@ mod tests {
         assert_eq!(child.last_message.as_deref(), Some("Review complete"));
         assert!(child.latest_activity().is_none());
         fs::write(&path, FIXTURE).unwrap();
-        assert!(store.refresh().sessions.iter().all(|s| s.parent.is_none()));
+        assert!(store.refresh(1).sessions.iter().all(|s| s.parent.is_none()));
     }
 
     #[test]

@@ -6,7 +6,7 @@ mod subagents;
 mod transcript;
 
 use crate::model::{Process, Session, SessionStatus};
-use crate::providers::{ProviderId, SessionKey};
+use crate::providers::{Capabilities, Provider, ProviderId, SessionKey, Snapshot};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -182,11 +182,6 @@ pub fn config_dir() -> PathBuf {
     .join(".claude")
 }
 
-pub struct Snapshot {
-    pub sessions: Vec<Session>,
-    pub has_more: bool,
-}
-
 #[derive(Clone)]
 struct Transcript {
     id: String,
@@ -201,28 +196,22 @@ struct CachedSummary {
     summary: Summary,
 }
 
-pub struct Store {
+pub struct ClaudeProvider {
     config_dir: PathBuf,
-    pages: usize,
     index: HashMap<String, Transcript>,
     summaries: HashMap<PathBuf, CachedSummary>,
 }
 
-impl Store {
+impl ClaudeProvider {
     pub fn new(config_dir: PathBuf) -> Self {
         Self {
             config_dir,
-            pages: 1,
             index: HashMap::new(),
             summaries: HashMap::new(),
         }
     }
 
-    pub fn show_more(&mut self) {
-        self.pages = self.pages.saturating_add(1);
-    }
-
-    pub fn refresh(&mut self) -> Snapshot {
+    fn snapshot(&mut self, pages: usize) -> Snapshot {
         self.list_transcripts();
         let live = registry::live(&self.config_dir);
         let live_ids: HashSet<_> = live
@@ -260,16 +249,14 @@ impl Store {
             session.status = entry
                 .status
                 .as_deref()
-                .and_then(SessionStatus::from_registry)
+                .and_then(registry::from_registry)
                 .unwrap_or(SessionStatus::Ready);
             if let Some(updated) = entry.updated_at.and_then(DateTime::from_timestamp_millis) {
                 session.updated_at = updated;
             }
             session.process = entry.pid.map(|pid| Process {
                 pid,
-                status: entry.status.unwrap_or_default(),
-                kind: entry.kind,
-                version: entry.version,
+                label: entry.kind,
                 started_at: entry.started_at.and_then(DateTime::from_timestamp_millis),
             });
             sessions.push(session);
@@ -286,7 +273,7 @@ impl Store {
             .map(|file| (file.id.clone(), file.modified))
             .collect();
         inactive.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        let shown = self.pages.saturating_mul(PAGE_SIZE);
+        let shown = pages.saturating_mul(PAGE_SIZE);
         let has_more = inactive.len() > shown;
         for (id, _) in inactive.into_iter().take(shown) {
             let (summary, path, modified) = self.summary(&id);
@@ -467,6 +454,28 @@ impl Store {
     }
 }
 
+impl Provider for ClaudeProvider {
+    fn id(&self) -> ProviderId {
+        ProviderId::Claude
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            resume: true,
+            fork: true,
+            new: true,
+            rename: true,
+            delete: true,
+            stop: true,
+            archive: true,
+        }
+    }
+
+    fn refresh(&mut self, pages: usize) -> Snapshot {
+        self.snapshot(pages)
+    }
+}
+
 fn is_uuid(id: &str) -> bool {
     id.len() == 36
         && id.bytes().enumerate().all(|(index, byte)| {
@@ -554,16 +563,35 @@ mod tests {
     }
 
     #[test]
+    fn provider_identity_and_capabilities() {
+        let dir = tempfile::tempdir().unwrap();
+        let provider: Box<dyn Provider> = Box::new(ClaudeProvider::new(dir.path().into()));
+        assert_eq!(provider.id(), ProviderId::Claude);
+        assert_eq!(
+            provider.capabilities(),
+            Capabilities {
+                resume: true,
+                fork: true,
+                new: true,
+                rename: true,
+                delete: true,
+                stop: true,
+                archive: true,
+            }
+        );
+    }
+
+    #[test]
     #[ignore = "reads real config; set AGENTS_BENCH_CONFIG explicitly"]
     fn measure_refresh() {
         let config = std::env::var_os("AGENTS_BENCH_CONFIG").expect("AGENTS_BENCH_CONFIG required");
-        let mut store = Store::new(config.into());
+        let mut store = ClaudeProvider::new(config.into());
         let start = std::time::Instant::now();
-        let snapshot = store.refresh();
+        let snapshot = store.refresh(1);
         let cold = start.elapsed();
         let start = std::time::Instant::now();
         for _ in 0..20 {
-            std::hint::black_box(store.refresh());
+            std::hint::black_box(store.refresh(1));
         }
         eprintln!(
             "refresh cold={cold:?} warm_mean={:?} transcripts={} cached={} sessions={}",
@@ -580,8 +608,8 @@ mod tests {
         let first_id = "00000000-0000-0000-0000-000000000001";
         let first = transcript(dir.path(), first_id, 1);
         let second = transcript(dir.path(), "00000000-0000-0000-0000-000000000002", 2);
-        let mut store = Store::new(dir.path().into());
-        store.refresh();
+        let mut store = ClaudeProvider::new(dir.path().into());
+        store.refresh(1);
         let first_prompt = store.summaries[&first].summary.prompt.as_ptr() as usize;
         let second_prompt = store.summaries[&second].summary.prompt.as_ptr() as usize;
         let title = FIXTURE.lines().nth(2).unwrap();
@@ -590,7 +618,7 @@ mod tests {
             "{title}"
         )
         .unwrap();
-        store.refresh();
+        store.refresh(1);
         // A parsed summary allocates its prompt while the previous cached one still lives.
         assert_ne!(
             store.summaries[&first].summary.prompt.as_ptr() as usize,
@@ -620,8 +648,8 @@ mod tests {
             FIXTURE,
         )
         .unwrap();
-        let mut store = Store::new(dir.path().into());
-        let first = store.refresh();
+        let mut store = ClaudeProvider::new(dir.path().into());
+        let first = store.refresh(1);
         assert_eq!(first.sessions.len(), 10);
         assert!(first.has_more);
         assert!(
@@ -641,10 +669,8 @@ mod tests {
             .prompt
             .clone();
         assert!(!cached.is_empty());
-        assert_eq!(store.refresh().sessions, first.sessions);
-        store.show_more();
-        store.show_more();
-        let all = store.refresh();
+        assert_eq!(store.refresh(1).sessions, first.sessions);
+        let all = store.refresh(3);
         assert_eq!(all.sessions.len(), 25);
         assert!(!all.has_more);
         assert!(
@@ -673,8 +699,8 @@ mod tests {
             serde_json::to_vec(&value).unwrap(),
         )
         .unwrap();
-        let mut store = Store::new(dir.path().into());
-        let snapshot = store.refresh();
+        let mut store = ClaudeProvider::new(dir.path().into());
+        let snapshot = store.refresh(1);
         assert_eq!(snapshot.sessions.len(), 11);
         assert!(snapshot.has_more);
         let session = snapshot
@@ -715,7 +741,7 @@ mod tests {
             serde_json::to_vec(&value).unwrap(),
         )
         .unwrap();
-        let snapshot = store.refresh();
+        let snapshot = store.refresh(1);
         let session = snapshot
             .sessions
             .iter()
@@ -731,18 +757,18 @@ mod tests {
         let id = "00000000-0000-0000-0000-000000000001";
         let path = transcript(dir.path(), id, 0);
         let modified = fs::metadata(&path).unwrap().modified().unwrap();
-        let mut store = Store::new(dir.path().into());
-        let first = store.refresh().sessions.remove(0);
+        let mut store = ClaudeProvider::new(dir.path().into());
+        let first = store.refresh(1).sessions.remove(0);
         let changed = FIXTURE.replace("Codex manager", "CODEX manager");
         assert_eq!(changed.len(), FIXTURE.len());
         fs::write(&path, changed).unwrap();
         let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
         file.set_modified(modified).unwrap();
-        assert_eq!(store.refresh().sessions[0].title, first.title);
+        assert_eq!(store.refresh(1).sessions[0].title, first.title);
         file.set_modified(modified + Duration::from_secs(1))
             .unwrap();
         assert_eq!(
-            store.refresh().sessions[0].title,
+            store.refresh(1).sessions[0].title,
             "CODEX manager 停止时线程处理"
         );
         let modified = fs::metadata(&path).unwrap().modified().unwrap();
@@ -750,9 +776,9 @@ mod tests {
         let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
         writeln!(file, "{title}").unwrap();
         file.set_modified(modified).unwrap();
-        assert_eq!(store.refresh().sessions[0].title, first.title);
+        assert_eq!(store.refresh(1).sessions[0].title, first.title);
         fs::remove_file(path).unwrap();
-        assert!(store.refresh().sessions.is_empty());
+        assert!(store.refresh(1).sessions.is_empty());
         assert!(store.summaries.is_empty());
     }
 }
@@ -774,9 +800,9 @@ mod rename_tests {
             serde_json::to_vec(&value).unwrap(),
         )
         .unwrap();
-        let mut store = Store::new(dir.path().into());
+        let mut store = ClaudeProvider::new(dir.path().into());
         assert_eq!(
-            store.refresh().sessions[0].display_title(),
+            store.refresh(1).sessions[0].display_title(),
             "translate-papers"
         );
         // This is the real custom-title record shape appended by saveCustomTitle.
@@ -787,7 +813,7 @@ mod rename_tests {
             serde_json::json!({"type":"custom-title", "customTitle":"Renamed live", "sessionId":id})
         )
         .unwrap();
-        assert_eq!(store.refresh().sessions[0].display_title(), "Renamed live");
+        assert_eq!(store.refresh(1).sessions[0].display_title(), "Renamed live");
     }
 
     #[test]
@@ -805,8 +831,8 @@ mod rename_tests {
             original.push('\n');
         }
         fs::write(&path, &original).unwrap();
-        let mut store = Store::new(dir.path().into());
-        store.refresh();
+        let mut store = ClaudeProvider::new(dir.path().into());
+        store.refresh(1);
         for name in ["Quoted \"title\" \n 中文", "Latest title"] {
             rename(&path, id, name).unwrap();
             let bytes = fs::read(&path).unwrap();
@@ -846,7 +872,7 @@ mod rename_tests {
                 Some(name)
             );
             assert_eq!(
-                store.refresh().sessions[0].display_title(),
+                store.refresh(1).sessions[0].display_title(),
                 name.lines().next().unwrap()
             );
         }
@@ -878,14 +904,14 @@ mod delete_tests {
             let registry = config.path().join("sessions/keep.json");
             fs::create_dir_all(registry.parent().unwrap()).unwrap();
             fs::write(&registry, "{}").unwrap();
-            let mut store = Store::new(config.path().into());
-            assert_eq!(store.refresh().sessions.len(), 1);
+            let mut store = ClaudeProvider::new(config.path().into());
+            assert_eq!(store.refresh(1).sessions.len(), 1);
             assert!(store.summaries.contains_key(&path));
             delete(&path).unwrap();
             assert!(!path.exists());
             assert!(!directory.exists());
             assert!(registry.exists());
-            assert!(store.refresh().sessions.is_empty());
+            assert!(store.refresh(1).sessions.is_empty());
             assert!(!store.summaries.contains_key(&path));
         }
     }
@@ -942,13 +968,11 @@ mod delete_live_tests {
             let other_key = registry_dir.join(format!("{pid}0.token.key"));
             fs::write(&key, "private").unwrap();
             fs::write(&other_key, "private").unwrap();
-            let mut store = Store::new(config.path().into());
-            let mut session = store.refresh().sessions.remove(0);
+            let mut store = ClaudeProvider::new(config.path().into());
+            let mut session = store.refresh(1).sessions.remove(0);
             session.process = Some(Process {
                 pid,
-                status: "idle".into(),
-                kind: None,
-                version: None,
+                label: None,
                 started_at: Some(start),
             });
             let result = delete_session(config.path(), &session);
@@ -966,7 +990,7 @@ mod delete_live_tests {
                 assert!(!key.exists());
                 assert!(other_key.exists());
                 assert!(!path.exists());
-                assert!(store.refresh().sessions.is_empty());
+                assert!(store.refresh(1).sessions.is_empty());
             }
             reaper.join().unwrap();
         }

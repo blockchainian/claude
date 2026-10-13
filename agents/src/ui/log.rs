@@ -236,8 +236,10 @@ mod log_markdown {
             include_str!("../../tests/fixtures/transcript.jsonl"),
         )
         .unwrap();
-        let mut store = crate::sessions::Store::new(dir.path().to_owned());
-        let mut session = store.refresh().sessions.remove(0);
+        let mut store = crate::providers::claude::ClaudeProvider::new(dir.path().to_owned());
+        let mut session = crate::providers::Provider::refresh(&mut store, 1)
+            .sessions
+            .remove(0);
         session.parent = Some(crate::providers::SessionKey {
             provider: crate::providers::ProviderId::Claude,
             id: "parent".into(),

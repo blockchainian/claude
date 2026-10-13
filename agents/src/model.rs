@@ -27,27 +27,13 @@ impl SessionStatus {
             Self::Inactive => "Inactive",
         }
     }
-
-    /// Maps a registry status string (`busy`, `shell`, `idle`, `waiting`).
-    pub fn from_registry(status: &str) -> Option<Self> {
-        match status {
-            "waiting" => Some(Self::NeedsInput),
-            "busy" | "shell" => Some(Self::Working),
-            "idle" => Some(Self::Ready),
-            _ => None,
-        }
-    }
 }
 
-/// A live process behind a session, read from `~/.claude/sessions/<pid>.json`.
+/// A live process behind a session.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Process {
     pub pid: u32,
-    /// Registry status string as written by Claude Code.
-    pub status: String,
-    /// `interactive`, `bg`, `daemon` or `daemon-worker`.
-    pub kind: Option<String>,
-    pub version: Option<String>,
+    pub label: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
 }
 

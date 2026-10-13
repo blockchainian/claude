@@ -3,9 +3,9 @@
 use crate::model::Action;
 use crate::model::Session;
 use crate::providers::SessionKey;
+use crate::providers::{Snapshot, claude::ClaudeProvider};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
-use crate::sessions::Snapshot;
-use crate::sessions::Store;
+use crate::sessions::Hub;
 use crate::state::Preferences;
 use crate::terminal_background;
 use crate::ui::View;
@@ -79,7 +79,7 @@ impl Drop for InputReader {
 
 pub struct App {
     config_dir: PathBuf,
-    store: Store,
+    hub: Hub,
     preferences: Preferences,
     view: View,
     sessions: Vec<Session>,
@@ -108,7 +108,7 @@ impl App {
         view.set_pinned(&preferences.pinned);
         view.set_loading(true);
         Self {
-            store: Store::new(config_dir.clone()),
+            hub: Hub::new(vec![Box::new(ClaudeProvider::new(config_dir.clone()))]),
             config_dir,
             preferences,
             view,
@@ -384,7 +384,7 @@ impl App {
     }
 
     fn refresh(&mut self) {
-        let Snapshot { sessions, has_more } = self.store.refresh();
+        let Snapshot { sessions, has_more } = self.hub.refresh();
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
@@ -421,7 +421,7 @@ impl App {
                 return self.launch_claude(session, &["--resume", &id.id]);
             }
             Action::ShowMore => {
-                self.store.show_more();
+                self.hub.show_more();
                 self.view.set_loading(true);
                 self.refresh();
             }

@@ -1169,9 +1169,7 @@ fn details_include_attention_and_clip_messages() {
     row.git_branch = Some("main".into());
     row.process = Some(crate::model::Process {
         pid: 123,
-        status: "waiting".into(),
-        kind: None,
-        version: Some("2.0".into()),
+        label: None,
         started_at: None,
     });
     row.prompt = "prompt ".repeat(40);
@@ -1465,9 +1463,7 @@ fn delete_live_rows_open_the_dialog_and_ignore_show_more() {
     let mut view = fixture();
     view.rows[view.selected].process = Some(crate::model::Process {
         pid: 123,
-        status: "idle".into(),
-        kind: None,
-        version: None,
+        label: None,
         started_at: None,
     });
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
@@ -2300,9 +2296,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
     row.last_record_at = Some(now - Duration::seconds(10));
     row.process = Some(crate::model::Process {
         pid: 1,
-        status: "busy".into(),
-        kind: None,
-        version: None,
+        label: None,
         started_at: None,
     });
     let mut view = View::new(Grouping::Project, false);
