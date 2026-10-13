@@ -18,6 +18,7 @@ fn default_detail(input: &serde_json::Value) -> Option<(&str, &str)> {
 
 fn tool_detail(name: &str, input: &serde_json::Value) -> String {
     match name {
+        "AskUserQuestion" => super::transcript::question_texts(input).join(" · "),
         "Bash" => input_text(input, "description")
             .map(str::to_owned)
             .unwrap_or_else(|| {
@@ -56,7 +57,7 @@ fn tool_detail(name: &str, input: &serde_json::Value) -> String {
 fn tool_label(name: &str, detail: &str) -> String {
     if detail.is_empty() {
         name.to_owned()
-    } else if name == "Bash" {
+    } else if matches!(name, "Bash" | "AskUserQuestion") {
         detail.to_owned()
     } else {
         format!("{name} {detail}")
@@ -71,7 +72,7 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     let input = &block["input"];
     if matches!(
         name,
-        "Bash" | "WebFetch" | "SendMessage" | "SubagentHandback"
+        "Bash" | "WebFetch" | "SendMessage" | "SubagentHandback" | "AskUserQuestion"
     ) || (matches!(name, "Agent" | "Task") && input_text(input, "name").is_some())
     {
         Some(tool_label(name, &tool_detail(name, input)))
@@ -467,6 +468,32 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
     use std::io::Write;
+
+    #[test]
+    fn ask_user_question_texts_in_log_and_latest_activity() {
+        for fixture in [
+            include_str!("../../../tests/fixtures/claude-questions-pending.jsonl"),
+            include_str!("../../../tests/fixtures/claude-questions-answered.jsonl"),
+        ] {
+            let record: serde_json::Value =
+                serde_json::from_str(fixture.lines().next().unwrap()).unwrap();
+            let expected = record["message"]["content"][0]["input"]["questions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|question| question["question"].as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            write!(file, "{fixture}").unwrap();
+            let events = tail(file.path(), 8).unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].body, expected);
+            let len = file.as_file().metadata().unwrap().len();
+            let summary = super::super::transcript::read(file.path(), len).unwrap();
+            assert_eq!(summary.activity.unwrap().label, expected);
+        }
+    }
 
     #[test]
     fn real_tool_details_match_log_and_latest_activity() {

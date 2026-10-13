@@ -645,6 +645,7 @@ fn session(
         last_message: summary.last_message,
         last_message_at: summary.last_message_at,
         activity: summary.activity,
+        pending_questions: summary.pending_questions,
         background: summary.background,
         last_prompt: summary.last_prompt,
         transcript: path,
@@ -658,6 +659,33 @@ mod tests {
     use std::time::Duration;
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
+
+    #[test]
+    fn ask_user_question_pending_questions_refresh_with_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "00000000-0000-4000-8000-000000000001";
+        let path = transcript(dir.path(), id, 0);
+        let pending = include_str!("../../../tests/fixtures/claude-questions-pending.jsonl");
+        let answered = include_str!("../../../tests/fixtures/claude-questions-answered.jsonl");
+        let record: serde_json::Value = serde_json::from_str(pending).unwrap();
+        let expected = record["message"]["content"][0]["input"]["questions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|question| question["question"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        for (fixture, questions) in [
+            (pending, expected.clone()),
+            (answered, vec![]),
+            (pending, expected),
+        ] {
+            fs::write(&path, fixture).unwrap();
+            let sessions = provider.refresh(1).sessions;
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].pending_questions, questions);
+        }
+    }
 
     pub(super) fn transcript(dir: &Path, id: &str, age: u64) -> PathBuf {
         let project = dir.join("projects/ambiguous-project-slug");

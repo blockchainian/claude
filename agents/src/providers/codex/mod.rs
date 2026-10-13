@@ -233,6 +233,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         last_message: None,
         last_message_at: None,
         activity: None,
+        pending_questions: vec![],
         background: vec![],
         last_prompt: None,
         transcript: column::<String>(row, "rollout_path")?

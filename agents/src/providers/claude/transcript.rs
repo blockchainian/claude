@@ -25,6 +25,7 @@ pub(super) struct Summary {
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub pending_questions: Vec<String>,
     pub background: Vec<BackgroundTask>,
     pub completed_background: HashSet<String>,
     pub background_ids: HashSet<String>,
@@ -156,6 +157,16 @@ pub(super) fn content_text(record: &Value, last: bool) -> Option<String> {
     } else {
         Some(texts.collect::<String>())
     }
+}
+
+pub(super) fn question_texts(input: &Value) -> Vec<String> {
+    input["questions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|question| question["question"].as_str())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn records(bytes: &[u8]) -> impl DoubleEndedIterator<Item = Value> + '_ {
@@ -422,7 +433,30 @@ fn read_messages(
     let mut next_user = None;
     let mut dequeued_user = None;
     let mut quiet_point = false;
+    let mut questions_found = false;
+    let mut tool_results = HashSet::new();
     walk_records(file, start, bytes, sidechains, |record| {
+        if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {
+            for block in blocks.iter().rev() {
+                if record["type"] == "user"
+                    && block["type"] == "tool_result"
+                    && let Some(id) = block["tool_use_id"].as_str()
+                {
+                    tool_results.insert(id.to_owned());
+                }
+                if record["type"] == "assistant"
+                    && block["type"] == "tool_use"
+                    && block["name"] == "AskUserQuestion"
+                    && let Some(id) = block["id"].as_str()
+                {
+                    questions_found = true;
+                    if !tool_results.contains(id) {
+                        summary.pending_questions = question_texts(&block["input"]);
+                    }
+                    break;
+                }
+            }
+        }
         if !quiet_point {
             if record["type"] == "user" {
                 next_user = content_text(&record, false);
@@ -1496,5 +1530,43 @@ mod tests {
             summary.ai_title.as_deref(),
             Some("Codex manager 停止时线程处理")
         );
+    }
+}
+
+#[cfg(test)]
+mod question_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn ask_user_question_matches_latest_call_by_id() {
+        let pending = include_str!("../../../tests/fixtures/claude-questions-pending.jsonl");
+        let answered = include_str!("../../../tests/fixtures/claude-questions-answered.jsonl");
+        let call: Value = serde_json::from_str(pending).unwrap();
+        let expected = question_texts(&call["message"]["content"][0]["input"]);
+        let answer: Value = serde_json::from_str(answered.lines().last().unwrap()).unwrap();
+        let mut other_answer = answer.clone();
+        other_answer["message"]["content"][0]["tool_use_id"] = "other-call".into();
+        let mut older_call = call.clone();
+        older_call["message"]["content"][0]["id"] = "older-call".into();
+        for (records, questions) in [
+            (vec![call.clone(), other_answer], expected.clone()),
+            (vec![older_call, call.clone(), answer.clone()], vec![]),
+            (
+                vec![call.clone(), answer.clone(), {
+                    let mut later_call = call.clone();
+                    later_call["message"]["content"][0]["id"] = "later-call".into();
+                    later_call
+                }],
+                expected,
+            ),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            for record in records {
+                writeln!(file, "{record}").unwrap();
+            }
+            let len = file.as_file().metadata().unwrap().len();
+            assert_eq!(read(file.path(), len).unwrap().pending_questions, questions);
+        }
     }
 }

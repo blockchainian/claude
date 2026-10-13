@@ -87,6 +87,7 @@ pub struct Session {
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub pending_questions: Vec<String>,
     pub background: Vec<BackgroundTask>,
     /// Latest user prompt, up to 512 chars.
     pub last_prompt: Option<String>,

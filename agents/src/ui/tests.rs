@@ -576,6 +576,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         last_message: None,
         last_message_at: None,
         activity: None,
+        pending_questions: Vec::new(),
         background: Vec::new(),
         last_prompt: None,
         transcript: None,
@@ -4327,4 +4328,69 @@ fn test_view(grouping: Grouping, use_colors: bool) -> View {
         },
     )]));
     view
+}
+
+#[test]
+fn ask_user_question_details_snapshot() {
+    let now = Utc::now();
+    let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
+    let record: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/claude-questions-pending.jsonl"
+    ))
+    .unwrap();
+    row.pending_questions = record["message"]["content"][0]["input"]["questions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|question| question["question"].as_str().unwrap().to_owned())
+        .collect();
+    let mut view = test_view(Grouping::Project, false);
+    let render = |view: &View| {
+        let area = Rect::new(0, 0, 160, 24);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, now);
+        buf.content
+            .chunks(160)
+            .map(|row| {
+                let mut text = String::new();
+                let mut cells = row.iter();
+                while let Some(cell) = cells.next() {
+                    text.push_str(cell.symbol());
+                    for _ in 1..cell.symbol().width() {
+                        cells.next();
+                    }
+                }
+                text.trim_end().to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end_matches('\n')
+            .to_owned()
+    };
+    view.set_sessions(vec![row.clone()], false);
+    let pending = render(&view);
+    assert!(
+        pending.contains(&format!(
+            "Needs attention\n{}",
+            row.pending_questions.join("\n")
+        )),
+        "{pending}"
+    );
+    assert!(!pending.contains("Open task to review."));
+    assert_eq!(
+        pending,
+        include_str!("../../tests/ui_snapshots/details_questions_pending.txt")
+    );
+    row.pending_questions.clear();
+    view.set_sessions(vec![row.clone()], false);
+    let answered = render(&view);
+    assert!(answered.contains("Needs attention\nOpen task to review.\nWaiting for your response."));
+    assert_eq!(
+        answered,
+        include_str!("../../tests/ui_snapshots/details_questions_answered.txt")
+    );
+    row.status = SessionStatus::Working;
+    row.pending_questions.push("cd 要不要显示？".into());
+    view.set_sessions(vec![row], false);
+    assert!(!render(&view).contains("Needs attention"));
 }

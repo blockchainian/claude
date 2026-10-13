@@ -469,12 +469,18 @@ impl View {
 
         if session.status == SessionStatus::NeedsInput {
             let start = items.len() + 1;
-            items.extend([
-                Line::default().into(),
-                "Needs attention".red().into(),
-                "Open task to review.".dim().into(),
-                "Waiting for your response.".into(),
-            ]);
+            items.extend([Line::default().into(), "Needs attention".red().into()]);
+            if session.pending_questions.is_empty() {
+                items.extend([
+                    "Open task to review.".dim().into(),
+                    "Waiting for your response.".into(),
+                ]);
+            } else {
+                items.extend(session.pending_questions.iter().map(|question| {
+                    truncate_line_with_ellipsis_if_overflow(Line::from(question.clone()), width)
+                        .into()
+                }));
+            }
             bodies.push(start..items.len());
         }
 
