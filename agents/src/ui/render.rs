@@ -317,7 +317,7 @@ impl View {
         let width = usize::from(area.width.max(1));
         let (status, dot) = Self::status(session);
         // Sections top to bottom: title, prompt, the newer of latest activity
-        // and last message, background, needs attention, model, project, branch.
+        // and last message, background, needs attention, project, branch, model.
         let mut header = Line::from(vec![status.into(), " ".into(), dot, " ".into()]);
         let title_width = width.saturating_sub(header.width());
         let title_style = self.title_style(&session.id).bold();
@@ -467,12 +467,6 @@ impl View {
             bodies.push(start..items.len());
         }
 
-        let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
-        if let Some(effort) = &session.effort {
-            model.extend([" · ".dim(), effort.clone().into()]);
-        }
-        items.extend([Line::default().into(), Line::from(model).into()]);
-
         let mut project = vec!["Project".dim()];
         if let Some(branch) = &session.git_branch {
             project.extend([
@@ -497,6 +491,12 @@ impl View {
             },
             super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width).into(),
         ]);
+
+        let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
+        if let Some(effort) = &session.effort {
+            model.extend([" · ".dim(), effort.clone().into()]);
+        }
+        items.extend([Line::default().into(), Line::from(model).into()]);
 
         let available = usize::from(area.height);
         let budget = budget_details(&items, &bodies, background, available);

@@ -9,7 +9,7 @@ Background
 │ Read files                           │
 ╰──────────────────────────────────────╯
 
-Model: Unknown
-
 Project
 /tmp/project
+
+Model: Unknown

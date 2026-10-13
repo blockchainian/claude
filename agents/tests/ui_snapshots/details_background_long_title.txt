@@ -12,7 +12,7 @@ Background
 ╰──────────────────────────────────────╯
 ╶ Waiting for output · 0s ─────────────╴
 
-Model: Unknown
-
 Project
 /tmp/project
+
+Model: Unknown
