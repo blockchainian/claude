@@ -11,10 +11,10 @@
                                                                          │ │                                         │
                                                                          │ ╰─────────────────────────────────────────╯
                                                                          │
+                                                                         │ Model: parent-model
+                                                                         │
                                                                          │ Project
                                                                          │ /tmp/project
-                                                                         │
-                                                                         │ Model: parent-model
                                                                          │
                                                                          │
                                                                          │

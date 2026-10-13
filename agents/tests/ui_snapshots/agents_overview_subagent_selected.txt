@@ -6,10 +6,10 @@
     ○ Parent task                                Ready           2m ago  │ Prompt
   › └ ● Check files                              Working         1m ago  │ Check files
     └ ○ Review results                           Ready              now  │
+                                                                         │ Model: child-model
+                                                                         │
                                                                          │ Project
                                                                          │ /tmp/child-project
-                                                                         │
-                                                                         │ Model: child-model
                                                                          │
                                                                          │
                                                                          │

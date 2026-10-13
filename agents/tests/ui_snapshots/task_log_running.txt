@@ -6,10 +6,10 @@
   › ● Task log example              Working            now  │ Prompt
                                                             │ Task log example
                                                             │
+                                                            │ Model: Unknown
+                                                            │
                                                             │ Project
                                                             │ /tmp/project
-                                                            │
-                                                            │ Model: Unknown
                                                             │
                                                             │
   ────────────────────────────────────────────────────────────────────────────────────────────────

@@ -1197,9 +1197,9 @@ fn details_include_attention_and_clip_messages() {
         .position(|line| line.trim_end().ends_with("/tmp/project"));
     assert!(position("Prompt") < position("Last message"));
     assert!(position("Last message") < position("Needs attention"));
-    assert!(position("Needs attention") < position("Project ·"));
+    assert!(position("Needs attention") < position("Model: claude-opus"));
+    assert!(position("Model: claude-opus") < position("Project ·"));
     assert!(position("Project ·") < project);
-    assert!(project < position("Model: claude-opus"));
     assert!(
         rendered
             .lines()
@@ -1209,7 +1209,7 @@ fn details_include_attention_and_clip_messages() {
     let area = Rect::new(0, 0, 38, 22);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
-    assert_eq!(buf[(0, 21)].symbol(), "M");
+    assert_eq!(buf[(0, 21)].symbol(), "/");
     let title_cell = &buf[(14, 0)];
     assert!(title_cell.modifier.contains(ratatui::style::Modifier::BOLD));
     assert_eq!(title_cell.fg, Color::Reset);
@@ -1942,7 +1942,10 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     }
     buf.reset();
     view.render_details(area, &mut buf, now);
-    assert_eq!(line(&buf, 5), "Model: Unknown");
+    assert_eq!(line(&buf, 2), "Model: Unknown");
+    assert_eq!(line(&buf, 3), "");
+    assert_eq!(line(&buf, 4), "Project");
+    assert_eq!(line(&buf, 5), "/tmp/project");
 }
 
 #[test]
@@ -2830,7 +2833,10 @@ mod details_budget {
         );
         assert!(!rows.iter().any(|line| line.contains("Check 3")));
         assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
-        assert!(rows[23].starts_with("Model:"));
+        assert!(rows[20].starts_with("Model:"));
+        assert_eq!(rows[21], "");
+        assert_eq!(rows[22], "Project");
+        assert_eq!(rows[23], "/tmp/project");
     }
 
     #[test]

@@ -3,8 +3,8 @@ Inactive ○ PR task
 Prompt
 PR task
 
+Model: Unknown
+
 Project · main
 /tmp/project
-
-Model: Unknown
 
