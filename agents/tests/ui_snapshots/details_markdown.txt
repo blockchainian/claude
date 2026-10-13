@@ -1,4 +1,4 @@
-Task details · ● Working · Markdown task
+● Working · Markdown task
 
 Prompt
 Use cargo and tests
