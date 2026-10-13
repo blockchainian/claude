@@ -1606,8 +1606,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     for (y, colour, bold) in [
-        (15, Color::Reset, true),
-        (16, Color::Yellow, true),
+        (15, Color::Yellow, true),
+        (16, Color::Reset, true),
         (17, Color::Blue, true),
         (18, Color::Red, true),
         (19, Color::Blue, true),
@@ -1628,8 +1628,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         assert!(!buf[(97, y)].modifier.contains(Modifier::BOLD));
     }
     for (kind, colour) in [
-        (Kind::User, Color::Reset),
-        (Kind::Model, Color::Yellow),
+        (Kind::User, Color::Yellow),
+        (Kind::Model, Color::Reset),
         (Kind::Tool, Color::Blue),
         (Kind::Error, Color::Red),
         (Kind::Queued, Color::Blue),
