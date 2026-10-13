@@ -67,10 +67,20 @@ struct Viewport {
     log: Rect,
     log_scroll: usize,
     details: Rect,
-    details_scroll: usize,
-    details_total_rows: usize,
+    details_scroll: DetailsScroll,
     /// Screen cell of the selection marker drawn by the last render.
     marker: Option<(u16, u16)>,
+}
+
+#[derive(Default)]
+struct DetailsScroll {
+    reveal: Vec<usize>,
+    hidden: Vec<usize>,
+    bodies: Vec<std::ops::Range<usize>>,
+    offset: usize,
+    content_top: u16,
+    /// Maximum plain offset; None when the budget layout applies.
+    fallback_max: Option<usize>,
 }
 
 struct DeleteDialog {
@@ -196,7 +206,7 @@ impl View {
             self.viewport.borrow_mut().log_scroll = 0;
         }
         if self.selected_id() != selected.as_deref() || self.status_filter != status_filter {
-            self.viewport.borrow_mut().details_scroll = 0;
+            self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
         }
     }
 
@@ -322,7 +332,7 @@ impl View {
     fn set_selected(&mut self, selected: usize) {
         if self.selected != selected {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.details_scroll = 0;
+            viewport.details_scroll = DetailsScroll::default();
             viewport.log_scroll = 0;
         }
         self.selected = selected;

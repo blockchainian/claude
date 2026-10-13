@@ -4,7 +4,7 @@ use unicode_segmentation::UnicodeSegmentation;
 impl View {
     fn set_filter(&mut self, idx: usize) {
         if self.status_filter != idx {
-            self.viewport.borrow_mut().details_scroll = 0;
+            self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
         }
         self.status_filter = idx;
         self.viewport.borrow_mut().scroll = 0;
@@ -75,14 +75,36 @@ impl View {
                     };
                 } else if over_details {
                     let mut viewport = self.viewport.borrow_mut();
-                    let max = viewport
-                        .details_total_rows
-                        .saturating_sub(usize::from(viewport.details.height));
-                    viewport.details_scroll = if forward {
-                        viewport.details_scroll.saturating_add(1).min(max)
+                    let state = &mut viewport.details_scroll;
+                    if let Some(max) = state.fallback_max {
+                        state.offset = if forward {
+                            state.offset.saturating_add(1).min(max)
+                        } else {
+                            state.offset.saturating_sub(1).min(max)
+                        };
                     } else {
-                        viewport.details_scroll.saturating_sub(1).min(max)
-                    };
+                        let d = usize::from(mouse.row.saturating_sub(state.content_top))
+                            + state.reveal.iter().sum::<usize>();
+                        if let Some(target) =
+                            curtain_target(&state.bodies, &state.reveal, &state.hidden, d, forward)
+                        {
+                            if forward {
+                                state.reveal[target] += 1;
+                                state.bodies[target].end += 1;
+                                for body in &mut state.bodies[target + 1..] {
+                                    body.start += 1;
+                                    body.end += 1;
+                                }
+                            } else {
+                                state.reveal[target] -= 1;
+                                state.bodies[target].end -= 1;
+                                for body in &mut state.bodies[target + 1..] {
+                                    body.start -= 1;
+                                    body.end -= 1;
+                                }
+                            }
+                        }
+                    }
                 }
             }
             _ => {}
@@ -336,4 +358,44 @@ impl View {
         }
         None
     }
+}
+
+/// Choose the body to open or close at a document row.
+pub(super) fn curtain_target(
+    bodies: &[std::ops::Range<usize>],
+    reveal: &[usize],
+    hidden: &[usize],
+    d: usize,
+    forward: bool,
+) -> Option<usize> {
+    let eligible = |i: usize| {
+        if forward {
+            reveal[i] < hidden[i]
+        } else {
+            reveal[i] > 0
+        }
+    };
+    bodies
+        .iter()
+        .enumerate()
+        .find(|(i, body)| body.contains(&d) && eligible(*i))
+        .map(|(i, _)| i)
+        .or_else(|| {
+            bodies
+                .iter()
+                .enumerate()
+                .find(|(i, body)| body.start > d && eligible(*i))
+                .map(|(i, _)| i)
+        })
+        .or_else(|| {
+            if forward {
+                None
+            } else {
+                bodies
+                    .iter()
+                    .enumerate()
+                    .rfind(|(i, body)| body.end <= d && eligible(*i))
+                    .map(|(i, _)| i)
+            }
+        })
 }

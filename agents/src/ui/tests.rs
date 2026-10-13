@@ -146,7 +146,7 @@ fn overflowing_details() -> View {
 }
 
 fn details_panel(view: &View) -> Buffer {
-    let mut buf = Buffer::empty(Rect::new(0, 0, 120, 24));
+    let mut buf = Buffer::empty(Rect::new(0, 0, 120, 40));
     view.render_at(buf.area, &mut buf, view.rows[view.selected].updated_at);
     let area = view.viewport.borrow().details;
     let mut panel = Buffer::empty(Rect::new(0, 0, area.width, area.height));
@@ -156,26 +156,6 @@ fn details_panel(view: &View) -> Buffer {
         }
     }
     panel
-}
-
-#[test]
-fn mouse_details_wheel_shifts_rendered_rows() {
-    let mut view = overflowing_details();
-    let before = details_panel(&view);
-    let rect = view.viewport.borrow().details;
-    assert!(!rect.is_empty());
-    let selected = view.selected;
-    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-    assert_eq!(view.viewport.borrow().details_scroll, 1);
-    assert_eq!(view.selected, selected);
-    let after = details_panel(&view);
-    // The last visible row is reserved for the overflow marker.
-    for y in 0..rect.height - 2 {
-        for x in 0..rect.width {
-            assert_eq!(after[(x, y)], before[(x, y + 1)], "cell {x},{y}");
-        }
-    }
-    assert_ne!(before, after);
 }
 
 #[test]
@@ -281,38 +261,32 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
 }
 
 #[test]
-fn mouse_details_wheel_clamps_and_clears_end_marker() {
-    let mut view = overflowing_details();
-    details_panel(&view);
-    let rect = view.viewport.borrow().details;
-    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
-    assert_eq!(view.viewport.borrow().details_scroll, 0);
-    let total = view.viewport.borrow().details_total_rows;
-    for _ in 0..total + 2 {
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-    }
-    assert_eq!(
-        view.viewport.borrow().details_scroll,
-        total.saturating_sub(usize::from(rect.height))
-    );
-    let panel = details_panel(&view);
-    let last = (0..rect.width)
-        .map(|x| panel[(x, rect.height - 1)].symbol())
-        .collect::<String>();
-    assert!(last.starts_with("Model: "), "{last}");
-    assert!(!last.contains('…'));
-}
-
-#[test]
 fn mouse_details_scroll_resets_with_selection_and_filter() {
     for code in [KeyCode::Down, KeyCode::End, KeyCode::PageDown, KeyCode::Tab] {
         let mut view = overflowing_details();
         details_panel(&view);
         let rect = view.viewport.borrow().details;
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-        assert_eq!(view.viewport.borrow().details_scroll, 1);
+        assert_eq!(
+            view.viewport
+                .borrow()
+                .details_scroll
+                .reveal
+                .iter()
+                .sum::<usize>(),
+            1
+        );
         key(&mut view, code);
-        assert_eq!(view.viewport.borrow().details_scroll, 0, "{code:?}");
+        assert_eq!(
+            view.viewport
+                .borrow()
+                .details_scroll
+                .reveal
+                .iter()
+                .sum::<usize>(),
+            0,
+            "{code:?}"
+        );
     }
     let mut view = overflowing_details();
     details_panel(&view);
@@ -322,7 +296,15 @@ fn mouse_details_scroll_resets_with_selection_and_filter() {
     let (_, tab) = view.viewport.borrow().tabs[3];
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), tab.x, tab.y));
     assert_eq!(view.selected_id(), Some(id.as_str()));
-    assert_eq!(view.viewport.borrow().details_scroll, 0);
+    assert_eq!(
+        view.viewport
+            .borrow()
+            .details_scroll
+            .reveal
+            .iter()
+            .sum::<usize>(),
+        0
+    );
 }
 
 #[test]
@@ -350,17 +332,17 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
         .find(|y| full[(full_area.x, *y)].symbol() == "╭")
         .unwrap();
     let area = Rect::new(7, 4, 43, 10);
-    view.viewport.borrow_mut().details_scroll = usize::from(top + 1 - full_area.y);
+    view.viewport.borrow_mut().details_scroll.offset = usize::from(top - full_area.y);
     let mut clipped = Buffer::empty(area);
     view.render_details(area, &mut clipped, now);
-    assert_eq!(clipped[(area.x, area.y)].symbol(), "│");
-    let scroll = view.viewport.borrow().details_scroll as u16;
-    for y in area.y..area.bottom() - 1 {
+    assert_eq!(clipped[(area.x, area.y + 1)].symbol(), "│");
+    let scroll = view.viewport.borrow().details_scroll.offset as u16;
+    for y in area.y + 1..area.bottom() - 1 {
         for x in area.x..area.right() {
             assert_eq!(clipped[(x, y)], full[(x, y + scroll)]);
         }
     }
-    view.viewport.borrow_mut().details_scroll = usize::MAX;
+    view.viewport.borrow_mut().details_scroll.offset = usize::MAX;
     view.render_details(area, &mut clipped, now);
     let link = clipped
         .content
@@ -390,10 +372,26 @@ fn details_scroll_tracks_session_identity_across_refreshes() {
     ));
     view.set_sessions(rows.clone(), false);
     assert_eq!(view.selected_id(), Some(id.as_str()));
-    assert_eq!(view.viewport.borrow().details_scroll, 1);
+    assert_eq!(
+        view.viewport
+            .borrow()
+            .details_scroll
+            .reveal
+            .iter()
+            .sum::<usize>(),
+        1
+    );
     rows.retain(|row| row.id != id);
     view.set_sessions(rows, false);
-    assert_eq!(view.viewport.borrow().details_scroll, 0);
+    assert_eq!(
+        view.viewport
+            .borrow()
+            .details_scroll
+            .reveal
+            .iter()
+            .sum::<usize>(),
+        0
+    );
 }
 
 #[test]
@@ -1905,7 +1903,7 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
         assert_eq!(line(&buf, 4), *expected);
         assert_eq!(line(&buf, 5), "…");
     }
-    let total = view.viewport.borrow().details_total_rows;
+    let total = view.viewport.borrow().details_scroll.fallback_max.unwrap();
     for _ in 0..total {
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x, area.y));
     }
@@ -2733,7 +2731,7 @@ mod details_budget {
     }
 
     #[test]
-    fn rest_budget_and_wheel_natural_stack() {
+    fn rest_budget_and_wheel_opens_prompt() {
         let mut row = session("budget", "Budget task", SessionStatus::NeedsInput, 0);
         row.prompt = (1..=12)
             .map(|i| format!("Prompt row {i}"))
@@ -2768,11 +2766,221 @@ mod details_budget {
                 .ends_with('…')
         );
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 0));
-        assert_eq!(view.viewport.borrow().details_scroll, 1);
+        assert_eq!(
+            view.viewport
+                .borrow()
+                .details_scroll
+                .reveal
+                .iter()
+                .sum::<usize>(),
+            1
+        );
         let scrolled = panel(&view);
-        assert_eq!(scrolled[23], "…");
+        assert_eq!(scrolled[0], rest[0]);
+        assert_eq!(scrolled[23], rest[23]);
         assert_eq!(scrolled[2], "Prompt row 1");
         view.handle_mouse(mouse(MouseEventKind::ScrollUp, 0, 0));
         assert_eq!(panel(&view), rest);
+    }
+}
+
+mod details_curtain {
+    use super::*;
+
+    fn fixture() -> View {
+        let mut row = session("curtain", "Curtain task", SessionStatus::NeedsInput, 0);
+        row.prompt = (1..=12)
+            .map(|i| format!("Prompt row {i}"))
+            .collect::<Vec<_>>()
+            .join("  \n");
+        row.last_message = Some(
+            (1..=6)
+                .map(|i| format!("Reply row {i}"))
+                .collect::<Vec<_>>()
+                .join("  \n"),
+        );
+        let mut view = View::default();
+        view.set_sessions(vec![row], false);
+        view
+    }
+
+    fn panel(view: &View) -> Buffer {
+        let area = Rect::new(0, 0, 120, 24);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, view.rows[view.selected].updated_at);
+        buf
+    }
+
+    fn text(buf: &Buffer, y: u16) -> String {
+        (0..buf.area.width)
+            .map(|x| buf[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    }
+
+    #[test]
+    fn targets_cut_body_or_first_cut_below() {
+        use super::super::input::curtain_target;
+        let bodies = [2..6, 8..12, 14..17];
+        let reveal = [0, 0, 0];
+        let hidden = [4, 2, 0];
+        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 3, true), Some(0));
+        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 7, true), Some(1));
+        assert_eq!(
+            curtain_target(&bodies, &[4, 0, 0], &hidden, 3, true),
+            Some(1)
+        );
+        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 13, true), None);
+        assert_eq!(curtain_target(&[], &[], &[], 0, true), None);
+    }
+
+    #[test]
+    fn targets_opened_body_then_below_then_above() {
+        use super::super::input::curtain_target;
+        let bodies = [2..6, 8..12, 14..17];
+        let reveal = [1, 0, 2];
+        let hidden = [4, 2, 2];
+        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 3, false), Some(0));
+        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 9, false), Some(2));
+        assert_eq!(
+            curtain_target(&bodies, &reveal, &hidden, 18, false),
+            Some(2)
+        );
+        assert_eq!(
+            curtain_target(&bodies, &[1, 0, 0], &hidden, 9, false),
+            Some(0)
+        );
+        assert_eq!(curtain_target(&bodies, &[0, 0, 0], &hidden, 3, false), None);
+        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 1, false), Some(0));
+    }
+
+    #[test]
+    fn fully_open_prompt_hands_off_to_message() {
+        let mut view = fixture();
+        panel(&view);
+        let hidden = view.viewport.borrow().details_scroll.hidden[0];
+        for _ in 0..hidden {
+            view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 5));
+            panel(&view);
+        }
+        let opened = panel(&view);
+        let message = (0..24)
+            .find(|&y| text(&opened, y) == "Last message")
+            .unwrap();
+        assert!((1..message).all(|y| !text(&opened, y).ends_with('…')));
+        assert_eq!(text(&opened, message - 2), "Prompt row 12");
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 5));
+        let after = panel(&view);
+        assert_eq!(
+            view.viewport.borrow().details_scroll.reveal,
+            vec![hidden, 1, 0]
+        );
+        assert_eq!(text(&after, 23), text(&opened, 23));
+    }
+
+    #[test]
+    fn queued_background_and_hyperlink_cells_stay_fixed() {
+        use std::io::Write;
+        let mut output = tempfile::NamedTempFile::new().unwrap();
+        writeln!(output, "Background output").unwrap();
+        let mut view = fixture();
+        let row = &mut view.rows[view.selected];
+        row.queued = vec!["Queued prompt".into()];
+        row.pr = Some(crate::model::PullRequest {
+            number: 833,
+            url: "https://example.com/pull/833".into(),
+        });
+        for i in 0..8 {
+            row.background.push(crate::model::BackgroundTask {
+                description: format!("Check {i}"),
+                output: output.path().into(),
+                started_at: row.updated_at,
+                waits_for_codex: false,
+            });
+        }
+        let before = panel(&view);
+        let queued = (0..24)
+            .find(|&y| text(&before, y) == "Queued prompt")
+            .unwrap();
+        assert_eq!(view.viewport.borrow().details_scroll.fallback_max, None);
+        assert!(
+            before
+                .content
+                .iter()
+                .any(|cell| cell.symbol().contains("https://example.com/pull/833"))
+        );
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 3));
+        let after = panel(&view);
+        for y in queued..24 {
+            for x in 0..120 {
+                assert_eq!(after[(x, y)], before[(x, y)], "static tail {x},{y}");
+            }
+        }
+        view.handle_mouse(mouse(MouseEventKind::ScrollUp, 0, 3));
+        assert_eq!(panel(&view), before);
+    }
+
+    #[test]
+    fn content_updates_clamp_and_body_count_changes_reset() {
+        let mut view = fixture();
+        panel(&view);
+        for _ in 0..3 {
+            view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 5));
+            panel(&view);
+        }
+        view.rows[view.selected].prompt = (1..=8)
+            .map(|i| format!("Prompt row {i}"))
+            .collect::<Vec<_>>()
+            .join("  \n");
+        panel(&view);
+        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![2, 0, 0]);
+        view.rows[view.selected].last_message = None;
+        panel(&view);
+        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 0]);
+    }
+
+    #[test]
+    fn opening_prompt_pins_header_and_tail_and_closes_exactly() {
+        let mut view = fixture();
+        let before = panel(&view);
+        let pointer = (0..24)
+            .find(|&y| text(&before, y) == "Prompt row 3")
+            .unwrap();
+        let message = (0..24)
+            .find(|&y| text(&before, y) == "Last message")
+            .unwrap();
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, pointer));
+        let after = panel(&view);
+        for x in 0..120 {
+            assert_eq!(after[(x, 0)], before[(x, 0)], "pinned header {x}");
+            for y in 1..pointer {
+                assert_eq!(after[(x, y)], before[(x, y + 1)], "shift {x},{y}");
+            }
+            for y in message..24 {
+                assert_eq!(after[(x, y)], before[(x, y)], "tail {x},{y}");
+            }
+        }
+        assert_eq!(text(&after, pointer), "Prompt row 4");
+        let cut_before = (0..message)
+            .map(|y| text(&before, y))
+            .find(|s| s.ends_with('…'))
+            .unwrap();
+        let cut_after = (0..message)
+            .map(|y| text(&after, y))
+            .find(|s| s.ends_with('…'))
+            .unwrap();
+        assert_ne!(cut_before, cut_after);
+        view.handle_mouse(mouse(MouseEventKind::ScrollUp, 0, pointer));
+        assert_eq!(panel(&view), before);
+    }
+
+    #[test]
+    fn wheel_below_last_cut_does_nothing() {
+        let mut view = fixture();
+        let before = panel(&view);
+        let project = (0..24).find(|&y| text(&before, y) == "Project").unwrap();
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, project));
+        assert_eq!(panel(&view), before);
     }
 }

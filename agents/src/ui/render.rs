@@ -286,7 +286,6 @@ impl View {
         now: chrono::DateTime<chrono::Utc>,
     ) {
         self.viewport.borrow_mut().details = Rect::default();
-        self.viewport.borrow_mut().details_total_rows = 0;
         let Some(session) = self.selected_row() else {
             return;
         };
@@ -310,7 +309,15 @@ impl View {
             )
         };
         header.spans.extend(title.spans);
-        let mut items: Vec<Item> = vec![header.into()];
+        line(header, row(area, 0, area.height.min(1)), buf);
+        let content_top = area.y + area.height.min(1);
+        let area = Rect::new(
+            area.x,
+            content_top,
+            area.width,
+            area.height.saturating_sub(1),
+        );
+        let mut items: Vec<Item> = Vec::new();
 
         let mut header = vec!["Prompt".dim()];
         if let Some(start) = session.prompt_at {
@@ -468,17 +475,69 @@ impl View {
         }
         items.extend([Line::default().into(), Line::from(model).into()]);
 
-        let total = items.iter().map(Item::height).sum::<usize>();
         let available = usize::from(area.height);
+        let budget = budget_details(&items, &bodies, background, available);
         let scroll = {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.details_total_rows = total;
-            viewport.details_scroll = viewport.details_scroll.min(total.saturating_sub(available));
-            viewport.details_scroll
+            let state = &mut viewport.details_scroll;
+            state.content_top = content_top;
+            if state.reveal.len() != bodies.len() {
+                state.reveal = vec![0; bodies.len()];
+            }
+            if let Some(budget) = &budget {
+                state.fallback_max = None;
+                state.offset = 0;
+                state.hidden = budget.bodies.iter().map(|&(_, hidden)| hidden).collect();
+                for (reveal, hidden) in state.reveal.iter_mut().zip(&state.hidden) {
+                    *reveal = (*reveal).min(*hidden);
+                }
+                let mut keep = vec![true; items.len()];
+                if let Some(cut) = &budget.background_cut {
+                    items[cut.start] = "…".dim().into();
+                    keep[cut.start + 1..cut.end].fill(false);
+                }
+                for (i, body) in bodies.iter().enumerate() {
+                    let rows = budget.bodies[i].0 + state.reveal[i];
+                    keep[body.start + rows..body.end].fill(false);
+                    if rows > 0 && state.reveal[i] < state.hidden[i] {
+                        let Item::Text(last) = &mut items[body.start + rows - 1] else {
+                            unreachable!("details bodies contain text rows");
+                        };
+                        *last =
+                            truncate_line_to_width(std::mem::take(last), width.saturating_sub(1));
+                        last.spans.push("…".dim());
+                    }
+                }
+                state.bodies = bodies
+                    .iter()
+                    .enumerate()
+                    .map(|(i, body)| {
+                        let start = items[..body.start]
+                            .iter()
+                            .zip(&keep)
+                            .filter(|(_, keep)| **keep)
+                            .map(|(item, _)| item.height())
+                            .sum::<usize>();
+                        start..start + budget.bodies[i].0 + state.reveal[i]
+                    })
+                    .collect();
+                let mut index = 0;
+                items.retain(|_| {
+                    let retain = keep[index];
+                    index += 1;
+                    retain
+                });
+                state.reveal.iter().sum::<usize>()
+            } else {
+                state.hidden.clear();
+                state.bodies.clear();
+                let total = items.iter().map(Item::height).sum::<usize>();
+                let max = total.saturating_sub(available);
+                state.fallback_max = Some(max);
+                state.offset = state.offset.min(max);
+                state.offset
+            }
         };
-        if scroll == 0 {
-            budget_details(&mut items, &bodies, background, available, width);
-        }
         let total = items.iter().map(Item::height).sum::<usize>();
         let content_area = Rect::new(0, 0, area.width, total as u16);
         let mut content = Buffer::empty(content_area);
@@ -509,7 +568,7 @@ impl View {
                 buf[(area.x + x, area.y + y as u16)] = content[(x, (scroll + y) as u16)].clone();
             }
         }
-        if total - scroll > available && available > 0 {
+        if budget.is_none() && total - scroll > available && available > 0 {
             let last = row(area, (available - 1) as u16, 1);
             Clear.render(last, buf);
             line("…".dim(), last, buf);
@@ -542,13 +601,17 @@ pub(super) fn allocate(wants: &[usize], budget: usize) -> Vec<usize> {
     rows
 }
 
+struct DetailsBudget {
+    bodies: Vec<(usize, usize)>,
+    background_cut: Option<std::ops::Range<usize>>,
+}
+
 fn budget_details(
-    items: &mut Vec<Item<'_>>,
+    items: &[Item<'_>],
     bodies: &[std::ops::Range<usize>],
     background: std::ops::Range<usize>,
     available: usize,
-    width: usize,
-) {
+) -> Option<DetailsBudget> {
     let wants = bodies.iter().map(|body| body.len()).collect::<Vec<_>>();
     let floors = wants.iter().filter(|&&want| want > 0).count();
     let background_rows = items[background.clone()]
@@ -559,12 +622,11 @@ fn budget_details(
         - wants.iter().sum::<usize>()
         - background_rows;
     if available < static_rows + floors + usize::from(background_rows > 0) {
-        return;
+        return None;
     }
-    let mut keep = vec![true; items.len()];
     let mut kept_background = background_rows;
     let box_budget = available - static_rows - floors;
-    if background_rows > box_budget {
+    let background_cut = if background_rows > box_budget {
         kept_background = 0;
         let mut end = background.start;
         for index in background.clone() {
@@ -575,27 +637,20 @@ fn budget_details(
             kept_background += height;
             end = index + 1;
         }
-        items[end] = "…".dim().into();
-        keep[end + 1..background.end].fill(false);
         kept_background += 1;
-    }
-    let allocations = allocate(&wants, available - static_rows - kept_background);
-    for (body, rows) in bodies.iter().zip(allocations) {
-        keep[body.start + rows..body.end].fill(false);
-        if rows > 0 && rows < body.len() {
-            let Item::Text(last) = &mut items[body.start + rows - 1] else {
-                unreachable!("details bodies contain text rows");
-            };
-            *last = truncate_line_to_width(std::mem::take(last), width.saturating_sub(1));
-            last.spans.push("…".dim());
-        }
-    }
-    let mut index = 0;
-    items.retain(|_| {
-        let retain = keep[index];
-        index += 1;
-        retain
-    });
+        Some(end..background.end)
+    } else {
+        None
+    };
+    let bodies = allocate(&wants, available - static_rows - kept_background)
+        .into_iter()
+        .zip(wants)
+        .map(|(alloc, want)| (alloc, want - alloc))
+        .collect();
+    Some(DetailsBudget {
+        bodies,
+        background_cut,
+    })
 }
 
 fn line_width_fits(line_width: usize, width: usize) -> bool {
