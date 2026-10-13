@@ -1482,7 +1482,7 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
 }
 
 #[test]
-fn task_log_labels_are_right_aligned_in_seven_columns() {
+fn task_log_labels_are_left_aligned_in_seven_columns() {
     let (view, now) = log_fixture();
     let rendered = log_screen(&view, 100, 25, now);
     assert!(
@@ -1490,7 +1490,7 @@ fn task_log_labels_are_right_aligned_in_seven_columns() {
             .lines()
             .nth(15)
             .unwrap()
-            .starts_with("  11:58:00    User Please")
+            .starts_with("  11:58:00 User    Please")
     );
 }
 
@@ -1625,7 +1625,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (18, Color::Red, true),
         (19, Color::Reset, true),
     ] {
-        let label = &buf[(17, y)];
+        let label = &buf[(11, y)];
         let body = &buf[(19, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
@@ -1666,15 +1666,15 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
                     .lines()
                     .nth(19)
                     .unwrap()
-                    .starts_with(&format!("  1m ago   {expected_label:>7} Also"))
+                    .starts_with(&format!("  1m ago   {expected_label:<7} Also"))
             );
         }
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        for x in [17, 19] {
+        for x in [11, 19] {
             let cell = &buf[(x, 19)];
             assert_eq!(cell.fg, colour);
-            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 17);
+            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 11);
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
         let time = &buf[(2, 19)];
@@ -1735,8 +1735,20 @@ fn task_log_left_aligns_mixed_width_times_and_aligns_labels() {
             .take(3)
             .map(|line| line.chars().skip(2).take(16).collect::<String>())
             .collect::<Vec<_>>(),
-        ["3s          Tool", "12:03:45   Model", "44m ago    Model"]
+        ["3s       Tool   ", "12:03:45 Model  ", "44m ago  Model  "]
     );
+    for (line, label) in rendered
+        .lines()
+        .skip(15)
+        .take(3)
+        .zip(["Tool", "Model", "Model"])
+    {
+        assert_eq!(
+            line.find(label),
+            Some(11),
+            "labels start at the same column"
+        );
+    }
 }
 
 #[test]
