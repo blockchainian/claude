@@ -9,6 +9,7 @@ pub enum Kind {
     Session,
     Tool,
     Error,
+    Denied,
     QueuedUser,
     QueuedSystem,
 }
@@ -39,7 +40,7 @@ pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             event.previous_end = previous_end;
         }
         previous_end = match event.kind {
-            Kind::Tool | Kind::Error => event.ended_at,
+            Kind::Tool | Kind::Error | Kind::Denied => event.ended_at,
             _ => Some(event.started_at),
         };
     }
@@ -65,6 +66,7 @@ struct ResultAt {
     at: DateTime<Utc>,
     sequence: usize,
     error: bool,
+    denial: Option<String>,
 }
 
 impl Log {
@@ -108,8 +110,26 @@ impl Log {
                                 at,
                                 sequence: self.sequence,
                                 error: false,
+                                denial: None,
                             });
                             result.error |= block["is_error"] == true;
+                            if block["is_error"] == true {
+                                if record["toolDenialKind"] == "automode-blocked" {
+                                    result.denial = Some(
+                                        block["content"]
+                                            .as_str()
+                                            .and_then(|text| text.split_once("Reason: ["))
+                                            .and_then(|(_, text)| text.split_once(']'))
+                                            .map(|(reason, _)| reason)
+                                            .unwrap_or("classifier")
+                                            .to_owned(),
+                                    );
+                                } else if record["permissionDecision"]["reasonType"]
+                                    == "safetyCheck"
+                                {
+                                    result.denial = Some("safety check".to_owned());
+                                }
+                            }
                         }
                     }
                 }
@@ -216,11 +236,14 @@ impl Log {
             return;
         };
         let input = &block["input"];
+        let result = block["id"].as_str().and_then(|id| self.results.get(id));
         let detail = ["description", "file_path", "prompt", "query", "message"]
             .iter()
             .find_map(|key| input[key].as_str().filter(|text| !text.trim().is_empty()))
             .unwrap_or("");
-        let call = if detail.is_empty() {
+        let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
+            format!("{name} denied: {reason}")
+        } else if detail.is_empty() {
             name.to_owned()
         } else {
             format!("{name} {detail}")
@@ -257,9 +280,10 @@ impl Log {
             entry.event.body.push_str(" *");
         }
         entry.event.started_at = at;
-        let result = block["id"].as_str().and_then(|id| self.results.get(id));
         if let Some(result) = result {
-            if result.error {
+            if result.denial.is_some() {
+                entry.event.kind = Kind::Denied;
+            } else if result.error && entry.event.kind != Kind::Denied {
                 entry.event.kind = Kind::Error;
             }
             if !entry.missing
@@ -428,6 +452,97 @@ mod tests {
             writeln!(file, "{r}").unwrap();
         }
         file
+    }
+
+    fn denial_records(fixture: &str) -> Vec<Value> {
+        fixture
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    fn events_from(records: Vec<Value>) -> Vec<Event> {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for record in records {
+            writeln!(file, "{record}").unwrap();
+        }
+        tail(file.path(), 20).unwrap()
+    }
+
+    #[test]
+    fn automode_blocked_is_denied_with_classifier_reason() {
+        let records = denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+        let end = records[1]["timestamp"].as_str().unwrap().parse().unwrap();
+        let events = events_from(records);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, Kind::Denied);
+        assert_eq!(events[0].body, "Bash denied: Create Unsafe Agents");
+        assert_eq!(events[0].ended_at, Some(end));
+    }
+
+    #[test]
+    fn safety_check_is_denied_and_ends_before_the_next_reply() {
+        let mut records = denial_records(include_str!("../../tests/fixtures/safety_check.jsonl"));
+        let end = records[1]["timestamp"].as_str().unwrap().parse().unwrap();
+        let mut reply = record("assistant", 1, json!([{"type":"text", "text":"checked"}]));
+        reply["timestamp"] = "2026-10-12T15:13:30Z".into();
+        records.push(reply);
+        let events = events_from(records);
+        assert_eq!(events[0].kind, Kind::Denied);
+        assert_eq!(events[0].body, "Bash denied: safety check");
+        assert_eq!(events[0].ended_at, Some(end));
+        assert_eq!(events[1].previous_end, Some(end));
+    }
+
+    #[test]
+    fn automode_unavailable_and_other_errors_stay_errors() {
+        for (denial, reason) in [
+            ("automode-unavailable", "classifier"),
+            ("permission-rule", "user"),
+            ("hook", "hook"),
+        ] {
+            let mut records =
+                denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+            records[1]["toolDenialKind"] = denial.into();
+            records[1]["permissionDecision"]["reasonType"] = reason.into();
+            let events = events_from(records);
+            assert_eq!(events[0].kind, Kind::Error);
+            assert_eq!(events[0].body, "Bash");
+        }
+    }
+
+    #[test]
+    fn automode_reason_without_complete_brackets_uses_classifier() {
+        for text in ["denied", "Reason: [unfinished"] {
+            let mut records =
+                denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+            records[1]["message"]["content"][0]["content"] = text.into();
+            let events = events_from(records);
+            assert_eq!(events[0].kind, Kind::Denied);
+            assert_eq!(events[0].body, "Bash denied: classifier");
+        }
+    }
+
+    #[test]
+    fn denied_parallel_batch_takes_precedence_over_errors_in_either_order() {
+        for first in [true, false] {
+            let mut records =
+                denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+            let mut other = records[0].clone();
+            other["message"]["content"][0]["id"] = "other".into();
+            other["message"]["content"][0]["name"] = "Read".into();
+            let mut result = records[1].clone();
+            result.as_object_mut().unwrap().remove("toolDenialKind");
+            result.as_object_mut().unwrap().remove("permissionDecision");
+            result["message"]["content"][0]["tool_use_id"] = "other".into();
+            records.insert(if first { 1 } else { 0 }, other);
+            records.push(result);
+            let events = events_from(records);
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].kind, Kind::Denied);
+            assert!(events[0].body.contains("Bash denied: Create Unsafe Agents"));
+            assert!(events[0].body.contains("Read"));
+        }
     }
 
     #[test]

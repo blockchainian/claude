@@ -1507,6 +1507,37 @@ fn task_log_labels_are_left_aligned_in_seven_columns() {
 }
 
 #[test]
+fn task_log_denied_snapshot() {
+    use crate::sessions::log::{Kind, tail};
+    let (mut view, now) = log_fixture();
+    view.log.truncate(1);
+    for (fixture, age, end) in [
+        ("automode_blocked.jsonl", 110, 105),
+        ("safety_check.jsonl", 100, 95),
+    ] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(fixture);
+        let mut event = tail(&path, 1).unwrap().remove(0);
+        event.started_at = now - Duration::seconds(age);
+        event.ended_at = Some(now - Duration::seconds(end));
+        event.previous_end = view
+            .log
+            .last()
+            .map(|previous| previous.ended_at.unwrap_or(previous.started_at));
+        assert_eq!(
+            super::style::log_styles(&event.kind),
+            super::style::log_styles(&Kind::Error)
+        );
+        view.log.push(event);
+    }
+    assert_eq!(
+        log_screen(&view, 100, 25, now),
+        include_str!("../../tests/ui_snapshots/task_log_denied.txt")
+    );
+}
+
+#[test]
 fn task_log_tall_running_snapshot() {
     let (view, now) = log_fixture();
     assert_eq!(
@@ -1659,6 +1690,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (Kind::Session, Color::Yellow),
         (Kind::Tool, Color::Blue),
         (Kind::Error, Color::Red),
+        (Kind::Denied, Color::Red),
         (Kind::QueuedUser, Color::Reset),
         (Kind::QueuedSystem, Color::Blue),
     ] {

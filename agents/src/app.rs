@@ -224,7 +224,9 @@ impl App {
         self.view.log.last().is_some_and(|event| {
             matches!(
                 event.kind,
-                crate::sessions::log::Kind::Tool | crate::sessions::log::Kind::Error
+                crate::sessions::log::Kind::Tool
+                    | crate::sessions::log::Kind::Error
+                    | crate::sessions::log::Kind::Denied
             ) && event.ended_at.is_none()
                 && !event.body.ends_with(" *")
         }) && self

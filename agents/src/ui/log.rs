@@ -45,7 +45,7 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
             .format("%H:%M:%S")
             .to_string()
     };
-    if !matches!(event.kind, Kind::Tool | Kind::Error) {
+    if !matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) {
         return if last {
             format_relative_time(now, Some(event.started_at))
         } else if event.kind == Kind::Model
@@ -102,6 +102,7 @@ fn render_event(
         Kind::Session => "Session",
         Kind::Tool => "Tool",
         Kind::Error => "Error",
+        Kind::Denied => "Denied",
         Kind::QueuedUser | Kind::QueuedSystem => "Queue",
     };
     let label = format!("{label:<7} ");

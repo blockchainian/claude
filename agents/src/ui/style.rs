@@ -60,7 +60,7 @@ pub(super) fn log_styles(kind: &crate::sessions::log::Kind) -> (Style, Style) {
         Kind::User | Kind::QueuedUser => Style::default(),
         Kind::Model | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
         Kind::Tool | Kind::QueuedSystem => Style::default().fg(Color::Blue),
-        Kind::Error => Style::default().fg(Color::Red),
+        Kind::Error | Kind::Denied => Style::default().fg(Color::Red),
     };
     (body.bold(), body)
 }
