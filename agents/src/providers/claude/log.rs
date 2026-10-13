@@ -406,46 +406,8 @@ fn wrapped_message(text: &str) -> Option<(Kind, String)> {
     if let Some(body) = pasted_content(text) {
         return Some((Kind::User, user_text(&body)));
     }
-    let (opening, rest) = text.trim().strip_prefix('<')?.split_once('>')?;
-    let tag = opening.split_whitespace().next()?;
-    let kind = match tag {
-        "agent-message" | "teammate-message" => Kind::Agent,
-        "cross-session-message" => Kind::Session,
-        _ => return None,
-    };
-    let (inner, closing) = rest.rsplit_once("</")?;
-    let closing = closing.strip_suffix('>')?;
-    if closing != tag {
-        return None;
-    }
-    let inner = inner.trim();
-    let report;
-    let body = if kind == Kind::Agent && inner.starts_with("[Subagent hand-back]") {
-        if let Some(line) = inner
-            .lines()
-            .position(|line| line.trim_end().ends_with("The report follows:"))
-        {
-            report = inner.lines().skip(line + 1).collect::<Vec<_>>().join("\n");
-            report.as_str()
-        } else {
-            inner
-        }
-    } else {
-        inner
-    };
+    let (kind, (name, body)) = super::peer::wrapped_message(text)?;
     let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
-    let attribute = |key: &str| {
-        opening
-            .split_once(&format!(" {key}=\""))?
-            .1
-            .split_once('"')
-            .map(|(value, _)| value)
-    };
-    let name = match tag {
-        "cross-session-message" => Some(attribute("from-name")?),
-        "teammate-message" => attribute("teammate_id"),
-        _ => attribute("from-name").or_else(|| attribute("from")),
-    };
     Some((kind, participant_text(name, &body)))
 }
 

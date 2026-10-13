@@ -2,6 +2,7 @@
 
 mod background;
 pub(crate) mod log;
+mod peer;
 mod registry;
 mod subagents;
 mod transcript;

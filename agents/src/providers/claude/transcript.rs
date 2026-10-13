@@ -197,7 +197,16 @@ impl QueueOperation {
 /// attachment instead of a user record.
 fn prompt_text(record: &Value) -> Option<String> {
     match record["type"].as_str()? {
-        "user" => content_text(record, false),
+        "user" => {
+            if let Some((name, body)) = super::peer::origin_message(record) {
+                return Some(crate::log::participant_text(name, body));
+            }
+            let text = content_text(record, false)?;
+            Some(match super::peer::wrapped_message(&text) {
+                Some((_, (name, body))) => crate::log::participant_text(name, body),
+                None => text,
+            })
+        }
         "attachment" => {
             let attachment = &record["attachment"];
             (attachment["type"] == "queued_command" && attachment["commandMode"] == "prompt")
@@ -617,6 +626,30 @@ mod tests {
     use std::io::Write;
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
+
+    #[test]
+    fn peer_prompts_show_sender_and_body() {
+        let expected = [
+            "(translate-pdf) translate-pdf: user approved the pilot; second file (MathJax page) done: ~/Documents/MIT-zh/6.1910-Computation Structures/L01-notes-basics-of-information.pdf. Asking the user now whether to batch the remaining 155.",
+            "(general-purpose) 41 files: 23209 bytes before, 19698 bytes after. All files parse, so none are left unfixed.",
+            "(codex-support-research) {\"type\":\"idle_notification\",\"from\":\"codex-support-research\",\"timestamp\":\"2026-10-13T17:36:33.617Z\",\"idleReason\":\"available\",\"result\":\"done\"}",
+        ];
+        for (line, expected) in include_str!("../../../tests/fixtures/claude-peer-prompts.jsonl")
+            .lines()
+            .zip(expected)
+        {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file, "{line}").unwrap();
+            let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+            assert_eq!(summary.prompt, expected);
+            let mut record: Value = serde_json::from_str(line).unwrap();
+            record["isSidechain"] = true.into();
+            std::fs::write(file.path(), format!("{record}\n")).unwrap();
+            let summary =
+                read_subagent(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+            assert_eq!(summary.prompt, expected);
+        }
+    }
 
     fn assert_summary(summary: &Summary) {
         let records: Vec<Value> = FIXTURE
