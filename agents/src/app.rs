@@ -241,7 +241,7 @@ impl App {
         crate::ui::set_light_background(light);
         crate::theme::use_default_accents(light);
         if let Some(path) = &self.preferences.theme
-            && let Err(error) = crate::theme::use_theme_file(path)
+            && let Err(error) = crate::theme::use_theme_file(path, light)
         {
             self.view
                 .set_notice(Some(format!("Theme not loaded: {error}")));

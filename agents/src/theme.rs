@@ -1,5 +1,5 @@
 //! Identity colors for session titles, drawn from a syntax theme's accents the way Codex does and
-//! ordered from darkest to lightest.
+//! ordered from the strongest contrast with the terminal background to the weakest.
 //! The default theme follows the terminal background; a `.tmTheme` file in the preferences replaces it.
 
 use ratatui::style::Color;
@@ -21,25 +21,17 @@ const LIGHT: &[Rgb] = &[
     (156, 25, 108),
 ];
 
-/// Catppuccin Mocha accents at 60% chroma and at most 0.75 OKLCH lightness, plus two hues filling
-/// its widest gaps, for dark backgrounds.
-const MOCHA: &[Rgb] = &[
-    (150, 185, 147),
-    (193, 164, 185),
-    (206, 164, 139),
-    (184, 163, 211),
-    (141, 184, 176),
-    (149, 175, 217),
-    (186, 173, 144),
-    (205, 160, 167),
-    (217, 154, 169),
-    (137, 183, 192),
-    (189, 168, 168),
-    (136, 182, 203),
-    (165, 171, 209),
-    (183, 171, 168),
-    (173, 178, 141),
-    (145, 185, 164),
+/// Eight accents for dark backgrounds, chosen the same way with a contrast of at least 3, kept dim
+/// enough to sit beside a near-black terminal's muted text.
+const DARK: &[Rgb] = &[
+    (23, 111, 124),
+    (174, 32, 89),
+    (114, 99, 10),
+    (113, 67, 187),
+    (14, 144, 33),
+    (192, 80, 8),
+    (17, 117, 222),
+    (146, 102, 142),
 ];
 
 #[cfg(test)]
@@ -48,34 +40,41 @@ pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 static ACCENTS: Mutex<Vec<Rgb>> = Mutex::new(Vec::new());
 
 pub fn use_default_accents(light_background: bool) {
-    set_accents(if light_background { LIGHT } else { MOCHA }.to_vec());
+    set_accents(
+        if light_background { LIGHT } else { DARK }.to_vec(),
+        light_background,
+    );
 }
 
-fn set_accents(mut accents: Vec<Rgb>) {
+/// Darkest first on a light background and lightest first on a dark one.
+fn set_accents(mut accents: Vec<Rgb>, light_background: bool) {
     accents.sort_by(|a, b| lightness(*a).total_cmp(&lightness(*b)));
+    if !light_background {
+        accents.reverse();
+    }
     *ACCENTS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = accents;
 }
 
 /// Loads the accents of a `.tmTheme` file; returns the reason when it cannot be used.
-pub fn use_theme_file(path: &Path) -> Result<(), String> {
+pub fn use_theme_file(path: &Path, light_background: bool) -> Result<(), String> {
     let theme: plist::Value =
         plist::from_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
     let accents = theme_accents(&theme);
     if accents.is_empty() {
         return Err(format!("{}: no accent colors", path.display()));
     }
-    set_accents(accents);
+    set_accents(accents, light_background);
     Ok(())
 }
 
-/// The accent in `slot`, counting from the darkest and wrapping around the palette.
+/// The accent in `slot`, counting from the strongest contrast and wrapping around the palette.
 pub fn accent(slot: usize) -> Color {
     let accents = ACCENTS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let accents = if accents.is_empty() { MOCHA } else { &accents };
+    let accents = if accents.is_empty() { DARK } else { &accents };
     let (r, g, b) = accents[slot % accents.len()];
     Color::Rgb(r, g, b)
 }
@@ -174,27 +173,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accents_run_from_darkest_to_lightest_and_wrap() {
+    fn accents_start_with_the_strongest_contrast_and_wrap() {
         let _guard = TEST_LOCK.lock().unwrap();
-        set_accents(vec![(255, 255, 255), (0, 0, 0), (128, 128, 128)]);
-        let slots: Vec<_> = (0..4).map(accent).collect();
-        assert_eq!(
-            slots,
-            [
-                Color::Rgb(0, 0, 0),
-                Color::Rgb(128, 128, 128),
-                Color::Rgb(255, 255, 255),
-                Color::Rgb(0, 0, 0),
-            ]
-        );
-        for palette in [LIGHT, MOCHA] {
-            set_accents(palette.to_vec());
-            let lightness: Vec<_> = (0..palette.len())
+        let (black, gray, white) = ((0, 0, 0), (128, 128, 128), (255, 255, 255));
+        for (light_background, order) in
+            [(true, [black, gray, white]), (false, [white, gray, black])]
+        {
+            set_accents(vec![white, black, gray], light_background);
+            let slots: Vec<_> = (0..4).map(accent).collect();
+            let expected: Vec<_> = order
+                .iter()
+                .chain(&order[..1])
+                .map(|&(r, g, b)| Color::Rgb(r, g, b))
+                .collect();
+            assert_eq!(slots, expected);
+        }
+        for light_background in [true, false] {
+            use_default_accents(light_background);
+            let mut lightness: Vec<_> = (0..8)
                 .map(|slot| match accent(slot) {
                     Color::Rgb(r, g, b) => lightness((r, g, b)),
                     other => panic!("{other:?}"),
                 })
                 .collect();
+            if !light_background {
+                lightness.reverse();
+            }
             assert!(lightness.is_sorted(), "{lightness:?}");
         }
     }
