@@ -74,6 +74,8 @@ pub struct BackgroundTask {
 pub struct Session {
     /// Claude Code session id (the transcript file stem).
     pub id: String,
+    /// Parent session id for a subagent.
+    pub parent: Option<String>,
     pub cwd: PathBuf,
     /// Name the user gave the session (`/rename` or `--name`).
     pub name: Option<String>,

@@ -2,6 +2,7 @@
 
 pub(crate) mod log;
 mod registry;
+mod subagents;
 mod transcript;
 mod watcher;
 
@@ -188,6 +189,7 @@ pub struct Snapshot {
     pub has_more: bool,
 }
 
+#[derive(Clone)]
 struct Transcript {
     id: String,
     path: PathBuf,
@@ -292,6 +294,14 @@ impl Store {
             let (summary, path, modified) = self.summary(&id);
             sessions.push(session(id, summary, path, modified));
         }
+        let mut paths: HashSet<PathBuf> =
+            self.index.values().map(|file| file.path.clone()).collect();
+        let mut children = Vec::new();
+        for parent in sessions.iter().filter(|session| session.process.is_some()) {
+            children.extend(self.subagents(parent, &mut paths));
+        }
+        self.summaries.retain(|path, _| paths.contains(path));
+        sessions.extend(children);
         Snapshot { sessions, has_more }
     }
 
@@ -349,21 +359,29 @@ impl Store {
                 }
             }
         }
-        let paths: HashSet<_> = self.index.values().map(|file| &file.path).collect();
-        self.summaries.retain(|path, _| paths.contains(path));
     }
 
     fn summary(&mut self, id: &str) -> (Summary, Option<PathBuf>, DateTime<Utc>) {
-        let Some(file) = self.index.get(id) else {
+        let Some(file) = self.index.get(id).cloned() else {
             return (Summary::default(), None, Utc::now());
         };
+        let summary = self.summary_file(&file, false).unwrap_or_default();
+        (summary, Some(file.path.clone()), file.modified.into())
+    }
+
+    fn summary_file(&mut self, file: &Transcript, subagent: bool) -> Option<Summary> {
         let changed = self
             .summaries
             .get(&file.path)
             .is_none_or(|cached| cached.modified != file.modified || cached.len != file.len);
         if changed {
             // Files may disappear while Claude Code moves or removes a project.
-            match transcript::read(&file.path, file.len) {
+            let read = if subagent {
+                transcript::read_subagent
+            } else {
+                transcript::read
+            };
+            match read(&file.path, file.len) {
                 Ok(summary) => {
                     self.summaries.insert(
                         file.path.clone(),
@@ -379,12 +397,74 @@ impl Store {
                 }
             }
         }
-        let summary = self
-            .summaries
+        self.summaries
             .get(&file.path)
             .map(|cached| cached.summary.clone())
-            .unwrap_or_default();
-        (summary, Some(file.path.clone()), file.modified.into())
+    }
+
+    fn subagents(&mut self, parent: &Session, paths: &mut HashSet<PathBuf>) -> Vec<Session> {
+        let Some(transcript) = &parent.transcript else {
+            return Vec::new();
+        };
+        let mut children = Vec::new();
+        for entry in fs::read_dir(transcript.with_extension("").join("subagents"))
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+        {
+            let path = entry.path();
+            if path
+                .extension()
+                .is_none_or(|extension| extension != "jsonl")
+            {
+                continue;
+            }
+            let Some(id) = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .filter(|id| id.strip_prefix("agent-").is_some_and(|id| !id.is_empty()))
+            else {
+                continue;
+            };
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            let Ok(modified) = metadata.modified() else {
+                continue;
+            };
+            paths.insert(path.clone());
+            let file = Transcript {
+                id: id.to_owned(),
+                path: path.clone(),
+                modified,
+                len: metadata.len(),
+            };
+            let Some(summary) = self.summary_file(&file, true) else {
+                continue;
+            };
+            let Some(meta) = subagents::Metadata::read(&path.with_extension("meta.json")) else {
+                continue;
+            };
+            let Some(status) = meta.status(
+                &summary,
+                &self.config_dir,
+                parent.process.is_some() || parent.status != SessionStatus::Inactive,
+            ) else {
+                continue;
+            };
+            let mut child = session(file.id, summary, Some(path), modified.into());
+            child.parent = Some(parent.id.clone());
+            child.title = meta.title();
+            child.prompt = child.title.clone();
+            child.name = meta.name();
+            child.status = status;
+            children.push(child);
+        }
+        children.sort_by(|a, b| a.id.cmp(&b.id));
+        children
     }
 }
 
@@ -426,6 +506,7 @@ fn session(
     });
     Session {
         id,
+        parent: None,
         cwd,
         name: None,
         title,

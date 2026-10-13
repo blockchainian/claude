@@ -174,6 +174,7 @@ impl View {
 
     /// Replace rows while retaining the selected session and view preferences.
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
+        sessions.retain(|session| session.parent.is_none());
         let selected = self.selected_id().map(str::to_owned);
         let status_filter = self.status_filter;
         let show_more = self.selected == usize::MAX && self.has_more;

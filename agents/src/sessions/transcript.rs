@@ -10,6 +10,7 @@ const CHUNK: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Summary {
+    pub subagent_records: Vec<Value>,
     pub cwd: Option<PathBuf>,
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
@@ -30,6 +31,62 @@ pub(super) struct Summary {
 }
 
 impl Summary {
+    fn record_metadata(&mut self, record: &Value) {
+        self.record_pr(record);
+        if let Some(timestamp) = record["timestamp"]
+            .as_str()
+            .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
+        {
+            self.timestamp = Some(timestamp.with_timezone(&Utc));
+        }
+        // A head chunk swallowed by one huge record still leaves these in the tail.
+        if self.cwd.is_none() {
+            self.cwd = record["cwd"]
+                .as_str()
+                .filter(|cwd| !cwd.is_empty())
+                .map(PathBuf::from);
+        }
+        if matches!(record["type"].as_str(), Some("user" | "assistant")) {
+            if self.cwd.is_none() {
+                self.cwd = record["cwd"]
+                    .as_str()
+                    .filter(|cwd| !cwd.is_empty())
+                    .map(PathBuf::from);
+            }
+            if self.git_branch.is_none() {
+                self.git_branch = text(record, "gitBranch");
+            }
+        }
+        match record["type"].as_str() {
+            Some("ai-title") => {
+                if let Some(title) = text(record, "aiTitle") {
+                    self.ai_title = Some(title);
+                }
+            }
+            Some("custom-title") => {
+                if let Some(title) = text(record, "customTitle") {
+                    self.custom_title = Some(title);
+                }
+            }
+            Some("last-prompt") => {
+                if let Some(prompt) = text(record, "lastPrompt") {
+                    self.last_prompt = Some(prompt);
+                }
+            }
+            Some("assistant") => {
+                if let Some(model) =
+                    text(record, "requestedModel").or_else(|| text(&record["message"], "model"))
+                {
+                    self.model = Some(model);
+                }
+                if let Some(effort) = text(record, "effort") {
+                    self.effort = Some(effort);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn record_pr(&mut self, record: &Value) {
         if record["type"] == "pr-link"
             && let Some(number) = record["prNumber"].as_u64()
@@ -55,7 +112,7 @@ fn text(value: &Value, field: &str) -> Option<String> {
         .filter(|text| !text.trim().is_empty())
 }
 
-fn content_text(record: &Value, last: bool) -> Option<String> {
+pub(super) fn content_text(record: &Value, last: bool) -> Option<String> {
     let content = record.get("message")?.get("content")?;
     if let Some(text) = content.as_str() {
         return Some(text.to_owned());
@@ -73,10 +130,17 @@ fn content_text(record: &Value, last: bool) -> Option<String> {
 }
 
 fn records(bytes: &[u8]) -> impl DoubleEndedIterator<Item = Value> + '_ {
+    records_with_sidechains(bytes, false)
+}
+
+fn records_with_sidechains(
+    bytes: &[u8],
+    sidechains: bool,
+) -> impl DoubleEndedIterator<Item = Value> + '_ {
     bytes
         .split(|byte| *byte == b'\n')
         .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
-        .filter(|record| record["isSidechain"] != true)
+        .filter(move |record| sidechains || record["isSidechain"] != true)
 }
 
 enum QueueOperation {
@@ -229,8 +293,18 @@ impl Background {
 /// The callback returns false once it has all the records it needs.
 pub(super) fn walk_records(
     file: &mut (impl Read + Seek),
+    start: u64,
+    bytes: Vec<u8>,
+    visit: impl FnMut(Value) -> bool,
+) -> io::Result<()> {
+    walk_records_with_sidechains(file, start, bytes, false, visit)
+}
+
+fn walk_records_with_sidechains(
+    file: &mut (impl Read + Seek),
     mut start: u64,
     mut bytes: Vec<u8>,
+    sidechains: bool,
     mut visit: impl FnMut(Value) -> bool,
 ) -> io::Result<()> {
     let mut chunk = CHUNK;
@@ -244,7 +318,7 @@ pub(super) fn walk_records(
                 .position(|byte| *byte == b'\n')
                 .map_or(bytes.len(), |index| index + 1)
         };
-        for record in records(&bytes[skip..]).rev() {
+        for record in records_with_sidechains(&bytes[skip..], sidechains).rev() {
             if !visit(record) {
                 return Ok(());
             }
@@ -267,10 +341,11 @@ pub(super) fn walk_records(
 }
 
 fn read_messages(
-    file: &mut File,
+    file: &mut (impl Read + Seek),
     start: u64,
     bytes: Vec<u8>,
     summary: &mut Summary,
+    sidechains: bool,
 ) -> io::Result<()> {
     let mut prompt_found = false;
     let mut turn_messages = 0;
@@ -283,7 +358,7 @@ fn read_messages(
     let mut quiet_point = false;
     let mut background = Background::default();
     let mut pairing_only = false;
-    walk_records(file, start, bytes, |record| {
+    walk_records_with_sidechains(file, start, bytes, sidechains, |record| {
         if !quiet_point {
             if record["type"] == "user" {
                 next_user = content_text(&record, false);
@@ -422,65 +497,49 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
         &tail[tail_skip..]
     };
     for record in records(metadata) {
-        summary.record_pr(&record);
-        if let Some(timestamp) = record["timestamp"]
-            .as_str()
-            .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
-        {
-            summary.timestamp = Some(timestamp.with_timezone(&Utc));
-        }
-        // A head chunk swallowed by one huge record still leaves these in the tail.
-        if summary.cwd.is_none() {
-            summary.cwd = record["cwd"]
-                .as_str()
-                .filter(|cwd| !cwd.is_empty())
-                .map(PathBuf::from);
-        }
-        if matches!(record["type"].as_str(), Some("user" | "assistant")) {
-            if summary.cwd.is_none() {
-                summary.cwd = record["cwd"]
-                    .as_str()
-                    .filter(|cwd| !cwd.is_empty())
-                    .map(PathBuf::from);
-            }
-            if summary.git_branch.is_none() {
-                summary.git_branch = text(&record, "gitBranch");
-            }
-        }
-        match record["type"].as_str() {
-            Some("ai-title") => {
-                if let Some(title) = text(&record, "aiTitle") {
-                    summary.ai_title = Some(title);
-                }
-            }
-            Some("custom-title") => {
-                if let Some(title) = text(&record, "customTitle") {
-                    summary.custom_title = Some(title);
-                }
-            }
-            Some("last-prompt") => {
-                if let Some(prompt) = text(&record, "lastPrompt") {
-                    summary.last_prompt = Some(prompt);
-                }
-            }
-            Some("assistant") => {
-                if let Some(model) =
-                    text(&record, "requestedModel").or_else(|| text(&record["message"], "model"))
-                {
-                    summary.model = Some(model);
-                }
-                if let Some(effort) = text(&record, "effort") {
-                    summary.effort = Some(effort);
-                }
-            }
-            _ => {}
-        }
+        summary.record_metadata(&record);
     }
     if len <= 2 * CHUNK {
-        read_messages(&mut file, 0, head, &mut summary)?;
+        read_messages(&mut file, 0, head, &mut summary, false)?;
     } else {
-        read_messages(&mut file, len - CHUNK - 1, tail, &mut summary)?;
+        read_messages(&mut file, len - CHUNK - 1, tail, &mut summary, false)?;
     }
+    Ok(summary)
+}
+
+/// Reads one tail chunk; subagent files have no queue quiet point to bound a walk.
+pub(super) fn read_subagent(path: &Path, len: u64) -> io::Result<Summary> {
+    read_subagent_tail(&mut File::open(path)?, len)
+}
+
+pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io::Result<Summary> {
+    let start = len.saturating_sub(CHUNK + 1);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(CHUNK + 1).read_to_end(&mut bytes)?;
+    if start > 0 {
+        let skip = bytes
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(bytes.len(), |index| index + 1);
+        bytes.drain(..skip);
+    }
+    let mut summary = Summary::default();
+    for record in records_with_sidechains(&bytes, true) {
+        summary.record_metadata(&record);
+        if summary.subagent_records.len() == 3 {
+            summary.subagent_records.remove(0);
+        }
+        summary.subagent_records.push(record);
+    }
+    // Start zero prevents the message scan from seeking before this bounded tail.
+    read_messages(
+        &mut std::io::Cursor::new(Vec::<u8>::new()),
+        0,
+        bytes,
+        &mut summary,
+        true,
+    )?;
     Ok(summary)
 }
 

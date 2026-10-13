@@ -549,6 +549,7 @@ fn mouse_list_ignores_overlays() {
 fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
     Session {
         id: id.into(),
+        parent: None,
         cwd: "/tmp/project".into(),
         name: None,
         title: title.into(),
@@ -3507,4 +3508,14 @@ fn task_log_search_active_snapshot() {
         log_screen(&view, 100, 25, now),
         include_str!("../../tests/ui_snapshots/task_log_search_active.txt")
     );
+}
+
+#[test]
+fn snapshot_subagents_are_hidden_until_nested_rows_are_enabled() {
+    let mut view = View::new(Grouping::Project, false);
+    let parent = session("parent", "Parent", SessionStatus::Ready, 1);
+    let mut child = session("agent-x", "Child", SessionStatus::Working, 0);
+    child.parent = Some(parent.id.clone());
+    view.set_sessions(vec![parent.clone(), child], false);
+    assert_eq!(view.rows, vec![parent]);
 }
