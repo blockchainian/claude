@@ -13,11 +13,6 @@ impl View {
             return;
         };
         super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
-        super::render::line(
-            "─".repeat(usize::from(area.width)).dim(),
-            super::render::row(area, area.height - 1, 1),
-            buf,
-        );
         if self.log_session.as_deref() != Some(session.id.as_str()) {
             return;
         }

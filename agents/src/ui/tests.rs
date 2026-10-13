@@ -1523,7 +1523,7 @@ fn task_log_requires_twenty_five_rows() {
 }
 
 #[test]
-fn task_log_rules_match_header_even_without_loaded_events() {
+fn task_log_top_rule_matches_header_and_footer_gap_is_empty() {
     use ratatui::style::Modifier;
     let (mut view, now) = log_fixture();
     for loaded in [true, false] {
@@ -1533,13 +1533,13 @@ fn task_log_rules_match_header_even_without_loaded_events() {
         let area = Rect::new(0, 0, 100, 25);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        for y in [14, 23] {
-            for x in 0..100 {
-                assert_eq!(buf[(x, y)].symbol(), buf[(x, 2)].symbol());
-                assert_eq!(buf[(x, y)].modifier, buf[(x, 2)].modifier);
-            }
-            assert!(buf[(2, y)].modifier.contains(Modifier::DIM));
+        for x in 0..100 {
+            assert_eq!(buf[(x, 14)].symbol(), buf[(x, 2)].symbol());
+            assert_eq!(buf[(x, 14)].modifier, buf[(x, 2)].modifier);
+            assert_eq!(buf[(x, 23)].symbol(), " ");
+            assert_eq!(buf[(x, 23)].modifier, Modifier::empty());
         }
+        assert!(buf[(2, 14)].modifier.contains(Modifier::DIM));
     }
 }
 
