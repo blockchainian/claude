@@ -185,19 +185,14 @@ pub(super) fn abbreviate_paths_in_text(text: &str, max_width: usize) -> String {
     }
     text.split(' ')
         .map(|word| {
-            // A path starts at the first `/` or `~` after punctuation only, so
-            // `a/b` and `https://…` stay prose while `报告：/tmp/…` is a path.
-            let Some(start) = word.find(['/', '~']).filter(|&start| {
-                !word[..start].contains(|c: char| c.is_ascii_alphanumeric() || c == ':')
-            }) else {
+            let Some(range) = prose_path(word) else {
                 return word.to_owned();
             };
-            let path = word[start..].trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':']);
-            let is_path =
-                (path.starts_with('/') || path.starts_with("~/")) && path[1..].contains('/');
-            if overflow == 0 || !is_path {
+            if overflow == 0 {
                 return word.to_owned();
             }
+            let start = range.start;
+            let path = &word[range];
             let width = display_width(path);
             let shrunk = abbreviate_directories(path, width.saturating_sub(overflow));
             overflow = overflow.saturating_sub(width.saturating_sub(display_width(&shrunk)));
@@ -207,9 +202,126 @@ pub(super) fn abbreviate_paths_in_text(text: &str, max_width: usize) -> String {
         .join(" ")
 }
 
+/// Finds absolute and home paths after punctuation, excluding URLs and relative paths.
+fn prose_path(word: &str) -> Option<std::ops::Range<usize>> {
+    // A path starts at the first `/` or `~` after punctuation only, so
+    // `a/b` and `https://…` stay prose while `报告：/tmp/…` is a path.
+    let start = word.find(['/', '~']).filter(|&start| {
+        !word[..start].contains(|c: char| c.is_ascii_alphanumeric() || c == ':')
+    })?;
+    let path = word[start..].trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':']);
+    ((path.starts_with('/') || path.starts_with("~/")) && path[1..].contains('/'))
+        .then_some(start..start + path.len())
+}
+
+/// Fits each oversized prose path to the wrapping width, independently of surrounding text.
+pub(super) fn abbreviate_paths_for_wrap(text: &str, width: usize) -> String {
+    text.split_inclusive(char::is_whitespace)
+        .map(|part| {
+            let word = part.trim_end_matches(char::is_whitespace);
+            let Some(range) = wrapped_path(word) else {
+                return part.to_owned();
+            };
+            let path = &word[range.clone()];
+            if display_width(path) <= width {
+                return part.to_owned();
+            }
+            format!(
+                "{}{}{}",
+                &part[..range.start],
+                abbreviate_path(path, width),
+                &part[range.end..]
+            )
+        })
+        .collect()
+}
+
+fn wrapped_path(word: &str) -> Option<std::ops::Range<usize>> {
+    let mut range = prose_path(word)?;
+    // CJK sentence punctuation ends a path without an intervening space.
+    if let Some(end) = word[range.clone()].find(['，', '。', '；', '：', '！', '？']) {
+        range.end = range.start + end;
+    }
+    for marker in ["**", "__", "~~", "*", "_"] {
+        if word[..range.start].ends_with(marker) && word[..range.end].ends_with(marker) {
+            range.end -= marker.len();
+            break;
+        }
+    }
+    Some(range)
+}
+
+/// Keeps paths together while retaining Unicode line breaks in surrounding prose.
+pub(super) fn prose_wrap_options(width: usize) -> textwrap::Options<'static> {
+    textwrap::Options::new(width)
+        .word_separator(textwrap::WordSeparator::Custom(prose_words))
+        .word_splitter(textwrap::WordSplitter::Custom(|word| {
+            if wrapped_path(word).is_some() {
+                Vec::new()
+            } else {
+                textwrap::WordSplitter::HyphenSplitter.split_points(word)
+            }
+        }))
+}
+
+fn prose_words(text: &str) -> Box<dyn Iterator<Item = textwrap::core::Word<'_>> + '_> {
+    let separator = textwrap::WordSeparator::new();
+    Box::new(
+        text.split_inclusive(char::is_whitespace)
+            .flat_map(move |part| {
+                let Some(range) = wrapped_path(part.trim_end_matches(char::is_whitespace)) else {
+                    return separator.find_words(part).collect::<Vec<_>>();
+                };
+                let mut words: Vec<_> = separator.find_words(&part[..range.start]).collect();
+                let suffix = &part[range.end..];
+                let spaces = suffix.len() - suffix.trim_start_matches(' ').len();
+                words.push(textwrap::core::Word::from(
+                    &part[range.start..range.end + spaces],
+                ));
+                words.extend(separator.find_words(&part[range.end + spaces..]));
+                words
+            }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrapped_paths_use_each_paths_width_and_preserve_whitespace() {
+        let text = "many words before /tmp/fits.md and /private/workspace/reports/result.md\n报告：/private/workspace/reports/result.md\tend";
+        assert_eq!(
+            abbreviate_paths_for_wrap(text, 30),
+            "many words before /tmp/fits.md and /p…/w…/reports/result.md\n报告：/p…/w…/reports/result.md\tend"
+        );
+        assert_eq!(abbreviate_paths_for_wrap(text, 100), text);
+    }
+
+    #[test]
+    fn wrapped_paths_preserve_cjk_suffix_and_markdown_punctuation() {
+        assert_eq!(
+            abbreviate_paths_for_wrap("报告：`/private/workspace/report.md`，已发送。", 20),
+            "报告：`/p…/w…/report.md`，已发送。"
+        );
+        assert_eq!(
+            abbreviate_paths_for_wrap("a/b/c https://example.com/a/b /report.md", 1),
+            "a/b/c https://example.com/a/b /report.md"
+        );
+    }
+
+    #[test]
+    fn wrapped_paths_use_home_and_last_component_rules_only_on_overflow() {
+        let home = std::env::var_os("HOME").expect("HOME");
+        let path = std::path::Path::new(&home).join("workspace/report.md");
+        let path = path.to_string_lossy();
+        assert_eq!(abbreviate_paths_for_wrap(&path, path.width()), path);
+        assert_eq!(abbreviate_paths_for_wrap(&path, 15), "~/w…/report.md");
+        assert_eq!(
+            abbreviate_paths_for_wrap("/workspace/longfilename.md", 12),
+            "/w…/longfil…"
+        );
+    }
 
     #[test]
     fn path_abbreviation_stops_after_each_left_component() {

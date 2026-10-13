@@ -377,11 +377,11 @@ impl View {
         };
         let mut bodies = Vec::new();
         let prompt_start = items.len();
-        let prompt_body = super::markdown::render(prompt_text, width);
+        let prompt_body = wrap_details(prompt_text, width, true);
         items.extend(prompt_body.into_iter().map(Item::from));
         bodies.push(prompt_start..items.len());
         items.extend(session.queued.iter().map(|queued| {
-            let first = super::markdown::render(queued, width)
+            let first = wrap_details(queued, width, true)
                 .into_iter()
                 .next()
                 .unwrap_or_default();
@@ -392,7 +392,7 @@ impl View {
         // clock: whichever of the latest tool call and the last reply is newer.
         let activity = session.latest_activity();
         if let Some(activity) = activity {
-            let wrapped = textwrap::wrap(&activity.label, width);
+            let wrapped = wrap_details(&activity.label, width, false);
             let mut label = wrapped
                 .first()
                 .map_or(String::new(), |line| line.to_string());
@@ -428,7 +428,7 @@ impl View {
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Model).1;
             items.extend(
-                super::markdown::render(message, width)
+                wrap_details(message, width, true)
                     .into_iter()
                     .map(|mut line| {
                         for span in &mut line.spans {
@@ -837,4 +837,113 @@ fn render_background_box(
 /// Rows a background box takes: a bare top rule without output, a full box otherwise.
 fn box_height(lines: usize) -> usize {
     if lines == 0 { 1 } else { 2 + lines }
+}
+
+fn wrap_details(text: &str, width: usize, markdown: bool) -> Vec<Line<'static>> {
+    let text = super::line_truncation::abbreviate_paths_for_wrap(text, width);
+    if markdown {
+        super::markdown::render_with_options(
+            &text,
+            super::line_truncation::prose_wrap_options(width),
+        )
+    } else {
+        textwrap::wrap(&text, super::line_truncation::prose_wrap_options(width))
+            .into_iter()
+            .map(|line| Line::from(line.into_owned()))
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod wrapped_path_tests {
+    use super::*;
+
+    const MESSAGE: &str = "报告已写到 /private/tmp/claude-501/-Users-satoshi-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
+
+    #[test]
+    fn wrapped_details_keep_fitting_paths_and_markdown_styles() {
+        for markdown in [false, true] {
+            let lines = wrap_details("some prose before /tmp/fits.md and after", 20, markdown);
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.to_string().contains("/tmp/fits.md"))
+            );
+        }
+        let lines = wrap_details("**/private/workspace/reports/report.md**", 20, true);
+        assert_eq!(lines[0].to_string(), "/p…/w…/r…/report.md");
+        assert!(lines[0].spans.iter().all(|span| {
+            span.style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        }));
+    }
+
+    #[test]
+    fn details_last_message_and_prompt_show_abbreviated_screenshot_path() {
+        let now = chrono::Utc::now();
+        let session = Session {
+            id: crate::providers::SessionKey {
+                provider: crate::providers::ProviderId::Claude,
+                id: "path-probe".into(),
+            },
+            parent: None,
+            cwd: "/tmp/project".into(),
+            name: None,
+            title: "Path probe".into(),
+            prompt: MESSAGE.into(),
+            queued: Vec::new(),
+            prompt_at: None,
+            turn_messages: 0,
+            last_record_at: None,
+            model: None,
+            effort: None,
+            git_branch: None,
+            pr: None,
+            status: SessionStatus::Ready,
+            process: None,
+            updated_at: now,
+            started_at: None,
+            last_message: Some(MESSAGE.into()),
+            last_message_at: None,
+            activity: None,
+            pending_questions: Vec::new(),
+            background: Vec::new(),
+            last_prompt: None,
+            transcript: None,
+        };
+        let mut view = View::new(Grouping::Project, false);
+        view.set_sessions(vec![session], false);
+        let area = Rect::new(0, 0, 40, 30);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, now);
+        let rows: Vec<String> = buf
+            .content
+            .chunks(40)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+            .collect();
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.contains("/p…/t…/c…/-…/0…/s…/b…/report.md"))
+                .count(),
+            2
+        );
+        assert!(rows.iter().any(|row| row.contains("Last message")));
+        assert!(!rows.iter().any(|row| row.contains("/private/")));
+    }
+
+    #[test]
+    fn wrapped_details_abbreviate_screenshot_path_at_narrow_width() {
+        let lines = wrap_details(MESSAGE, 40, true);
+        let plain: Vec<_> = lines.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            plain,
+            [
+                "报告已写到",
+                "/p…/t…/c…/-…/0…/s…/b…/report.md，并已发",
+                "给 team-lead。",
+            ]
+        );
+        assert!(lines.iter().all(|line| line.width() <= 40));
+    }
 }

@@ -5,7 +5,14 @@ use ratatui::{
 };
 
 pub(crate) fn render(text: &str, width: usize) -> Vec<Line<'static>> {
-    if width == 0 {
+    render_with_options(text, textwrap::Options::new(width))
+}
+
+pub(super) fn render_with_options(
+    text: &str,
+    options: textwrap::Options<'_>,
+) -> Vec<Line<'static>> {
+    if options.width == 0 {
         return Vec::new();
     }
     let mut writer = Writer::default();
@@ -108,7 +115,7 @@ pub(crate) fn render(text: &str, width: usize) -> Vec<Line<'static>> {
     writer
         .lines
         .into_iter()
-        .flat_map(|(line, indent)| wrap(line, indent, width))
+        .flat_map(|(line, indent)| wrap(line, indent, options.clone()))
         .collect()
 }
 
@@ -161,13 +168,14 @@ impl Writer {
     }
 }
 
-fn wrap(line: Line<'static>, indent: usize, width: usize) -> Vec<Line<'static>> {
+fn wrap(line: Line<'static>, indent: usize, options: textwrap::Options<'_>) -> Vec<Line<'static>> {
+    let width = options.width;
     if line.width() <= width {
         return vec![line];
     }
     let plain = line.to_string();
     let padding = " ".repeat(indent.min(width.saturating_sub(1)));
-    let options = textwrap::Options::new(width)
+    let options = options
         .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit)
         .subsequent_indent(&padding);
     let mut offset = 0;
