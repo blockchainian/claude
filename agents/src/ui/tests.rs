@@ -1597,27 +1597,62 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
 }
 
 #[test]
-fn task_log_uses_terminal_styles_and_preserves_time_when_truncated() {
+fn task_log_uses_cctail_colours_and_highlights_latest_time() {
+    use crate::sessions::log::Kind;
+    use ratatui::style::Modifier;
+    let (mut view, now) = log_fixture();
+    view.log.truncate(5);
+    let area = Rect::new(0, 0, 100, 25);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    for (y, colour, bold) in [
+        (15, Color::Cyan, true),
+        (16, Color::Yellow, true),
+        (17, Color::Blue, true),
+        (18, Color::Red, true),
+        (19, Color::Cyan, false),
+    ] {
+        let label = &buf[(2, y)];
+        let body = &buf[(9, y)];
+        assert_eq!(label.fg, colour, "label row {y}");
+        assert_eq!(body.fg, colour, "body row {y}");
+        assert_eq!(label.modifier.contains(Modifier::BOLD), bold, "row {y}");
+        assert!(!label.modifier.contains(Modifier::DIM), "label row {y}");
+        assert!(
+            !body.modifier.intersects(Modifier::DIM | Modifier::BOLD),
+            "body row {y}"
+        );
+    }
+    for y in 15..19 {
+        assert!(buf[(97, y)].modifier.contains(Modifier::DIM));
+        assert!(!buf[(97, y)].modifier.contains(Modifier::BOLD));
+    }
+    for kind in [
+        Kind::User,
+        Kind::Model,
+        Kind::Tool,
+        Kind::Error,
+        Kind::Queued,
+    ] {
+        view.log.last_mut().unwrap().kind = kind;
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let time = &buf[(97, 19)];
+        assert_ne!(time.symbol(), " ");
+        assert_eq!(time.fg, Color::Yellow);
+        assert!(time.modifier.contains(Modifier::BOLD));
+        assert!(!time.modifier.contains(Modifier::DIM));
+    }
+}
+
+#[test]
+fn task_log_preserves_time_when_truncated() {
     use crate::sessions::log::Kind;
     use ratatui::style::Modifier;
     let (view, now) = log_fixture();
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    assert_eq!(buf[(2, 15)].fg, style::accent_color());
-    assert!(buf[(2, 15)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(9, 15)].fg, style::accent_color());
-    assert!(buf[(2, 16)].modifier.contains(Modifier::BOLD));
-    assert!(
-        buf[(2, 17)]
-            .modifier
-            .contains(Modifier::DIM | Modifier::BOLD)
-    );
-    assert!(buf[(9, 17)].modifier.contains(Modifier::DIM));
-    assert_eq!(buf[(2, 18)].fg, Color::Red);
-    assert_eq!(buf[(9, 18)].fg, Color::Red);
-    assert_eq!(buf[(2, 19)].fg, style::accent_color());
-    assert!(!buf[(2, 19)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(86, 21)].symbol(), "…");
     assert!(buf[(97, 21)].modifier.contains(Modifier::DIM));
     for kind in [Kind::User, Kind::Model, Kind::Queued] {

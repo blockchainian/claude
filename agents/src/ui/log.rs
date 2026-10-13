@@ -18,10 +18,12 @@ impl View {
         }
         let events = &self.log[self.log.len().saturating_sub(8)..];
         for (index, event) in events.iter().enumerate() {
-            let time = event_time(event, session, index + 1 == events.len(), now);
+            let last = index + 1 == events.len();
+            let time = event_time(event, session, last, now);
             render_event(
                 event,
                 &time,
+                last,
                 super::render::row(area, index as u16 + 1, 1),
                 buf,
             );
@@ -59,7 +61,7 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
     format_duration((end - previous).num_seconds().max(0))
 }
 
-fn render_event(event: &Event, time: &str, area: Rect, buf: &mut Buffer) {
+fn render_event(event: &Event, time: &str, last: bool, area: Rect, buf: &mut Buffer) {
     if area.is_empty() {
         return;
     }
@@ -71,7 +73,12 @@ fn render_event(event: &Event, time: &str, area: Rect, buf: &mut Buffer) {
         time_width as u16,
         1,
     );
-    Line::from(time.to_owned().dim())
+    let time_style = if last {
+        Style::default().fg(Color::Yellow).bold()
+    } else {
+        Style::default().dim()
+    };
+    Line::from(Span::styled(time.to_owned(), time_style))
         .right_aligned()
         .render(time_area, buf);
     let content_width = width.saturating_sub(time_width + 3);

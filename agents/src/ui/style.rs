@@ -56,20 +56,17 @@ pub(super) fn thread_color(id: &str) -> Color {
 /// Label and body styles for transcript events, using terminal palette colors.
 pub(super) fn log_styles(kind: &crate::sessions::log::Kind) -> (Style, Style) {
     use crate::sessions::log::Kind;
-    match kind {
-        Kind::User => (
-            Style::default().fg(accent_color()).bold(),
-            Style::default().fg(accent_color()),
-        ),
-        Kind::Model => (Style::default().bold(), Style::default()),
-        Kind::Tool => (Style::default().dim().bold(), Style::default().dim()),
-        Kind::Error => (
-            Style::default().fg(Color::Red),
-            Style::default().fg(Color::Red),
-        ),
-        Kind::Queued => (
-            Style::default().fg(accent_color()),
-            Style::default().fg(accent_color()),
-        ),
-    }
+    let color = match kind {
+        Kind::User | Kind::Queued => Color::Cyan,
+        Kind::Model => Color::Yellow,
+        Kind::Tool => Color::Blue,
+        Kind::Error => Color::Red,
+    };
+    let body = Style::default().fg(color);
+    let label = if matches!(kind, Kind::Queued) {
+        body
+    } else {
+        body.bold()
+    };
+    (label, body)
 }
