@@ -21,4 +21,5 @@
         5s Tool   Bash run a background job *
   11:59:20 Model  A long response whose whitespace collapses and whose body must be truncated bef…
        35s Tool   Bash run tests
+  ────────────────────────────────────────────────────────────────────────────────────────────────
   ? help  esc back  ↑/↓ move  enter open  n new

@@ -1485,7 +1485,7 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
 fn task_log_tall_running_snapshot() {
     let (view, now) = log_fixture();
     assert_eq!(
-        log_screen(&view, 100, 24, now),
+        log_screen(&view, 100, 25, now),
         include_str!("../../tests/ui_snapshots/task_log_running.txt")
     );
 }
@@ -1495,7 +1495,7 @@ fn task_log_tall_finished_snapshot() {
     let (mut view, now) = log_fixture();
     view.log.last_mut().unwrap().ended_at = Some(now - Duration::seconds(5));
     assert_eq!(
-        log_screen(&view, 100, 24, now),
+        log_screen(&view, 100, 25, now),
         include_str!("../../tests/ui_snapshots/task_log_finished.txt")
     );
 }
@@ -1514,17 +1514,47 @@ fn task_log_short_terminal_matches_existing_snapshot() {
 }
 
 #[test]
+fn task_log_requires_twenty_five_rows() {
+    let (mut view, now) = log_fixture();
+    let hidden = log_screen(&view, 100, 24, now);
+    assert!(!hidden.contains("Please inspect"));
+    view.rows[view.selected].transcript = None;
+    assert_eq!(hidden, log_screen(&view, 100, 24, now));
+}
+
+#[test]
+fn task_log_rules_match_header_even_without_loaded_events() {
+    use ratatui::style::Modifier;
+    let (mut view, now) = log_fixture();
+    for loaded in [true, false] {
+        if !loaded {
+            view.log_session = None;
+        }
+        let area = Rect::new(0, 0, 100, 25);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        for y in [14, 23] {
+            for x in 0..100 {
+                assert_eq!(buf[(x, y)].symbol(), buf[(x, 2)].symbol());
+                assert_eq!(buf[(x, y)].modifier, buf[(x, 2)].modifier);
+            }
+            assert!(buf[(2, y)].modifier.contains(Modifier::DIM));
+        }
+    }
+}
+
+#[test]
 fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
     let (mut view, now) = log_fixture();
     assert!(
-        log_screen(&view, 100, 24, now)
+        log_screen(&view, 100, 25, now)
             .lines()
             .nth(22)
             .unwrap()
             .starts_with("       35s ")
     );
     assert!(
-        log_screen(&view, 100, 24, now + Duration::seconds(1))
+        log_screen(&view, 100, 25, now + Duration::seconds(1))
             .lines()
             .nth(22)
             .unwrap()
@@ -1532,7 +1562,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
     );
     view.rows[view.selected].process = None;
     assert!(
-        log_screen(&view, 100, 24, now)
+        log_screen(&view, 100, 25, now)
             .lines()
             .nth(22)
             .unwrap()
@@ -1540,7 +1570,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
     );
     view.log.last_mut().unwrap().body.push_str(" *");
     assert!(
-        log_screen(&view, 100, 24, now)
+        log_screen(&view, 100, 25, now)
             .lines()
             .nth(22)
             .unwrap()
@@ -1553,14 +1583,14 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
     let (mut view, now) = log_fixture();
     view.log.pop();
     assert!(
-        log_screen(&view, 100, 24, now)
+        log_screen(&view, 100, 25, now)
             .lines()
             .nth(21)
             .unwrap()
             .starts_with("   40s ago ")
     );
     view.rows[view.selected].transcript = None;
-    let rendered = log_screen(&view, 100, 24, now);
+    let rendered = log_screen(&view, 100, 25, now);
     assert!(!rendered.contains("Please inspect"));
     assert!(!rendered.lines().nth(14).unwrap().contains('─'));
     assert!(rendered.lines().nth(22).unwrap().contains('│'));
@@ -1571,7 +1601,7 @@ fn task_log_uses_terminal_styles_and_preserves_time_when_truncated() {
     use crate::sessions::log::Kind;
     use ratatui::style::Modifier;
     let (view, now) = log_fixture();
-    let area = Rect::new(0, 0, 100, 24);
+    let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     assert_eq!(buf[(11, 15)].fg, style::accent_color());
@@ -1595,7 +1625,7 @@ fn task_log_uses_terminal_styles_and_preserves_time_when_truncated() {
         let event = view.log.last_mut().unwrap();
         event.kind = kind;
         assert!(
-            log_screen(&view, 100, 24, now)
+            log_screen(&view, 100, 25, now)
                 .lines()
                 .nth(22)
                 .unwrap()
@@ -1615,7 +1645,7 @@ fn task_log_right_aligns_mixed_width_times() {
     view.log[1].started_at = now + Duration::seconds(225);
     view.log[2].kind = Kind::Model;
     view.log[2].started_at = now - Duration::minutes(44);
-    let rendered = log_screen(&view, 100, 24, now);
+    let rendered = log_screen(&view, 100, 25, now);
     assert_eq!(
         rendered
             .lines()
@@ -1642,9 +1672,9 @@ fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
         previous_end: None,
     };
     view.log.insert(0, first);
-    assert!(!log_screen(&view, 100, 24, now).contains("Discarded event"));
+    assert!(!log_screen(&view, 100, 25, now).contains("Discarded event"));
     view.selected = usize::MAX;
-    let rendered = log_screen(&view, 100, 24, now);
+    let rendered = log_screen(&view, 100, 25, now);
     assert!(!rendered.contains("Please inspect"));
     assert!(!rendered.lines().nth(14).unwrap().contains('─'));
 }

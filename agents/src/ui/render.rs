@@ -42,12 +42,12 @@ impl View {
         let header_height = if area.height >= 6 { 3 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
-        let log_height = if area.height >= 24
+        let log_height = if area.height >= 25
             && self
                 .selected_row()
                 .is_some_and(|session| session.transcript.is_some())
         {
-            9
+            10
         } else {
             0
         };
