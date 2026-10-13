@@ -317,10 +317,10 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        let (status, dot) = Self::status(session);
+        let (status, _) = Self::status(session);
         // Sections top to bottom: title, prompt, the newer of latest activity
         // and last message, background, needs attention, project, branch, model.
-        let mut header = Line::from(vec![status.into(), " ".into(), dot, " ".into()]);
+        let mut header = Line::from(vec![status.into(), " · ".dim()]);
         let elapsed = session
             .started_at
             .map(|at| format!(" · {}", format_session_duration((now - at).num_seconds())));

@@ -1,4 +1,4 @@
-Ready ○ Parent
+Ready · Parent
 
 Prompt
 Parent

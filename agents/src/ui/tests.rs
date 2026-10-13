@@ -1853,6 +1853,7 @@ fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
 
 mod details_header {
     use super::*;
+    use ratatui::style::Modifier;
 
     #[test]
     fn elapsed_wall_time_follows_redraw_for_every_row_kind() {
@@ -1897,7 +1898,7 @@ mod details_header {
                         if advance == 0 {
                             assert_eq!(
                                 header.trim_end(),
-                                format!("Working ● Fix login bug · {expected}")
+                                format!("Working · Fix login bug · {expected}")
                             );
                         } else {
                             assert!(header.contains("d "), "{header}");
@@ -1912,7 +1913,39 @@ mod details_header {
     fn status_precedes_title() {
         let row = session("header", "Header task", SessionStatus::Working, 0);
         let rendered = queued_details(row, 15);
-        assert_eq!(rendered.lines().next().unwrap(), "Working ● Header task");
+        assert_eq!(rendered.lines().next().unwrap(), "Working · Header task");
+    }
+
+    #[test]
+    fn separator_is_dim_and_status_keeps_its_style() {
+        for status in [
+            SessionStatus::Working,
+            SessionStatus::Ready,
+            SessionStatus::NeedsInput,
+            SessionStatus::Inactive,
+        ] {
+            let mut view = test_view(Grouping::Project, true);
+            if status == SessionStatus::Inactive {
+                view.status_filter = 4;
+            }
+            view.set_sessions(vec![session("header", "Header task", status, 0)], false);
+            let area = Rect::new(0, 0, 80, 15);
+            let mut buf = Buffer::empty(area);
+            view.render_details(area, &mut buf, Utc::now());
+            let label = status.label();
+            let header = buf.content[..80]
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert_eq!(header.trim_end(), format!("{label} · Header task"));
+            for cell in &buf.content[..label.len()] {
+                assert_eq!(cell.fg, ratatui::style::Color::Reset);
+                assert!(!cell.modifier.contains(Modifier::DIM));
+            }
+            for cell in &buf.content[label.len()..label.len() + 3] {
+                assert!(cell.modifier.contains(Modifier::DIM));
+            }
+        }
     }
 
     #[test]
@@ -1943,9 +1976,9 @@ mod details_header {
         row.prompt = "Current prompt".into();
         let rendered = queued_details(row, 15);
         let header = rendered.lines().next().unwrap();
-        let title = header.strip_prefix("Working ● ").expect("visible status");
+        let title = header.strip_prefix("Working · ").expect("visible status");
         assert!(title.ends_with('…'), "{title}");
-        assert_eq!(header, "Working ● A very long session title tha…");
+        assert_eq!(header, "Working · A very long session title tha…");
         assert_eq!(
             rendered,
             include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
@@ -4047,7 +4080,7 @@ mod subagent_rows {
         let header: String = (0..panel.area.width)
             .map(|x| panel[(x, 0)].symbol())
             .collect();
-        assert!(header.starts_with("Working ● Check files"), "{header}");
+        assert!(header.starts_with("Working · Check files"), "{header}");
         let rendered = screen(&view, 120, 30);
         assert!(rendered.contains("Model: child-model"));
         assert!(!rendered.contains("Needs attention"));
