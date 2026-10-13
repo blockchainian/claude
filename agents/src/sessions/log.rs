@@ -143,12 +143,29 @@ impl Log {
             }
             Some("queue-operation") if record["operation"] == "enqueue" => {
                 if let Some(text) = record["content"].as_str() {
-                    let kind = if text.starts_with('<') {
-                        Kind::QueuedSystem
+                    let (kind, body) = if let Some(notification) = text
+                        .trim()
+                        .strip_prefix("<task-notification>")
+                        .and_then(|text| text.strip_suffix("</task-notification>"))
+                    {
+                        let summary = notification
+                            .split_once("<summary>")
+                            .and_then(|(_, text)| text.split_once("</summary>"))
+                            .map(|(summary, _)| summary.trim())
+                            .unwrap_or_else(|| {
+                                notification
+                                    .lines()
+                                    .map(str::trim)
+                                    .find(|line| !line.is_empty())
+                                    .unwrap_or("")
+                            });
+                        (Kind::Tool, summary)
+                    } else if text.starts_with('<') {
+                        (Kind::QueuedSystem, text)
                     } else {
-                        Kind::QueuedUser
+                        (Kind::QueuedUser, text)
                     };
-                    self.push(kind, text.to_owned(), at);
+                    self.push(kind, body.to_owned(), at);
                 }
             }
             _ => {}
@@ -157,12 +174,13 @@ impl Log {
     }
 
     fn push(&mut self, kind: Kind, body: String, started_at: DateTime<Utc>) {
+        let ended_at = matches!(kind, Kind::Tool).then_some(started_at);
         self.entries.push(Entry {
             event: Event {
                 kind,
                 body,
                 started_at,
-                ended_at: None,
+                ended_at,
                 previous_end: None,
             },
             missing: false,
@@ -297,7 +315,8 @@ mod tests {
             ),
             result(38, "c", false),
             json!({"type":"queue-operation", "timestamp":at(40).to_rfc3339(), "operation":"enqueue", "content":"next task"}),
-            json!({"type":"queue-operation", "timestamp":at(42).to_rfc3339(), "operation":"enqueue", "content":"<task-notification>finished</task-notification>"}),
+            json!({"type":"queue-operation", "timestamp":at(42).to_rfc3339(), "operation":"enqueue", "content":"<agent-message>finished</agent-message>"}),
+            json!({"type":"queue-operation", "timestamp":at(43).to_rfc3339(), "operation":"enqueue", "content":"<task-notification>\n<task-id>bcfsuvg3w</task-id>\n<status>completed</status>\n<summary>  Background command \"等 Codex 做日志面板\" completed (exit code 0) \n</summary>\n</task-notification>"}),
             record(
                 "user",
                 41,
@@ -315,7 +334,7 @@ mod tests {
     fn groups_interleaved_parallel_calls_and_tracks_predecessors() {
         let file = fixture();
         let events = tail(file.path(), 8).unwrap();
-        assert_eq!(events.len(), 6);
+        assert_eq!(events.len(), 7);
         assert_eq!(
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
             [
@@ -324,7 +343,8 @@ mod tests {
                 &Kind::Error,
                 &Kind::Tool,
                 &Kind::QueuedUser,
-                &Kind::QueuedSystem
+                &Kind::QueuedSystem,
+                &Kind::Tool
             ]
         );
         assert!(events[0].body.contains("Stop hook error"));
@@ -345,11 +365,14 @@ mod tests {
         assert_eq!(events[3].ended_at, Some(at(38)));
         assert_eq!(events[4].body, "next task");
         assert_eq!(events[4].started_at, at(40));
-        assert_eq!(
-            events[5].body,
-            "<task-notification>finished</task-notification>"
-        );
+        assert_eq!(events[5].body, "<agent-message>finished</agent-message>");
         assert_eq!(events[5].started_at, at(42));
+        assert_eq!(
+            events[6].body,
+            "Background command \"等 Codex 做日志面板\" completed (exit code 0)"
+        );
+        assert_eq!(events[6].started_at, at(43));
+        assert_eq!(events[6].ended_at, Some(at(43)));
         assert_eq!(events[0].previous_end, None);
         for pair in events.windows(2) {
             let end = if matches!(pair[0].kind, Kind::Tool | Kind::Error) {
@@ -359,7 +382,7 @@ mod tests {
             };
             assert_eq!(pair[1].previous_end, end);
         }
-        assert_eq!(tail(file.path(), 2).unwrap(), events[4..]);
+        assert_eq!(tail(file.path(), 2).unwrap(), events[5..]);
         assert!(tail(file.path(), 0).unwrap().is_empty());
     }
     #[test]
@@ -469,8 +492,63 @@ mod tests {
         assert_eq!(measured.earliest, len - 64 * 1024);
         assert_eq!(
             log.entries[0].event.body,
-            "<task-notification>finished</task-notification>"
+            "Background command \"等 Codex 做日志面板\" completed (exit code 0)"
         );
+    }
+
+    #[test]
+    fn queued_task_notifications_end_at_the_record_time_for_every_status() {
+        for status in ["completed", "failed", "killed", "stopped"] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let content = format!(
+                "<task-notification>\n<status>{status}</status>\n<summary> \njob {status}\n </summary>\n</task-notification>"
+            );
+            writeln!(file, "{}", json!({"type":"queue-operation", "timestamp":at(2).to_rfc3339(), "operation":"enqueue", "content":content})).unwrap();
+            let events = tail(file.path(), 1).unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].kind, Kind::Tool);
+            assert_eq!(events[0].body, format!("job {status}"));
+            assert_eq!(events[0].started_at, at(2));
+            assert_eq!(events[0].ended_at, Some(at(2)));
+        }
+    }
+
+    #[test]
+    fn queued_task_notifications_without_summary_use_the_first_nonempty_line() {
+        for (content, body) in [
+            (
+                "<task-notification>\n \n  finished  \nmore\n</task-notification>",
+                "finished",
+            ),
+            (
+                "<task-notification>finished</task-notification>",
+                "finished",
+            ),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file, "{}", json!({"type":"queue-operation", "timestamp":at(2).to_rfc3339(), "operation":"enqueue", "content":content})).unwrap();
+            let events = tail(file.path(), 1).unwrap();
+            assert_eq!(events[0].kind, Kind::Tool);
+            assert_eq!(events[0].body, body);
+            assert_eq!(events[0].started_at, at(2));
+            assert_eq!(events[0].ended_at, Some(at(2)));
+        }
+    }
+
+    #[test]
+    fn other_queued_tags_keep_their_content_and_kind() {
+        for content in [
+            "<agent-message>finished</agent-message>",
+            "<cross-session-message>finished</cross-session-message>",
+            "<pasted_content>finished</pasted_content>",
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file, "{}", json!({"type":"queue-operation", "timestamp":at(2).to_rfc3339(), "operation":"enqueue", "content":content})).unwrap();
+            let events = tail(file.path(), 1).unwrap();
+            assert_eq!(events[0].kind, Kind::QueuedSystem);
+            assert_eq!(events[0].body, content);
+            assert_eq!(events[0].ended_at, None);
+        }
     }
 
     #[test]
