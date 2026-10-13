@@ -48,6 +48,10 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
     if !matches!(event.kind, Kind::Tool | Kind::Error) {
         return if last {
             format_relative_time(now, Some(event.started_at))
+        } else if event.kind == Kind::Model
+            && let Some(reference) = event.previous_end
+        {
+            format_duration((event.started_at - reference).num_seconds().max(0))
         } else {
             clock()
         };

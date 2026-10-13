@@ -1461,6 +1461,15 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         ended_at: end.map(|age| now - Duration::seconds(age)),
         previous_end: Some(now - Duration::seconds(age + 5)),
     }).collect();
+    let mut reference = None;
+    for event in &mut view.log {
+        if event.kind == Kind::Model {
+            event.previous_end = reference;
+        }
+        if matches!(event.kind, Kind::User | Kind::Model) {
+            reference = Some(event.started_at);
+        }
+    }
     (view, now)
 }
 
@@ -1479,6 +1488,7 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
         })
         .collect::<Vec<_>>()
         .join("\n")
+        + "\n"
 }
 
 #[test]
@@ -1655,6 +1665,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         assert_eq!(label_style.fg, foreground);
         assert_eq!(body_style.fg, foreground);
         view.log.first_mut().unwrap().kind = kind.clone();
+        view.log.first_mut().unwrap().previous_end = None;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let time = &buf[(9, 15)];
@@ -1738,6 +1749,7 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
     view.log[0].previous_end = Some(now - Duration::seconds(123));
     view.log[0].ended_at = Some(now - Duration::seconds(120));
     view.log[1].started_at = now + Duration::seconds(225);
+    view.log[1].previous_end = None;
     view.log[2].kind = Kind::Model;
     view.log[2].started_at = now - Duration::minutes(44);
     let rendered = log_screen(&view, 100, 25, now);

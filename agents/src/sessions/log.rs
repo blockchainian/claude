@@ -18,6 +18,8 @@ pub struct Event {
     pub body: String,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
+    /// For Model replies, the preceding user record or assistant text timestamp.
+    /// For other events, the preceding visible event's end.
     pub previous_end: Option<DateTime<Utc>>,
 }
 pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
@@ -34,7 +36,9 @@ pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     events.reverse();
     let mut previous_end = None;
     for event in &mut events {
-        event.previous_end = previous_end;
+        if event.kind != Kind::Model {
+            event.previous_end = previous_end;
+        }
         previous_end = match event.kind {
             Kind::Tool | Kind::Error => event.ended_at,
             _ => Some(event.started_at),
@@ -66,7 +70,21 @@ struct ResultAt {
 
 impl Log {
     fn ready(&self, count: usize) -> bool {
-        self.entries.len() > count && self.batch.is_none_or(|index| index > count)
+        self.entries.len() > count
+            && self.batch.is_none_or(|index| index > count)
+            && self
+                .entries
+                .iter()
+                .take(count)
+                .all(|entry| entry.event.kind != Kind::Model || entry.event.previous_end.is_some())
+    }
+
+    fn reference(&mut self, at: DateTime<Utc>) {
+        for entry in &mut self.entries {
+            if entry.event.kind == Kind::Model && entry.event.previous_end.is_none() {
+                entry.event.previous_end = Some(at);
+            }
+        }
     }
 
     fn record(&mut self, record: serde_json::Value, count: usize) -> bool {
@@ -95,6 +113,12 @@ impl Log {
         let content = &record["message"]["content"];
         match record["type"].as_str() {
             Some("user") => {
+                let tool_result = content.as_array().is_some_and(|blocks| {
+                    blocks.iter().any(|block| block["type"] == "tool_result")
+                });
+                if !tool_result {
+                    self.reference(at);
+                }
                 if let Some(blocks) = content.as_array() {
                     for block in blocks {
                         if block["type"] == "tool_result"
@@ -136,6 +160,7 @@ impl Log {
                         match block["type"].as_str() {
                             Some("text") => {
                                 if let Some(text) = block["text"].as_str() {
+                                    self.reference(at);
                                     self.push(Kind::Model, text.to_owned(), at);
                                 }
                             }
@@ -332,6 +357,141 @@ mod tests {
             second,
             json!([{"type":"tool_result", "tool_use_id":id, "is_error":error, "content":"done"}]),
         )
+    }
+    fn model_turn() -> tempfile::NamedTempFile {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for (time, mut r) in [
+            ("10:00:00", record("user", 0, json!("inspect"))),
+            ("10:00:02", tool(2, "first", "a", "Read", json!({}))),
+            ("10:00:05", result(5, "a", false)),
+            (
+                "10:00:11",
+                record("assistant", 11, json!([{"type":"text", "text":"done"}])),
+            ),
+            (
+                "10:01:00",
+                record(
+                    "user",
+                    0,
+                    json!("<task-notification>finished</task-notification>"),
+                ),
+            ),
+            (
+                "10:01:57",
+                record("assistant", 57, json!([{"type":"text", "text":"checked"}])),
+            ),
+        ] {
+            r["timestamp"] = format!("2026-10-06T{time}Z").into();
+            writeln!(file, "{r}").unwrap();
+        }
+        file
+    }
+
+    #[test]
+    fn model_reply_duration_includes_tools_and_hidden_turn_starters() {
+        let file = model_turn();
+        let events = tail(file.path(), 20).unwrap();
+        let models: Vec<_> = events
+            .iter()
+            .filter(|event| event.kind == Kind::Model)
+            .collect();
+        assert_eq!(models.len(), 2);
+        for (event, seconds) in models.into_iter().zip([11, 57]) {
+            assert_eq!(
+                (event.started_at - event.previous_end.unwrap()).num_seconds(),
+                seconds
+            );
+        }
+    }
+
+    #[test]
+    fn model_reply_tail_finds_hidden_reference_across_chunks() {
+        let mut file = model_turn();
+        let before = tail(file.path(), 1).unwrap();
+        assert_eq!(before.len(), 1);
+        assert_eq!(before[0].kind, Kind::Model);
+        assert_eq!(
+            (before[0].started_at - before[0].previous_end.unwrap()).num_seconds(),
+            57
+        );
+        // Tool traffic must not stop the backward search at an extra visible row.
+        writeln!(
+            file,
+            "{}",
+            tool(
+                58,
+                "large",
+                "b",
+                "Read",
+                json!({"prompt":"x".repeat(140_000)})
+            )
+        )
+        .unwrap();
+        writeln!(file, "{}", result(59, "b", false)).unwrap();
+        writeln!(
+            file,
+            "{}",
+            record("assistant", 59, json!([{"type":"text", "text":"again"}]))
+        )
+        .unwrap();
+        let events = tail(file.path(), 1).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].previous_end, Some(before[0].started_at));
+    }
+
+    #[test]
+    fn consecutive_model_replies_reference_the_previous_text() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for r in [
+            record("user", 0, json!("inspect")),
+            record("assistant", 11, json!([{"type":"text", "text":"first"}])),
+            tool(12, "between", "a", "Read", json!({})),
+            result(15, "a", false),
+            record("assistant", 20, json!([{"type":"text", "text":"second"}])),
+        ] {
+            writeln!(file, "{r}").unwrap();
+        }
+        let events = tail(file.path(), 1).unwrap();
+        assert_eq!(events[0].previous_end, Some(at(11)));
+        assert_eq!(
+            (events[0].started_at - events[0].previous_end.unwrap()).num_seconds(),
+            9
+        );
+    }
+
+    #[test]
+    fn model_reply_without_reference_keeps_none() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            "{}",
+            record("assistant", 11, json!([{"type":"text", "text":"first"}]))
+        )
+        .unwrap();
+        assert_eq!(tail(file.path(), 1).unwrap()[0].previous_end, None);
+    }
+
+    #[test]
+    fn model_reply_uses_any_non_tool_result_user_content() {
+        for content in [
+            json!("typed prompt"),
+            json!("<task-notification>finished</task-notification>"),
+            json!("<agent-message>finished</agent-message>"),
+            json!("<cross-session-message from-name=\"peer\">finished</cross-session-message>"),
+            json!("<pasted_content>finished</pasted_content>"),
+            json!([{"type":"image", "source":{"type":"base64", "data":""}}]),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            for r in [
+                record("user", 0, content),
+                tool(2, "between", "a", "Read", json!({})),
+                result(5, "a", false),
+                record("assistant", 11, json!([{"type":"text", "text":"done"}])),
+            ] {
+                writeln!(file, "{r}").unwrap();
+            }
+            assert_eq!(tail(file.path(), 1).unwrap()[0].previous_end, Some(at(0)));
+        }
     }
     fn fixture() -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().unwrap();
