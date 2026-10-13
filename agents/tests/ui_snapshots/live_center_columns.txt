@@ -3,10 +3,10 @@
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                                               Status         Updated  │ Ready ○ Current task
   Pinned  2                                                                                       │
-  › ○ Current task                                                        Ready              now  │ Prompt
-    ● Needs an answer                                                     Needs input     2h ago  │ Current task
-                                                                                                  │
-  /tmp/project  3 of 4                                                                            │ Model: Unknown
+  › ○ Current task                                                        Ready              now  │ Model: Unknown
+    ● Needs an answer                                                     Needs input     2h ago  │
+                                                                                                  │ Prompt
+  /tmp/project  3 of 4                                                                            │ Current task
     ○ A longer task title that uses the available column                  Ready           5m ago  │
     ● Failed task                                                         Needs input     1h ago  │ Project
     ● Working task                                                        Working         1d ago  │ /tmp/project

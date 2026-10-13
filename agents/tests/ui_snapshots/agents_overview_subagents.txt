@@ -3,15 +3,15 @@
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                      Status         Updated  │ Ready ○ Parent task
   /tmp/project  3                                                        │
-  › ○ Parent task                                Ready           2m ago  │ Prompt
-    └ ● Check files                              Working         1m ago  │ Parent task
-    └ ○ Review results                           Ready              now  │
+  › ○ Parent task                                Ready           2m ago  │ Model: parent-model
+    └ ● Check files                              Working         1m ago  │
+    └ ○ Review results                           Ready              now  │ Prompt
+                                                                         │ Parent task
+                                                                         │
                                                                          │ Background
                                                                          │ ╭ Check files ────────────────────────────╮
                                                                          │ │                                         │
                                                                          │ ╰─────────────────────────────────────────╯
-                                                                         │
-                                                                         │ Model: parent-model
                                                                          │
                                                                          │ Project
                                                                          │ /tmp/project

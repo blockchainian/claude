@@ -1,12 +1,12 @@
 Working ● Activity task
 
+Model: Unknown
+
 Prompt · 42 messages · 1h 10m
 Activity task
 
 Last message · 3s ago
 Checking the project
-
-Model: Unknown
 
 Project
 /tmp/project

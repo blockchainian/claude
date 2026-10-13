@@ -1,5 +1,7 @@
 Working ● Queue task
 
+Model: Unknown
+
 Prompt
 Current prompt Current prompt Current
 prompt Current prompt Current prompt
@@ -7,8 +9,6 @@ Current prompt Current prompt Current
 prompt Current prompt Current prompt
 Current prompt Current prompt
 Queued prompt that extends beyond the
-
-Model: Unknown
 
 Project
 /tmp/project

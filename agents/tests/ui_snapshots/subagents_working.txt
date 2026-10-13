@@ -3,10 +3,10 @@
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                      Status         Updated  │ Working ● Check files
   /tmp/project  1 of 3                                                   │
-    ○ Parent task                                Ready           2m ago  │ Prompt
-  › └ ● Check files                              Working         1m ago  │ Check files
-                                                                         │
-                                                                         │ Model: child-model
+    ○ Parent task                                Ready           2m ago  │ Model: child-model
+  › └ ● Check files                              Working         1m ago  │
+                                                                         │ Prompt
+                                                                         │ Check files
                                                                          │
                                                                          │ Project
                                                                          │ /tmp/child-project

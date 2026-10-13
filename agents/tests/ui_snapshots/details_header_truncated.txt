@@ -1,9 +1,9 @@
 Working ● A very long session title tha…
 
+Model: Unknown
+
 Prompt
 Current prompt
-
-Model: Unknown
 
 Project
 /tmp/project

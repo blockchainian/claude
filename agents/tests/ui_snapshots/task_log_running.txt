@@ -3,10 +3,10 @@
   ────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                         Status         Updated  │ Working ● Task log example
   /tmp/project  1                                           │
-  › ● Task log example              Working            now  │ Prompt
-                                                            │ Task log example
+  › ● Task log example              Working            now  │ Model: Unknown
                                                             │
-                                                            │ Model: Unknown
+                                                            │ Prompt
+                                                            │ Task log example
                                                             │
                                                             │ Project
                                                             │ /tmp/project
