@@ -86,6 +86,15 @@ pub struct App {
     /// returns once it exits.
     launch: Option<Command>,
     last_session: Option<String>,
+    log_stamp: Option<LogStamp>,
+}
+
+#[derive(PartialEq, Eq)]
+struct LogStamp {
+    session: String,
+    path: PathBuf,
+    modified: std::time::SystemTime,
+    length: u64,
 }
 
 impl App {
@@ -102,6 +111,7 @@ impl App {
             sessions: Vec::new(),
             launch: None,
             last_session: None,
+            log_stamp: None,
         }
     }
 
@@ -185,9 +195,10 @@ impl App {
             {
                 terminal.set_cursor_position((x, y))?;
             }
-            match receiver
-                .recv_timeout(schedule.redraw_timeout(Instant::now(), self.view.has_background()))
-            {
+            match receiver.recv_timeout(schedule.redraw_timeout(
+                Instant::now(),
+                self.view.has_background() || self.log_ticks(),
+            )) {
                 Ok(Input::Terminal(event)) => match event? {
                     Event::Key(key) if self.handle_key(key) => return Ok(()),
                     _ => {}
@@ -209,16 +220,77 @@ impl App {
         }
     }
 
+    fn log_ticks(&self) -> bool {
+        self.view.log.last().is_some_and(|event| {
+            matches!(
+                event.kind,
+                crate::sessions::log::Kind::Tool | crate::sessions::log::Kind::Error
+            ) && event.ended_at.is_none()
+                && !event.body.ends_with(" *")
+        }) && self
+            .view
+            .selected_id()
+            .and_then(|id| self.sessions.iter().find(|s| s.id == id))
+            .is_some_and(|session| {
+                session.process.is_some() && session.status != crate::model::SessionStatus::Inactive
+            })
+    }
+
+    fn refresh_log(&mut self) {
+        let selected = self
+            .view
+            .selected_id()
+            .and_then(|id| self.sessions.iter().find(|session| session.id == id))
+            .and_then(|session| Some((session.id.clone(), session.transcript.clone()?)));
+        let Some((session, path)) = selected else {
+            self.log_stamp = None;
+            self.view.log.clear();
+            self.view.log_session = None;
+            return;
+        };
+        let load = || -> io::Result<Option<(LogStamp, Vec<crate::sessions::log::Event>)>> {
+            let metadata = std::fs::metadata(&path)?;
+            let stamp = LogStamp {
+                session: session.clone(),
+                path: path.clone(),
+                modified: metadata.modified()?,
+                length: metadata.len(),
+            };
+            if self.log_stamp.as_ref() == Some(&stamp) {
+                return Ok(None);
+            }
+            Ok(Some((stamp, crate::sessions::log::tail(&path, 8)?)))
+        };
+        match load() {
+            Ok(Some((stamp, events))) => {
+                self.log_stamp = Some(stamp);
+                self.view.log = events;
+                self.view.log_session = Some(session);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.log_stamp = None;
+                self.view.log.clear();
+                self.view.log_session = None;
+                self.view
+                    .set_notice(Some(format!("Failed to read task log: {error}")));
+            }
+        }
+    }
+
     fn refresh(&mut self) {
         let Snapshot { sessions, has_more } = self.store.refresh();
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
+        self.refresh_log();
     }
 
     /// Returns true when the dashboard should close.
     fn handle_key(&mut self, key: KeyEvent) -> bool {
-        let Some(action) = self.view.handle_key(key) else {
+        let action = self.view.handle_key(key);
+        self.refresh_log();
+        let Some(action) = action else {
             return false;
         };
         match action {
@@ -304,6 +376,7 @@ impl App {
                     .set_notice(Some(format!("{what} is not supported")));
             }
         }
+        self.refresh_log();
         false
     }
 
@@ -407,6 +480,68 @@ mod tests {
             command.get_current_dir(),
             Some(app.sessions[0].cwd.as_path())
         );
+    }
+
+    #[test]
+    fn task_log_cache_uses_selection_length_and_mtime() {
+        use std::io::Write;
+        let (_dir, mut app) = fixture();
+        key(&mut app, KeyCode::BackTab);
+        app.refresh();
+        assert_eq!(app.view.log.len(), 2);
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let original = std::fs::read_to_string(&path).unwrap();
+        let changed = original.replace("Codex", "CODEX");
+        assert_eq!(original.len(), changed.len());
+        std::fs::write(&path, &changed).unwrap();
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_modified(modified).unwrap();
+        let cached = app.view.log.clone();
+        app.refresh_log();
+        assert_eq!(app.view.log, cached);
+        file.set_modified(modified + Duration::from_secs(1))
+            .unwrap();
+        app.refresh_log();
+        assert_ne!(app.view.log, cached);
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T16:40:00Z", "content":"queued"})).unwrap();
+        file.set_modified(modified + Duration::from_secs(1))
+            .unwrap();
+        app.refresh();
+        assert_eq!(app.sessions.len(), 1);
+        assert!(
+            app.view.selected_id().is_some(),
+            "selected disappeared after refresh"
+        );
+        assert_eq!(app.view.log.last().unwrap().body, "queued");
+    }
+
+    #[test]
+    fn task_log_reloads_on_keyboard_selection_and_clears_without_transcript() {
+        let (dir, mut app) = fixture();
+        let mut second = app.sessions[0].clone();
+        second.id = "second".into();
+        second.updated_at -= chrono::Duration::seconds(1);
+        let path = dir.path().join("second.jsonl");
+        std::fs::write(&path, serde_json::json!({"type":"user", "timestamp":"2026-10-06T16:40:00Z", "message":{"content":"second prompt"}}).to_string()).unwrap();
+        second.transcript = Some(path);
+        let mut third = second.clone();
+        third.id = "third".into();
+        third.updated_at -= chrono::Duration::seconds(1);
+        third.transcript = None;
+        app.sessions.extend([second, third]);
+        app.view.set_sessions(app.sessions.clone(), false);
+        app.refresh_log();
+        key(&mut app, KeyCode::Down);
+        assert_eq!(app.view.log_session.as_deref(), Some("second"));
+        assert_eq!(app.view.log[0].body, "second prompt");
+        key(&mut app, KeyCode::Down);
+        assert!(app.view.log.is_empty());
+        assert!(app.view.log_session.is_none());
     }
 
     #[test]

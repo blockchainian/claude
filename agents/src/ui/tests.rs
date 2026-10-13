@@ -1425,3 +1425,199 @@ fn details_markdown_snapshot() {
     assert_eq!(buffer[(6, 9)].fg, Color::Cyan);
     assert_eq!(buffer[(0, 11)].fg, Color::Cyan);
 }
+
+fn log_fixture() -> (View, chrono::DateTime<Utc>) {
+    use crate::sessions::log::{Event, Kind};
+    use chrono::TimeZone;
+    let now = chrono::Local
+        .with_ymd_and_hms(2026, 10, 12, 12, 0, 0)
+        .unwrap()
+        .with_timezone(&Utc);
+    let mut row = session("log", "Task log example", SessionStatus::Working, 0);
+    row.updated_at = now;
+    row.transcript = Some("/tmp/task-log.jsonl".into());
+    row.last_record_at = Some(now - Duration::seconds(10));
+    row.process = Some(crate::model::Process {
+        pid: 1,
+        status: "busy".into(),
+        kind: None,
+        version: None,
+        started_at: None,
+    });
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    view.log_session = Some("log".into());
+    view.log = [
+        (Kind::User, "Please\n  inspect the task", 120, None),
+        (Kind::Model, "I will check the files", 110, None),
+        (Kind::Tool, "Read src/main.rs，Read src/app.rs", 100, Some(90)),
+        (Kind::Error, "Bash failed check", 80, Some(70)),
+        (Kind::Queued, "Also inspect the tests", 60, None),
+        (Kind::Tool, "Bash run a background job *", 50, None),
+        (Kind::Model, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
+        (Kind::Tool, "Bash run tests", 30, None),
+    ].into_iter().map(|(kind, body, age, end)| Event {
+        kind, body: body.into(), started_at: now - Duration::seconds(age),
+        ended_at: end.map(|age| now - Duration::seconds(age)),
+        previous_end: Some(now - Duration::seconds(age + 5)),
+    }).collect();
+    (view, now)
+}
+
+fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) -> String {
+    let area = Rect::new(0, 0, width, height);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    buf.content
+        .chunks(usize::from(width))
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn task_log_tall_running_snapshot() {
+    let (view, now) = log_fixture();
+    assert_eq!(
+        log_screen(&view, 100, 24, now),
+        include_str!("../../tests/ui_snapshots/task_log_running.txt")
+    );
+}
+
+#[test]
+fn task_log_tall_finished_snapshot() {
+    let (mut view, now) = log_fixture();
+    view.log.last_mut().unwrap().ended_at = Some(now - Duration::seconds(5));
+    assert_eq!(
+        log_screen(&view, 100, 24, now),
+        include_str!("../../tests/ui_snapshots/task_log_finished.txt")
+    );
+}
+
+#[test]
+fn task_log_short_terminal_matches_existing_snapshot() {
+    let mut view = fixture();
+    view.rows[view.selected].transcript = Some("/tmp/task-log.jsonl".into());
+    let (log, _) = log_fixture();
+    view.log = log.log;
+    view.log_session = view.selected_id().map(str::to_owned);
+    assert_eq!(
+        screen(&view, 160, 22),
+        include_str!("../../tests/ui_snapshots/live_center_columns.txt")
+    );
+}
+
+#[test]
+fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
+    let (mut view, now) = log_fixture();
+    assert!(
+        log_screen(&view, 100, 24, now)
+            .lines()
+            .nth(22)
+            .unwrap()
+            .ends_with("35s")
+    );
+    assert!(
+        log_screen(&view, 100, 24, now + Duration::seconds(1))
+            .lines()
+            .nth(22)
+            .unwrap()
+            .ends_with("36s")
+    );
+    view.rows[view.selected].process = None;
+    assert!(
+        log_screen(&view, 100, 24, now)
+            .lines()
+            .nth(22)
+            .unwrap()
+            .ends_with("25s")
+    );
+    view.log.last_mut().unwrap().body.push_str(" *");
+    assert!(
+        log_screen(&view, 100, 24, now)
+            .lines()
+            .nth(22)
+            .unwrap()
+            .ends_with("5s")
+    );
+}
+
+#[test]
+fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel() {
+    let (mut view, now) = log_fixture();
+    view.log.pop();
+    assert!(
+        log_screen(&view, 100, 24, now)
+            .lines()
+            .nth(21)
+            .unwrap()
+            .ends_with("40s ago")
+    );
+    view.rows[view.selected].transcript = None;
+    let rendered = log_screen(&view, 100, 24, now);
+    assert!(!rendered.contains("Please inspect"));
+    assert!(!rendered.lines().nth(14).unwrap().contains('─'));
+    assert!(rendered.lines().nth(22).unwrap().contains('│'));
+}
+
+#[test]
+fn task_log_uses_terminal_styles_and_preserves_time_when_truncated() {
+    use crate::sessions::log::Kind;
+    use ratatui::style::Modifier;
+    let (view, now) = log_fixture();
+    let area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    assert_eq!(buf[(2, 15)].fg, style::accent_color());
+    assert!(buf[(2, 15)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(9, 15)].fg, style::accent_color());
+    assert!(buf[(2, 16)].modifier.contains(Modifier::BOLD));
+    assert!(
+        buf[(2, 17)]
+            .modifier
+            .contains(Modifier::DIM | Modifier::BOLD)
+    );
+    assert!(buf[(9, 17)].modifier.contains(Modifier::DIM));
+    assert_eq!(buf[(2, 18)].fg, Color::Red);
+    assert_eq!(buf[(9, 18)].fg, Color::Red);
+    assert_eq!(buf[(2, 19)].fg, style::accent_color());
+    assert!(!buf[(2, 19)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(86, 21)].symbol(), "…");
+    assert!(buf[(97, 21)].modifier.contains(Modifier::DIM));
+    for kind in [Kind::User, Kind::Model, Kind::Queued] {
+        let mut view = log_fixture().0;
+        let event = view.log.last_mut().unwrap();
+        event.kind = kind;
+        assert!(
+            log_screen(&view, 100, 24, now)
+                .lines()
+                .nth(22)
+                .unwrap()
+                .ends_with("30s ago")
+        );
+    }
+}
+
+#[test]
+fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
+    let (mut view, now) = log_fixture();
+    let first = crate::sessions::log::Event {
+        kind: crate::sessions::log::Kind::User,
+        body: "Discarded event".into(),
+        started_at: now - Duration::seconds(180),
+        ended_at: None,
+        previous_end: None,
+    };
+    view.log.insert(0, first);
+    assert!(!log_screen(&view, 100, 24, now).contains("Discarded event"));
+    view.selected = usize::MAX;
+    let rendered = log_screen(&view, 100, 24, now);
+    assert!(!rendered.contains("Please inspect"));
+    assert!(!rendered.lines().nth(14).unwrap().contains('─'));
+}

@@ -4,6 +4,7 @@ mod hints;
 mod hyperlink;
 mod input;
 mod line_truncation;
+mod log;
 mod markdown;
 mod navigation;
 mod render;
@@ -65,6 +66,8 @@ struct DeleteDialog {
 }
 
 pub struct View {
+    pub(crate) log: Vec<crate::sessions::log::Event>,
+    pub(crate) log_session: Option<String>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
     selected: usize,
@@ -116,6 +119,8 @@ impl ProjectGroup {
 impl View {
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
+            log: Vec::new(),
+            log_session: None,
             rows: Vec::new(),
             project_groups: Vec::new(),
             selected: usize::MAX,
