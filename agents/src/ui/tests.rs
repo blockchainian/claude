@@ -1490,7 +1490,7 @@ fn task_log_labels_are_right_aligned_in_seven_columns() {
             .lines()
             .nth(15)
             .unwrap()
-            .starts_with("     User Please")
+            .starts_with("  11:58:00    User Please")
     );
 }
 
@@ -1564,14 +1564,14 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .nth(22)
             .unwrap()
-            .ends_with("35s")
+            .starts_with("  35s")
     );
     assert!(
         log_screen(&view, 100, 25, now + Duration::seconds(1))
             .lines()
             .nth(22)
             .unwrap()
-            .ends_with("36s")
+            .starts_with("  36s")
     );
     view.rows[view.selected].process = None;
     assert!(
@@ -1579,7 +1579,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .nth(22)
             .unwrap()
-            .ends_with("25s")
+            .starts_with("  25s")
     );
     view.log.last_mut().unwrap().body.push_str(" *");
     assert!(
@@ -1587,7 +1587,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .nth(22)
             .unwrap()
-            .ends_with("5s")
+            .starts_with("  5s")
     );
 }
 
@@ -1600,7 +1600,7 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
             .lines()
             .nth(21)
             .unwrap()
-            .ends_with("40s ago")
+            .starts_with("  40s ago")
     );
     view.rows[view.selected].transcript = None;
     let rendered = log_screen(&view, 100, 25, now);
@@ -1625,8 +1625,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (18, Color::Red, true),
         (19, Color::Reset, true),
     ] {
-        let label = &buf[(8, y)];
-        let body = &buf[(10, y)];
+        let label = &buf[(17, y)];
+        let body = &buf[(19, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
         assert_eq!(label.modifier.contains(Modifier::BOLD), bold, "row {y}");
@@ -1637,8 +1637,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         );
     }
     for y in 15..19 {
-        assert!(buf[(97, y)].modifier.contains(Modifier::DIM));
-        assert!(!buf[(97, y)].modifier.contains(Modifier::BOLD));
+        assert!(buf[(2, y)].modifier.contains(Modifier::DIM));
+        assert!(!buf[(2, y)].modifier.contains(Modifier::BOLD));
     }
     for (kind, colour) in [
         (Kind::User, Color::Reset),
@@ -1666,18 +1666,18 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
                     .lines()
                     .nth(19)
                     .unwrap()
-                    .starts_with(&format!("  {expected_label:>7} Also"))
+                    .starts_with(&format!("  1m ago   {expected_label:>7} Also"))
             );
         }
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        for x in [8, 10] {
+        for x in [17, 19] {
             let cell = &buf[(x, 19)];
             assert_eq!(cell.fg, colour);
-            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 8);
+            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 17);
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
-        let time = &buf[(97, 19)];
+        let time = &buf[(2, 19)];
         assert_ne!(time.symbol(), " ");
         assert_eq!(time.fg, colour);
         assert!(time.modifier.contains(Modifier::BOLD));
@@ -1693,8 +1693,8 @@ fn task_log_preserves_time_when_truncated() {
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    assert_eq!(buf[(86, 21)].symbol(), "…");
-    assert!(buf[(97, 21)].modifier.contains(Modifier::DIM));
+    assert_eq!(buf[(97, 21)].symbol(), "…");
+    assert!(buf[(2, 21)].modifier.contains(Modifier::DIM));
     for kind in [
         Kind::User,
         Kind::Model,
@@ -1711,13 +1711,13 @@ fn task_log_preserves_time_when_truncated() {
                 .lines()
                 .nth(22)
                 .unwrap()
-                .ends_with("30s ago")
+                .starts_with("  30s ago")
         );
     }
 }
 
 #[test]
-fn task_log_right_aligns_mixed_width_times() {
+fn task_log_left_aligns_mixed_width_times_and_aligns_labels() {
     use crate::sessions::log::Kind;
     let (mut view, now) = log_fixture();
     view.log.truncate(3);
@@ -1733,9 +1733,9 @@ fn task_log_right_aligns_mixed_width_times() {
             .lines()
             .skip(15)
             .take(3)
-            .map(|line| line.chars().skip(90).collect::<String>())
+            .map(|line| line.chars().skip(2).take(16).collect::<String>())
             .collect::<Vec<_>>(),
-        ["      3s", "12:03:45", " 44m ago"]
+        ["3s          Tool", "12:03:45   Model", "44m ago    Model"]
     );
 }
 
