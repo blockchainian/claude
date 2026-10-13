@@ -367,7 +367,7 @@ fn wrapped_message(text: &str) -> Option<(Kind, String)> {
     let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
     let body = if kind == Kind::Session {
         let name = opening.split_once(" from-name=\"")?.1.split_once('"')?.0;
-        format!("{name}: {body}")
+        format!("({name}) {body}")
     } else {
         body
     };
@@ -837,7 +837,7 @@ mod tests {
             (
                 &events[4..6],
                 Kind::Session,
-                "translate-pdf: translate-pdf pilots ready for review.",
+                "(translate-pdf) translate-pdf pilots ready for review.",
             ),
         ] {
             assert_eq!(pair[0].kind, Kind::QueuedSystem);
