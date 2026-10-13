@@ -81,7 +81,6 @@ struct Adoption {
 struct Shell {
     task_id: String,
     pid: u32,
-    command: String,
     description: String,
     output_path: PathBuf,
 }
@@ -290,7 +289,6 @@ impl Tasks {
             };
             if !finished && liveness.alive(shell.pid)? {
                 session.background.push(BackgroundTask {
-                    waits_for_codex: transcript::waits_for_codex(&shell.command),
                     description: shell.description,
                     output: shell.output_path,
                     started_at,

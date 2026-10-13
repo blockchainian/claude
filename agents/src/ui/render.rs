@@ -626,7 +626,6 @@ impl View {
                     render_background_box(
                         &child.title,
                         elapsed.as_deref(),
-                        Style::default(),
                         vec![body],
                         item_area,
                         &mut content,
@@ -770,15 +769,9 @@ fn render_background(
     buf: &mut Buffer,
 ) {
     let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
-    let description_style = if task.waits_for_codex {
-        style::log_styles(&crate::log::Kind::Model).1
-    } else {
-        Style::default()
-    };
     render_background_box(
         &task.description,
         Some(&elapsed),
-        description_style,
         output.into_iter().map(Line::from).collect(),
         box_area,
         buf,
@@ -788,14 +781,13 @@ fn render_background(
 fn render_background_box(
     description: &str,
     elapsed: Option<&str>,
-    description_style: Style,
     output: Vec<Line<'static>>,
     box_area: Rect,
     buf: &mut Buffer,
 ) {
     // One space keeps the title off the corner glyph on both sides.
     let mut title = truncate_line_with_ellipsis_if_overflow(
-        Line::from(Span::styled(description.to_owned(), description_style)),
+        Line::from(description.to_owned()),
         usize::from(box_area.width.saturating_sub(4)).saturating_sub(
             elapsed.map_or(0, |elapsed| elapsed.chars().count() + " · ".chars().count()),
         ),

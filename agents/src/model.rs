@@ -51,7 +51,6 @@ pub struct Activity {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BackgroundTask {
-    pub waits_for_codex: bool,
     pub description: String,
     pub output: PathBuf,
     pub started_at: DateTime<Utc>,
