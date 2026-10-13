@@ -112,9 +112,142 @@ fn render_event(
         .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
     let body_width = content_width.saturating_sub(label_width);
     let body = event.body.split_whitespace().collect::<Vec<_>>().join(" ");
-    truncate_line_with_ellipsis_if_overflow(Line::from(Span::styled(body, body_style)), body_width)
-        .render(
-            Rect::new(content_x + label_width as u16, area.y, body_width as u16, 1),
-            buf,
+    let body = if matches!(event.kind, Kind::User | Kind::Model | Kind::Agent) {
+        super::markdown::render(&body, usize::MAX)
+            .into_iter()
+            .next()
+            .map(|mut line| {
+                for span in &mut line.spans {
+                    span.style = body_style.patch(span.style);
+                }
+                line
+            })
+            .unwrap_or_else(|| Line::from(Span::styled(body, body_style)))
+    } else {
+        let body = if let Some(path) = &event.path {
+            let path_width = body_width.saturating_sub(body.width() + 1);
+            format!(
+                "{body} {}",
+                super::line_truncation::abbreviate_path(path, path_width)
+            )
+        } else {
+            body
+        };
+        Line::from(Span::styled(body, body_style))
+    };
+    truncate_line_with_ellipsis_if_overflow(body, body_width).render(
+        Rect::new(content_x + label_width as u16, area.y, body_width as u16, 1),
+        buf,
+    );
+}
+
+#[cfg(test)]
+mod log_markdown {
+    use super::*;
+    use ratatui::style::Modifier;
+
+    fn body_buffer(kind: Kind, body: &str, width: u16) -> Buffer {
+        let area = Rect::new(0, 0, width + 17, 1);
+        let mut buffer = Buffer::empty(area);
+        let event = Event {
+            kind,
+            body: body.into(),
+            path: None,
+            started_at: Utc::now(),
+            ended_at: None,
+            previous_end: None,
+        };
+        render_event(&event, "12:00:00", 8, false, area, &mut buffer);
+        buffer
+    }
+
+    fn body_text(buffer: &Buffer) -> String {
+        buffer.content[17..]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    }
+
+    #[test]
+    fn prose_uses_markdown_and_preserves_base_and_inline_styles() {
+        for kind in [Kind::User, Kind::Model, Kind::Agent] {
+            let base = super::super::style::log_styles(&kind).1;
+            let buffer = body_buffer(
+                kind,
+                "plain `code` **bold** [link](https://example.com)",
+                80,
+            );
+            assert_eq!(body_text(&buffer), "plain code bold link");
+            assert_eq!(buffer[(17, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert_eq!(buffer[(23, 0)].fg, Color::Cyan);
+            assert_eq!(buffer[(28, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(buffer[(28, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(33, 0)].fg, Color::Cyan);
+            assert!(buffer[(33, 0)].modifier.contains(Modifier::UNDERLINED));
+        }
+    }
+
+    #[test]
+    fn non_prose_rows_keep_markdown_literal() {
+        for kind in [
+            Kind::Tool,
+            Kind::Session,
+            Kind::QueuedUser,
+            Kind::QueuedSystem,
+            Kind::Error,
+            Kind::Denied,
+        ] {
+            let base = super::super::style::log_styles(&kind).1;
+            let buffer = body_buffer(kind, "  `code`\n **bold** [link](url)  ", 80);
+            assert_eq!(body_text(&buffer), "`code` **bold** [link](url)");
+            assert_eq!(buffer[(17, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(17, 0)].modifier.contains(Modifier::BOLD));
+        }
+    }
+
+    #[test]
+    fn empty_prose_and_zero_body_width_are_safe() {
+        for kind in [Kind::User, Kind::Model, Kind::Agent] {
+            assert_eq!(body_text(&body_buffer(kind.clone(), " \n ", 20)), "");
+            assert_eq!(body_text(&body_buffer(kind, "`code`", 0)), "");
+        }
+    }
+
+    #[test]
+    fn cut_inline_code_keeps_colour_through_the_ellipsis() {
+        for kind in [Kind::User, Kind::Model, Kind::Agent] {
+            let buffer = body_buffer(kind, "ok `abcdefghijklmnop`", 10);
+            assert_eq!(body_text(&buffer), "ok abcdef…");
+            for x in 20..27 {
+                assert_eq!(buffer[(x, 0)].fg, Color::Cyan);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "manual per-frame markdown timing; run with --release --ignored --nocapture"]
+    fn markdown_frame_timing() {
+        use std::{hint::black_box, time::Instant};
+
+        let bodies: Vec<_> = (0..60)
+            .map(|row| {
+                format!(
+                    "Checked `src/session_{row}.rs` and **verified** the update. See [the report](https://example.com/reports/{row}) for details and the remaining checks."
+                )
+            })
+            .collect();
+        assert!(bodies.iter().all(|body| (80..=200).contains(&body.len())));
+        let start = Instant::now();
+        for _ in 0..1000 {
+            for body in &bodies {
+                black_box(super::super::markdown::render(black_box(body), 100));
+            }
+        }
+        eprintln!(
+            "60 rows, width 100, 1000 frames: {:.2} us/frame",
+            start.elapsed().as_secs_f64() * 1_000_000.0 / 1000.0
         );
+    }
 }
