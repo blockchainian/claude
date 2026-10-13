@@ -83,7 +83,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(
             dir.path().join("agents.json"),
-            r#"{"grouping":"model","pinned":["old-id","claude:kept","codex:unknown","claude:"]}"#,
+            r#"{"grouping":"model","pinned":["old-id","claude:kept","codex:kept","unknown:id","claude:"]}"#,
         )
         .unwrap();
         let preferences = Preferences::load(dir.path());
@@ -94,12 +94,15 @@ mod tests {
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
-            ["claude:kept"]
+            ["claude:kept", "codex:kept"]
         );
         preferences.save(dir.path()).unwrap();
         let stored: serde_json::Value =
             serde_json::from_slice(&fs::read(dir.path().join("agents.json")).unwrap()).unwrap();
-        assert_eq!(stored["pinned"], serde_json::json!(["claude:kept"]));
+        assert_eq!(
+            stored["pinned"],
+            serde_json::json!(["claude:kept", "codex:kept"])
+        );
     }
 
     #[test]
