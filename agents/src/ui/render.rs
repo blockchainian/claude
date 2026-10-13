@@ -19,6 +19,29 @@ pub(super) fn line(text: impl Into<Line<'static>>, area: Rect, buf: &mut Buffer)
             .render(row(area, 0, 1), buf);
     }
 }
+fn input_row(prompt: &str, edit: &line_edit::LineEdit, area: Rect) -> (Line<'static>, u16) {
+    let prompt_width = prompt.width();
+    let (text, caret) = edit.window(usize::from(area.width).saturating_sub(prompt_width));
+    (
+        Line::from(vec![
+            prompt.to_owned().cyan().bold(),
+            text.to_owned().into(),
+        ]),
+        (prompt_width + usize::from(caret)).min(usize::from(area.width.saturating_sub(1))) as u16,
+    )
+}
+
+pub(super) fn render_input_row(
+    prompt: &str,
+    edit: &line_edit::LineEdit,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    buf.set_style(area, super::style::active_tab_style());
+    let (text, _) = input_row(prompt, edit, area);
+    line(text, area, buf);
+}
+
 pub(super) struct CenterLayout {
     pub(super) header: Rect,
     pub(super) list: Rect,
@@ -29,11 +52,11 @@ pub(super) struct CenterLayout {
     pub(super) log: Rect,
 }
 impl View {
-    fn editor(&self) -> &line_edit::LineEdit {
+    fn input(&self) -> (&str, &line_edit::LineEdit) {
         if self.rename_target.is_some() {
-            &self.rename
+            ("Rename › ", &self.rename)
         } else {
-            &self.search
+            ("Search › ", &self.search)
         }
     }
 
@@ -103,14 +126,8 @@ impl View {
             && !layout.log.is_empty()
         {
             let input = log::search_input_rect(layout.log.inner(Margin::new(2, 0)));
-            let (_, caret) = self
-                .log_search
-                .query
-                .window(usize::from(input.width.saturating_sub(8)));
-            return Some((
-                input.x + (8 + caret).min(input.width.saturating_sub(1)),
-                input.y,
-            ));
+            let (_, caret) = input_row("Search › ", &self.log_search.query, input);
+            return Some((input.x + caret, input.y));
         }
         if !(self.searching || self.rename_target.is_some())
             || self.delete_dialog.is_some()
@@ -119,15 +136,11 @@ impl View {
         {
             return None;
         }
-        let available = usize::from(layout.search.width).saturating_sub(9);
-        Some((
-            layout.search.x
-                + (9 + usize::from(self.editor().window(available).1))
-                    .min(usize::from(layout.search.width.saturating_sub(1)))
-                    as u16,
-            layout.search.y,
-        ))
+        let (prompt, edit) = self.input();
+        let (_, caret) = input_row(prompt, edit, layout.search);
+        Some((layout.search.x + caret, layout.search.y))
     }
+
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         self.render_at(area, buf, chrono::Utc::now());
     }
@@ -189,23 +202,10 @@ impl View {
             buf,
         );
         if self.searching || self.rename_target.is_some() {
-            buf.set_style(layout.search, super::style::active_tab_style());
-            let available = usize::from(layout.search.width).saturating_sub(9);
-            line(
-                vec![
-                    if self.rename_target.is_some() {
-                        "Rename › "
-                    } else {
-                        "Search › "
-                    }
-                    .cyan()
-                    .bold(),
-                    self.editor().window(available).0.to_owned().into(),
-                ],
-                layout.search,
-                buf,
-            );
+            let (prompt, edit) = self.input();
+            render_input_row(prompt, edit, layout.search, buf);
         }
+
         if let Some(notice) = &self.notice {
             line(notice.clone().dim(), inset(layout.footer), buf);
         } else {

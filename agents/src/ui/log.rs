@@ -26,12 +26,7 @@ impl View {
         if self.log_search.active() && area.height > 1 {
             let input = search_input_rect(area);
             if self.log_search.editing {
-                buf.set_style(input, super::style::active_tab_style());
-                let (query, _) = self
-                    .log_search
-                    .query
-                    .window(usize::from(input.width.saturating_sub(8)));
-                Line::from(format!("search: {query}")).render(input, buf);
+                super::render::render_input_row("Search › ", &self.log_search.query, input, buf);
             } else {
                 Line::from(self.log_search.query.text().to_owned())
                     .dim()

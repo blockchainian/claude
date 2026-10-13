@@ -3226,7 +3226,7 @@ mod log_search {
         })
         .to_vec();
         open(&mut view);
-        assert!(text(&panel(&view, now)).contains("search: "));
+        assert!(text(&panel(&view, now)).contains("Search › "));
         assert!(
             view.center_footer_hints()
                 .to_string()
@@ -3247,11 +3247,11 @@ mod log_search {
         let buf = panel(&view, now);
         assert!(text(&buf).contains("timeout"));
         assert!(buf[(99, 11)].modifier.contains(Modifier::DIM));
-        assert!(!text(&buf).contains("search: "));
+        assert!(!text(&buf).contains("Search › "));
         open(&mut view);
-        assert!(text(&panel(&view, now)).contains("search: time out"));
+        assert!(text(&panel(&view, now)).contains("Search › time out"));
         key(&mut view, KeyCode::Backspace);
-        assert!(text(&panel(&view, now)).contains("search: time ou"));
+        assert!(text(&panel(&view, now)).contains("Search › time ou"));
         key(&mut view, KeyCode::Esc);
         assert!(text(&panel(&view, now)).contains("unrelated"));
     }
@@ -3337,7 +3337,7 @@ mod log_search {
         view.set_selected(index);
         view.log_session = Some("second".into());
         let buf = panel(&view, now);
-        assert!(!text(&buf).contains("search: "));
+        assert!(!text(&buf).contains("Search › "));
         assert_eq!(
             view.center_footer_hints().to_string(),
             super::super::hints::hint_line(&[
@@ -3400,9 +3400,9 @@ mod line_edit {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let y = view.center_layout(area).log.bottom() - 1;
-        assert_eq!(buf[(10, y)].symbol(), "你");
-        assert_eq!(buf[(12, y)].symbol(), "好");
-        assert_eq!(view.cursor_pos(area), Some((14, y)));
+        assert_eq!(buf[(11, y)].symbol(), "你");
+        assert_eq!(buf[(13, y)].symbol(), "好");
+        assert_eq!(view.cursor_pos(area), Some((15, y)));
     }
 
     #[test]
@@ -3418,4 +3418,93 @@ mod line_edit {
             matches!(key(&mut view, KeyCode::Enter), Some(Action::Rename { name, .. }) if name == expected)
         );
     }
+}
+
+mod input_row {
+    use super::*;
+
+    fn rendered_inputs(
+        width: u16,
+        query: &str,
+        left: bool,
+    ) -> (Buffer, Rect, Buffer, Rect, View, View) {
+        let area = Rect::new(3, 2, width, 40);
+        let (mut task, now) = log_fixture();
+        key(&mut task, KeyCode::Char('/'));
+        task.search.set_text(query);
+        let (mut log, _) = log_fixture();
+        log.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        log.log_search.query.set_text(query);
+        if left {
+            task.search.left();
+            log.log_search.query.left();
+        }
+        let mut task_buf = Buffer::empty(area);
+        task.render_at(area, &mut task_buf, now);
+        let mut log_buf = Buffer::empty(area);
+        log.render_at(area, &mut log_buf, now);
+        let task_row = task.center_layout(area).search;
+        let log_row = super::super::log::search_input_rect(
+            log.center_layout(area).log.inner(Margin::new(2, 0)),
+        );
+        (task_buf, task_row, log_buf, log_row, task, log)
+    }
+
+    #[test]
+    fn search_prompt_cells_and_whole_row_style_match() {
+        for width in [14, 24, 88] {
+            let (task, task_row, log, log_row, _, _) = rendered_inputs(width, "你好 query", false);
+            assert_eq!(task_row.x, log_row.x);
+            assert_eq!(task_row.width, log_row.width);
+            for x in 0..task_row.width {
+                let task_cell = &task[(task_row.x + x, task_row.y)];
+                let log_cell = &log[(log_row.x + x, log_row.y)];
+                assert_eq!(task_cell, log_cell, "width={width}, column={x}");
+                assert_eq!(
+                    task_cell.bg,
+                    super::super::style::active_tab_style()
+                        .bg
+                        .unwrap_or(Color::Reset)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn search_carets_follow_the_same_visible_window() {
+        for width in [8, 14, 24, 88] {
+            for query in ["", "abc", "你好 query that scrolls past the edge"] {
+                for left in [false, true] {
+                    let (_, task_row, _, log_row, task, log) = rendered_inputs(width, query, left);
+                    let area = Rect::new(3, 2, width, 40);
+                    let expected = (9 + task
+                        .search
+                        .window(usize::from(task_row.width.saturating_sub(9)))
+                        .1)
+                        .min(task_row.width.saturating_sub(1));
+                    assert_eq!(
+                        task.cursor_pos(area),
+                        Some((task_row.x + expected, task_row.y))
+                    );
+                    assert_eq!(
+                        log.cursor_pos(area),
+                        Some((log_row.x + expected, log_row.y))
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn task_log_search_active_snapshot() {
+    let (mut view, now) = log_fixture();
+    view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    for c in "tests".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    assert_eq!(
+        log_screen(&view, 100, 25, now),
+        include_str!("../../tests/ui_snapshots/task_log_search_active.txt")
+    );
 }
