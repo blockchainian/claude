@@ -1,6 +1,6 @@
 use super::formatting::{format_duration, format_relative_time, tail_lines, visible_suffix};
 use super::hints::hint_line;
-use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
+use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
 use ratatui::widgets::{Block, BorderType, Borders};
 
@@ -295,7 +295,6 @@ impl View {
         let (status, dot) = Self::status(session);
         // Sections top to bottom: title, prompt, the newer of latest activity
         // and last message, background, needs attention, project, branch, model.
-        // Whatever does not fit is cut at the bottom and marked with an ellipsis.
         let suffix = Line::from(vec![" ".into(), dot, " ".into(), status.into()]);
         let title_width = width.saturating_sub(suffix.width());
         let title_style = self.title_style(&session.id).bold();
@@ -334,8 +333,11 @@ impl View {
             "" => "No prompt available.",
             prompt => prompt,
         };
+        let mut bodies = Vec::new();
+        let prompt_start = items.len();
         let prompt_body = super::markdown::render(prompt_text, width);
         items.extend(prompt_body.into_iter().map(Item::from));
+        bodies.push(prompt_start..items.len());
         items.extend(session.queued.iter().map(|queued| {
             let first = super::markdown::render(queued, width)
                 .into_iter()
@@ -358,6 +360,7 @@ impl View {
             if wrapped.len() > 1 {
                 label.push('…');
             }
+            let start = items.len() + 2;
             items.extend([
                 Line::default().into(),
                 Line::from(vec![
@@ -375,6 +378,7 @@ impl View {
                 )
                 .into(),
             ]);
+            bodies.push(start..items.len());
         }
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
             let mut header = vec!["Last message".dim()];
@@ -382,6 +386,7 @@ impl View {
                 header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
             }
             items.extend([Line::default().into(), Line::from(header).into()]);
+            let start = items.len();
             let body_style = style::log_styles(&crate::sessions::log::Kind::Model).1;
             items.extend(
                 super::markdown::render(message, width)
@@ -394,6 +399,7 @@ impl View {
                     })
                     .map(Item::from),
             );
+            bodies.push(start..items.len());
         }
 
         // Claude Code appends an exit marker to the output file when the
@@ -408,22 +414,27 @@ impl View {
                     .is_some_and(|last| last.starts_with("[exited with code"))
             })
             .collect::<Vec<_>>();
+        let mut background = items.len()..items.len();
         if !boxes.is_empty() {
             items.extend([Line::default().into(), "Background".dim().into()]);
+            let start = items.len();
             items.extend(
                 boxes
                     .into_iter()
                     .map(|(task, output)| Item::Background { task, output }),
             );
+            background = start..items.len();
         }
 
         if session.status == SessionStatus::NeedsInput {
+            let start = items.len() + 1;
             items.extend([
                 Line::default().into(),
                 "Needs attention".red().into(),
                 "Open task to review.".dim().into(),
                 "Waiting for your response.".into(),
             ]);
+            bodies.push(start..items.len());
         }
 
         let mut project = vec!["Project".dim()];
@@ -465,6 +476,10 @@ impl View {
             viewport.details_scroll = viewport.details_scroll.min(total.saturating_sub(available));
             viewport.details_scroll
         };
+        if scroll == 0 {
+            budget_details(&mut items, &bodies, background, available, width);
+        }
+        let total = items.iter().map(Item::height).sum::<usize>();
         let content_area = Rect::new(0, 0, area.width, total as u16);
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
@@ -500,6 +515,87 @@ impl View {
             line("…".dim(), last, buf);
         }
     }
+}
+
+/// Share rows equally, returning unused shares from sections that fit.
+pub(super) fn allocate(wants: &[usize], budget: usize) -> Vec<usize> {
+    let mut rows = vec![0; wants.len()];
+    let mut remaining = budget.min(wants.iter().sum());
+    while remaining > 0 {
+        let active = wants
+            .iter()
+            .zip(&rows)
+            .filter(|(want, have)| want > have)
+            .count();
+        let share = remaining / active;
+        let mut extra = remaining % active;
+        for (have, want) in rows.iter_mut().zip(wants) {
+            if *have == *want {
+                continue;
+            }
+            let grant = (share + usize::from(extra > 0)).min(want - *have);
+            extra = extra.saturating_sub(1);
+            *have += grant;
+            remaining -= grant;
+        }
+    }
+    rows
+}
+
+fn budget_details(
+    items: &mut Vec<Item<'_>>,
+    bodies: &[std::ops::Range<usize>],
+    background: std::ops::Range<usize>,
+    available: usize,
+    width: usize,
+) {
+    let wants = bodies.iter().map(|body| body.len()).collect::<Vec<_>>();
+    let floors = wants.iter().filter(|&&want| want > 0).count();
+    let background_rows = items[background.clone()]
+        .iter()
+        .map(Item::height)
+        .sum::<usize>();
+    let static_rows = items.iter().map(Item::height).sum::<usize>()
+        - wants.iter().sum::<usize>()
+        - background_rows;
+    if available < static_rows + floors + usize::from(background_rows > 0) {
+        return;
+    }
+    let mut keep = vec![true; items.len()];
+    let mut kept_background = background_rows;
+    let box_budget = available - static_rows - floors;
+    if background_rows > box_budget {
+        kept_background = 0;
+        let mut end = background.start;
+        for index in background.clone() {
+            let height = items[index].height();
+            if kept_background + height + 1 > box_budget {
+                break;
+            }
+            kept_background += height;
+            end = index + 1;
+        }
+        items[end] = "…".dim().into();
+        keep[end + 1..background.end].fill(false);
+        kept_background += 1;
+    }
+    let allocations = allocate(&wants, available - static_rows - kept_background);
+    for (body, rows) in bodies.iter().zip(allocations) {
+        keep[body.start + rows..body.end].fill(false);
+        if rows > 0 && rows < body.len() {
+            let Item::Text(last) = &mut items[body.start + rows - 1] else {
+                unreachable!("details bodies contain text rows");
+            };
+            *last = truncate_line_to_width(std::mem::take(last), width.saturating_sub(1));
+            last.spans.push("…".dim());
+        }
+    }
+    let mut index = 0;
+    items.retain(|_| {
+        let retain = keep[index];
+        index += 1;
+        retain
+    });
 }
 
 fn line_width_fits(line_width: usize, width: usize) -> bool {

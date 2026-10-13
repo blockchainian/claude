@@ -1180,7 +1180,7 @@ fn details_include_attention_and_clip_messages() {
     let area = Rect::new(0, 0, 38, 22);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
-    assert_eq!(buf[(0, 21)].symbol(), "…");
+    assert_eq!(buf[(0, 21)].symbol(), "M");
     let title_cell = &buf[(0, 0)];
     assert!(title_cell.modifier.contains(ratatui::style::Modifier::BOLD));
     assert_eq!(title_cell.fg, Color::Reset);
@@ -2636,5 +2636,143 @@ fn task_log_event_count_follows_height() {
                     .is_empty()
             );
         }
+    }
+}
+
+mod details_budget {
+    use super::*;
+    use crate::ui::render::allocate;
+
+    #[test]
+    fn everything_fits() {
+        assert_eq!(allocate(&[12, 6, 3], 25), vec![12, 6, 3]);
+    }
+
+    #[test]
+    fn shares_rows_in_display_order() {
+        assert_eq!(allocate(&[12, 6, 3], 8), vec![3, 3, 2]);
+        assert_eq!(allocate(&[1, 12, 3], 10), vec![1, 6, 3]);
+    }
+
+    #[test]
+    fn single_section_uses_budget() {
+        assert_eq!(allocate(&[12], 5), vec![5]);
+    }
+
+    #[test]
+    fn budget_below_floors() {
+        for budget in 0..3 {
+            let rows = allocate(&[12, 6, 3], budget);
+            assert!(rows.iter().all(|&rows| rows <= 1));
+            assert_eq!(rows.iter().sum::<usize>(), budget);
+        }
+        assert_eq!(allocate(&[0, 12, 0], 2), vec![0, 2, 0]);
+    }
+
+    #[test]
+    fn background_gets_space_before_bodies_and_cuts_whole_boxes() {
+        use std::io::Write;
+        let mut output = tempfile::NamedTempFile::new().unwrap();
+        writeln!(output, "Running checks").unwrap();
+        let mut row = session(
+            "background-budget",
+            "Background task",
+            SessionStatus::NeedsInput,
+            0,
+        );
+        row.prompt = "Prompt text\n\n".repeat(12);
+        row.queued = vec!["Queued work".into()];
+        for i in 0..8 {
+            row.background.push(crate::model::BackgroundTask {
+                description: format!("Check {i}"),
+                output: output.path().into(),
+                started_at: row.updated_at,
+                waits_for_codex: false,
+            });
+        }
+        let mut view = View::default();
+        view.set_sessions(vec![row], false);
+        let rows = panel(&view);
+        assert!(rows.iter().any(|line| line == "Queued work"));
+        assert!(
+            rows.iter()
+                .any(|line| line.starts_with("╭") && line.contains("Check 2"))
+        );
+        assert!(!rows.iter().any(|line| line.contains("Check 3")));
+        assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
+        assert!(rows[23].starts_with("Model:"));
+    }
+
+    #[test]
+    fn tiny_panel_keeps_plain_bottom_cut() {
+        let mut row = session("tiny", "Tiny task", SessionStatus::NeedsInput, 0);
+        row.prompt = "First row\n\nSecond row\n\nThird row".into();
+        let mut view = View::default();
+        view.set_sessions(vec![row], false);
+        let area = Rect::new(0, 0, 120, 6);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, Utc::now());
+        assert_eq!(buf[(0, 3)].symbol(), "F");
+        assert_eq!(buf[(0, 5)].symbol(), "…");
+    }
+
+    fn panel(view: &View) -> Vec<String> {
+        let area = Rect::new(0, 0, 120, 24);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, Utc::now());
+        buf.content
+            .chunks(120)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rest_budget_and_wheel_natural_stack() {
+        let mut row = session("budget", "Budget task", SessionStatus::NeedsInput, 0);
+        row.prompt = (1..=12)
+            .map(|i| format!("Prompt row {i}"))
+            .collect::<Vec<_>>()
+            .join("  \n");
+        row.last_message = Some(
+            (1..=6)
+                .map(|i| format!("Reply row {i}"))
+                .collect::<Vec<_>>()
+                .join("  \n"),
+        );
+        assert_eq!(super::super::markdown::render(&row.prompt, 120).len(), 12);
+        assert_eq!(
+            super::super::markdown::render(row.last_message.as_ref().unwrap(), 120).len(),
+            6
+        );
+        let mut view = View::default();
+        view.set_sessions(vec![row], false);
+        let rest = panel(&view);
+        for header in ["Prompt", "Last message", "Needs attention"] {
+            assert!(rest.iter().any(|line| line == header), "{header}: {rest:?}");
+        }
+        assert!(!rest[23].is_empty());
+        assert_ne!(rest[23], "…");
+        let message = rest.iter().position(|line| line == "Last message").unwrap();
+        assert!(
+            rest[..message]
+                .iter()
+                .rev()
+                .find(|line| !line.is_empty())
+                .unwrap()
+                .ends_with('…')
+        );
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 0));
+        assert_eq!(view.viewport.borrow().details_scroll, 1);
+        let scrolled = panel(&view);
+        assert_eq!(scrolled[23], "…");
+        assert_eq!(scrolled[2], "Prompt row 1");
+        view.handle_mouse(mouse(MouseEventKind::ScrollUp, 0, 0));
+        assert_eq!(panel(&view), rest);
     }
 }
