@@ -1,5 +1,6 @@
 //! Session sources: the live registry and transcripts.
 
+mod background;
 pub(crate) mod log;
 mod registry;
 mod subagents;
@@ -201,6 +202,7 @@ pub struct ClaudeProvider {
     config_dir: PathBuf,
     index: HashMap<String, Transcript>,
     summaries: HashMap<PathBuf, CachedSummary>,
+    background: background::Tasks,
 }
 
 impl ClaudeProvider {
@@ -209,6 +211,7 @@ impl ClaudeProvider {
             config_dir,
             index: HashMap::new(),
             summaries: HashMap::new(),
+            background: background::Tasks::default(),
         }
     }
 
@@ -244,6 +247,7 @@ impl ClaudeProvider {
                 .as_deref()
                 .expect("live entries have session ids");
             let (summary, path, modified) = self.summary(id);
+            self.background.observe(id, &summary);
             let custom_title = summary.custom_title.clone();
             let has_title = custom_title.is_some() || summary.ai_title.is_some();
             let mut session = session(id.to_owned(), summary, path, modified);
@@ -296,7 +300,14 @@ impl ClaudeProvider {
         let has_more = inactive.len() > shown;
         for (id, _) in inactive.into_iter().take(shown) {
             let (summary, path, modified) = self.summary(&id);
+            self.background.observe(&id, &summary);
             sessions.push(session(id, summary, path, modified));
+        }
+        if let Err(error) =
+            self.background
+                .refresh(&self.config_dir, &mut sessions, &background::Processes)
+        {
+            eprintln!("agents: Claude background tasks: {error}");
         }
         let mut paths: HashSet<PathBuf> =
             self.index.values().map(|file| file.path.clone()).collect();

@@ -1,0 +1,343 @@
+use super::*;
+use chrono::Utc;
+use std::cell::Cell;
+use std::os::unix::fs::symlink;
+
+const RECORDS: &str = include_str!("../../../tests/fixtures/background/records.jsonl");
+
+struct Observed {
+    held: HashSet<PathBuf>,
+    alive: HashSet<u32>,
+    scans: Cell<usize>,
+}
+impl Liveness for Observed {
+    fn held_outputs(&self) -> io::Result<HashSet<PathBuf>> {
+        self.scans.set(self.scans.get() + 1);
+        Ok(self.held.clone())
+    }
+    fn alive(&self, pid: u32) -> io::Result<bool> {
+        Ok(self.alive.contains(&pid))
+    }
+}
+
+#[test]
+fn files_control_liveness_and_descriptions_survive_transcript_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut tasks = Tasks::new(dir.path().join("tasks-root"));
+    let config = dir.path().join("config");
+    let transcript = dir.path().join("session.jsonl");
+    let records: Vec<serde_json::Value> = RECORDS
+        .lines()
+        .map(|s| serde_json::from_str(s).unwrap())
+        .collect();
+    let id = records
+        .iter()
+        .find_map(|r| r["toolUseResult"]["backgroundTaskId"].as_str())
+        .unwrap();
+    let mut sessions = vec![super::super::session(
+        "session".into(),
+        transcript::Summary::default(),
+        Some(transcript.clone()),
+        Utc::now(),
+    )];
+    sessions[0].cwd = PathBuf::from("/tmp/project.with punctuation");
+    let directory = tasks.directory(&sessions[0]);
+    fs::create_dir_all(&directory).unwrap();
+    let running = directory.join(format!("{id}.output"));
+    fs::write(
+        &running,
+        include_bytes!("../../../tests/fixtures/background/running.output"),
+    )
+    .unwrap();
+    for (name, fixture) in [
+        ("finished", "exited.output"),
+        ("killed", "killed.output"),
+        ("detached", "detached.output"),
+    ] {
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/background")
+                .join(fixture),
+            directory.join(format!("{name}.output")),
+        )
+        .unwrap();
+    }
+    let orphan = directory.join("orphan.output");
+    fs::write(&orphan, b"").unwrap();
+    let foreground = directory.join("foreground.output");
+    fs::write(&foreground, b"").unwrap();
+    symlink(&running, directory.join("agent.output")).unwrap();
+    // A complete current turn creates the existing queue quiet point after the task.
+    let quiet = include_str!("../../../tests/fixtures/background/quiet-turn.jsonl");
+    let foreground_records = include_str!("../../../tests/fixtures/background/foreground.jsonl");
+    fs::write(
+        &transcript,
+        format!(
+            "{RECORDS}{foreground_records}{}\n{quiet}",
+            " ".repeat(150_000)
+        ),
+    )
+    .unwrap();
+    let mut observed = Observed {
+        held: [running.clone(), foreground].into(),
+        alive: HashSet::new(),
+        scans: Cell::new(0),
+    };
+    let held = std::mem::take(&mut observed.held);
+    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    assert!(
+        sessions[0].background.is_empty(),
+        "unheld real background output is an orphan"
+    );
+    assert_eq!(tasks.transcript_bytes, 0);
+    observed.held = held;
+    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    assert_eq!(sessions[0].background.len(), 1);
+    assert_eq!(sessions[0].background[0].output, running);
+    let first = sessions[0].background[0].clone();
+    let cost = tasks.transcript_bytes;
+    assert!(cost > 0);
+    // Even a stamp change must not re-read the description of a matched task.
+    fs::write(&transcript, format!("{RECORDS}{quiet}{quiet}")).unwrap();
+    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    assert_eq!(sessions[0].background, [first]);
+    // Neither matched tasks nor foreground outputs are scanned again on a stamp change.
+    let after_change = tasks.transcript_bytes;
+    assert_eq!(after_change, cost);
+    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    assert_eq!(tasks.transcript_bytes, after_change);
+    assert_eq!(observed.scans.get(), 4);
+    let tails = tasks.output_bytes;
+    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    assert_eq!(tasks.output_bytes, tails);
+    fs::write(
+        &running,
+        include_bytes!("../../../tests/fixtures/background/exited.output"),
+    )
+    .unwrap();
+    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    assert!(sessions[0].background.is_empty());
+    // A finished file never becomes a candidate again, even after replacement.
+    fs::write(&running, b"").unwrap();
+    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    assert!(sessions[0].background.is_empty());
+}
+
+#[test]
+fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut tasks = Tasks::new(dir.path().join("tasks"));
+    let mut adopt: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/background/adopt.json"
+    ))
+    .unwrap();
+    let pid = adopt["shells"][0]["pid"].as_u64().unwrap() as u32;
+    let output = dir.path().join("adopted.output");
+    fs::write(&output, b"").unwrap();
+    adopt["shells"][0]["outputPath"] = output.to_str().unwrap().into();
+    fs::create_dir_all(dir.path().join("jobs/50517e58")).unwrap();
+    fs::write(
+        dir.path().join("jobs/50517e58/adopt.json"),
+        adopt.to_string(),
+    )
+    .unwrap();
+    let mut session = super::super::session(
+        "50517e58-041e-49c8-95e0-a41879199991".into(),
+        transcript::Summary::default(),
+        None,
+        Utc::now(),
+    );
+    session.process = Some(crate::model::Process {
+        pid: 1,
+        label: Some("bg".into()),
+        started_at: None,
+    });
+    let mut sessions = [session];
+    let observed = Observed {
+        held: HashSet::new(),
+        alive: [pid].into(),
+        scans: Cell::new(0),
+    };
+    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    assert_eq!(sessions[0].background.len(), 1);
+    assert_eq!(
+        sessions[0].background[0].description,
+        adopt["shells"][0]["description"]
+    );
+    assert_eq!(observed.scans.get(), 0);
+    let dead = Observed {
+        alive: HashSet::new(),
+        ..observed
+    };
+    tasks.refresh(dir.path(), &mut sessions, &dead).unwrap();
+    assert!(sessions[0].background.is_empty());
+    fs::write(
+        output,
+        include_bytes!("../../../tests/fixtures/background/detached.output"),
+    )
+    .unwrap();
+    tasks
+        .refresh(
+            dir.path(),
+            &mut sessions,
+            &Observed {
+                alive: [pid].into(),
+                ..dead
+            },
+        )
+        .unwrap();
+    assert!(sessions[0].background.is_empty());
+}
+
+#[test]
+fn slug_matches_claudes_utf16_replacement_and_long_path_hash() {
+    assert_eq!(project_slug("/tmp/a.b_中😀"), "-tmp-a-b----");
+    let cwd = format!("/{}", "a".repeat(210));
+    assert_eq!(project_slug(&cwd), format!("-{}-djaaup", "a".repeat(199)));
+}
+
+#[test]
+fn notifications_hide_cached_tasks_and_background_results_retry_foreground_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut tasks = Tasks::new(dir.path().join("root"));
+    let path = dir.path().join("session.jsonl");
+    let mut sessions = [super::super::session(
+        "session".into(),
+        transcript::Summary::default(),
+        Some(path.clone()),
+        Utc::now(),
+    )];
+    let records: Vec<serde_json::Value> = RECORDS
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let id = records[1]["toolUseResult"]["backgroundTaskId"]
+        .as_str()
+        .unwrap();
+    let directory = tasks.directory(&sessions[0]);
+    fs::create_dir_all(&directory).unwrap();
+    let output = directory.join(format!("{id}.output"));
+    fs::write(&output, b"").unwrap();
+    // Before the background tool result arrives, this is a foreground shell.
+    fs::write(&path, format!("{}\n", records[0])).unwrap();
+    let observed = Observed {
+        held: [output].into(),
+        alive: HashSet::new(),
+        scans: Cell::new(0),
+    };
+    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    assert!(sessions[0].background.is_empty());
+    fs::write(&path, RECORDS).unwrap();
+    let summary = transcript::read(&path, fs::metadata(&path).unwrap().len()).unwrap();
+    tasks.observe("session", &summary);
+    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    assert_eq!(sessions[0].background.len(), 1);
+    let mut completed = transcript::Summary::default();
+    completed.completed_background.insert(id.to_owned());
+    tasks.observe("session", &completed);
+    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    assert!(sessions[0].background.is_empty());
+}
+
+#[test]
+fn symlink_task_outputs_are_not_candidates() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut tasks = Tasks::new(dir.path().join("root"));
+    let mut sessions = [super::super::session(
+        "session".into(),
+        transcript::Summary::default(),
+        None,
+        Utc::now(),
+    )];
+    let directory = tasks.directory(&sessions[0]);
+    fs::create_dir_all(&directory).unwrap();
+    let target = dir.path().join("subagent.jsonl");
+    fs::write(&target, b"").unwrap();
+    let link = directory.join("agent.output");
+    symlink(target, &link).unwrap();
+    let observed = Observed {
+        held: [link].into(),
+        alive: HashSet::new(),
+        scans: Cell::new(0),
+    };
+    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    assert!(sessions[0].background.is_empty());
+    assert_eq!(observed.scans.get(), 0);
+}
+
+/// Explicit integration probe; ordinary unit tests use injected observations.
+#[test]
+#[ignore = "starts a real sleep and invokes lsof/kill; run explicitly"]
+fn real_sleep_output_liveness_and_refresh_cost() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut tasks = Tasks::new(fs::canonicalize(dir.path()).unwrap().join("root"));
+    let path = dir.path().join("session.jsonl");
+    fs::write(
+        &path,
+        format!(
+            "{RECORDS}{}",
+            include_str!("../../../tests/fixtures/background/quiet-turn.jsonl")
+        ),
+    )
+    .unwrap();
+    let records: Vec<serde_json::Value> = RECORDS
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let id = records[1]["toolUseResult"]["backgroundTaskId"]
+        .as_str()
+        .unwrap();
+    let mut sessions = [super::super::session(
+        "session".into(),
+        transcript::Summary::default(),
+        Some(path),
+        Utc::now(),
+    )];
+    let directory = tasks.directory(&sessions[0]);
+    fs::create_dir_all(&directory).unwrap();
+    let output = directory.join(format!("{id}.output"));
+    let file = File::create(&output).unwrap();
+    struct Sleep(std::process::Child);
+    impl Drop for Sleep {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut sleep = Sleep(
+        Command::new("sleep")
+            .arg("20")
+            .stdout(file.try_clone().unwrap())
+            .stderr(file)
+            .spawn()
+            .unwrap(),
+    );
+    let result = (|| -> io::Result<()> {
+        assert!(Processes.alive(sleep.0.id())?);
+        let first = std::time::Instant::now();
+        tasks.refresh(dir.path(), &mut sessions, &Processes)?;
+        let first_elapsed = first.elapsed();
+        assert_eq!(sessions[0].background.len(), 1);
+        let before = tasks.transcript_bytes;
+        let tail_before = tasks.output_bytes;
+        let next = std::time::Instant::now();
+        tasks.refresh(dir.path(), &mut sessions, &Processes)?;
+        eprintln!(
+            "first={first_elapsed:?} transcript_bytes={before}; steady={:?} transcript_bytes={} output_bytes={}",
+            next.elapsed(),
+            tasks.transcript_bytes - before,
+            tasks.output_bytes - tail_before
+        );
+        assert_eq!(tasks.transcript_bytes, before);
+        assert_eq!(tasks.output_bytes, tail_before);
+        Ok(())
+    })();
+    sleep.0.kill().unwrap();
+    sleep.0.wait().unwrap();
+    result.unwrap();
+    assert!(!Processes.alive(sleep.0.id()).unwrap());
+    tasks
+        .refresh(dir.path(), &mut sessions, &Processes)
+        .unwrap();
+    assert!(sessions[0].background.is_empty());
+}

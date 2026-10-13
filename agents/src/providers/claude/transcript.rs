@@ -25,6 +25,8 @@ pub(super) struct Summary {
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
     pub background: Vec<BackgroundTask>,
+    pub completed_background: HashSet<String>,
+    pub background_ids: HashSet<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
@@ -206,30 +208,16 @@ fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
         .collect()
 }
 
-fn background_result(content: &str) -> Option<(String, PathBuf)> {
-    let task = if let Some(rest) = content.strip_prefix("Command running in background with ID: ") {
-        rest.split_once('.')?.0
-    } else {
-        content
-            .strip_prefix("Command was moved to the background (ID: ")?
-            .split_once(')')?
-            .0
-    };
-    let output = content.split_once("Output is being written to: ")?.1;
-    let output = output.split_once(". ").map_or(output, |(path, _)| path);
-    let output = output.strip_suffix('.').unwrap_or(output);
-    (!task.is_empty() && !output.is_empty()).then(|| (task.to_owned(), PathBuf::from(output)))
-}
-
 #[derive(Default)]
 struct Background {
     completed: HashSet<String>,
     pending: HashMap<String, (String, PathBuf)>,
-    tasks: Vec<BackgroundTask>,
+    tasks: Vec<(String, BackgroundTask)>,
+    requested: HashMap<String, PathBuf>,
 }
 
 impl Background {
-    fn record(&mut self, record: &Value, at: Option<DateTime<Utc>>, pairing_only: bool) {
+    fn record(&mut self, record: &Value, at: Option<DateTime<Utc>>) {
         if record["type"] == "attachment" {
             let attachment = &record["attachment"];
             if attachment["type"] == "queued_command"
@@ -239,53 +227,102 @@ impl Background {
                 && let Some((task, _)) = rest.split_once("</task-id>")
             {
                 self.completed.insert(task.to_owned());
+                self.requested.remove(task);
+                self.pending.retain(|_, (id, _)| id != task);
             }
         }
         let Some(blocks) = record["message"]["content"].as_array() else {
             return;
         };
         for block in blocks.iter().rev() {
-            if !pairing_only
-                && record["type"] == "user"
+            if record["type"] == "user"
                 && block["type"] == "tool_result"
                 && let Some(id) = block["tool_use_id"].as_str()
-                && let Some(content) = block["content"].as_str()
-                && let Some((task, output)) = background_result(content)
-                && !self.completed.contains(&task)
+                && let Some(task) = record["toolUseResult"]["backgroundTaskId"].as_str()
+                && !self.completed.contains(task)
+                && let Some(output) = self.requested.remove(task)
             {
-                self.pending.insert(id.to_owned(), (task, output));
+                self.pending
+                    .insert(id.to_owned(), (task.to_owned(), output));
             }
+
             if record["type"] == "assistant"
                 && block["type"] == "tool_use"
                 && block["name"] == "Bash"
                 && let Some(id) = block["id"].as_str()
-                && let Some((_, output)) = self.pending.remove(id)
+                && let Some((task, output)) = self.pending.remove(id)
                 && let Some(started_at) = at
                 && let Some(description) = block["input"]["description"]
                     .as_str()
                     .filter(|description| !description.trim().is_empty())
                     .or_else(|| block["input"]["command"].as_str()?.lines().next())
             {
-                self.tasks.push(BackgroundTask {
-                    waits_for_codex: block["input"]["command"]
-                        .as_str()
-                        .and_then(|command| shell_words::split(command).ok())
-                        .is_some_and(|argv| {
-                            argv.get(1).is_some_and(|path| {
-                                Path::new(path).ends_with("codex-manager/manager.mjs")
-                            }) && argv.get(2).is_some_and(|argument| argument == "await")
-                        }),
-                    description: description.to_owned(),
-                    output,
-                    started_at,
-                });
+                self.tasks.push((
+                    task,
+                    BackgroundTask {
+                        waits_for_codex: block["input"]["command"]
+                            .as_str()
+                            .is_some_and(waits_for_codex),
+                        description: description.to_owned(),
+                        output,
+                        started_at,
+                    },
+                ));
             }
         }
     }
+}
 
-    fn finish(mut self) -> Vec<BackgroundTask> {
-        self.tasks.reverse();
-        self.tasks
+pub(super) fn waits_for_codex(command: &str) -> bool {
+    shell_words::split(command).ok().is_some_and(|argv| {
+        argv.get(1)
+            .is_some_and(|path| Path::new(path).ends_with("codex-manager/manager.mjs"))
+            && argv.get(2).is_some_and(|argument| argument == "await")
+    })
+}
+
+/// Resolve only file-confirmed running ids, continuing through queue quiet points.
+pub(super) fn background_tasks(
+    path: &Path,
+    len: u64,
+    requested: &HashMap<String, PathBuf>,
+) -> io::Result<(HashMap<String, BackgroundTask>, u64)> {
+    let mut file = CountingReader {
+        inner: File::open(path)?,
+        bytes: 0,
+    };
+    let start = len.saturating_sub(CHUNK);
+    file.seek(SeekFrom::Start(start))?;
+    let mut tail = Vec::new();
+    (&mut file).take(len - start).read_to_end(&mut tail)?;
+    let background = read_messages(
+        &mut file,
+        start,
+        tail,
+        &mut Summary::default(),
+        false,
+        Background {
+            requested: requested.clone(),
+            ..Background::default()
+        },
+    )?;
+    Ok((background.tasks.into_iter().collect(), file.bytes))
+}
+
+struct CountingReader<R> {
+    inner: R,
+    bytes: u64,
+}
+impl<R: Read> Read for CountingReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let count = self.inner.read(buffer)?;
+        self.bytes += count as u64;
+        Ok(count)
+    }
+}
+impl<R: Seek> Seek for CountingReader<R> {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(position)
     }
 }
 
@@ -337,7 +374,9 @@ fn read_messages(
     bytes: Vec<u8>,
     summary: &mut Summary,
     sidechains: bool,
-) -> io::Result<()> {
+    mut background: Background,
+) -> io::Result<Background> {
+    let descriptions_only = !background.requested.is_empty();
     let mut prompt_found = false;
     let mut turn_messages = 0;
     // An absorbed queued prompt waits for its `remove` record, which carries
@@ -347,8 +386,6 @@ fn read_messages(
     let mut next_user = None;
     let mut dequeued_user = None;
     let mut quiet_point = false;
-    let mut background = Background::default();
-    let mut pairing_only = false;
     walk_records(file, start, bytes, sidechains, |record| {
         if !quiet_point {
             if record["type"] == "user" {
@@ -370,7 +407,13 @@ fn read_messages(
             .as_str()
             .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
             .map(|value| value.with_timezone(&Utc));
-        background.record(&record, at, pairing_only);
+        background.record(&record, at);
+        if descriptions_only && background.requested.is_empty() && background.pending.is_empty() {
+            return false;
+        }
+        if let Some(id) = record["toolUseResult"]["backgroundTaskId"].as_str() {
+            summary.background_ids.insert(id.to_owned());
+        }
         if !prompt_found && record["type"] == "assistant" {
             turn_messages += 1;
         }
@@ -435,19 +478,16 @@ fn read_messages(
             && summary.last_message.is_some()
             && summary.activity.is_some()
             && quiet_point
+            && background.requested.is_empty()
+            && background.pending.is_empty()
         {
-            // Tasks before this existing stopping point are intentionally invisible.
-            // Only an already-seen result may extend the walk to its tool use.
-            pairing_only = true;
-            if background.pending.is_empty() {
-                return false;
-            }
+            return false;
         }
         true
     })?;
-    summary.background = background.finish();
+    summary.completed_background = background.completed.clone();
     summary.queued = queued_prompts(operations);
-    Ok(())
+    Ok(background)
 }
 
 pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
@@ -495,9 +535,23 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
         summary.record_metadata(&record);
     }
     if len <= 2 * CHUNK {
-        read_messages(&mut file, 0, head, &mut summary, false)?;
+        read_messages(
+            &mut file,
+            0,
+            head,
+            &mut summary,
+            false,
+            Background::default(),
+        )?;
     } else {
-        read_messages(&mut file, len - CHUNK - 1, tail, &mut summary, false)?;
+        read_messages(
+            &mut file,
+            len - CHUNK - 1,
+            tail,
+            &mut summary,
+            false,
+            Background::default(),
+        )?;
     }
     Ok(summary)
 }
@@ -534,6 +588,7 @@ pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io:
         bytes,
         &mut summary,
         true,
+        Background::default(),
     )?;
     Ok(summary)
 }
@@ -623,7 +678,21 @@ mod tests {
     }
 
     fn summary(file: &tempfile::NamedTempFile) -> Summary {
-        read(file.path(), file.as_file().metadata().unwrap().len()).unwrap()
+        let len = file.as_file().metadata().unwrap().len();
+        let mut summary = read(file.path(), len).unwrap();
+        let bytes = std::fs::read(file.path()).unwrap();
+        let requested = records(&bytes)
+            .filter_map(|record| {
+                let id = record["toolUseResult"]["backgroundTaskId"]
+                    .as_str()?
+                    .to_owned();
+                Some((id.clone(), PathBuf::from(format!("/tmp/x/{id}.output"))))
+            })
+            .collect();
+        let (tasks, _) = background_tasks(file.path(), len, &requested).unwrap();
+        summary.background = tasks.into_values().collect();
+        summary.background.sort_by(|a, b| a.output.cmp(&b.output));
+        summary
     }
 
     fn background_start(file: &mut impl Write, task: &str, description: Option<&str>, moved: bool) {
@@ -664,7 +733,7 @@ mod tests {
             file,
             "{}",
             serde_json::json!({
-                "type": "user", "message": {"content": [{"type": "tool_result",
+                "type": "user", "toolUseResult": {"backgroundTaskId": task}, "message": {"content": [{"type": "tool_result",
                     "tool_use_id": format!("tool-{task}"), "content": text}]}
             })
         )
@@ -768,11 +837,18 @@ mod tests {
     }
 
     #[test]
-    fn background_tasks_before_existing_quiet_point_are_not_scanned() {
+    fn background_tasks_before_existing_quiet_point_are_found() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         background_start(&mut file, "b1", Some("Earlier task"), false);
         idle_prompt(&mut file);
-        assert!(summary(&file).background.is_empty());
+        let requested = HashMap::from([("b1".to_owned(), PathBuf::from("/tmp/x/b1.output"))]);
+        let (tasks, _) = background_tasks(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            &requested,
+        )
+        .unwrap();
+        assert_eq!(tasks.len(), 1);
     }
 
     #[test]
@@ -785,9 +861,16 @@ mod tests {
         file.write_all(&task[..newline]).unwrap();
         idle_prompt(&mut file);
         file.write_all(&task[newline..]).unwrap();
-        let tasks = summary(&file).background;
+        let requested =
+            HashMap::from([("pending".to_owned(), PathBuf::from("/tmp/x/pending.output"))]);
+        let (tasks, _) = background_tasks(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            &requested,
+        )
+        .unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].description, "Pair across boundary");
+        assert_eq!(tasks["pending"].description, "Pair across boundary");
     }
 
     #[test]
