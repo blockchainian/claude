@@ -10,6 +10,7 @@ use crate::terminal_background;
 use crate::ui::View;
 use crossterm::event::Event;
 use crossterm::event::KeyEvent;
+use crossterm::event::Theme;
 use crossterm::terminal;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -124,14 +125,7 @@ impl App {
                 .ok()
                 .flatten()
                 .is_some_and(terminal_background::is_light);
-            crate::ui::set_light_background(light);
-            crate::theme::use_default_accents(light);
-            if let Some(path) = self.preferences.theme.clone()
-                && let Err(error) = crate::theme::use_theme_file(&path)
-            {
-                self.view
-                    .set_notice(Some(format!("Theme not loaded: {error}")));
-            }
+            self.apply_background(light);
             let result = self.event_loop(&mut terminal);
             leave_terminal(terminal)?;
             result?;
@@ -176,6 +170,10 @@ impl App {
                 POLLING_INTERVAL
             },
         );
+        crossterm::execute!(
+            terminal.backend_mut(),
+            crossterm::event::EnableThemeChangeReports
+        )?;
         self.refresh();
         loop {
             if schedule.due(Instant::now()) {
@@ -201,10 +199,11 @@ impl App {
                 Instant::now(),
                 self.view.has_background() || self.log_ticks(),
             )) {
-                Ok(Input::Terminal(event)) => match event? {
-                    Event::Key(key) if self.handle_key(key) => return Ok(()),
-                    _ => {}
-                },
+                Ok(Input::Terminal(event)) => {
+                    if self.handle_event(event?) {
+                        return Ok(());
+                    }
+                }
                 Ok(Input::Filesystem(Ok(()))) if watcher.is_some() => {
                     schedule.changed(Instant::now());
                 }
@@ -219,6 +218,28 @@ impl App {
                     return Err(io::Error::other("event readers disconnected"));
                 }
             }
+        }
+    }
+
+    fn apply_background(&mut self, light: bool) {
+        crate::ui::set_light_background(light);
+        crate::theme::use_default_accents(light);
+        if let Some(path) = &self.preferences.theme
+            && let Err(error) = crate::theme::use_theme_file(path)
+        {
+            self.view
+                .set_notice(Some(format!("Theme not loaded: {error}")));
+        }
+    }
+
+    fn handle_event(&mut self, event: Event) -> bool {
+        match event {
+            Event::Key(key) => self.handle_key(key),
+            Event::ThemeChanged(theme) => {
+                self.apply_background(theme == Theme::Light);
+                false
+            }
+            _ => false,
         }
     }
 
@@ -434,9 +455,14 @@ fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
 }
 
 fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+    let reports = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::event::DisableThemeChangeReports
+    );
     terminal::disable_raw_mode()?;
     crossterm::execute!(terminal.backend_mut(), terminal::LeaveAlternateScreen)?;
-    terminal.show_cursor()
+    terminal.show_cursor()?;
+    reports
 }
 
 pub fn config_dir_exists(config_dir: &Path) -> bool {
@@ -485,6 +511,49 @@ mod tests {
             command.get_current_dir(),
             Some(app.sessions[0].cwd.as_path())
         );
+    }
+
+    #[test]
+    fn terminal_theme_events_update_background_and_accents() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let (_dir, mut app) = fixture();
+        crate::ui::set_light_background(false);
+        crate::theme::use_default_accents(false);
+        let dark = crate::theme::color_for_id("theme-test");
+        assert!(!app.handle_event(Event::ThemeChanged(Theme::Light)));
+        assert!(crate::ui::light_background());
+        let light = crate::theme::color_for_id("theme-test");
+        assert_ne!(light, dark);
+        assert!(!app.handle_event(Event::ThemeChanged(Theme::Dark)));
+        assert!(!crate::ui::light_background());
+        assert_eq!(crate::theme::color_for_id("theme-test"), dark);
+
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            file.path(),
+            r##"<?xml version="1.0"?>
+<plist version="1.0"><dict><key>settings</key><array>
+<dict><key>scope</key><string>keyword</string><key>settings</key>
+<dict><key>foreground</key><string>#123456</string></dict></dict>
+</array></dict></plist>"##,
+        )
+        .unwrap();
+        app.preferences.theme = Some(file.path().to_owned());
+        app.apply_background(true);
+        assert!(crate::ui::light_background());
+        assert_eq!(
+            crate::theme::color_for_id("theme-test"),
+            ratatui::style::Color::Rgb(0x12, 0x34, 0x56)
+        );
+        for theme in [Theme::Light, Theme::Dark] {
+            assert!(!app.handle_event(Event::ThemeChanged(theme)));
+            assert_eq!(crate::ui::light_background(), theme == Theme::Light);
+            assert_eq!(
+                crate::theme::color_for_id("theme-test"),
+                ratatui::style::Color::Rgb(0x12, 0x34, 0x56)
+            );
+        }
+        crate::theme::use_default_accents(false);
     }
 
     #[test]

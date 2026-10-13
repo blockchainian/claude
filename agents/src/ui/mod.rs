@@ -12,6 +12,8 @@ mod rows;
 mod selection_tabs;
 mod shortcut_help;
 mod style;
+#[cfg(test)]
+pub use style::light_background;
 pub use style::set_light_background;
 
 use crate::model::{Action, Grouping, Session, SessionStatus};

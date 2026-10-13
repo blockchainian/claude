@@ -904,6 +904,7 @@ fn delete_live_rows_open_the_dialog_and_ignore_show_more() {
 
 #[test]
 fn live_center_delete_dialog() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let mut view = View::new(Grouping::Project, false);
     view.status_filter = 4;
     view.set_sessions(
@@ -957,6 +958,7 @@ fn delete_dialog_number_shortcuts_follow_codex() {
 
 #[test]
 fn details_branch_and_pull_request_use_session_title_color() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
     row.git_branch = Some("main".into());
     row.pr = Some(crate::model::PullRequest {

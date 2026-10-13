@@ -43,6 +43,9 @@ const MOCHA: &[Rgb] = &[
     (245, 224, 220),
 ];
 
+#[cfg(test)]
+pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
+
 static ACCENTS: Mutex<Vec<Rgb>> = Mutex::new(Vec::new());
 
 pub fn use_default_accents(light_background: bool) {
@@ -158,6 +161,7 @@ mod tests {
 
     #[test]
     fn default_palettes_reach_all_fourteen_accents() {
+        let _guard = TEST_LOCK.lock().unwrap();
         for palette in [LATTE, MOCHA] {
             set_accents(palette.to_vec());
             let assigned: std::collections::HashSet<_> =
