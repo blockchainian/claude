@@ -1557,25 +1557,24 @@ fn task_log_tall_finished_snapshot() {
 }
 
 #[test]
-fn task_log_short_terminal_matches_existing_snapshot() {
+fn task_log_short_terminal_keeps_ten_log_rows() {
     let mut view = fixture();
     view.rows[view.selected].transcript = Some("/tmp/task-log.jsonl".into());
     let (log, _) = log_fixture();
     view.log = log.log;
     view.log_session = view.selected_id().map(str::to_owned);
-    assert_eq!(
-        screen(&view, 160, 22),
-        include_str!("../../tests/ui_snapshots/live_center_columns.txt")
-    );
+    let layout = view.center_layout(Rect::new(0, 0, 160, 22));
+    assert_eq!(layout.log.height, 10);
+    assert!(screen(&view, 160, 22).contains("Please inspect"));
 }
 
 #[test]
-fn task_log_requires_twenty_five_rows() {
+fn task_log_requires_room_for_header_and_six_body_rows() {
     let (mut view, now) = log_fixture();
-    let hidden = log_screen(&view, 100, 24, now);
+    let hidden = log_screen(&view, 100, 19, now);
     assert!(!hidden.contains("Please inspect"));
     view.rows[view.selected].transcript = None;
-    assert_eq!(hidden, log_screen(&view, 100, 24, now));
+    assert_eq!(hidden, log_screen(&view, 100, 19, now));
 }
 
 #[test]
@@ -1830,4 +1829,87 @@ fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
     let rendered = log_screen(&view, 100, 25, now);
     assert!(!rendered.contains("Please inspect"));
     assert!(!rendered.lines().nth(14).unwrap().contains('─'));
+}
+
+#[test]
+fn center_layout_golden_rects_follow_each_area() {
+    let (view, _) = log_fixture();
+    for (width, height, top, log_height, list_width, details_width) in [
+        (80, 24, 13, 10, 76, 0),
+        (120, 40, 25, 14, 70, 43),
+        (200, 60, 37, 22, 119, 74),
+        (80, 24, 13, 10, 76, 0),
+    ] {
+        let area = Rect::new(5, 7, width, height);
+        let layout = view.center_layout(area);
+        assert_eq!(layout.header, Rect::new(5, 7, width, 3));
+        assert_eq!(layout.list, Rect::new(7, 10, list_width, top - 3));
+        assert_eq!(layout.log, Rect::new(5, 7 + top, width, log_height));
+        assert_eq!(layout.footer, Rect::new(5, 7 + height - 1, width, 1));
+        if details_width == 0 {
+            assert_eq!(layout.details, Rect::default());
+            assert_eq!(layout.gap, Rect::default());
+        } else {
+            assert_eq!(layout.gap, Rect::new(7 + list_width, 10, 3, top - 3));
+            assert_eq!(
+                layout.details,
+                Rect::new(10 + list_width, 10, details_width, top - 3)
+            );
+        }
+    }
+}
+
+#[test]
+fn center_layout_log_and_details_hide_thresholds() {
+    let (mut view, _) = log_fixture();
+    for height in 0..20 {
+        let layout = view.center_layout(Rect::new(0, 0, 94, height));
+        assert_eq!(layout.log.height, 0, "height {height}");
+    }
+    let layout = view.center_layout(Rect::new(0, 0, 94, 20));
+    assert_eq!(layout.log.height, 10);
+    assert_eq!(layout.list.height, 6);
+    assert!(layout.details.width > 0);
+    assert_eq!(
+        view.center_layout(Rect::new(0, 0, 93, 20)).details,
+        Rect::default()
+    );
+    view.rows[view.selected].transcript = None;
+    for height in [24, 40, 60] {
+        let layout = view.center_layout(Rect::new(0, 0, 120, height));
+        assert_eq!(layout.log.height, 0);
+        assert_eq!(layout.list.height, height - 4);
+    }
+}
+
+#[test]
+fn task_log_event_count_follows_height() {
+    let (mut view, now) = log_fixture();
+    let event = view.log[0].clone();
+    view.log = (0..30)
+        .map(|index| {
+            let mut event = event.clone();
+            event.body = format!("event-{index:02}");
+            event
+        })
+        .collect();
+    for (height, count) in [(24, 8), (40, 12), (60, 20), (19, 0), (24, 8)] {
+        let rendered = log_screen(&view, 120, height, now);
+        let events: Vec<_> = rendered
+            .lines()
+            .filter(|line| line.contains("event-"))
+            .collect();
+        assert_eq!(events.len(), count, "height {height}");
+        if count > 0 {
+            assert!(events[0].contains(&format!("event-{:02}", 30 - count)));
+            assert!(events.last().unwrap().contains("event-29"));
+            assert!(
+                rendered
+                    .lines()
+                    .nth(usize::from(height - 2))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
 }

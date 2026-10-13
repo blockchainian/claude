@@ -19,14 +19,14 @@ pub(super) fn line(text: impl Into<Line<'static>>, area: Rect, buf: &mut Buffer)
             .render(row(area, 0, 1), buf);
     }
 }
-struct CenterLayout {
-    header: Rect,
-    list: Rect,
-    gap: Rect,
-    details: Rect,
-    search: Rect,
-    footer: Rect,
-    log: Rect,
+pub(super) struct CenterLayout {
+    pub(super) header: Rect,
+    pub(super) list: Rect,
+    pub(super) gap: Rect,
+    pub(super) details: Rect,
+    pub(super) search: Rect,
+    pub(super) footer: Rect,
+    pub(super) log: Rect,
 }
 impl View {
     fn editor_text(&self) -> &str {
@@ -37,17 +37,20 @@ impl View {
         }
     }
 
-    fn center_layout(&self, area: Rect) -> CenterLayout {
+    pub(super) fn center_layout(&self, area: Rect) -> CenterLayout {
         let footer_height = u16::from(area.height >= 2);
         let header_height = if area.height >= 6 { 3 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
-        let log_height = if area.height >= 25
+        let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
+        let log_height = bottom_height.saturating_sub(footer_height).max(10);
+        let log_height = if area.height.saturating_sub(footer_height + log_height)
+            >= header_height + 6
             && self
                 .selected_row()
                 .is_some_and(|session| session.transcript.is_some())
         {
-            10
+            log_height
         } else {
             0
         };
@@ -55,12 +58,16 @@ impl View {
         let body = row(area, header_height, log.y.saturating_sub(header.bottom()))
             .inner(Margin::new(2, 0));
         let [list, gap, details] = if body.width >= 90 {
-            Layout::horizontal([
-                Constraint::Min(46),
-                Constraint::Length(3),
-                Constraint::Length(38),
-            ])
-            .areas(body)
+            let content = Rect {
+                width: body.width - 3,
+                ..body
+            };
+            let [list, mut details] =
+                Layout::horizontal([Constraint::Ratio(618, 1000), Constraint::Ratio(382, 1000)])
+                    .areas(content);
+            let gap = Rect::new(list.right(), body.y, 3, body.height);
+            details.x += gap.width;
+            [list, gap, details]
         } else {
             [body, Rect::default(), Rect::default()]
         };
@@ -84,6 +91,10 @@ impl View {
             log,
         }
     }
+    pub(crate) fn log_event_count(&self, area: Rect) -> usize {
+        usize::from(self.center_layout(area).log.height.saturating_sub(2))
+    }
+
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout = self.center_layout(area);
         if !(self.searching || self.rename_target.is_some())

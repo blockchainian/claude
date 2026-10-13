@@ -95,6 +95,7 @@ struct LogStamp {
     path: PathBuf,
     modified: std::time::SystemTime,
     length: u64,
+    count: usize,
 }
 
 impl App {
@@ -183,6 +184,7 @@ impl App {
             }
             terminal.draw(|frame| {
                 let area = frame.area();
+                self.refresh_log(self.view.log_event_count(area));
                 self.view.render(area, frame.buffer_mut());
                 if let Some((x, y)) = self.view.cursor_pos(area) {
                     frame.set_cursor_position((x, y));
@@ -238,7 +240,7 @@ impl App {
             })
     }
 
-    fn refresh_log(&mut self) {
+    fn refresh_log(&mut self, count: usize) {
         let selected = self
             .view
             .selected_id()
@@ -257,11 +259,12 @@ impl App {
                 path: path.clone(),
                 modified: metadata.modified()?,
                 length: metadata.len(),
+                count,
             };
             if self.log_stamp.as_ref() == Some(&stamp) {
                 return Ok(None);
             }
-            Ok(Some((stamp, crate::sessions::log::tail(&path, 8)?)))
+            Ok(Some((stamp, crate::sessions::log::tail(&path, count)?)))
         };
         match load() {
             Ok(Some((stamp, events))) => {
@@ -285,13 +288,11 @@ impl App {
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
-        self.refresh_log();
     }
 
     /// Returns true when the dashboard should close.
     fn handle_key(&mut self, key: KeyEvent) -> bool {
         let action = self.view.handle_key(key);
-        self.refresh_log();
         let Some(action) = action else {
             return false;
         };
@@ -378,7 +379,6 @@ impl App {
                     .set_notice(Some(format!("{what} is not supported")));
             }
         }
-        self.refresh_log();
         false
     }
 
@@ -464,11 +464,14 @@ mod tests {
         app.sessions[0].cwd = dir.path().to_owned();
         app.sessions[0].status = SessionStatus::Ready;
         app.view.set_sessions(app.sessions.clone(), false);
+        app.refresh_log(8);
         (dir, app)
     }
 
     fn key(app: &mut App, code: KeyCode) -> bool {
-        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+        let quit = app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        app.refresh_log(8);
+        quit
     }
 
     fn assert_resume(app: &App) {
@@ -485,11 +488,30 @@ mod tests {
     }
 
     #[test]
+    fn task_log_cache_rereads_when_event_count_changes() {
+        let (_dir, mut app) = fixture();
+        key(&mut app, KeyCode::BackTab);
+        app.refresh();
+        app.refresh_log(8);
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let payload = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, payload.repeat(20)).unwrap();
+        for (height, count) in [(24, 8), (40, 12), (60, 20), (19, 0), (24, 8)] {
+            app.refresh_log(
+                app.view
+                    .log_event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
+            );
+            assert_eq!(app.view.log.len(), count);
+        }
+    }
+
+    #[test]
     fn task_log_cache_uses_selection_length_and_mtime() {
         use std::io::Write;
         let (_dir, mut app) = fixture();
         key(&mut app, KeyCode::BackTab);
         app.refresh();
+        app.refresh_log(8);
         assert_eq!(app.view.log.len(), 2);
         let path = app.sessions[0].transcript.clone().unwrap();
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
@@ -500,11 +522,11 @@ mod tests {
         let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         file.set_modified(modified).unwrap();
         let cached = app.view.log.clone();
-        app.refresh_log();
+        app.refresh_log(8);
         assert_eq!(app.view.log, cached);
         file.set_modified(modified + Duration::from_secs(1))
             .unwrap();
-        app.refresh_log();
+        app.refresh_log(8);
         assert_ne!(app.view.log, cached);
         let mut file = std::fs::OpenOptions::new()
             .append(true)
@@ -514,6 +536,7 @@ mod tests {
         file.set_modified(modified + Duration::from_secs(1))
             .unwrap();
         app.refresh();
+        app.refresh_log(8);
         assert_eq!(app.sessions.len(), 1);
         assert!(
             app.view.selected_id().is_some(),
@@ -537,7 +560,7 @@ mod tests {
         third.transcript = None;
         app.sessions.extend([second, third]);
         app.view.set_sessions(app.sessions.clone(), false);
-        app.refresh_log();
+        app.refresh_log(8);
         key(&mut app, KeyCode::Down);
         assert_eq!(app.view.log_session.as_deref(), Some("second"));
         assert_eq!(app.view.log[0].body, "second prompt");

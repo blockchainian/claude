@@ -16,7 +16,10 @@ impl View {
         if self.log_session.as_deref() != Some(session.id.as_str()) {
             return;
         }
-        let events = &self.log[self.log.len().saturating_sub(8)..];
+        let events = &self.log[self
+            .log
+            .len()
+            .saturating_sub(usize::from(area.height.saturating_sub(2)))..];
         let times: Vec<_> = events
             .iter()
             .enumerate()

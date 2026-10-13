@@ -1,22 +1,22 @@
   Agent command center  Group: Project  g
    Active 5   Ready 2   Working 1   Needs you 2   Inactive 1                                                                                   tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                                                                   Status         Updated  │ Task details · ○ Ready · Current task
-  Pinned  2                                                                                                           │
-  › ○ Current task                                                                            Ready              now  │ Prompt
-    ● Needs an answer                                                                         Needs input     2h ago  │ Current task
-                                                                                                                      │
-  /tmp/project  3 of 4                                                                                                │ Project
-    ○ A longer task title that uses the available column                                      Ready           5m ago  │ /tmp/project
-    ● Failed task                                                                             Needs input     1h ago  │
-    ● Working task                                                                            Working         1d ago  │ Model: Unknown
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
-                                                                                                                      │
+      Tasks                                                               Status         Updated  │ Task details · ○ Ready · Current task
+  Pinned  2                                                                                       │
+  › ○ Current task                                                        Ready              now  │ Prompt
+    ● Needs an answer                                                     Needs input     2h ago  │ Current task
+                                                                                                  │
+  /tmp/project  3 of 4                                                                            │ Project
+    ○ A longer task title that uses the available column                  Ready           5m ago  │ /tmp/project
+    ● Failed task                                                         Needs input     1h ago  │
+    ● Working task                                                        Working         1d ago  │ Model: Unknown
+                                                                                                  │
+                                                                                                  │
+                                                                                                  │
+                                                                                                  │
+                                                                                                  │
+                                                                                                  │
+                                                                                                  │
+                                                                                                  │
+                                                                                                  │
   ? help  esc back  ↑/↓ move  enter open  n new
