@@ -335,7 +335,7 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
     let mut full = Buffer::empty(full_area);
     view.render_details(full_area, &mut full, now);
     let top = (full_area.y..full_area.bottom())
-        .find(|y| full[(full_area.x, *y)].symbol() == "╶")
+        .find(|y| full[(full_area.x, *y)].symbol() == "─")
         .unwrap();
     let area = Rect::new(7, 4, 43, 10);
     view.viewport.borrow_mut().details_scroll.offset = usize::from(top - full_area.y);
@@ -2173,7 +2173,7 @@ fn details_background_boxes_tail_and_clip_output() {
         include_str!("../../tests/ui_snapshots/details_background_long_title.txt")
     );
     let clipped = queued_details(row, 14);
-    assert!(clipped.contains("Background\n╶"));
+    assert!(clipped.contains("Background\n─"));
     assert!(clipped.contains("Last message"));
     assert!(!clipped.contains("Project"));
     assert!(clipped.ends_with("\n…"));
@@ -2295,7 +2295,7 @@ fn background_box_dims_border_but_not_title_or_output() {
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
     let top = (0..20)
-        .find(|y| buf[(0, *y)].symbol() == "╶")
+        .find(|y| buf[(0, *y)].symbol() == "─")
         .expect("box top border");
     assert!(buf[(0, top)].modifier.contains(Modifier::DIM));
     assert!(buf[(30, top)].modifier.contains(Modifier::DIM));
@@ -2937,7 +2937,7 @@ mod details_budget {
         assert!(rows.iter().any(|line| line == "Queued work"));
         assert!(
             rows.iter()
-                .any(|line| line.starts_with("╶") && line.contains("Check 3"))
+                .any(|line| line.starts_with("─") && line.contains("Check 3"))
         );
         assert!(!rows.iter().any(|line| line.contains("Check 4")));
         assert_eq!(rows.iter().filter(|line| *line == "…").count(), 2);

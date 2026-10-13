@@ -7,7 +7,7 @@
     └ ○ Review results                           Ready              now  │ Parent task
                                                                          │
                                                                          │ Background
-                                                                         │ ╶ Check files ────────────────────────────╴
+                                                                         │ ─ Check files ─────────────────────────────
                                                                          │
                                                                          │ Project
                                                                          │ /tmp/project

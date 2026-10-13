@@ -4,9 +4,9 @@ Prompt
 Parent
 
 Background
-╶ Check files · 1m 5s ─────────────────╴
+─ Check files · 1m 5s ──────────────────
   Read files
-╶ Run checks · 10s ────────────────────╴
+─ Run checks · 10s ─────────────────────
 
 Project
 /tmp/project
