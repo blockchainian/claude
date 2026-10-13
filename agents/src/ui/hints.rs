@@ -53,6 +53,7 @@ impl View {
                     ("pgup", "Page up"),
                     ("pgdn", "Page down"),
                     ("⌃c", "Quit"),
+                    ("esc", "Back"),
                 ],
             ),
             group(

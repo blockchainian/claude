@@ -1,5 +1,5 @@
   Agent command center  Group: Project  g
-   All 3   Needs you 1   Working 0   Ready 1   Inactive 1
+   Active 2   Ready 1   Working 0   Needs you 1          ›
   ────────────────────────────────────────────────────────
   Task shortcuts
 
@@ -10,7 +10,7 @@
   pgup   Page up      f          Fork
   pgdn   Page down    r          Rename
   ⌃c     Quit         x          Stop
-                      a          Archive
+  esc    Back         a          Archive
                       h          Hide
                       backspace  Delete
                       p          Pin/unpin

@@ -18,7 +18,10 @@ impl View {
         }];
     }
     fn activate(&mut self) -> Option<Action> {
-        if self.selected == usize::MAX && self.has_more {
+        if self.selected == usize::MAX
+            && self.has_more
+            && TASK_FILTERS[self.status_filter].1 == [SessionStatus::Inactive]
+        {
             if self.loading {
                 return None;
             }
@@ -196,7 +199,7 @@ impl View {
                     .unwrap_or(usize::MAX)
             }
             KeyCode::Enter | KeyCode::Right => return self.activate(),
-            KeyCode::Esc => return Some(Action::Quit),
+            KeyCode::Esc => return Some(Action::Back),
             KeyCode::Char('g') => {
                 self.grouping = self.grouping.next();
                 self.viewport.borrow_mut().scroll = 0;

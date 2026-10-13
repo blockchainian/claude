@@ -26,6 +26,7 @@ struct CenterLayout {
     details: Rect,
     search: Rect,
     footer: Rect,
+    log: Rect,
 }
 impl View {
     fn editor_text(&self) -> &str {
@@ -41,12 +42,18 @@ impl View {
         let header_height = if area.height >= 6 { 3 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
-        let body = row(
-            area,
-            header_height,
-            footer.y.saturating_sub(header.bottom()),
-        )
-        .inner(Margin::new(2, 0));
+        let log_height = if area.height >= 24
+            && self
+                .selected_row()
+                .is_some_and(|session| session.transcript.is_some())
+        {
+            9
+        } else {
+            0
+        };
+        let log = row(area, area.height - footer_height - log_height, log_height);
+        let body = row(area, header_height, log.y.saturating_sub(header.bottom()))
+            .inner(Margin::new(2, 0));
         let [list, gap, details] = if body.width >= 90 {
             Layout::horizontal([
                 Constraint::Min(46),
@@ -74,6 +81,7 @@ impl View {
             details,
             search,
             footer,
+            log,
         }
     }
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
@@ -95,6 +103,14 @@ impl View {
         ))
     }
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.render_at(area, buf, chrono::Utc::now());
+    }
+    pub(crate) fn render_at(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
         Clear.render(area, buf);
         self.viewport.borrow_mut().marker = None;
         let layout = self.center_layout(area);
@@ -113,7 +129,7 @@ impl View {
                 let count = self
                     .rows
                     .iter()
-                    .filter(|s| !self.hidden.contains(&s.id) && group.is_none_or(|g| g == s.status))
+                    .filter(|s| !self.hidden.contains(&s.id) && group.contains(&s.status))
                     .count();
                 format!("{label} {count}")
             })
@@ -190,11 +206,11 @@ impl View {
                     .set_style(Style::default().dim());
             }
         }
-        let now = chrono::Utc::now();
         self.render_center_rows(layout.list, buf, now);
         if !layout.details.is_empty() {
             self.render_details(layout.details, buf, now);
         }
+        self.render_log(inset(layout.log), buf, now);
         if let Some(dialog) = &self.delete_dialog {
             self.render_delete_dialog(dialog, layout.list, buf);
             self.viewport.borrow_mut().marker = None;
@@ -391,18 +407,21 @@ impl View {
         }
 
         let mut project = vec!["Project".dim()];
+        if let Some(branch) = &session.git_branch {
+            project.extend([
+                " · ".dim(),
+                Span::styled(branch.clone(), self.title_style(&session.id)),
+            ]);
+        }
         let link = session.pr.as_ref().and_then(|pr| {
             let label = format!("#{}", pr.number);
             project.push(" · ".dim());
             let prefix_width = Line::from(project.clone()).width();
             let link = line_width_fits(prefix_width + label.len(), width)
                 .then(|| (prefix_width as u16, label.len() as u16, pr.url.clone()));
-            project.push(label.into());
+            project.push(Span::styled(label, self.title_style(&session.id)));
             link
         });
-        if let Some(branch) = &session.git_branch {
-            project.extend([" · ".dim(), branch.clone().into()]);
-        }
         items.extend([
             Line::default().into(),
             Item::Link {

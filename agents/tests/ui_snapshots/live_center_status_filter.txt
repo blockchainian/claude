@@ -1,5 +1,5 @@
   Agent command center  Group: Projec…
-  ‹  Working 0   Ready 1   Inactive 1
+  ‹  Needs you 1   Inactive 1
   ────────────────────────────────────
       Tasks
   /tmp/project  1 of 3
