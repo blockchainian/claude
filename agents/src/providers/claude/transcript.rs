@@ -1,3 +1,4 @@
+use crate::log::question_texts;
 use crate::model::{Activity, BackgroundTask, PullRequest};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -157,16 +158,6 @@ pub(super) fn content_text(record: &Value, last: bool) -> Option<String> {
     } else {
         Some(texts.collect::<String>())
     }
-}
-
-pub(super) fn question_texts(input: &Value) -> Vec<String> {
-    input["questions"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|question| question["question"].as_str())
-        .map(str::to_owned)
-        .collect()
 }
 
 fn records(bytes: &[u8]) -> impl DoubleEndedIterator<Item = Value> + '_ {

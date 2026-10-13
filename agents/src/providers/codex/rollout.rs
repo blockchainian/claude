@@ -1,4 +1,4 @@
-use crate::log::{Event, Filter, Kind, participant_text};
+use crate::log::{Event, Filter, Kind, participant_text, question_texts};
 use crate::model::Activity;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -16,6 +16,7 @@ pub(super) struct Summary {
     pub activity: Option<Activity>,
     pub updated_at: Option<DateTime<Utc>>,
     pub turn_ended: bool,
+    pub pending_questions: Vec<String>,
 }
 
 /// Walk complete JSON records newest first, retaining records spanning chunks.
@@ -96,6 +97,9 @@ fn assistant_text(record: &Value) -> Option<String> {
 
 fn tool_body(payload: &Value) -> Option<String> {
     let name = payload["name"].as_str()?;
+    if name.rsplit('.').next() == Some("request_user_input") {
+        return Some(question_texts(&tool_arguments(payload)?).join(" · "));
+    }
     if name == "exec"
         && payload["type"] == "custom_tool_call"
         && let Some(input) = payload["input"].as_str()
@@ -138,15 +142,44 @@ fn tool_body(payload: &Value) -> Option<String> {
     })
 }
 
+fn tool_arguments(payload: &Value) -> Option<Value> {
+    serde_json::from_str(payload["arguments"].as_str()?).ok()
+}
+
 pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     let mut summary = Summary::default();
     let mut boundary = false;
+    let mut outputs = HashSet::new();
+    let mut pending = Vec::new();
     walk(path, |record| {
         let Some(at) = timestamp(&record) else {
             return true;
         };
         summary.updated_at.get_or_insert(at);
         let payload = &record["payload"];
+        if !boundary && record["type"] == "response_item" {
+            match payload["type"].as_str() {
+                Some("function_call_output") => {
+                    if let Some(id) = payload["call_id"].as_str() {
+                        outputs.insert(id.to_owned());
+                    }
+                }
+                Some("function_call")
+                    if payload["name"]
+                        .as_str()
+                        .and_then(|name| name.rsplit('.').next())
+                        == Some("request_user_input") =>
+                {
+                    if let Some(id) = payload["call_id"].as_str()
+                        && !outputs.contains(id)
+                        && let Some(args) = tool_arguments(payload)
+                    {
+                        pending.push(question_texts(&args));
+                    }
+                }
+                _ => {}
+            }
+        }
         if !boundary && record["type"] == "event_msg" {
             match payload["type"].as_str() {
                 Some("task_complete" | "turn_aborted") => {
@@ -175,6 +208,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
         }
         !(boundary && summary.last_message.is_some() && summary.activity.is_some())
     })?;
+    summary.pending_questions = pending.into_iter().rev().flatten().collect();
     Ok(summary)
 }
 
@@ -270,6 +304,102 @@ mod tests {
     use std::io::Write;
     fn fixture() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-rollout.jsonl")
+    }
+    #[test]
+    fn request_user_input_log_and_activity_show_question_texts() {
+        for mode in ["default", "plan"] {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("tests/fixtures/codex-input/{mode}-pending.jsonl"));
+            let events = tail_filtered(&path, 100, &Filter::default()).unwrap();
+            let question = events
+                .iter()
+                .find(|event| event.kind == Kind::Tool)
+                .unwrap();
+            assert_eq!(question.body, "Pick a color?");
+            assert!(question.ended_at.is_none());
+            assert_eq!(
+                summary(&path).unwrap().activity.unwrap().label,
+                "Pick a color?"
+            );
+        }
+    }
+
+    fn input_records(state: &str) -> Vec<Value> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("tests/fixtures/codex-input/default-{state}.jsonl"));
+        std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    fn input_summary(records: &[Value]) -> Summary {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for record in records {
+            writeln!(file, "{record}").unwrap();
+        }
+        summary(file.path()).unwrap()
+    }
+
+    #[test]
+    fn request_user_input_output_clears_only_matching_call_before_turn_ends() {
+        let mut records = input_records("pending");
+        let output = input_records("answered")
+            .into_iter()
+            .find(|record| record["payload"]["type"] == "function_call_output")
+            .unwrap();
+        let mut other = output.clone();
+        other["payload"]["call_id"] = "another-call".into();
+        records.push(other);
+        assert_eq!(input_summary(&records).pending_questions, ["Pick a color?"]);
+        records.push(output);
+        let result = input_summary(&records);
+        assert!(result.pending_questions.is_empty());
+        assert!(!result.turn_ended);
+    }
+
+    #[test]
+    fn request_user_input_does_not_leak_across_turn_boundaries() {
+        let mut records = input_records("pending");
+        let started = records
+            .iter()
+            .find(|record| record["payload"]["type"] == "task_started")
+            .unwrap()
+            .clone();
+        records.push(started.clone());
+        assert!(input_summary(&records).pending_questions.is_empty());
+        records.pop();
+        let mut aborted = started;
+        aborted["payload"]["type"] = "turn_aborted".into();
+        records.push(aborted);
+        assert!(input_summary(&records).pending_questions.is_empty());
+    }
+
+    #[test]
+    fn request_user_input_multiple_questions_and_calls_keep_order() {
+        let mut records = input_records("pending");
+        let mut call = records
+            .iter()
+            .find(|record| record["payload"]["name"] == "request_user_input")
+            .unwrap()
+            .clone();
+        let mut args = tool_arguments(&call["payload"]).unwrap();
+        let mut second = args["questions"][0].clone();
+        second["question"] = "Pick a size?".into();
+        args["questions"].as_array_mut().unwrap().push(second);
+        call["payload"]["arguments"] = args.to_string().into();
+        call["payload"]["call_id"] = "second-call".into();
+        call["payload"]["name"] = "functions.request_user_input".into();
+        assert_eq!(
+            tool_body(&call["payload"]).unwrap(),
+            "Pick a color? · Pick a size?"
+        );
+        records.push(call);
+        assert_eq!(
+            input_summary(&records).pending_questions,
+            ["Pick a color?", "Pick a color?", "Pick a size?"]
+        );
     }
     #[test]
     fn real_agent_names_in_log_and_activity() {

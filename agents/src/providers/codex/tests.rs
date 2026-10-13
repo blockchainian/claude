@@ -13,6 +13,57 @@ fn fixture() -> (tempfile::TempDir, CodexProvider) {
 }
 
 #[test]
+fn request_user_input_pending_answered_and_offline() {
+    let (dir, mut provider) = fixture();
+    let path = dir.path().join("rollout.jsonl");
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE threads SET rollout_path=? WHERE id='thread-0'",
+            [path.to_str().unwrap()],
+        )
+        .unwrap();
+    for mode in ["default", "plan"] {
+        for (state, expected) in [
+            ("pending", SessionStatus::NeedsInput),
+            ("answered", SessionStatus::Ready),
+        ] {
+            let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("tests/fixtures/codex-input/{mode}-{state}.jsonl"));
+            std::fs::copy(fixture, &path).unwrap();
+            let snapshot = provider.refresh(1);
+            let mut session = snapshot
+                .sessions
+                .into_iter()
+                .find(|session| session.id.id == "thread-0")
+                .unwrap();
+            assert_eq!(session.status, SessionStatus::Inactive);
+            session.process = Some(Process {
+                pid: std::process::id(),
+                label: Some("codex".into()),
+                started_at: None,
+            });
+            apply_rollout(&mut session, rollout::summary(&path).unwrap());
+            assert_eq!(session.status, expected, "{mode}-{state}");
+            assert_eq!(
+                session.pending_questions,
+                if state == "pending" {
+                    vec!["Pick a color?"]
+                } else {
+                    vec![]
+                }
+            );
+            if state == "pending" {
+                assert_eq!(session.latest_activity().unwrap().label, "Pick a color?");
+            }
+            session.process = None;
+            apply_rollout(&mut session, rollout::summary(&path).unwrap());
+            assert_eq!(session.status, SessionStatus::Inactive);
+        }
+    }
+}
+
+#[test]
 fn reads_named_columns_and_pages_inactive_threads() {
     let (_dir, mut provider) = fixture();
     let first = provider.refresh(1);

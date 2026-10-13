@@ -1,4 +1,15 @@
 use chrono::{DateTime, Utc};
+use serde_json::Value;
+
+pub(crate) fn question_texts(input: &Value) -> Vec<String> {
+    input["questions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|question| question["question"].as_str())
+        .map(str::to_owned)
+        .collect()
+}
 
 pub(crate) fn participant_text(name: Option<&str>, body: &str) -> String {
     match name.map(str::trim).filter(|name| !name.is_empty()) {

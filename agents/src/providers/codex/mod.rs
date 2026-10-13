@@ -149,14 +149,7 @@ impl CodexProvider {
                 Err(error) => return Err(error),
             };
             if let Some(summary) = summary {
-                session.last_message = summary.last_message;
-                session.last_message_at = summary.last_message_at;
-                session.last_record_at = summary.updated_at;
-                session.activity = summary.activity;
-                if let Some(at) = summary.updated_at {
-                    session.updated_at = session.updated_at.max(at);
-                }
-                session.status = status(session.process.is_some(), summary.turn_ended);
+                apply_rollout(session, summary);
             } else {
                 session.status = status(session.process.is_some(), false);
             }
@@ -168,6 +161,21 @@ impl CodexProvider {
             }
         }
         Ok(Snapshot { sessions, has_more })
+    }
+}
+
+fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
+    session.last_message = summary.last_message;
+    session.last_message_at = summary.last_message_at;
+    session.last_record_at = summary.updated_at;
+    session.activity = summary.activity;
+    if let Some(at) = summary.updated_at {
+        session.updated_at = session.updated_at.max(at);
+    }
+    session.status = status(session.process.is_some(), summary.turn_ended);
+    session.pending_questions = summary.pending_questions;
+    if session.process.is_some() && !session.pending_questions.is_empty() {
+        session.status = SessionStatus::NeedsInput;
     }
 }
 

@@ -21,7 +21,7 @@ fn default_detail(input: &serde_json::Value) -> Option<(&str, &str)> {
 
 fn tool_detail(name: &str, input: &serde_json::Value) -> String {
     match name {
-        "AskUserQuestion" => super::transcript::question_texts(input).join(" · "),
+        "AskUserQuestion" => crate::log::question_texts(input).join(" · "),
         "Bash" => input_text(input, "description")
             .map(str::to_owned)
             .unwrap_or_else(|| {
