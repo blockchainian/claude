@@ -1,0 +1,130 @@
+[
+  {
+    "input": "const r = await tools.exec_command({\n  cmd: \"cat website/AGENTS.md\",\n  workdir: \"/tmp/project/example/project\",\n  yield_time_ms: 10000,\n  max_output_tokens: 12000\n});\ntext(r.output);\n",
+    "expected": "cat"
+  },
+  {
+    "input": "const r = await tools.exec_command({\n  cmd: \"yarn lint\",\n  workdir: \"/tmp/project/example/project/website\",\n  yield_time_ms: 30000,\n  max_output_tokens: 30000\n});\ntext(JSON.stringify(r));\n",
+    "expected": "yarn lint"
+  },
+  {
+    "input": "const r = await tools.exec_command({\n  cmd: \"git status --short\",\n  workdir: \"/tmp/project/example/project\",\n  yield_time_ms: 10000,\n  max_output_tokens: 10000\n});\ntext(r.output);\n",
+    "expected": "git status"
+  },
+  {
+    "input": "const r = await tools.exec_command({\n  cmd: \"sed -n '800,1420p' .git/codex-execute/chart-drift-heal/logs/review.log | tail -620\",\n  workdir: \"/tmp/project/example/project\",\n  yield_time_ms: 10000,\n  max_output_tokens: 40000\n});\ntext(r.output);\n",
+    "expected": "sed, tail"
+  },
+  {
+    "input": "const r = await tools.exec_command({\n  cmd: \"rg -n --max-count 20 \\\"firstDataRequest\\\" website/public/trading-view | head -20\",\n  workdir: \"/tmp/project/example/project\",\n  yield_time_ms: 10000,\n  max_output_tokens: 20000\n});\ntext(r.output);\n",
+    "expected": "rg, head"
+  },
+  {
+    "input": "const r = await tools.exec_command({\n  cmd:\"git status --short --branch && git show --stat --oneline --summary HEAD\",\n  workdir:\"/tmp/project/example/project\",\n  yield_time_ms:10000,\n  max_output_tokens:20000\n});\ntext(r);\n",
+    "expected": "git {status,show}"
+  },
+  {
+    "input": "const r = await tools.exec_command({cmd:\"yarn format && git status --short && git diff -- proxy/test/birdEyeWebSocketHub.test.ts\",\"workdir\":\"/tmp/project/example/project/proxy\",\"yield_time_ms\":30000,\"max_output_tokens\":30000});text(r.output)\n",
+    "expected": "yarn format, git {status,diff}"
+  },
+  {
+    "input": "const r = await tools.exec_command({cmd:\"yarn tsc --noEmit 2>&1 | rg 'birdEyeWebSocketHub' || true\",\"workdir\":\"/tmp/project/example/project/proxy\",\"yield_time_ms\":30000,\"max_output_tokens\":10000});text(r.output)\n",
+    "expected": "yarn tsc, rg, true"
+  },
+  {
+    "input": "const r = await tools.exec_command({cmd:\"yarn build && yarn test --forceExit\",\"workdir\":\"/tmp/project/example/project/streamer\",\"yield_time_ms\":1000,\"max_output_tokens\":20000,\"tty\":false});\ntext(JSON.stringify(r));\n",
+    "expected": "yarn {build,test}"
+  },
+  {
+    "input": "const r=await tools.exec_command({cmd:\"git show --stat --oneline --summary HEAD && git diff --cached --name-only && git status --short\",workdir:\"/tmp/project/example/project\",yield_time_ms:10000,max_output_tokens:16000}); text(r.output)\n",
+    "expected": "git {show,diff,status}"
+  },
+  {
+    "input": "const r = await tools.exec_command({\"cmd\":\"sed -n '2680,2760p' proxy/src/index.ts; sed -n '3580,3665p' proxy/src/index.ts\",\"workdir\":\"/tmp/project/example/project\",\"yield_time_ms\":10000,\"max_output_tokens\":15000}); text(r.output);\n",
+    "expected": "sed"
+  },
+  {
+    "input": "const r = await tools.exec_command({\"cmd\":\"sed -n '1,230p' proxy/src/index.ts; git status --short; git log -3 --oneline\",\"workdir\":\"/tmp/project/example/project\",\"yield_time_ms\":10000,\"max_output_tokens\":30000}); text(r.output);\n",
+    "expected": "sed, git {status,log}"
+  },
+  {
+    "input": "const r = await tools.exec_command({\"cmd\":\"yarn format && yarn lint\",\"workdir\":\"/tmp/project/example/project/proxy\",\"yield_time_ms\":30000,\"max_output_tokens\":10000});\ntext(r.output);\n",
+    "expected": "yarn {format,lint}"
+  },
+  {
+    "input": "const r = await tools.exec_command({\"cmd\":\"yarn format && yarn lint && yarn test\",\"workdir\":\"/tmp/project/example/project/proxy\",\"yield_time_ms\":30000,\"max_output_tokens\":15000});\ntext(r.output);\n",
+    "expected": "yarn {format,lint,test}"
+  },
+  {
+    "input": "const r = await tools.exec_command({\"cmd\":\"git status --short && git diff --check && git diff --stat && git log --oneline -8\",\"workdir\":\"/tmp/project/example/project\",\"yield_time_ms\":10000,\"max_output_tokens\":20000});\ntext(r.output);\n",
+    "expected": "git {status,diff,log}"
+  },
+  {
+    "input": "const r = await tools.exec_command({\"cmd\":\"git status --short && git branch -vv && git remote -v && git log --oneline --decorate --all -12\",\"workdir\":\"/tmp/project/example/project\",\"yield_time_ms\":10000,\"max_output_tokens\":12000});\ntext(r.output);\n",
+    "expected": "git {status,branch,remote,log}"
+  },
+  {
+    "input": "const r = await tools.exec_command({\"cmd\":\"git push origin poc\",\"workdir\":\"/tmp/project/example/project\",\"yield_time_ms\":30000,\"max_output_tokens\":8000});\ntext(r.output);\n",
+    "expected": "git push"
+  },
+  {
+    "input": "const r=await tools.exec_command({cmd:\"ls -l /tmp/3.md 2>/dev/null || true\",workdir:\"/tmp/project/example/project\",yield_time_ms:10000,max_output_tokens:1000}); text(r.output);\n",
+    "expected": "ls, true"
+  },
+  {
+    "input": "const r=await tools.exec_command({cmd:\"rg -n '^```' /tmp/3.md; rg -n '^## ' /tmp/3.md\",workdir:\"/tmp/project/example/project\",yield_time_ms:10000,max_output_tokens:4000}); text(r.output);\n",
+    "expected": "rg"
+  },
+  {
+    "input": "const r = await tools.exec_command({cmd:\"git status --short\\ngit show --stat --oneline --summary HEAD\",\"workdir\":\"/tmp/project/example/project\",\"yield_time_ms\":10000,\"max_output_tokens\":5000});\ntext(r.output);",
+    "expected": "git {status,show}"
+  },
+  {
+    "input": "const r = await tools.exec_command({cmd:\"git -C /tmp/project/example/project worktree list --porcelain && ls -la /tmp/project/example/project/.claude/worktrees\",workdir:\"/tmp\",shell:\"/bin/sh\",login:false,yield_time_ms:10000,max_output_tokens:5000});\ntext(r.output);\n",
+    "expected": "git worktree, ls"
+  },
+  {
+    "input": "const r=await tools.exec_command({cmd:\"env -i HOME=/tmp/project PATH=/usr/bin:/bin SHELL=/bin/bash /bin/bash -lc 'command -v python3; python3 --version'\",\"max_output_tokens\":400});text(r)\n",
+    "expected": "command, python3"
+  },
+  {
+    "input": "const r=await tools.exec_command({\n  cmd:\"env XDG_CACHE_HOME=/tmp/project-gh-cache gh run view 12345 --repo example/project --job 12345 --log-failed\",\n  workdir:\"/tmp/project/example/project\",\n  yield_time_ms:30000,\n  max_output_tokens:24000\n});\ntext(r.output);\n",
+    "expected": "gh run"
+  },
+  {
+    "input": "const r = await tools.exec_command({cmd:\"node --import tsx --test $(find test -type f -name '*.test.ts' -print | sort)\",\"workdir\":\"/tmp/project/example/project/streamer\",\"yield_time_ms\":30000,\"max_output_tokens\":50000});\ntext(r.output);\nif (r.session_id) text(`SESSION_ID=${r.session_id}`);\n",
+    "expected": "node, find, sort"
+  },
+  {
+    "input": "const r = await tools.exec_command({\"cmd\":\"timeout 30m gh run watch 12345 --exit-status\",\"workdir\":\"/tmp/project/.worktrees/fix-checks\",\"yield_time_ms\":30000,\"max_output_tokens\":12000,\"tty\":true}); text(r.output); if (r.session_id) text(`SESSION_ID=${r.session_id}`);\n",
+    "expected": "gh run"
+  },
+  {
+    "input": "const r = await tools.exec_command({cmd:\"sudo /usr/bin/install -d -m 755 /etc/codex\",\"workdir\":\"/tmp/project/blockchainian/dot\",\"yield_time_ms\":30000,\"max_output_tokens\":2000,\"sandbox_permissions\":\"require_escalated\",\"justification\":\"允许我创建 /etc/codex 目录，以永久禁用 ChatGPT 桌面 App 的内置 Browser 吗？\",\"tty\":true});text(JSON.stringify(r));\n",
+    "expected": "install"
+  },
+  {
+    "input": "const r = await tools.exec_command({\n  cmd: \"find specs/2026-08-29-token-list-providers -maxdepth 2 -type f -print | sort | xargs -I{} sh -c 'echo --- {}; sed -n \\\"1,240p\\\" \\\"{}\\\"' | head -c 100000\",\n  workdir: \"/tmp/project/example/project\",\n  yield_time_ms: 10000,\n  max_output_tokens: 50000\n});\ntext(r.output);\n",
+    "expected": "find, sort, echo, sed, head"
+  },
+  {
+    "input": "const r = await tools.exec_command({\n  cmd: \"python3 - <<'PY'\\np='website/public/trading-view/bundles/library.9fddf5dccfe2adbfb2cf.js'\\ns=open(p).read()\\ni=s.find('async _applySymbolParamsChanges(e)')\\nprint(s[i:i+8000])\\nPY\",\n  workdir: \"/tmp/project/example/project\",\n  yield_time_ms: 10000,\n  max_output_tokens: 15000\n});\ntext(r.output);\n",
+    "expected": "python3"
+  },
+  {
+    "input": "text(await tools.write_stdin({session_id:1280,chars:\"\",max_output_tokens:700}));\n",
+    "expected": "write_stdin"
+  },
+  {
+    "input": "const r=await tools.view_image({path:\"/tmp/intel-smoke-translate/page-3.png\"});image(r.image_url);\n",
+    "expected": "view_image"
+  },
+  {
+    "input": "const r=await Promise.allSettled([\ntools.exec_command({cmd:\"git status --short --branch\",workdir:\"/tmp/project/.worktrees/api\"}),\ntools.exec_command({cmd:\"git rev-parse HEAD origin/api\",workdir:\"/tmp/project/.worktrees/api\"})\n]);r.forEach((x,i)=>text(JSON.stringify({i,result:x})));\n",
+    "expected": "git {status,rev-parse}"
+  },
+  {
+    "input": "text(await tools.exec_command({cmd:\"unterminated",
+    "expected": "exec text(await tools.exec_command({cmd:\"unterminated"
+  }
+]

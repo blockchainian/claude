@@ -1,3 +1,4 @@
+mod exec_summary;
 mod manager;
 mod rollout;
 #[cfg(test)]

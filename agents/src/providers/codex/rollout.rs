@@ -96,6 +96,12 @@ fn assistant_text(record: &Value) -> Option<String> {
 
 fn tool_body(payload: &Value) -> Option<String> {
     let name = payload["name"].as_str()?;
+    if name == "exec"
+        && payload["type"] == "custom_tool_call"
+        && let Some(input) = payload["input"].as_str()
+    {
+        return Some(super::exec_summary::summarize(input));
+    }
     let detail = if payload["type"] == "custom_tool_call" {
         payload["input"].as_str().map(str::to_owned)
     } else {
@@ -246,6 +252,20 @@ mod tests {
     use std::io::Write;
     fn fixture() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-rollout.jsonl")
+    }
+    #[test]
+    fn exec_summary_keeps_missing_input_and_existing_fallback() {
+        assert_eq!(
+            tool_body(&serde_json::json!({"type":"custom_tool_call", "name":"exec"})).as_deref(),
+            Some("exec")
+        );
+        assert_eq!(
+            tool_body(
+                &serde_json::json!({"type":"custom_tool_call", "name":"exec", "input":"broken ("})
+            )
+            .as_deref(),
+            Some("exec broken (")
+        );
     }
     #[test]
     fn completed_rollout_summary() {
