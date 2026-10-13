@@ -1606,11 +1606,11 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     for (y, colour, bold) in [
-        (15, Color::Yellow, true),
-        (16, Color::Reset, true),
+        (15, Color::Reset, true),
+        (16, Color::Yellow, true),
         (17, Color::Blue, true),
         (18, Color::Red, true),
-        (19, Color::Yellow, true),
+        (19, Color::Reset, true),
     ] {
         let label = &buf[(2, y)];
         let body = &buf[(9, y)];
@@ -1628,13 +1628,17 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         assert!(!buf[(97, y)].modifier.contains(Modifier::BOLD));
     }
     for (kind, colour) in [
-        (Kind::User, Color::Yellow),
-        (Kind::Model, Color::Reset),
+        (Kind::User, Color::Reset),
+        (Kind::Model, Color::Yellow),
         (Kind::Tool, Color::Blue),
         (Kind::Error, Color::Red),
-        (Kind::QueuedUser, Color::Yellow),
+        (Kind::QueuedUser, Color::Reset),
         (Kind::QueuedSystem, Color::Blue),
     ] {
+        let (label_style, body_style) = super::style::log_styles(&kind);
+        let foreground = (colour != Color::Reset).then_some(colour);
+        assert_eq!(label_style.fg, foreground);
+        assert_eq!(body_style.fg, foreground);
         view.log.last_mut().unwrap().kind = kind;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);

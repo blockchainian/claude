@@ -57,8 +57,8 @@ pub(super) fn thread_color(id: &str) -> Color {
 pub(super) fn log_styles(kind: &crate::sessions::log::Kind) -> (Style, Style) {
     use crate::sessions::log::Kind;
     let body = match kind {
-        Kind::User | Kind::QueuedUser => Style::default().fg(Color::Yellow),
-        Kind::Model => Style::default(),
+        Kind::User | Kind::QueuedUser => Style::default(),
+        Kind::Model => Style::default().fg(Color::Yellow),
         Kind::Tool | Kind::QueuedSystem => Style::default().fg(Color::Blue),
         Kind::Error => Style::default().fg(Color::Red),
     };
