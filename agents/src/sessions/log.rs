@@ -7,7 +7,8 @@ pub enum Kind {
     Model,
     Tool,
     Error,
-    Queued,
+    QueuedUser,
+    QueuedSystem,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
@@ -142,7 +143,12 @@ impl Log {
             }
             Some("queue-operation") if record["operation"] == "enqueue" => {
                 if let Some(text) = record["content"].as_str() {
-                    self.push(Kind::Queued, text.to_owned(), at);
+                    let kind = if text.starts_with('<') {
+                        Kind::QueuedSystem
+                    } else {
+                        Kind::QueuedUser
+                    };
+                    self.push(kind, text.to_owned(), at);
                 }
             }
             _ => {}
@@ -291,6 +297,7 @@ mod tests {
             ),
             result(38, "c", false),
             json!({"type":"queue-operation", "timestamp":at(40).to_rfc3339(), "operation":"enqueue", "content":"next task"}),
+            json!({"type":"queue-operation", "timestamp":at(42).to_rfc3339(), "operation":"enqueue", "content":"<task-notification>finished</task-notification>"}),
             record(
                 "user",
                 41,
@@ -308,7 +315,7 @@ mod tests {
     fn groups_interleaved_parallel_calls_and_tracks_predecessors() {
         let file = fixture();
         let events = tail(file.path(), 8).unwrap();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 6);
         assert_eq!(
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
             [
@@ -316,7 +323,8 @@ mod tests {
                 &Kind::Model,
                 &Kind::Error,
                 &Kind::Tool,
-                &Kind::Queued
+                &Kind::QueuedUser,
+                &Kind::QueuedSystem
             ]
         );
         assert!(events[0].body.contains("Stop hook error"));
@@ -337,6 +345,11 @@ mod tests {
         assert_eq!(events[3].ended_at, Some(at(38)));
         assert_eq!(events[4].body, "next task");
         assert_eq!(events[4].started_at, at(40));
+        assert_eq!(
+            events[5].body,
+            "<task-notification>finished</task-notification>"
+        );
+        assert_eq!(events[5].started_at, at(42));
         assert_eq!(events[0].previous_end, None);
         for pair in events.windows(2) {
             let end = if matches!(pair[0].kind, Kind::Tool | Kind::Error) {
@@ -346,7 +359,7 @@ mod tests {
             };
             assert_eq!(pair[1].previous_end, end);
         }
-        assert_eq!(tail(file.path(), 2).unwrap(), events[3..]);
+        assert_eq!(tail(file.path(), 2).unwrap(), events[4..]);
         assert!(tail(file.path(), 0).unwrap().is_empty());
     }
     #[test]
@@ -454,7 +467,10 @@ mod tests {
         .unwrap();
         assert_eq!(measured.bytes_read, 64 * 1024);
         assert_eq!(measured.earliest, len - 64 * 1024);
-        assert_eq!(log.entries[0].event.body, "next task");
+        assert_eq!(
+            log.entries[0].event.body,
+            "<task-notification>finished</task-notification>"
+        );
     }
 
     #[test]

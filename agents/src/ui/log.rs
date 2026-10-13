@@ -91,7 +91,7 @@ fn render_event(event: &Event, time: &str, last: bool, area: Rect, buf: &mut Buf
         Kind::Model => "Model",
         Kind::Tool => "Tool",
         Kind::Error => "Error",
-        Kind::Queued => "Queued",
+        Kind::QueuedUser | Kind::QueuedSystem => "Queue",
     };
     let label = format!("{label:<6} ");
     let label_width = label.width().min(content_width);

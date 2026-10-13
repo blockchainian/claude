@@ -1452,7 +1452,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Model, "I will check the files", 110, None),
         (Kind::Tool, "Read src/main.rs，Read src/app.rs", 100, Some(90)),
         (Kind::Error, "Bash failed check", 80, Some(70)),
-        (Kind::Queued, "Also inspect the tests", 60, None),
+        (Kind::QueuedUser, "Also inspect the tests", 60, None),
         (Kind::Tool, "Bash run a background job *", 50, None),
         (Kind::Model, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
         (Kind::Tool, "Bash run tests", 30, None),
@@ -1610,7 +1610,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (16, Color::Reset, true),
         (17, Color::Blue, true),
         (18, Color::Red, true),
-        (19, Color::Blue, true),
+        (19, Color::Yellow, true),
     ] {
         let label = &buf[(2, y)];
         let body = &buf[(9, y)];
@@ -1632,11 +1632,18 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (Kind::Model, Color::Reset),
         (Kind::Tool, Color::Blue),
         (Kind::Error, Color::Red),
-        (Kind::Queued, Color::Blue),
+        (Kind::QueuedUser, Color::Yellow),
+        (Kind::QueuedSystem, Color::Blue),
     ] {
         view.log.last_mut().unwrap().kind = kind;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
+        for x in [2, 9] {
+            let cell = &buf[(x, 19)];
+            assert_eq!(cell.fg, colour);
+            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 2);
+            assert!(!cell.modifier.contains(Modifier::DIM));
+        }
         let time = &buf[(97, 19)];
         assert_ne!(time.symbol(), " ");
         assert_eq!(time.fg, colour);
@@ -1655,7 +1662,12 @@ fn task_log_preserves_time_when_truncated() {
     view.render_at(area, &mut buf, now);
     assert_eq!(buf[(86, 21)].symbol(), "…");
     assert!(buf[(97, 21)].modifier.contains(Modifier::DIM));
-    for kind in [Kind::User, Kind::Model, Kind::Queued] {
+    for kind in [
+        Kind::User,
+        Kind::Model,
+        Kind::QueuedUser,
+        Kind::QueuedSystem,
+    ] {
         let mut view = log_fixture().0;
         let event = view.log.last_mut().unwrap();
         event.kind = kind;
