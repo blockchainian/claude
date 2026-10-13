@@ -1,3 +1,4 @@
+mod manager;
 mod rollout;
 #[cfg(test)]
 mod tests;
@@ -21,11 +22,12 @@ const PAGE_SIZE: usize = 10;
 
 pub struct CodexProvider {
     home: PathBuf,
+    manager_home: PathBuf,
 }
 
 impl CodexProvider {
-    pub fn new(home: PathBuf) -> Self {
-        Self { home }
+    pub fn new(home: PathBuf, manager_home: PathBuf) -> Self {
+        Self { manager_home, home }
     }
 
     pub fn from_config() -> io::Result<Self> {
@@ -46,7 +48,13 @@ impl CodexProvider {
             )
             .join(".codex"),
         };
-        Ok(Self::new(home))
+        let user_home = std::env::var_os("HOME")
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is unset"))?;
+        let manager_home = std::env::var_os("CODEX_MANAGER_STATE_DIR")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(user_home).join(".local/state/codex-manager"));
+        Ok(Self::new(home, manager_home))
     }
 
     fn snapshot(&self, pages: usize) -> io::Result<Snapshot> {
@@ -59,6 +67,7 @@ impl CodexProvider {
         }
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(io::Error::other)?;
+        let manager = manager::links(&self.manager_home)?;
         let parents = parents(&db).map_err(io::Error::other)?;
         let live = live_writers(&self.home.join("thread-writer-locks"))?;
         let mut statement = db
@@ -77,6 +86,13 @@ impl CodexProvider {
                         started_at: None,
                     });
                 }
+                if let Some(link) = manager.get(&session.id.id) {
+                    session.parent = Some(link.parent.clone());
+                    if let Some(name) = &link.name {
+                        session.name = Some(name.clone());
+                        session.title = name.clone();
+                    }
+                }
                 sessions.push(session);
             }
         }
@@ -94,7 +110,12 @@ impl CodexProvider {
         let has_more = inactive.len() > shown;
         let mut selected: HashSet<_> = sessions
             .iter()
-            .filter(|s| s.parent.is_none() && s.process.is_some())
+            .filter(|s| {
+                (s.parent.is_none() && s.process.is_some())
+                    || s.parent
+                        .as_ref()
+                        .is_some_and(|parent| parent.provider == ProviderId::Claude)
+            })
             .map(|s| s.id.clone())
             .chain(inactive.into_iter().take(shown))
             .collect();
@@ -137,6 +158,12 @@ impl CodexProvider {
                 session.status = status(session.process.is_some(), summary.turn_ended);
             } else {
                 session.status = status(session.process.is_some(), false);
+            }
+            if manager
+                .get(&session.id.id)
+                .is_some_and(|link| link.needs_input)
+            {
+                session.status = SessionStatus::NeedsInput;
             }
         }
         Ok(Snapshot { sessions, has_more })
@@ -306,6 +333,7 @@ impl Provider for CodexProvider {
         Ok(["sessions", "archived_sessions", "thread-writer-locks"]
             .into_iter()
             .map(|name| self.home.join(name))
+            .chain(std::iter::once(self.manager_home.clone()))
             .filter(|path| path.is_dir())
             .collect())
     }

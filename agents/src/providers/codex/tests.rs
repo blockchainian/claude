@@ -8,7 +8,7 @@ fn fixture() -> (tempfile::TempDir, CodexProvider) {
         .unwrap()
         .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let provider = CodexProvider::new(dir.path().to_owned());
+    let provider = CodexProvider::new(dir.path().to_owned(), dir.path().join("manager"));
     (dir, provider)
 }
 
@@ -57,7 +57,7 @@ fn missing_home_is_empty_without_creating_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("absent");
     assert!(
-        CodexProvider::new(path.clone())
+        CodexProvider::new(path.clone(), dir.path().join("manager"))
             .refresh(1)
             .sessions
             .is_empty()
@@ -73,7 +73,7 @@ fn missing_optional_columns_degrade_and_database_stays_read_only() {
     db.execute_batch("CREATE TABLE threads (id TEXT, cwd TEXT, title TEXT, updated_at INTEGER); INSERT INTO threads VALUES ('minimal','/workspace','Task',1791911000);").unwrap();
     drop(db);
     let before = std::fs::read(&path).unwrap();
-    let mut provider = CodexProvider::new(dir.path().to_owned());
+    let mut provider = CodexProvider::new(dir.path().to_owned(), dir.path().join("manager"));
     let snap = provider.refresh(1);
     assert_eq!(snap.sessions.len(), 1);
     assert_eq!(snap.sessions[0].title, "Task");
@@ -124,4 +124,248 @@ fn rollout_details_are_read_through_the_provider() {
         .log(session, 100, &log::Filter::default(), false)
         .unwrap();
     assert_eq!(events.len(), 3);
+}
+
+fn manager_fixture(dir: &Path, provider: &mut CodexProvider, kind: &str) -> PathBuf {
+    let root = dir.join("manager");
+    std::fs::create_dir_all(root.join("threads")).unwrap();
+    let session = root.join("claude-parent");
+    std::fs::create_dir_all(&session).unwrap();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-manager");
+    let id = if kind == "attached" {
+        "thread-12"
+    } else {
+        "thread-0"
+    };
+    std::fs::copy(
+        fixtures.join(format!("{kind}-supervisor.json")),
+        root.join("threads").join(format!("{id}.json")),
+    )
+    .unwrap();
+    std::fs::copy(
+        fixtures.join(format!("{kind}-state.json")),
+        session.join("state.json"),
+    )
+    .unwrap();
+    provider.manager_home = root;
+    session
+}
+
+#[test]
+fn manager_children_bypass_codex_paging_and_keep_descendants() {
+    let (dir, mut provider) = fixture();
+    manager_fixture(dir.path(), &mut provider, "attached");
+    let snapshot = provider.snapshot(0).unwrap();
+    assert_eq!(snapshot.sessions.len(), 2);
+    let child = snapshot
+        .sessions
+        .iter()
+        .find(|s| s.id.id == "thread-12")
+        .unwrap();
+    assert_eq!(
+        child.parent,
+        Some(SessionKey {
+            provider: ProviderId::Claude,
+            id: "claude-parent".into()
+        })
+    );
+    assert_eq!(child.name.as_deref(), Some("Managed worker"));
+    assert_eq!(child.status, SessionStatus::Inactive);
+    assert!(
+        provider
+            .watch_roots()
+            .unwrap()
+            .contains(&provider.manager_home)
+    );
+}
+
+#[test]
+fn manager_waiting_and_asks_override_rollout_status_and_clear() {
+    let (dir, mut provider) = fixture();
+    let session = manager_fixture(dir.path(), &mut provider, "attached");
+    let path = session.join("state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    // No pending requests existed at capture; exercise the manager's documented disk transitions.
+    state["threads"][0]["waiting"] = serde_json::json!([{"callId":"approval-1","kind":"approval","since":1791911000000_i64,"text":"Run checks"}]);
+    std::fs::write(&path, state.to_string()).unwrap();
+    assert_eq!(
+        provider
+            .snapshot(0)
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "thread-12")
+            .unwrap()
+            .status,
+        SessionStatus::NeedsInput
+    );
+    state["threads"][0]["waiting"] = serde_json::json!([]);
+    std::fs::write(&path, state.to_string()).unwrap();
+    let ask = session.join("thread-12.ask.question-1.json");
+    std::fs::write(
+        &ask,
+        r#"{"callId":"question-1","text":"Continue?","since":1791911000000}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        provider
+            .snapshot(0)
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "thread-12")
+            .unwrap()
+            .status,
+        SessionStatus::NeedsInput
+    );
+    std::fs::remove_file(ask).unwrap();
+    assert_eq!(
+        provider
+            .snapshot(0)
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "thread-12")
+            .unwrap()
+            .status,
+        SessionStatus::Inactive
+    );
+}
+
+#[test]
+fn manager_detached_missing_and_reassigned_records_do_not_nest() {
+    let (dir, mut provider) = fixture();
+    let session = manager_fixture(dir.path(), &mut provider, "detached");
+    let snapshot = provider.snapshot(1).unwrap();
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "thread-0")
+            .unwrap()
+            .parent
+            .is_none()
+    );
+    let session = {
+        std::fs::remove_file(session.join("state.json")).unwrap();
+        manager_fixture(dir.path(), &mut provider, "attached")
+    };
+    std::fs::write(
+        provider.manager_home.join("threads/thread-12.json"),
+        r#"{"sessionId":"another-session","pid":12345}"#,
+    )
+    .unwrap();
+    assert!(provider.snapshot(0).unwrap().sessions.is_empty());
+    std::fs::remove_file(provider.manager_home.join("threads/thread-12.json")).unwrap();
+    assert!(provider.snapshot(0).unwrap().sessions.is_empty());
+    assert!(session.join("state.json").exists());
+}
+
+#[test]
+fn manager_children_use_shared_hub_filtering_and_view_only_rows() {
+    use crate::{model::Grouping, providers::claude::ClaudeProvider, sessions::Hub, ui::View};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
+
+    let (dir, mut codex) = fixture();
+    let manager_session = manager_fixture(dir.path(), &mut codex, "attached");
+    let claude_home = dir.path().join("claude");
+    let project = claude_home.join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    let parent_id = "00000000-0000-0000-0000-000000000001";
+    std::fs::write(
+        project.join(format!("{parent_id}.jsonl")),
+        include_str!("../../../tests/fixtures/transcript.jsonl"),
+    )
+    .unwrap();
+    std::fs::rename(&manager_session, codex.manager_home.join(parent_id)).unwrap();
+    std::fs::write(
+        codex.manager_home.join("threads/thread-12.json"),
+        serde_json::json!({"sessionId":parent_id,"pid":12345}).to_string(),
+    )
+    .unwrap();
+    let session = codex.manager_home.join(parent_id);
+    std::fs::write(
+        session.join("thread-12.ask.question.json"),
+        r#"{"callId":"question","text":"Continue?","since":1791911000000}"#,
+    )
+    .unwrap();
+
+    let mut orphan_hub = Hub::new(vec![Box::new(CodexProvider::new(
+        dir.path().into(),
+        codex.manager_home.clone(),
+    ))]);
+    assert!(
+        orphan_hub
+            .refresh()
+            .sessions
+            .iter()
+            .all(|s| s.id.id != "thread-12" && s.id.id != "thread-13")
+    );
+    let mut hub = Hub::new(vec![
+        Box::new(ClaudeProvider::new(claude_home)),
+        Box::new(codex),
+    ]);
+    let snapshot = hub.refresh();
+    let parent = snapshot
+        .sessions
+        .iter()
+        .find(|s| s.id.provider == ProviderId::Claude)
+        .unwrap();
+    let parent_key = parent.id.clone();
+    let parent_title = parent.display_title().chars().take(12).collect::<String>();
+    assert_eq!(parent.status, SessionStatus::Inactive);
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .any(|s| s.id.id == "thread-12" && s.parent.as_ref() == Some(&parent_key))
+    );
+    let mut view = View::new(Grouping::Project, false);
+    view.set_capabilities(hub.capabilities());
+    view.set_sessions(snapshot.sessions, snapshot.has_more);
+    assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
+    view.render(buffer.area, &mut buffer);
+    let lines: Vec<String> = buffer
+        .content
+        .chunks(160)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+        .collect();
+    let parent_row = lines
+        .iter()
+        .position(|line| line.contains(&parent_title))
+        .unwrap_or_else(|| panic!("parent={parent_title:?}\n{}", lines.join("\n")));
+    let x = 6;
+    assert!(
+        buffer[(x as u16, parent_row as u16)]
+            .modifier
+            .contains(Modifier::DIM)
+    );
+    assert!(lines[parent_row + 1].contains("Managed worker"));
+    for code in [
+        KeyCode::Enter,
+        KeyCode::Right,
+        KeyCode::Char('o'),
+        KeyCode::Char('r'),
+        KeyCode::Char('x'),
+        KeyCode::Char('p'),
+    ] {
+        assert_eq!(
+            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
+            None
+        );
+        assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
+    }
+    // Pending and inactive children never populate the parent's Background section.
+    for _ in 0..4 {
+        view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    }
+    while view.selected_id() != Some(&parent_key) {
+        let previous = view.selected_id().cloned();
+        view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_ne!(view.selected_id(), previous.as_ref());
+    }
+    assert!(!view.has_background());
 }
