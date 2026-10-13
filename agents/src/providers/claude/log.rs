@@ -55,6 +55,7 @@ fn tool_detail(name: &str, input: &serde_json::Value) -> String {
 }
 
 fn tool_label(name: &str, detail: &str) -> String {
+    let name = if name == "SendMessage" { "To" } else { name };
     if detail.is_empty() {
         name.to_owned()
     } else if matches!(name, "Bash" | "AskUserQuestion") {
@@ -500,8 +501,8 @@ mod tests {
         let expected = [
             "mkdir, cd, ls, wc, head",
             "找那个会话",
-            "SendMessage (hide-idle-teammates) 问 line_truncation.rs 是不是它在改",
-            "SendMessage (team-lead) Report: /tmp/research",
+            "To (hide-idle-teammates) 问 line_truncation.rs 是不是它在改",
+            "To (team-lead) Report: /tmp/research",
             "SubagentHandback Report: /tmp/research",
             "WebFetch code.claude.com/docs/en/hooks",
             "cd, ls, sed, wc",
@@ -587,10 +588,15 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        for name in ["Agent", "Task", "SendMessage", "SubagentHandback"] {
+        for (name, label) in [
+            ("Agent", "Agent"),
+            ("Task", "Task"),
+            ("SendMessage", "To"),
+            ("SubagentHandback", "SubagentHandback"),
+        ] {
             for (participant, expected) in [
-                ("reviewer", format!("{name} (reviewer)")),
-                (" ", name.to_owned()),
+                ("reviewer", format!("{label} (reviewer)")),
+                (" ", label.to_owned()),
             ] {
                 let mut record = record.clone();
                 let block = &mut record["message"]["content"][0];

@@ -127,9 +127,14 @@ fn tool_body(payload: &Value) -> Option<String> {
                     .find_map(|key| args[*key].as_str().map(str::to_owned))
             })
     };
+    let label = if name.rsplit('.').next() == Some("send_message") {
+        "To"
+    } else {
+        name
+    };
     Some(match detail.filter(|text| !text.trim().is_empty()) {
-        Some(detail) => format!("{name} {}", preview(&detail)),
-        None => name.to_owned(),
+        Some(detail) => format!("{label} {}", preview(&detail)),
+        None => label.to_owned(),
     })
 }
 
@@ -272,7 +277,7 @@ mod tests {
             .lines()
             .zip([
                 "spawn_agent (real_scan) Review files.",
-                "send_message (/root) Review files.",
+                "To (/root) Review files.",
                 "followup_task (ux_probe) Review files.",
             ])
         {
@@ -308,7 +313,12 @@ mod tests {
             record["payload"]["arguments"] = serde_json::json!({key:"reviewer"}).to_string().into();
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), record.to_string()).unwrap();
-            let expected = format!("{name} (reviewer)");
+            let label = if name == "collaboration.send_message" {
+                "To"
+            } else {
+                name
+            };
+            let expected = format!("{label} (reviewer)");
             assert_eq!(
                 tail_filtered(file.path(), 1, &Filter::default()).unwrap()[0].body,
                 expected
