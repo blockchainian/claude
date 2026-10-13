@@ -1,6 +1,5 @@
 # AGENTS.md
 
-> Before working here, read `README.md`.  
 > The user runs the installed `agents`, never the source.
 
 This directory is `agents`, the Rust terminal dashboard that lists every Claude Code and Codex session on this machine in the layout of `codex agents`.
