@@ -316,8 +316,8 @@ impl View {
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
         let (status, dot) = Self::status(session);
-        // Sections top to bottom: title, model, prompt, the newer of latest activity
-        // and last message, background, needs attention, project, branch.
+        // Sections top to bottom: title, prompt, the newer of latest activity
+        // and last message, background, needs attention, model, project, branch.
         let mut header = Line::from(vec![status.into(), " ".into(), dot, " ".into()]);
         let title_width = width.saturating_sub(header.width());
         let title_style = self.title_style(&session.id).bold();
@@ -342,12 +342,6 @@ impl View {
             area.height.saturating_sub(1),
         );
         let mut items: Vec<Item> = Vec::new();
-
-        let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
-        if let Some(effort) = &session.effort {
-            model.extend([" · ".dim(), effort.clone().into()]);
-        }
-        items.extend([Line::default().into(), Line::from(model).into()]);
 
         let mut header = vec!["Prompt".dim()];
         if let Some(start) = session.prompt_at {
@@ -472,6 +466,12 @@ impl View {
             ]);
             bodies.push(start..items.len());
         }
+
+        let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
+        if let Some(effort) = &session.effort {
+            model.extend([" · ".dim(), effort.clone().into()]);
+        }
+        items.extend([Line::default().into(), Line::from(model).into()]);
 
         let mut project = vec!["Project".dim()];
         if let Some(branch) = &session.git_branch {

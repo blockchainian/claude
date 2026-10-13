@@ -1197,8 +1197,7 @@ fn details_include_attention_and_clip_messages() {
         .position(|line| line.trim_end().ends_with("/tmp/project"));
     assert!(position("Prompt") < position("Last message"));
     assert!(position("Last message") < position("Needs attention"));
-    assert!(position("Model: claude-opus") < position("Prompt"));
-    assert!(position("Needs attention") < position("Project ·"));
+    assert!(position("Needs attention") < position("Model: claude-opus"));
     assert!(position("Model: claude-opus") < position("Project ·"));
     assert!(position("Project ·") < project);
     assert!(
@@ -1900,10 +1899,10 @@ fn details_prompt_renders_all_wrapped_lines() {
     row.prompt = format!("{} {} {}", "a".repeat(40), "b".repeat(40), "c".repeat(40));
     let rendered = queued_details(row, 15);
     let lines = rendered.lines().collect::<Vec<_>>();
-    assert_eq!(lines[5], "a".repeat(40));
-    assert_eq!(lines[6], "b".repeat(40));
-    assert_eq!(lines[7], "c".repeat(40));
-    assert_eq!(lines[8], "");
+    assert_eq!(lines[3], "a".repeat(40));
+    assert_eq!(lines[4], "b".repeat(40));
+    assert_eq!(lines[5], "c".repeat(40));
+    assert_eq!(lines[6], "");
     assert!(!rendered.contains('…'));
 }
 
@@ -1916,7 +1915,7 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     row.prompt = wrapped.join(" ");
     let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![row], false);
-    let area = Rect::new(0, 0, 40, 8);
+    let area = Rect::new(0, 0, 40, 6);
     let now = Utc::now();
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, now);
@@ -1927,15 +1926,15 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
             .trim_end()
             .to_owned()
     };
-    assert_eq!(line(&buf, 5), wrapped[0]);
-    assert_eq!(line(&buf, 6), wrapped[1]);
-    assert_eq!(line(&buf, 7), "…");
+    assert_eq!(line(&buf, 3), wrapped[0]);
+    assert_eq!(line(&buf, 4), wrapped[1]);
+    assert_eq!(line(&buf, 5), "…");
     for expected in &wrapped[2..] {
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x, area.y));
         buf.reset();
         view.render_details(area, &mut buf, now);
-        assert_eq!(line(&buf, 6), *expected);
-        assert_eq!(line(&buf, 7), "…");
+        assert_eq!(line(&buf, 4), *expected);
+        assert_eq!(line(&buf, 5), "…");
     }
     let total = view.viewport.borrow().details_scroll.fallback_max.unwrap();
     for _ in 0..total {
@@ -1943,10 +1942,10 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     }
     buf.reset();
     view.render_details(area, &mut buf, now);
-    assert_eq!(line(&buf, 4), wrapped[7]);
-    assert_eq!(line(&buf, 5), "");
-    assert_eq!(line(&buf, 6), "Project");
-    assert_eq!(line(&buf, 7), "/tmp/project");
+    assert_eq!(line(&buf, 2), "Model: Unknown");
+    assert_eq!(line(&buf, 3), "");
+    assert_eq!(line(&buf, 4), "Project");
+    assert_eq!(line(&buf, 5), "/tmp/project");
 }
 
 #[test]
@@ -2269,19 +2268,19 @@ fn details_markdown_snapshot() {
         rendered,
         include_str!("../../tests/ui_snapshots/details_markdown.txt")
     );
-    assert_eq!(buffer[(4, 5)].fg, Color::Cyan);
+    assert_eq!(buffer[(4, 3)].fg, Color::Cyan);
     assert!(
-        buffer[(14, 5)]
+        buffer[(14, 3)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, 6)]
+        buffer[(2, 4)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, 11)].fg, Color::Cyan);
-    assert_eq!(buffer[(0, 13)].fg, Color::Cyan);
+    assert_eq!(buffer[(6, 9)].fg, Color::Cyan);
+    assert_eq!(buffer[(0, 11)].fg, Color::Cyan);
 }
 
 fn log_fixture() -> (View, chrono::DateTime<Utc>) {
@@ -2834,7 +2833,7 @@ mod details_budget {
         );
         assert!(!rows.iter().any(|line| line.contains("Check 3")));
         assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
-        assert!(rows[2].starts_with("Model:"));
+        assert!(rows[20].starts_with("Model:"));
         assert_eq!(rows[21], "");
         assert_eq!(rows[22], "Project");
         assert_eq!(rows[23], "/tmp/project");
@@ -2849,7 +2848,7 @@ mod details_budget {
         let area = Rect::new(0, 0, 120, 6);
         let mut buf = Buffer::empty(area);
         view.render_details(area, &mut buf, Utc::now());
-        assert_eq!(buf[(0, 4)].symbol(), "P");
+        assert_eq!(buf[(0, 3)].symbol(), "F");
         assert_eq!(buf[(0, 5)].symbol(), "…");
     }
 
@@ -2917,7 +2916,7 @@ mod details_budget {
         let scrolled = panel(&view);
         assert_eq!(scrolled[0], rest[0]);
         assert_eq!(scrolled[23], rest[23]);
-        assert_eq!(scrolled[4], "Prompt row 1");
+        assert_eq!(scrolled[2], "Prompt row 1");
         view.handle_mouse(mouse(MouseEventKind::ScrollUp, 0, 0));
         assert_eq!(panel(&view), rest);
     }

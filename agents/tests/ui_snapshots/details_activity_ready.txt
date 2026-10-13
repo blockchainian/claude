@@ -1,12 +1,12 @@
 Ready ○ Activity task
 
-Model: Unknown
-
 Prompt · 42 messages · 10m 5s
 Activity task
 
 Latest activity · 7s ago
 Run checks
+
+Model: Unknown
 
 Project
 /tmp/project

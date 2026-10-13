@@ -3,10 +3,10 @@
   ────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                         Status         Updated  │ Ready ○ Legacy task
   Unknown  1                                                │
-  › ○ Legacy task                   Ready           1s ago  │ Model: Unknown
-                                                            │
-  model-a  2                                                │ Prompt
-    ○ Recent task                   Ready           2s ago  │ Legacy task
+  › ○ Legacy task                   Ready           1s ago  │ Prompt
+                                                            │ Legacy task
+  model-a  2                                                │
+    ○ Recent task                   Ready           2s ago  │ Model: Unknown
     ○ Older task                    Ready           4s ago  │
                                                             │ Project
   model-b  1                                                │ /tmp/project

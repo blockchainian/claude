@@ -1,7 +1,5 @@
 Ready ○ Parent
 
-Model: Unknown
-
 Prompt
 Parent
 
@@ -10,6 +8,8 @@ Background
 ╭ Check files · 1m 5s ─────────────────╮
 │ Read files                           │
 ╰──────────────────────────────────────╯
+
+Model: Unknown
 
 Project
 /tmp/project

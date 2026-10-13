@@ -1,11 +1,11 @@
 Working ● Queue task
 
-Model: Unknown
-
 Prompt
 Current prompt
 First queued prompt
 Second queued prompt
+
+Model: Unknown
 
 Project
 /tmp/project

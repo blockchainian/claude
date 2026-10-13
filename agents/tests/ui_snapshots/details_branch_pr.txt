@@ -1,9 +1,9 @@
 Inactive ○ PR task
 
-Model: Unknown
-
 Prompt
 PR task
+
+Model: Unknown
 
 Project · main · #833
 /tmp/project

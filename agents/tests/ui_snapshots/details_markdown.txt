@@ -1,7 +1,5 @@
 Working ● Markdown task
 
-Model: Unknown
-
 Prompt
 Use cargo and tests
 • queued prompt
@@ -12,6 +10,8 @@ Result
 Built agents.
 
 cargo test
+
+Model: Unknown
 
 Project
 /tmp/project

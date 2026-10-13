@@ -1,7 +1,5 @@
 Ready ○ Background task
 
-Model: Unknown
-
 Prompt
 Background task
 
@@ -13,6 +11,8 @@ Background
 │ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
 ╰──────────────────────────────────────╯
 ╶ Waiting for output · 0s ─────────────╴
+
+Model: Unknown
 
 Project
 /tmp/project
