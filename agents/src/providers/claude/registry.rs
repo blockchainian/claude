@@ -122,7 +122,7 @@ pub(super) mod tests {
             .get(&pid)
             .expect("ps must be available for the liveness test")[0];
         let mut value: serde_json::Value =
-            serde_json::from_str(include_str!("../../tests/fixtures/registry.json")).unwrap();
+            serde_json::from_str(include_str!("../../../tests/fixtures/registry.json")).unwrap();
         value["pid"] = pid.into();
         value["procStart"] = start.format("%a %b %e %H:%M:%S %Y").to_string().into();
         fs::create_dir_all(dir.join("sessions")).unwrap();

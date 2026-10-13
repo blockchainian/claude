@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn subagent_transcript_reads_sidechain_records_only_in_subagent_mode() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        file.write_all(include_bytes!("../../tests/fixtures/subagent.jsonl"))
+        file.write_all(include_bytes!("../../../tests/fixtures/subagent.jsonl"))
             .unwrap();
         assert!(tail(file.path(), 8).unwrap().is_empty());
         let events = tail_filtered(file.path(), 8, &Filter::default(), true).unwrap();
@@ -557,7 +557,9 @@ mod tests {
 
     #[test]
     fn automode_blocked_is_denied_with_classifier_reason() {
-        let records = denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+        let records = denial_records(include_str!(
+            "../../../tests/fixtures/automode_blocked.jsonl"
+        ));
         let end = records[1]["timestamp"].as_str().unwrap().parse().unwrap();
         let events = events_from(records);
         assert_eq!(events.len(), 1);
@@ -569,7 +571,7 @@ mod tests {
     #[test]
     fn automode_blocked_without_brackets_is_denied_as_dangerous() {
         let records = denial_records(include_str!(
-            "../../tests/fixtures/automode_blocked_dangerous.jsonl"
+            "../../../tests/fixtures/automode_blocked_dangerous.jsonl"
         ));
         let end = records[1]["timestamp"].as_str().unwrap().parse().unwrap();
         let events = events_from(records);
@@ -581,7 +583,8 @@ mod tests {
 
     #[test]
     fn safety_check_is_denied_and_ends_before_the_next_reply() {
-        let mut records = denial_records(include_str!("../../tests/fixtures/safety_check.jsonl"));
+        let mut records =
+            denial_records(include_str!("../../../tests/fixtures/safety_check.jsonl"));
         let end = records[1]["timestamp"].as_str().unwrap().parse().unwrap();
         let mut reply = record("assistant", 1, json!([{"type":"text", "text":"checked"}]));
         reply["timestamp"] = "2026-10-12T15:13:30Z".into();
@@ -600,8 +603,9 @@ mod tests {
             ("permission-rule", "user"),
             ("hook", "hook"),
         ] {
-            let mut records =
-                denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+            let mut records = denial_records(include_str!(
+                "../../../tests/fixtures/automode_blocked.jsonl"
+            ));
             records[1]["toolDenialKind"] = denial.into();
             records[1]["permissionDecision"]["reasonType"] = reason.into();
             let events = events_from(records);
@@ -613,8 +617,9 @@ mod tests {
     #[test]
     fn automode_reason_without_complete_brackets_uses_dangerous() {
         for text in ["denied", "Reason: [unfinished"] {
-            let mut records =
-                denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+            let mut records = denial_records(include_str!(
+                "../../../tests/fixtures/automode_blocked.jsonl"
+            ));
             records[1]["message"]["content"][0]["content"] = text.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Denied);
@@ -625,8 +630,9 @@ mod tests {
     #[test]
     fn denied_parallel_batch_takes_precedence_over_errors_in_either_order() {
         for first in [true, false] {
-            let mut records =
-                denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+            let mut records = denial_records(include_str!(
+                "../../../tests/fixtures/automode_blocked.jsonl"
+            ));
             let mut other = records[0].clone();
             other["message"]["content"][0]["id"] = "other".into();
             other["message"]["content"][0]["name"] = "Read".into();
@@ -779,7 +785,7 @@ mod tests {
     fn fixture() -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         // Reuse the real prompt and assistant response before the tool records.
-        for line in include_str!("../../tests/fixtures/transcript.jsonl")
+        for line in include_str!("../../../tests/fixtures/transcript.jsonl")
             .lines()
             .take(2)
         {
@@ -962,8 +968,9 @@ mod tests {
     #[test]
     fn task_list_tool_results_cannot_make_error_or_denied_rows() {
         for name in ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"] {
-            let mut records =
-                denial_records(include_str!("../../tests/fixtures/automode_blocked.jsonl"));
+            let mut records = denial_records(include_str!(
+                "../../../tests/fixtures/automode_blocked.jsonl"
+            ));
             records[0]["message"]["content"][0]["name"] = name.into();
             assert!(events_from(records).is_empty());
             assert!(
@@ -1357,9 +1364,9 @@ mod log_filters {
     #[test]
     fn filtered_tail_keeps_batch_kinds_and_event_times() {
         for payload in [
-            include_str!("../../tests/fixtures/automode_blocked.jsonl"),
-            include_str!("../../tests/fixtures/safety_check.jsonl"),
-            include_str!("../../tests/fixtures/transcript.jsonl"),
+            include_str!("../../../tests/fixtures/automode_blocked.jsonl"),
+            include_str!("../../../tests/fixtures/safety_check.jsonl"),
+            include_str!("../../../tests/fixtures/transcript.jsonl"),
         ] {
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), payload).unwrap();

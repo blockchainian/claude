@@ -123,7 +123,7 @@ impl Metadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::{Store, registry, tests::transcript};
+    use crate::providers::claude::{Store, registry, tests::transcript};
     use serde_json::{Value, json};
     use std::{
         fs,
@@ -131,7 +131,7 @@ mod tests {
         path::PathBuf,
     };
 
-    const FIXTURE: &str = include_str!("../../tests/fixtures/subagent.jsonl");
+    const FIXTURE: &str = include_str!("../../../tests/fixtures/subagent.jsonl");
 
     fn records() -> Vec<Value> {
         FIXTURE
@@ -172,9 +172,11 @@ mod tests {
                 .join("\n"),
         )
         .unwrap();
-        let summary =
-            crate::sessions::transcript::read_subagent(&path, fs::metadata(&path).unwrap().len())
-                .unwrap();
+        let summary = crate::providers::claude::transcript::read_subagent(
+            &path,
+            fs::metadata(&path).unwrap().len(),
+        )
+        .unwrap();
         let meta: Metadata = serde_json::from_value(json!({"taskKind":if teammate {"in_process_teammate"} else {"background"}, "teamName":"test", "name":"worker"})).unwrap();
         if listed {
             fs::create_dir_all(dir.path().join("teams/test")).unwrap();
@@ -485,7 +487,8 @@ mod tests {
             inner: std::io::Cursor::new(bytes),
             read: 0,
         };
-        let summary = crate::sessions::transcript::read_subagent_tail(&mut reader, len).unwrap();
+        let summary =
+            crate::providers::claude::transcript::read_subagent_tail(&mut reader, len).unwrap();
         assert!(reader.read <= 64 * 1024 + 1);
         assert_eq!(summary.model.as_deref(), Some("claude-opus-5-5"));
         assert_eq!(summary.subagent_records.len(), 2);

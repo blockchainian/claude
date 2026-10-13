@@ -539,7 +539,7 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    const FIXTURE: &str = include_str!("../../tests/fixtures/transcript.jsonl");
+    const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
 
     fn assert_summary(summary: &Summary) {
         let records: Vec<Value> = FIXTURE
@@ -573,7 +573,7 @@ mod tests {
         );
     }
 
-    const PR: &str = include_str!("../../tests/fixtures/pr-link.jsonl");
+    const PR: &str = include_str!("../../../tests/fixtures/pr-link.jsonl");
 
     fn write_tool_traffic(file: &mut impl Write, bytes: usize) {
         let tool_use = serde_json::json!({
