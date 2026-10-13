@@ -13,13 +13,13 @@
                                                           │
                                                           │
   ────────────────────────────────────────────────────────────────────────────────────────────────
-  11:58:00 User   Please inspect the task
-  11:58:10 Model  I will check the files
-       15s Tool   Read src/main.rs， Read src/app.rs
-       15s Error  Bash failed check
-  11:59:00 Queued Also inspect the tests
-        5s Tool   Bash run a background job *
-  11:59:20 Model  A long response whose whitespace collapses and whose body must be truncated bef…
-       35s Tool   Bash run tests
+  User   Please inspect the task                                                          11:58:00
+  Model  I will check the files                                                           11:58:10
+  Tool   Read src/main.rs， Read src/app.rs                                                     15s
+  Error  Bash failed check                                                                     15s
+  Queued Also inspect the tests                                                           11:59:00
+  Tool   Bash run a background job *                                                            5s
+  Model  A long response whose whitespace collapses and whose body must be truncated b…   11:59:20
+  Tool   Bash run tests                                                                        35s
   ────────────────────────────────────────────────────────────────────────────────────────────────
   ? help  esc back  ↑/↓ move  enter open  n new

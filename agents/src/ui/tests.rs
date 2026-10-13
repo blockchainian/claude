@@ -1551,14 +1551,14 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .nth(22)
             .unwrap()
-            .starts_with("       35s ")
+            .ends_with("35s")
     );
     assert!(
         log_screen(&view, 100, 25, now + Duration::seconds(1))
             .lines()
             .nth(22)
             .unwrap()
-            .starts_with("       36s ")
+            .ends_with("36s")
     );
     view.rows[view.selected].process = None;
     assert!(
@@ -1566,7 +1566,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .nth(22)
             .unwrap()
-            .starts_with("       25s ")
+            .ends_with("25s")
     );
     view.log.last_mut().unwrap().body.push_str(" *");
     assert!(
@@ -1574,7 +1574,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .nth(22)
             .unwrap()
-            .starts_with("        5s ")
+            .ends_with("5s")
     );
 }
 
@@ -1587,7 +1587,7 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
             .lines()
             .nth(21)
             .unwrap()
-            .starts_with("   40s ago ")
+            .ends_with("40s ago")
     );
     view.rows[view.selected].transcript = None;
     let rendered = log_screen(&view, 100, 25, now);
@@ -1604,22 +1604,22 @@ fn task_log_uses_terminal_styles_and_preserves_time_when_truncated() {
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    assert_eq!(buf[(11, 15)].fg, style::accent_color());
-    assert!(buf[(11, 15)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(18, 15)].fg, style::accent_color());
-    assert!(buf[(11, 16)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(2, 15)].fg, style::accent_color());
+    assert!(buf[(2, 15)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(9, 15)].fg, style::accent_color());
+    assert!(buf[(2, 16)].modifier.contains(Modifier::BOLD));
     assert!(
-        buf[(11, 17)]
+        buf[(2, 17)]
             .modifier
             .contains(Modifier::DIM | Modifier::BOLD)
     );
-    assert!(buf[(18, 17)].modifier.contains(Modifier::DIM));
-    assert_eq!(buf[(11, 18)].fg, Color::Red);
-    assert_eq!(buf[(18, 18)].fg, Color::Red);
-    assert_eq!(buf[(11, 19)].fg, style::accent_color());
-    assert!(!buf[(11, 19)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(97, 21)].symbol(), "…");
-    assert!(buf[(2, 21)].modifier.contains(Modifier::DIM));
+    assert!(buf[(9, 17)].modifier.contains(Modifier::DIM));
+    assert_eq!(buf[(2, 18)].fg, Color::Red);
+    assert_eq!(buf[(9, 18)].fg, Color::Red);
+    assert_eq!(buf[(2, 19)].fg, style::accent_color());
+    assert!(!buf[(2, 19)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(86, 21)].symbol(), "…");
+    assert!(buf[(97, 21)].modifier.contains(Modifier::DIM));
     for kind in [Kind::User, Kind::Model, Kind::Queued] {
         let mut view = log_fixture().0;
         let event = view.log.last_mut().unwrap();
@@ -1629,7 +1629,7 @@ fn task_log_uses_terminal_styles_and_preserves_time_when_truncated() {
                 .lines()
                 .nth(22)
                 .unwrap()
-                .starts_with("   30s ago ")
+                .ends_with("30s ago")
         );
     }
 }
@@ -1651,13 +1651,9 @@ fn task_log_right_aligns_mixed_width_times() {
             .lines()
             .skip(15)
             .take(3)
-            .map(|line| &line[..18])
+            .map(|line| line.chars().skip(90).collect::<String>())
             .collect::<Vec<_>>(),
-        [
-            "        3s Tool   ",
-            "  12:03:45 Model  ",
-            "   44m ago Model  "
-        ]
+        ["      3s", "12:03:45", " 44m ago"]
     );
 }
 
