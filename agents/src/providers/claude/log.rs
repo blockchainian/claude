@@ -112,7 +112,7 @@ pub fn tail_filtered(
     events.reverse();
     let mut previous_end = None;
     for event in &mut events {
-        if event.kind != Kind::Model || event.previous_end.is_none() {
+        if event.kind != Kind::Assistant || event.previous_end.is_none() {
             event.previous_end = previous_end;
         }
         previous_end = match event.kind {
@@ -245,7 +245,7 @@ impl Log {
                         blocks.iter().any(|block| block["type"] == "tool_result")
                     })
                     && let Some(entry) = self.entries.last_mut()
-                    && entry.event.kind == Kind::Model
+                    && entry.event.kind == Kind::Assistant
                     && entry.event.previous_end.is_none()
                 {
                     entry.event.previous_end = Some(at);
@@ -257,7 +257,7 @@ impl Log {
                         match block["type"].as_str() {
                             Some("text") => {
                                 if let Some(text) = block["text"].as_str() {
-                                    self.push(Kind::Model, text.to_owned(), at);
+                                    self.push(Kind::Assistant, text.to_owned(), at);
                                 }
                             }
                             Some("tool_use") => self.tool(block, at),
@@ -344,7 +344,7 @@ impl Log {
         };
         let kind = crate::log::tool_kind(name);
         if self.batch.is_some_and(|index| {
-            (self.entries[index].event.kind == Kind::Model) != (kind == Kind::Model)
+            (self.entries[index].event.kind == Kind::Assistant) != (kind == Kind::Assistant)
         }) {
             self.batch = None;
         }
@@ -499,12 +499,12 @@ mod tests {
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].body, expected);
-            assert_eq!(events[0].kind, Kind::Model);
+            assert_eq!(events[0].kind, Kind::Assistant);
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();
             let activity = summary.activity.unwrap();
             assert_eq!(activity.label, expected);
-            assert_eq!(activity.kind, Kind::Model);
+            assert_eq!(activity.kind, Kind::Assistant);
         }
     }
 
@@ -662,7 +662,7 @@ mod tests {
         assert!(events[0].body.starts_with("SubagentHandback"));
         assert!(events[0].ended_at.is_some());
         let mut filter = Filter::default();
-        filter.toggle(&[Kind::Model]);
+        filter.toggle(&[Kind::Assistant]);
         assert!(
             tail_filtered(file.path(), 8, &filter, true)
                 .unwrap()
@@ -838,7 +838,7 @@ mod tests {
         let events = tail(file.path(), 20).unwrap();
         let models: Vec<_> = events
             .iter()
-            .filter(|event| event.kind == Kind::Model)
+            .filter(|event| event.kind == Kind::Assistant)
             .collect();
         let tool = events
             .iter()
@@ -862,7 +862,7 @@ mod tests {
         let mut file = model_turn();
         let before = tail(file.path(), 1).unwrap();
         assert_eq!(before.len(), 1);
-        assert_eq!(before[0].kind, Kind::Model);
+        assert_eq!(before[0].kind, Kind::Assistant);
         assert_eq!(
             (before[0].started_at - before[0].previous_end.unwrap()).num_seconds(),
             57
@@ -1291,7 +1291,7 @@ mod tests {
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
             [
                 &Kind::User,
-                &Kind::Model,
+                &Kind::Assistant,
                 &Kind::Error,
                 &Kind::Tool,
                 &Kind::QueuedUser,
@@ -1566,7 +1566,7 @@ mod log_filters {
             std::fs::write(file.path(), payload).unwrap();
             let all = tail(file.path(), usize::MAX).unwrap();
             for kinds in [
-                &[Kind::Model, Kind::Agent][..],
+                &[Kind::Assistant, Kind::Agent][..],
                 &[Kind::Tool],
                 &[Kind::Error, Kind::Denied],
                 &[Kind::User, Kind::QueuedUser],

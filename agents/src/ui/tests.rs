@@ -173,7 +173,7 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
     view.log.insert(0, older);
     let before = log_screen(&view, 100, 25, now);
     let rect = view.center_layout(Rect::new(0, 0, 100, 25)).log;
-    assert!(before.contains("35s Tool    run tests"), "{before}");
+    assert!(before.contains("35s Tool      run tests"), "{before}");
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
     let after = log_screen(&view, 100, 25, now);
     assert!(after.contains("Older event"), "{after}");
@@ -189,12 +189,12 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
     view.log[7].body = "Earlier unfinished tool".into();
     let after = log_screen(&view, 100, 25, now);
     assert!(
-        after.contains("5s Tool    Earlier unfinished tool"),
+        after.contains("5s Tool      Earlier unfinished tool"),
         "{after}"
     );
     assert!(!after.contains("35s Tool"));
     view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x + 2, rect.y + 1));
-    assert!(log_screen(&view, 100, 25, now).contains("35s Tool    run tests"));
+    assert!(log_screen(&view, 100, 25, now).contains("35s Tool      run tests"));
 }
 
 #[test]
@@ -215,8 +215,8 @@ fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
     view.log.last_mut().unwrap().previous_end = None;
     let before = log_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
-    assert!(before.contains("11:59:30 Tool    Event 11"), "{before}");
-    assert!(before.contains("12s Tool    Event 10"), "{before}");
+    assert!(before.contains("11:59:30 Tool      Event 11"), "{before}");
+    assert!(before.contains("12s Tool      Event 10"), "{before}");
     let (before_x, before_y) = rendered_cell(&before, "Event 10");
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
     let after = log_screen(&view, 100, 25, now);
@@ -2413,12 +2413,12 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
     view.log_session = Some(session_key("log"));
     view.log = [
         (Kind::User, "Please\n  inspect the task", 120, None),
-        (Kind::Model, "I will check the files", 110, None),
+        (Kind::Assistant, "I will check the files", 110, None),
         (Kind::Tool, "Read src/main.rs，Read src/app.rs", 100, Some(90)),
         (Kind::Error, "failed check", 80, Some(70)),
         (Kind::QueuedUser, "Also inspect the tests", 60, None),
         (Kind::Tool, "run a background job *", 50, None),
-        (Kind::Model, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
+        (Kind::Assistant, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
         kind, body: body.into(), path: None, started_at: now - Duration::seconds(age),
@@ -2427,7 +2427,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
     }).collect();
     let mut previous_end = None;
     for event in &mut view.log {
-        if event.kind == Kind::Model {
+        if event.kind == Kind::Assistant {
             event.previous_end = previous_end;
         }
         previous_end = if matches!(event.kind, Kind::Tool | Kind::Error) {
@@ -2458,7 +2458,7 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
 }
 
 #[test]
-fn task_log_labels_are_left_aligned_in_seven_columns() {
+fn task_log_labels_are_left_aligned_in_nine_columns() {
     let (view, now) = log_fixture();
     let rendered = log_screen(&view, 100, 25, now);
     assert!(
@@ -2466,7 +2466,7 @@ fn task_log_labels_are_left_aligned_in_seven_columns() {
             .lines()
             .nth(22)
             .unwrap()
-            .starts_with("  11:58:00 User    Please")
+            .starts_with("  11:58:00 User      Please")
     );
 }
 
@@ -2634,7 +2634,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (15, Color::Reset, true),
     ] {
         let label = &buf[(11, y)];
-        let body = &buf[(19, y)];
+        let body = &buf[(21, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
         assert_eq!(label.modifier.contains(Modifier::BOLD), bold, "row {y}");
@@ -2650,7 +2650,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     }
     for (kind, colour) in [
         (Kind::User, Color::Reset),
-        (Kind::Model, Color::Yellow),
+        (Kind::Assistant, Color::Yellow),
         (Kind::Agent, Color::Yellow),
         (Kind::Session, Color::Yellow),
         (Kind::Tool, Color::Blue),
@@ -2684,12 +2684,12 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
                     .lines()
                     .nth(15)
                     .unwrap()
-                    .starts_with(&format!("    1m ago {expected_label:<7} Also"))
+                    .starts_with(&format!("    1m ago {expected_label:<9} Also"))
             );
         }
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        for x in [11, 19] {
+        for x in [11, 21] {
             let cell = &buf[(x, 15)];
             assert_eq!(cell.fg, colour);
             assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 11);
@@ -2720,7 +2720,7 @@ fn task_log_preserves_time_when_truncated() {
     );
     for kind in [
         Kind::User,
-        Kind::Model,
+        Kind::Assistant,
         Kind::Agent,
         Kind::Session,
         Kind::QueuedUser,
@@ -2749,7 +2749,7 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
     view.log[0].ended_at = Some(now - Duration::seconds(120));
     view.log[1].started_at = now + Duration::seconds(225);
     view.log[1].previous_end = None;
-    view.log[2].kind = Kind::Model;
+    view.log[2].kind = Kind::Assistant;
     view.log[2].started_at = now - Duration::minutes(44);
     let rendered = log_screen(&view, 100, 25, now);
     assert_eq!(
@@ -2757,13 +2757,17 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
             .lines()
             .skip(15)
             .take(3)
-            .map(|line| line.chars().skip(2).take(16).collect::<String>())
+            .map(|line| line.chars().skip(2).take(18).collect::<String>())
             .collect::<Vec<_>>(),
-        [" 44m ago Model  ", "12:03:45 Model  ", "      3s Tool   "]
+        [
+            " 44m ago Assistant",
+            "12:03:45 Assistant",
+            "      3s Tool     "
+        ]
     );
     for (line, (time, label)) in rendered.lines().skip(15).take(3).zip([
-        ("44m ago", "Model"),
-        ("12:03:45", "Model"),
+        ("44m ago", "Assistant"),
+        ("12:03:45", "Assistant"),
         ("3s", "Tool"),
     ]) {
         assert_eq!(
@@ -2869,7 +2873,12 @@ fn task_log_event_count_follows_height() {
         assert_eq!(events.len(), count, "height {height}");
         if count > 0 {
             assert!(events[0].contains("event-29"));
-            assert!(events.last().unwrap().contains(&format!("event-{:02}", 30 - count)));
+            assert!(
+                events
+                    .last()
+                    .unwrap()
+                    .contains(&format!("event-{:02}", 30 - count))
+            );
             assert!(
                 rendered
                     .lines()
@@ -3291,18 +3300,18 @@ mod log_path_abbrev {
                 .into_owned(),
         );
         view.log = vec![event];
-        let area = Rect::new(0, 0, 41, 3);
+        let area = Rect::new(0, 0, 43, 3);
         let mut buf = Buffer::empty(area);
         view.render_log(area, &mut buf, now);
         let row = buf
             .content
-            .chunks(41)
+            .chunks(43)
             .nth(1)
             .unwrap()
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert!(row.contains("Tool    Read ~/U…/w…/p…/main.rs"), "{row}");
+        assert!(row.contains("Tool      Read ~/U…/w…/p…/main.rs"), "{row}");
     }
 }
 
@@ -3315,7 +3324,7 @@ mod log_filters {
         let template = view.log[0].clone();
         view.log = [
             Kind::User,
-            Kind::Model,
+            Kind::Assistant,
             Kind::Agent,
             Kind::Session,
             Kind::Tool,
@@ -3353,7 +3362,7 @@ mod log_filters {
         for event in &view.log {
             assert_eq!(
                 filtered.contains(&event.body),
-                matches!(event.kind, Kind::Model | Kind::Agent)
+                matches!(event.kind, Kind::Assistant | Kind::Agent)
             );
         }
         view.viewport.borrow_mut().log_scroll = 3;
@@ -3485,7 +3494,7 @@ mod log_search {
         assert!(text(&buf).contains("plain timeout bold"));
         assert!(!text(&buf).contains("unrelated"));
         assert!(!text(&buf).contains("t........"));
-        for x in 23..30 {
+        for x in 25..32 {
             assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
             assert_eq!(buf[(x, 1)].fg, crate::theme::inline_code_color());
         }
@@ -3509,7 +3518,7 @@ mod log_search {
         let (mut view, now) = log_fixture();
         let template = view.log[0].clone();
         view.log = [
-            (Kind::Model, "timeout connection out"),
+            (Kind::Assistant, "timeout connection out"),
             (Kind::Tool, "timeout alone"),
             (Kind::Error, "timeout connection"),
             (Kind::User, "plain `café` [link](url)"),
@@ -3560,12 +3569,12 @@ mod log_search {
         }
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain café link"));
-        for x in 23..27 {
+        for x in 25..29 {
             assert_eq!(buf[(x, 1)].fg, crate::theme::inline_code_color());
             assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
         }
-        assert!(buf[(28, 1)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buf[(28, 1)].modifier.contains(Modifier::BOLD));
+        assert!(buf[(30, 1)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buf[(30, 1)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -4459,7 +4468,7 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
     let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
     row.pending_questions = vec!["Pick a color?".into()];
     row.activity = Some(crate::model::Activity {
-        kind: crate::log::Kind::Model,
+        kind: crate::log::Kind::Assistant,
         label: "Pick a color?".into(),
         at: Utc::now(),
     });
@@ -4518,14 +4527,14 @@ fn pending_question_log_uses_model_color() {
             .content
             .chunks(160)
             .find(|cells| {
-                cells[11..18]
+                cells[11..20]
                     .iter()
                     .map(|cell| cell.symbol())
                     .collect::<String>()
-                    .contains("Model")
+                    .contains("Assistant")
             })
             .expect("question log row");
-        assert_eq!(question_row[19].fg, Color::Yellow);
+        assert_eq!(question_row[21].fg, Color::Yellow);
     }
 }
 

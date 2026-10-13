@@ -13,8 +13,8 @@
                                                             │
                                                             │
   ────────────────────────────────────────────────────────────────────────────────────────────────
-       35s Tool    run tests
-  11:59:00 Queue   Also inspect the tests
+       35s Tool      run tests
+  11:59:00 Queue     Also inspect the tests
 
 
 

@@ -3,7 +3,7 @@ use serde_json::Value;
 
 pub(crate) fn tool_kind(name: &str) -> Kind {
     match name.rsplit('.').next() {
-        Some("AskUserQuestion" | "request_user_input") => Kind::Model,
+        Some("AskUserQuestion" | "request_user_input") => Kind::Assistant,
         _ => Kind::Tool,
     }
 }
@@ -29,7 +29,7 @@ pub(crate) fn participant_text(name: Option<&str>, body: &str) -> String {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     User,
-    Model,
+    Assistant,
     Agent,
     Session,
     Tool,
@@ -62,6 +62,6 @@ pub struct Event {
     pub path: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
-    /// The preceding event's end, including hidden turn starters for Model replies.
+    /// The preceding event's end, including hidden turn starters for Assistant replies.
     pub previous_end: Option<DateTime<Utc>>,
 }

@@ -13,10 +13,10 @@
                                                             │
                                                             │
   ────────────────────────────────────────────────────────────────────────────────────────────────
-       10s Denied  Edit: Dangerous
-       10s Denied  Bash: Safety Check
-       15s Denied  Bash: Create Unsafe Agents
-  11:58:00 User    Please inspect the task
+       10s Denied    Edit: Dangerous
+       10s Denied    Bash: Safety Check
+       15s Denied    Bash: Create Unsafe Agents
+  11:58:00 User      Please inspect the task
 
 
 

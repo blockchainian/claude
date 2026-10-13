@@ -91,7 +91,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
     if !matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) {
         return if last {
             RowTime::Ago(event.started_at)
-        } else if event.kind == Kind::Model
+        } else if event.kind == Kind::Assistant
             && let Some(reference) = event.previous_end
         {
             RowTime::Settled((event.started_at - reference).num_seconds().max(0))
@@ -175,7 +175,7 @@ fn render_event(
     let content_x = area.x + time_width as u16 + 1;
     let label = match event.kind {
         Kind::User => "User",
-        Kind::Model => "Model",
+        Kind::Assistant => "Assistant",
         Kind::Agent => "Agent",
         Kind::Session => "Session",
         Kind::Tool => "Tool",
@@ -183,7 +183,7 @@ fn render_event(
         Kind::Denied => "Denied",
         Kind::QueuedUser | Kind::QueuedSystem => "Queue",
     };
-    let label = format!("{label:<7} ");
+    let label = format!("{label:<9} ");
     let label_width = label.width().min(content_width);
     Line::from(Span::styled(label, label_style))
         .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
@@ -222,7 +222,7 @@ fn render_event(
 pub(super) fn body_line(event: &Event, body_width: usize) -> Line<'static> {
     let body_style = super::style::log_styles(&event.kind).1;
     let body = event.body.split_whitespace().collect::<Vec<_>>().join(" ");
-    if matches!(event.kind, Kind::User | Kind::Model | Kind::Agent) {
+    if matches!(event.kind, Kind::User | Kind::Assistant | Kind::Agent) {
         let body = super::line_truncation::abbreviate_paths_in_text(&body, body_width);
         super::markdown::render(&body, usize::MAX)
             .into_iter()
@@ -254,7 +254,7 @@ mod log_markdown {
     use ratatui::style::Modifier;
 
     fn body_buffer(kind: Kind, body: &str, width: u16) -> Buffer {
-        let area = Rect::new(0, 0, width + 17, 1);
+        let area = Rect::new(0, 0, width + 19, 1);
         let mut buffer = Buffer::empty(area);
         let event = Event {
             kind,
@@ -269,7 +269,7 @@ mod log_markdown {
     }
 
     fn body_text(buffer: &Buffer) -> String {
-        buffer.content[17..]
+        buffer.content[19..]
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>()
@@ -338,7 +338,7 @@ mod log_markdown {
     #[test]
     fn prose_uses_markdown_and_preserves_base_and_inline_styles() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-        for kind in [Kind::User, Kind::Model, Kind::Agent] {
+        for kind in [Kind::User, Kind::Assistant, Kind::Agent] {
             let base = super::super::style::log_styles(&kind).1;
             let buffer = body_buffer(
                 kind,
@@ -346,12 +346,12 @@ mod log_markdown {
                 80,
             );
             assert_eq!(body_text(&buffer), "plain code bold link");
-            assert_eq!(buffer[(17, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert_eq!(buffer[(23, 0)].fg, crate::theme::inline_code_color());
-            assert_eq!(buffer[(28, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(buffer[(28, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buffer[(33, 0)].fg, crate::theme::link_color());
-            assert!(buffer[(33, 0)].modifier.contains(Modifier::UNDERLINED));
+            assert_eq!(buffer[(19, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert_eq!(buffer[(25, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(buffer[(30, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(buffer[(30, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(35, 0)].fg, crate::theme::link_color());
+            assert!(buffer[(35, 0)].modifier.contains(Modifier::UNDERLINED));
         }
     }
 
@@ -368,14 +368,14 @@ mod log_markdown {
             let base = super::super::style::log_styles(&kind).1;
             let buffer = body_buffer(kind, "  `code`\n **bold** [link](url)  ", 80);
             assert_eq!(body_text(&buffer), "`code` **bold** [link](url)");
-            assert_eq!(buffer[(17, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(!buffer[(17, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(19, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(19, 0)].modifier.contains(Modifier::BOLD));
         }
     }
 
     #[test]
     fn empty_prose_and_zero_body_width_are_safe() {
-        for kind in [Kind::User, Kind::Model, Kind::Agent] {
+        for kind in [Kind::User, Kind::Assistant, Kind::Agent] {
             assert_eq!(body_text(&body_buffer(kind.clone(), " \n ", 20)), "");
             assert_eq!(body_text(&body_buffer(kind, "`code`", 0)), "");
         }
@@ -383,7 +383,7 @@ mod log_markdown {
 
     #[test]
     fn prose_paths_shrink_before_the_line_is_cut() {
-        for kind in [Kind::User, Kind::Model, Kind::Agent] {
+        for kind in [Kind::User, Kind::Assistant, Kind::Agent] {
             let buffer = body_buffer(
                 kind,
                 "Report: /private/tmp/claude-501/report.md 1. done",
@@ -396,10 +396,10 @@ mod log_markdown {
     #[test]
     fn cut_inline_code_keeps_colour_through_the_ellipsis() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-        for kind in [Kind::User, Kind::Model, Kind::Agent] {
+        for kind in [Kind::User, Kind::Assistant, Kind::Agent] {
             let buffer = body_buffer(kind, "ok `abcdefghijklmnop`", 10);
             assert_eq!(body_text(&buffer), "ok abcdef…");
-            for x in 20..27 {
+            for x in 22..29 {
                 assert_eq!(buffer[(x, 0)].fg, crate::theme::inline_code_color());
             }
         }

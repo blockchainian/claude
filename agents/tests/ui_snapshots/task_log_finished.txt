@@ -13,13 +13,13 @@
                                                             │
                                                             │
   ────────────────────────────────────────────────────────────────────────────────────────────────
-       30s Tool    run tests
-  11:59:20 Model   A long response whose whitespace collapses and whose body must be truncated be…
-        5s Tool    run a background job *
-  11:59:00 Queue   Also inspect the tests
-       15s Error   failed check
-       15s Tool    Read src/main.rs， Read src/app.rs
-       10s Model   I will check the files
-  11:58:00 User    Please inspect the task
+       30s Tool      run tests
+  11:59:20 Assistant A long response whose whitespace collapses and whose body must be truncated …
+        5s Tool      run a background job *
+  11:59:00 Queue     Also inspect the tests
+       15s Error     failed check
+       15s Tool      Read src/main.rs， Read src/app.rs
+       10s Assistant I will check the files
+  11:58:00 User      Please inspect the task
 
   ? help  esc back  ↑/↓ move  enter open  n new

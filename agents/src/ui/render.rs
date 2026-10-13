@@ -423,7 +423,7 @@ impl View {
             }
             items.extend([Line::default().into(), Line::from(header).into()]);
             let start = items.len();
-            let body_style = style::log_styles(&crate::log::Kind::Model).1;
+            let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(
                 wrap_details(message, width, true)
                     .into_iter()
@@ -482,7 +482,7 @@ impl View {
                     truncate_line_with_ellipsis_if_overflow(
                         Line::from(Span::styled(
                             question.clone(),
-                            style::log_styles(&crate::log::Kind::Model).1,
+                            style::log_styles(&crate::log::Kind::Assistant).1,
                         )),
                         width,
                     )
@@ -764,7 +764,7 @@ fn subagent_line(child: &Session) -> (&str, crate::log::Kind) {
     let (text, kind) = if let Some(activity) = activity {
         (Some(activity.label.as_str()), activity.kind.clone())
     } else {
-        (child.last_message.as_deref(), crate::log::Kind::Model)
+        (child.last_message.as_deref(), crate::log::Kind::Assistant)
     };
     (
         text.unwrap_or_default().lines().next().unwrap_or_default(),

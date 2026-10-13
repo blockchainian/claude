@@ -111,7 +111,7 @@ pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
     use crate::log::Kind;
     let body = match kind {
         Kind::User | Kind::QueuedUser => Style::default(),
-        Kind::Model | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
+        Kind::Assistant | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
         Kind::Tool | Kind::QueuedSystem => Style::default().fg(Color::Blue),
         Kind::Error | Kind::Denied => Style::default().fg(Color::Red),
     };

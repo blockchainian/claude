@@ -253,7 +253,7 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
             (Some("response_item"), Some("message")) => {
                 let kind = match payload["role"].as_str() {
                     Some("user") => Kind::User,
-                    Some("assistant") => Kind::Model,
+                    Some("assistant") => Kind::Assistant,
                     _ => return true,
                 };
                 let Some(body) = content_text(&payload["content"]) else {
@@ -278,7 +278,7 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
                 let Some(body) = content_text(&item["content"]) else {
                     return true;
                 };
-                (Kind::Model, body, None)
+                (Kind::Assistant, body, None)
             }
             (Some("event_msg"), Some("turn_aborted")) => {
                 (Kind::Error, "Turn aborted".to_owned(), Some(at))
@@ -324,12 +324,12 @@ mod tests {
                 .iter()
                 .find(|event| event.body == "Pick a color?")
                 .unwrap();
-            assert_eq!(question.kind, Kind::Model);
+            assert_eq!(question.kind, Kind::Assistant);
             assert_eq!(question.body, "Pick a color?");
             assert!(question.ended_at.is_none());
             let activity = summary(&path).unwrap().activity.unwrap();
             assert_eq!(activity.label, "Pick a color?");
-            assert_eq!(activity.kind, Kind::Model);
+            assert_eq!(activity.kind, Kind::Assistant);
         }
     }
 
@@ -496,7 +496,7 @@ mod tests {
         let events = tail_filtered(&fixture(), 100, &Filter::default()).unwrap();
         assert_eq!(
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
-            vec![&Kind::User, &Kind::Tool, &Kind::Model]
+            vec![&Kind::User, &Kind::Tool, &Kind::Assistant]
         );
         assert_eq!(events[1].body, "javascript");
         assert!(events[1].ended_at.is_some());
@@ -568,7 +568,7 @@ mod tests {
             Some("Checks passed.")
         );
         let events = tail_filtered(file.path(), 1, &Filter::default()).unwrap();
-        assert_eq!(events[0].kind, Kind::Model);
+        assert_eq!(events[0].kind, Kind::Assistant);
         assert_eq!(events[0].body, "Checks passed.");
     }
 

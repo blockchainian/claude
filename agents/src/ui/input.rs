@@ -355,7 +355,7 @@ impl View {
                 use crate::log::Kind;
                 let kinds: &[Kind] = match hotkey {
                     '*' => &[],
-                    'm' => &[Kind::Model, Kind::Agent],
+                    'm' => &[Kind::Assistant, Kind::Agent],
                     't' => &[Kind::Tool],
                     'u' => &[Kind::User, Kind::QueuedUser],
                     'e' => &[Kind::Error, Kind::Denied],
