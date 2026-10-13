@@ -11,12 +11,6 @@ impl View {
         self.reconcile_selection();
     }
 
-    fn step_filter(&mut self, backwards: bool) {
-        let idx = (self.status_filter + if backwards { TASK_FILTERS.len() - 1 } else { 1 })
-            % TASK_FILTERS.len();
-        self.set_filter(idx);
-    }
-
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
         if self.delete_dialog.is_some()
             || self.help
@@ -64,7 +58,12 @@ impl View {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let forward = mouse.kind == MouseEventKind::ScrollDown;
                 if over_tabs {
-                    self.step_filter(!forward);
+                    let idx = if forward {
+                        (self.status_filter + 1).min(TASK_FILTERS.len() - 1)
+                    } else {
+                        self.status_filter.saturating_sub(1)
+                    };
+                    self.set_filter(idx);
                 } else if over_list {
                     self.move_selection(forward);
                 } else if over_log {
@@ -268,7 +267,9 @@ impl View {
         if plain && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             let backwards =
                 key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT);
-            self.step_filter(backwards);
+            let idx = (self.status_filter + if backwards { TASK_FILTERS.len() - 1 } else { 1 })
+                % TASK_FILTERS.len();
+            self.set_filter(idx);
             return None;
         }
         if plain && matches!(key.code, KeyCode::Char('/') | KeyCode::F(3)) {
