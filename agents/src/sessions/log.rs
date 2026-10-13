@@ -291,17 +291,19 @@ impl Log {
 
 /// Extracts the visible text of supported harness messages.
 fn wrapped_message(text: &str) -> Option<(Kind, String)> {
+    if let Some(body) = pasted_content(text) {
+        return Some((Kind::User, user_text(&body)));
+    }
     let (opening, rest) = text.trim().strip_prefix('<')?.split_once('>')?;
     let tag = opening.split_whitespace().next()?;
     let kind = match tag {
-        "pasted_content" => Kind::User,
         "agent-message" => Kind::Agent,
         "cross-session-message" => Kind::Session,
         _ => return None,
     };
     let (inner, closing) = rest.rsplit_once("</")?;
     let closing = closing.strip_suffix('>')?;
-    if closing != tag && !(tag == "pasted_content" && closing == opening) {
+    if closing != tag {
         return None;
     }
     let inner = inner.trim();
@@ -327,6 +329,57 @@ fn wrapped_message(text: &str) -> Option<(Kind, String)> {
         body
     };
     Some((kind, body))
+}
+
+fn pasted_content(mut text: &str) -> Option<String> {
+    let mut body = String::new();
+    let mut found = false;
+    while let Some(start) = text.find("<pasted_content") {
+        body.push_str(&text[..start]);
+        let Some((opening, rest)) = text[start + 1..].split_once('>') else {
+            body.push_str(&text[start..]);
+            text = "";
+            break;
+        };
+        let closing = format!("</{opening}>");
+        let end = (opening.split_whitespace().next() == Some("pasted_content"))
+            .then(|| {
+                [closing.as_str(), "</pasted_content>"]
+                    .into_iter()
+                    .filter_map(|tag| rest.find(tag).map(|index| (index, tag.len())))
+                    .min_by_key(|(index, _)| *index)
+            })
+            .flatten();
+        if let Some((end, closing_len)) = end {
+            let inner = rest[..end]
+                .split_inclusive('\n')
+                .map(|line| line.strip_prefix("  ").unwrap_or(line))
+                .collect::<String>();
+            body.push_str(&inner);
+            text = &rest[end + closing_len..];
+            found = true;
+        } else {
+            body.push_str(&text[start..start + opening.len() + 2]);
+            text = rest;
+        }
+    }
+    body.push_str(text);
+    found.then_some(body)
+}
+
+fn user_text(text: &str) -> String {
+    text.lines()
+        .filter(|line| {
+            !line.trim().strip_prefix("```").is_some_and(|suffix| {
+                suffix.is_empty()
+                    || suffix
+                        .chars()
+                        .all(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '-' | '+' | '#' | '.'))
+            })
+        })
+        .flat_map(str::split_whitespace)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -593,6 +646,42 @@ mod tests {
             for event in pair {
                 assert_eq!(event.body, body);
                 assert_eq!(event.ended_at, None);
+            }
+        }
+    }
+
+    #[test]
+    fn fenced_pasted_user_text_keeps_the_following_comment() {
+        let content = "```\n\n\n<pasted_content id=\"7771\">\n  17:58:53 User    实话实说吧啊，…\n        6s Tool    mcp__plugin_codex_codex-manager__send …\n</pasted_content id=\"7771\">\n\n```\n\n那个五点五十八五十三秒和五点五十九零四秒。 哎，这个 model 的这个回复是…";
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{}", record("user", 1, json!(content))).unwrap();
+        writeln!(file, "{}", json!({"type":"queue-operation", "timestamp":at(2).to_rfc3339(), "operation":"enqueue", "content":content})).unwrap();
+        let events = tail(file.path(), 2).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, Kind::User);
+        assert_eq!(events[1].kind, Kind::QueuedUser);
+        for event in events {
+            assert!(event.body.starts_with("17:58:53 User 实话实说吧啊"));
+            assert!(event.body.contains("那个五点五十八五十三秒"));
+            assert!(!event.body.contains("```"));
+            assert!(!event.body.contains("<pasted_content"));
+        }
+    }
+
+    #[test]
+    fn pasted_blocks_anywhere_preserve_surrounding_user_and_queue_text() {
+        for content in [
+            "before\n```text\n<pasted_content id=\"a\">\n  first\n  second\n</pasted_content id=\"a\">\n```\nbetween <pasted_content id=\"b\">  third</pasted_content id=\"b\"> after",
+            "<pasted_content id=\"a\">\n  before first second\n</pasted_content id=\"a\"> between <pasted_content id=\"b\">  third</pasted_content id=\"b\"> after",
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file, "{}", record("user", 1, json!(content))).unwrap();
+            writeln!(file, "{}", json!({"type":"queue-operation", "timestamp":at(2).to_rfc3339(), "operation":"enqueue", "content":content})).unwrap();
+            let events = tail(file.path(), 2).unwrap();
+            assert_eq!(events.len(), 2);
+            assert_eq!(events[0].kind, Kind::User);
+            for event in events {
+                assert_eq!(event.body, "before first second between third after");
             }
         }
     }
