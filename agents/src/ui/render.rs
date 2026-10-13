@@ -466,7 +466,7 @@ impl View {
                 line: Line::from(project),
                 link,
             },
-            session.cwd.display().to_string().into(),
+            super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width).into(),
         ]);
 
         let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];

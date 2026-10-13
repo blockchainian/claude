@@ -2984,3 +2984,51 @@ mod details_curtain {
         assert_eq!(panel(&view), before);
     }
 }
+
+#[test]
+fn path_abbreviation_in_details_preserves_last_component() {
+    let mut task = session("path", "Path task", SessionStatus::Ready, 0);
+    task.cwd = "/Users/visitor/Code/.worktrees/agents-panel".into();
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(vec![task], false);
+    let area = Rect::new(0, 0, 26, 20);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, Utc::now());
+    let rows: Vec<String> = buf
+        .content
+        .chunks(26)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect();
+    let project = rows.iter().position(|row| row == "Project").unwrap();
+    assert_eq!(rows[project + 1], "/U…/v…/C…/.w…/agents-panel");
+}
+
+#[test]
+fn path_abbreviation_in_group_header_preserves_last_component() {
+    let mut task = session("path", "Path task", SessionStatus::Ready, 0);
+    task.cwd = "/Users/visitor/Code/.worktrees/agents-panel".into();
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(vec![task], false);
+    let area = Rect::new(0, 0, 30, 6);
+    let mut buf = Buffer::empty(area);
+    view.render_center_rows(area, &mut buf, Utc::now());
+    let heading = buf
+        .content
+        .chunks(30)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .find(|row| row.starts_with('/'))
+        .unwrap();
+    assert_eq!(heading, "/U…/v…/C…/.w…/agents-panel  1");
+}

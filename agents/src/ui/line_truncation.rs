@@ -103,212 +103,123 @@ pub(crate) fn truncate_line_with_ellipsis_if_overflow(
     }
 }
 
-pub(super) fn center_truncate_path(path: &str, max_width: usize) -> String {
-    if max_width == 0 {
-        return String::new();
-    }
-    if display_width(path) <= max_width {
-        return path.to_string();
+pub(super) fn abbreviate_path(path: &str, max_width: usize) -> String {
+    let path = super::formatting::format_directory_display(std::path::Path::new(path));
+    if display_width(&path) <= max_width {
+        return path;
     }
 
-    let sep = std::path::MAIN_SEPARATOR;
-    let has_leading_sep = path.starts_with(sep);
-    let has_trailing_sep = path.ends_with(sep);
-    let mut raw_segments: Vec<&str> = path.split(sep).collect();
-    if has_leading_sep && !raw_segments.is_empty() && raw_segments[0].is_empty() {
-        raw_segments.remove(0);
-    }
-    if has_trailing_sep
-        && !raw_segments.is_empty()
-        && raw_segments.last().is_some_and(|last| last.is_empty())
-    {
-        raw_segments.pop();
-    }
-
-    if raw_segments.is_empty() {
-        if has_leading_sep {
-            let root = sep.to_string();
-            if display_width(root.as_str()) <= max_width {
-                return root;
-            }
-        }
-        return "…".to_string();
-    }
-
-    struct Segment<'a> {
-        original: &'a str,
-        text: String,
-        truncatable: bool,
-        is_suffix: bool,
-    }
-
-    let assemble = |leading: bool, segments: &[Segment<'_>]| -> String {
-        let mut result = String::new();
-        if leading {
-            result.push(sep);
-        }
-        for segment in segments {
-            if !result.is_empty() && !result.ends_with(sep) {
-                result.push(sep);
-            }
-            result.push_str(segment.text.as_str());
-        }
-        result
+    let mut components: Vec<String> = path
+        .split(std::path::MAIN_SEPARATOR)
+        .map(str::to_owned)
+        .collect();
+    let Some(last) = components
+        .iter()
+        .rposition(|component| !component.is_empty())
+    else {
+        return path;
     };
-
-    let front_truncate = |original: &str, allowed_width: usize| -> String {
-        if allowed_width == 0 {
-            return String::new();
+    let separator = std::path::MAIN_SEPARATOR.to_string();
+    for index in 0..last {
+        let component = &components[index];
+        if component.is_empty() || component == "~" {
+            continue;
         }
-        if display_width(original) <= allowed_width {
-            return original.to_string();
-        }
-        if allowed_width == 1 {
-            return "…".to_string();
-        }
-
-        let mut kept = Vec::new();
-        let mut used_width = 1; // reserve space for leading ellipsis
-        for grapheme in original.graphemes(/*is_extended*/ true).rev() {
-            let grapheme_width = display_width(grapheme);
-            if used_width + grapheme_width > allowed_width {
-                break;
-            }
-            used_width += grapheme_width;
-            kept.push(grapheme);
-        }
-        kept.reverse();
-        let mut truncated = String::from("…");
-        for grapheme in kept {
-            truncated.push_str(grapheme);
-        }
-        truncated
-    };
-
-    let mut combos: Vec<(usize, usize)> = Vec::new();
-    let segment_count = raw_segments.len();
-    for left in 1..=segment_count {
-        let min_right = if left == segment_count { 0 } else { 1 };
-        for right in min_right..=(segment_count - left) {
-            combos.push((left, right));
-        }
-    }
-    let desired_suffix = if segment_count > 1 {
-        std::cmp::min(2, segment_count - 1)
-    } else {
-        0
-    };
-    let mut prioritized: Vec<(usize, usize)> = Vec::new();
-    let mut fallback: Vec<(usize, usize)> = Vec::new();
-    for combo in combos {
-        if combo.1 >= desired_suffix {
-            prioritized.push(combo);
+        let mut graphemes = component.graphemes(true);
+        let first = graphemes.next().expect("nonempty component");
+        let head = if first == "." {
+            format!("{first}{}", graphemes.next().unwrap_or(""))
         } else {
-            fallback.push(combo);
+            first.to_owned()
+        };
+        let abbreviated = format!("{head}…");
+        if display_width(&abbreviated) < display_width(component) {
+            components[index] = abbreviated;
+            let candidate = components.join(&separator);
+            if display_width(&candidate) <= max_width {
+                return candidate;
+            }
         }
     }
-    let sort_combos = |items: &mut Vec<(usize, usize)>| {
-        items.sort_by(|(left_a, right_a), (left_b, right_b)| {
-            left_b
-                .cmp(left_a)
-                .then_with(|| right_b.cmp(right_a))
-                .then_with(|| (left_b + right_b).cmp(&(left_a + right_a)))
-        });
-    };
-    sort_combos(&mut prioritized);
-    sort_combos(&mut fallback);
 
-    let fit_segments =
-        |segments: &mut Vec<Segment<'_>>, allow_front_truncate: bool| -> Option<String> {
-            loop {
-                let candidate = assemble(has_leading_sep, segments);
-                let width = display_width(candidate.as_str());
-                if width <= max_width {
-                    return Some(candidate);
-                }
-
-                if !allow_front_truncate {
-                    return None;
-                }
-
-                let mut indices: Vec<usize> = Vec::new();
-                for (idx, seg) in segments.iter().enumerate().rev() {
-                    if seg.truncatable && seg.is_suffix {
-                        indices.push(idx);
-                    }
-                }
-                for (idx, seg) in segments.iter().enumerate().rev() {
-                    if seg.truncatable && !seg.is_suffix {
-                        indices.push(idx);
-                    }
-                }
-
-                if indices.is_empty() {
-                    return None;
-                }
-
-                let mut changed = false;
-                for idx in indices {
-                    let original_width = display_width(segments[idx].original);
-                    if original_width <= max_width && segment_count > 2 {
-                        continue;
-                    }
-                    let seg_width = display_width(segments[idx].text.as_str());
-                    let other_width = width.saturating_sub(seg_width);
-                    let allowed_width = max_width.saturating_sub(other_width).max(1);
-                    let new_text = front_truncate(segments[idx].original, allowed_width);
-                    if new_text != segments[idx].text {
-                        segments[idx].text = new_text;
-                        changed = true;
-                        break;
-                    }
-                }
-
-                if !changed {
-                    return None;
-                }
-            }
-        };
-
-    for (left_count, right_count) in prioritized.into_iter().chain(fallback) {
-        let mut segments: Vec<Segment<'_>> = raw_segments[..left_count]
-            .iter()
-            .map(|seg| Segment {
-                original: seg,
-                text: (*seg).to_string(),
-                truncatable: true,
-                is_suffix: false,
-            })
-            .collect();
-
-        let need_ellipsis = left_count + right_count < segment_count;
-        if need_ellipsis {
-            segments.push(Segment {
-                original: "…",
-                text: "…".to_string(),
-                truncatable: false,
-                is_suffix: false,
-            });
-        }
-
-        if right_count > 0 {
-            segments.extend(
-                raw_segments[segment_count - right_count..]
-                    .iter()
-                    .map(|seg| Segment {
-                        original: seg,
-                        text: (*seg).to_string(),
-                        truncatable: true,
-                        is_suffix: true,
-                    }),
-            );
-        }
-
-        let allow_front_truncate = need_ellipsis || segment_count <= 2;
-        if let Some(candidate) = fit_segments(&mut segments, allow_front_truncate) {
+    let tail = components[last].clone();
+    let boundaries: Vec<usize> = tail
+        .grapheme_indices(true)
+        .map(|(index, _)| index)
+        .collect();
+    for &end in boundaries.iter().skip(1).rev() {
+        let abbreviated = format!("{}…", &tail[..end]);
+        components[last] = abbreviated;
+        let candidate = components.join(&separator);
+        if display_width(&candidate) <= max_width {
             return candidate;
         }
     }
+    components.join(&separator)
+}
 
-    front_truncate(path, max_width)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_abbreviation_stops_after_each_left_component() {
+        let path = "/Users/visitor/Code/.worktrees/agents-panel";
+        for expected in [
+            "/U…/visitor/Code/.worktrees/agents-panel",
+            "/U…/v…/Code/.worktrees/agents-panel",
+            "/U…/v…/C…/.worktrees/agents-panel",
+            "/U…/v…/C…/.w…/agents-panel",
+        ] {
+            assert_eq!(abbreviate_path(path, display_width(expected)), expected);
+        }
+    }
+
+    #[test]
+    fn path_abbreviation_keeps_dot_and_skips_short_components() {
+        assert_eq!(
+            abbreviate_path("~/.worktrees/a/.x/ab/project", 22),
+            "~/.w…/a/.x/ab/project"
+        );
+        assert_eq!(abbreviate_path("~/a/.x/ab/project", 1), "~/a/.x/ab/p…");
+    }
+
+    #[test]
+    fn path_abbreviation_cuts_only_the_last_component_tail() {
+        for (width, expected) in [
+            (13, "/U…/agents-p…"),
+            (10, "/U…/agent…"),
+            (6, "/U…/a…"),
+            (0, "/U…/a…"),
+        ] {
+            assert_eq!(abbreviate_path("/Users/agents-panel", width), expected);
+        }
+    }
+
+    #[test]
+    fn path_abbreviation_short_circuits_after_home_replacement() {
+        let home = std::env::var_os("HOME").expect("HOME");
+        let path = std::path::Path::new(&home).join("Code/agents-panel");
+        assert_eq!(
+            abbreviate_path(&path.to_string_lossy(), 19),
+            "~/Code/agents-panel"
+        );
+        assert_eq!(abbreviate_path(&home.to_string_lossy(), 1), "~");
+    }
+
+    #[test]
+    fn path_abbreviation_leaves_fitting_paths_unchanged() {
+        for path in ["/tmp/project", "~/Code/project", "a/.x/ab", "/", ""] {
+            assert_eq!(abbreviate_path(path, display_width(path)), path);
+        }
+    }
+
+    #[test]
+    fn path_abbreviation_uses_display_width_and_preserves_graphemes() {
+        assert_eq!(abbreviate_path("/界面/工具", 9), "/界…/工具");
+        assert_eq!(
+            abbreviate_path("e\u{301}cole/project", 10),
+            "e\u{301}…/project"
+        );
+    }
 }

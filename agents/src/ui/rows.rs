@@ -159,7 +159,7 @@ impl View {
                     format!("{count} of {total}")
                 };
                 let group = if self.grouping == Grouping::Project && !self.is_pinned(index) {
-                    super::line_truncation::center_truncate_path(
+                    super::line_truncation::abbreviate_path(
                         &group,
                         usize::from(rect.width)
                             .saturating_sub(count.width() + 2)
