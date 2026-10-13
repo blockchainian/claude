@@ -2,6 +2,10 @@ use crate::log::{Event, Filter, Kind};
 use chrono::{DateTime, Utc};
 use std::{io, path::Path};
 
+pub(super) fn tool_hidden(name: &str) -> bool {
+    matches!(name, "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet")
+}
+
 #[cfg(test)]
 pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     tail_filtered(path, count, &Filter::default(), false)
@@ -240,7 +244,7 @@ impl Log {
         let Some(name) = block["name"].as_str() else {
             return;
         };
-        if matches!(name, "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet") {
+        if tool_hidden(name) {
             return;
         }
         let input = &block["input"];

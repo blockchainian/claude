@@ -397,7 +397,7 @@ fn read_messages(
                     .map(str::to_owned);
             }
         }
-        // The latest tool call, finished or not; the panel shows it while it
+        // The latest visible tool call, finished or not; the panel shows it while it
         // is newer than the last reply.
         if summary.activity.is_none()
             && record["type"] == "assistant"
@@ -408,10 +408,14 @@ fn read_messages(
                 .rev()
                 .filter(|block| block["type"] == "tool_use")
                 .find_map(|block| {
+                    let name = block["name"].as_str()?;
+                    if super::log::tool_hidden(name) {
+                        return None;
+                    }
                     block["input"]["description"]
                         .as_str()
                         .filter(|value| !value.trim().is_empty())
-                        .or_else(|| block["name"].as_str())
+                        .or(Some(name))
                 })
         {
             summary.activity = Some(Activity {
@@ -1033,6 +1037,71 @@ mod tests {
                     }
                 );
                 assert_eq!(activity.at, at);
+            }
+        }
+    }
+
+    #[test]
+    fn activity_skips_hidden_tools() {
+        for sidechain in [false, true] {
+            for same_record in [false, true] {
+                for name in [
+                    "TaskCreate",
+                    "TaskUpdate",
+                    "TaskList",
+                    "TaskGet",
+                    "TaskStop",
+                ] {
+                    for description in [None, Some("Update tasks")] {
+                        let mut file = tempfile::NamedTempFile::new().unwrap();
+                        let mut assistant: Value =
+                            serde_json::from_str(FIXTURE.lines().nth(1).unwrap()).unwrap();
+                        assistant["isSidechain"] = sidechain.into();
+                        assistant["message"]["content"] = serde_json::json!([
+                            {"type": "tool_use", "id": "bash", "name": "Bash", "input": {"description": "Run checks"}}
+                        ]);
+                        let bash_at: DateTime<Utc> =
+                            assistant["timestamp"].as_str().unwrap().parse().unwrap();
+                        let tool = serde_json::json!({"type": "tool_use", "id": "task", "name": name,
+                            "input": {"description": description}});
+                        if same_record {
+                            assistant["message"]["content"]
+                                .as_array_mut()
+                                .unwrap()
+                                .push(tool);
+                        } else {
+                            writeln!(file, "{assistant}").unwrap();
+                            assistant["timestamp"] = "2026-10-12T12:00:00Z".into();
+                            assistant["message"]["content"] = serde_json::json!([tool]);
+                        }
+                        writeln!(file, "{assistant}").unwrap();
+                        let len = file.as_file().metadata().unwrap().len();
+                        let summary = if sidechain {
+                            read_subagent(file.path(), len)
+                        } else {
+                            read(file.path(), len)
+                        }
+                        .unwrap();
+                        let activity = summary.activity.unwrap();
+                        if name == "TaskStop" {
+                            assert_eq!(activity.label, description.unwrap_or(name));
+                            assert_eq!(
+                                activity.at,
+                                assistant["timestamp"]
+                                    .as_str()
+                                    .unwrap()
+                                    .parse::<DateTime<Utc>>()
+                                    .unwrap()
+                            );
+                        } else {
+                            assert_eq!(
+                                activity.label, "Run checks",
+                                "{name}, sidechain={sidechain}, same_record={same_record}"
+                            );
+                            assert_eq!(activity.at, bash_at);
+                        }
+                    }
+                }
             }
         }
     }
