@@ -3513,7 +3513,7 @@ fn task_log_search_active_snapshot() {
 mod subagent_rows {
     use super::*;
 
-    fn fixture() -> View {
+    pub(super) fn fixture() -> View {
         let now = "2026-10-13T12:00:00Z".parse().unwrap();
         let mut parent = session("parent", "Parent task", SessionStatus::Ready, 120);
         parent.updated_at = now - Duration::minutes(2);
@@ -3532,7 +3532,7 @@ mod subagent_rows {
         view
     }
 
-    fn screen(view: &View, width: u16, height: u16) -> String {
+    pub(super) fn screen(view: &View, width: u16, height: u16) -> String {
         let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
         view.render_at(buf.area, &mut buf, "2026-10-13T12:00:00Z".parse().unwrap());
         buf.content
@@ -3739,6 +3739,98 @@ mod subagent_rows {
         assert_eq!(
             screen(&view, 120, 30),
             include_str!("../../tests/ui_snapshots/agents_overview_subagents.txt")
+        );
+    }
+}
+
+mod subagent_actions {
+    use super::*;
+
+    fn fixture() -> View {
+        let mut view = subagent_rows::fixture();
+        key(&mut view, KeyCode::Down);
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        view
+    }
+
+    fn assert_unchanged(view: &View, before: &str) {
+        assert_eq!(view.selected_id(), Some("agent-older"));
+        assert!(view.rename_target.is_none());
+        assert!(view.rename.text().is_empty());
+        assert!(view.delete_dialog.is_none());
+        assert!(view.hidden.is_empty());
+        assert!(view.pinned.is_empty());
+        assert!(!view.searching);
+        assert!(!view.help);
+        assert_eq!(subagent_rows::screen(view, 120, 30), before);
+    }
+
+    macro_rules! ignored_key {
+        ($name:ident, $code:expr, $modifiers:expr) => {
+            #[test]
+            fn $name() {
+                for notice in [None, Some("Keep this notice".to_owned())] {
+                    let mut view = fixture();
+                    view.notice = notice.clone();
+                    let before = subagent_rows::screen(&view, 120, 30);
+                    assert_eq!(view.handle_key(KeyEvent::new($code, $modifiers)), None);
+                    assert_eq!(view.notice, notice);
+                    assert_unchanged(&view, &before);
+                }
+            }
+        };
+    }
+
+    ignored_key!(enter, KeyCode::Enter, KeyModifiers::NONE);
+    ignored_key!(right, KeyCode::Right, KeyModifiers::NONE);
+    ignored_key!(control_l, KeyCode::Char('l'), KeyModifiers::CONTROL);
+    ignored_key!(resume, KeyCode::Char('o'), KeyModifiers::NONE);
+    ignored_key!(rename, KeyCode::Char('r'), KeyModifiers::NONE);
+    ignored_key!(fork, KeyCode::Char('f'), KeyModifiers::NONE);
+    ignored_key!(stop, KeyCode::Char('x'), KeyModifiers::NONE);
+    ignored_key!(delete, KeyCode::Backspace, KeyModifiers::NONE);
+    ignored_key!(hide, KeyCode::Char('h'), KeyModifiers::NONE);
+    ignored_key!(pin, KeyCode::Char('p'), KeyModifiers::NONE);
+
+    #[test]
+    fn click() {
+        let mut view = fixture();
+        let before = subagent_rows::screen(&view, 120, 30);
+        let (x, y) = view.marker_pos().unwrap();
+        assert_eq!(
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y)),
+            None
+        );
+        assert_unchanged(&view, &before);
+    }
+
+    #[test]
+    fn activation_keeps_search() {
+        for event in [
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
+        ] {
+            let mut view = fixture();
+            view.searching = true;
+            view.search.set_text("Check files");
+            let before = subagent_rows::screen(&view, 120, 30);
+            assert_eq!(view.handle_key(event), None);
+            assert!(view.searching);
+            assert_eq!(view.search.text(), "Check files");
+            assert_eq!(subagent_rows::screen(&view, 120, 30), before);
+        }
+    }
+
+    #[test]
+    fn footer_snapshot() {
+        let view = fixture();
+        assert_eq!(
+            view.center_footer_hints().to_string(),
+            "? help  esc back  ↑/↓ move"
+        );
+        assert_eq!(
+            subagent_rows::screen(&view, 120, 30),
+            include_str!("../../tests/ui_snapshots/agents_overview_subagent_selected.txt")
         );
     }
 }

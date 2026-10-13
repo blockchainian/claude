@@ -22,6 +22,8 @@ impl View {
             hint_line(&[("esc", "back"), ("enter", "rename")])
         } else if self.log_search.editing {
             hint_line(&[("esc", "back"), ("enter", "keep")])
+        } else if self.selected_is_subagent() {
+            hint_line(&[("?", "help"), ("esc", "back"), ("↑/↓", "move")])
         } else if self.searching {
             hint_line(&[("esc", "back"), ("enter", "open")])
         } else {

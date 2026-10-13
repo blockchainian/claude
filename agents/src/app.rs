@@ -394,6 +394,21 @@ impl App {
         let Some(action) = action else {
             return false;
         };
+        let target = match &action {
+            Action::Open(id)
+            | Action::Resume(id)
+            | Action::Fork(id)
+            | Action::Rename { id, .. }
+            | Action::Delete(id)
+            | Action::TogglePin { id, .. } => Some(id),
+            _ => None,
+        };
+        if target
+            .and_then(|id| self.session(id))
+            .is_some_and(|session| session.parent.is_some())
+        {
+            return false;
+        }
         match action {
             Action::Quit => return true,
             Action::Back => {
@@ -440,6 +455,9 @@ impl App {
             Action::Delete(id) => {
                 self.refresh();
                 if let Some(session) = self.session(&id) {
+                    if session.parent.is_some() {
+                        return false;
+                    }
                     if session.transcript.is_none() {
                         self.view.set_notice(Some("Nothing to delete".into()));
                     } else {
@@ -507,6 +525,9 @@ impl App {
 
     /// Hands the terminal to `claude <args>` in the session's directory until it exits.
     fn launch_claude(&mut self, session: Session, args: &[&str]) -> bool {
+        if session.parent.is_some() {
+            return false;
+        }
         let cwd = if session.cwd.is_dir() {
             session.cwd.clone()
         } else {
@@ -930,6 +951,113 @@ mod tests {
         assert!(app.log_ticks());
         app.sessions[0].status = SessionStatus::Ready;
         assert!(!app.log_ticks());
+    }
+
+    fn subagent_fixture() -> (tempfile::TempDir, App, Session) {
+        let (dir, mut app) = fixture();
+        let mut child = app.sessions[0].clone();
+        child.id = "agent-abf695d5995bd43ab".into();
+        child.parent = Some(app.sessions[0].id.clone());
+        child.process = None;
+        let path = dir.path().join(format!("{}.jsonl", child.id));
+        std::fs::write(&path, include_str!("../tests/fixtures/subagent.jsonl")).unwrap();
+        child.transcript = Some(path);
+        app.sessions.push(child.clone());
+        app.view.set_sessions(app.sessions.clone(), false);
+        key(&mut app, KeyCode::Down);
+        assert_eq!(app.view.selected_id(), Some(child.id.as_str()));
+        (dir, app, child)
+    }
+
+    fn assert_subagent_action_ignored(make_action: impl FnOnce(&str) -> Action) {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let (dir, mut app, child) = subagent_fixture();
+        key(&mut app, KeyCode::Up);
+        let selected = app.view.selected_id().unwrap().to_owned();
+        assert_ne!(selected, child.id);
+        let sessions = app.sessions.clone();
+        let preferences = app.preferences.clone();
+        let log = app.view.log.clone();
+        let path = child.transcript.as_ref().unwrap();
+        let transcript = std::fs::read(path).unwrap();
+        let meta = path.with_extension("meta.json");
+        std::fs::write(&meta, r#"{"description":"Check files","name":"worker"}"#).unwrap();
+        let metadata = std::fs::read(&meta).unwrap();
+        let area = ratatui::layout::Rect::new(0, 0, 120, 30);
+        let mut before = ratatui::buffer::Buffer::empty(area);
+        app.view.render_at(area, &mut before, child.updated_at);
+        assert!(!app.handle_action(Some(make_action(&child.id))));
+        let mut after = ratatui::buffer::Buffer::empty(area);
+        app.view.render_at(area, &mut after, child.updated_at);
+        assert_eq!(after, before);
+        assert_eq!(app.sessions, sessions);
+        assert_eq!(app.preferences, preferences);
+        assert_eq!(app.view.log, log);
+        assert_eq!(app.view.selected_id(), Some(selected.as_str()));
+        assert!(app.launch.is_none());
+        assert!(app.last_session.is_none());
+        assert_eq!(std::fs::read(path).unwrap(), transcript);
+        assert!(!path.with_extension("").exists());
+        assert_eq!(std::fs::read(meta).unwrap(), metadata);
+        assert!(!dir.path().join("agents.json").exists());
+    }
+
+    #[test]
+    fn subagent_open_is_ignored() {
+        assert_subagent_action_ignored(|id| Action::Open(id.into()));
+    }
+
+    #[test]
+    fn subagent_resume_is_ignored() {
+        assert_subagent_action_ignored(|id| Action::Resume(id.into()));
+    }
+
+    #[test]
+    fn subagent_fork_is_ignored() {
+        assert_subagent_action_ignored(|id| Action::Fork(id.into()));
+    }
+
+    #[test]
+    fn subagent_rename_is_ignored() {
+        assert_subagent_action_ignored(|id| Action::Rename {
+            id: id.into(),
+            name: "Rename".into(),
+        });
+    }
+
+    #[test]
+    fn subagent_delete_is_ignored() {
+        assert_subagent_action_ignored(|id| Action::Delete(id.into()));
+    }
+
+    #[test]
+    fn subagent_pin_is_ignored() {
+        for pinned in [false, true] {
+            assert_subagent_action_ignored(|id| Action::TogglePin {
+                id: id.into(),
+                pinned,
+            });
+        }
+    }
+
+    #[test]
+    fn subagent_launch_is_ignored_before_directory_validation() {
+        let (_dir, mut app, mut child) = subagent_fixture();
+        child.cwd = child.cwd.join("missing");
+        assert!(!app.launch_claude(child.clone(), &["--resume", &child.id]));
+        assert!(app.launch.is_none());
+        assert!(app.last_session.is_none());
+        let area = ratatui::layout::Rect::new(0, 0, 120, 30);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        app.view.render_at(area, &mut buffer, child.updated_at);
+        assert!(
+            !buffer
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+                .contains("Directory no longer exists")
+        );
     }
 
     #[test]

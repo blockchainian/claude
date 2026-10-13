@@ -128,6 +128,9 @@ impl View {
         self.set_selected(selected);
     }
     fn activate(&mut self) -> Option<Action> {
+        if self.selected_is_subagent() {
+            return None;
+        }
         if self.selected == usize::MAX
             && self.has_more
             && TASK_FILTERS[self.status_filter].1 == [SessionStatus::Inactive]
@@ -146,13 +149,32 @@ impl View {
         Some(Action::Open(id))
     }
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
-        self.notice = None;
         if key.kind == KeyEventKind::Release {
             return None;
         }
         let plain = !key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
+        if self.delete_dialog.is_none()
+            && !self.help
+            && self.rename_target.is_none()
+            && !self.log_search.editing
+            && !self.searching
+            && self.selected_is_subagent()
+            && ((plain
+                && matches!(
+                    key.code,
+                    KeyCode::Enter
+                        | KeyCode::Right
+                        | KeyCode::Backspace
+                        | KeyCode::Char('o' | 'r' | 'f' | 'x' | 'h' | 'p')
+                ))
+                || (key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.code == KeyCode::Char('l')))
+        {
+            return None;
+        }
+        self.notice = None;
         if let Some(dialog) = &mut self.delete_dialog {
             if plain {
                 match key.code {

@@ -262,6 +262,10 @@ impl View {
     pub fn selected_id(&self) -> Option<&str> {
         self.selected_row().map(|s| s.id.as_str())
     }
+    fn selected_is_subagent(&self) -> bool {
+        self.selected_row()
+            .is_some_and(|session| session.parent.is_some())
+    }
     fn selected_row(&self) -> Option<&Session> {
         self.rows
             .get(self.selected)
