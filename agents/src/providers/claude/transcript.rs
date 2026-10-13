@@ -450,16 +450,7 @@ fn read_messages(
                 .iter()
                 .rev()
                 .filter(|block| block["type"] == "tool_use")
-                .find_map(|block| {
-                    let name = block["name"].as_str()?;
-                    if super::log::tool_hidden(name) {
-                        return None;
-                    }
-                    block["input"]["description"]
-                        .as_str()
-                        .filter(|value| !value.trim().is_empty())
-                        .or(Some(name))
-                })
+                .find_map(super::log::tool_activity)
         {
             summary.activity = Some(Activity {
                 label: label.to_owned(),

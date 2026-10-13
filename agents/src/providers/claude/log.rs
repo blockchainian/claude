@@ -6,6 +6,77 @@ pub(super) fn tool_hidden(name: &str) -> bool {
     matches!(name, "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet")
 }
 
+fn input_text<'a>(input: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    input[key].as_str().filter(|text| !text.trim().is_empty())
+}
+
+fn default_detail(input: &serde_json::Value) -> Option<(&str, &str)> {
+    ["description", "file_path", "prompt", "query", "message"]
+        .into_iter()
+        .find_map(|key| input_text(input, key).map(|text| (key, text)))
+}
+
+fn tool_detail(name: &str, input: &serde_json::Value) -> String {
+    match name {
+        "Bash" => input_text(input, "description")
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                crate::shell_summary::summarize_shell_commands(
+                    input_text(input, "command").unwrap_or(""),
+                )
+            }),
+        "WebFetch" => input_text(input, "url")
+            .map(|url| {
+                let address = url.split_once("://").map_or(url, |(_, address)| address);
+                address.split(['?', '#']).next().unwrap_or("").to_owned()
+            })
+            .unwrap_or_default(),
+        "SendMessage" => {
+            let message = input_text(input, "summary")
+                .or_else(|| input_text(input, "message").and_then(|text| text.lines().next()));
+            [input_text(input, "to"), message]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+        "SubagentHandback" => input_text(input, "message")
+            .and_then(|text| text.lines().next())
+            .unwrap_or("")
+            .to_owned(),
+        _ => default_detail(input)
+            .map(|(_, text)| text)
+            .unwrap_or("")
+            .to_owned(),
+    }
+}
+
+fn tool_label(name: &str, detail: &str) -> String {
+    if detail.is_empty() {
+        name.to_owned()
+    } else if name == "Bash" {
+        detail.to_owned()
+    } else {
+        format!("{name} {detail}")
+    }
+}
+
+pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
+    let name = block["name"].as_str()?;
+    if tool_hidden(name) {
+        return None;
+    }
+    let input = &block["input"];
+    if matches!(
+        name,
+        "Bash" | "WebFetch" | "SendMessage" | "SubagentHandback"
+    ) {
+        Some(tool_label(name, &tool_detail(name, input)))
+    } else {
+        Some(input_text(input, "description").unwrap_or(name).to_owned())
+    }
+}
+
 #[cfg(test)]
 pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     tail_filtered(path, count, &Filter::default(), false)
@@ -249,28 +320,19 @@ impl Log {
         }
         let input = &block["input"];
         let result = block["id"].as_str().and_then(|id| self.results.get(id));
-        let detail = ["description", "file_path", "prompt", "query", "message"]
-            .iter()
-            .find_map(|key| {
-                input[key]
-                    .as_str()
-                    .filter(|text| !text.trim().is_empty())
-                    .map(|text| (*key, text))
-            });
+        let detail = default_detail(input);
         let path = detail
             .filter(|(key, _)| *key == "file_path")
             .filter(|_| name != "Bash" && self.batch.is_none())
             .filter(|_| result.is_none_or(|result| result.denial.is_none()))
             .map(|(_, path)| path.to_owned());
-        let detail = detail.map(|(_, text)| text).unwrap_or("");
+        let detail = tool_detail(name, input);
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
             format!("{name}: {reason}")
-        } else if detail.is_empty() || path.is_some() {
+        } else if path.is_some() {
             name.to_owned()
-        } else if name == "Bash" {
-            detail.to_owned()
         } else {
-            format!("{name} {detail}")
+            tool_label(name, &detail)
         };
         let mut entry = if let Some(index) = self.batch.take() {
             let entry = self.entries.remove(index);
@@ -436,6 +498,55 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn real_tool_details_match_log_and_latest_activity() {
+        let expected = [
+            "mkdir, cd, ls, wc, head",
+            "找那个会话",
+            "SendMessage hide-idle-teammates 问 line_truncation.rs 是不是它在改",
+            "SendMessage team-lead Report: /tmp/research",
+            "SubagentHandback Report: /tmp/research",
+            "WebFetch code.claude.com/docs/en/hooks",
+            "cd, ls, sed, wc",
+            "cd, cat, wc, sed",
+        ];
+        for (line, expected) in include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
+            .lines()
+            .zip(expected)
+        {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file, "{line}").unwrap();
+            let events = tail_filtered(file.path(), 8, &Filter::default(), true).unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].body, expected);
+            let len = file.as_file().metadata().unwrap().len();
+            let summary = super::super::transcript::read_subagent(file.path(), len).unwrap();
+            assert_eq!(summary.activity.unwrap().label, expected);
+        }
+    }
+
+    #[test]
+    fn bash_blank_description_uses_command_in_both_surfaces() {
+        let mut record: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
+                .lines()
+                .nth(6)
+                .unwrap(),
+        )
+        .unwrap();
+        record["message"]["content"][0]["input"]["description"] = "  ".into();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{record}").unwrap();
+        let events = tail_filtered(file.path(), 8, &Filter::default(), true).unwrap();
+        assert_eq!(events[0].body, "cd, ls, sed, wc");
+        let summary = super::super::transcript::read_subagent(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+        )
+        .unwrap();
+        assert_eq!(summary.activity.unwrap().label, "cd, ls, sed, wc");
+    }
+
+    #[test]
     fn subagent_transcript_reads_sidechain_records_only_in_subagent_mode() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(include_bytes!("../../../tests/fixtures/subagent.jsonl"))
@@ -577,7 +688,7 @@ mod tests {
             records[1]["permissionDecision"]["reasonType"] = reason.into();
             let events = events_from(records);
             assert_eq!(events[0].kind, Kind::Error);
-            assert_eq!(events[0].body, "Bash");
+            assert_eq!(events[0].body, "echo");
         }
     }
 

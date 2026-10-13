@@ -1,5 +1,4 @@
-mod shell;
-use shell::{Commands, summarize_shell_commands};
+use crate::shell_summary::{self as shell, Commands, summarize_shell_commands};
 
 enum Call {
     Shell(String),

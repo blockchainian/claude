@@ -5,6 +5,7 @@ mod providers;
 mod refresh;
 mod repository;
 mod sessions;
+mod shell_summary;
 mod state;
 mod terminal_background;
 mod theme;

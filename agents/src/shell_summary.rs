@@ -24,9 +24,9 @@ const SUBCOMMANDS: &[&str] = &[
 ];
 
 #[derive(Default)]
-pub(super) struct Commands(Vec<(String, Vec<String>)>);
+pub(crate) struct Commands(Vec<(String, Vec<String>)>);
 impl Commands {
-    pub(super) fn add(&mut self, name: &str, sub: Option<&str>) {
+    pub(crate) fn add(&mut self, name: &str, sub: Option<&str>) {
         let index = self
             .0
             .iter()
@@ -41,7 +41,7 @@ impl Commands {
             self.0[index].1.push(sub.into());
         }
     }
-    pub(super) fn finish(self) -> Option<String> {
+    pub(crate) fn finish(self) -> Option<String> {
         if self.0.is_empty() {
             return None;
         }
@@ -60,14 +60,14 @@ impl Commands {
 }
 
 /// Return command names in first-appearance order; an empty result means unsupported shell syntax.
-pub(super) fn summarize_shell_commands(cmd: &str) -> String {
+pub(crate) fn summarize_shell_commands(cmd: &str) -> String {
     let mut commands = Commands::default();
     shell(cmd, &mut commands, 0)
         .and_then(|()| commands.finish())
         .unwrap_or_default()
 }
 
-pub(super) fn collect(cmd: &str, commands: &mut Commands) -> Option<()> {
+pub(crate) fn collect(cmd: &str, commands: &mut Commands) -> Option<()> {
     shell(cmd, commands, 0)
 }
 
