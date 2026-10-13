@@ -2,6 +2,35 @@ use super::*;
 use unicode_segmentation::UnicodeSegmentation;
 
 impl View {
+    fn set_filter(&mut self, idx: usize) {
+        self.status_filter = idx;
+        self.viewport.borrow_mut().scroll = 0;
+        self.reconcile_selection();
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+        if self.delete_dialog.is_some()
+            || self.help
+            || self.rename_target.is_some()
+            || self.searching
+        {
+            return None;
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            let tab = self
+                .viewport
+                .borrow()
+                .tabs
+                .iter()
+                .find(|(_, rect)| rect.contains((mouse.column, mouse.row).into()))
+                .map(|(idx, _)| *idx);
+            if let Some(idx) = tab {
+                self.set_filter(idx);
+            }
+        }
+        None
+    }
+
     fn move_selection(&mut self, forward: bool) {
         let visible = self.selectable_indices();
         if visible.is_empty() {
@@ -154,11 +183,9 @@ impl View {
         if plain && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             let backwards =
                 key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT);
-            self.status_filter = (self.status_filter
-                + if backwards { TASK_FILTERS.len() - 1 } else { 1 })
+            let idx = (self.status_filter + if backwards { TASK_FILTERS.len() - 1 } else { 1 })
                 % TASK_FILTERS.len();
-            self.viewport.borrow_mut().scroll = 0;
-            self.reconcile_selection();
+            self.set_filter(idx);
             return None;
         }
         if plain && matches!(key.code, KeyCode::Char('/') | KeyCode::F(3)) {

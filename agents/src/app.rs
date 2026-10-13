@@ -9,7 +9,6 @@ use crate::state::Preferences;
 use crate::terminal_background;
 use crate::ui::View;
 use crossterm::event::Event;
-use crossterm::event::KeyEvent;
 use crossterm::event::Theme;
 use crossterm::terminal;
 use ratatui::Terminal;
@@ -172,7 +171,8 @@ impl App {
         );
         crossterm::execute!(
             terminal.backend_mut(),
-            crossterm::event::EnableThemeChangeReports
+            crossterm::event::EnableThemeChangeReports,
+            MouseReports::Enable
         )?;
         self.refresh();
         loop {
@@ -233,14 +233,16 @@ impl App {
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
-        match event {
-            Event::Key(key) => self.handle_key(key),
+        let action = match event {
+            Event::Key(key) => self.view.handle_key(key),
+            Event::Mouse(mouse) => self.view.handle_mouse(mouse),
             Event::ThemeChanged(theme) => {
                 self.apply_background(theme == Theme::Light);
-                false
+                return false;
             }
-            _ => false,
-        }
+            _ => return false,
+        };
+        self.handle_action(action)
     }
 
     fn log_ticks(&self) -> bool {
@@ -312,8 +314,7 @@ impl App {
     }
 
     /// Returns true when the dashboard should close.
-    fn handle_key(&mut self, key: KeyEvent) -> bool {
-        let action = self.view.handle_key(key);
+    fn handle_action(&mut self, action: Option<Action>) -> bool {
         let Some(action) = action else {
             return false;
         };
@@ -447,6 +448,28 @@ impl App {
     }
 }
 
+enum MouseReports {
+    Enable,
+    Disable,
+}
+
+impl crossterm::Command for MouseReports {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Enable => "\x1b[?1000h\x1b[?1002h\x1b[?1006h",
+            Self::Disable => "\x1b[?1006l\x1b[?1002l\x1b[?1000l",
+        })
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Mouse reporting requires ANSI support",
+        ))
+    }
+}
+
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -457,7 +480,8 @@ fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
 fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
     let reports = crossterm::execute!(
         terminal.backend_mut(),
-        crossterm::event::DisableThemeChangeReports
+        crossterm::event::DisableThemeChangeReports,
+        MouseReports::Disable
     );
     terminal::disable_raw_mode()?;
     crossterm::execute!(terminal.backend_mut(), terminal::LeaveAlternateScreen)?;
@@ -473,7 +497,7 @@ pub fn config_dir_exists(config_dir: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::model::SessionStatus;
-    use crossterm::event::{KeyCode, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn fixture() -> (tempfile::TempDir, App) {
         let dir = tempfile::tempdir().unwrap();
@@ -495,7 +519,7 @@ mod tests {
     }
 
     fn key(app: &mut App, code: KeyCode) -> bool {
-        let quit = app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        let quit = app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
         app.refresh_log(8);
         quit
     }
@@ -715,7 +739,10 @@ mod tests {
         let (_dir, mut app) = fixture();
         assert!(key(&mut app, KeyCode::Enter));
         app.launch.take().unwrap();
-        assert!(app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        assert!(app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL
+        ))));
         assert!(app.launch.is_none());
     }
 }

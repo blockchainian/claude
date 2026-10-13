@@ -17,7 +17,9 @@ pub use style::light_background;
 pub use style::set_light_background;
 
 use crate::model::{Action, Grouping, Session, SessionStatus};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Margin, Rect},
@@ -57,6 +59,7 @@ fn tab_for_status(status: Option<SessionStatus>, current_tab: usize) -> usize {
 struct Viewport {
     scroll: usize,
     page_height: usize,
+    tabs: Vec<(usize, Rect)>,
     /// Screen cell of the selection marker drawn by the last render.
     marker: Option<(u16, u16)>,
 }

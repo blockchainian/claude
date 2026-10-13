@@ -1,5 +1,130 @@
 use super::*;
 use chrono::{Duration, Utc};
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+#[test]
+fn mouse_tab_rects_match_visible_tabs_after_render() {
+    let view = fixture();
+    let rendered = screen(&view, 120, 40);
+    let viewport = view.viewport.borrow();
+    assert_eq!(viewport.tabs.len(), TASK_FILTERS.len());
+    for (expected, &(idx, rect)) in viewport.tabs.iter().enumerate() {
+        assert_eq!(idx, expected);
+        assert_eq!(rect.height, 1);
+        let row = rendered.lines().nth(usize::from(rect.y)).unwrap();
+        let label = row
+            .chars()
+            .skip(usize::from(rect.x))
+            .take(usize::from(rect.width))
+            .collect::<String>();
+        assert!(label.trim().starts_with(TASK_FILTERS[idx].0));
+    }
+}
+
+#[test]
+fn mouse_left_click_activates_tab_and_resets_scroll() {
+    let mut view = fixture();
+    screen(&view, 120, 40);
+    let (idx, rect) = view.viewport.borrow().tabs[1];
+    view.viewport.borrow_mut().scroll = 7;
+    assert!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            rect.x,
+            rect.y
+        ))
+        .is_none()
+    );
+    assert_eq!(view.status_filter, idx);
+    assert_eq!(view.viewport.borrow().scroll, 0);
+    assert_eq!(view.selected_row().unwrap().status, SessionStatus::Ready);
+}
+
+#[test]
+fn mouse_click_outside_tabs_changes_nothing() {
+    let mut view = fixture();
+    screen(&view, 120, 40);
+    view.viewport.borrow_mut().scroll = 7;
+    let selected = view.selected;
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0))
+            .is_none()
+    );
+    assert_eq!(view.status_filter, 0);
+    assert_eq!(view.selected, selected);
+    assert_eq!(view.viewport.borrow().scroll, 7);
+}
+
+#[test]
+fn mouse_tabs_ignore_overlays() {
+    for overlay in 0..4 {
+        let mut view = fixture();
+        screen(&view, 120, 40);
+        let (_, rect) = view.viewport.borrow().tabs[1];
+        match overlay {
+            0 => {
+                key(&mut view, KeyCode::Char('?'));
+            }
+            1 => {
+                key(&mut view, KeyCode::Char('/'));
+            }
+            2 => {
+                key(&mut view, KeyCode::Char('r'));
+            }
+            3 => {
+                key(&mut view, KeyCode::Backspace);
+            }
+            _ => unreachable!(),
+        }
+        view.viewport.borrow_mut().scroll = 7;
+        let selected = view.selected;
+        assert!(
+            view.handle_mouse(mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                rect.x,
+                rect.y
+            ))
+            .is_none()
+        );
+        assert_eq!(view.status_filter, 0);
+        assert_eq!(view.selected, selected);
+        assert_eq!(view.viewport.borrow().scroll, 7);
+    }
+}
+
+#[test]
+fn mouse_tabs_ignore_other_events() {
+    let mut view = fixture();
+    screen(&view, 120, 40);
+    let (_, rect) = view.viewport.borrow().tabs[1];
+    view.viewport.borrow_mut().scroll = 7;
+    let selected = view.selected;
+    for kind in [
+        MouseEventKind::Down(MouseButton::Right),
+        MouseEventKind::Down(MouseButton::Middle),
+        MouseEventKind::Up(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Left),
+        MouseEventKind::Moved,
+        MouseEventKind::ScrollUp,
+        MouseEventKind::ScrollDown,
+        MouseEventKind::ScrollLeft,
+        MouseEventKind::ScrollRight,
+    ] {
+        assert!(view.handle_mouse(mouse(kind, rect.x, rect.y)).is_none());
+        assert_eq!(view.status_filter, 0);
+        assert_eq!(view.selected, selected);
+        assert_eq!(view.viewport.borrow().scroll, 7);
+    }
+}
 
 fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
     Session {
