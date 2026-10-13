@@ -64,3 +64,14 @@ pub(super) fn log_styles(kind: &crate::sessions::log::Kind) -> (Style, Style) {
     };
     (body.bold(), body)
 }
+
+pub(super) fn log_time_style(kind: &crate::sessions::log::Kind, last: bool) -> Style {
+    use crate::sessions::log::Kind;
+    if last {
+        log_styles(kind).1.bold()
+    } else if matches!(kind, Kind::User | Kind::Model) {
+        log_styles(kind).1
+    } else {
+        Style::default().dim()
+    }
+}

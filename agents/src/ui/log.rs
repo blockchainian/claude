@@ -82,11 +82,7 @@ fn render_event(
     let time_width = time_width.min(width);
     let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
     let (label_style, body_style) = super::style::log_styles(&event.kind);
-    let time_style = if last {
-        body_style.bold()
-    } else {
-        Style::default().dim()
-    };
+    let time_style = super::style::log_time_style(&event.kind, last);
     Line::from(Span::styled(time.to_owned(), time_style))
         .right_aligned()
         .render(time_area, buf);
