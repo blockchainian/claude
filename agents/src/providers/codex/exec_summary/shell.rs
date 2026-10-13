@@ -51,7 +51,7 @@ impl Commands {
                 .map(|(name, subs)| match subs.len() {
                     0 => name,
                     1 => format!("{name} {}", subs[0]),
-                    _ => format!("{name} {{{}}}", subs.join(",")),
+                    _ => format!("{name} {{{}}}", subs.join(", ")),
                 })
                 .collect::<Vec<_>>()
                 .join(", "),

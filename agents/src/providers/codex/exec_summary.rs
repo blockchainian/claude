@@ -42,7 +42,13 @@ fn parse(input: &str) -> Option<String> {
     for call in calls {
         match call {
             Call::Shell(cmd) => shell::collect(&cmd, &mut commands)?,
-            Call::Tool(name) => commands.add(&name, None),
+            Call::Tool(name) => commands.add(
+                match name.as_str() {
+                    "write_stdin" => "stdin",
+                    name => name,
+                },
+                None,
+            ),
         }
     }
     commands.finish()
@@ -424,7 +430,7 @@ mod tests {
             summarize(
                 r#"text(await tools.exec_command({cmd:"cat file; git -C dir status && git branch | head; echo $(pwd); bash -lc 'env X=y cargo test'"}));"#
             ),
-            "cat, git {status,branch}, head, echo, pwd, cargo test"
+            "cat, git {status, branch}, head, echo, pwd, cargo test"
         );
     }
     #[test]
@@ -433,7 +439,7 @@ mod tests {
             summarize(
                 r#"text(await tools.write_stdin({session_id:1})); image(await tools.view_image({path:"x"}));"#
             ),
-            "write_stdin, view_image"
+            "stdin, view_image"
         );
         assert_eq!(summarize("broken ("), "javascript");
     }
@@ -477,7 +483,7 @@ mod tests {
             r#"const jobs = [["a", "git status"], ["b", "git arbitrary"], ["c", "pwd"]]; await Promise.all(jobs.map(([name, cmd]) => tools.exec_command({cmd})));"#,
             r#"const jobs = [{cmd:"git status"}, {cmd:"git arbitrary"}, {cmd:"pwd"}]; await Promise.all(jobs.map(j => tools.exec_command(j)));"#,
         ] {
-            assert_eq!(summarize(input), "git {status,arbitrary}, pwd");
+            assert_eq!(summarize(input), "git {status, arbitrary}, pwd");
         }
     }
     #[test]
@@ -517,7 +523,7 @@ mod tests {
         );
         assert_eq!(
             summarize_shell_commands("cat file; git -C dir status && git branch"),
-            "cat, git {status,branch}"
+            "cat, git {status, branch}"
         );
     }
     #[test]
