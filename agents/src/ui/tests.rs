@@ -1636,15 +1636,9 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
             "body row {y}"
         );
     }
-    for (y, colour, dim) in [
-        (15, Color::Reset, false),
-        (16, Color::Yellow, false),
-        (17, Color::Reset, true),
-        (18, Color::Reset, true),
-    ] {
-        assert_eq!(buf[(9, y)].fg, colour, "time row {y}");
-        assert_eq!(buf[(9, y)].modifier.contains(Modifier::DIM), dim);
-        assert!(!buf[(9, y)].modifier.contains(Modifier::BOLD));
+    for y in 15..19 {
+        assert_eq!(buf[(9, y)].fg, Color::Reset, "time row {y}");
+        assert!(buf[(9, y)].modifier.is_empty(), "time row {y}");
     }
     for (kind, colour) in [
         (Kind::User, Color::Reset),
@@ -1664,14 +1658,10 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let time = &buf[(9, 15)];
-        let plain = matches!(kind, Kind::User | Kind::Model);
         let time_style = super::style::log_time_style(&kind, false);
-        assert_eq!(time_style.fg, if plain { foreground } else { None });
-        assert_eq!(time_style.add_modifier.contains(Modifier::DIM), !plain);
-        assert!(!time_style.add_modifier.contains(Modifier::BOLD));
-        assert_eq!(time.fg, if plain { colour } else { Color::Reset });
-        assert_eq!(time.modifier.contains(Modifier::DIM), !plain);
-        assert!(!time.modifier.contains(Modifier::BOLD));
+        assert_eq!(time_style, Style::default());
+        assert_eq!(time.fg, Color::Reset);
+        assert!(time.modifier.is_empty());
         let expected_label = match kind {
             Kind::Agent => "Agent",
             Kind::Session => "Session",
@@ -1712,7 +1702,7 @@ fn task_log_preserves_time_when_truncated() {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     assert_eq!(buf[(97, 21)].symbol(), "…");
-    assert_eq!(buf[(2, 21)].fg, Color::Yellow);
+    assert_eq!(buf[(2, 21)].fg, Color::Reset);
     assert!(
         !buf[(2, 21)]
             .modifier
