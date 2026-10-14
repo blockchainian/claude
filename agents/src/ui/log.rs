@@ -83,7 +83,7 @@ impl View {
         }
         let label = match viewport.log_unseen {
             0 => " ↑ Latest ".to_owned(),
-            unseen => format!(" ↑ {unseen} new "),
+            unseen => format!(" ↑ {unseen} New "),
         };
         let x = area.x + (CLOCK_WIDTH + KIND_WIDTH + 1) as u16;
         let jump = Rect::new(x, area.y, label.width() as u16, 1).intersection(area);
