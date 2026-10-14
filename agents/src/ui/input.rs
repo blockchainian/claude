@@ -1,7 +1,7 @@
 use super::*;
 
-/// Rows one wheel report scrolls the log panel, matching tmux's copy-mode wheel.
-const WHEEL_ROWS: usize = 5;
+/// Rows one wheel report scrolls the log panel, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
+const WHEEL_ROWS: usize = 3;
 
 impl View {
     fn set_filter(&mut self, idx: usize) {

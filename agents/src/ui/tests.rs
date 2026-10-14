@@ -243,13 +243,13 @@ fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
 }
 
 #[test]
-fn mouse_log_wheel_scrolls_tmux_copy_mode_rows_per_report() {
+fn mouse_log_wheel_scrolls_three_rows_per_report() {
     let (view, now) = log_fixture();
     log_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
     let mut view = view;
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
-    assert_eq!(view.log_scroll(), 5);
+    assert_eq!(view.log_scroll(), 3);
     view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x + 2, rect.y + 1));
     assert_eq!(view.log_scroll(), 0);
 }
@@ -366,7 +366,7 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
     details_panel(&view);
     let rect = view.viewport.borrow().log;
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-    assert_eq!(view.log_scroll(), 5);
+    assert_eq!(view.log_scroll(), 3);
     let id = view.selected_id().unwrap().to_owned();
     let mut rows = view.rows.clone();
     rows.push(session(
@@ -377,7 +377,7 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
     ));
     view.set_sessions(rows.clone(), false);
     assert_eq!(view.selected_id(), Some(&id));
-    assert_eq!(view.log_scroll(), 5);
+    assert_eq!(view.log_scroll(), 3);
     rows.retain(|row| row.id != id);
     for row in &mut rows {
         row.transcript = Some(row.cwd.join("session.jsonl"));
@@ -387,7 +387,7 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
     details_panel(&view);
     let rect = view.viewport.borrow().log;
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-    assert_eq!(view.log_scroll(), 5);
+    assert_eq!(view.log_scroll(), 3);
     key(&mut view, KeyCode::Down);
     assert_eq!(view.log_scroll(), 0);
 }
@@ -3706,7 +3706,7 @@ mod log_search {
         screen(&view, 120, 40);
         let rect = view.viewport.borrow().log;
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y + 1));
-        assert_eq!(view.log_scroll(), 5);
+        assert_eq!(view.log_scroll(), 3);
         let mut second = view.rows[0].clone();
         second.id = session_key("second");
         view.set_sessions(vec![view.rows[0].clone(), second], false);
