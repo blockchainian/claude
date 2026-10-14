@@ -11,6 +11,7 @@ mod log;
 mod log_search;
 mod markdown;
 mod navigation;
+mod paths;
 mod render;
 mod rows;
 mod selection_tabs;

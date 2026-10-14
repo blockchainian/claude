@@ -73,6 +73,10 @@ impl LogSearch {
 
 impl View {
     pub(crate) fn prepare_log_search(&mut self) {
+        let cwd = self
+            .selected_row()
+            .map(|session| session.cwd.clone())
+            .unwrap_or_default();
         self.log_search.bodies = self
             .log
             .iter()
@@ -80,7 +84,7 @@ impl View {
                 format!(
                     "{} {}",
                     super::log::kind_label(&event.kind),
-                    super::log::body_line(event, usize::MAX)
+                    super::log::body_line(event, usize::MAX, &cwd)
                 )
             })
             .collect();

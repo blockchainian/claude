@@ -410,7 +410,7 @@ impl View {
         let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> =
             vec![Vec::new(); items.len()];
         let prompt_start = items.len();
-        let prompt_body = wrap_details(prompt_text, width, true);
+        let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
         items.extend(prompt_body.into_iter().map(Item::from));
         bodies.push(prompt_start..items.len());
         copies.push(
@@ -424,7 +424,7 @@ impl View {
         ));
         item_links.resize(items.len(), Vec::new());
         for queued in &session.queued {
-            let first = wrap_details(queued, width, true)
+            let first = wrap_details(queued, &session.cwd, width, true)
                 .into_iter()
                 .next()
                 .unwrap_or_default();
@@ -449,7 +449,7 @@ impl View {
         // clock: whichever of the latest tool call and the last reply is newer.
         let activity = session.latest_activity();
         if let Some(activity) = activity {
-            let wrapped = wrap_details(&activity.label, width, false);
+            let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
             let mut label = wrapped
                 .first()
                 .map_or(String::new(), |line| line.to_string());
@@ -484,7 +484,7 @@ impl View {
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(
-                wrap_details(message, width, true)
+                wrap_details(message, &session.cwd, width, true)
                     .into_iter()
                     .map(|mut line| {
                         for span in &mut line.spans {
@@ -1001,8 +1001,14 @@ fn box_height(lines: usize) -> usize {
     1 + lines
 }
 
-fn wrap_details(text: &str, width: usize, markdown: bool) -> Vec<Line<'static>> {
-    let text = super::line_truncation::abbreviate_paths_for_wrap(text, width);
+fn wrap_details(
+    text: &str,
+    cwd: &std::path::Path,
+    width: usize,
+    markdown: bool,
+) -> Vec<Line<'static>> {
+    let paths = super::paths::text_paths(text, cwd);
+    let text = super::line_truncation::abbreviate_paths_for_wrap(text, &paths, width);
     if markdown {
         super::markdown::render_with_options(
             &text,
@@ -1025,14 +1031,24 @@ mod wrapped_path_tests {
     #[test]
     fn wrapped_details_keep_fitting_paths_and_markdown_styles() {
         for markdown in [false, true] {
-            let lines = wrap_details("some prose before /tmp/fits.md and after", 20, markdown);
+            let lines = wrap_details(
+                "some prose before /tmp/fits.md and after",
+                std::path::Path::new("/"),
+                20,
+                markdown,
+            );
             assert!(
                 lines
                     .iter()
                     .any(|line| line.to_string().contains("/tmp/fits.md"))
             );
         }
-        let lines = wrap_details("**/private/workspace/reports/report.md**", 20, true);
+        let lines = wrap_details(
+            "**/private/workspace/reports/report.md**",
+            std::path::Path::new("/"),
+            20,
+            true,
+        );
         assert_eq!(lines[0].to_string(), "/p…/w…/r…/report.md");
         assert!(lines[0].spans.iter().all(|span| {
             span.style
@@ -1097,7 +1113,7 @@ mod wrapped_path_tests {
 
     #[test]
     fn wrapped_details_abbreviate_screenshot_path_at_narrow_width() {
-        let lines = wrap_details(MESSAGE, 40, true);
+        let lines = wrap_details(MESSAGE, std::path::Path::new("/"), 40, true);
         let plain: Vec<_> = lines.iter().map(ToString::to_string).collect();
         assert_eq!(
             plain,

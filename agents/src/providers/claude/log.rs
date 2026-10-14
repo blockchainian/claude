@@ -1,4 +1,4 @@
-use crate::log::{Event, Kind, participant_text};
+use crate::log::{Event, Kind, Section, ToolCall, participant_text};
 use chrono::{DateTime, Utc};
 use std::{io, path::Path};
 
@@ -136,6 +136,246 @@ struct ResultAt {
     sequence: usize,
     error: bool,
     denial: Option<String>,
+    content: String,
+    value: serde_json::Value,
+}
+
+fn result_text(value: &serde_json::Value) -> String {
+    value.as_str().map(str::to_owned).unwrap_or_else(|| {
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|block| block["type"] == "text")
+            .filter_map(|block| block["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+}
+
+fn fields(input: &serde_json::Value, keys: &[&str]) -> Section {
+    Section::Fields(
+        keys.iter()
+            .filter_map(|key| {
+                input.get(*key).map(|value| {
+                    (
+                        (*key).to_owned(),
+                        value
+                            .as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| value.to_string()),
+                    )
+                })
+            })
+            .collect(),
+    )
+}
+
+fn all_fields(input: &serde_json::Value) -> Section {
+    fields(
+        input,
+        &input
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(key, _)| key.as_str())
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn text_section(label: &str, text: &str) -> Section {
+    Section::Text {
+        label: label.to_owned(),
+        text: text.to_owned(),
+    }
+}
+
+fn code_section(label: &str, lang: &str, text: &str) -> Section {
+    Section::Code {
+        label: label.to_owned(),
+        lang: lang.to_owned(),
+        text: text.to_owned(),
+    }
+}
+
+fn line_range(start: u64, count: Option<u64>) -> String {
+    match count {
+        Some(count) => format!(
+            "lines {start}–{}",
+            start.saturating_add(count.saturating_sub(1))
+        ),
+        None => format!("lines {start}–"),
+    }
+}
+
+fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -> ToolCall {
+    let path = input["file_path"].as_str().unwrap_or("");
+    let lang = Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("");
+    let value = result.map(|result| &result.value);
+    let mut sections = match name {
+        "Bash" => {
+            let mut sections = vec![code_section(
+                "command",
+                "bash",
+                input["command"].as_str().unwrap_or(""),
+            )];
+            if input.get("description").is_some() {
+                sections.push(fields(input, &["description"]));
+            }
+            sections
+        }
+        "Read" | "Edit" | "Write" => {
+            vec![Section::Fields(vec![("path".to_owned(), path.to_owned())])]
+        }
+        "WebFetch" => vec![fields(input, &["url", "prompt"])],
+        "Agent" | "SendMessage" => {
+            let key = if name == "Agent" { "prompt" } else { "message" };
+            vec![
+                Section::Markdown {
+                    label: key.to_owned(),
+                    text: input[key].as_str().unwrap_or("").to_owned(),
+                },
+                fields(input, &["subagent_type", "to", "summary"]),
+            ]
+        }
+        _ => vec![all_fields(input)],
+    };
+    match name {
+        "Read" if input.get("offset").is_some() || input.get("limit").is_some() => {
+            if let Section::Fields(fields) = &mut sections[0] {
+                fields.push((
+                    "range".to_owned(),
+                    line_range(
+                        input["offset"].as_u64().unwrap_or(1),
+                        input["limit"].as_u64(),
+                    ),
+                ));
+            }
+        }
+        "Edit" => {
+            let patch = value.and_then(|value| value["structuredPatch"].as_array());
+            let diff = if let Some(hunks) = patch {
+                hunks
+                    .iter()
+                    .map(|hunk| {
+                        let header = format!(
+                            "@@ -{},{} +{},{} @@",
+                            hunk["oldStart"], hunk["oldLines"], hunk["newStart"], hunk["newLines"]
+                        );
+                        std::iter::once(header)
+                            .chain(
+                                hunk["lines"]
+                                    .as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .filter_map(|line| line.as_str().map(str::to_owned)),
+                            )
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                [("old_string", "-"), ("new_string", "+")]
+                    .into_iter()
+                    .flat_map(|(key, prefix)| {
+                        input[key]
+                            .as_str()
+                            .unwrap_or("")
+                            .lines()
+                            .map(move |line| format!("{prefix}{line}"))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            sections.push(Section::Diff {
+                label: path.to_owned(),
+                text: diff,
+            });
+        }
+        "Write" => sections.push(code_section(
+            "content",
+            lang,
+            input["content"].as_str().unwrap_or(""),
+        )),
+        _ => {}
+    }
+    let output = result.map(|result| {
+        let fallback = || vec![text_section("output", &result.content)];
+        let value = &result.value;
+        if result.error {
+            return fallback();
+        }
+        if matches!(name, "Agent" | "SendMessage") {
+            return vec![Section::Markdown {
+                label: "output".to_owned(),
+                text: result.content.clone(),
+            }];
+        }
+        if !(value.is_object() || value.is_array()) {
+            return fallback();
+        }
+        match name {
+            "Bash" => {
+                let mut output: Vec<_> = ["stdout", "stderr"]
+                    .into_iter()
+                    .filter_map(|key| {
+                        value[key]
+                            .as_str()
+                            .filter(|text| !text.is_empty())
+                            .map(|text| text_section(key, text))
+                    })
+                    .collect();
+                if output.is_empty() {
+                    output.push(text_section("stdout", "(no output)"));
+                }
+                output
+            }
+            "Read" if value["file"].is_object() => {
+                let file = &value["file"];
+                let label = file["startLine"]
+                    .as_u64()
+                    .map(|start| line_range(start, file["numLines"].as_u64()))
+                    .unwrap_or_else(|| "content".to_owned());
+                vec![code_section(
+                    &label,
+                    lang,
+                    file["content"].as_str().unwrap_or(""),
+                )]
+            }
+            "WebFetch" if value["result"].is_string() => vec![Section::Markdown {
+                label: "output".to_owned(),
+                text: value["result"].as_str().unwrap().to_owned(),
+            }],
+            _ if name.starts_with("mcp__") && value.is_array() => value
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|block| block["type"] == "text")
+                .filter_map(|block| block["text"].as_str())
+                .map(
+                    |text| match serde_json::from_str::<serde_json::Value>(text) {
+                        Ok(value) => code_section(
+                            "output",
+                            "json",
+                            &serde_json::to_string_pretty(&value).unwrap(),
+                        ),
+                        Err(_) => text_section("output", text),
+                    },
+                )
+                .collect(),
+            _ => fallback(),
+        }
+    });
+    ToolCall {
+        name: name.to_owned(),
+        input: sections,
+        output,
+        is_error: result.is_some_and(|result| result.error),
+    }
 }
 
 impl Log {
@@ -181,6 +421,8 @@ impl Log {
                                 sequence: self.sequence,
                                 error: false,
                                 denial: None,
+                                content: result_text(&block["content"]),
+                                value: record["toolUseResult"].clone(),
                             });
                             result.error |= block["is_error"] == true;
                             if block["is_error"] == true {
@@ -363,16 +605,27 @@ impl Log {
             .filter(|_| entry.background)
             .unwrap_or(&entry.event.body);
         let path = path.map(|_| name.len() + 1..call.len());
-        let call = if body.is_empty() {
-            call
+        // A path call followed by a path call of the same tool shares its verb: "Edit a b".
+        let verb = format!("{name} ");
+        let shared = path.is_some()
+            && body.starts_with(&verb)
+            && entry.event.paths.first().map(|range| range.start) == Some(verb.len());
+        let (body, call) = if shared {
+            for range in &mut entry.event.paths {
+                *range = range.start - verb.len()..range.end - verb.len();
+            }
+            (&body[verb.len()..], format!("{call} "))
+        } else if body.is_empty() {
+            (body, call)
         } else {
-            format!("{call}，")
+            (body, format!("{call}，"))
         };
         for range in &mut entry.event.paths {
             *range = range.start + call.len()..range.end + call.len();
         }
         entry.event.paths.splice(0..0, path);
         entry.event.body = format!("{call}{body}");
+        entry.event.calls.insert(0, tool_call(name, input, result));
         entry.background |= input["run_in_background"] == true;
         if entry.background {
             entry.event.body.push_str(" *");
@@ -513,6 +766,211 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
     use std::io::Write;
+
+    #[test]
+    fn tool_calls_keep_input_and_result_sections() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let parallel_inputs: Vec<_> = records[16..18]
+            .iter()
+            .map(|record| all_fields(&record["message"]["content"][0]["input"]))
+            .collect();
+        let events = events_from(records.clone());
+        let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
+        assert!(calls.len() >= 10);
+        let bash = calls.iter().find(|call| call.name == "Bash").unwrap();
+        assert!(matches!(&bash.input[0], Section::Code { lang, .. } if lang == "bash"));
+        let output = bash.output.as_ref().unwrap();
+        assert!(matches!(&output[0], Section::Text { label, .. } if label == "stdout"));
+        assert!(matches!(&output[1], Section::Text { label, .. } if label == "stderr"));
+        let read = calls.iter().find(|call| call.name == "Read").unwrap();
+        assert!(
+            matches!(&read.output.as_ref().unwrap()[0], Section::Code { lang, text, .. }
+            if lang == "conf" && !text.contains("1→"))
+        );
+        let raw_file = &records[3]["toolUseResult"]["file"];
+        assert_eq!(
+            read.output.as_ref().unwrap()[0],
+            code_section(
+                &line_range(
+                    raw_file["startLine"].as_u64().unwrap(),
+                    raw_file["numLines"].as_u64()
+                ),
+                "conf",
+                raw_file["content"].as_str().unwrap()
+            )
+        );
+        assert!(
+            matches!(&read.input[0], Section::Fields(fields) if fields.iter().any(|(key, _)| key == "range"))
+        );
+        let edit = calls.iter().find(|call| call.name == "Edit").unwrap();
+        assert!(matches!(&edit.input[1], Section::Diff { text, .. } if text.starts_with("@@ -")));
+        let patch = &records[5]["toolUseResult"]["structuredPatch"][0];
+        if let Section::Diff { text, .. } = &edit.input[1] {
+            assert!(text.starts_with(&format!(
+                "@@ -{},{} +{},{} @@\n",
+                patch["oldStart"], patch["oldLines"], patch["newStart"], patch["newLines"]
+            )));
+            assert!(
+                text.ends_with(
+                    patch["lines"]
+                        .as_array()
+                        .unwrap()
+                        .last()
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                )
+            );
+        }
+        let mcp = calls
+            .iter()
+            .find(|call| call.name.starts_with("mcp__"))
+            .unwrap();
+        assert!(
+            matches!(&mcp.output.as_ref().unwrap()[0], Section::Code { lang, text, .. }
+            if lang == "json" && text.contains('\n'))
+        );
+        let parallel = events.last().unwrap();
+        assert_eq!(
+            parallel
+                .calls
+                .iter()
+                .map(|call| call.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "mcp__plugin_codex_codex-manager__start",
+                "mcp__plugin_codex_codex-manager__start"
+            ]
+        );
+        assert_eq!(
+            parallel
+                .calls
+                .iter()
+                .map(|call| call.input[0].clone())
+                .collect::<Vec<_>>(),
+            parallel_inputs
+        );
+        assert!(parallel.calls[1].output.is_none());
+        for (name, input_index, output_index) in
+            [("Write", 6, 7), ("WebFetch", 8, 9), ("Agent", 10, 11)]
+        {
+            let call = calls.iter().find(|call| call.name == name).unwrap();
+            let raw_input = &records[input_index]["message"]["content"][0]["input"];
+            let raw_result = &records[output_index]["toolUseResult"];
+            match name {
+                "Write" => assert!(
+                    matches!(&call.input[1], Section::Code { text, lang, .. } if text == raw_input["content"].as_str().unwrap() && lang == "md")
+                ),
+                "WebFetch" => assert!(
+                    matches!(&call.output.as_ref().unwrap()[0], Section::Markdown { text, .. } if text == raw_result["result"].as_str().unwrap())
+                ),
+                "Agent" => assert!(
+                    matches!(&call.input[0], Section::Markdown { text, .. } if text == raw_input["prompt"].as_str().unwrap())
+                ),
+                _ => unreachable!(),
+            }
+        }
+        assert!(calls.iter().any(|call| call.is_error));
+    }
+
+    #[test]
+    fn tool_call_fallbacks_keep_reasons_and_skip_images() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let bash = &records[0]["message"]["content"][0];
+        let mut result = ResultAt {
+            at: at(1),
+            sequence: 1,
+            error: false,
+            denial: None,
+            content: "reason".to_owned(),
+            value: Value::Null,
+        };
+        for value in [Value::Null, json!("metadata"), json!(3)] {
+            result.value = value;
+            assert_eq!(
+                tool_call("Bash", &bash["input"], Some(&result)).output,
+                Some(vec![text_section("output", "reason")])
+            );
+        }
+        result.value = json!({"stdout":"", "stderr":""});
+        assert_eq!(
+            tool_call("Bash", &bash["input"], Some(&result)).output,
+            Some(vec![text_section("stdout", "(no output)")])
+        );
+        result.error = true;
+        assert_eq!(
+            tool_call("Bash", &bash["input"], Some(&result)).output,
+            Some(vec![text_section("output", "reason")])
+        );
+        result.error = false;
+        result.value = Value::Null;
+        assert!(
+            matches!(&tool_call("Agent", &records[10]["message"]["content"][0]["input"], Some(&result)).output.unwrap()[0], Section::Markdown { text, .. } if text == "reason")
+        );
+        result.value = json!([{"type":"image","data":"skipped"},{"type":"text","text":"plain"}]);
+        assert_eq!(
+            tool_call(
+                "mcp__tool",
+                &json!({"flag":true,"nested":{"n":1}}),
+                Some(&result)
+            )
+            .output,
+            Some(vec![text_section("output", "plain")])
+        );
+        result.value = Value::Null;
+        let edit = tool_call(
+            "Edit",
+            &records[4]["message"]["content"][0]["input"],
+            Some(&result),
+        );
+        assert!(
+            matches!(&edit.input[1], Section::Diff { text, .. } if text.contains("\n+") && text.starts_with('-'))
+        );
+        assert_eq!(
+            tool_call(
+                "Read",
+                &records[2]["message"]["content"][0]["input"],
+                Some(&result)
+            )
+            .output,
+            Some(vec![text_section("output", "reason")])
+        );
+        assert_eq!(
+            result_text(
+                &json!([{"type":"image"},{"type":"text","text":"one"},{"type":"text","text":"two"}])
+            ),
+            "one\ntwo"
+        );
+        assert!(
+            tool_call("Read", &records[2]["message"]["content"][0]["input"], None)
+                .output
+                .is_none()
+        );
+        let mut record = records[0].clone();
+        record["wireToolInputs"] = json!({"command":"wrong"});
+        let events = events_from(vec![record]);
+        assert_eq!(
+            events[0].calls[0].input[0],
+            code_section(
+                "command",
+                "bash",
+                bash["input"]["command"].as_str().unwrap()
+            )
+        );
+        assert_eq!(
+            all_fields(&json!({"flag":true,"nested":{"n":1}})),
+            Section::Fields(vec![
+                ("flag".to_owned(), "true".to_owned()),
+                ("nested".to_owned(), "{\"n\":1}".to_owned())
+            ])
+        );
+    }
 
     #[test]
     fn ask_user_question_texts_in_log_and_latest_activity() {
@@ -1383,7 +1841,8 @@ mod tests {
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Error);
-        assert_eq!(events[0].body, "Read a，Read b");
+        assert_eq!(events[0].body, "Read a b");
+        assert_eq!(events[0].paths, [5..6, 7..8]);
         assert_eq!(events[0].ended_at, None);
         assert_eq!(events[0].started_at, at(1));
     }
