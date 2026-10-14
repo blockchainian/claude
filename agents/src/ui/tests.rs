@@ -5641,7 +5641,7 @@ fn open_view_top_button_and_scrollbar() {
     let area = view.viewport.borrow().log_text.area;
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
-    assert_eq!(buf[(area.right(), area.top())].symbol(), "┃");
+    assert_eq!(buf[(area.right(), area.top())].symbol(), "│");
     assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), " ");
     view.viewport.borrow_mut().log_open_scroll = usize::MAX;
     let bottom = log_screen(&view, 100, 25, now);
@@ -5651,7 +5651,7 @@ fn open_view_top_button_and_scrollbar() {
     assert_eq!(jump.x, layout.list.x + (layout.list.width - jump.width) / 2);
     assert_eq!(jump.y, layout.log.y);
     view.render_at(buf.area, &mut buf, now);
-    assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), "┃");
+    assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), "│");
     click_text(&mut view, &bottom, " ↑ Top ");
     assert_eq!(view.viewport.borrow().log_open_scroll, 0);
     assert!(view.log_open.is_some());
@@ -5848,7 +5848,12 @@ fn tool_outputs_and_markdown_use_shared_json_rendering() {
     assert!(open.lines().any(|line| line.trim() == "↓"));
     let area = view.viewport.borrow().log_text.area;
     assert_eq!(area.width, 96);
-    assert!(!open.contains('┃'));
+    let lines: Vec<&str> = open.lines().collect();
+    assert!(
+        (area.top()..area.bottom()).all(|y| {
+            lines[usize::from(y)].chars().nth(usize::from(area.right())) != Some('│')
+        })
+    );
 }
 
 #[test]
