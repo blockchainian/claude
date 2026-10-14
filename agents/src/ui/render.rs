@@ -625,7 +625,7 @@ impl View {
             }
             sources.push(text_selection::Source {
                 id,
-                text: (*source).to_owned(),
+                text: (*source).into(),
                 label: (*label).to_owned(),
             });
         }

@@ -2,7 +2,7 @@
 
 use super::highlight;
 use crate::log::{Event, Kind, Section};
-use ratatui::style::Style;
+use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -17,8 +17,8 @@ pub(super) struct Part {
 enum Body {
     /// A call name or section label, in the given style.
     Label(Style),
-    /// The row's blank line between two calls.
-    Blank,
+    /// A full-width separator; the input/output rule carries a centred arrow.
+    Rule(bool),
     /// The dim note that a call has no output yet.
     Running,
     /// `key: value` lines.
@@ -33,10 +33,18 @@ enum Body {
 
 impl Part {
     fn new(source: impl Into<String>, body: Body) -> Self {
-        Part {
-            source: source.into(),
-            body,
+        let source = source.into();
+        match serde_json::from_str::<serde_json::Value>(&source) {
+            Ok(value) if value.is_object() || value.is_array() => Part {
+                source: serde_json::to_string_pretty(&value).expect("JSON value serializes"),
+                body: Body::Code("json".into()),
+            },
+            _ => Part { source, body },
         }
+    }
+
+    pub fn text(source: String, markdown: bool) -> Self {
+        Self::new(source, if markdown { Body::Markdown } else { Body::Text })
     }
 
     /// Whether the selection maps the drawn lines back to the source as Markdown.
@@ -46,11 +54,22 @@ impl Part {
 
     /// The part drawn `width` columns wide; every line fits so each cell maps to its source.
     pub fn lines(&self, width: usize, body_style: Style) -> Vec<Line<'static>> {
-        let source = self.source.as_str();
+        let drawn = self.source.replace('\t', "    ");
+        let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let lines = match &self.body {
-            Body::Label(style) => vec![Line::from(Span::styled(source.to_owned(), *style))],
-            Body::Blank => vec![Line::default()],
+            Body::Label(style) => split_wide(
+                vec![Line::from(Span::styled(source.to_owned(), *style))],
+                width,
+            ),
+            Body::Rule(arrow) => {
+                let mut rule = "─".repeat(width);
+                if *arrow && width > 0 {
+                    let middle = width / 2;
+                    rule.replace_range(middle * "─".len()..(middle + 1) * "─".len(), "↓");
+                }
+                vec![Line::from(rule).dim()]
+            }
             Body::Running => vec![Line::from(Span::styled(
                 source.to_owned(),
                 Style::new().dim(),
@@ -64,6 +83,9 @@ impl Part {
                 .map(|line| Line::from(line.into_owned()))
                 .collect(),
         };
+        if matches!(self.body, Body::Rule(_)) {
+            return lines;
+        }
         lines
             .into_iter()
             .map(|mut line| {
@@ -76,22 +98,27 @@ impl Part {
     }
 }
 
-/// The parts of an event's calls, in drawing order: per call its name, then each input and
-/// output section as a label and a body, with a blank line between calls.
+/// Per-call inputs and outputs, with titles for merged calls and display-only rules.
 pub(super) fn parts(event: &Event) -> Vec<Part> {
     let label_style = super::style::log_styles(&event.kind).0;
     let error_style = super::style::log_styles(&Kind::Error).0;
     let mut parts = Vec::new();
     for (index, call) in event.calls.iter().enumerate() {
         if index > 0 {
-            parts.push(Part::new("", Body::Blank));
+            parts.push(Part::new("", Body::Rule(false)));
         }
-        parts.push(Part::new(call.name.clone(), Body::Label(label_style)));
+        if event.calls.len() > 1 {
+            parts.push(Part::new(call.title.clone(), Body::Label(label_style)));
+        }
         for section in &call.input {
             push_section(&mut parts, section, label_style);
         }
         match &call.output {
             Some(output) => {
+                parts.push(Part::new("", Body::Rule(true)));
+                if output.is_empty() {
+                    parts.push(Part::new("(no output)", Body::Text));
+                }
                 let style = if call.is_error {
                     error_style
                 } else {
@@ -125,16 +152,15 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style) {
         Section::Markdown { label, text } => (label, Part::new(cells(text), Body::Markdown)),
         Section::Text { label, text } => (label, Part::new(cells(text), Body::Text)),
     };
-    if !label.is_empty() {
+    if matches!(section, Section::Diff { .. }) || label == "stderr" {
         parts.push(Part::new(label.clone(), Body::Label(label_style)));
     }
     parts.push(body);
 }
 
-/// `text` as it occupies cells: tabs as four spaces, so the drawn cells map back to the
-/// copied text one grapheme each, and without trailing line breaks.
+/// Copy sources preserve tabs and omit trailing line breaks.
 fn cells(text: &str) -> String {
-    text.trim_end_matches(['\n', '\r']).replace('\t', "    ")
+    text.trim_end_matches(['\n', '\r']).to_owned()
 }
 
 /// `lines` with every line wider than `width` split at grapheme boundaries.
@@ -203,9 +229,39 @@ mod tests {
     }
 
     #[test]
-    fn calls_become_name_label_body_parts_with_a_running_note() {
+    fn review_wide_label_fits_drawn_cells() {
+        let part = Part::new(
+            "/workspace/very/long/path/to/source.rs",
+            Body::Label(Style::default()),
+        );
+        assert!(
+            part.lines(8, Style::default())
+                .iter()
+                .all(|line| line.width() <= 8)
+        );
+    }
+
+    #[test]
+    fn review_tab_copy_source_keeps_tabs() {
+        let mut parts = Vec::new();
+        push_section(
+            &mut parts,
+            &Section::Text {
+                label: String::new(),
+                text: "a\tb".into(),
+            },
+            Style::default(),
+        );
+        assert_eq!(parts[0].source, "a\tb");
+        assert_eq!(texts(&parts, 80), ["a    b"]);
+    }
+
+    #[test]
+    fn merged_calls_have_titles_and_rules_with_a_running_note() {
         let parts = parts(&event(vec![
             ToolCall {
+                id: "Bash-fixture".into(),
+                title: "Bash".into(),
                 name: "Bash".into(),
                 input: vec![Section::Code {
                     label: "command".into(),
@@ -219,6 +275,8 @@ mod tests {
                 is_error: false,
             },
             ToolCall {
+                id: "Read-fixture".into(),
+                title: "Read".into(),
                 name: "Read".into(),
                 input: vec![Section::Fields(vec![
                     ("path".into(), "agents/src/log.rs".into()),
@@ -235,9 +293,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "Bash",
-                "command",
                 "cargo test",
-                "stdout",
+                "",
                 "running 3 tests\n...",
                 "",
                 "Read",
@@ -249,12 +306,11 @@ mod tests {
             texts(&parts, 80),
             [
                 "Bash",
-                "command",
                 "cargo test",
-                "stdout",
+                &format!("{}↓{}", "─".repeat(40), "─".repeat(39)),
                 "running 3 tests",
                 "...",
-                "",
+                &"─".repeat(80),
                 "Read",
                 "path: agents/src/log.rs",
                 "range: lines 1–40",
@@ -266,6 +322,8 @@ mod tests {
     #[test]
     fn wide_code_and_diff_lines_split_at_grapheme_boundaries() {
         let parts = parts(&event(vec![ToolCall {
+            id: "Edit-fixture".into(),
+            title: "Edit".into(),
             name: "Edit".into(),
             input: vec![Section::Diff {
                 label: "a.rs".into(),
@@ -281,11 +339,11 @@ mod tests {
         assert_eq!(
             texts(&parts, 9),
             [
-                "Edit",
                 "a.rs",
                 "+中文字符",
                 "串很长",
                 "-short",
+                "────↓────",
                 "let value",
                 " = \"abcde",
                 "fghij\";",
@@ -299,6 +357,8 @@ mod tests {
     #[test]
     fn errors_label_output_in_the_error_style_and_tabs_become_spaces() {
         let parts = parts(&event(vec![ToolCall {
+            id: "Bash-fixture".into(),
+            title: "Bash".into(),
             name: "Bash".into(),
             input: vec![],
             output: Some(vec![Section::Text {
@@ -312,6 +372,6 @@ mod tests {
             lines[0].spans[0].style,
             super::super::style::log_styles(&Kind::Error).0
         );
-        assert_eq!(parts[2].source, "    boom");
+        assert_eq!(parts[2].source, "\tboom");
     }
 }

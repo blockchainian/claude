@@ -25,7 +25,7 @@ struct Anchor {
 #[derive(Clone)]
 pub(super) struct Source {
     pub id: usize,
-    pub text: String,
+    pub text: std::rc::Rc<str>,
     pub label: String,
 }
 
@@ -172,6 +172,17 @@ impl View {
             Panel::Log => &viewport.log_text,
             Panel::Tasks => &viewport.task_text,
             Panel::LogList => &viewport.log_list_text,
+        }
+    }
+
+    pub(super) fn cancel_open_selection(&self) {
+        if self
+            .text_selection
+            .borrow()
+            .as_ref()
+            .is_some_and(|selection| selection.panel == Panel::Log)
+        {
+            self.text_selection.borrow_mut().take();
         }
     }
 
@@ -466,7 +477,7 @@ impl View {
             }
             region.sources.push(Source {
                 id,
-                text,
+                text: text.into(),
                 label: "Copied selection".into(),
             });
             region.rows.push(DrawnRow {

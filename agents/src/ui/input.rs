@@ -79,7 +79,11 @@ impl View {
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && self.viewport.borrow().log_jump.contains(position)
         {
-            self.show_newest_log();
+            if self.log_open.is_some() {
+                self.viewport.borrow_mut().log_open_scroll = 0;
+            } else {
+                self.show_newest_log();
+            }
             return None;
         }
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
