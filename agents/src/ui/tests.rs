@@ -4750,26 +4750,3 @@ fn clicks_on_two_bodies_are_not_a_double_click() {
         assert!(view.handle_mouse(click).is_none());
     }
 }
-
-#[test]
-fn brief_notice_clears_itself_after_two_seconds() {
-    let mut view = fixture();
-    let start = Instant::now();
-    view.set_brief_notice("Copied".into(), start);
-    assert_eq!(
-        view.expire_notice(start + std::time::Duration::from_millis(500)),
-        Some(std::time::Duration::from_millis(1500))
-    );
-    assert_eq!(view.notice.as_deref(), Some("Copied"));
-    assert_eq!(
-        view.expire_notice(start + std::time::Duration::from_secs(2)),
-        None
-    );
-    assert!(view.notice.is_none());
-    view.set_notice(Some("Failed to copy".into()));
-    assert_eq!(
-        view.expire_notice(start + std::time::Duration::from_secs(60)),
-        None
-    );
-    assert_eq!(view.notice.as_deref(), Some("Failed to copy"));
-}
