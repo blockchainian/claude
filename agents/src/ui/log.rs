@@ -585,8 +585,8 @@ mod log_markdown {
         }
     }
 
-    #[test]
-    fn merged_tool_row_abbreviates_every_path() {
+    /// A row merging an Edit and a Read call, fitted to `width`.
+    fn merged_tool_row(width: usize) -> (String, bool) {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         for (id, name, path) in [
             ("a", "Edit", "/opt/work/agents/src/ui/tests.rs"),
@@ -601,17 +601,32 @@ mod log_markdown {
             std::io::Write::write_all(&mut file, format!("{record}\n").as_bytes()).unwrap();
         }
         let events = crate::providers::claude::log::tail(file.path(), 1).unwrap();
-        let (line, cut) = fitted_body_line(&events[0], 70);
-        let text: String = line
+        let (line, cut) = fitted_body_line(&events[0], width);
+        let text = line
             .spans
             .iter()
             .map(|span| span.content.as_ref())
             .collect();
+        (text, cut)
+    }
+
+    #[test]
+    fn merged_tool_row_abbreviates_every_path() {
         assert_eq!(
-            text,
-            "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/codex/tests.rs"
+            merged_tool_row(70),
+            (
+                "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/codex/tests.rs".into(),
+                true
+            )
         );
-        assert!(cut);
+    }
+
+    #[test]
+    fn merged_tool_row_keeps_every_file_name_whole() {
+        assert_eq!(
+            merged_tool_row(40).0,
+            "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/c…/tests.rs"
+        );
     }
 
     #[test]

@@ -191,13 +191,14 @@ pub(super) fn abbreviate_paths_in_text(text: &str, max_width: usize) -> String {
 }
 
 /// Shrinks the paths at `ranges` in `text`, left to right, until the text
-/// fits: every path's directories first, then the last components.
+/// fits: every path's directories first, then the last component of a lone
+/// path, since cutting several file names leaves none readable.
 pub(super) fn abbreviate_paths(
     text: &str,
     ranges: &[std::ops::Range<usize>],
     max_width: usize,
 ) -> String {
-    fit_paths(text, ranges, max_width, true)
+    fit_paths(text, ranges, max_width, ranges.len() == 1)
 }
 
 fn fit_paths(
