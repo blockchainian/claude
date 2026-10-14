@@ -270,10 +270,7 @@ fn render_event(
 
 /// The full text an open log event shows below its header.
 pub(super) fn open_text(event: &Event) -> String {
-    match &event.path {
-        Some(path) if !is_prose(&event.kind) => format!("{} {path}", event.body),
-        _ => event.body.clone(),
-    }
+    event.body.clone()
 }
 
 /// The footer confirmation after copying an open log event, such as "Copied user message".
@@ -321,17 +318,47 @@ fn fitted_body_line(event: &Event, body_width: usize) -> (Line<'static>, bool) {
             })
             .unwrap_or_else(|| Line::from(Span::styled(shortened.clone(), body_style)));
         (line, shortened != body)
-    } else if let Some(path) = &event.path {
-        let path_width = body_width.saturating_sub(body.width() + 1);
-        let shortened = super::line_truncation::abbreviate_path(path, path_width);
-        let cut = shortened != *path;
-        (
-            Line::from(Span::styled(format!("{body} {shortened}"), body_style)),
-            cut,
-        )
     } else {
-        (Line::from(Span::styled(body, body_style)), false)
+        let (text, paths) = display_paths(event);
+        let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width);
+        let cut = shortened != body;
+        (Line::from(Span::styled(shortened, body_style)), cut)
     }
+}
+
+/// An event's body with whitespace runs collapsed and home paths shown as
+/// `~`, and the byte ranges of its paths in that text.
+fn display_paths(event: &Event) -> (String, Vec<std::ops::Range<usize>>) {
+    let mut text = String::new();
+    let mut ranges = Vec::new();
+    let mut end = 0;
+    for range in &event.paths {
+        text.push_str(&collapse_whitespace(&event.body[end..range.start]));
+        let path = super::formatting::format_directory_display(std::path::Path::new(
+            &event.body[range.clone()],
+        ));
+        ranges.push(text.len()..text.len() + path.len());
+        text.push_str(&path);
+        end = range.end;
+    }
+    text.push_str(&collapse_whitespace(&event.body[end..]));
+    let trimmed = text.len() - text.trim_start().len();
+    for range in &mut ranges {
+        *range = range.start - trimmed..range.end - trimmed;
+    }
+    (text.trim().to_owned(), ranges)
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    let mut collapsed = String::new();
+    for character in text.chars() {
+        if !character.is_whitespace() {
+            collapsed.push(character);
+        } else if !collapsed.ends_with(' ') {
+            collapsed.push(' ');
+        }
+    }
+    collapsed
 }
 
 #[cfg(test)]
@@ -345,7 +372,7 @@ mod log_markdown {
         let event = Event {
             kind,
             body: body.into(),
-            path: None,
+            paths: Vec::new(),
             started_at: Utc::now(),
             ended_at: None,
             duration: None,
@@ -531,6 +558,35 @@ mod log_markdown {
                 assert_eq!(buffer[(x, 0)].fg, crate::theme::inline_code_color());
             }
         }
+    }
+
+    #[test]
+    fn merged_tool_row_abbreviates_every_path() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for (id, name, path) in [
+            ("a", "Edit", "/opt/work/agents/src/ui/tests.rs"),
+            ("b", "Read", "/opt/work/agents/src/providers/codex/tests.rs"),
+        ] {
+            let record = serde_json::json!({
+                "type":"assistant", "timestamp":"2026-10-06T16:39:01Z", "uuid":id,
+                "message":{"id":"batch", "content":[
+                    {"type":"tool_use", "id":id, "name":name, "input":{"file_path":path}}
+                ]}
+            });
+            std::io::Write::write_all(&mut file, format!("{record}\n").as_bytes()).unwrap();
+        }
+        let events = crate::providers::claude::log::tail(file.path(), 1).unwrap();
+        let (line, cut) = fitted_body_line(&events[0], 70);
+        let text: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(
+            text,
+            "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/codex/tests.rs"
+        );
+        assert!(cut);
     }
 
     #[test]

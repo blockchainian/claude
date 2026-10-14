@@ -2470,7 +2470,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Assistant, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
-        kind, body: body.into(), path: None, started_at: now - Duration::seconds(age),
+        kind, body: body.into(), paths: Vec::new(), started_at: now - Duration::seconds(age),
         ended_at: end.map(|age| now - Duration::seconds(age)),
         duration: None,
         previous_end: Some(now - Duration::seconds(age + 5)),
@@ -2891,7 +2891,7 @@ fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
     let first = crate::log::Event {
         kind: crate::log::Kind::User,
         body: "Discarded event".into(),
-        path: None,
+        paths: Vec::new(),
         started_at: now - Duration::seconds(180),
         ended_at: None,
         duration: None,
@@ -3394,14 +3394,10 @@ mod log_path_abbrev {
     fn read_path_is_abbreviated_to_the_available_body_width() {
         let (mut view, now) = log_fixture();
         let mut event = view.log[2].clone();
-        event.body = "Read".into();
         let home = std::env::var_os("HOME").expect("HOME");
-        event.path = Some(
-            std::path::Path::new(&home)
-                .join("Users/workspace/project/main.rs")
-                .to_string_lossy()
-                .into_owned(),
-        );
+        let path = std::path::Path::new(&home).join("Users/workspace/project/main.rs");
+        event.body = format!("Read {}", path.display());
+        event.paths.push(5..event.body.len());
         view.log = vec![event];
         let area = Rect::new(0, 0, 43, 3);
         let mut buf = Buffer::empty(area);
@@ -4721,7 +4717,11 @@ fn task_log_click_on_whole_row_keeps_list() {
 fn task_log_click_opens_row_with_shortened_path() {
     let (mut view, now) = log_fixture();
     let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
-    view.log[7].path = Some(path.into());
+    let event = &mut view.log[7];
+    event
+        .paths
+        .push(event.body.len() + 1..event.body.len() + 1 + path.len());
+    event.body = format!("{} {path}", event.body);
     let list = log_screen(&view, 100, 25, now);
     assert!(!list.contains(path), "{list}");
     click_log_text(&mut view, &list, "run tests", MouseButton::Left);

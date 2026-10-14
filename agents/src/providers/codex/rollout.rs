@@ -209,7 +209,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         return Ok(None);
     }
     let item = &payload["item"];
-    let mut path = None;
+    let mut paths = Vec::new();
     let item_type = required_text(item, "type")?;
     let body = match item_type {
         "CommandExecution" => {
@@ -245,17 +245,13 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
                     "Codex file change requires changes",
                 )
             })?;
-            if changes.len() == 1 {
-                path = changes.keys().next().cloned();
-                "apply_patch".to_owned()
-            } else if changes.is_empty() {
-                "apply_patch".to_owned()
-            } else {
-                format!(
-                    "apply_patch {}",
-                    changes.keys().cloned().collect::<Vec<_>>().join(" · ")
-                )
+            let mut body = "apply_patch".to_owned();
+            for (index, path) in changes.keys().enumerate() {
+                body.push_str(if index == 0 { " " } else { " · " });
+                paths.push(body.len()..body.len() + path.len());
+                body.push_str(path);
             }
+            body
         }
         "McpToolCall" => format!(
             "{}.{}",
@@ -276,8 +272,10 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         }
         "ImageView" => {
             let image = required_text(item, "path")?;
-            path = Some(image.strip_prefix("file://").unwrap_or(image).to_owned());
-            "view_image".to_owned()
+            let image = image.strip_prefix("file://").unwrap_or(image);
+            let body = "view_image ";
+            paths.push(body.len()..body.len() + image.len());
+            format!("{body}{image}")
         }
         "SubAgentActivity" => format!(
             "subagent {} {}",
@@ -326,7 +324,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
     Ok(Some(Event {
         kind: Kind::Tool,
         body,
-        path,
+        paths,
         started_at,
         ended_at: Some(ended_at),
         duration,
@@ -387,13 +385,9 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
         if summary.activity.is_none()
             && let Some(event) = completed_tool(&record)?
         {
-            let label = match event.path {
-                Some(path) => format!("{} {path}", event.body),
-                None => event.body,
-            };
             summary.activity = Some(Activity {
                 kind: event.kind,
-                label,
+                label: event.body,
                 at,
             });
         }
@@ -501,7 +495,7 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
         entries.push(Event {
             kind,
             body,
-            path: None,
+            paths: Vec::new(),
             started_at: at,
             ended_at,
             duration: ended_at.map(|end| end - at),

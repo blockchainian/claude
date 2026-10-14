@@ -308,7 +308,7 @@ impl Log {
             event: Event {
                 kind,
                 body,
-                path: None,
+                paths: Vec::new(),
                 started_at,
                 ended_at,
                 duration: None,
@@ -332,14 +332,14 @@ impl Log {
         let detail = default_detail(input);
         let path = detail
             .filter(|(key, _)| *key == "file_path")
-            .filter(|_| name != "Bash" && self.batch.is_none())
+            .filter(|_| name != "Bash")
             .filter(|_| result.is_none_or(|result| result.denial.is_none()))
-            .map(|(_, path)| path.to_owned());
+            .map(|(_, path)| path);
         let detail = tool_detail(name, input);
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
             format!("{name}: {reason}")
-        } else if path.is_some() {
-            name.to_owned()
+        } else if let Some(path) = path {
+            format!("{name} {path}")
         } else {
             tool_label(name, &detail)
         };
@@ -358,7 +358,7 @@ impl Log {
                 event: Event {
                     kind,
                     body: String::new(),
-                    path: None,
+                    paths: Vec::new(),
                     started_at: at,
                     ended_at: None,
                     duration: None,
@@ -375,16 +375,17 @@ impl Log {
             .strip_suffix(" *")
             .filter(|_| entry.background)
             .unwrap_or(&entry.event.body);
-        let body = match entry.event.path.take() {
-            Some(path) => format!("{body} {path}"),
-            None => body.to_owned(),
-        };
-        entry.event.path = path;
-        entry.event.body = if body.is_empty() {
+        let path = path.map(|_| name.len() + 1..call.len());
+        let call = if body.is_empty() {
             call
         } else {
-            format!("{call}，{body}")
+            format!("{call}，")
         };
+        for range in &mut entry.event.paths {
+            *range = range.start + call.len()..range.end + call.len();
+        }
+        entry.event.paths.splice(0..0, path);
+        entry.event.body = format!("{call}{body}");
         entry.background |= input["run_in_background"] == true;
         if entry.background {
             entry.event.body.push_str(" *");
@@ -1197,10 +1198,13 @@ mod tests {
                 name,
                 json!({"file_path":"~/Users/project/src/main.rs"}),
             )]);
-            assert_eq!(events[0].body, name);
             assert_eq!(
-                events[0].path.as_deref(),
-                Some("~/Users/project/src/main.rs")
+                events[0].body,
+                format!("{name} ~/Users/project/src/main.rs")
+            );
+            assert_eq!(
+                &events[0].body[events[0].paths[0].clone()],
+                "~/Users/project/src/main.rs"
             );
         }
     }

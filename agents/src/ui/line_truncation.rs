@@ -179,27 +179,63 @@ fn abbreviate_directories(path: &str, max_width: usize) -> String {
 /// Abbreviates the directories of absolute and home paths in prose, left to
 /// right, until the text fits or every path's directories are shrunk.
 pub(super) fn abbreviate_paths_in_text(text: &str, max_width: usize) -> String {
-    let mut overflow = display_width(text).saturating_sub(max_width);
-    if overflow == 0 {
-        return text.to_owned();
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    for word in text.split(' ') {
+        if let Some(range) = prose_path(word) {
+            ranges.push(start + range.start..start + range.end);
+        }
+        start += word.len() + 1;
     }
-    text.split(' ')
-        .map(|word| {
-            let Some(range) = prose_path(word) else {
-                return word.to_owned();
-            };
+    fit_paths(text, &ranges, max_width, false)
+}
+
+/// Shrinks the paths at `ranges` in `text`, left to right, until the text
+/// fits: every path's directories first, then the last components.
+pub(super) fn abbreviate_paths(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+    max_width: usize,
+) -> String {
+    fit_paths(text, ranges, max_width, true)
+}
+
+fn fit_paths(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+    max_width: usize,
+    cut_names: bool,
+) -> String {
+    let mut overflow = display_width(text).saturating_sub(max_width);
+    let mut paths: Vec<String> = ranges
+        .iter()
+        .map(|range| text[range.clone()].to_owned())
+        .collect();
+    let passes: &[fn(&str, usize) -> String] = if cut_names {
+        &[abbreviate_directories, abbreviate_path]
+    } else {
+        &[abbreviate_directories]
+    };
+    for shrink in passes {
+        for path in &mut paths {
             if overflow == 0 {
-                return word.to_owned();
+                break;
             }
-            let start = range.start;
-            let path = &word[range];
             let width = display_width(path);
-            let shrunk = abbreviate_directories(path, width.saturating_sub(overflow));
+            let shrunk = shrink(path, width.saturating_sub(overflow));
             overflow = overflow.saturating_sub(width.saturating_sub(display_width(&shrunk)));
-            format!("{}{shrunk}{}", &word[..start], &word[start + path.len()..])
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+            *path = shrunk;
+        }
+    }
+    let mut fitted = String::new();
+    let mut end = 0;
+    for (range, path) in ranges.iter().zip(&paths) {
+        fitted.push_str(&text[end..range.start]);
+        fitted.push_str(path);
+        end = range.end;
+    }
+    fitted.push_str(&text[end..]);
+    fitted
 }
 
 /// Finds absolute and home paths after punctuation, excluding URLs and relative paths.

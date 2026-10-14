@@ -78,8 +78,8 @@ fn file_change_uses_record_paths() {
         .next()
         .unwrap()
         .clone();
-    assert_eq!(entries[0].body, "apply_patch");
-    assert_eq!(entries[0].path.as_deref(), Some(path.as_str()));
+    assert_eq!(entries[0].body, format!("apply_patch {path}"));
+    assert_eq!(&entries[0].body[entries[0].paths[0].clone()], path);
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], record);
 }
@@ -124,13 +124,11 @@ fn web_extension_is_tool_activity() {
 fn image_view_retains_image_path_for_rendering() {
     let entries = events("image-view");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "view_image");
     let records = records("image-view");
     let path = records[0]["payload"]["item"]["path"].as_str().unwrap();
-    assert_eq!(
-        entries[0].path.as_deref(),
-        Some(path.strip_prefix("file://").unwrap())
-    );
+    let path = path.strip_prefix("file://").unwrap();
+    assert_eq!(entries[0].body, format!("view_image {path}"));
+    assert_eq!(&entries[0].body[entries[0].paths[0].clone()], path);
     assert_eq!(entries[0].kind, Kind::Tool);
     assert_record_timing(&entries[0], &records[0]);
 }
@@ -182,7 +180,7 @@ fn non_activity_completed_items_do_not_become_tool_events() {
 fn file_change_without_start_log_anchors_at_completion() {
     let entries = events("file-change-without-start");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "apply_patch");
+    assert_eq!(entries[0].body, "apply_patch /workspace/project/design.md");
     let completion = DateTime::from_timestamp_millis(1781329074517).unwrap();
     assert_eq!(entries[0].started_at, completion);
     assert_eq!(entries[0].ended_at, Some(completion));

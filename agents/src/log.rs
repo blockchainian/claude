@@ -59,7 +59,8 @@ impl Filter {
 pub struct Event {
     pub kind: Kind,
     pub body: String,
-    pub path: Option<String>,
+    /// Byte ranges of the file paths inside `body`, in order.
+    pub paths: Vec<std::ops::Range<usize>>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     /// Known execution time; absent when a completed activity has no recorded start.

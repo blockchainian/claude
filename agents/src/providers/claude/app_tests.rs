@@ -388,7 +388,7 @@ fn last_prose_log_row_ticks_each_second_under_a_minute() {
     app.view.log = vec![crate::log::Event {
         kind: crate::log::Kind::Assistant,
         body: "done".into(),
-        path: None,
+        paths: Vec::new(),
         started_at,
         ended_at: None,
         duration: None,
@@ -668,12 +668,13 @@ mod log_filters {
         assert!(app.view.log.iter().any(|event| event.kind != Kind::Tool));
         key(&mut app, KeyCode::Char('t'));
         assert_eq!(app.view.log.len(), 8);
-        assert!(
-            app.view
-                .log
+        assert!(app.view.log.iter().all(|event| {
+            event
+                .paths
                 .iter()
-                .all(|event| event.path.as_deref() == Some("src/test.rs"))
-        );
+                .map(|range| &event.body[range.clone()])
+                .eq(["src/test.rs"])
+        }));
     }
 }
 
