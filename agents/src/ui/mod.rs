@@ -552,15 +552,16 @@ impl View {
         }
     }
 
-    /// The row a tab selects when its chosen task is gone: the task that waited longest, or on
-    /// Inactive, where old tasks wait for nothing, the top row.
+    /// The row a tab selects when its chosen task is gone: the task that waited longest, leaving
+    /// out subagents, which wait on their task rather than the user; or on Inactive, where old
+    /// tasks wait for nothing, the top row.
     fn fallback_selection(&self) -> usize {
         let selectable = self.selectable_indices();
         if TASK_FILTERS[self.status_filter].1 != [SessionStatus::Inactive]
             && let Some(longest_waiting) = selectable
                 .iter()
                 .copied()
-                .filter(|&index| index != usize::MAX)
+                .filter(|&index| self.rows.get(index).is_some_and(|s| s.parent.is_none()))
                 .max_by_key(|&index| session_order(&self.rows[index]))
         {
             return longest_waiting;

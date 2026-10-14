@@ -4186,6 +4186,27 @@ mod subagent_rows {
     }
 
     #[test]
+    fn a_tab_without_its_chosen_task_falls_back_to_a_task_not_a_subagent() {
+        let mut view = fixture();
+        let mut rows = view.rows.clone();
+        let mut oldest = session("agent-oldest", "Old subagent", SessionStatus::Ready, 0);
+        oldest.parent = Some(session_key("parent"));
+        oldest.updated_at = rows
+            .iter()
+            .find(|s| s.id == session_key("parent"))
+            .unwrap()
+            .updated_at
+            - Duration::hours(1);
+        rows.push(oldest);
+        view.set_sessions(rows, false);
+
+        key(&mut view, KeyCode::Tab);
+
+        assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+        assert_eq!(view.selected_id(), Some(&session_key("parent")));
+    }
+
+    #[test]
     fn selection_skips_dimmed_parent_headers() {
         let mut view = fixture();
         let mut rows = view.rows.clone();
