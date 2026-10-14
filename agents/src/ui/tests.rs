@@ -4973,8 +4973,12 @@ fn task_log_click_opens_a_whole_row_that_has_calls() {
 }
 
 #[test]
-fn merged_tool_titles_align_right_and_copy_without_padding() {
-    for (width, title) in [(100, "Bash"), (30, "  Read 界面  Read 界面  Read 界面")] {
+fn merged_tool_title_rules_center_on_the_arrow_and_copy_only_titles() {
+    for (width, title) in [
+        (100, "Bash"),
+        (99, "看探针结果"),
+        (30, "  Read 界面  Read 界面  Read 界面"),
+    ] {
         let (mut view, now) = open_tool_fixture();
         let mut event = view.log[7].clone();
         event.calls[0].title = title.into();
@@ -5000,34 +5004,28 @@ fn merged_tool_titles_align_right_and_copy_without_padding() {
                     region.area,
                 )
             };
-            for row in &rows {
-                assert_eq!(row.cells.last().unwrap().0.end, body.width);
-                let padding = body.width
-                    - row
-                        .cells
-                        .iter()
-                        .map(|(cells, _)| cells.end - cells.start)
-                        .sum::<u16>();
-                assert_eq!(row.cells.first().unwrap().0.start, padding);
-                for x in 0..padding {
-                    assert_eq!(buf[(body.x + x, row.y)].symbol(), " ");
-                }
-                for (cells, bytes) in &row.cells {
-                    assert_eq!(
-                        buf[(row.x + cells.start, row.y)].symbol(),
-                        &title[bytes.clone()]
-                    );
-                }
+            assert_eq!(rows.len(), 1);
+            let row = &rows[0];
+            let start = row.cells.first().unwrap().0.start;
+            let end = row.cells.last().unwrap().0.end;
+            assert_eq!(start + (end - start) / 2, body.width / 2);
+            if start > 1 {
+                assert_eq!(buf[(body.x, row.y)].symbol(), "─");
             }
-            let first = rows.first().unwrap();
-            let last = rows.last().unwrap();
-            let x1 = first.x + first.cells.first().unwrap().0.start;
-            let x2 = body.right();
-            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x1, first.y));
-            view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2, last.y));
+            if end < body.width - 1 {
+                assert_eq!(buf[(body.right() - 1, row.y)].symbol(), "─");
+            }
+            if title != "Read" {
+                let viewport = view.viewport.borrow();
+                assert_eq!(row.y, viewport.log_text.rows.first().unwrap().y);
+            }
+            let x1 = body.x + start;
+            let x2 = body.right() - 1;
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x1, row.y));
+            view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2, row.y));
             view.render_at(buf.area, &mut buf, now);
             assert_eq!(
-                view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, last.y)),
+                view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, row.y)),
                 Some(Action::Copy {
                     text: title.into(),
                     label: "Copied tool message".into()
@@ -5053,7 +5051,7 @@ fn task_log_open_tool_snapshot() {
     assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(
         super::log::open_text(&view.log[7]),
-        "Bash\ncargo test\n\nrunning 3 tests\n...\n\nRead\npath: agents/src/log.rs\nrange: lines 1–40\nrunning…"
+        "Bash\ncargo test\n\nrunning 3 tests\n...\nRead\npath: agents/src/log.rs\nrange: lines 1–40\nrunning…"
     );
 }
 
