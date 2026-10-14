@@ -5,7 +5,6 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
@@ -279,9 +278,11 @@ class Manager {
     return turns.data?.[0];
   }
 
-  /** Subscribes to a detached thread again, which also loads it when the daemon has unloaded it. */
+  /** Subscribes to a detached attached session again; refuses a thread this session started, which detach archived. */
   async listenAgain(client, threadId) {
-    if (!this.thread(threadId).detached) return;
+    const thread = this.thread(threadId);
+    if (!thread.detached) return;
+    if (!thread.attached) throw new Error(`thread ${threadId} was detached and archived; start a new thread`);
     await this.subscribe(client, threadId);
     this.updateThread(threadId, { detached: undefined });
   }
@@ -538,43 +539,20 @@ class Manager {
     return { threadId, turnId: thread.turnId, interrupted: true };
   }
 
-  /** Stops listening to a thread whose work is done, so the daemon unloads it once nobody else is subscribed. */
+  /** Archives a thread this session started, with its spawned agents; only unsubscribes an attached session. */
   async detach({ threadId }) {
     if (!threadId) throw new Error("threadId is required");
-    if (this.thread(threadId).lastStatus === "inProgress") throw new Error(`thread ${threadId} is still running a turn; wait for it or interrupt it first`);
+    const thread = this.thread(threadId);
+    if (thread.lastStatus === "inProgress") throw new Error(`thread ${threadId} is still running a turn; wait for it or interrupt it first`);
     const client = await this.connect();
-    const { status } = await client.request("thread/unsubscribe", { threadId });
+    if (thread.attached) {
+      const { status } = await client.request("thread/unsubscribe", { threadId });
+      this.updateThread(threadId, { detached: true });
+      return { threadId, detached: true, status };
+    }
+    await client.request("thread/archive", { threadId });
     this.updateThread(threadId, { detached: true });
-    const databasePath = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "state_5.sqlite");
-    let descendants;
-    try {
-      const { DatabaseSync } = await import("node:sqlite");
-      const database = new DatabaseSync(databasePath, { readOnly: true });
-      try {
-        descendants = database.prepare(`
-          WITH RECURSIVE descendants(id) AS (
-            SELECT child_thread_id FROM thread_spawn_edges WHERE parent_thread_id = ? AND status = 'open'
-            UNION
-            SELECT edge.child_thread_id FROM thread_spawn_edges edge
-            JOIN descendants ON edge.parent_thread_id = descendants.id WHERE edge.status = 'open'
-          )
-          SELECT id FROM descendants WHERE id != ?
-        `).all(threadId, threadId);
-      } finally {
-        database.close();
-      }
-    } catch (error) {
-      log(`cannot read spawned descendants from ${databasePath}: ${error.message}`);
-    }
-    for (const { id } of descendants ?? []) {
-      try {
-        const response = await client.request("thread/unsubscribe", { threadId: id });
-        if (response?.status !== "unsubscribed") throw new Error(`unexpected unsubscribe response: ${JSON.stringify(response)}`);
-      } catch (error) {
-        log(`cannot unsubscribe spawned descendant ${id}: ${error.message}`);
-      }
-    }
-    return { threadId, detached: true, status };
+    return { threadId, detached: true, archived: true };
   }
 
   async list() {
@@ -594,7 +572,7 @@ function reviewInstructions(base, plan, decisions, stance, focus) {
   return `Review the code changes since commit ${base}. Run \`git diff ${base}\` to inspect the changes.${spec}${decided}${adversarial}${focused}${close}Provide prioritized, actionable findings.`;
 }
 
-const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask or approval), you have checked and accepted its result, and you plan no further message. Detach it in that same turn, and before ending a multi-thread run, list the threads and detach every finished one. When a thread asks, check list for waiting requests before you reply: await can return an ask already answered.`;
+const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask or approval), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived and takes no further send. Before ending a multi-thread run, list the threads and detach every finished one. When a thread asks, check list for waiting requests before you reply: await can return an ask already answered.`;
 
 // Reasoning efforts codex accepts for model_reasoning_effort.
 const reasoningEfforts = ["minimal", "low", "medium", "high", "xhigh"];
@@ -606,7 +584,7 @@ const TOOLS = [
   { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. The text becomes the result of its ask_claude call or, for an approval request, one of the decisions its inbox event listed. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "list", description: "List the codex threads this session started or attached, with each one's last turn status, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: {} } },
-  { name: "detach", description: "Stop listening to a codex thread, which the daemon then unloads from the Ready list of `codex agents`. The session is kept, and a later send re-attaches it. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
+  { name: "detach", description: "Release a thread you no longer need. A thread you started is archived with its spawned agents and takes no further send; an attached session stays open in its own client, and send or attach takes it back. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "review", description: "Review the commits since a base sha in a read-only thread with codex's built-in review mode, and save the rendered review, priority-tagged findings with an overall verdict, to a file. Pass `stance: \"adversarial\"` for a challenge review. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, decisions: { type: "string", description: "Path of the file listing the rules decided while the changes were built, relative to cwd or absolute." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." }, stance: { type: "string", enum: ["adversarial"], description: "adversarial: the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. Omit for the plain review." }, focus: { type: "string", description: "What the reviewer should weigh most, in a phrase." } }, required: ["cwd", "base", "out"] } }
 ];
 
