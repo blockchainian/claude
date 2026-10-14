@@ -192,6 +192,7 @@ impl App {
         )?;
         self.refresh();
         loop {
+            self.view.expire_notice(Instant::now());
             if schedule.due(Instant::now()) {
                 self.refresh();
                 schedule.refreshed(Instant::now());
@@ -216,6 +217,10 @@ impl App {
                 .view
                 .log_redraw_in(chrono::Utc::now())
                 .map_or(timeout, |log| timeout.min(log));
+            let timeout = self
+                .view
+                .expire_notice(Instant::now())
+                .map_or(timeout, |notice| timeout.min(notice));
             match receiver.recv_timeout(timeout) {
                 Ok(Input::Terminal(event)) => {
                     if self.handle_event(event?) {
@@ -488,13 +493,12 @@ impl App {
                 self.preferences.grouping = grouping;
                 self.save_preferences();
             }
-            Action::Copy(text) => {
-                let notice = match copy_to_clipboard(&text) {
-                    Ok(()) => "Copied".to_owned(),
-                    Err(error) => format!("Failed to copy: {error}"),
-                };
-                self.view.set_notice(Some(notice));
-            }
+            Action::Copy(text) => match copy_to_clipboard(&text) {
+                Ok(()) => self.view.set_brief_notice("Copied".into(), Instant::now()),
+                Err(error) => self
+                    .view
+                    .set_notice(Some(format!("Failed to copy: {error}"))),
+            },
             Action::Unsupported(what) => {
                 self.view
                     .set_notice(Some(format!("{what} is not supported")));

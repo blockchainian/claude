@@ -55,6 +55,9 @@ const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     ("Inactive", &[SessionStatus::Inactive]),
 ];
 
+/// How long a brief notice such as "Copied" stays in the footer.
+const NOTICE_LIFETIME: Duration = Duration::from_secs(2);
+
 /// Longest gap between two clicks on one task that still opens it.
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -133,6 +136,8 @@ pub struct View {
     loading: bool,
     has_more: bool,
     notice: Option<String>,
+    /// When the shown notice clears itself; `None` keeps it until the next key.
+    notice_expires_at: Option<Instant>,
     viewport: RefCell<Viewport>,
     /// Task row and time of the last left click in the list.
     last_click: Option<(usize, Instant)>,
@@ -200,6 +205,7 @@ impl View {
             loading: false,
             has_more: false,
             notice: None,
+            notice_expires_at: None,
             viewport: RefCell::new(Viewport::default()),
             last_click: None,
             last_copy_click: None,
@@ -286,6 +292,23 @@ impl View {
     }
     pub fn set_notice(&mut self, notice: Option<String>) {
         self.notice = notice;
+        self.notice_expires_at = None;
+    }
+
+    /// Shows `notice` until `NOTICE_LIFETIME` after `now`.
+    pub fn set_brief_notice(&mut self, notice: String, now: Instant) {
+        self.notice = Some(notice);
+        self.notice_expires_at = Some(now + NOTICE_LIFETIME);
+    }
+
+    /// Clears a brief notice whose time is up, and returns how long until the shown one is.
+    pub fn expire_notice(&mut self, now: Instant) -> Option<Duration> {
+        let expires_at = self.notice_expires_at?;
+        if now >= expires_at {
+            self.set_notice(None);
+            return None;
+        }
+        Some(expires_at - now)
     }
     /// Where the `›` of the selected row was drawn last, so the terminal cursor can rest on it.
     pub fn marker_pos(&self) -> Option<(u16, u16)> {
