@@ -8,7 +8,6 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
-import { DatabaseSync } from "node:sqlite";
 import { fakeDaemon, send } from "./helpers/fake-daemon.mjs";
 import { parentProcesses, resolveSessionId } from "../codex-manager/session.mjs";
 
@@ -364,6 +363,7 @@ function daemonScript() {
       if (message.method === "turn/interrupt") reply({});
       if (message.method === "review/start") reply({ turn: { id: "turn-review", status: "inProgress" }, reviewThreadId: message.params.threadId });
       if (message.method === "thread/unsubscribe") reply({ status: "unsubscribed" });
+      if (message.method === "thread/archive") reply({});
       if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId } });
       if (message.method === "thread/turns/list") reply({ data: script.resumeTurns ?? [{ id: "turn-old", status: "completed", items: script.resumeItems ?? [{ type: "agentMessage", text: "done while you were away" }] }] });
       if (message.method === "thread/list") {
@@ -431,7 +431,7 @@ test("mcp initialize provides thread lifecycle instructions before tools are loa
     assert.match(result.instructions, /no activity for a minute.*stuck.*pointed hint.*never steer.*faked tests/);
     assert.match(result.instructions, /finished only.*turn completed.*not failed, interrupted.*waiting on an ask or approval.*checked and accepted.*no further message/);
     assert.match(result.instructions, /Detach it in that same turn/);
-    assert.match(result.instructions, /before ending a multi-thread run, list.*detach every finished one/);
+    assert.match(result.instructions, /Before ending a multi-thread run, list.*detach every finished one/);
     assert.match(result.instructions, /check list for waiting requests before you reply.*already answered/);
   } finally {
     await home.close();
@@ -1414,63 +1414,7 @@ test("requests the daemon sends for an attached session are left to the client i
   }
 });
 
-// Copied read-only from state_5.sqlite; tests use only the saved rows and a temporary database.
-const spawnEdges = JSON.parse(readFileSync(new URL("./fixtures/thread-spawn-edges.json", import.meta.url), "utf8"));
-
-for (const outcome of ["success", "error", "unexpected", "missing database"]) {
-  test(`detach releases open spawned descendants on its connection: ${outcome}`, { timeout: 20_000 }, async () => {
-    const home = await tempHome();
-    const root = spawnEdges[0].parent_thread_id;
-    const open = spawnEdges.filter((edge) => edge.status === "open");
-    const closedRoot = spawnEdges.find((edge) => edge.status === "closed").parent_thread_id;
-    if (outcome !== "missing database") {
-      const db = new DatabaseSync(path.join(home.home, "state_5.sqlite"));
-      try {
-        db.exec("CREATE TABLE thread_spawn_edges (parent_thread_id TEXT NOT NULL, child_thread_id TEXT NOT NULL PRIMARY KEY, status TEXT NOT NULL)");
-        const insert = db.prepare("INSERT INTO thread_spawn_edges VALUES (?, ?, ?)");
-        for (const edge of spawnEdges) insert.run(edge.parent_thread_id, edge.child_thread_id, edge.status);
-      } finally { db.close(); }
-    }
-    await mkdir(home.dir, { recursive: true });
-    await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ threads: [root, closedRoot].map((id) => ({ id, lastStatus: "completed" })) }));
-    const script = daemonScript();
-    const requests = [];
-    const daemon = await fakeDaemon((message, socket) => {
-      if (message.method === "thread/unsubscribe") {
-        requests.push({ threadId: message.params.threadId, socket });
-        if (message.params.threadId === open[0].child_thread_id && outcome !== "success") {
-          send(socket, outcome === "error" ? { id: message.id, error: { code: -32000, message: "child unsubscribe failed" } } : { id: message.id, result: { status: "surprise" } });
-          return;
-        }
-      }
-      script.handler(message, socket);
-    });
-    const mcp = new McpChild(home.home, daemon.socketPath, { CODEX_HOME: home.home });
-    try {
-      const detached = await mcp.call("detach", { threadId: root });
-      assert.equal(detached.isError, false, detached.text);
-      assert.deepEqual(detached.json, { threadId: root, detached: true, status: "unsubscribed" });
-      const expected = outcome === "missing database" ? [root] : [root, ...open.map((edge) => edge.child_thread_id)];
-      assert.deepEqual(requests.map((request) => request.threadId).sort(), expected.sort());
-      assert.equal(requests[0].threadId, root);
-      assert.ok(requests.every((request) => request.socket === requests[0].socket));
-      assert.equal((await mcp.call("list", {})).json.threads.find((thread) => thread.id === root).detached, true);
-      if (outcome === "error" || outcome === "unexpected") {
-        await waitFor(() => mcp.stderr.includes(open[0].child_thread_id));
-      }
-      if (outcome === "missing database") await waitFor(() => mcp.stderr.includes("state_5.sqlite"));
-      requests.length = 0;
-      assert.equal((await mcp.call("detach", { threadId: closedRoot })).isError, false);
-      assert.deepEqual(requests.map((request) => request.threadId), [closedRoot]);
-    } finally {
-      await mcp.close();
-      await daemon.close();
-      await home.close();
-    }
-  });
-}
-
-test("detach unsubscribes a finished thread, refuses a running one, and send picks the thread up again", { timeout: 20_000 }, async () => {
+test("detach archives a started thread, refuses a running one, and refuses later send or attach", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
@@ -1479,15 +1423,16 @@ test("detach unsubscribes a finished thread, refuses a running one, and send pic
     const running = await mcp.call("detach", { threadId: "thread-A" });
     assert.equal(running.isError, true);
     assert.match(running.text, /still running/);
-    assert.equal(script.messages.some((message) => message.method === "thread/unsubscribe"), false);
+    assert.equal(script.messages.some((message) => ["thread/unsubscribe", "thread/archive"].includes(message.method)), false);
 
     send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-1", status: "completed" } } });
     await waitFor(() => inboxLines(path.join(home.dir, "thread-A.jsonl")).length === 1);
     const detached = await mcp.call("detach", { threadId: "thread-A" });
     assert.equal(detached.isError, false, detached.text);
-    assert.deepEqual(detached.json, { threadId: "thread-A", detached: true, status: "unsubscribed" });
-    assert.deepEqual(script.messages.at(-1).method, "thread/unsubscribe");
+    assert.deepEqual(detached.json, { threadId: "thread-A", detached: true, archived: true });
+    assert.equal(script.messages.at(-1).method, "thread/archive");
     assert.deepEqual(script.messages.at(-1).params, { threadId: "thread-A" });
+    assert.equal(script.messages.some((message) => message.method === "thread/unsubscribe"), false);
     const listed = await mcp.call("list", {});
     assert.equal(listed.json.threads[0].detached, true);
     assert.equal(listed.json.threads[0].unread, 1);
@@ -1496,18 +1441,59 @@ test("detach unsubscribes a finished thread, refuses a running one, and send pic
     assert.equal(unknown.isError, true);
     assert.match(unknown.text, /unknown thread/);
 
+    const before = script.messages.length;
+    const sent = await mcp.call("send", { threadId: "thread-A", prompt: "one more thing" });
+    assert.equal(sent.isError, true);
+    assert.equal(sent.text, "thread thread-A was detached and archived; start a new thread");
+    assert.equal(script.messages.length, before);
+
     script.threads = [{ id: "thread-A", name: null, cwd: "/repo", status: { type: "notLoaded" } }];
     const reattached = await mcp.call("attach", { thread: "thread-A" });
+    assert.equal(reattached.isError, true);
+    assert.equal(reattached.text, sent.text);
+    assert.equal(script.messages.some((message) => message.method === "thread/resume"), false);
+    const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
+    assert.equal(state.threads[0].detached, true);
+    assert.equal(state.threads[0].lastStatus, "completed");
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("detach unsubscribes an attached session and later send or attach subscribes again", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  script.threads = [{ id: "thread-existing", name: "existing", cwd: "/repo", status: { type: "idle" } }];
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = await mcpChild(home, daemon);
+  try {
+    const attached = await mcp.call("attach", { thread: "thread-existing" });
+    assert.equal(attached.isError, false, attached.text);
+    assert.equal(attached.json.attached, true);
+    const detach = async () => {
+      const detached = await mcp.call("detach", { threadId: "thread-existing" });
+      assert.equal(detached.isError, false, detached.text);
+      assert.deepEqual(detached.json, { threadId: "thread-existing", detached: true, status: "unsubscribed" });
+      assert.equal(script.messages.at(-1).method, "thread/unsubscribe");
+      assert.deepEqual(script.messages.at(-1).params, { threadId: "thread-existing" });
+      assert.equal((await mcp.call("list", {})).json.threads[0].detached, true);
+    };
+    await detach();
+    const reattached = await mcp.call("attach", { thread: "thread-existing" });
     assert.equal(reattached.isError, false, reattached.text);
-    assert.equal(reattached.json.attached, false);
+    assert.equal(reattached.json.attached, true);
     assert.deepEqual(script.messages.slice(-2).map((message) => message.method), ["thread/resume", "thread/turns/list"]);
     assert.equal((await mcp.call("list", {})).json.threads[0].detached, undefined);
-    await mcp.call("detach", { threadId: "thread-A" });
+    await detach();
 
-    const sent = await mcp.call("send", { threadId: "thread-A", prompt: "one more thing" });
+    const sent = await mcp.call("send", { threadId: "thread-existing", prompt: "one more thing" });
     assert.equal(sent.isError, false, sent.text);
     assert.deepEqual(script.messages.slice(-3).map((message) => message.method), ["thread/resume", "thread/turns/list", "turn/start"]);
+    assert.equal(script.messages.some((message) => message.method === "thread/archive"), false);
     const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
+    assert.equal(state.threads[0].attached, true);
     assert.equal(state.threads[0].detached, undefined);
     assert.equal(state.threads[0].lastStatus, "inProgress");
   } finally {
