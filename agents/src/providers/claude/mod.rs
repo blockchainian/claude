@@ -640,6 +640,7 @@ fn session(
         name: None,
         title,
         prompt: summary.prompt,
+        prompt_images: Vec::new(),
         queued: summary.queued,
         prompt_at: summary.prompt_at,
         turn_messages: summary.turn_messages,

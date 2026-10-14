@@ -347,6 +347,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         ended_at: Some(ended_at),
         duration,
         previous_end: None,
+        images: Vec::new(),
     }))
 }
 
@@ -515,6 +516,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             ended_at,
             duration: ended_at.map(|end| end - at),
             previous_end: None,
+            images: Vec::new(),
         });
         Ok(entries.len() <= count)
     })?;

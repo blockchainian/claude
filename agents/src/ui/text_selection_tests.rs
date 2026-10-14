@@ -27,6 +27,7 @@ fn fixture() -> View {
         name: None,
         title: "Selection".into(),
         prompt: event.body,
+        prompt_images: Vec::new(),
         queued: Vec::new(),
         prompt_at: None,
         turn_messages: 0,

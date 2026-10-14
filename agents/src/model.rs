@@ -70,6 +70,8 @@ pub struct Session {
     pub title: String,
     /// Latest real user prompt, up to 512 chars, for the details panel.
     pub prompt: String,
+    /// Images attached to `prompt` whose files still exist.
+    pub prompt_images: Vec<crate::log::Image>,
     pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,

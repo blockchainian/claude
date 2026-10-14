@@ -468,6 +468,7 @@ mod log_markdown {
             ended_at: None,
             duration: None,
             previous_end: None,
+            images: Vec::new(),
         };
         render_event(&event, "12:00:00", 8, false, area, &mut buffer, None);
         buffer

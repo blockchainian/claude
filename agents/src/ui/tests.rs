@@ -738,6 +738,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         name: None,
         title: title.into(),
         prompt: title.into(),
+        prompt_images: Vec::new(),
         queued: Vec::new(),
         prompt_at: None,
         turn_messages: 0,
@@ -2720,6 +2721,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         ended_at: end.map(|age| now - Duration::seconds(age)),
         duration: None,
         previous_end: Some(now - Duration::seconds(age + 5)),
+        images: Vec::new(),
     }).collect();
     let mut previous_end = None;
     for event in &mut view.log {
@@ -3143,6 +3145,7 @@ fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
         ended_at: None,
         duration: None,
         previous_end: None,
+        images: Vec::new(),
     };
     view.log.insert(0, first);
     assert!(!log_screen(&view, 100, 25, now).contains("Discarded event"));

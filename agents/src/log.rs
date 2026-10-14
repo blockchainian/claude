@@ -50,4 +50,14 @@ pub struct Event {
     pub duration: Option<chrono::Duration>,
     /// The preceding event's end, including hidden turn starters for Assistant replies.
     pub previous_end: Option<DateTime<Utc>>,
+    /// Images attached to this prompt whose files still exist.
+    pub images: Vec<Image>,
+}
+
+/// An image attached to a prompt: its placeholder in the prompt text, such as
+/// `[Image #1]`, and the file it was attached from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Image {
+    pub label: String,
+    pub path: std::path::PathBuf,
 }

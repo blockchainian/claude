@@ -253,6 +253,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         },
         title,
         prompt: prompt.chars().take(512).collect(),
+        prompt_images: Vec::new(),
         queued: vec![],
         prompt_at: None,
         turn_messages: 0,
