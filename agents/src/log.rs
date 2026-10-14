@@ -38,24 +38,6 @@ pub enum Kind {
     QueuedUser,
     QueuedSystem,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Filter(std::collections::HashSet<Kind>);
-
-impl Filter {
-    #[cfg(test)]
-    pub fn toggle(&mut self, kinds: &[Kind]) {
-        if kinds.iter().all(|kind| self.0.contains(kind)) {
-            self.0.retain(|kind| !kinds.contains(kind));
-        } else {
-            self.0.extend(kinds.iter().cloned());
-        }
-    }
-
-    pub fn matches(&self, kind: &Kind) -> bool {
-        self.0.is_empty() || self.0.contains(kind)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
     pub kind: Kind,

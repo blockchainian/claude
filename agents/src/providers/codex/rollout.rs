@@ -1,4 +1,4 @@
-use crate::log::{Event, Filter, Kind, participant_text, question_texts};
+use crate::log::{Event, Kind, participant_text, question_texts};
 use crate::model::Activity;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -431,14 +431,13 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     Ok(summary)
 }
 
-pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::Result<Vec<Event>> {
+pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     if count == 0 {
         return Ok(Vec::new());
     }
     let mut entries = Vec::new();
     let mut results = HashMap::new();
     let mut seen = HashSet::new();
-    let mut matching = 0;
     walk(path, |record| {
         let Some(at) = timestamp(&record) else {
             return Ok(true);
@@ -448,9 +447,8 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
             }
-            matching += usize::from(filter.matches(&event.kind));
             entries.push(event);
-            return Ok(matching <= count);
+            return Ok(entries.len() <= count);
         }
         let (kind, body, ended_at) = match (record["type"].as_str(), payload["type"].as_str()) {
             (Some("response_item"), Some("function_call_output")) => {
@@ -510,7 +508,6 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
             }
             _ => return Ok(true),
         };
-        matching += usize::from(filter.matches(&kind));
         entries.push(Event {
             kind,
             body,
@@ -520,7 +517,7 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
             duration: ended_at.map(|end| end - at),
             previous_end: None,
         });
-        Ok(matching <= count)
+        Ok(entries.len() <= count)
     })?;
     entries.reverse();
     let mut previous_end = None;
@@ -528,7 +525,6 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
         entry.previous_end = previous_end;
         previous_end = Some(entry.ended_at.unwrap_or(entry.started_at));
     }
-    entries.retain(|entry| filter.matches(&entry.kind));
     let skip = entries.len().saturating_sub(count);
     Ok(entries.into_iter().skip(skip).collect())
 }
@@ -545,7 +541,7 @@ mod tests {
         for mode in ["default", "plan"] {
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join(format!("tests/fixtures/codex-input/{mode}-pending.jsonl"));
-            let events = tail_filtered(&path, 100, &Filter::default()).unwrap();
+            let events = tail(&path, 100).unwrap();
             let question = events
                 .iter()
                 .find(|event| event.body == "Pick a color?")
@@ -648,7 +644,7 @@ mod tests {
         {
             let file = tempfile::NamedTempFile::new().unwrap();
             std::fs::write(file.path(), line).unwrap();
-            let events = tail_filtered(file.path(), 8, &Filter::default()).unwrap();
+            let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].body, expected);
             assert_eq!(
@@ -684,10 +680,7 @@ mod tests {
                 name
             };
             let expected = format!("{label} (reviewer)");
-            assert_eq!(
-                tail_filtered(file.path(), 1, &Filter::default()).unwrap()[0].body,
-                expected
-            );
+            assert_eq!(tail(file.path(), 1).unwrap()[0].body, expected);
             assert_eq!(
                 summary(file.path()).unwrap().activity.unwrap().label,
                 expected
@@ -717,7 +710,7 @@ mod tests {
     }
     #[test]
     fn log_maps_real_records_without_duplicate_messages() {
-        let events = tail_filtered(&fixture(), 100, &Filter::default()).unwrap();
+        let events = tail(&fixture(), 100).unwrap();
         assert_eq!(
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
             vec![&Kind::User, &Kind::Assistant]
@@ -726,17 +719,8 @@ mod tests {
         assert!(events[1].previous_end.is_some());
     }
     #[test]
-    fn filtered_tail_counts_matching_events() {
-        let mut filter = Filter::default();
-        filter.toggle(&[Kind::User]);
-        let events = tail_filtered(&fixture(), 1, &filter).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].body, "Check the dashboard.");
-        assert!(
-            tail_filtered(Path::new("missing"), 0, &filter)
-                .unwrap()
-                .is_empty()
-        );
+    fn zero_count_reads_nothing() {
+        assert!(tail(Path::new("missing"), 0).unwrap().is_empty());
     }
     #[test]
     fn backwards_reader_keeps_large_unicode_record_and_partial_tail() {
@@ -770,7 +754,7 @@ mod tests {
         for line in lines {
             writeln!(file, "{line}").unwrap();
         }
-        let events = tail_filtered(file.path(), 100, &Filter::default()).unwrap();
+        let events = tail(file.path(), 100).unwrap();
         assert_eq!(events.len(), 2);
     }
 
@@ -789,7 +773,7 @@ mod tests {
             summary(file.path()).unwrap().last_message.as_deref(),
             Some("Checks passed.")
         );
-        let events = tail_filtered(file.path(), 1, &Filter::default()).unwrap();
+        let events = tail(file.path(), 1).unwrap();
         assert_eq!(events[0].kind, Kind::Assistant);
         assert_eq!(events[0].body, "Checks passed.");
     }

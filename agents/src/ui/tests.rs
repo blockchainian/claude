@@ -2616,7 +2616,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         if event.kind == Kind::Assistant {
             event.previous_end = previous_end;
         }
-        previous_end = if matches!(event.kind, Kind::Tool | Kind::Error) {
+        previous_end = if matches!(event.kind, crate::log::Kind::Tool | crate::log::Kind::Error) {
             event.ended_at
         } else {
             Some(event.started_at)
@@ -2701,8 +2701,6 @@ fn codex_inner_task_log_snapshot() {
         dir.path().join("manager"),
     );
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-inner");
-    let mut filter = crate::log::Filter::default();
-    filter.toggle(&[crate::log::Kind::Tool, crate::log::Kind::Error]);
     view.log.clear();
     for (index, fixture) in [
         "command.jsonl",
@@ -2715,9 +2713,12 @@ fn codex_inner_task_log_snapshot() {
     .enumerate()
     {
         view.rows[0].transcript = Some(root.join(fixture));
-        let events = provider
-            .log(&view.rows[0], usize::MAX, &filter, false)
-            .unwrap();
+        let events: Vec<_> = provider
+            .log(&view.rows[0], usize::MAX, false)
+            .unwrap()
+            .into_iter()
+            .filter(|event| matches!(event.kind, crate::log::Kind::Tool | crate::log::Kind::Error))
+            .collect();
         assert_eq!(events.len(), 1, "{fixture}: {events:?}");
         let mut event = events.into_iter().next().unwrap();
         let duration = event.ended_at.unwrap() - event.started_at;
@@ -4662,9 +4663,7 @@ fn pending_question_log_uses_model_color() {
         let path = root.join(fixture);
         row.transcript = Some(path.clone());
         let events = if fixture.contains("codex-input") {
-            codex
-                .log(row, 8, &crate::log::Filter::default(), false)
-                .unwrap()
+            codex.log(row, 8, false).unwrap()
         } else {
             crate::providers::claude::log::tail(&path, 8).unwrap()
         };

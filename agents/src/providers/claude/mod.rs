@@ -543,14 +543,13 @@ impl Provider for ClaudeProvider {
         &self,
         session: &Session,
         count: usize,
-        filter: &crate::log::Filter,
         sidechains: bool,
     ) -> io::Result<Vec<crate::log::Event>> {
         let path = session
             .transcript
             .as_deref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Session has no transcript"))?;
-        log::tail_filtered(path, count, filter, sidechains)
+        log::tail_session(path, count, sidechains)
     }
 
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command> {
@@ -812,9 +811,7 @@ mod tests {
         );
         assert_eq!(new.get_args().count(), 0);
         assert_eq!(
-            provider
-                .log(&session, 8, &crate::log::Filter::default(), false)
-                .unwrap(),
+            provider.log(&session, 8, false).unwrap(),
             log::tail(&path, 8).unwrap()
         );
         provider.rename(&session, "Provider title").unwrap();

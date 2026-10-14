@@ -468,17 +468,11 @@ impl Provider for CodexProvider {
             }
         })
     }
-    fn log(
-        &self,
-        session: &Session,
-        count: usize,
-        filter: &log::Filter,
-        _: bool,
-    ) -> io::Result<Vec<log::Event>> {
+    fn log(&self, session: &Session, count: usize, _: bool) -> io::Result<Vec<log::Event>> {
         session
             .transcript
             .as_deref()
-            .map(|path| rollout::tail_filtered(path, count, filter))
+            .map(|path| rollout::tail(path, count))
             .unwrap_or_else(|| Ok(vec![]))
     }
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command> {

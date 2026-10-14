@@ -1,5 +1,5 @@
-use super::rollout::{summary, tail_filtered};
-use crate::log::{Event, Filter, Kind};
+use super::rollout::{summary, tail};
+use crate::log::{Event, Kind};
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn events(name: &str) -> Vec<Event> {
-    tail_filtered(&fixture(name), 100, &Filter::default()).unwrap()
+    tail(&fixture(name), 100).unwrap()
 }
 
 fn records(name: &str) -> Vec<Value> {
@@ -149,19 +149,11 @@ fn collaboration_tool_activity_is_rendered() {
 }
 
 #[test]
-fn inner_activity_respects_filter_and_page_count() {
+fn inner_activity_respects_page_count() {
     let path = fixture("inline-array");
     let entries = events("inline-array");
-    let mut tool = Filter::default();
-    tool.toggle(&[Kind::Tool]);
-    let page = tail_filtered(&path, 1, &tool).unwrap();
-    assert_eq!(page.len(), 1);
-    assert_eq!(page[0].body, entries[1].body);
-    assert_eq!(page[0].previous_end, entries[0].ended_at);
-    let mut assistant = Filter::default();
-    assistant.toggle(&[Kind::Assistant]);
-    assert!(tail_filtered(&path, 100, &assistant).unwrap().is_empty());
-    assert!(tail_filtered(&path, 0, &tool).unwrap().is_empty());
+    assert_eq!(tail(&path, 1).unwrap(), entries[entries.len() - 1..]);
+    assert!(tail(&path, 0).unwrap().is_empty());
 }
 
 #[test]
@@ -203,11 +195,7 @@ fn check_completed_record(mut record: Value, change: impl FnOnce(&mut Value), va
     change(&mut record);
     let file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(file.path(), format!("{record}\n")).unwrap();
-    assert_eq!(
-        tail_filtered(file.path(), 100, &Filter::default()).is_ok(),
-        valid,
-        "{record}"
-    );
+    assert_eq!(tail(file.path(), 100).is_ok(), valid, "{record}");
     assert_eq!(summary(file.path()).is_ok(), valid, "{record}");
 }
 
@@ -391,7 +379,7 @@ fn command_without_start_has_unknown_duration_even_with_item_duration() {
         .remove("started_at_ms");
     let file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(file.path(), format!("{record}\n")).unwrap();
-    let entries = tail_filtered(file.path(), 100, &Filter::default()).unwrap();
+    let entries = tail(file.path(), 100).unwrap();
     assert_eq!(entries[0].duration, None);
     assert_eq!(entries[0].started_at, entries[0].ended_at.unwrap());
     assert!(summary(file.path()).unwrap().activity.is_some());

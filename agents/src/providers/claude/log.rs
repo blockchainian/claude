@@ -1,4 +1,4 @@
-use crate::log::{Event, Filter, Kind, participant_text};
+use crate::log::{Event, Kind, participant_text};
 use chrono::{DateTime, Utc};
 use std::{io, path::Path};
 
@@ -87,24 +87,16 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 pub fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
-    tail_filtered(path, count, &Filter::default(), false)
+    tail_session(path, count, false)
 }
 
-pub fn tail_filtered(
-    path: &Path,
-    count: usize,
-    filter: &Filter,
-    sidechains: bool,
-) -> io::Result<Vec<Event>> {
+pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<Vec<Event>> {
     if count == 0 {
         return Ok(Vec::new());
     }
     let mut file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();
-    let mut log = Log {
-        filter: filter.clone(),
-        ..Log::default()
-    };
+    let mut log = Log::default();
     super::transcript::walk_records(&mut file, len, Vec::new(), sidechains, |record| {
         log.record(record, count)
     })?;
@@ -120,15 +112,12 @@ pub fn tail_filtered(
             _ => Some(event.started_at),
         };
     }
-    events.retain(|event| filter.matches(&event.kind));
     let skip = events.len().saturating_sub(count);
     Ok(events.into_iter().skip(skip).collect())
 }
 
 #[derive(Default)]
 struct Log {
-    filter: Filter,
-    matching: usize,
     entries: Vec<Entry>,
     results: std::collections::HashMap<String, ResultAt>,
     assistant: Option<String>,
@@ -150,14 +139,7 @@ struct ResultAt {
 
 impl Log {
     fn ready(&self, count: usize) -> bool {
-        self.matching > count
-            && self.batch.is_none_or(|index| {
-                self.entries[..index]
-                    .iter()
-                    .filter(|entry| self.filter.matches(&entry.event.kind))
-                    .count()
-                    > count
-            })
+        self.entries.len() > count && self.batch.is_none_or(|index| index > count)
     }
 
     fn record(&mut self, record: serde_json::Value, count: usize) -> bool {
@@ -303,7 +285,6 @@ impl Log {
 
     fn push(&mut self, kind: Kind, body: String, started_at: DateTime<Utc>) {
         let ended_at = matches!(kind, Kind::Tool).then_some(started_at);
-        self.matching += usize::from(self.filter.matches(&kind));
         self.entries.push(Entry {
             event: Event {
                 kind,
@@ -350,9 +331,7 @@ impl Log {
             self.batch = None;
         }
         let mut entry = if let Some(index) = self.batch.take() {
-            let entry = self.entries.remove(index);
-            self.matching -= usize::from(self.filter.matches(&entry.event.kind));
-            entry
+            self.entries.remove(index)
         } else {
             Entry {
                 event: Event {
@@ -409,7 +388,6 @@ impl Log {
             entry.missing = true;
             entry.event.ended_at = None;
         }
-        self.matching += usize::from(self.filter.matches(&entry.event.kind));
         self.batch = Some(self.entries.len());
         self.entries.push(entry);
     }
@@ -529,7 +507,7 @@ mod tests {
         {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             writeln!(file, "{line}").unwrap();
-            let events = tail_filtered(file.path(), 8, &Filter::default(), true).unwrap();
+            let events = tail_session(file.path(), 8, true).unwrap();
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].body, expected);
             let len = file.as_file().metadata().unwrap().len();
@@ -643,7 +621,7 @@ mod tests {
         record["message"]["content"][0]["input"]["description"] = "  ".into();
         let mut file = tempfile::NamedTempFile::new().unwrap();
         writeln!(file, "{record}").unwrap();
-        let events = tail_filtered(file.path(), 8, &Filter::default(), true).unwrap();
+        let events = tail_session(file.path(), 8, true).unwrap();
         assert_eq!(events[0].body, "cd, ls, sed, wc");
         let summary = super::super::transcript::read_subagent(
             file.path(),
@@ -659,18 +637,11 @@ mod tests {
         file.write_all(include_bytes!("../../../tests/fixtures/subagent.jsonl"))
             .unwrap();
         assert!(tail(file.path(), 8).unwrap().is_empty());
-        let events = tail_filtered(file.path(), 8, &Filter::default(), true).unwrap();
+        let events = tail_session(file.path(), 8, true).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Tool);
         assert!(events[0].body.starts_with("SubagentHandback"));
         assert!(events[0].ended_at.is_some());
-        let mut filter = Filter::default();
-        filter.toggle(&[Kind::Assistant]);
-        assert!(
-            tail_filtered(file.path(), 8, &filter, true)
-                .unwrap()
-                .is_empty()
-        );
     }
 
     fn at(second: u32) -> DateTime<Utc> {
@@ -1554,45 +1525,5 @@ mod tests {
             ["before", "after"]
         );
         assert_eq!(events[1].previous_end, Some(at(1)));
-    }
-}
-
-#[cfg(test)]
-mod log_filters {
-    use super::*;
-
-    #[test]
-    fn filtered_tail_keeps_batch_kinds_and_event_times() {
-        for payload in [
-            include_str!("../../../tests/fixtures/automode_blocked.jsonl"),
-            include_str!("../../../tests/fixtures/safety_check.jsonl"),
-            include_str!("../../../tests/fixtures/transcript.jsonl"),
-        ] {
-            let file = tempfile::NamedTempFile::new().unwrap();
-            std::fs::write(file.path(), payload).unwrap();
-            let all = tail(file.path(), usize::MAX).unwrap();
-            for kinds in [
-                &[Kind::Assistant, Kind::Agent][..],
-                &[Kind::Tool],
-                &[Kind::Error, Kind::Denied],
-                &[Kind::User, Kind::QueuedUser],
-                &[],
-            ] {
-                let mut filter = Filter::default();
-                filter.toggle(kinds);
-                let matching: Vec<_> = all
-                    .iter()
-                    .filter(|event| filter.matches(&event.kind))
-                    .cloned()
-                    .collect();
-                for count in [0, 1, 2, 8] {
-                    let expected = &matching[matching.len().saturating_sub(count)..];
-                    assert_eq!(
-                        tail_filtered(file.path(), count, &filter, false).unwrap(),
-                        expected
-                    );
-                }
-            }
-        }
     }
 }

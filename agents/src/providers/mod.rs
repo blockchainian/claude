@@ -75,13 +75,8 @@ pub trait Provider {
     fn capabilities(&self) -> Capabilities;
     /// Returns this provider's sessions, including children with provider-qualified parents.
     fn refresh(&mut self, pages: usize) -> Snapshot;
-    fn log(
-        &self,
-        session: &Session,
-        count: usize,
-        filter: &log::Filter,
-        sidechains: bool,
-    ) -> io::Result<Vec<log::Event>>;
+    fn log(&self, session: &Session, count: usize, sidechains: bool)
+    -> io::Result<Vec<log::Event>>;
     /// Returns a resume, fork or new-session command when available.
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command>;
     fn rename(&self, session: &Session, name: &str) -> io::Result<()>;

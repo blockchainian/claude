@@ -554,9 +554,7 @@ fn rollout_details_are_read_through_the_provider() {
     assert_eq!(session.last_message.as_deref(), Some("Checks passed."));
     assert!(session.last_record_at.is_some());
     assert!(session.activity.is_none());
-    let events = provider
-        .log(session, 100, &log::Filter::default(), false)
-        .unwrap();
+    let events = provider.log(session, 100, false).unwrap();
     let bodies: Vec<_> = events.iter().map(|event| event.body.as_str()).collect();
     assert_eq!(bodies, ["Check the dashboard.", "Checks passed."]);
 }

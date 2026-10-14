@@ -546,14 +546,7 @@ mod log_markdown {
             .remove(0);
         session.id.provider = crate::providers::ProviderId::Codex;
         session.transcript = Some(path);
-        let events = crate::providers::Provider::log(
-            &provider,
-            &session,
-            100,
-            &crate::log::Filter::default(),
-            false,
-        )
-        .unwrap();
+        let events = crate::providers::Provider::log(&provider, &session, 100, false).unwrap();
         let event = &events[0];
         assert_eq!(
             row_time(event, &session, true),

@@ -339,7 +339,6 @@ impl App {
                 let events = self.hub.provider(session.provider).log(
                     &selected_session,
                     usize::MAX,
-                    &crate::log::Filter::default(),
                     selected_session.parent.is_some(),
                 )?;
                 Ok(Some((stamp, events)))
@@ -383,7 +382,6 @@ impl App {
             let events = self.hub.provider(session.provider).log(
                 &selected_session,
                 count,
-                &crate::log::Filter::default(),
                 selected_session.parent.is_some(),
             )?;
             Ok(Some((stamp, events)))
