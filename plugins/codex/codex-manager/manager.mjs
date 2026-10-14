@@ -450,23 +450,18 @@ class Manager {
     return { threadId, turnId: response.turn.id, name: name ?? null, cwd: absolute, out: target, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when the review is written." };
   }
 
-  /** Pages through the daemon's sessions without filtering titles or names. */
-  async *daemonThreads(client) {
-    let cursor;
-    do {
-      const page = await client.request("thread/list", { limit: 100, sortKey: "updated_at", cursor });
-      yield* page.data ?? [];
-      cursor = page.nextCursor;
-    } while (cursor);
-  }
-
   /** Finds a session on the daemon by id or exact name, the open one first; the daemon's own searchTerm filters titles, not names. */
   async findThread(client, wanted) {
     const named = [];
-    for await (const thread of this.daemonThreads(client)) {
-      if (thread.id === wanted) return thread;
-      if (thread.name === wanted) named.push(thread);
-    }
+    let cursor;
+    do {
+      const page = await client.request("thread/list", { limit: 100, sortKey: "updated_at", cursor });
+      for (const thread of page.data ?? []) {
+        if (thread.id === wanted) return thread;
+        if (thread.name === wanted) named.push(thread);
+      }
+      cursor = page.nextCursor;
+    } while (cursor);
     if (!named.length) throw new Error(`no codex session has the id or name ${JSON.stringify(wanted)}`);
     // Sessions keep their name after they are closed, so the one that is open is the one meant.
     const open = named.filter((thread) => thread.status?.type !== "notLoaded");
@@ -554,27 +549,6 @@ class Manager {
 
   async list() {
     if (!this.client) await this.connect().catch((error) => log(`not connected: ${error.message}`));
-    if (this.client && this.state().threads.length) {
-      const registered = new Set(this.state().threads.map((thread) => thread.id));
-      const names = new Map();
-      try {
-        for await (const thread of this.daemonThreads(this.client)) {
-          if (registered.has(thread.id)) names.set(thread.id, thread.name ?? null);
-        }
-      } catch (error) {
-        log(`cannot refresh thread names: ${error.message}`);
-        names.clear();
-      }
-      if (names.size) this.store.updateState((state) => {
-        let changed = false;
-        for (const thread of state.threads) {
-          if (!names.has(thread.id) || thread.name === names.get(thread.id)) continue;
-          thread.name = names.get(thread.id);
-          changed = true;
-        }
-        return changed;
-      });
-    }
     const threads = this.state().threads.map((thread) => ({ ...thread, waiting: this.waiting(thread), unread: this.store.unreadCount(thread.id), await: awaitCommand(thread.id) }));
     return { connected: this.connected(), sessionDir: this.store.dir, threads };
   }
