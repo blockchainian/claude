@@ -24,7 +24,7 @@ enum Body {
     /// The dim note that a call has no output yet.
     Running,
     /// `key: value` lines.
-    Fields,
+    Fields(Vec<std::ops::Range<usize>>),
     /// Code highlighted as the given language.
     Code(String),
     Diff,
@@ -145,7 +145,34 @@ impl Part {
                 source.to_owned(),
                 Style::new().dim(),
             ))],
-            Body::Fields => split_wide(highlight::plain_lines(source), width),
+            Body::Fields(keys) => {
+                let key_style = Style::default().fg(highlight::json_key_foreground());
+                let mut offset = 0;
+                let lines = self.source.split_inclusive('\n').map(|raw| {
+                    let text = raw.lines().next().expect("split field line exists");
+                    let end = offset + text.len();
+                    let key = keys.iter().find(|key| key.start < end && key.end > offset);
+                    let line = if let Some(key) = key {
+                        let start = key.start.saturating_sub(offset);
+                        let end = key.end.min(end) - offset;
+                        let mut spans = Vec::new();
+                        if start > 0 {
+                            spans.push(Span::raw(text[..start].replace('\t', "    ")));
+                        }
+                        spans.push(Span::styled(
+                            text[start..end].replace('\t', "    "),
+                            key_style,
+                        ));
+                        spans.push(Span::raw(text[end..].replace('\t', "    ")));
+                        Line::from(spans)
+                    } else {
+                        Line::from(text.replace('\t', "    "))
+                    };
+                    offset += raw.len();
+                    line
+                });
+                split_wide(lines.collect(), width)
+            }
             Body::Code(lang) => split_wide(highlight::code_lines(source, lang), width),
             Body::Diff => split_wide(highlight::diff_lines(source), width),
             Body::Markdown => super::markdown::render_with_options(source, options),
@@ -212,12 +239,18 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
         Section::Fields(fields) => {
-            let text = fields
-                .iter()
-                .map(|(key, value)| format!("{key}: {value}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            parts.push(Part::new(cells(&text), Body::Fields));
+            let mut text = String::new();
+            let mut keys = Vec::new();
+            for (key, value) in fields {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                keys.push(text.len()..text.len() + key.len());
+                text.push_str(key);
+                text.push_str(": ");
+                text.push_str(value);
+            }
+            parts.push(Part::new(cells(&text), Body::Fields(keys)));
             return;
         }
         Section::Code { label, lang, text } => {
@@ -462,6 +495,40 @@ mod tests {
         );
         assert_eq!(parts[0].source, "{\"ok\":true}");
         assert!(matches!(parts[0].body, Body::Code(ref lang) if lang == "rust"));
+    }
+
+    #[test]
+    fn fields_keys_match_json_key_foregrounds() {
+        let mut parts = Vec::new();
+        push_section(
+            &mut parts,
+            &Section::Fields(vec![("path".into(), "first\nvalue: unchanged".into())]),
+            Style::default(),
+            false,
+        );
+        let json = highlight::code_lines(r#"{"path": "first"}"#, "json");
+        let key = json[0]
+            .spans
+            .iter()
+            .find(|span| span.content.contains("path"))
+            .unwrap();
+        assert!(key.style.fg.is_some());
+        let body_style = Style::default().fg(ratatui::style::Color::Gray);
+        let lines = parts[0].lines(80, body_style);
+        assert_eq!(lines[0].spans[0].content, "path");
+        assert_eq!(lines[0].spans[0].style.fg, key.style.fg);
+        assert_eq!(lines[0].spans[1].content, ": first");
+        assert_eq!(lines[0].spans[1].style, body_style);
+        assert_eq!(lines[1].to_string(), "value: unchanged");
+        assert!(lines[1].spans.iter().all(|span| span.style == body_style));
+        assert_eq!(parts[0].source, "path: first\nvalue: unchanged");
+        for (line, cells) in lines.iter().zip(parts[0].maps(&lines)) {
+            let copied: String = cells
+                .iter()
+                .map(|(_, bytes)| &parts[0].source[bytes.clone()])
+                .collect();
+            assert_eq!(copied, line.to_string());
+        }
     }
 
     #[test]
