@@ -76,6 +76,35 @@ fn content_text(content: &Value) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
+/// Image tags are separate blocks around an input_image, never prompt text.
+fn user_text(content: &Value) -> Option<String> {
+    let Some(blocks) = content.as_array() else {
+        return content_text(content);
+    };
+    let mut wrappers = HashSet::new();
+    for (index, triple) in blocks.windows(3).enumerate() {
+        if triple[0]["type"] == "input_text"
+            && triple[0]["text"]
+                .as_str()
+                .is_some_and(|text| text.starts_with("<image name=") && text.ends_with('>'))
+            && triple[1]["type"] == "input_image"
+            && triple[2]["type"] == "input_text"
+            && triple[2]["text"] == "</image>"
+        {
+            wrappers.insert(index);
+            wrappers.insert(index + 2);
+        }
+    }
+    let text = blocks
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !wrappers.contains(index))
+        .filter_map(|(_, block)| block["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.trim().is_empty()).then_some(text)
+}
+
 /// Whether a user-role message carries context Codex injected, such as
 /// AGENTS.md or the environment, rather than what the user sent. Codex labels
 /// each content item, and its own history hides a message holding any item
@@ -481,7 +510,11 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
                     Some("assistant") => Kind::Assistant,
                     _ => return Ok(true),
                 };
-                let Some(body) = content_text(&payload["content"]) else {
+                let Some(body) = (if kind == Kind::User {
+                    user_text(&payload["content"])
+                } else {
+                    content_text(&payload["content"])
+                }) else {
                     return Ok(true);
                 };
                 if let Some(id) = payload["id"].as_str()

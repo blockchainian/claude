@@ -384,3 +384,24 @@ fn command_without_start_has_unknown_duration_even_with_item_duration() {
     assert_eq!(entries[0].started_at, entries[0].ended_at.unwrap());
     assert!(summary(file.path()).unwrap().activity.is_some());
 }
+
+fn image_fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/codex-images")
+        .join(format!("{name}.jsonl"))
+}
+
+#[test]
+fn prompt_image_wrappers_are_not_log_text() {
+    for name in ["wrapped", "fallback"] {
+        let records: Vec<Value> = std::fs::read_to_string(image_fixture(name))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let entries = tail(&image_fixture(name), 100).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, Kind::User);
+        assert_eq!(entries[0].body, records[0]["payload"]["content"][3]["text"]);
+    }
+}
