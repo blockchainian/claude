@@ -178,6 +178,7 @@ fn all_fields(input: &serde_json::Value) -> Section {
             .as_object()
             .into_iter()
             .flatten()
+            .filter(|(key, _)| key.as_str() != "description")
             .map(|(key, _)| key.as_str())
             .collect::<Vec<_>>(),
     )
@@ -216,31 +217,24 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         .unwrap_or("");
     let value = result.map(|result| &result.value);
     let mut sections = match name {
-        "Bash" => {
-            let mut sections = vec![code_section(
-                "command",
-                "bash",
-                input["command"].as_str().unwrap_or(""),
-            )];
-            if input.get("description").is_some() {
-                sections.push(fields(input, &["description"]));
-            }
-            sections
-        }
+        "Bash" => vec![code_section(
+            "command",
+            "bash",
+            input["command"].as_str().unwrap_or(""),
+        )],
         "Read" | "Edit" | "Write" => {
             vec![Section::Fields(vec![("path".to_owned(), path.to_owned())])]
         }
         "WebFetch" => vec![fields(input, &["url", "prompt"])],
-        "Agent" | "SendMessage" => {
-            let key = if name == "Agent" { "prompt" } else { "message" };
-            vec![
-                Section::Markdown {
-                    label: key.to_owned(),
-                    text: input[key].as_str().unwrap_or("").to_owned(),
-                },
-                fields(input, &["subagent_type", "to", "summary"]),
-            ]
-        }
+        "Agent" | "Task" => vec![Section::Markdown {
+            label: "prompt".to_owned(),
+            text: input["prompt"].as_str().unwrap_or("").to_owned(),
+        }],
+        "SendMessage" => vec![Section::Markdown {
+            label: "message".to_owned(),
+            text: input["message"].as_str().unwrap_or("").to_owned(),
+        }],
+        "Skill" => vec![text_section("args", input["args"].as_str().unwrap_or(""))],
         _ => vec![all_fields(input)],
     };
     match name {
@@ -356,21 +350,14 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
                 .iter()
                 .filter(|block| block["type"] == "text")
                 .filter_map(|block| block["text"].as_str())
-                .map(
-                    |text| match serde_json::from_str::<serde_json::Value>(text) {
-                        Ok(value) => code_section(
-                            "output",
-                            "json",
-                            &serde_json::to_string_pretty(&value).unwrap(),
-                        ),
-                        Err(_) => text_section("output", text),
-                    },
-                )
+                .map(|text| text_section("output", text))
                 .collect(),
             _ => fallback(),
         }
     });
     ToolCall {
+        id: String::new(),
+        title: crate::log::tool_title(name, input),
         name: name.to_owned(),
         input: sections,
         output,
@@ -625,7 +612,9 @@ impl Log {
         }
         entry.event.paths.splice(0..0, path);
         entry.event.body = format!("{call}{body}");
-        entry.event.calls.insert(0, tool_call(name, input, result));
+        let mut detail = tool_call(name, input, result);
+        detail.id = block["id"].as_str().unwrap_or("").to_owned();
+        entry.event.calls.insert(0, detail);
         entry.background |= input["run_in_background"] == true;
         if entry.background {
             entry.event.body.push_str(" *");
@@ -725,6 +714,56 @@ fn user_text(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn real_call_titles_and_ids_match_inputs() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-tool-calls.jsonl");
+        let events = super::tail(&path, 100).unwrap();
+        let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
+        let bash = calls.iter().find(|call| call.name == "Bash").unwrap();
+        assert_eq!(bash.title, "改到持久目录");
+        assert_eq!(bash.id, "toolu_01XU5dCe5eBxX8ccqC2DwN2G");
+        let agent = calls.iter().find(|call| call.name == "Agent").unwrap();
+        assert_eq!(agent.title, "Plan agent 写工具详情计划");
+        let skill = calls.iter().find(|call| call.name == "Skill").unwrap();
+        assert_eq!(skill.title, "secrets:secrets-manager");
+        assert_eq!(skill.input, vec![super::text_section("args", "[scrubbed]")]);
+        let records: Vec<serde_json::Value> =
+            include_str!("../../../tests/fixtures/claude-tool-details.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let send = records
+            .iter()
+            .flat_map(|record| {
+                record["message"]["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+            })
+            .find(|block| block["name"] == "SendMessage")
+            .unwrap();
+        assert_eq!(
+            super::tool_call("SendMessage", &send["input"], None).title,
+            format!("To {}", send["input"]["to"].as_str().unwrap())
+        );
+    }
+
+    #[test]
+    fn tool_inputs_do_not_repeat_titles_or_metadata() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-tool-calls.jsonl");
+        let events = super::tail(&path, 100).unwrap();
+        for name in ["Bash", "Agent"] {
+            let call = events
+                .iter()
+                .flat_map(|event| &event.calls)
+                .find(|call| call.name == name)
+                .unwrap();
+            assert_eq!(call.input.len(), 1, "{name}");
+        }
+    }
+
     #[test]
     fn prompt_images_follow_their_own_user_events() {
         let (dir, records) = super::super::transcript::tests::image_fixture();
@@ -830,10 +869,19 @@ mod tests {
             .find(|call| call.name.starts_with("mcp__"))
             .unwrap();
         assert!(
-            matches!(&mcp.output.as_ref().unwrap()[0], Section::Code { lang, text, .. }
-            if lang == "json" && text.contains('\n'))
+            matches!(&mcp.output.as_ref().unwrap()[0], Section::Text { text, .. }
+            if serde_json::from_str::<Value>(text).unwrap().is_object())
         );
-        let parallel = events.last().unwrap();
+        let parallel = events
+            .iter()
+            .find(|event| {
+                event.calls.len() == 2
+                    && event
+                        .calls
+                        .iter()
+                        .all(|call| call.name.starts_with("mcp__"))
+            })
+            .unwrap();
         assert_eq!(
             parallel
                 .calls

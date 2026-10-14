@@ -8,6 +8,38 @@ pub(crate) fn tool_kind(name: &str) -> Kind {
     }
 }
 
+pub(crate) fn tool_title(name: &str, input: &Value) -> String {
+    let text = |key: &str| input[key].as_str().filter(|text| !text.trim().is_empty());
+    let tool = name.rsplit('.').next().unwrap_or(name);
+    match tool {
+        "Agent" | "Task" | "spawn_agent" => {
+            let agent = text("subagent_type")
+                .map(|kind| format!("{kind} agent"))
+                .unwrap_or_else(|| "Agent".to_owned());
+            text("description")
+                .map(|description| format!("{agent} {description}"))
+                .unwrap_or(agent)
+        }
+        "Skill" => text("skill").unwrap_or(name).to_owned(),
+        "SendMessage" | "send_message" | "followup_task" => text("to")
+            .or_else(|| text("target"))
+            .map(|recipient| format!("To {recipient}"))
+            .unwrap_or_else(|| name.to_owned()),
+        _ if name.starts_with("mcp__") => name.to_owned(),
+        _ if text("description").is_some() => text("description").unwrap().to_owned(),
+        "Bash" | "exec" | "exec_command" | "shell" => {
+            let command = text("command").or_else(|| text("cmd")).unwrap_or("");
+            let summary = crate::shell_summary::summarize_shell_commands(command);
+            if summary.is_empty() {
+                name.to_owned()
+            } else {
+                summary
+            }
+        }
+        _ => name.to_owned(),
+    }
+}
+
 pub(crate) fn question_texts(input: &Value) -> Vec<String> {
     input["questions"]
         .as_array()
@@ -59,6 +91,9 @@ pub struct Event {
 /// One tool call of a Tool, Error or Denied row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
+    /// The provider's stable call identifier.
+    pub id: String,
+    pub title: String,
     /// The provider's tool name, such as "Bash", "exec_command" or "apply_patch".
     pub name: String,
     pub input: Vec<Section>,
