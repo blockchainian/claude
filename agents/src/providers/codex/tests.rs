@@ -101,7 +101,10 @@ fn reads_named_columns_and_pages_inactive_threads() {
             id: "thread-12".into()
         })
     );
-    assert!(provider.rename(session, "name").is_err());
+    assert_eq!(
+        provider.rename(session, "name").unwrap_err().to_string(),
+        "Codex's app-server daemon isn't running"
+    );
 }
 
 #[test]
@@ -191,6 +194,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
             fork: true,
             new: true,
             delete: true,
+            rename: true,
             ..Capabilities::default()
         }
     );
@@ -207,13 +211,23 @@ fn capabilities_gate_codex_actions_in_the_view() {
         (KeyCode::Char('o'), Action::Resume(session.id.clone())),
         (KeyCode::Char('f'), Action::Fork(session.id.clone())),
         (KeyCode::Char('n'), Action::New(Some(session.cwd.clone()))),
-        (KeyCode::Char('r'), Action::Unsupported("Rename")),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             Some(expected)
         );
     }
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
+        None
+    );
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        Some(Action::Rename {
+            id: session.id.clone(),
+            name: session.display_title().into()
+        })
+    );
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
         None
@@ -784,7 +798,6 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     for code in [
         KeyCode::Char('f'),
         KeyCode::Backspace,
-        KeyCode::Char('r'),
         KeyCode::Char('x'),
         KeyCode::Char('p'),
     ] {
@@ -890,5 +903,79 @@ fn spawn_children_cannot_resume_in_the_view() {
     assert_eq!(
         view.handle_mouse(click),
         Some(Action::Unsupported("Resume"))
+    );
+}
+
+#[test]
+fn names_follow_history_mode_and_manager_precedence() {
+    let (dir, mut provider) = fixture();
+    manager_fixture(dir.path(), &mut provider, "attached");
+    // Rows use the captured state schema; index lines use the live rename PoC shape.
+    std::fs::write(
+        dir.path().join("session_index.jsonl"),
+        include_str!("../../../tests/fixtures/codex-names.jsonl"),
+    )
+    .unwrap();
+    let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
+    for (history, title, first, name, expected) in [
+        (
+            "paginated",
+            "Preview",
+            "Preview",
+            Some("  Codex name  "),
+            Some("Codex name"),
+        ),
+        (
+            "paginated",
+            "Preview",
+            "Preview",
+            None,
+            Some("Managed worker"),
+        ),
+        (
+            "legacy",
+            "Preview",
+            "Preview",
+            Some("Ignored column"),
+            Some("Index name"),
+        ),
+        (
+            "legacy",
+            "  Metadata name  ",
+            "Preview",
+            None,
+            Some("Metadata name"),
+        ),
+        ("legacy", "   ", "Preview", None, Some("Index name")),
+        ("legacy", " Preview ", " Preview ", None, Some("Index name")),
+    ] {
+        db.execute("UPDATE threads SET history_mode=?1,title=?2,first_user_message=?3,name=?4 WHERE id='thread-12'", rusqlite::params![history,title,first,name]).unwrap();
+        let session = provider
+            .snapshot(0)
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.id.id == "thread-12")
+            .unwrap();
+        assert_eq!(session.name.as_deref(), expected, "{history} {title}");
+        assert_eq!(session.display_title(), expected.unwrap());
+    }
+    std::fs::remove_file(dir.path().join("session_index.jsonl")).unwrap();
+    db.execute(
+        "UPDATE threads SET title=first_user_message WHERE id='thread-12'",
+        [],
+    )
+    .unwrap();
+    assert_eq!(
+        provider
+            .snapshot(0)
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.id.id == "thread-12")
+            .unwrap()
+            .name
+            .as_deref(),
+        Some("Managed worker")
     );
 }

@@ -408,7 +408,7 @@ impl App {
                 if !session.can_resume() {
                     return self.handle_action(Some(Action::Unsupported("Resume")));
                 }
-            } else {
+            } else if !matches!(action, Action::Rename { .. }) || !session.can_resume() {
                 return false;
             }
         }

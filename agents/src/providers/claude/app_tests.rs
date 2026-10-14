@@ -728,10 +728,6 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
         }
         for action in [
             Action::Fork(child.id.clone()),
-            Action::Rename {
-                id: child.id.clone(),
-                name: "Blocked".into(),
-            },
             Action::Delete(child.id.clone()),
             Action::TogglePin {
                 id: child.id.clone(),
@@ -751,5 +747,64 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
         app.sessions.push(claude_child.clone());
         assert!(!app.handle_action(Some(Action::Open(claude_child.id))));
         assert!(app.launch.is_none());
+    }
+}
+
+#[test]
+fn child_rename_only_reaches_provider_for_manager_threads() {
+    use crate::providers::{Provider, ProviderId, codex::CodexProvider};
+    use ratatui::{buffer::Buffer, layout::Rect};
+    for (child_provider, parent_provider) in [
+        (ProviderId::Codex, ProviderId::Claude),
+        (ProviderId::Codex, ProviderId::Codex),
+        (ProviderId::Claude, ProviderId::Claude),
+    ] {
+        let (dir, mut app) = fixture();
+        rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+            .unwrap()
+            .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+            .unwrap();
+        let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let mut child = provider
+            .refresh(2)
+            .sessions
+            .into_iter()
+            .find(|session| session.id.id == "thread-13")
+            .unwrap();
+        child.id.provider = child_provider;
+        child.parent = Some(SessionKey {
+            provider: parent_provider,
+            id: app.sessions[0].id.id.clone(),
+        });
+        app.hub = Hub::new(vec![Box::new(provider)]);
+        app.sessions.push(child.clone());
+        assert!(!app.handle_action(Some(Action::Rename {
+            id: child.id.clone(),
+            name: "Rename probe".into()
+        })));
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
+        app.view.render(buffer.area, &mut buffer);
+        let rendered = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert_eq!(
+            rendered.contains("Failed to rename"),
+            child_provider == ProviderId::Codex && parent_provider == ProviderId::Claude
+        );
+        assert!(app.launch.is_none());
+        for action in [
+            Action::Fork(child.id.clone()),
+            Action::Delete(child.id.clone()),
+            Action::TogglePin {
+                id: child.id.clone(),
+                pinned: true,
+            },
+        ] {
+            assert!(!app.handle_action(Some(action)));
+            assert!(app.launch.is_none());
+            assert!(app.preferences.pinned.is_empty());
+        }
     }
 }

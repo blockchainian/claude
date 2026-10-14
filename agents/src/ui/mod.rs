@@ -517,4 +517,6 @@ impl View {
 }
 
 #[cfg(test)]
+mod rename_tests;
+#[cfg(test)]
 mod tests;

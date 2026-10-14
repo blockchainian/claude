@@ -232,10 +232,11 @@ impl View {
             && !self.searching
             && self.selected_is_subagent()
             && ((plain
-                && matches!(
+                && (matches!(
                     key.code,
-                    KeyCode::Backspace | KeyCode::Char('r' | 'f' | 'x' | 'h' | 'p')
-                ))
+                    KeyCode::Backspace | KeyCode::Char('f' | 'x' | 'h' | 'p')
+                ) || (key.code == KeyCode::Char('r')
+                    && !self.selected_row().is_some_and(Session::can_resume))))
                 || (key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.code == KeyCode::Char('l')))
         {

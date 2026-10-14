@@ -1,3 +1,4 @@
+mod app_server;
 #[cfg(test)]
 mod inner_tests;
 mod manager;
@@ -15,7 +16,7 @@ use rusqlite::{Connection, OpenFlags, Row};
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io,
+    io::{self, BufRead},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -70,6 +71,7 @@ impl CodexProvider {
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(io::Error::other)?;
         let manager = manager::links(&self.manager_home)?;
+        let names = indexed_names(&self.home)?;
         let parents = parents(&db).map_err(io::Error::other)?;
         let live = live_writers(&self.home.join("thread-writer-locks"))?;
         let starts = process_starts(&live.values().copied().collect::<Vec<_>>())?;
@@ -77,7 +79,16 @@ impl CodexProvider {
             .prepare("SELECT * FROM threads")
             .map_err(io::Error::other)?;
         let rows = statement
-            .query_map([], |row| session(row, &parents))
+            .query_map([], |row| {
+                let mut session = session(row, &parents)?;
+                if column::<String>(row, "history_mode")?.as_deref() != Some("paginated")
+                    && let Some(session) = session.as_mut()
+                    && session.name.is_none()
+                {
+                    session.name = names.get(&session.id.id).cloned();
+                }
+                Ok(session)
+            })
             .map_err(io::Error::other)?;
         let mut sessions = Vec::new();
         for row in rows {
@@ -91,8 +102,10 @@ impl CodexProvider {
                 }
                 if let Some(link) = manager.get(&session.id.id) {
                     session.parent = Some(link.parent.clone());
-                    if let Some(name) = &link.name {
-                        session.name = Some(name.clone());
+                    if session.name.is_none() {
+                        session.name = link.name.clone();
+                    }
+                    if let Some(name) = &session.name {
                         session.title = name.clone();
                     }
                 }
@@ -225,7 +238,15 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         parent: parents.get(&id).cloned().map(key),
         id: key(id),
         cwd: PathBuf::from(column::<String>(row, "cwd")?.unwrap_or_default()),
-        name: column::<String>(row, "name")?.filter(|s| !s.trim().is_empty()),
+        name: match column::<String>(row, "history_mode")?.as_deref() {
+            Some("paginated") => column::<String>(row, "name")?
+                .map(|name| name.trim().to_owned())
+                .filter(|name| !name.is_empty()),
+            _ => {
+                let title = title.trim();
+                (!title.is_empty() && title != prompt.trim()).then(|| title.to_owned())
+            }
+        },
         title,
         prompt: prompt.chars().take(512).collect(),
         queued: vec![],
@@ -250,6 +271,32 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
             .filter(|p| !p.is_empty())
             .map(PathBuf::from),
     }))
+}
+
+fn indexed_names(home: &Path) -> io::Result<HashMap<String, String>> {
+    #[derive(serde::Deserialize)]
+    struct Entry {
+        id: String,
+        thread_name: String,
+        #[serde(rename = "updated_at")]
+        _updated_at: String,
+    }
+    let file = match File::open(home.join("session_index.jsonl")) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(error) => return Err(error),
+    };
+    let mut names = HashMap::new();
+    for line in io::BufReader::new(file).lines() {
+        // Codex skips malformed index records and keeps the latest nonempty name.
+        if let Ok(entry) = serde_json::from_str::<Entry>(&line?) {
+            let name = entry.thread_name.trim();
+            if !name.is_empty() {
+                names.insert(entry.id, name.to_owned());
+            }
+        }
+    }
+    Ok(names)
 }
 
 fn parents(db: &Connection) -> rusqlite::Result<HashMap<String, String>> {
@@ -438,6 +485,7 @@ impl Provider for CodexProvider {
             fork: true,
             new: true,
             delete: true,
+            rename: true,
             ..Capabilities::default()
         }
     }
@@ -506,8 +554,12 @@ impl Provider for CodexProvider {
         }
         Some(command)
     }
-    fn rename(&self, _: &Session, _: &str) -> io::Result<()> {
-        Err(io::ErrorKind::Unsupported.into())
+    fn rename(&self, session: &Session, name: &str) -> io::Result<()> {
+        if !session.can_resume() {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
+        let mut client = app_server::Client::connect(&self.home)?;
+        app_server::thread::set_name(&mut client, &session.id.id, name)
     }
     fn delete(&self, session: &Session) -> io::Result<()> {
         if session.parent.is_some() {
