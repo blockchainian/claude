@@ -409,7 +409,9 @@ fn wrapped_message(text: &str) -> Option<(Kind, String)> {
     Some((kind, participant_text(name, &body)))
 }
 
-fn pasted_content(mut text: &str) -> Option<String> {
+/// Replaces each `<pasted_content>` block with its content, or `None` when
+/// the text has none.
+pub(super) fn pasted_content(mut text: &str) -> Option<String> {
     let mut body = String::new();
     let mut found = false;
     while let Some(start) = text.find("<pasted_content") {
@@ -430,10 +432,16 @@ fn pasted_content(mut text: &str) -> Option<String> {
             .flatten();
         if let Some((end, closing_len)) = end {
             let inner = rest[..end]
+                .strip_prefix('\n')
+                .unwrap_or(&rest[..end])
                 .split_inclusive('\n')
                 .map(|line| line.strip_prefix("  ").unwrap_or(line))
                 .collect::<String>();
-            body.push_str(&inner);
+            // A paste nested in a paste has its tags escaped with a backslash.
+            let inner = inner
+                .replace("<\\pasted_content", "<pasted_content")
+                .replace("<\\/pasted_content", "</pasted_content");
+            body.push_str(&pasted_content(&inner).unwrap_or(inner));
             text = &rest[end + closing_len..];
             found = true;
         } else {

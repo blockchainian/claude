@@ -209,7 +209,7 @@ fn prompt_text(record: &Value) -> Option<String> {
             let text = content_text(record, false)?;
             Some(match super::peer::wrapped_message(&text) {
                 Some((_, (name, body))) => crate::log::participant_text(name, body),
-                None => text,
+                None => typed_text(text),
             })
         }
         "attachment" => {
@@ -217,9 +217,15 @@ fn prompt_text(record: &Value) -> Option<String> {
             (attachment["type"] == "queued_command" && attachment["commandMode"] == "prompt")
                 .then(|| attachment["prompt"].as_str().map(str::to_owned))
                 .flatten()
+                .map(typed_text)
         }
         _ => None,
     }
+}
+
+/// Text the user typed, with pasted blocks shown as their content.
+fn typed_text(text: String) -> String {
+    super::log::pasted_content(&text).unwrap_or(text)
 }
 
 fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
@@ -239,6 +245,7 @@ fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
     }
     queue
         .into_iter()
+        .map(typed_text)
         .filter(|content| !content.trim_start().starts_with('<'))
         .map(|content| {
             printable(&content)
@@ -771,7 +778,12 @@ pub(super) mod tests {
         assert_eq!(summary.ai_title.as_deref(), records[2]["aiTitle"].as_str());
         assert_eq!(
             summary.prompt,
-            printable(records[0]["message"]["content"].as_str().unwrap())
+            printable(
+                &super::super::log::pasted_content(
+                    records[0]["message"]["content"].as_str().unwrap()
+                )
+                .unwrap()
+            )
         );
         assert_eq!(summary.cwd, records[0]["cwd"].as_str().map(PathBuf::from));
         assert_eq!(summary.git_branch.as_deref(), Some("main"));
@@ -1028,6 +1040,27 @@ pub(super) mod tests {
         idle_prompt(&mut file);
         assert_eq!(summary(&file).prompt, "Current prompt");
         assert!(summary(&file).queued.is_empty());
+    }
+
+    #[test]
+    fn pasted_prompts_show_their_content_without_tags() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        user(
+            &mut file,
+            "```\n\n\n<pasted_content id=\"a350\">\n```\n\n\n<\\pasted_content id=\"a832\">\nImplement workstream A.\n\nRules:\n- Do not push.\n<\\/pasted_content id=\"a832\">\n\n```\n\n发现了一个 bug。\n</pasted_content id=\"a350\">\n\n```\n嗯。",
+        );
+        queue(
+            &mut file,
+            "enqueue",
+            "<pasted_content id=\"a350\">\n  queued paste\n</pasted_content id=\"a350\">",
+        );
+        let summary = summary(&file);
+        assert_eq!(
+            summary.prompt,
+            "```\n\n\n```\n\n\nImplement workstream A.\n\nRules:\n- Do not push.\n\n\n```\n\n发现了一个 bug。\n\n\n```\n嗯。"
+        );
+        assert_eq!(summary.queued, ["queued paste"]);
     }
 
     #[test]
