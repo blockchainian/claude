@@ -190,7 +190,7 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
     let before = log_screen(&view, 100, 25, now);
     let rect = view.center_layout(Rect::new(0, 0, 100, 25)).log;
     assert!(before.contains("35s Tool      run tests"), "{before}");
-    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
+    view.scroll_content_row(true, true, rect.y + 1);
     let after = log_screen(&view, 100, 25, now);
     assert!(after.contains("Older event"), "{after}");
     assert!(!after.contains("run tests"));
@@ -209,7 +209,7 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
         "{after}"
     );
     assert!(!after.contains("35s Tool"));
-    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x + 2, rect.y + 1));
+    view.scroll_content_row(false, true, rect.y + 1);
     assert!(log_screen(&view, 100, 25, now).contains("35s Tool      run tests"));
 }
 
@@ -234,12 +234,24 @@ fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
     assert!(before.contains("11:59:30 Tool      Event 11"), "{before}");
     assert!(before.contains("12s Tool      Event 10"), "{before}");
     let (before_x, before_y) = rendered_cell(&before, "Event 10");
-    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
+    view.scroll_content_row(true, true, rect.y + 1);
     let after = log_screen(&view, 100, 25, now);
     assert!(!after.contains("Event 11"), "{after}");
     let (after_x, after_y) = rendered_cell(&after, "Event 10");
     assert_eq!(after_y + 1, before_y);
     assert_eq!(after_x, before_x);
+}
+
+#[test]
+fn mouse_log_wheel_scrolls_tmux_copy_mode_rows_per_report() {
+    let (view, now) = log_fixture();
+    log_screen(&view, 100, 25, now);
+    let rect = view.viewport.borrow().log;
+    let mut view = view;
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
+    assert_eq!(view.log_scroll(), 5);
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x + 2, rect.y + 1));
+    assert_eq!(view.log_scroll(), 0);
 }
 
 #[test]
@@ -313,7 +325,7 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     let (mut view, now) = log_fixture();
     log_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
-    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
+    view.scroll_content_row(true, true, rect.y + 1);
     let before = log_screen(&view, 100, 25, now);
     assert!(before.contains("↑ Latest"), "{before}");
     view.set_log(log_with_newer_event(&view, now));
@@ -356,7 +368,7 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
     details_panel(&view);
     let rect = view.viewport.borrow().log;
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-    assert_eq!(view.log_scroll(), 1);
+    assert_eq!(view.log_scroll(), 5);
     let id = view.selected_id().unwrap().to_owned();
     let mut rows = view.rows.clone();
     rows.push(session(
@@ -367,7 +379,7 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
     ));
     view.set_sessions(rows.clone(), false);
     assert_eq!(view.selected_id(), Some(&id));
-    assert_eq!(view.log_scroll(), 1);
+    assert_eq!(view.log_scroll(), 5);
     rows.retain(|row| row.id != id);
     for row in &mut rows {
         row.transcript = Some(row.cwd.join("session.jsonl"));
@@ -377,7 +389,7 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
     details_panel(&view);
     let rect = view.viewport.borrow().log;
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-    assert_eq!(view.log_scroll(), 1);
+    assert_eq!(view.log_scroll(), 5);
     key(&mut view, KeyCode::Down);
     assert_eq!(view.log_scroll(), 0);
 }
@@ -3810,7 +3822,7 @@ mod log_search {
         screen(&view, 120, 40);
         let rect = view.viewport.borrow().log;
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y + 1));
-        assert_eq!(view.log_scroll(), 1);
+        assert_eq!(view.log_scroll(), 5);
         let mut second = view.rows[0].clone();
         second.id = session_key("second");
         view.set_sessions(vec![view.rows[0].clone(), second], false);

@@ -152,7 +152,7 @@ fn queued_wheel_events_apply_before_the_next_draw() {
             .unwrap()
     );
     assert!(receiver.try_recv().is_err());
-    assert_eq!(app.view.log_scroll(), 5);
+    assert_eq!(app.view.log_scroll(), 25);
 }
 
 #[test]
@@ -165,8 +165,8 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     app.refresh_log(8);
     scroll_log(&mut app, ScrollDown);
     app.refresh_log(8);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
-    assert_eq!(app.view.log.len(), 9);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 13);
+    assert_eq!(app.view.log.len(), 13);
     let cached = app.view.log.clone();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
     std::fs::write(&path, payload.replace("Codex", "CODEX").repeat(20)).unwrap();
@@ -182,7 +182,7 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     app.refresh_log(8);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
     assert_eq!(app.view.log.len(), 8);
-    assert_ne!(app.view.log, cached[1..]);
+    assert_ne!(app.view.log, cached[5..]);
 }
 
 #[test]
@@ -202,8 +202,8 @@ fn task_log_growth_keeps_distance_from_end() {
     )
     .unwrap();
     app.refresh_log(8);
-    assert_eq!(app.view.log_scroll(), 1);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
+    assert_eq!(app.view.log_scroll(), 5);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 13);
     assert_ne!(app.view.log, before);
 }
 
@@ -675,8 +675,8 @@ mod log_filters {
         assert!(app.view.log.iter().all(|event| event.kind == Kind::Tool));
         scroll_log(&mut app, ScrollDown);
         app.refresh_log(8);
-        assert_eq!(app.view.log.len(), 9);
-        assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
+        assert_eq!(app.view.log.len(), 13);
+        assert_eq!(app.log_stamp.as_ref().unwrap().count, 13);
         let cached = app.view.log.clone();
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::fs::write(&path, payload.replace("main.rs", "test.rs").repeat(20)).unwrap();

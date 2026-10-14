@@ -1,5 +1,8 @@
 use super::*;
 
+/// Rows one wheel report scrolls the log panel, matching tmux's copy-mode wheel.
+const WHEEL_ROWS: usize = 5;
+
 impl View {
     fn set_filter(&mut self, idx: usize) {
         if self.status_filter != idx {
@@ -163,57 +166,68 @@ impl View {
                     self.set_filter(idx);
                 } else if over_list {
                     self.move_selection(forward);
-                } else if over_log && self.log_open.is_some() {
-                    let mut viewport = self.viewport.borrow_mut();
-                    viewport.log_open_scroll = if forward {
-                        viewport.log_open_scroll.saturating_add(1)
-                    } else {
-                        viewport.log_open_scroll.saturating_sub(1)
-                    };
                 } else if over_log {
-                    let mut viewport = self.viewport.borrow_mut();
-                    viewport.log_scroll = if forward {
-                        viewport.log_scroll.saturating_add(1)
-                    } else {
-                        viewport.log_scroll.saturating_sub(1)
-                    };
-                } else if over_details {
-                    let mut viewport = self.viewport.borrow_mut();
-                    let state = &mut viewport.details_scroll;
-                    if let Some(max) = state.fallback_max {
-                        state.offset = if forward {
-                            state.offset.saturating_add(1).min(max)
-                        } else {
-                            state.offset.saturating_sub(1).min(max)
-                        };
-                    } else {
-                        let d = usize::from(mouse.row.saturating_sub(state.content_top))
-                            + state.reveal.iter().sum::<usize>();
-                        if let Some(target) =
-                            curtain_target(&state.bodies, &state.reveal, &state.hidden, d, forward)
-                        {
-                            if forward {
-                                state.reveal[target] += 1;
-                                state.bodies[target].end += 1;
-                                for body in &mut state.bodies[target + 1..] {
-                                    body.start += 1;
-                                    body.end += 1;
-                                }
-                            } else {
-                                state.reveal[target] -= 1;
-                                state.bodies[target].end -= 1;
-                                for body in &mut state.bodies[target + 1..] {
-                                    body.start -= 1;
-                                    body.end -= 1;
-                                }
-                            }
-                        }
+                    for _ in 0..WHEEL_ROWS {
+                        self.scroll_content_row(forward, true, mouse.row);
                     }
+                } else if over_details {
+                    self.scroll_content_row(forward, false, mouse.row);
                 }
             }
             _ => {}
         }
         None
+    }
+
+    /// Scrolls the log panel, or the details panel when `over_log` is false, by one row.
+    pub(super) fn scroll_content_row(&mut self, forward: bool, over_log: bool, row: u16) {
+        if over_log && self.log_open.is_some() {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_open_scroll = if forward {
+                viewport.log_open_scroll.saturating_add(1)
+            } else {
+                viewport.log_open_scroll.saturating_sub(1)
+            };
+        } else if over_log {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_scroll = if forward {
+                viewport.log_scroll.saturating_add(1)
+            } else {
+                viewport.log_scroll.saturating_sub(1)
+            };
+        } else {
+            let mut viewport = self.viewport.borrow_mut();
+            let state = &mut viewport.details_scroll;
+            if let Some(max) = state.fallback_max {
+                state.offset = if forward {
+                    state.offset.saturating_add(1).min(max)
+                } else {
+                    state.offset.saturating_sub(1).min(max)
+                };
+            } else {
+                let d = usize::from(row.saturating_sub(state.content_top))
+                    + state.reveal.iter().sum::<usize>();
+                if let Some(target) =
+                    curtain_target(&state.bodies, &state.reveal, &state.hidden, d, forward)
+                {
+                    if forward {
+                        state.reveal[target] += 1;
+                        state.bodies[target].end += 1;
+                        for body in &mut state.bodies[target + 1..] {
+                            body.start += 1;
+                            body.end += 1;
+                        }
+                    } else {
+                        state.reveal[target] -= 1;
+                        state.bodies[target].end -= 1;
+                        for body in &mut state.bodies[target + 1..] {
+                            body.start -= 1;
+                            body.end -= 1;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn move_selection(&mut self, forward: bool) {
