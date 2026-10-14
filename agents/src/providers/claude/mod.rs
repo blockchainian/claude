@@ -238,7 +238,17 @@ impl ClaudeProvider {
 
     fn snapshot(&mut self, pages: usize) -> Snapshot {
         self.list_transcripts();
-        let live = registry::live(&self.config_dir);
+        // Claude Code writes a transcript only after the first prompt, and
+        // `claude --resume` cannot open a session without one.
+        let live: Vec<_> = registry::live(&self.config_dir)
+            .into_iter()
+            .filter(|entry| {
+                entry
+                    .session_id
+                    .as_ref()
+                    .is_some_and(|id| self.index.contains_key(id))
+            })
+            .collect();
         let live_ids: HashSet<_> = live
             .iter()
             .filter_map(|entry| entry.session_id.clone())
@@ -958,6 +968,23 @@ mod tests {
         assert_eq!(
             session.updated_at,
             "2026-10-06T16:39:29.554Z".parse::<DateTime<Utc>>().unwrap()
+        );
+    }
+
+    #[test]
+    fn live_session_without_transcript_is_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let value = registry::tests::fixture(dir.path());
+        fs::write(
+            dir.path().join("sessions/live.json"),
+            serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            ClaudeProvider::new(dir.path().into())
+                .refresh(1)
+                .sessions
+                .is_empty()
         );
     }
 
