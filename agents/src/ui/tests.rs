@@ -4919,6 +4919,135 @@ fn task_log_click_on_whole_row_keeps_list() {
     assert_eq!(log_screen(&view, 100, 25, now), list);
 }
 
+/// The calls of a merged Bash + Read row, the Read still running.
+fn tool_calls() -> Vec<crate::log::ToolCall> {
+    use crate::log::{Section, ToolCall};
+    vec![
+        ToolCall {
+            name: "Bash".into(),
+            input: vec![Section::Code {
+                label: "command".into(),
+                lang: "bash".into(),
+                text: "cargo test".into(),
+            }],
+            output: Some(vec![Section::Text {
+                label: "stdout".into(),
+                text: "running 3 tests\n...".into(),
+            }]),
+            is_error: false,
+        },
+        ToolCall {
+            name: "Read".into(),
+            input: vec![Section::Fields(vec![
+                ("path".into(), "agents/src/log.rs".into()),
+                ("range".into(), "lines 1–40".into()),
+            ])],
+            output: None,
+            is_error: false,
+        },
+    ]
+}
+
+/// The log fixture with its running "run tests" row carrying `tool_calls`, opened.
+fn open_tool_fixture() -> (View, chrono::DateTime<Utc>) {
+    let (mut view, now) = log_fixture();
+    view.log[7].calls = tool_calls();
+    view.set_log_open(Some(view.log[7].clone()));
+    (view, now)
+}
+
+#[test]
+fn task_log_click_opens_a_whole_row_that_has_calls() {
+    let (mut view, now) = log_fixture();
+    view.log[7].calls = tool_calls();
+    let list = log_screen(&view, 100, 25, now);
+    click_log_text(&mut view, &list, "run tests", MouseButton::Left);
+    assert_eq!(view.log_open, Some(view.log[7].clone()));
+    assert!(log_screen(&view, 100, 25, now).contains("cargo test"));
+}
+
+#[test]
+fn task_log_open_tool_snapshot() {
+    let (view, now) = open_tool_fixture();
+    let open = log_screen(&view, 100, 48, now);
+    assert_eq!(
+        open,
+        include_str!("../../tests/ui_snapshots/task_log_open_tool.txt")
+    );
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
+    view.render_at(buf.area, &mut buf, now);
+    let (x, y) = rendered_cell(&open, "cargo test");
+    assert!(matches!(buf[(x, y)].fg, Color::Rgb(..)));
+    let (x, y) = rendered_cell(&open, "stdout");
+    assert_eq!(buf[(x, y)].fg, Color::Blue);
+    assert!(
+        buf[(x, y)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    let (x, y) = rendered_cell(&open, "running…");
+    assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+    assert_eq!(
+        super::log::open_text(&view.log[7]),
+        "Bash\ncommand\ncargo test\nstdout\nrunning 3 tests\n...\n\nRead\npath: agents/src/log.rs\nrange: lines 1–40\nrunning…"
+    );
+}
+
+#[test]
+fn task_log_open_tool_layout_is_cached_until_it_closes_or_the_width_changes() {
+    let (mut view, now) = open_tool_fixture();
+    assert!(view.viewport.borrow().log_open_layout.is_none());
+    let open = log_screen(&view, 100, 25, now);
+    assert!(view.viewport.borrow().log_open_layout.is_some());
+    assert_eq!(log_screen(&view, 100, 25, now), open);
+    let narrow = log_screen(&view, 60, 25, now);
+    assert_ne!(narrow, open);
+    assert!(narrow.contains("running 3 tests"));
+    view.set_log_open(None);
+    assert!(view.viewport.borrow().log_open_layout.is_none());
+}
+
+#[test]
+fn task_log_open_tool_gains_its_output_when_the_log_refreshes() {
+    let (mut view, now) = open_tool_fixture();
+    let open = log_screen(&view, 100, 48, now);
+    let mut events = view.log.clone();
+    events[7].calls[1].output = Some(vec![crate::log::Section::Text {
+        label: "content".into(),
+        text: "use chrono::{DateTime, Utc};".into(),
+    }]);
+    view.set_log(events.clone());
+    assert_eq!(view.log_open, Some(events[7].clone()));
+    let refreshed = log_screen(&view, 100, 48, now);
+    assert_ne!(refreshed, open);
+    assert!(refreshed.contains("use chrono::{DateTime, Utc};"));
+    assert!(!refreshed.contains("running…"));
+    view.set_log(view.log[..7].to_vec());
+    assert_eq!(view.log_open, Some(events[7].clone()));
+}
+
+#[test]
+fn task_log_open_tool_copies_a_dragged_section() {
+    let (mut view, now) = open_tool_fixture();
+    let open = log_screen(&view, 100, 25, now);
+    let (x1, y1) = rendered_cell(&open, "cargo test");
+    let (x2, y2) = rendered_cell(&open, "running 3 tests");
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x1, y1))
+            .is_none()
+    );
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2 + 7, y2));
+    log_screen(&view, 100, 25, now);
+    let action = view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2 + 7, y2));
+    assert_eq!(
+        action,
+        Some(Action::Copy {
+            text: "cargo test\nstdout\nrunning".into(),
+            label: "Copied selection".into()
+        })
+    );
+}
+
 #[test]
 fn task_log_open_event_header_reads_its_list_row_time_left_aligned() {
     for body in ["A long response", "The newest reply"] {
