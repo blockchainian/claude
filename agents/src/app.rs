@@ -350,8 +350,7 @@ impl App {
                 Ok(loaded) => {
                     if let Some((stamp, events)) = loaded {
                         self.full_log_stamp = Some(stamp);
-                        self.view.log = events;
-                        self.view.prepare_log_search();
+                        self.view.set_log(events);
                     }
                     self.log_stamp = None;
                     self.view.log_session = Some(session);
@@ -400,8 +399,13 @@ impl App {
                     stamp.count = visible.saturating_add(self.view.log_scroll());
                 }
                 self.log_stamp = Some(stamp);
-                self.view.log = events;
+                let scroll = self.view.log_scroll();
+                self.view.set_log(events);
                 self.view.log_session = Some(session);
+                // Keeping the rows still scrolled further back than the loaded window reaches.
+                if self.view.log_scroll() > scroll {
+                    self.refresh_log(visible);
+                }
             }
             Ok(None) => {}
             Err(error) => {

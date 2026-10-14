@@ -6,6 +6,7 @@ use chrono::{DateTime, Local, Utc};
 
 const CLOCK_FORMAT: &str = "%H:%M:%S";
 const CLOCK_WIDTH: usize = 8;
+const KIND_WIDTH: usize = 9;
 
 pub(super) fn search_input_rect(area: Rect) -> Rect {
     super::render::row(area, area.height.saturating_sub(1), 1)
@@ -24,7 +25,11 @@ impl View {
             return;
         };
         super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
-        self.viewport.borrow_mut().log_rows.clear();
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_rows.clear();
+            viewport.log_jump = Rect::default();
+        }
         if self.log_session.as_ref() != Some(&session.id) {
             return;
         }
@@ -44,6 +49,7 @@ impl View {
             }
         }
         let scroll = self.log_scroll();
+        self.render_log_jump(area, scroll, buf);
         let matching: Vec<_> = self.shown_log_events().collect();
         let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
@@ -65,6 +71,24 @@ impl View {
         let text_area = super::render::row(area, 1, rows.len() as u16);
         self.viewport.borrow_mut().log_rows = rows;
         self.capture_list_text(text_selection::Panel::LogList, text_area, scroll, buf);
+    }
+
+    /// Draws the button that jumps back to the newest row on the rule, its arrow above the
+    /// rows' bodies, while the log is scrolled off its newest row.
+    fn render_log_jump(&self, area: Rect, scroll: usize, buf: &mut Buffer) {
+        let mut viewport = self.viewport.borrow_mut();
+        if scroll == 0 {
+            viewport.log_unseen = 0;
+            return;
+        }
+        let label = match viewport.log_unseen {
+            0 => " ↑ Latest ".to_owned(),
+            unseen => format!(" ↑ {unseen} new "),
+        };
+        let x = area.x + (CLOCK_WIDTH + KIND_WIDTH + 1) as u16;
+        let jump = Rect::new(x, area.y, label.width() as u16, 1).intersection(area);
+        Line::from(label.bold()).render(jump, buf);
+        viewport.log_jump = jump;
     }
 
     /// Draws one log event whole: its time and kind, a blank row, then the full body.
@@ -129,6 +153,28 @@ impl View {
         Paragraph::new(lines.split_off(viewport.log_open_scroll)).render(body_area, buf);
         drop(viewport);
         self.highlight_text_selection(text_selection::Panel::Log, buf);
+    }
+
+    /// Replaces the task log. Off the newest row, or while a mouse button is held, the rows on
+    /// screen stay put and the newer events count toward the jump button.
+    pub(crate) fn set_log(&mut self, events: Vec<Event>) {
+        let newest = self
+            .shown_log_events()
+            .last()
+            .map(|(_, event)| event.started_at);
+        self.log = events;
+        self.prepare_log_search();
+        let following = self.log_scroll() == 0 && self.mouse_press.is_none();
+        let Some(newest) = newest.filter(|_| !following) else {
+            return;
+        };
+        let added = self
+            .shown_log_events()
+            .filter(|(_, event)| event.started_at > newest)
+            .count();
+        let mut viewport = self.viewport.borrow_mut();
+        viewport.log_scroll += added;
+        viewport.log_unseen += added;
     }
 
     /// How long until the top log row's time reads differently, or `None` if it never does.
@@ -260,7 +306,7 @@ fn render_event(
         return true;
     }
     let content_x = area.x + time_width as u16 + 1;
-    let label = format!("{:<9} ", kind_label(&event.kind));
+    let label = format!("{:<KIND_WIDTH$} ", kind_label(&event.kind));
     let label_width = label.width().min(content_width);
     Line::from(Span::styled(label, label_style))
         .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);

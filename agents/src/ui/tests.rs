@@ -251,6 +251,67 @@ fn mouse_log_wheel_up_at_newest_stays_at_newest() {
     assert_eq!(before, log_screen(&view, 100, 25, now));
 }
 
+fn log_with_newer_event(view: &View, now: chrono::DateTime<Utc>) -> Vec<crate::log::Event> {
+    let mut events = view.log.clone();
+    let mut event = events.last().unwrap().clone();
+    event.body = "brand new event".into();
+    event.started_at = now - Duration::seconds(5);
+    event.previous_end = Some(now - Duration::seconds(10));
+    events.push(event);
+    events
+}
+
+#[test]
+fn new_log_events_keep_rows_still_while_mouse_is_held() {
+    let (mut view, now) = log_fixture();
+    let before = log_screen(&view, 100, 25, now);
+    let rect = view.viewport.borrow().log;
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        rect.x + 20,
+        rect.y + 2,
+    ));
+    view.set_log(log_with_newer_event(&view, now));
+    let after = log_screen(&view, 100, 25, now);
+    assert!(!after.contains("brand new event"), "{after}");
+    for body in ["run tests", "run a background job"] {
+        assert_eq!(rendered_cell(&after, body), rendered_cell(&before, body));
+    }
+}
+
+#[test]
+fn new_log_events_keep_rows_still_off_the_newest_row() {
+    let (mut view, now) = log_fixture();
+    log_screen(&view, 100, 25, now);
+    let rect = view.viewport.borrow().log;
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
+    let before = log_screen(&view, 100, 25, now);
+    assert!(before.contains("↑ Latest"), "{before}");
+    view.set_log(log_with_newer_event(&view, now));
+    let after = log_screen(&view, 100, 25, now);
+    assert!(!after.contains("brand new event"), "{after}");
+    let body = rendered_cell(&after, "run a background job");
+    assert_eq!(body, rendered_cell(&before, "run a background job"));
+    let jump = rendered_cell(&after, "↑ 1 new");
+    assert_eq!((jump.0, jump.1), (body.0, rect.y));
+}
+
+#[test]
+fn jump_button_returns_to_the_newest_log_row() {
+    let (mut view, now) = log_fixture();
+    log_screen(&view, 100, 25, now);
+    let rect = view.viewport.borrow().log;
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y + 1));
+    let scrolled = log_screen(&view, 100, 25, now);
+    let (x, y) = rendered_cell(&scrolled, "↑ Latest");
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x + 2, y));
+    view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x + 2, y));
+    assert_eq!(view.log_scroll(), 0);
+    let after = log_screen(&view, 100, 25, now);
+    assert!(after.contains("run tests"), "{after}");
+    assert!(!after.lines().nth(usize::from(y)).unwrap().contains('↑'), "{after}");
+}
+
 #[test]
 fn mouse_log_scroll_tracks_selected_session_identity() {
     let mut view = overflowing_details();

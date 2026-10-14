@@ -61,6 +61,12 @@ impl View {
             _ => {}
         }
         let position = (mouse.column, mouse.row).into();
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left)
+            && self.viewport.borrow().log_jump.contains(position)
+        {
+            self.show_newest_log();
+            return None;
+        }
         let (tab, over_tabs, over_list, over_details, over_log, entry, log_row, copy_text) = {
             let viewport = self.viewport.borrow();
             let tab = viewport
