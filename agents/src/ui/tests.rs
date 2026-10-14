@@ -1100,6 +1100,69 @@ fn leaving_inactive_reconciles_show_more_selection() {
 }
 
 #[test]
+fn returning_to_a_tab_restores_its_selection() {
+    let mut view = fixture();
+    while view.selected_id() != Some(&session_key("46")) {
+        key(&mut view, KeyCode::Down);
+    }
+
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    key(&mut view, KeyCode::BackTab);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
+}
+
+#[test]
+fn a_task_chosen_in_one_tab_stays_selected_in_tabs_that_list_it() {
+    let mut view = fixture();
+    while view.selected_id() != Some(&session_key("43")) {
+        key(&mut view, KeyCode::Down);
+    }
+
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    assert_eq!(view.selected_id(), Some(&session_key("43")));
+    key(&mut view, KeyCode::Up);
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
+    key(&mut view, KeyCode::BackTab);
+
+    assert_eq!(view.selected_id(), Some(&session_key("42")));
+}
+
+#[test]
+fn returning_to_inactive_through_an_empty_tab_restores_its_selection() {
+    let mut view = fixture();
+    let mut rows = view.rows.clone();
+    for row in &mut rows {
+        row.status = match row.status {
+            SessionStatus::Working => SessionStatus::Inactive,
+            SessionStatus::NeedsInput => SessionStatus::Ready,
+            status => status,
+        };
+    }
+    view.set_sessions(rows, true);
+    key(&mut view, KeyCode::BackTab);
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
+    while view.selected_id() != Some(&session_key("45")) {
+        key(&mut view, KeyCode::Down);
+    }
+
+    for _ in 0..3 {
+        key(&mut view, KeyCode::Tab);
+    }
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Working");
+    assert_eq!(view.selected_id(), None);
+    for _ in 0..2 {
+        key(&mut view, KeyCode::Tab);
+    }
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
+    assert_eq!(view.selected_id(), Some(&session_key("45")));
+}
+
+#[test]
 fn empty_active_tab_does_not_page_inactive_sessions() {
     let mut view = test_view(Grouping::Project, true);
     view.set_sessions(

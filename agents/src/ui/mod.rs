@@ -155,6 +155,8 @@ pub struct View {
     pinned: Vec<SessionKey>,
     hidden: HashSet<SessionKey>,
     status_filter: usize,
+    /// The task each tab shows selected when it is entered, by tab index.
+    tab_selections: Vec<Option<SessionKey>>,
     search: line_edit::LineEdit,
     searching: bool,
     rename_target: Option<SessionKey>,
@@ -227,6 +229,7 @@ impl View {
             pinned: Vec::new(),
             hidden: HashSet::new(),
             status_filter: 0,
+            tab_selections: vec![None; TASK_FILTERS.len()],
             search: line_edit::LineEdit::default(),
             searching: false,
             rename_target: None,
@@ -289,6 +292,9 @@ impl View {
             })
         };
         self.reconcile_selection();
+        if self.status_filter != status_filter && self.selected_id() == selected.as_ref() {
+            self.remember_selection();
+        }
         if self.selected_id() != selected.as_ref() {
             self.text_selection.borrow_mut().take();
             self.log_search.clear();
@@ -320,7 +326,7 @@ impl View {
                 .get(position.min(visible.len().saturating_sub(1)))
                 .copied()
                 .unwrap_or(usize::MAX);
-            self.set_selected(selected);
+            self.select(selected);
         }
         self.reconcile_selection();
     }
@@ -504,6 +510,24 @@ impl View {
             self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
         }
         self.selected = selected;
+    }
+
+    /// Selects the row the user chose.
+    fn select(&mut self, selected: usize) {
+        self.set_selected(selected);
+        self.remember_selection();
+    }
+
+    /// Makes the selected task the selection of every tab that lists it.
+    fn remember_selection(&mut self) {
+        let Some((id, status)) = self.selected_row().map(|s| (s.id.clone(), s.status)) else {
+            return;
+        };
+        for (tab, (_, statuses)) in TASK_FILTERS.iter().enumerate() {
+            if statuses.contains(&status) {
+                self.tab_selections[tab] = Some(id.clone());
+            }
+        }
     }
 
     fn reconcile_selection(&mut self) {

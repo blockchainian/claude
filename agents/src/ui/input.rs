@@ -10,6 +10,18 @@ impl View {
         }
         self.status_filter = idx;
         self.viewport.borrow_mut().scroll = 0;
+        let visible = self.visible_indices();
+        let remembered = self.tab_selections[idx].as_ref().and_then(|id| {
+            visible
+                .iter()
+                .copied()
+                .find(|&index| &self.rows[index].id == id)
+        });
+        self.set_selected(
+            remembered
+                .or_else(|| self.selectable_indices().first().copied())
+                .unwrap_or(usize::MAX),
+        );
         self.reconcile_selection();
     }
 
@@ -124,7 +136,7 @@ impl View {
                     let task = match entries.get(entry) {
                         Some(super::navigation::CenterRow::Task(index)) => *index,
                         Some(super::navigation::CenterRow::ShowMore) => {
-                            self.set_selected(usize::MAX);
+                            self.select(usize::MAX);
                             return self.activate();
                         }
                         _ => return None,
@@ -133,7 +145,7 @@ impl View {
                     let double = self.last_click.take().is_some_and(|(last, at)| {
                         last == task && now.duration_since(at) < DOUBLE_CLICK_INTERVAL
                     });
-                    self.set_selected(task);
+                    self.select(task);
                     if double {
                         return self.activate();
                     }
@@ -242,7 +254,7 @@ impl View {
         } else {
             current.checked_sub(1).unwrap_or(visible.len() - 1)
         }];
-        self.set_selected(selected);
+        self.select(selected);
     }
     fn activate(&mut self) -> Option<Action> {
         if self
@@ -427,7 +439,7 @@ impl View {
                             .find(|&i| self.rows.get(i).is_some_and(|s| self.matches_search(s)))
                             .or_else(|| selectable.first().copied())
                             .unwrap_or(usize::MAX);
-                        self.set_selected(selected);
+                        self.select(selected);
                     } else {
                         self.reconcile_selection();
                     }
@@ -490,7 +502,7 @@ impl View {
                     .first()
                     .copied()
                     .unwrap_or(usize::MAX);
-                self.set_selected(selected);
+                self.select(selected);
             }
             KeyCode::End => {
                 let selected = self
@@ -498,7 +510,7 @@ impl View {
                     .last()
                     .copied()
                     .unwrap_or(usize::MAX);
-                self.set_selected(selected);
+                self.select(selected);
             }
             KeyCode::Enter | KeyCode::Right => return self.activate(),
             KeyCode::Esc => return Some(Action::Back),
