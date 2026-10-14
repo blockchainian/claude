@@ -108,7 +108,7 @@ impl View {
         buf: &mut Buffer,
         cwd: &std::path::Path,
     ) {
-        let (label_style, body_style) = super::style::log_styles(&event.kind);
+        let (label_style, _) = super::style::log_styles(&event.kind);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown(event));
         let header = Line::from(vec![
             Span::styled(time.to_owned(), time_style),
@@ -116,58 +116,54 @@ impl View {
             Span::styled(kind_label(&event.kind), label_style),
         ]);
         super::render::line(header, super::render::row(area, 1, 1), buf);
-        let body = open_text(event);
-        let options = super::line_truncation::prose_wrap_options(usize::from(area.width));
-        let mut lines = if is_prose(&event.kind) {
-            super::markdown::render_with_options(&body, options)
-        } else {
-            textwrap::wrap(&body, options)
-                .into_iter()
-                .map(|line| Line::from(line.into_owned()))
-                .collect()
-        };
-        for line in &mut lines {
-            for span in &mut line.spans {
-                span.style = body_style.patch(span.style);
-            }
-        }
         let body_area = super::render::row(area, 3, area.height.saturating_sub(3));
-        let maps = super::text_selection_layout::map_lines(&body, &lines, is_prose(&event.kind));
-        let links = if is_prose(&event.kind) {
-            super::links::text_links(&body, cwd, &event.images)
-        } else {
-            super::links::path_links(&body, &tool_paths(event), cwd)
-        };
+        let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
-        viewport.log_open_max = lines.len().saturating_sub(usize::from(body_area.height));
-        viewport.log_open_scroll = viewport
-            .log_open_scroll
-            .min(lines.len().saturating_sub(usize::from(body_area.height)));
+        let layout = match viewport.log_open_layout.take() {
+            Some(layout) if layout.width == area.width => layout,
+            _ => open_layout(event, area.width, cwd),
+        };
+        viewport.log_open_max = layout.lines.len().saturating_sub(height);
+        viewport.log_open_scroll = viewport.log_open_scroll.min(viewport.log_open_max);
+        let scroll = viewport.log_open_scroll;
+        let rows: Vec<_> = layout
+            .rows
+            .iter()
+            .skip(scroll)
+            .take(height)
+            .enumerate()
+            .map(|(row, (segment, cells))| text_selection::DrawnRow {
+                segment: *segment,
+                x: body_area.x,
+                y: body_area.y + row as u16,
+                cells: cells.clone(),
+            })
+            .collect();
+        viewport.log_links = rows
+            .iter()
+            .flat_map(|row| {
+                super::links::drawn_links(std::slice::from_ref(row), &layout.links[row.segment])
+            })
+            .collect();
         viewport.log_text = text_selection::TextRegion {
             area: body_area,
-            sources: vec![text_selection::Source {
-                id: 0,
-                text: body,
-                label: copied_label(event),
-            }],
-            rows: maps
-                .into_iter()
-                .skip(viewport.log_open_scroll)
-                .take(usize::from(body_area.height))
-                .enumerate()
-                .map(|(row, cells)| text_selection::DrawnRow {
-                    segment: 0,
-                    x: body_area.x,
-                    y: body_area.y + row as u16,
-                    cells,
-                })
-                .collect(),
+            sources: layout.sources.clone(),
+            rows,
         };
-        viewport.log_links = super::links::drawn_links(&viewport.log_text.rows, &links);
-        Paragraph::new(lines.split_off(viewport.log_open_scroll)).render(body_area, buf);
-        super::links::underline(buf, &viewport.log_links);
+        let visible = layout.lines
+            [scroll.min(layout.lines.len())..(scroll + height).min(layout.lines.len())]
+            .to_vec();
+        viewport.log_open_layout = Some(layout);
         drop(viewport);
+        Paragraph::new(visible).render(body_area, buf);
+        super::links::underline(buf, &self.viewport.borrow().log_links);
         self.highlight_text_selection(text_selection::Panel::Log, buf);
+    }
+
+    /// Opens `event` in the log panel, or closes the open event, dropping its cached layout.
+    pub(super) fn set_log_open(&mut self, event: Option<Event>) {
+        self.log_open = event;
+        self.viewport.borrow_mut().log_open_layout = None;
     }
 
     /// Replaces the task log. Off the newest row, or while a mouse button is held, the rows on
@@ -179,6 +175,15 @@ impl View {
             .map(|(_, event)| event.started_at);
         self.log = events;
         self.prepare_log_search();
+        if let Some(open) = &self.log_open
+            && let Some(current) = self
+                .log
+                .iter()
+                .find(|event| event.started_at == open.started_at && event.kind == open.kind)
+            && current != open
+        {
+            self.set_log_open(Some(current.clone()));
+        }
         let following = self.log_scroll() == 0 && self.mouse_press.is_none();
         let Some(newest) = newest.filter(|_| !following) else {
             return;
@@ -400,9 +405,97 @@ fn render_event(
     (cut, links)
 }
 
+/// The open log event laid out at one panel width, reused every frame until the event or
+/// the width changes.
+pub(super) struct OpenLayout {
+    width: u16,
+    lines: Vec<Line<'static>>,
+    /// Each line's text part and the cells mapping it back to that part's bytes.
+    rows: Vec<(usize, Vec<(std::ops::Range<u16>, std::ops::Range<usize>)>)>,
+    sources: Vec<text_selection::Source>,
+    /// The links in each text part.
+    links: Vec<Vec<super::links::Link>>,
+}
+
+fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
+    let body_style = super::style::log_styles(&event.kind).1;
+    let parts: Vec<(String, Vec<Line<'static>>, bool, Vec<super::links::Link>)> =
+        if shows_calls(event) {
+            super::tool_detail::parts(event)
+                .into_iter()
+                .map(|part| {
+                    let markdown = part.markdown();
+                    let lines = part.lines(usize::from(width), body_style);
+                    let links = if markdown {
+                        super::links::text_links(&part.source, cwd, &[])
+                    } else {
+                        super::links::path_links(&part.source, &free_paths(&part.source), cwd)
+                    };
+                    (part.source, lines, markdown, links)
+                })
+                .collect()
+        } else {
+            let body = event.body.clone();
+            let options = super::line_truncation::prose_wrap_options(usize::from(width));
+            let mut lines = if is_prose(&event.kind) {
+                super::markdown::render_with_options(&body, options)
+            } else {
+                textwrap::wrap(&body, options)
+                    .into_iter()
+                    .map(|line| Line::from(line.into_owned()))
+                    .collect()
+            };
+            for line in &mut lines {
+                for span in &mut line.spans {
+                    span.style = body_style.patch(span.style);
+                }
+            }
+            let links = if is_prose(&event.kind) {
+                super::links::text_links(&body, cwd, &event.images)
+            } else {
+                super::links::path_links(&body, &tool_paths(event), cwd)
+            };
+            vec![(body, lines, is_prose(&event.kind), links)]
+        };
+    let mut layout = OpenLayout {
+        width,
+        lines: Vec::new(),
+        rows: Vec::new(),
+        sources: Vec::new(),
+        links: Vec::new(),
+    };
+    for (id, (source, lines, markdown, links)) in parts.into_iter().enumerate() {
+        let maps = super::text_selection_layout::map_lines(&source, &lines, markdown);
+        layout
+            .rows
+            .extend(maps.into_iter().map(|cells| (id, cells)));
+        layout.lines.extend(lines);
+        layout.sources.push(text_selection::Source {
+            id,
+            text: source,
+            label: copied_label(event),
+        });
+        layout.links.push(links);
+    }
+    layout
+}
+
+/// Whether an open event draws its tool calls instead of its row body.
+fn shows_calls(event: &Event) -> bool {
+    matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) && !event.calls.is_empty()
+}
+
 /// The full text an open log event shows below its header.
 pub(super) fn open_text(event: &Event) -> String {
-    event.body.clone()
+    if shows_calls(event) {
+        super::tool_detail::parts(event)
+            .into_iter()
+            .map(|part| part.source)
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        event.body.clone()
+    }
 }
 
 /// The footer confirmation after copying an open log event, such as "Copied user message".
@@ -513,21 +606,29 @@ fn display_paths(event: &Event) -> (String, Vec<std::ops::Range<usize>>) {
 /// other absolute or home path its free text mentions.
 fn tool_paths(event: &Event) -> Vec<std::ops::Range<usize>> {
     let mut paths = event.paths.clone();
+    for range in free_paths(&event.body) {
+        if !paths
+            .iter()
+            .any(|known| known.start < range.end && range.start < known.end)
+        {
+            paths.push(range);
+        }
+    }
+    paths.sort_by_key(|range| range.start);
+    paths
+}
+
+/// The absolute and home paths the free text mentions.
+fn free_paths(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut paths = Vec::new();
     let mut start = 0;
-    for part in event.body.split_inclusive(char::is_whitespace) {
+    for part in text.split_inclusive(char::is_whitespace) {
         let word = part.trim_end_matches(char::is_whitespace);
         if let Some(range) = super::line_truncation::wrapped_path(word) {
-            let range = start + range.start..start + range.end;
-            if !paths
-                .iter()
-                .any(|known| known.start < range.end && range.start < known.end)
-            {
-                paths.push(range);
-            }
+            paths.push(start + range.start..start + range.end);
         }
         start += part.len();
     }
-    paths.sort_by_key(|range| range.start);
     paths
 }
 

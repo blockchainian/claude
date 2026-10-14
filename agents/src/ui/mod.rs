@@ -96,6 +96,8 @@ struct Viewport {
     /// Lines of the open log event scrolled off the top.
     log_open_scroll: usize,
     log_open_max: usize,
+    /// The open log event's layout, built on the first frame after it opens or the width changes.
+    log_open_layout: Option<log::OpenLayout>,
     log_text: text_selection::TextRegion,
     details_text: text_selection::TextRegion,
     task_text: text_selection::TextRegion,
@@ -501,7 +503,7 @@ impl View {
 
     /// Closes the open log event and scrolls the log back to its newest row.
     fn show_newest_log(&mut self) {
-        self.log_open = None;
+        self.set_log_open(None);
         let mut viewport = self.viewport.borrow_mut();
         viewport.log_scroll = 0;
         viewport.log_open_scroll = 0;

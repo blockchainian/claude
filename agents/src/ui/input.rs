@@ -158,7 +158,7 @@ impl View {
                 } else if self.log_open.is_none()
                     && let Some((index, true)) = log_row
                 {
-                    self.log_open = self.log.get(index).cloned();
+                    self.set_log_open(self.log.get(index).cloned());
                     self.viewport.borrow_mut().log_open_scroll = 0;
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();
@@ -171,7 +171,7 @@ impl View {
                     self.last_copy_click = Some((text, now));
                 }
             }
-            MouseEventKind::Up(MouseButton::Right) => self.log_open = None,
+            MouseEventKind::Up(MouseButton::Right) => self.set_log_open(None),
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let forward = mouse.kind == MouseEventKind::ScrollDown;
                 if over_tabs {

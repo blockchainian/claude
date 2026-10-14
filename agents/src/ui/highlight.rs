@@ -97,7 +97,9 @@ fn convert(style: syntect::highlighting::Style) -> Style {
 
 /// `text` as one unstyled line per source line.
 pub(super) fn plain_lines(text: &str) -> Vec<Line<'static>> {
-    text.lines().map(|line| Line::from(line.to_owned())).collect()
+    text.lines()
+        .map(|line| Line::from(line.to_owned()))
+        .collect()
 }
 
 /// Unified diff hunks: removed lines red, added lines green, hunk headers dim.

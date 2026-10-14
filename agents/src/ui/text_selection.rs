@@ -195,28 +195,29 @@ impl View {
     }
 
     pub(super) fn extend_text_selection(&mut self, x: u16, y: u16) {
-        let mut selection = self.text_selection.borrow_mut();
-        let Some(selection) = selection.as_mut() else {
-            return;
-        };
-        if selection.panel.is_list() && !selection.dragged && selection.pointer == (x, y) {
-            return;
-        }
-        selection.dragged = true;
-        if selection.panel == Panel::LogList {
-            self.log_open = None;
-        }
-        selection.pointer = (x, y);
-        if let Some(anchor) = Self::text_region(&self.viewport.borrow(), selection.panel).hit(
-            x,
-            y,
-            false,
-            selection.panel.is_list(),
-        ) {
-            selection.end = anchor;
+        let panel =
+            {
+                let mut selection = self.text_selection.borrow_mut();
+                let Some(selection) = selection.as_mut() else {
+                    return;
+                };
+                if selection.panel.is_list() && !selection.dragged && selection.pointer == (x, y) {
+                    return;
+                }
+                selection.dragged = true;
+                selection.pointer = (x, y);
+                if let Some(anchor) = Self::text_region(&self.viewport.borrow(), selection.panel)
+                    .hit(x, y, false, selection.panel.is_list())
+                {
+                    selection.end = anchor;
+                }
+                selection.panel
+            };
+        if panel == Panel::LogList {
+            self.set_log_open(None);
         }
         self.last_copy_click = None;
-        if selection.panel.is_list() {
+        if panel.is_list() {
             self.last_click = None;
         }
     }
