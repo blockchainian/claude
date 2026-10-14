@@ -45,12 +45,11 @@ fn inline_array_exec_shows_each_completed_command_in_record_order() {
         .filter(|record| record["payload"]["item"]["type"] == "CommandExecution")
         .collect();
     assert_eq!(entries.len(), 2);
+    let bodies: Vec<_> = entries.iter().map(|entry| entry.body.as_str()).collect();
+    assert_eq!(bodies, ["cat, git {log, status}, shasum", "gh pr"]);
     for (entry, record) in entries.iter().zip(&completed) {
         assert_eq!(entry.kind, Kind::Tool);
-        let command = record["payload"]["item"]["command"][2].as_str().unwrap();
-        assert_eq!(entry.body, format!("exec_command {command}"));
         assert_record_timing(entry, record);
-        assert!(!entry.body.contains("Promise.all"));
     }
     assert_eq!(entries[1].previous_end, entries[0].ended_at);
 }
@@ -60,7 +59,7 @@ fn single_command_uses_exit_code_and_inner_duration() {
     let entries = events("command");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, Kind::Tool);
-    assert_eq!(entries[0].body, "exec_command type gwta (exit 1)");
+    assert_eq!(entries[0].body, "type (exit 1)");
     assert_record_timing(&entries[0], &records("command")[1]);
     let activity = summary(&fixture("command")).unwrap().activity.unwrap();
     assert_eq!(activity.label, entries[0].body);
@@ -103,7 +102,7 @@ fn pure_js_exec_and_output_never_become_activity() {
 fn long_command_written_after_wrapper_output_retains_command_duration() {
     let entries = events("late-command");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].body, "exec_command sleep 300");
+    assert_eq!(entries[0].body, "sleep");
     assert_record_timing(&entries[0], &records("late-command")[2]);
     assert!(entries[0].ended_at.unwrap() - entries[0].started_at > TimeDelta::seconds(299));
 }

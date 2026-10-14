@@ -17,7 +17,7 @@
         1s Tool      web.search site:pond.dflow.net "dev-quote-api.dflow.net"
        28s Tool      claude.ask_claude
         0s Tool      apply_patch ~/Documents/case-studies/khaby-lame/drafts/06.md
-        0s Tool      exec_command type gwta (exit 1)
+        0s Tool      type (exit 1)
 
 
 

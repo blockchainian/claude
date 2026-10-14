@@ -230,7 +230,12 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
             } else {
                 command.join(" ")
             };
-            let mut body = format!("exec_command {text}");
+            let summary = crate::shell_summary::summarize_shell_commands(&text);
+            let mut body = if summary.is_empty() {
+                format!("exec_command {text}")
+            } else {
+                summary
+            };
             if let Some(code) = optional::<i32>(item, "exit_code")?
                 && code != 0
             {
