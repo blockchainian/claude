@@ -18,7 +18,7 @@ use std::{
     fs::File,
     io::{self, BufRead},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
 };
 
 const PAGE_SIZE: usize = 10;
@@ -383,64 +383,6 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
         .collect())
 }
 
-fn process_exists(pid: u32) -> io::Result<bool> {
-    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
-        return Ok(true);
-    }
-    let error = io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        Ok(false)
-    } else {
-        Err(error)
-    }
-}
-
-fn stop_process(home: &Path, session: &Session, process: &Process) -> io::Result<()> {
-    use std::time::{Duration, Instant};
-    let pid = process.pid;
-    if pid == 0 || pid > i32::MAX as u32 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Invalid process id",
-        ));
-    }
-    for (signal, timeout) in [(libc::SIGTERM, 5), (libc::SIGKILL, 2)] {
-        if !process_exists(pid)? {
-            return Ok(());
-        }
-        // Recheck both process identity and session ownership before each signal.
-        let starts = process_starts(&[pid])?;
-        if process.started_at.is_none() || starts.get(&pid).copied() != process.started_at {
-            return Err(io::Error::other("Session process start time changed"));
-        }
-        if live_writers(&home.join("thread-writer-locks"))?.get(&session.id.id) != Some(&pid) {
-            return Err(io::Error::other("Session writer lock changed"));
-        }
-        if unsafe { libc::kill(pid as libc::pid_t, signal) } != 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
-                return Ok(());
-            }
-            return Err(error);
-        }
-        let deadline = Instant::now() + Duration::from_secs(timeout);
-        while process_exists(pid)? {
-            if Instant::now() >= deadline {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-    }
-    if process_exists(pid)? {
-        Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "Session process did not exit",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
 impl Provider for CodexProvider {
     fn id(&self) -> ProviderId {
         ProviderId::Codex
@@ -531,23 +473,7 @@ impl Provider for CodexProvider {
         if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        if let Some(process) = &session.process {
-            stop_process(&self.home, session, process)?;
-        }
-        if live_writers(&self.home.join("thread-writer-locks"))?.contains_key(&session.id.id) {
-            return Err(io::Error::other("Session writer lock changed"));
-        }
-        let output = Command::new("codex")
-            .args(["delete", "--force", &session.id.id])
-            .env("CODEX_HOME", &self.home)
-            .stdin(Stdio::null())
-            .output()?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(io::Error::other(
-                String::from_utf8_lossy(&output.stderr).into_owned(),
-            ))
-        }
+        let mut client = app_server::Client::connect(&self.home)?;
+        app_server::thread::delete(&mut client, &session.id.id)
     }
 }

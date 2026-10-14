@@ -1,6 +1,9 @@
 use crate::providers::codex::*;
 use serde_json::{Value, json};
-use std::time::{Duration, Instant};
+use std::{
+    process::Stdio,
+    time::{Duration, Instant},
+};
 
 struct Cleanup(String, PathBuf, bool);
 impl Drop for Cleanup {
@@ -8,13 +11,8 @@ impl Drop for Cleanup {
         if !self.2 {
             return;
         }
-        let status = Command::new("codex")
-            .args(["delete", "--force", &self.0])
-            .env("CODEX_HOME", &self.1)
-            .stdin(Stdio::null())
-            .status()
-            .unwrap();
-        assert!(status.success(), "throwaway cleanup failed");
+        let mut client = super::Client::connect(&self.1).unwrap();
+        super::thread::delete(&mut client, &self.0).expect("throwaway cleanup failed");
     }
 }
 
@@ -204,4 +202,166 @@ fn stop_and_archive_thread(manager: bool) {
     provider.delete(&session).unwrap();
     cleanup.2 = false;
     assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
+}
+
+#[test]
+fn delete_uses_thread_rpc_without_signalling_the_writer() {
+    use std::os::unix::net::UnixListener;
+    use tungstenite::Message;
+
+    for live in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        Connection::open(home.path().join("state_5.sqlite"))
+            .unwrap()
+            .execute_batch(include_str!("../../../../tests/fixtures/codex-state.sql"))
+            .unwrap();
+        let provider = CodexProvider::new(home.path().into(), home.path().join("manager"));
+        let mut session = stored_session(&provider, "thread-0");
+        if live {
+            // The writer may be a shared daemon: its identity must not affect deletion.
+            session.process = Some(Process {
+                pid: std::process::id(),
+                label: Some("codex".into()),
+                started_at: None,
+            });
+        }
+        let control = home.path().join("app-server-control");
+        std::fs::create_dir(&control).unwrap();
+        let listener = UnixListener::bind(control.join("app-server-control.sock")).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return false;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("{error}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            let initialize: Value =
+                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(initialize["method"], "initialize");
+            socket
+                .send(Message::text(
+                    json!({"id": initialize["id"], "result": {"userAgent": "codex"}}).to_string(),
+                ))
+                .unwrap();
+            let initialized: Value =
+                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(initialized, json!({"method": "initialized"}));
+            let request: Value =
+                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(
+                request,
+                json!({"id": 2, "method": "thread/delete", "params": {"threadId": "thread-0"}})
+            );
+            // Recorded from the live daemon deleting our throwaway thread.
+            let mut response: Value = serde_json::from_str(include_str!(
+                "../../../../tests/fixtures/codex-delete-response.json"
+            ))
+            .unwrap();
+            response["id"] = request["id"].clone();
+            socket.send(Message::text(response.to_string())).unwrap();
+            true
+        });
+        let result = provider.delete(&session);
+        let received = server.join().unwrap();
+        assert!(received, "delete did not reach thread/delete: {result:?}");
+        result.unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires the shared Codex daemon and local auth; creates and deletes idle, running and archived throwaway threads"]
+fn delete_real_codex_sessions() {
+    let provider = CodexProvider::from_config().unwrap();
+    for (active, archived) in [(false, false), (true, false), (false, true)] {
+        let (id, mut cleanup) = throwaway_thread(&provider);
+        let mut owner = super::Client::connect(&provider.home).unwrap();
+        let _: Value = owner
+            .request("thread/resume", json!({"threadId": id}))
+            .unwrap();
+        if active {
+            let started: Value = owner.request("turn/start", json!({
+                "threadId": id,
+                "input": [{"type": "text", "text": "Do not use tools. Write a detailed 10000-word essay about rivers."}],
+                "effort": "low",
+            })).unwrap();
+            assert_eq!(started["turn"]["status"], "inProgress");
+        }
+        let mut session = stored_session(&provider, &id);
+        let lock = provider
+            .home
+            .join("thread-writer-locks")
+            .join(format!("{id}.lock"));
+        assert!(lock_held(&lock).unwrap());
+        let pid = live_writers(&provider.home.join("thread-writer-locks")).unwrap()[&id];
+        let start = crate::processes::start_time(pid).expect("writer must be alive");
+        session.process = Some(Process {
+            pid,
+            label: Some("codex".into()),
+            started_at: Some(start),
+        });
+        let rollout = session.transcript.clone().unwrap();
+        assert!(rollout.exists());
+        if archived {
+            provider.archive(&session).unwrap();
+            let path: String = Connection::open_with_flags(
+                provider.home.join("state_5.sqlite"),
+                OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap()
+            .query_row(
+                "SELECT rollout_path FROM threads WHERE id=?1",
+                [&id],
+                |row| row.get(0),
+            )
+            .unwrap();
+            session.transcript = Some(PathBuf::from(path));
+        }
+        let deleted_rollout = session.transcript.clone().unwrap();
+        provider.delete(&session).unwrap();
+        cleanup.2 = false;
+        assert!(!rollout.exists());
+        assert!(!deleted_rollout.exists());
+        assert!(!lock_held(&lock).unwrap());
+        assert!(!lock.exists());
+        let loaded: Value = owner.request("thread/loaded/list", json!({})).unwrap();
+        assert!(
+            !loaded["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|loaded| loaded == &id)
+        );
+        assert_eq!(
+            crate::processes::start_time(pid),
+            Some(start),
+            "shared daemon must survive deletion"
+        );
+        let count: i64 = Connection::open_with_flags(
+            provider.home.join("state_5.sqlite"),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM threads WHERE id=?1", [&id], |row| {
+            row.get(0)
+        })
+        .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(
+            provider.delete(&session).unwrap_err().to_string(),
+            format!("no rollout found for thread id {id}")
+        );
+    }
 }

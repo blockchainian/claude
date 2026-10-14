@@ -258,7 +258,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
 }
 
 #[test]
-fn delete_rejects_children_and_changed_process_identity() {
+fn delete_rejects_children_and_requires_the_daemon() {
     let (_dir, provider) = fixture();
     let mut session = provider.snapshot(1).unwrap().sessions.remove(0);
     session.parent = Some(key("parent".into()));
@@ -267,223 +267,15 @@ fn delete_rejects_children_and_changed_process_identity() {
         io::ErrorKind::Unsupported
     );
     session.parent = None;
-    let pid = std::process::id();
-    let start = process_starts(&[pid]).unwrap()[&pid];
-    for started_at in [None, Some(start - chrono::Duration::seconds(1))] {
-        session.process = Some(Process {
-            pid,
-            label: Some("codex".into()),
-            started_at,
-        });
-        assert_eq!(
-            provider.delete(&session).unwrap_err().to_string(),
-            "Session process start time changed"
-        );
-        assert!(process_exists(pid).unwrap());
-    }
-    session.process.as_mut().unwrap().started_at = Some(start);
+    session.process = Some(Process {
+        pid: std::process::id(),
+        label: Some("codex".into()),
+        started_at: None,
+    });
     assert_eq!(
         provider.delete(&session).unwrap_err().to_string(),
-        "Session writer lock changed"
+        "Codex's app-server daemon isn't running"
     );
-    assert!(process_exists(pid).unwrap());
-}
-
-#[test]
-#[ignore = "creates throwaway sessions with the real codex exec binary and uses local Codex auth"]
-fn delete_real_codex_sessions() {
-    use std::{
-        fs,
-        sync::{Arc, Mutex},
-        time::{Duration, Instant},
-    };
-
-    struct Exec(Arc<Mutex<std::process::Child>>);
-    impl Drop for Exec {
-        fn drop(&mut self) {
-            let mut child = self.0.lock().unwrap();
-            if child.try_wait().unwrap().is_none() {
-                child.kill().unwrap();
-                child.wait().unwrap();
-            }
-        }
-    }
-
-    let dir = tempfile::tempdir().unwrap();
-    let auth_home = std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap()).join(".codex"));
-    let auth = auth_home.join("auth.json");
-    if auth.is_file() {
-        std::os::unix::fs::symlink(auth, dir.path().join("auth.json")).unwrap();
-    }
-    let home = dir.path().canonicalize().unwrap();
-    let provider = CodexProvider::new(home.clone(), home.join("manager"));
-    for archived in [false, true] {
-        let child = Command::new("codex")
-            .args([
-                "exec",
-                "--ignore-user-config",
-                "--skip-git-repo-check",
-                "--json",
-                "Run sleep 30 once, then reply OK.",
-            ])
-            .env("CODEX_HOME", dir.path())
-            .current_dir(dir.path())
-            .stdin(Stdio::null())
-            .stdout(File::create(dir.path().join("exec.stdout")).unwrap())
-            .stderr(File::create(dir.path().join("exec.stderr")).unwrap())
-            .spawn()
-            .unwrap();
-        let exec = Exec(Arc::new(Mutex::new(child)));
-        let child = exec.0.clone();
-        let reaper = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(60);
-            loop {
-                let mut child = child.lock().unwrap();
-                if let Some(status) = child.try_wait().unwrap() {
-                    return status;
-                }
-                if Instant::now() >= deadline {
-                    child.kill().unwrap();
-                    return child.wait().unwrap();
-                }
-                drop(child);
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        });
-        let deadline = Instant::now() + Duration::from_secs(30);
-        let mut session = loop {
-            if let Some(session) = provider
-                .snapshot(1)
-                .unwrap()
-                .sessions
-                .into_iter()
-                .find(|session| session.process.is_some())
-            {
-                break session;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "codex exec did not register a live throwaway session"
-            );
-            if exec.0.lock().unwrap().try_wait().unwrap().is_some() {
-                let diagnostics = tempfile::tempdir().unwrap().keep();
-                fs::copy(
-                    dir.path().join("exec.stderr"),
-                    diagnostics.join("exec.stderr"),
-                )
-                .unwrap();
-                fs::copy(
-                    dir.path().join("exec.stdout"),
-                    diagnostics.join("exec.stdout"),
-                )
-                .unwrap();
-                panic!(
-                    "codex exec exited before registering a live session; diagnostics: {}",
-                    diagnostics.display()
-                );
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        };
-        let transcript = session.transcript.clone().unwrap();
-        assert!(session.process.as_ref().unwrap().started_at.is_some());
-
-        if !archived {
-            let output = Command::new("codex")
-                .args(["delete", &session.id.id])
-                .env("CODEX_HOME", &home)
-                .stdin(Stdio::null())
-                .output()
-                .unwrap();
-            assert!(!output.status.success());
-            assert!(String::from_utf8_lossy(&output.stderr).contains("--force"));
-            let output = Command::new("codex")
-                .args(["delete", "--force", &session.id.id])
-                .env("CODEX_HOME", &home)
-                .stdin(Stdio::null())
-                .output()
-                .unwrap();
-            assert!(!output.status.success(), "CLI must reject an active writer");
-            assert!(process_exists(session.process.as_ref().unwrap().pid).unwrap());
-            assert!(transcript.exists());
-        }
-
-        if archived {
-            stop_process(&home, &session, session.process.as_ref().unwrap()).unwrap();
-            session.process = None;
-            let output = Command::new("codex")
-                .args(["archive", &session.id.id])
-                .env("CODEX_HOME", dir.path())
-                .stdin(Stdio::null())
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert!(
-                !provider
-                    .snapshot(1)
-                    .unwrap()
-                    .sessions
-                    .iter()
-                    .any(|candidate| candidate.id == session.id)
-            );
-            let rollout: String = Connection::open(dir.path().join("state_5.sqlite"))
-                .unwrap()
-                .query_row(
-                    "SELECT rollout_path FROM threads WHERE id=?1",
-                    [&session.id.id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            session.transcript = Some(PathBuf::from(rollout));
-            assert!(
-                session
-                    .transcript
-                    .as_ref()
-                    .unwrap()
-                    .starts_with(home.join("archived_sessions"))
-            );
-        }
-        let deleted_rollout = session.transcript.clone().unwrap();
-        let manager_state = provider.manager_home.join("state.json");
-        fs::create_dir_all(&provider.manager_home).unwrap();
-        let manager_bytes =
-            include_bytes!("../../../tests/fixtures/codex-manager/attached-state.json");
-        fs::write(&manager_state, manager_bytes).unwrap();
-        provider.delete(&session).unwrap();
-        reaper.join().unwrap();
-        assert!(!transcript.exists());
-        assert!(!deleted_rollout.exists());
-        assert!(
-            !dir.path()
-                .join("thread-writer-locks")
-                .join(format!("{}.lock", session.id.id))
-                .exists()
-        );
-        assert!(
-            !provider
-                .snapshot(1)
-                .unwrap()
-                .sessions
-                .iter()
-                .any(|candidate| candidate.id == session.id)
-        );
-        assert_eq!(fs::read(&manager_state).unwrap(), manager_bytes);
-        let output = Command::new("codex")
-            .args(["delete", "--force", &session.id.id])
-            .env("CODEX_HOME", dir.path())
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
-        assert!(!output.status.success());
-        let error = provider.delete(&session).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::Other);
-        assert_eq!(error.to_string(), String::from_utf8_lossy(&output.stderr));
-    }
 }
 
 #[test]
@@ -1055,6 +847,6 @@ fn manager_thread_operations_use_the_provider_paths() {
     });
     assert_eq!(
         provider.delete(&session).unwrap_err().to_string(),
-        "Session process start time changed"
+        "Codex's app-server daemon isn't running"
     );
 }

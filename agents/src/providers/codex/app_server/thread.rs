@@ -36,6 +36,15 @@ pub(in crate::providers::codex) fn archive(client: &mut Client, thread_id: &str)
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct DeleteResponse {}
+
+/// Interrupts any running turn and unloads the thread before removing its persisted data.
+pub(in crate::providers::codex) fn delete(client: &mut Client, thread_id: &str) -> io::Result<()> {
+    let _: DeleteResponse = client.request("thread/delete", ThreadParams { thread_id })?;
+    Ok(())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TurnsListParams<'a> {
