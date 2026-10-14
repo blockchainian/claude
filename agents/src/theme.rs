@@ -185,6 +185,18 @@ pub fn accent(slot: usize) -> Color {
     Color::Rgb(r, g, b)
 }
 
+/// How many accents the palette holds.
+pub fn accent_count() -> usize {
+    let accents = ACCENTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if accents.is_empty() {
+        DARK.len()
+    } else {
+        accents.len()
+    }
+}
+
 /// OKLab lightness, which follows how light a color looks to people.
 fn lightness((r, g, b): Rgb) -> f64 {
     let (r, g, b) = (linear_channel(r), linear_channel(g), linear_channel(b));

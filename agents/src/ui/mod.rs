@@ -22,6 +22,7 @@ mod text_selection;
 mod text_selection_layout;
 mod title_rule;
 mod tool_detail;
+mod usage_chart;
 pub(crate) mod vscode;
 #[cfg(test)]
 pub use style::light_background;
@@ -117,6 +118,12 @@ struct Viewport {
     log_links: Vec<links::DrawnLink>,
     /// Screen cell of the selection marker drawn by the last render.
     marker: Option<(u16, u16)>,
+    /// Where the last render drew the usage chart, and the right bins it could show: the
+    /// one it showed, the newest and the oldest.
+    usage_chart: Rect,
+    usage_end: i64,
+    usage_live_end: i64,
+    usage_min_end: i64,
 }
 
 #[derive(Default)]
@@ -218,6 +225,13 @@ pub struct View {
     /// The newest log event the shown task had when the user left it, standing in for the
     /// loaded log's newest until that task's log loads.
     left_log_newest: Option<DateTime<Utc>>,
+    /// The usage bins of the task the app read last.
+    usage: Option<(
+        SessionKey,
+        std::collections::BTreeMap<i64, crate::usage::Bin>,
+    )>,
+    /// The right bin the user scrolled the usage chart to; `None` follows the newest.
+    usage_anchor: Option<i64>,
 }
 
 impl Default for View {
@@ -289,6 +303,8 @@ impl View {
             panels_task: None,
             task_panels: HashMap::new(),
             left_log_newest: None,
+            usage: None,
+            usage_anchor: None,
         }
     }
 

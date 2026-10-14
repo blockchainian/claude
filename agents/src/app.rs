@@ -90,6 +90,8 @@ pub struct App {
     last_session: Option<SessionKey>,
     log_stamp: Option<LogStamp>,
     full_log_stamp: Option<LogStamp>,
+    /// Token usage of each transcript the user has selected, kept up to date while selected.
+    usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -119,6 +121,7 @@ impl App {
             last_session: None,
             log_stamp: None,
             full_log_stamp: None,
+            usage: std::collections::HashMap::new(),
         }
     }
 
@@ -207,6 +210,7 @@ impl App {
             terminal.draw(|frame| {
                 let area = frame.area();
                 self.refresh_log(self.view.log_event_count(area));
+                self.refresh_usage();
                 self.view.render(area, frame.buffer_mut());
                 if let Some((x, y)) = self.view.cursor_pos(area) {
                     frame.set_cursor_position((x, y));
@@ -228,6 +232,10 @@ impl App {
                 .view
                 .expire_messages(Instant::now())
                 .map_or(timeout, |message| timeout.min(message));
+            let timeout = self
+                .view
+                .usage_redraw_in(chrono::Utc::now())
+                .map_or(timeout, |usage| timeout.min(usage));
             let timeout =
                 crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
             let timeout = if self.view.text_selection_dragging() {
@@ -413,6 +421,27 @@ impl App {
                 self.view
                     .set_notice(Some(format!("Failed to read task log: {error}")));
             }
+        }
+    }
+
+    /// Reads what the selected task's transcript gained and hands its usage to the view.
+    fn refresh_usage(&mut self) {
+        let Some(session) = self
+            .view
+            .selected_id()
+            .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
+        else {
+            return;
+        };
+        let Some(path) = &session.transcript else {
+            return;
+        };
+        let series = self.usage.entry(path.clone()).or_default();
+        let Ok(changed) = series.update(path, session.id.provider) else {
+            return;
+        };
+        if changed || self.view.usage_session() != Some(&session.id) {
+            self.view.set_usage(&session.id, series.bins.clone());
         }
     }
 

@@ -12,6 +12,7 @@ mod state;
 mod terminal_background;
 mod theme;
 mod ui;
+mod usage;
 
 fn main() {
     let result = providers::configured()

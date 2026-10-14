@@ -100,6 +100,11 @@ impl View {
         } else {
             [body, Rect::default(), Rect::default()]
         };
+        // The row above the task log's top rule stays blank for the usage chart.
+        let list = Rect {
+            height: list.height.saturating_sub(u16::from(!log.is_empty())),
+            ..list
+        };
         let search = row(
             list,
             0,
@@ -282,6 +287,12 @@ impl View {
         }
         self.viewport.borrow_mut().log = layout.log;
         self.render_log(inset(layout.log), buf, now);
+        if layout.log.is_empty() {
+            self.viewport.borrow_mut().usage_chart = Rect::default();
+        } else {
+            let rule = Rect::new(layout.list.x, layout.log.y, layout.list.width, 1);
+            self.render_usage_chart(Self::usage_chart_area(rule), buf, now);
+        }
         if let Some(rule) = details_rule {
             self.render_details_title(rule, buf, now);
         }

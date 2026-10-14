@@ -3434,7 +3434,8 @@ fn center_layout_golden_rects_follow_each_area() {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
         assert_eq!(layout.header, Rect::new(5, 7, width, 3));
-        assert_eq!(layout.list, Rect::new(7, 10, list_width, top - 3));
+        // The row above the log's top rule is left for the usage chart.
+        assert_eq!(layout.list, Rect::new(7, 10, list_width, top - 4));
         assert_eq!(layout.log, Rect::new(5, 7 + top, width, log_height));
         assert_eq!(layout.footer, Rect::new(5, 7 + height - 1, width, 1));
         if details_width == 0 {
@@ -3459,7 +3460,7 @@ fn center_layout_log_and_details_hide_thresholds() {
     }
     let layout = view.center_layout(Rect::new(0, 0, 94, 20));
     assert_eq!(layout.log.height, 10);
-    assert_eq!(layout.list.height, 6);
+    assert_eq!(layout.list.height, 5);
     assert!(layout.details.width > 0);
     assert_eq!(
         view.center_layout(Rect::new(0, 0, 93, 20)).details,
@@ -6604,4 +6605,66 @@ fn wrapped_messages_keep_list_text_and_open_paragraphs() {
         assert!(state < traps && traps < first && first < second && second < last);
         assert!(lines[last - 1].is_empty());
     }
+}
+
+#[test]
+fn usage_chart_draws_output_above_and_input_below_the_log_rule_and_scrolls_back() {
+    use crate::usage::{Bin, bin_of};
+    let (mut view, now) = log_fixture();
+    let id = view.rows[view.selected].id.clone();
+    let mut bins = std::collections::BTreeMap::new();
+    bins.insert(
+        bin_of(now),
+        Bin {
+            input: 0,
+            output: 50_000,
+        },
+    );
+    bins.insert(
+        bin_of(now) - 400,
+        Bin {
+            input: 50_000,
+            output: 0,
+        },
+    );
+    view.set_usage(&id, bins);
+    let screen = log_screen(&view, 100, 25, now);
+    let rows: Vec<&str> = screen.lines().collect();
+    let rule = rows
+        .iter()
+        .position(|row| row.contains("Task log example") && row.contains('─'))
+        .unwrap();
+    let braille = |row: &str| {
+        row.chars()
+            .filter(|c| ('\u{2801}'..='\u{28ff}').contains(c))
+            .count()
+    };
+    // Full-height output fills the rule's top dots and the row above; input waits off screen.
+    assert_eq!(braille(rows[rule - 1]), 1);
+    assert_eq!(braille(rows[rule]), 1);
+    assert_eq!(braille(rows[rule + 1]), 0);
+    assert!(rows[rule].starts_with("  ──"));
+
+    for _ in 0..100 {
+        view.scroll_usage_chart(false);
+        log_screen(&view, 100, 25, now);
+    }
+    let screen = log_screen(&view, 100, 25, now);
+    let rows: Vec<&str> = screen.lines().collect();
+    assert!(
+        braille(rows[rule + 1]) > 0,
+        "scrolled-back input hangs below the rule"
+    );
+    assert!(
+        view.usage_redraw_in(now).is_none(),
+        "a scrolled chart stays put"
+    );
+    for _ in 0..100 {
+        view.scroll_usage_chart(true);
+        log_screen(&view, 100, 25, now);
+    }
+    assert!(
+        view.usage_redraw_in(now).is_some(),
+        "scrolling to now follows the newest bins"
+    );
 }
