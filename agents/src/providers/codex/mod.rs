@@ -164,6 +164,9 @@ impl CodexProvider {
                 Err(error) => return Err(error),
             };
             if let Some(summary) = summary {
+                if let Some(path) = session.transcript.as_deref() {
+                    session.prompt_images = rollout::first_prompt_images(path, &session.prompt)?;
+                }
                 apply_rollout(session, summary);
             } else {
                 session.status = status(session.process.is_some(), false);

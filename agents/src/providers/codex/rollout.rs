@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, BufRead, Read, Seek, SeekFrom};
 use std::path::Path;
 
 const CHUNK: u64 = 64 * 1024;
@@ -151,8 +151,8 @@ fn completed_user(record: &Value) -> bool {
         && record["payload"]["item"]["type"] == "UserMessage"
 }
 
-/// Older response messages lack turn IDs; their paired event still has the
-/// same prompt text. Consume each completed event only at its preceding user.
+/// Pair by prompt text and, when present, turn ID. Consume each completed
+/// event only at its preceding user message.
 fn prompt_images(prompt: &Prompt, payload: &Value, completed: Option<&Value>) -> Vec<Image> {
     let paired = completed.filter(|record| {
         let response_turn =
@@ -464,6 +464,47 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         previous_end: None,
         images: Vec::new(),
     }))
+}
+
+/// Read only through the SQLite prompt and its following completed item.
+/// Prompt text itself comes from SQLite; rollout records supply attachments.
+pub(super) fn first_prompt_images(path: &Path, first_user_message: &str) -> io::Result<Vec<Image>> {
+    let mut lines = io::BufReader::new(File::open(path)?).lines();
+    for line in lines.by_ref() {
+        let Ok(record) = serde_json::from_str::<Value>(&line?) else {
+            continue;
+        };
+        if completed_user(&record) {
+            return Ok(Vec::new());
+        }
+        let payload = &record["payload"];
+        if record["type"] != "response_item"
+            || payload["type"] != "message"
+            || payload["role"] != "user"
+            || is_context_message(payload)
+        {
+            continue;
+        }
+        let prompt = user_prompt(&payload["content"]);
+        // Injected AGENTS/environment messages may have no content-kind labels.
+        // SQLite identifies the actual first prompt, truncated by session().
+        if !prompt
+            .body()
+            .is_some_and(|text| text.chars().take(512).eq(first_user_message.chars()))
+        {
+            continue;
+        }
+        if prompt.attachments.is_empty() {
+            return Ok(Vec::new());
+        }
+        let completed = lines
+            .next()
+            .transpose()?
+            .and_then(|line| serde_json::from_str::<Value>(&line).ok())
+            .filter(completed_user);
+        return Ok(prompt_images(&prompt, payload, completed.as_ref()));
+    }
+    Ok(Vec::new())
 }
 
 pub(super) fn summary(path: &Path) -> io::Result<Summary> {

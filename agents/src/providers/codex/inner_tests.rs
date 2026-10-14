@@ -515,3 +515,127 @@ fn named_image_blocks_without_prompt_text_show_their_labels() {
     assert_eq!(entries[0].body, "[Image #1]");
     assert!(entries[0].images.is_empty());
 }
+
+#[test]
+fn session_prompt_images_belong_to_first_user_message() {
+    use super::{CodexProvider, Provider};
+    use rusqlite::Connection;
+    let dir = tempfile::tempdir().unwrap();
+    let db = Connection::open(dir.path().join("state_5.sqlite")).unwrap();
+    db.execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+        .unwrap();
+    let path = dir.path().join("rollout.jsonl");
+    db.execute(
+        "UPDATE threads SET rollout_path=? WHERE id='thread-0'",
+        [path.to_str().unwrap()],
+    )
+    .unwrap();
+    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let image = dir.path().join("first.png");
+    std::fs::write(&image, b"image").unwrap();
+    for name in ["wrapped", "fallback"] {
+        let first = relocated_image_records(name, &image);
+        let prompt = first[0]["payload"]["content"][3]["text"].as_str().unwrap();
+        db.execute(
+            "UPDATE threads SET first_user_message=? WHERE id='thread-0'",
+            [prompt],
+        )
+        .unwrap();
+        let context: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/codex-images/context.jsonl"
+        ))
+        .unwrap();
+        let later = relocated_image_records("wrapped", &dir.path().join("missing.png"));
+        write_image_records(
+            &path,
+            &[
+                context,
+                first[0].clone(),
+                first[1].clone(),
+                later[0].clone(),
+                later[1].clone(),
+            ],
+        );
+        let sessions = provider.refresh(1).sessions;
+        let session = sessions.iter().find(|s| s.id.id == "thread-0").unwrap();
+        assert_eq!(
+            session.prompt_images,
+            [crate::log::Image {
+                label: "[Image #1]".into(),
+                path: image.clone()
+            }]
+        );
+        assert_eq!(session.prompt, prompt.chars().take(512).collect::<String>());
+    }
+    std::fs::remove_file(&image).unwrap();
+    let session = provider
+        .refresh(1)
+        .sessions
+        .into_iter()
+        .find(|s| s.id.id == "thread-0")
+        .unwrap();
+    assert!(session.prompt_images.is_empty());
+}
+
+#[test]
+fn first_prompt_images_stop_at_the_first_completed_user_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("attachment.png");
+    std::fs::write(&image, b"image").unwrap();
+    let path = dir.path().join("rollout.jsonl");
+    let first = relocated_image_records("fallback", &dir.path().join("missing.png"));
+    let later = relocated_image_records("wrapped", &image);
+    let later_text = later[0]["payload"]["content"][3]["text"].as_str().unwrap();
+    write_image_records(
+        &path,
+        &[
+            first[0].clone(),
+            first[1].clone(),
+            later[0].clone(),
+            later[1].clone(),
+        ],
+    );
+    assert!(
+        super::rollout::first_prompt_images(&path, later_text)
+            .unwrap()
+            .is_empty()
+    );
+    // The wrapper path is usable even before the following event is appended.
+    write_image_records(&path, &later[..1]);
+    assert_eq!(
+        super::rollout::first_prompt_images(&path, later_text)
+            .unwrap()
+            .len(),
+        1
+    );
+    // A text-only first prompt must not acquire later attachments.
+    let mut plain = first[0].clone();
+    plain["payload"]["content"] = Value::Array(vec![first[0]["payload"]["content"][3].clone()]);
+    write_image_records(&path, &[plain, later[0].clone(), later[1].clone()]);
+    let first_text = first[0]["payload"]["content"][3]["text"].as_str().unwrap();
+    assert!(
+        super::rollout::first_prompt_images(&path, first_text)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn wrapper_path_precedes_event_path_and_unavailable_path_falls_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let wrapper = dir.path().join("wrapper.png");
+    let event = dir.path().join("event.png");
+    for path in [&wrapper, &event] {
+        std::fs::write(path, b"image").unwrap();
+    }
+    let path = dir.path().join("rollout.jsonl");
+    let mut records = relocated_image_records("wrapped", &wrapper);
+    records[1]["payload"]["item"]["content"][0]["path"] = event.to_str().unwrap().into();
+    write_image_records(&path, &records);
+    assert_eq!(tail(&path, 100).unwrap()[0].images[0].path, wrapper);
+    std::fs::remove_file(&wrapper).unwrap();
+    assert_eq!(tail(&path, 100).unwrap()[0].images[0].path, event);
+    records[1]["payload"]["turn_id"] = "different-turn".into();
+    write_image_records(&path, &records);
+    assert!(tail(&path, 100).unwrap()[0].images.is_empty());
+}
