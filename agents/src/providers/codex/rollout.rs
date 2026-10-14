@@ -1,4 +1,4 @@
-use crate::log::{Event, Image, Kind, participant_text, question_texts};
+use crate::log::{Event, Image, Kind, Section, ToolCall, participant_text, question_texts};
 use crate::model::Activity;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -308,6 +308,156 @@ fn tool_arguments(payload: &Value) -> Option<Value> {
     serde_json::from_str(payload["arguments"].as_str()?).ok()
 }
 
+fn argument_fields(value: &Value) -> Vec<Section> {
+    value
+        .as_object()
+        .map(|fields| {
+            vec![Section::Fields(
+                fields
+                    .iter()
+                    .map(|(key, value)| {
+                        (
+                            key.clone(),
+                            value
+                                .as_str()
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| value.to_string()),
+                        )
+                    })
+                    .collect(),
+            )]
+        })
+        .unwrap_or_default()
+}
+
+fn text_section(label: &str, text: &str) -> Section {
+    Section::Text {
+        label: label.to_owned(),
+        text: text.to_owned(),
+    }
+}
+
+fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
+    let input = if payload["type"] == "custom_tool_call" {
+        vec![text_section(
+            "input",
+            payload["input"].as_str().unwrap_or(""),
+        )]
+    } else {
+        let raw = payload["arguments"].as_str().unwrap_or("");
+        match serde_json::from_str::<Value>(raw) {
+            Ok(value) if value.is_object() => argument_fields(&value),
+            _ => vec![text_section("input", raw)],
+        }
+    };
+    ToolCall {
+        name: payload["name"].as_str().unwrap_or("").to_owned(),
+        input,
+        output: output.map(|text| vec![text_section("output", text)]),
+        is_error: false,
+    }
+}
+
+fn result_section(text: &str) -> Section {
+    match serde_json::from_str::<Value>(text) {
+        Ok(value) => Section::Code {
+            label: "result".to_owned(),
+            lang: "json".to_owned(),
+            text: serde_json::to_string_pretty(&value).unwrap(),
+        },
+        Err(_) => text_section("result", text),
+    }
+}
+
+fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
+    let item_type = item["type"].as_str().unwrap();
+    let (name, input, output) = match item_type {
+        "CommandExecution" => {
+            let mut input = vec![Section::Code {
+                label: "command".to_owned(),
+                lang: "bash".to_owned(),
+                text: command.unwrap(),
+            }];
+            if let Some(code) = item["exit_code"].as_i64().filter(|code| *code != 0) {
+                input.push(Section::Fields(vec![(
+                    "exit code".to_owned(),
+                    code.to_string(),
+                )]));
+            }
+            (
+                "exec_command".to_owned(),
+                input,
+                item["aggregated_output"]
+                    .as_str()
+                    .map(|text| vec![text_section("output", text)]),
+            )
+        }
+        "FileChange" => {
+            let input = item["changes"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .filter_map(|(path, change)| {
+                    Some(Section::Diff {
+                        label: format!("{path} ({})", change["type"].as_str()?),
+                        text: change["unified_diff"].as_str()?.to_owned(),
+                    })
+                })
+                .collect();
+            ("apply_patch".to_owned(), input, None)
+        }
+        "McpToolCall" => {
+            let output = item
+                .get("result")
+                .filter(|result| !result.is_null())
+                .map(|result| {
+                    if let Some(blocks) = result["content"].as_array() {
+                        blocks
+                            .iter()
+                            .filter(|block| block["type"] == "text")
+                            .filter_map(|block| block["text"].as_str())
+                            .map(result_section)
+                            .collect()
+                    } else if let Some(text) = result.as_str() {
+                        vec![result_section(text)]
+                    } else {
+                        vec![Section::Code {
+                            label: "result".to_owned(),
+                            lang: "json".to_owned(),
+                            text: serde_json::to_string_pretty(result).unwrap(),
+                        }]
+                    }
+                });
+            (
+                format!(
+                    "{}.{}",
+                    item["server"].as_str().unwrap(),
+                    item["tool"].as_str().unwrap()
+                ),
+                argument_fields(&item["arguments"]),
+                output,
+            )
+        }
+        _ => (
+            item_type.to_owned(),
+            vec![Section::Fields(
+                item.as_object()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_owned())))
+                    .collect(),
+            )],
+            None,
+        ),
+    };
+    ToolCall {
+        name,
+        input,
+        output,
+        is_error: item["status"] == "failed" || item["result"]["isError"] == true,
+    }
+}
+
 fn required_text<'a>(value: &'a Value, key: &str) -> io::Result<&'a str> {
     value[key].as_str().ok_or_else(|| {
         io::Error::new(
@@ -339,6 +489,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
     let item = &payload["item"];
     let mut paths = Vec::new();
     let item_type = required_text(item, "type")?;
+    let mut command_text = None;
     let body = match item_type {
         "CommandExecution" => {
             let command: Vec<_> = item["command"]
@@ -358,6 +509,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
             } else {
                 command.join(" ")
             };
+            command_text = Some(text.clone());
             let summary = crate::shell_summary::summarize_shell_commands(&text);
             let mut body = if summary.is_empty() {
                 format!("exec_command {text}")
@@ -463,7 +615,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         duration,
         previous_end: None,
         images: Vec::new(),
-        calls: Vec::new(),
+        calls: vec![completed_call(item, command_text)],
     }))
 }
 
@@ -606,6 +758,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
         }
         let payload = &record["payload"];
         let mut images = Vec::new();
+        let mut calls = Vec::new();
         if let Some(event) = completed_tool(&record)? {
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
@@ -614,9 +767,21 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             return Ok(entries.len() <= count);
         }
         let (kind, body, ended_at) = match (record["type"].as_str(), payload["type"].as_str()) {
-            (Some("response_item"), Some("function_call_output")) => {
+            (Some("response_item"), Some("function_call_output" | "custom_tool_call_output")) => {
                 if let Some(id) = payload["call_id"].as_str() {
-                    results.insert(id.to_owned(), at);
+                    let output = if let Some(text) = payload["output"].as_str() {
+                        text.to_owned()
+                    } else {
+                        payload["output"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|block| block["type"] == "input_text")
+                            .filter_map(|block| block["text"].as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    results.insert(id.to_owned(), (at, output));
                 }
                 return Ok(true);
             }
@@ -632,10 +797,14 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
                 let ended = payload["call_id"]
                     .as_str()
                     .and_then(|id| results.remove(id));
+                calls.push(response_tool_call(
+                    payload,
+                    ended.as_ref().map(|(_, text)| text.as_str()),
+                ));
                 (
                     crate::log::tool_kind(payload["name"].as_str().unwrap()),
                     body,
-                    ended,
+                    ended.map(|(at, _)| at),
                 )
             }
             (Some("response_item"), Some("message")) => {
@@ -691,7 +860,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             duration: ended_at.map(|end| end - at),
             previous_end: None,
             images,
-            calls: Vec::new(),
+            calls,
         });
         Ok(entries.len() <= count)
     })?;
@@ -712,6 +881,144 @@ mod tests {
     fn fixture() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-rollout.jsonl")
     }
+    fn tool_records() -> Vec<Value> {
+        include_str!("../../../tests/fixtures/codex-tool-calls.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn tool_calls_keep_arguments_outputs_and_running_state() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-tool-calls.jsonl");
+        let events = tail(&path, 100).unwrap();
+        let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
+        let spawn: Vec<_> = calls
+            .iter()
+            .filter(|call| call.name == "spawn_agent")
+            .collect();
+        assert_eq!(spawn.len(), 2);
+        assert!(
+            matches!(&spawn[0].input[0], crate::log::Section::Fields(fields) if fields.iter().any(|(key, value)| key == "message" && value == "[scrubbed]"))
+        );
+        assert!(spawn[0].output.is_some());
+        assert_eq!(spawn[1].output, None);
+        let custom = calls.iter().find(|call| call.name == "js_repl").unwrap();
+        assert!(
+            matches!(&custom.input[0], crate::log::Section::Text { text, .. } if text.starts_with("// codex-js-repl"))
+        );
+        assert!(
+            matches!(&custom.output.as_ref().unwrap()[0], crate::log::Section::Text { text, .. } if text == "[]")
+        );
+        assert!(!calls.iter().any(|call| call.name == "exec"));
+    }
+
+    #[test]
+    fn completed_calls_keep_command_output_and_file_diff() {
+        let records = tool_records();
+        let command = records
+            .iter()
+            .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap();
+        let event = completed_tool(command).unwrap().unwrap();
+        assert_eq!(event.calls.len(), 1);
+        assert!(
+            matches!(&event.calls[0].input[0], crate::log::Section::Code { lang, text, .. } if lang == "bash" && text == command["payload"]["item"]["command"][2].as_str().unwrap())
+        );
+        assert!(
+            matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::log::Section::Text { text, .. } if text == command["payload"]["item"]["aggregated_output"].as_str().unwrap())
+        );
+        let file = records
+            .iter()
+            .find(|record| record["payload"]["item"]["type"] == "FileChange")
+            .unwrap();
+        let event = completed_tool(file).unwrap().unwrap();
+        assert!(
+            matches!(&event.calls[0].input[0], crate::log::Section::Diff { label, text } if label.contains("/workspace/agents/src/processes.rs") && label.contains("update") && text.starts_with("@@ -132,2 +132,22 @@"))
+        );
+    }
+
+    #[test]
+    fn malformed_arguments_and_completed_mcp_results_keep_details() {
+        let records = tool_records();
+        let mut call = records
+            .iter()
+            .find(|record| record["payload"]["type"] == "function_call")
+            .unwrap()["payload"]
+            .clone();
+        call["arguments"] = "{unfinished".into();
+        let detail = response_tool_call(&call, None);
+        assert_eq!(
+            detail.input,
+            [Section::Text {
+                label: "input".to_owned(),
+                text: "{unfinished".to_owned()
+            }]
+        );
+        let mcp = records
+            .iter()
+            .find(|record| record["payload"]["item"]["type"] == "McpToolCall")
+            .unwrap();
+        let event = completed_tool(mcp).unwrap().unwrap();
+        assert!(
+            matches!(&event.calls[0].input[0], Section::Fields(fields) if fields == &[("text".to_owned(), "[scrubbed]".to_owned())])
+        );
+        assert!(
+            matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Text { text, .. } if text == "Delivered to Claude.")
+        );
+        let mut no_result = mcp.clone();
+        no_result["payload"]["item"]["result"] = Value::Null;
+        assert_eq!(
+            completed_tool(&no_result).unwrap().unwrap().calls[0].output,
+            None
+        );
+        let mut json_result = mcp.clone();
+        json_result["payload"]["item"]["result"]["content"][0]["text"] = r#"{"ok":true}"#.into();
+        let event = completed_tool(&json_result).unwrap().unwrap();
+        assert!(
+            matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Code { lang, text, .. } if lang == "json" && text == "{\n  \"ok\": true\n}")
+        );
+        let mut command = records
+            .iter()
+            .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap()
+            .clone();
+        command["payload"]["item"]["exit_code"] = 2.into();
+        let event = completed_tool(&command).unwrap().unwrap();
+        assert_eq!(
+            event.calls[0].input[1],
+            Section::Fields(vec![("exit code".to_owned(), "2".to_owned())])
+        );
+    }
+
+    #[test]
+    fn custom_output_arrays_join_text_and_ignore_images() {
+        let mut records = tool_records();
+        let mut call = records
+            .iter()
+            .find(|record| record["payload"]["name"] == "exec")
+            .unwrap()
+            .clone();
+        call["payload"]["name"] = "js_repl".into();
+        let mut output = records.pop().unwrap();
+        output["payload"]["output"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"type":"input_image","text":"skip"}));
+        output["payload"]["output"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"type":"input_text","text":"second text"}));
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{call}\n{output}").unwrap();
+        let events = tail(file.path(), 100).unwrap();
+        assert_eq!(events[0].calls.len(), 1);
+        assert!(
+            matches!(&events[0].calls[0].output.as_ref().unwrap()[0], crate::log::Section::Text { text, .. } if text.starts_with("Script completed") && !text.contains("skip") && text.ends_with("\nsecond text"))
+        );
+    }
+
     #[test]
     fn request_user_input_log_and_activity_show_question_texts() {
         for mode in ["default", "plan"] {
