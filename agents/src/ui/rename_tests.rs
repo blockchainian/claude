@@ -69,17 +69,27 @@ fn manager_child_rename_opens_dialog_and_emits_action() {
 }
 
 #[test]
-fn other_child_rename_and_all_child_fork_delete_pin_stay_blocked() {
+fn codex_child_session_keys_stay_silent() {
     for (child, parent) in [
         (ProviderId::Codex, ProviderId::Claude),
         (ProviderId::Codex, ProviderId::Codex),
-        (ProviderId::Claude, ProviderId::Claude),
     ] {
         let (_dir, mut view) = child_view(child, parent);
-        let mut codes = vec![KeyCode::Char('f'), KeyCode::Backspace, KeyCode::Char('p')];
+        let mut codes = vec![
+            KeyCode::Char('f'),
+            KeyCode::Char('x'),
+            KeyCode::Char('a'),
+            KeyCode::Backspace,
+            KeyCode::Char('h'),
+            KeyCode::Char('p'),
+        ];
         if parent != ProviderId::Claude || child != ProviderId::Codex {
             codes.push(KeyCode::Char('r'));
         }
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+            None
+        );
         for code in codes {
             assert_eq!(
                 view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
@@ -88,6 +98,7 @@ fn other_child_rename_and_all_child_fork_delete_pin_stay_blocked() {
             assert!(view.rename_target.is_none());
             assert!(view.confirm_dialog.is_none());
             assert!(view.pinned.is_empty());
+            assert!(view.hidden.is_empty());
         }
     }
 }

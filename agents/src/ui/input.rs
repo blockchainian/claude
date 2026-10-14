@@ -65,7 +65,14 @@ impl View {
             )
         };
         match mouse.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                self.extend_text_selection(mouse.column, mouse.row);
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                return self.finish_text_selection(mouse.column, mouse.row);
+            }
             MouseEventKind::Down(MouseButton::Left) => {
+                self.begin_text_selection(mouse.column, mouse.row);
                 if let Some(idx) = tab {
                     self.set_filter(idx);
                 } else if let Some(entry) = entry {
@@ -240,7 +247,22 @@ impl View {
                 || (key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.code == KeyCode::Char('l')))
         {
-            return None;
+            return self
+                .selected_id()
+                .filter(|id| id.provider == ProviderId::Claude)
+                .map(|_| {
+                    Action::Unsupported(match key.code {
+                        KeyCode::Char('l') => "Resume",
+                        KeyCode::Char('f') => "Fork",
+                        KeyCode::Char('r') => "Rename",
+                        KeyCode::Char('x') => "Stop",
+                        KeyCode::Char('a') => "Archive",
+                        KeyCode::Backspace => "Delete",
+                        KeyCode::Char('h') => "Hide",
+                        KeyCode::Char('p') => "Pin",
+                        _ => unreachable!("subagent session key is gated above"),
+                    })
+                });
         }
         self.notice = None;
         if let Some(dialog) = &mut self.confirm_dialog {

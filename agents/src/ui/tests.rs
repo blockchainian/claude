@@ -2599,7 +2599,7 @@ fn codex_inner_task_log_snapshot() {
     view.rematch_log();
     assert_eq!(view.matching_log_count(), 1);
     assert!(view.log_matches(4));
-    view.log_search.query.set_text("type gwta");
+    view.log_search.query.set_text("type (exit 1)");
     view.rematch_log();
     assert_eq!(view.matching_log_count(), 1);
     assert!(view.log_matches(0));
@@ -4360,15 +4360,18 @@ mod subagent_actions {
         assert_eq!(subagent_rows::screen(view, 120, 30), before);
     }
 
-    macro_rules! ignored_key {
-        ($name:ident, $code:expr, $modifiers:expr) => {
+    macro_rules! unsupported_key {
+        ($name:ident, $code:expr, $modifiers:expr, $label:literal) => {
             #[test]
             fn $name() {
                 for notice in [None, Some("Keep this notice".to_owned())] {
                     let mut view = fixture();
                     view.notice = notice.clone();
                     let before = subagent_rows::screen(&view, 120, 30);
-                    assert_eq!(view.handle_key(KeyEvent::new($code, $modifiers)), None);
+                    assert_eq!(
+                        view.handle_key(KeyEvent::new($code, $modifiers)),
+                        Some(Action::Unsupported($label))
+                    );
                     assert_eq!(view.notice, notice);
                     assert_unchanged(&view, &before);
                 }
@@ -4376,14 +4379,19 @@ mod subagent_actions {
         };
     }
 
-    ignored_key!(control_l, KeyCode::Char('l'), KeyModifiers::CONTROL);
-    ignored_key!(rename, KeyCode::Char('r'), KeyModifiers::NONE);
-    ignored_key!(fork, KeyCode::Char('f'), KeyModifiers::NONE);
-    ignored_key!(stop, KeyCode::Char('x'), KeyModifiers::NONE);
-    ignored_key!(delete, KeyCode::Backspace, KeyModifiers::NONE);
-    ignored_key!(archive, KeyCode::Char('a'), KeyModifiers::NONE);
-    ignored_key!(hide, KeyCode::Char('h'), KeyModifiers::NONE);
-    ignored_key!(pin, KeyCode::Char('p'), KeyModifiers::NONE);
+    unsupported_key!(
+        control_l,
+        KeyCode::Char('l'),
+        KeyModifiers::CONTROL,
+        "Resume"
+    );
+    unsupported_key!(rename, KeyCode::Char('r'), KeyModifiers::NONE, "Rename");
+    unsupported_key!(fork, KeyCode::Char('f'), KeyModifiers::NONE, "Fork");
+    unsupported_key!(stop, KeyCode::Char('x'), KeyModifiers::NONE, "Stop");
+    unsupported_key!(delete, KeyCode::Backspace, KeyModifiers::NONE, "Delete");
+    unsupported_key!(archive, KeyCode::Char('a'), KeyModifiers::NONE, "Archive");
+    unsupported_key!(hide, KeyCode::Char('h'), KeyModifiers::NONE, "Hide");
+    unsupported_key!(pin, KeyCode::Char('p'), KeyModifiers::NONE, "Pin");
 
     #[test]
     fn resume_emits_unsupported_notice() {
