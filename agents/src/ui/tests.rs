@@ -4277,16 +4277,31 @@ mod subagent_actions {
         };
     }
 
-    ignored_key!(enter, KeyCode::Enter, KeyModifiers::NONE);
-    ignored_key!(right, KeyCode::Right, KeyModifiers::NONE);
     ignored_key!(control_l, KeyCode::Char('l'), KeyModifiers::CONTROL);
-    ignored_key!(resume, KeyCode::Char('o'), KeyModifiers::NONE);
     ignored_key!(rename, KeyCode::Char('r'), KeyModifiers::NONE);
     ignored_key!(fork, KeyCode::Char('f'), KeyModifiers::NONE);
     ignored_key!(stop, KeyCode::Char('x'), KeyModifiers::NONE);
     ignored_key!(delete, KeyCode::Backspace, KeyModifiers::NONE);
     ignored_key!(hide, KeyCode::Char('h'), KeyModifiers::NONE);
     ignored_key!(pin, KeyCode::Char('p'), KeyModifiers::NONE);
+
+    #[test]
+    fn resume_emits_unsupported_notice() {
+        for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+            let mut view = fixture();
+            assert_eq!(key(&mut view, code), Some(Action::Unsupported("Resume")));
+            assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
+        }
+        let mut view = fixture();
+        subagent_rows::screen(&view, 120, 30);
+        let (x, y) = view.marker_pos().unwrap();
+        let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+        assert_eq!(view.handle_mouse(click), None);
+        assert_eq!(
+            view.handle_mouse(click),
+            Some(Action::Unsupported("Resume"))
+        );
+    }
 
     #[test]
     fn click() {
@@ -4310,7 +4325,7 @@ mod subagent_actions {
             view.searching = true;
             view.search.set_text("Check files");
             let before = subagent_rows::screen(&view, 120, 30);
-            assert_eq!(view.handle_key(event), None);
+            assert_eq!(view.handle_key(event), Some(Action::Unsupported("Resume")));
             assert!(view.searching);
             assert_eq!(view.search.text(), "Check files");
             assert_eq!(subagent_rows::screen(&view, 120, 30), before);

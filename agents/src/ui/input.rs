@@ -138,8 +138,11 @@ impl View {
         self.set_selected(selected);
     }
     fn activate(&mut self) -> Option<Action> {
-        if self.selected_is_subagent() {
-            return None;
+        if self
+            .selected_row()
+            .is_some_and(|session| !session.can_resume())
+        {
+            return Some(Action::Unsupported("Resume"));
         }
         if self.selected == usize::MAX
             && self.has_more
@@ -184,10 +187,7 @@ impl View {
             && ((plain
                 && matches!(
                     key.code,
-                    KeyCode::Enter
-                        | KeyCode::Right
-                        | KeyCode::Backspace
-                        | KeyCode::Char('o' | 'r' | 'f' | 'x' | 'h' | 'p')
+                    KeyCode::Backspace | KeyCode::Char('r' | 'f' | 'x' | 'h' | 'p')
                 ))
                 || (key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.code == KeyCode::Char('l')))
@@ -438,11 +438,15 @@ impl View {
             }
             KeyCode::Char('o') => {
                 let id = self.selected_id()?.clone();
-                return Some(if self.selected_capabilities().resume {
-                    Action::Resume(id)
-                } else {
-                    Action::Unsupported("Resume")
-                });
+                return Some(
+                    if self.selected_capabilities().resume
+                        && self.selected_row().is_some_and(Session::can_resume)
+                    {
+                        Action::Resume(id)
+                    } else {
+                        Action::Unsupported("Resume")
+                    },
+                );
             }
             KeyCode::Char('f') => {
                 let id = self.selected_id()?.clone();

@@ -471,7 +471,11 @@ impl Provider for CodexProvider {
             .unwrap_or_else(|| Ok(vec![]))
     }
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command> {
-        if session.is_some_and(|session| session.parent.is_some()) {
+        if session.is_some_and(|session| {
+            session.parent.is_some()
+                && (!session.can_resume()
+                    || !matches!(action, Action::Open(_) | Action::Resume(_) | Action::Back))
+        }) {
             return None;
         }
         let mut command = Command::new("codex");

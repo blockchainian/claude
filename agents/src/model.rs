@@ -1,6 +1,6 @@
 //! Sessions as the command center sees them, independent of where they were read from.
 
-use crate::providers::SessionKey;
+use crate::providers::{ProviderId, SessionKey};
 use chrono::DateTime;
 use chrono::Utc;
 use std::path::PathBuf;
@@ -95,6 +95,13 @@ pub struct Session {
 }
 
 impl Session {
+    /// Cross-provider Codex children are ordinary threads linked by codex-manager.
+    pub fn can_resume(&self) -> bool {
+        self.parent.as_ref().is_none_or(|parent| {
+            self.id.provider == ProviderId::Codex && parent.provider == ProviderId::Claude
+        })
+    }
+
     pub fn display_title(&self) -> &str {
         let title = if self.parent.is_some() {
             &self.title

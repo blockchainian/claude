@@ -396,11 +396,16 @@ impl App {
             | Action::TogglePin { id, .. } => Some(id),
             _ => None,
         };
-        if target
-            .and_then(|id| self.session(id))
-            .is_some_and(|session| session.parent.is_some())
+        if let Some(session) = target.and_then(|id| self.session(id))
+            && session.parent.is_some()
         {
-            return false;
+            if matches!(action, Action::Open(_) | Action::Resume(_)) {
+                if !session.can_resume() {
+                    return self.handle_action(Some(Action::Unsupported("Resume")));
+                }
+            } else {
+                return false;
+            }
         }
         match action {
             Action::Quit => return true,
@@ -520,7 +525,10 @@ impl App {
 
     /// Hands the terminal to the selected session's provider process.
     fn launch_session(&mut self, action: Action, session: Session) -> bool {
-        if session.parent.is_some() {
+        if session.parent.is_some()
+            && (!session.can_resume()
+                || !matches!(action, Action::Open(_) | Action::Resume(_) | Action::Back))
+        {
             return false;
         }
         if !session.cwd.is_dir() {

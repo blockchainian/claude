@@ -146,13 +146,7 @@ fn launch_rejects_children_missing_sessions_and_missing_cwd() {
         assert!(provider.launch(&action, Some(&session)).is_none());
         session.cwd = dir.path().into();
     }
-    for parent in [
-        key("parent".into()),
-        SessionKey {
-            provider: ProviderId::Claude,
-            id: "parent".into(),
-        },
-    ] {
+    for parent in [key("parent".into())] {
         session.parent = Some(parent);
         for action in [
             Action::Resume(session.id.clone()),
@@ -235,9 +229,14 @@ fn capabilities_gate_codex_actions_in_the_view() {
     session.parent = Some(parent.id.clone());
     view.set_sessions(vec![parent, session.clone()], false);
     assert_eq!(view.selected_id(), Some(&session.id));
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
+        assert_eq!(
+            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
+            Some(Action::Unsupported("Resume"))
+        );
+    }
     for code in [
-        KeyCode::Enter,
-        KeyCode::Char('o'),
+        KeyCode::Char('p'),
         KeyCode::Char('f'),
         KeyCode::Char('r'),
         KeyCode::Backspace,
@@ -679,7 +678,7 @@ fn manager_detached_missing_and_reassigned_records_do_not_nest() {
 }
 
 #[test]
-fn manager_children_use_shared_hub_filtering_and_view_only_rows() {
+fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     use crate::{model::Grouping, providers::claude::ClaudeProvider, sessions::Hub, ui::View};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
@@ -760,10 +759,31 @@ fn manager_children_use_shared_hub_filtering_and_view_only_rows() {
             .contains(Modifier::DIM)
     );
     assert!(lines[parent_row + 1].contains("Managed worker"));
+    for (code, expected) in [
+        (KeyCode::Enter, Action::Open(key("thread-12".into()))),
+        (KeyCode::Right, Action::Open(key("thread-12".into()))),
+        (KeyCode::Char('o'), Action::Resume(key("thread-12".into()))),
+    ] {
+        assert_eq!(
+            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
+            Some(expected)
+        );
+    }
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let click = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: x as u16,
+        row: parent_row as u16 + 1,
+        modifiers: KeyModifiers::NONE,
+    };
+    assert_eq!(view.handle_mouse(click), None);
+    assert_eq!(
+        view.handle_mouse(click),
+        Some(Action::Open(key("thread-12".into())))
+    );
     for code in [
-        KeyCode::Enter,
-        KeyCode::Right,
-        KeyCode::Char('o'),
+        KeyCode::Char('f'),
+        KeyCode::Backspace,
         KeyCode::Char('r'),
         KeyCode::Char('x'),
         KeyCode::Char('p'),
@@ -784,4 +804,91 @@ fn manager_children_use_shared_hub_filtering_and_view_only_rows() {
         assert_ne!(view.selected_id(), previous.as_ref());
     }
     assert!(!view.has_background());
+}
+
+#[test]
+fn manager_children_launch_resume_but_not_fork() {
+    let (dir, mut provider) = fixture();
+    manager_fixture(dir.path(), &mut provider, "attached");
+    let mut session = provider
+        .snapshot(0)
+        .unwrap()
+        .sessions
+        .into_iter()
+        .find(|session| session.id.id == "thread-12")
+        .unwrap();
+    session.cwd = dir.path().into();
+    for action in [
+        Action::Open(session.id.clone()),
+        Action::Resume(session.id.clone()),
+        Action::Back,
+    ] {
+        let command = provider.launch(&action, Some(&session)).unwrap();
+        assert_eq!(command.get_program(), "codex");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["resume", "thread-12"]
+        );
+        assert_eq!(command.get_current_dir(), Some(dir.path()));
+    }
+    assert!(
+        provider
+            .launch(&Action::Fork(session.id.clone()), Some(&session))
+            .is_none()
+    );
+    assert!(
+        provider
+            .launch(&Action::New(Some(session.cwd.clone())), Some(&session))
+            .is_none()
+    );
+}
+
+#[test]
+fn spawn_children_cannot_resume_in_the_view() {
+    use crate::{model::Grouping, ui::View};
+    use crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
+    use ratatui::{buffer::Buffer, layout::Rect};
+    let (_dir, mut provider) = fixture();
+    let sessions = provider.refresh(2).sessions;
+    let mut child = sessions
+        .iter()
+        .find(|session| session.id.id == "thread-13")
+        .unwrap()
+        .clone();
+    let parent = sessions
+        .iter()
+        .find(|session| session.id.id == "thread-12")
+        .unwrap()
+        .clone();
+    child.status = SessionStatus::Ready;
+    let id = child.id.clone();
+    let mut view = View::new(Grouping::Project, false);
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Codex,
+        provider.capabilities(),
+    )]));
+    view.set_sessions(vec![parent, child], false);
+    assert_eq!(view.selected_id(), Some(&id));
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
+        assert_eq!(
+            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
+            Some(Action::Unsupported("Resume"))
+        );
+    }
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
+    view.render(buffer.area, &mut buffer);
+    let (column, row) = view.marker_pos().unwrap();
+    let click = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    };
+    assert_eq!(view.handle_mouse(click), None);
+    assert_eq!(
+        view.handle_mouse(click),
+        Some(Action::Unsupported("Resume"))
+    );
 }

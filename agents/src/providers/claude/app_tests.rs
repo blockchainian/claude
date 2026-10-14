@@ -421,7 +421,7 @@ fn subagent_fixture() -> (tempfile::TempDir, App, Session) {
     (dir, app, child)
 }
 
-fn assert_subagent_action_ignored(make_action: impl FnOnce(&SessionKey) -> Action) {
+fn assert_subagent_action_blocked(make_action: impl FnOnce(&SessionKey) -> Action) {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (dir, mut app, child) = subagent_fixture();
     key(&mut app, KeyCode::Up);
@@ -438,9 +438,24 @@ fn assert_subagent_action_ignored(make_action: impl FnOnce(&SessionKey) -> Actio
     let area = ratatui::layout::Rect::new(0, 0, 120, 30);
     let mut before = ratatui::buffer::Buffer::empty(area);
     app.view.render_at(area, &mut before, child.updated_at);
-    assert!(!app.handle_action(Some(make_action(&child.id))));
+    let action = make_action(&child.id);
+    let resume = matches!(action, Action::Open(_) | Action::Resume(_));
+    assert!(!app.handle_action(Some(action)));
     let mut after = ratatui::buffer::Buffer::empty(area);
     app.view.render_at(area, &mut after, child.updated_at);
+    if resume {
+        assert!(
+            after
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .contains("Resume is not supported")
+        );
+        app.view.set_notice(None);
+        after = ratatui::buffer::Buffer::empty(area);
+        app.view.render_at(area, &mut after, child.updated_at);
+    }
     assert_eq!(after, before);
     assert_eq!(app.sessions, sessions);
     assert_eq!(app.preferences, preferences);
@@ -455,23 +470,23 @@ fn assert_subagent_action_ignored(make_action: impl FnOnce(&SessionKey) -> Actio
 }
 
 #[test]
-fn subagent_open_is_ignored() {
-    assert_subagent_action_ignored(|id| Action::Open(id.clone()));
+fn subagent_open_shows_unsupported_notice() {
+    assert_subagent_action_blocked(|id| Action::Open(id.clone()));
 }
 
 #[test]
-fn subagent_resume_is_ignored() {
-    assert_subagent_action_ignored(|id| Action::Resume(id.clone()));
+fn subagent_resume_shows_unsupported_notice() {
+    assert_subagent_action_blocked(|id| Action::Resume(id.clone()));
 }
 
 #[test]
 fn subagent_fork_is_ignored() {
-    assert_subagent_action_ignored(|id| Action::Fork(id.clone()));
+    assert_subagent_action_blocked(|id| Action::Fork(id.clone()));
 }
 
 #[test]
 fn subagent_rename_is_ignored() {
-    assert_subagent_action_ignored(|id| Action::Rename {
+    assert_subagent_action_blocked(|id| Action::Rename {
         id: id.clone(),
         name: "Rename".into(),
     });
@@ -479,13 +494,13 @@ fn subagent_rename_is_ignored() {
 
 #[test]
 fn subagent_delete_is_ignored() {
-    assert_subagent_action_ignored(|id| Action::Delete(id.clone()));
+    assert_subagent_action_blocked(|id| Action::Delete(id.clone()));
 }
 
 #[test]
 fn subagent_pin_is_ignored() {
     for pinned in [false, true] {
-        assert_subagent_action_ignored(|id| Action::TogglePin {
+        assert_subagent_action_blocked(|id| Action::TogglePin {
             id: id.clone(),
             pinned,
         });
@@ -658,5 +673,83 @@ mod log_filters {
                 .iter()
                 .all(|event| event.path.as_deref() == Some("src/test.rs"))
         );
+    }
+}
+
+#[test]
+fn child_resume_actions_reach_the_provider_or_show_the_notice() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    use crate::providers::{Provider, ProviderId, SessionKey, codex::CodexProvider};
+    use ratatui::{buffer::Buffer, layout::Rect};
+    for manager in [false, true] {
+        let (dir, mut app) = fixture();
+        rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+            .unwrap()
+            .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+            .unwrap();
+        let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let mut child = provider
+            .refresh(2)
+            .sessions
+            .into_iter()
+            .find(|session| session.id.id == "thread-13")
+            .unwrap();
+        if manager {
+            child.parent = Some(app.sessions[0].id.clone());
+        }
+        child.cwd = dir.path().into();
+        app.hub = Hub::new(vec![Box::new(provider)]);
+        app.sessions.push(child.clone());
+        for action in [
+            Action::Open(child.id.clone()),
+            Action::Resume(child.id.clone()),
+        ] {
+            assert_eq!(app.handle_action(Some(action)), manager);
+            if manager {
+                let command = app.launch.take().unwrap();
+                assert_eq!(command.get_program(), "codex");
+                assert_eq!(
+                    command.get_args().collect::<Vec<_>>(),
+                    ["resume", "thread-13"]
+                );
+            } else {
+                assert!(app.launch.is_none());
+                let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
+                app.view.render(buffer.area, &mut buffer);
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .map(|cell| cell.symbol())
+                        .collect::<String>()
+                        .contains("Resume is not supported")
+                );
+            }
+        }
+        for action in [
+            Action::Fork(child.id.clone()),
+            Action::Rename {
+                id: child.id.clone(),
+                name: "Blocked".into(),
+            },
+            Action::Delete(child.id.clone()),
+            Action::TogglePin {
+                id: child.id.clone(),
+                pinned: true,
+            },
+        ] {
+            assert!(!app.handle_action(Some(action)));
+            assert!(app.launch.is_none());
+            assert!(app.preferences.pinned.is_empty());
+        }
+        let mut claude_child = app.sessions[0].clone();
+        claude_child.id = SessionKey {
+            provider: ProviderId::Claude,
+            id: "agent-child".into(),
+        };
+        claude_child.parent = Some(app.sessions[0].id.clone());
+        app.sessions.push(claude_child.clone());
+        assert!(!app.handle_action(Some(Action::Open(claude_child.id))));
+        assert!(app.launch.is_none());
     }
 }
