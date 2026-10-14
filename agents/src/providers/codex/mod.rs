@@ -11,7 +11,7 @@ use crate::{
     log,
     model::{Action, Process, Session, SessionStatus},
 };
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags, Row};
 use std::{
     collections::{HashMap, HashSet},
@@ -373,39 +373,10 @@ fn live_writers(directory: &Path) -> io::Result<HashMap<String, u32>> {
 }
 
 fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
-    if pids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let output = Command::new("ps")
-        .args(["-o", "pid=,lstart=", "-p"])
-        .arg(
-            pids.iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(","),
-        )
-        .env("LC_ALL", "C")
-        .env("TZ", "UTC")
-        .output()?;
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(io::Error::other(
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ));
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|line| {
-            let (pid, start) = line
-                .trim()
-                .split_once(char::is_whitespace)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid ps output"))?;
-            let pid = pid.parse::<u32>().map_err(io::Error::other)?;
-            let start = NaiveDateTime::parse_from_str(start.trim(), "%a %b %e %H:%M:%S %Y")
-                .map_err(io::Error::other)?
-                .and_utc();
-            Ok((pid, start))
-        })
-        .collect()
+    Ok(pids
+        .iter()
+        .filter_map(|&pid| crate::processes::start_time(pid).map(|start| (pid, start)))
+        .collect())
 }
 
 fn process_exists(pid: u32) -> io::Result<bool> {

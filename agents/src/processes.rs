@@ -1,5 +1,6 @@
 //! Running processes and the files they hold open, read through macOS libproc.
 
+use chrono::{DateTime, Utc};
 use std::ffi::{CStr, c_int, c_void};
 use std::mem::size_of;
 use std::path::PathBuf;
@@ -45,6 +46,28 @@ pub fn all_pids() -> Vec<u32> {
         }
         capacity *= 2;
     }
+}
+
+/// The process's start time at whole-second resolution, or `None` if unavailable.
+pub fn start_time(pid: u32) -> Option<DateTime<Utc>> {
+    let pid = c_int::try_from(pid).ok().filter(|&pid| pid > 0)?;
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = size_of::<libc::proc_bsdinfo>() as c_int;
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast::<c_void>(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    // Session identities store lstart timestamps with whole-second precision.
+    DateTime::from_timestamp(i64::try_from(info.pbi_start_tvsec).ok()?, 0)
 }
 
 /// The process's command name, or `None` once it has exited.
@@ -128,6 +151,26 @@ pub fn open_files(pid: u32) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use std::fs::File;
+
+    #[test]
+    fn reads_process_start_time_at_second_resolution() {
+        let before = chrono::Utc::now();
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .unwrap();
+        let start = start_time(child.id());
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        let start = start.expect("libproc must read the child process start time");
+        assert!((start - before).num_milliseconds().abs() <= 2000);
+        assert_eq!(start.timestamp_subsec_nanos(), 0);
+        assert!(start_time(child.id()).is_none());
+        assert!(start_time(std::process::id()).is_some());
+        assert!(start_time(0).is_none());
+        assert!(start_time(u32::MAX).is_none());
+    }
 
     #[test]
     fn struct_matches_the_sdk_layout() {

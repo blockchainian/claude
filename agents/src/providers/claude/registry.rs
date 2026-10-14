@@ -1,10 +1,9 @@
 use crate::model::SessionStatus;
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,38 +33,8 @@ pub(super) fn from_registry(status: &str) -> Option<SessionStatus> {
 }
 
 pub(super) fn process_starts(pids: &[u32]) -> HashMap<u32, Vec<DateTime<Utc>>> {
-    if pids.is_empty() {
-        return HashMap::new();
-    }
-    let Ok(output) = Command::new("ps")
-        .args(["-o", "pid=,lstart=", "-p"])
-        .arg(
-            pids.iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(","),
-        )
-        .env("LC_ALL", "C")
-        .output()
-    else {
-        return HashMap::new();
-    };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let (pid, start) = line.split_once(char::is_whitespace)?;
-            let pid = pid.parse().ok()?;
-            let local = NaiveDateTime::parse_from_str(start.trim(), "%a %b %e %H:%M:%S %Y").ok()?;
-            let starts = match Local.from_local_datetime(&local) {
-                chrono::LocalResult::Single(time) => vec![time.with_timezone(&Utc)],
-                chrono::LocalResult::Ambiguous(a, b) => {
-                    vec![a.with_timezone(&Utc), b.with_timezone(&Utc)]
-                }
-                chrono::LocalResult::None => return None,
-            };
-            Some((pid, starts))
-        })
+    pids.iter()
+        .filter_map(|&pid| crate::processes::start_time(pid).map(|start| (pid, vec![start])))
         .collect()
 }
 
@@ -132,7 +101,7 @@ pub(super) mod tests {
         let starts = process_starts(&[pid]);
         let start = starts
             .get(&pid)
-            .expect("ps must be available for the liveness test")[0];
+            .expect("libproc must read the process start time for the liveness test")[0];
         let mut value: serde_json::Value =
             serde_json::from_str(include_str!("../../../tests/fixtures/registry.json")).unwrap();
         value["pid"] = pid.into();
