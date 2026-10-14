@@ -63,7 +63,6 @@ impl View {
             let (cut, links) = render_event(
                 event,
                 &time,
-                CLOCK_WIDTH,
                 last,
                 super::render::row(area, index as u16 + 1, 1),
                 buf,
@@ -312,7 +311,6 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
 fn render_event(
     event: &Event,
     time: &str,
-    time_width: usize,
     last: bool,
     area: Rect,
     buf: &mut Buffer,
@@ -323,7 +321,7 @@ fn render_event(
         return (false, Vec::new());
     }
     let width = usize::from(area.width);
-    let time_width = time_width.min(width);
+    let time_width = CLOCK_WIDTH.min(width);
     let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
     let (label_style, _) = super::style::log_styles(&event.kind);
     let time_style = super::style::log_time_style(&event.kind, last);
@@ -396,10 +394,8 @@ fn render_event(
             })
             .collect();
     }
-    truncate_line_with_ellipsis_if_overflow(body, body_width).render(
-        Rect::new(body_x, area.y, body_width as u16, 1),
-        buf,
-    );
+    truncate_line_with_ellipsis_if_overflow(body, body_width)
+        .render(Rect::new(body_x, area.y, body_width as u16, 1), buf);
     super::links::underline(buf, &links);
     (cut, links)
 }
@@ -546,7 +542,6 @@ mod log_markdown {
         render_event(
             &event,
             "12:00:00",
-            8,
             false,
             area,
             &mut buffer,

@@ -64,12 +64,19 @@ fn word_link(word: &str, cwd: &Path) -> Option<(Range<usize>, PathBuf)> {
 
 /// A relative path such as `src/ui/log.rs` inside a word, before any existence check.
 fn relative_path(word: &str) -> Option<Range<usize>> {
-    let start = word.len() - word.trim_start_matches(['`', '(', '"', '\'', '[', '*', '_', '<']).len();
-    let path = word[start..].trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':', ']', '>', '*', '_']);
+    let start = word.len()
+        - word
+            .trim_start_matches(['`', '(', '"', '\'', '[', '*', '_', '<'])
+            .len();
+    let path = word[start..]
+        .trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':', ']', '>', '*', '_']);
     let plain = path.contains('/')
         && !path.contains("://")
         && !path.starts_with('/')
-        && path.chars().next().is_some_and(|c| c.is_alphanumeric() || c == '.');
+        && path
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '.');
     plain.then_some(start..start + path.len())
 }
 
@@ -148,7 +155,8 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("src/ui")).unwrap();
         std::fs::write(dir.path().join("src/ui/log.rs"), "").unwrap();
         let home = std::env::var("HOME").unwrap();
-        let text = "see `src/ui/log.rs`, and/or ~/notes.md, /tmp/a/b.md and https://x.io/a/b [Image #1]";
+        let text =
+            "see `src/ui/log.rs`, and/or ~/notes.md, /tmp/a/b.md and https://x.io/a/b [Image #1]";
         let images = [crate::log::Image {
             label: "[Image #1]".into(),
             path: "/tmp/1.png".into(),

@@ -4978,9 +4978,17 @@ fn task_log_click_on_a_shortened_tool_path_opens_the_full_path() {
     let (x, y) = rendered_cell(&list, "report.md");
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
-    assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::UNDERLINED));
+    assert!(
+        buf[(x, y)]
+            .modifier
+            .contains(ratatui::style::Modifier::UNDERLINED)
+    );
     let (x, y) = rendered_cell(&list, "run tests");
-    assert!(!buf[(x, y)].modifier.contains(ratatui::style::Modifier::UNDERLINED));
+    assert!(
+        !buf[(x, y)]
+            .modifier
+            .contains(ratatui::style::Modifier::UNDERLINED)
+    );
     assert_eq!(click_text(&mut view, &list, "run tests"), None);
     assert!(view.log_open.is_some());
 }
@@ -5107,6 +5115,41 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
         Some(Action::OpenPath("/tmp/project/notes/todo.md".into()))
     );
     assert_eq!(click_text(&mut view, &rendered, "Then read"), None);
+}
+
+#[test]
+fn project_group_header_opens_its_directory() {
+    let mut view = fixture();
+    let rendered = screen(&view, 120, 40);
+    let (x, y) = rendered_cell(&rendered, "/tmp/project  ");
+    assert_eq!(
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), x + 2, y)
+        ),
+        Some(Action::OpenPath("/tmp/project".into()))
+    );
+    let selected = view.selected;
+    assert_eq!(
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), x + 14, y)
+        ),
+        None
+    );
+    assert_eq!(view.selected, selected);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 120, 40));
+    view.render_at(buf.area, &mut buf, Utc::now());
+    assert!(
+        buf[(x, y)]
+            .modifier
+            .contains(ratatui::style::Modifier::UNDERLINED)
+    );
+    assert!(
+        !buf[(x + 14, y)]
+            .modifier
+            .contains(ratatui::style::Modifier::UNDERLINED)
+    );
 }
 
 #[test]

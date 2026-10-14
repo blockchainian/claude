@@ -422,14 +422,15 @@ impl View {
                 .into_iter()
                 .next()
                 .unwrap_or_default();
-            let visible = if first.width() > width { width - 1 } else { width } as u16;
-            let mut cells = super::text_selection_layout::map_lines(
-                queued,
-                std::slice::from_ref(&first),
-                true,
-            )
-            .pop()
-            .unwrap_or_default();
+            let visible = if first.width() > width {
+                width - 1
+            } else {
+                width
+            } as u16;
+            let mut cells =
+                super::text_selection_layout::map_lines(queued, std::slice::from_ref(&first), true)
+                    .pop()
+                    .unwrap_or_default();
             cells.retain(|(columns, _)| columns.end <= visible);
             item_links.push(super::links::row_links(
                 &cells,
@@ -466,11 +467,7 @@ impl View {
             ]);
             bodies.push(start..items.len());
             copies.push(Some((activity.label.as_str(), "Copied latest activity")));
-            body_links.push(super::links::text_links(
-                &activity.label,
-                &session.cwd,
-                &[],
-            ));
+            body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
             let mut header = vec!["Last message".dim()];

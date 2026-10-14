@@ -41,6 +41,7 @@ impl View {
             self.selecting_list(text_selection::Panel::Tasks) && self.text_selection_dragging();
         let mut state = self.viewport.borrow_mut();
         state.task_text = text_selection::TextRegion::default();
+        state.list_links.clear();
         state.list = area;
         state.list_rows = Rect::default();
         state.first_entry = 0;
@@ -184,6 +185,18 @@ impl View {
                     group
                 };
                 line(format!("{group}  {count}").dim(), rect, buf);
+                if self.grouping == Grouping::Project && !self.is_pinned(index) {
+                    let link =
+                        Rect::new(rect.x, rect.y, group.width() as u16, 1).intersection(rect);
+                    let links = [(
+                        link,
+                        self.project_groups[self.group_index(index).unwrap()]
+                            .heading
+                            .clone(),
+                    )];
+                    super::links::underline(buf, &links);
+                    state.list_links.extend(links);
+                }
                 continue;
             }
             let header = matches!(entry, CenterRow::Parent(_));
