@@ -246,9 +246,14 @@ fn prose_path(word: &str) -> Option<std::ops::Range<usize>> {
     let start = word.find(['/', '~']).filter(|&start| {
         !word[..start].contains(|c: char| c.is_ascii_alphanumeric() || c == ':')
     })?;
-    let path = word[start..].trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':']);
+    let path = trim_closing(&word[start..]);
     ((path.starts_with('/') || path.starts_with("~/")) && path[1..].contains('/'))
         .then_some(start..start + path.len())
+}
+
+/// Drops the quotes, brackets and punctuation that close a path in prose.
+fn trim_closing(path: &str) -> &str {
+    path.trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':'])
 }
 
 /// Fits each oversized prose path to the wrapping width, independently of surrounding text.
@@ -277,7 +282,7 @@ pub(super) fn wrapped_path(word: &str) -> Option<std::ops::Range<usize>> {
     let mut range = prose_path(word)?;
     // CJK sentence punctuation ends a path without an intervening space.
     if let Some(end) = word[range.clone()].find(['，', '。', '；', '：', '！', '？']) {
-        range.end = range.start + end;
+        range.end = range.start + trim_closing(&word[range.start..range.start + end]).len();
     }
     for marker in ["**", "__", "~~", "*", "_"] {
         if word[..range.start].ends_with(marker) && word[..range.end].ends_with(marker) {
@@ -333,6 +338,12 @@ mod tests {
             "many words before /tmp/fits.md and /p…/w…/reports/result.md\n报告：/p…/w…/reports/result.md\tend"
         );
         assert_eq!(abbreviate_paths_for_wrap(text, 100), text);
+    }
+
+    #[test]
+    fn wrapped_path_ends_before_closing_punctuation_ahead_of_cjk_text() {
+        let word = "装进了`~/.cargo/bin`。正在跑的";
+        assert_eq!(&word[wrapped_path(word).unwrap()], "~/.cargo/bin");
     }
 
     #[test]
