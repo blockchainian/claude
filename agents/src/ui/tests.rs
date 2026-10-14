@@ -5118,6 +5118,26 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
 }
 
 #[test]
+fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
+    let mut view = fixture();
+    let selected = &mut view.rows[view.selected];
+    selected.pr = Some(crate::model::PullRequest {
+        number: 833,
+        url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
+    });
+    let rendered = screen(&view, 120, 40);
+    let (x, y) = rendered_cell(&rendered, "Project · ");
+    let cwd_cell = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1);
+    assert_eq!(
+        click_mouse(&mut view, cwd_cell),
+        Some(Action::OpenPath("/tmp/project".into()))
+    );
+    // Under 90 columns the details panel is gone and the list spans its cells.
+    screen(&view, 80, 40);
+    assert_eq!(click_mouse(&mut view, cwd_cell), None);
+}
+
+#[test]
 fn project_group_header_opens_its_directory() {
     let mut view = fixture();
     let rendered = screen(&view, 120, 40);

@@ -157,9 +157,15 @@ impl View {
         now: chrono::DateTime<chrono::Utc>,
     ) {
         Clear.render(area, buf);
-        self.viewport.borrow_mut().marker = None;
-        self.viewport.borrow_mut().details = Rect::default();
-        self.viewport.borrow_mut().log = Rect::default();
+        {
+            // A panel this frame leaves out keeps no links from the last one.
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.marker = None;
+            viewport.details = Rect::default();
+            viewport.log = Rect::default();
+            viewport.details_links.clear();
+            viewport.log_links.clear();
+        }
         let layout = self.center_layout(area);
         let inset = |area: Rect| area.inner(Margin::new(2, 0));
         line(
