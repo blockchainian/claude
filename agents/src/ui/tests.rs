@@ -4628,11 +4628,13 @@ fn click_log_text(view: &mut View, screen: &str, text: &str, button: MouseButton
 }
 
 #[test]
-fn task_log_click_opens_cut_event_and_right_click_returns() {
+fn task_log_right_click_opens_cut_event_and_closes_it() {
     let (mut view, now) = log_fixture();
     view.log[6].body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph".into();
     let list = log_screen(&view, 100, 25, now);
     click_log_text(&mut view, &list, "A long response", MouseButton::Left);
+    assert_eq!(log_screen(&view, 100, 25, now), list);
+    click_log_text(&mut view, &list, "A long response", MouseButton::Right);
     let open = log_screen(&view, 100, 25, now);
     assert_eq!(
         open,
@@ -4654,7 +4656,7 @@ fn task_log_click_opens_cut_event_and_right_click_returns() {
 }
 
 #[test]
-fn task_log_click_on_whole_row_keeps_list() {
+fn task_log_right_click_on_whole_row_keeps_list() {
     let (mut view, now) = log_fixture();
     let list = log_screen(&view, 100, 25, now);
     click_log_text(&mut view, &list, "run tests", MouseButton::Left);
@@ -4664,13 +4666,13 @@ fn task_log_click_on_whole_row_keeps_list() {
 }
 
 #[test]
-fn task_log_click_opens_row_with_shortened_path() {
+fn task_log_right_click_opens_row_with_shortened_path() {
     let (mut view, now) = log_fixture();
     let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
     view.log[7].path = Some(path.into());
     let list = log_screen(&view, 100, 25, now);
     assert!(!list.contains(path), "{list}");
-    click_log_text(&mut view, &list, "run tests", MouseButton::Left);
+    click_log_text(&mut view, &list, "run tests", MouseButton::Right);
     let open = log_screen(&view, 100, 25, now);
     // The open event wraps the full path at the panel edge instead of shortening it.
     assert!(open.contains(&path[..96]), "{open}");
@@ -4680,7 +4682,7 @@ fn task_log_click_opens_row_with_shortened_path() {
 fn task_log_open_event_closes_when_selection_changes() {
     let (mut view, now) = log_fixture();
     let list = log_screen(&view, 100, 25, now);
-    click_log_text(&mut view, &list, "A long response", MouseButton::Left);
+    click_log_text(&mut view, &list, "A long response", MouseButton::Right);
     assert!(view.log_open.is_some());
     let mut other = session("other", "Other task", SessionStatus::Working, 1);
     other.transcript = Some("/tmp/other.jsonl".into());
