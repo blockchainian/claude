@@ -13,3 +13,6 @@ Extracted from real local Codex rollouts. Source paths below are relative to the
 - `extension.jsonl`: `2026/10/07/rollout-2026-10-07T16-55-42-01a118cb-58c9-7931-90c2-17d36e492b52.jsonl`, lines 100.
 - `pure-js.jsonl`: `2026/10/05/rollout-2026-10-05T22-39-03-01a10fb8-f855-7851-89b3-57074554bbee.jsonl`, lines 1538, 1541.
 - `non-activity.jsonl`: `2026/10/03/rollout-2026-10-03T15-54-53-01a103fa-3afd-7aa1-8925-96b46ceaa947.jsonl` line 10; `2026/10/03/rollout-2026-10-03T13-32-23-01a10377-c545-78a1-8a3b-842a994ffdd3.jsonl` line 22; `2026/10/03/rollout-2026-10-03T11-10-34-01a102f5-ef80-7b80-b383-fcf617823a00.jsonl` line 673; `2026/10/02/rollout-2026-10-02T19-49-08-01a0ffaa-551d-71f1-868b-1023d27526e9.jsonl` line 2; `2026/10/02/rollout-2026-10-02T19-49-08-01a0ffaa-551d-71f1-868b-1023d27526e9.jsonl` line 47.
+
+- `file-change-without-start.jsonl`: `2026/06/12/rollout-2026-06-12T22-31-00-019ebf76-46e6-7da2-acdd-4676737d367e.jsonl`, lines 150–152. Patch path scrubbed; timing fields retained, including the absent start.
+- `image-generation.jsonl`: `2026/07/21/rollout-2026-07-21T19-13-52-019f8461-d57c-7870-920d-fcac3f017a77.jsonl`, line 162. Image result omitted, prompt scrubbed, optional saved path omitted.

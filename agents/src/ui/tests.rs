@@ -2472,6 +2472,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
     ].into_iter().map(|(kind, body, age, end)| Event {
         kind, body: body.into(), path: None, started_at: now - Duration::seconds(age),
         ended_at: end.map(|age| now - Duration::seconds(age)),
+        duration: None,
         previous_end: Some(now - Duration::seconds(age + 5)),
     }).collect();
     let mut previous_end = None;
@@ -2893,6 +2894,7 @@ fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
         path: None,
         started_at: now - Duration::seconds(180),
         ended_at: None,
+        duration: None,
         previous_end: None,
     };
     view.log.insert(0, first);

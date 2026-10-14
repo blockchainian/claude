@@ -77,22 +77,56 @@ fn content_text(content: &Value) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
-fn assistant_text(record: &Value) -> Option<String> {
+fn assistant_text(record: &Value) -> io::Result<Option<String>> {
     let payload = &record["payload"];
-    match (record["type"].as_str()?, payload["type"].as_str()) {
-        ("response_item", Some("message")) if payload["role"] == "assistant" => {
+    Ok(match (record["type"].as_str(), payload["type"].as_str()) {
+        (Some("response_item"), Some("message")) if payload["role"] == "assistant" => {
             content_text(&payload["content"])
         }
-        ("event_msg", Some("task_complete")) => payload["last_agent_message"]
+        (Some("event_msg"), Some("task_complete")) => payload["last_agent_message"]
             .as_str()
             .filter(|text| !text.trim().is_empty())
             .map(str::to_owned),
-        ("event_msg", Some("agent_message")) => payload["message"].as_str().map(str::to_owned),
-        ("event_msg", Some("item_completed")) if payload["item"]["type"] == "AgentMessage" => {
-            content_text(&payload["item"]["content"])
+        (Some("event_msg"), Some("agent_message")) => {
+            payload["message"].as_str().map(str::to_owned)
+        }
+        (Some("event_msg"), Some("item_completed"))
+            if payload["item"]["type"] == "AgentMessage" =>
+        {
+            required_text(&payload["item"], "id")?;
+            completed_message(&payload["item"])?
         }
         _ => None,
-    }
+    })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "type")]
+enum MessageContent {
+    Text { text: String },
+}
+
+fn completed_message(item: &Value) -> io::Result<Option<String>> {
+    let content: Vec<MessageContent> = field(item, "content")?;
+    let text = content
+        .into_iter()
+        .map(|MessageContent::Text { text }| text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok((!text.trim().is_empty()).then_some(text))
+}
+
+fn field<T: serde::de::DeserializeOwned>(value: &Value, key: &str) -> io::Result<T> {
+    serde_json::from_value(value[key].clone()).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Invalid Codex activity {key}: {error}"),
+        )
+    })
+}
+
+fn optional<T: serde::de::DeserializeOwned>(value: &Value, key: &str) -> io::Result<Option<T>> {
+    field(value, key)
 }
 
 fn tool_body(payload: &Value) -> Option<String> {
@@ -156,15 +190,17 @@ fn required_text<'a>(value: &'a Value, key: &str) -> io::Result<&'a str> {
 }
 
 fn item_time(payload: &Value, key: &str) -> io::Result<DateTime<Utc>> {
-    payload[key]
-        .as_i64()
-        .and_then(DateTime::from_timestamp_millis)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Invalid Codex activity {key}"),
-            )
-        })
+    let millis = if key == "completed_at_ms" && payload.get(key).is_none() {
+        0
+    } else {
+        field::<i64>(payload, key)?
+    };
+    DateTime::from_timestamp_millis(millis).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Invalid Codex activity {key}"),
+        )
+    })
 }
 
 fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
@@ -174,8 +210,9 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
     }
     let item = &payload["item"];
     let mut path = None;
-    let body = match item["type"].as_str() {
-        Some("CommandExecution") => {
+    let item_type = required_text(item, "type")?;
+    let body = match item_type {
+        "CommandExecution" => {
             let command: Vec<_> = item["command"]
                 .as_array()
                 .ok_or_else(|| {
@@ -188,26 +225,20 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
                     })
                 })
                 .collect::<io::Result<_>>()?;
-            if command.is_empty() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Empty Codex command",
-                ));
-            }
             let text = if command.len() == 3 && matches!(command[1], "-lc" | "-c") {
                 command[2].to_owned()
             } else {
                 command.join(" ")
             };
             let mut body = format!("exec_command {text}");
-            if let Some(code) = item["exit_code"].as_i64()
+            if let Some(code) = optional::<i32>(item, "exit_code")?
                 && code != 0
             {
                 body.push_str(&format!(" (exit {code})"));
             }
             body
         }
-        Some("FileChange") => {
+        "FileChange" => {
             let changes = item["changes"].as_object().ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -226,52 +257,41 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
                 )
             }
         }
-        Some("McpToolCall") => format!(
+        "McpToolCall" => format!(
             "{}.{}",
             required_text(item, "server")?,
             required_text(item, "tool")?
         ),
-        Some("Extension") => {
+        "Extension" => {
             let kind = required_text(item, "kind")?;
-            match item["query"]
-                .as_str()
-                .or_else(|| item["revisedPrompt"].as_str())
-            {
+            let detail = match kind {
+                "web.search" => Some(required_text(item, "query")?.to_owned()),
+                "image_gen.generation" => optional::<String>(item, "revisedPrompt")?,
+                _ => None,
+            };
+            match detail {
                 Some(detail) => format!("{kind} {detail}"),
                 None => kind.to_owned(),
             }
         }
-        Some("ImageView") => {
+        "ImageView" => {
             let image = required_text(item, "path")?;
             path = Some(image.strip_prefix("file://").unwrap_or(image).to_owned());
             "view_image".to_owned()
         }
-        Some("SubAgentActivity") => format!(
+        "SubAgentActivity" => format!(
             "subagent {} {}",
             required_text(item, "kind")?,
             participant_text(Some(required_text(item, "agent_path")?), "")
         ),
-        Some("CollabAgentToolCall") => {
+        "CollabAgentToolCall" => {
             let tool = required_text(item, "tool")?;
-            let targets = item["receiver_thread_ids"]
-                .as_array()
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Codex collaboration requires receivers",
-                    )
-                })?
-                .iter()
-                .map(|id| {
-                    id.as_str().ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Invalid Codex collaboration receiver",
-                        )
-                    })
-                })
-                .collect::<io::Result<Vec<_>>>()?
-                .join(", ");
+            let targets = if item.get("receiver_thread_ids").is_some() {
+                field::<Vec<String>>(item, "receiver_thread_ids")?
+            } else {
+                Vec::new()
+            }
+            .join(", ");
             if targets.is_empty() {
                 tool.to_owned()
             } else {
@@ -280,33 +300,28 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         }
         _ => return Ok(None),
     };
+    required_text(item, "id")?;
     let ended_at = item_time(payload, "completed_at_ms")?;
-    let started_at = if item["duration"].is_null() {
-        item_time(payload, "started_at_ms")?
+    let start = optional::<i64>(payload, "started_at_ms")?
+        .map(|_| item_time(payload, "started_at_ms"))
+        .transpose()?;
+    let elapsed = if matches!(item_type, "CommandExecution" | "McpToolCall") {
+        optional::<std::time::Duration>(item, "duration")?
+            .map(chrono::Duration::from_std)
+            .transpose()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
     } else {
-        let duration = &item["duration"];
-        let seconds = duration["secs"]
-            .as_i64()
-            .filter(|secs| *secs >= 0)
-            .and_then(chrono::Duration::try_seconds);
-        let nanos = duration["nanos"]
-            .as_i64()
-            .filter(|nanos| (0..1_000_000_000).contains(nanos));
-        let elapsed = seconds
-            .zip(nanos)
-            .and_then(|(secs, nanos)| secs.checked_add(&chrono::Duration::nanoseconds(nanos)))
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Invalid Codex activity duration",
-                )
-            })?;
-        ended_at.checked_sub_signed(elapsed).ok_or_else(|| {
+        None
+    };
+    let duration = start.map(|start| elapsed.unwrap_or(ended_at - start));
+    let started_at = match duration {
+        Some(elapsed) => ended_at.checked_sub_signed(elapsed).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Codex activity duration exceeds timestamp",
             )
-        })?
+        })?,
+        None => ended_at,
     };
     Ok(Some(Event {
         kind: Kind::Tool,
@@ -314,6 +329,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         path,
         started_at,
         ended_at: Some(ended_at),
+        duration,
         previous_end: None,
     }))
 }
@@ -363,7 +379,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             }
         }
         if summary.last_message.is_none()
-            && let Some(text) = assistant_text(&record)
+            && let Some(text) = assistant_text(&record)?
         {
             summary.last_message = Some(preview(&text));
             summary.last_message_at = Some(at);
@@ -416,9 +432,7 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
         };
         let payload = &record["payload"];
         if let Some(event) = completed_tool(&record)? {
-            if let Some(id) = payload["item"]["id"].as_str()
-                && !seen.insert(id.to_owned())
-            {
+            if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
             }
             matching += usize::from(filter.matches(&event.kind));
@@ -470,12 +484,10 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
                 if payload["item"]["type"] == "AgentMessage" =>
             {
                 let item = &payload["item"];
-                if let Some(id) = item["id"].as_str()
-                    && !seen.insert(id.to_owned())
-                {
+                if !seen.insert(required_text(item, "id")?.to_owned()) {
                     return Ok(true);
                 }
-                let Some(body) = content_text(&item["content"]) else {
+                let Some(body) = completed_message(item)? else {
                     return Ok(true);
                 };
                 (Kind::Assistant, body, None)
@@ -492,6 +504,7 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
             path: None,
             started_at: at,
             ended_at,
+            duration: ended_at.map(|end| end - at),
             previous_end: None,
         });
         Ok(matching <= count)

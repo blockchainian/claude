@@ -1003,3 +1003,28 @@ fn names_follow_history_mode_and_manager_precedence() {
         Some("Managed worker")
     );
 }
+
+#[test]
+fn file_change_without_start_preserves_session_list() {
+    let (dir, mut provider) = fixture();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/codex-inner/file-change-without-start.jsonl");
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE threads SET rollout_path=? WHERE id='thread-0'",
+            [path.to_str().unwrap()],
+        )
+        .unwrap();
+    let snapshot = provider.refresh(2);
+    assert_eq!(snapshot.sessions.len(), 14);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|s| s.id.id == "thread-0")
+        .unwrap();
+    assert_eq!(
+        session.activity.as_ref().unwrap().label,
+        "apply_patch /workspace/project/design.md"
+    );
+}

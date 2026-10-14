@@ -151,7 +151,10 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
         && event.kind == Kind::Tool
         && let Some(end) = event.ended_at
     {
-        return RowTime::Settled((end - event.started_at).num_seconds().max(0));
+        return match event.duration {
+            Some(duration) => RowTime::Settled(duration.num_seconds().max(0)),
+            None => RowTime::Clock(end),
+        };
     }
     let Some(previous) = event.previous_end else {
         return RowTime::Clock(event.started_at);
@@ -345,6 +348,7 @@ mod log_markdown {
             path: None,
             started_at: Utc::now(),
             ended_at: None,
+            duration: None,
             previous_end: None,
         };
         render_event(&event, "12:00:00", 8, false, area, &mut buffer, None);
@@ -403,6 +407,47 @@ mod log_markdown {
         assert_eq!(event_time(event, &session, true, now), "2m 0s");
         session.status = SessionStatus::Ready;
         assert_eq!(event_time(event, &session, true, now), "30s");
+    }
+
+    #[test]
+    fn file_change_without_start_shows_clock_instead_of_duration() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex-inner/file-change-without-start.jsonl");
+        let provider = crate::providers::codex::CodexProvider::new(
+            std::path::PathBuf::new(),
+            std::path::PathBuf::new(),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut store = crate::providers::claude::ClaudeProvider::new(dir.path().to_owned());
+        let mut session = crate::providers::Provider::refresh(&mut store, 1)
+            .sessions
+            .remove(0);
+        session.id.provider = crate::providers::ProviderId::Codex;
+        session.transcript = Some(path);
+        let events = crate::providers::Provider::log(
+            &provider,
+            &session,
+            100,
+            &crate::log::Filter::default(),
+            false,
+        )
+        .unwrap();
+        let event = &events[0];
+        assert_eq!(
+            row_time(event, &session, true),
+            RowTime::Clock(event.started_at)
+        );
+        assert_eq!(
+            row_time(event, &session, false),
+            RowTime::Clock(event.started_at)
+        );
     }
 
     #[test]

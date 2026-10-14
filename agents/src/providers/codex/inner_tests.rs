@@ -177,3 +177,225 @@ fn non_activity_completed_items_do_not_become_tool_events() {
             .is_none()
     );
 }
+
+#[test]
+fn file_change_without_start_log_anchors_at_completion() {
+    let entries = events("file-change-without-start");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].body, "apply_patch");
+    let completion = DateTime::from_timestamp_millis(1781329074517).unwrap();
+    assert_eq!(entries[0].started_at, completion);
+    assert_eq!(entries[0].ended_at, Some(completion));
+    assert_eq!(entries[0].duration, None);
+}
+
+#[test]
+fn file_change_without_start_summary_succeeds() {
+    let activity = summary(&fixture("file-change-without-start"))
+        .unwrap()
+        .activity
+        .unwrap();
+    assert_eq!(activity.label, "apply_patch /workspace/project/design.md");
+    assert_eq!(
+        activity.at,
+        DateTime::from_timestamp_millis(1781329074517).unwrap()
+    );
+}
+
+fn check_completed_record(mut record: Value, change: impl FnOnce(&mut Value), valid: bool) {
+    change(&mut record);
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), format!("{record}\n")).unwrap();
+    assert_eq!(
+        tail_filtered(file.path(), 100, &Filter::default()).is_ok(),
+        valid,
+        "{record}"
+    );
+    assert_eq!(summary(file.path()).is_ok(), valid, "{record}");
+}
+
+#[test]
+fn completed_record_protocol_defaults_and_optional_types() {
+    let file_change = records("file-change").remove(0);
+    check_completed_record(
+        file_change.clone(),
+        |r| {
+            r["payload"]
+                .as_object_mut()
+                .unwrap()
+                .remove("completed_at_ms");
+        },
+        true,
+    );
+    check_completed_record(
+        file_change.clone(),
+        |r| {
+            r["payload"]["completed_at_ms"] = Value::Null;
+        },
+        false,
+    );
+    check_completed_record(
+        file_change.clone(),
+        |r| {
+            r["payload"]["started_at_ms"] = Value::Null;
+        },
+        true,
+    );
+    check_completed_record(
+        file_change.clone(),
+        |r| {
+            r["payload"]["started_at_ms"] = "bad".into();
+        },
+        false,
+    );
+    check_completed_record(
+        file_change,
+        |r| {
+            r["payload"]["item"].as_object_mut().unwrap().remove("id");
+        },
+        false,
+    );
+    let collab = records("collaboration").remove(0);
+    check_completed_record(
+        collab.clone(),
+        |r| {
+            r["payload"]["item"]
+                .as_object_mut()
+                .unwrap()
+                .remove("receiver_thread_ids");
+        },
+        true,
+    );
+    check_completed_record(
+        collab,
+        |r| {
+            r["payload"]["item"]["receiver_thread_ids"] = Value::Null;
+        },
+        false,
+    );
+    let command = records("command").remove(1);
+    check_completed_record(
+        command.clone(),
+        |r| {
+            r["payload"]["item"]["exit_code"] = "bad".into();
+        },
+        false,
+    );
+    check_completed_record(
+        command.clone(),
+        |r| {
+            r["payload"]["item"]["exit_code"] = i64::from(i32::MAX).saturating_add(1).into();
+        },
+        false,
+    );
+    check_completed_record(
+        command.clone(),
+        |r| {
+            r["payload"]["item"]["exit_code"] = Value::Null;
+            r["payload"]["item"]["duration"] = Value::Null;
+        },
+        true,
+    );
+    check_completed_record(
+        command,
+        |r| {
+            r["payload"]["item"]["command"] = serde_json::json!([]);
+        },
+        true,
+    );
+    let extension = records("extension").remove(0);
+    check_completed_record(
+        extension.clone(),
+        |r| {
+            r["payload"]["item"]
+                .as_object_mut()
+                .unwrap()
+                .remove("query");
+        },
+        false,
+    );
+    check_completed_record(
+        extension,
+        |r| {
+            r["payload"]["item"]["query"] = Value::Null;
+        },
+        false,
+    );
+}
+
+#[test]
+fn completed_message_and_extension_fields_follow_protocol() {
+    let message: Value = include_str!("../../../tests/fixtures/codex-rollout.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .find(|record| record["payload"]["item"]["type"] == "AgentMessage")
+        .unwrap();
+    check_completed_record(message.clone(), |_| {}, true);
+    for key in ["id", "content"] {
+        check_completed_record(
+            message.clone(),
+            |r| {
+                r["payload"]["item"].as_object_mut().unwrap().remove(key);
+            },
+            false,
+        );
+    }
+    check_completed_record(
+        message.clone(),
+        |r| {
+            r["payload"]["item"]["content"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("text");
+        },
+        false,
+    );
+    check_completed_record(
+        message,
+        |r| {
+            r["payload"]["item"]["content"] = "bad".into();
+        },
+        false,
+    );
+    let image = records("image-generation").remove(0);
+    check_completed_record(
+        image.clone(),
+        |r| {
+            r["payload"]["item"]
+                .as_object_mut()
+                .unwrap()
+                .remove("revisedPrompt");
+        },
+        true,
+    );
+    check_completed_record(
+        image.clone(),
+        |r| {
+            r["payload"]["item"]["revisedPrompt"] = Value::Null;
+        },
+        true,
+    );
+    check_completed_record(
+        image,
+        |r| {
+            r["payload"]["item"]["revisedPrompt"] = 42.into();
+        },
+        false,
+    );
+}
+
+#[test]
+fn command_without_start_has_unknown_duration_even_with_item_duration() {
+    let mut record = records("command").remove(1);
+    assert!(record["payload"]["item"]["duration"].is_object());
+    record["payload"]
+        .as_object_mut()
+        .unwrap()
+        .remove("started_at_ms");
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), format!("{record}\n")).unwrap();
+    let entries = tail_filtered(file.path(), 100, &Filter::default()).unwrap();
+    assert_eq!(entries[0].duration, None);
+    assert_eq!(entries[0].started_at, entries[0].ended_at.unwrap());
+    assert!(summary(file.path()).unwrap().activity.is_some());
+}

@@ -391,6 +391,7 @@ fn last_prose_log_row_ticks_each_second_under_a_minute() {
         path: None,
         started_at,
         ended_at: None,
+        duration: None,
         previous_end: None,
     }];
     let at = |seconds| started_at + chrono::Duration::seconds(seconds);

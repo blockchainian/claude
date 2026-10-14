@@ -62,6 +62,8 @@ pub struct Event {
     pub path: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
+    /// Known execution time; absent when a completed activity has no recorded start.
+    pub duration: Option<chrono::Duration>,
     /// The preceding event's end, including hidden turn starters for Assistant replies.
     pub previous_end: Option<DateTime<Utc>>,
 }
