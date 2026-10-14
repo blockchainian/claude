@@ -393,12 +393,31 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
 }
 
 #[test]
+fn mouse_details_wheel_scrolls_three_rows_per_report() {
+    let mut view = overflowing_details();
+    details_panel(&view);
+    let rect = view.viewport.borrow().details;
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    let revealed = |view: &View| {
+        view.viewport
+            .borrow()
+            .details_scroll
+            .reveal
+            .iter()
+            .sum::<usize>()
+    };
+    assert_eq!(revealed(&view), 3);
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, rect.x, rect.y));
+    assert_eq!(revealed(&view), 0);
+}
+
+#[test]
 fn mouse_details_scroll_resets_with_selection_and_filter() {
     for code in [KeyCode::Down, KeyCode::End, KeyCode::PageDown, KeyCode::Tab] {
         let mut view = overflowing_details();
         details_panel(&view);
         let rect = view.viewport.borrow().details;
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+        view.scroll_content_row(true, false, rect.y);
         assert_eq!(
             view.viewport
                 .borrow()
@@ -495,7 +514,7 @@ fn details_scroll_tracks_session_identity_across_refreshes() {
     let mut view = overflowing_details();
     details_panel(&view);
     let rect = view.viewport.borrow().details;
-    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    view.scroll_content_row(true, false, rect.y);
     let id = view.selected_id().unwrap().to_owned();
     let mut rows = view.rows.clone();
     rows.push(session(
@@ -2276,7 +2295,7 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     assert_eq!(line(&buf, 4), wrapped[1]);
     assert_eq!(line(&buf, 5), "…");
     for expected in &wrapped[2..] {
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x, area.y));
+        view.scroll_content_row(true, false, area.y);
         buf.reset();
         view.render_details(area, &mut buf, now);
         assert_eq!(line(&buf, 4), *expected);
@@ -3257,7 +3276,7 @@ mod details_budget {
                 .unwrap()
                 .ends_with('…')
         );
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 0));
+        view.scroll_content_row(true, false, 0);
         assert_eq!(
             view.viewport
                 .borrow()
@@ -3271,7 +3290,7 @@ mod details_budget {
         assert_eq!(scrolled[0], rest[0]);
         assert_eq!(scrolled[23], rest[23]);
         assert_eq!(scrolled[2], "Prompt row 1");
-        view.handle_mouse(mouse(MouseEventKind::ScrollUp, 0, 0));
+        view.scroll_content_row(false, false, 0);
         assert_eq!(panel(&view), rest);
     }
 }
@@ -3353,7 +3372,7 @@ mod details_curtain {
         panel(&view);
         let hidden = view.viewport.borrow().details_scroll.hidden[0];
         for _ in 0..hidden {
-            view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 5));
+            view.scroll_content_row(true, false, 5);
             panel(&view);
         }
         let opened = panel(&view);
@@ -3362,7 +3381,7 @@ mod details_curtain {
             .unwrap();
         assert!((1..message).all(|y| !text(&opened, y).ends_with('…')));
         assert_eq!(text(&opened, message - 2), "Prompt row 12");
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 5));
+        view.scroll_content_row(true, false, 5);
         let after = panel(&view);
         assert_eq!(
             view.viewport.borrow().details_scroll.reveal,
@@ -3417,7 +3436,7 @@ mod details_curtain {
         let mut view = fixture();
         panel(&view);
         for _ in 0..3 {
-            view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, 5));
+            view.scroll_content_row(true, false, 5);
             panel(&view);
         }
         view.rows[view.selected].prompt = (1..=8)
@@ -3441,7 +3460,7 @@ mod details_curtain {
         let message = (0..24)
             .find(|&y| text(&before, y) == "Last message")
             .unwrap();
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, pointer));
+        view.scroll_content_row(true, false, pointer);
         let after = panel(&view);
         for x in 0..120 {
             assert_eq!(after[(x, 0)], before[(x, 0)], "pinned header {x}");
@@ -3462,7 +3481,7 @@ mod details_curtain {
             .find(|s| s.ends_with('…'))
             .unwrap();
         assert_ne!(cut_before, cut_after);
-        view.handle_mouse(mouse(MouseEventKind::ScrollUp, 0, pointer));
+        view.scroll_content_row(false, false, pointer);
         assert_eq!(panel(&view), before);
     }
 

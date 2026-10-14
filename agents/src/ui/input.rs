@@ -1,6 +1,6 @@
 use super::*;
 
-/// Rows one wheel report scrolls the log panel, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
+/// Rows one wheel report scrolls the log and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
 const WHEEL_ROWS: usize = 3;
 
 impl View {
@@ -166,12 +166,10 @@ impl View {
                     self.set_filter(idx);
                 } else if over_list {
                     self.move_selection(forward);
-                } else if over_log {
+                } else if over_log || over_details {
                     for _ in 0..WHEEL_ROWS {
-                        self.scroll_content_row(forward, true, mouse.row);
+                        self.scroll_content_row(forward, over_log, mouse.row);
                     }
-                } else if over_details {
-                    self.scroll_content_row(forward, false, mouse.row);
                 }
             }
             _ => {}
