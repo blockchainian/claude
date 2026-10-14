@@ -2622,6 +2622,15 @@ fn background_box_dims_border_but_not_title_or_output() {
     assert!(buf[(30, top)].modifier.contains(Modifier::DIM));
     assert_eq!(buf[(2, top)].symbol(), "R");
     assert!(!buf[(2, top)].modifier.contains(Modifier::DIM));
+    let (tool_view, _) = open_tool_fixture();
+    let mut event = tool_view.log[7].clone();
+    event.calls[0].title = "Run checks".into();
+    let parts = super::tool_detail::parts(&event);
+    let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
+    (&parts[0].lines(40, Style::default())[0]).render(title_buf.area, &mut title_buf);
+    for x in (0..12).chain(30..39) {
+        assert_eq!(title_buf[(x, 0)], buf[(x, top)], "title cell {x}");
+    }
     assert_eq!(buf[(2, top + 1)].symbol(), "t");
     assert!(!buf[(2, top + 1)].modifier.contains(Modifier::DIM));
 }
@@ -4973,7 +4982,7 @@ fn task_log_click_opens_a_whole_row_that_has_calls() {
 }
 
 #[test]
-fn merged_tool_title_rules_center_on_the_arrow_and_copy_only_titles() {
+fn merged_tool_title_rules_start_at_the_arrow_column_and_copy_only_titles() {
     for (width, title) in [
         (100, "Bash"),
         (99, "看探针结果"),
@@ -5008,7 +5017,7 @@ fn merged_tool_title_rules_center_on_the_arrow_and_copy_only_titles() {
             let row = &rows[0];
             let start = row.cells.first().unwrap().0.start;
             let end = row.cells.last().unwrap().0.end;
-            assert_eq!(start + (end - start) / 2, body.width / 2);
+            assert_eq!(start, 2);
             if start > 1 {
                 assert_eq!(buf[(body.x, row.y)].symbol(), "─");
             }
@@ -5019,6 +5028,24 @@ fn merged_tool_title_rules_center_on_the_arrow_and_copy_only_titles() {
                 let viewport = view.viewport.borrow();
                 assert_eq!(row.y, viewport.log_text.rows.first().unwrap().y);
             }
+            assert!(
+                buf[(body.x, row.y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
+            assert!(
+                !buf[(body.x + start, row.y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
+            let arrow = (body.y..body.bottom())
+                .find(|y| buf[(body.x + 2, *y)].symbol() == "↓")
+                .expect("arrow at the title column");
+            assert!(
+                buf[(body.x + 2, arrow)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            );
             let x1 = body.x + start;
             let x2 = body.right() - 1;
             view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x1, row.y));
@@ -5653,7 +5680,7 @@ fn open_tool_layout_titles_and_rules() {
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "↓");
     let area = view.viewport.borrow().log_text.area;
-    assert_eq!(x, area.x + area.width / 2);
+    assert_eq!(x, area.x + 2);
     assert_eq!(buf[(x, y)].fg, Color::Reset);
     assert!(
         buf[(x, y)]

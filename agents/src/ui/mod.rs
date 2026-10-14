@@ -20,6 +20,7 @@ mod shortcut_help;
 mod style;
 mod text_selection;
 mod text_selection_layout;
+mod title_rule;
 mod tool_detail;
 pub(crate) mod vscode;
 #[cfg(test)]
