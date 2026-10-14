@@ -1,6 +1,7 @@
 //! Session sources: the live registry and transcripts.
 
 mod background;
+mod images;
 pub(crate) mod log;
 mod peer;
 mod registry;
@@ -640,7 +641,7 @@ fn session(
         name: None,
         title,
         prompt: summary.prompt,
-        prompt_images: Vec::new(),
+        prompt_images: summary.prompt_images,
         queued: summary.queued,
         prompt_at: summary.prompt_at,
         turn_messages: summary.turn_messages,

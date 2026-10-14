@@ -118,6 +118,7 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
 
 #[derive(Default)]
 struct Log {
+    images: super::images::Companions,
     entries: Vec<Entry>,
     results: std::collections::HashMap<String, ResultAt>,
     assistant: Option<String>,
@@ -143,6 +144,7 @@ impl Log {
     }
 
     fn record(&mut self, record: serde_json::Value, count: usize) -> bool {
+        self.images.record(&record);
         self.sequence += 1;
         if record["type"] == "assistant" {
             let key = record["message"]["id"]
@@ -218,7 +220,9 @@ impl Log {
                     if let Some((kind, body)) = wrapped_message(&text) {
                         self.push(kind, body, at);
                     } else if !text.trim_start().starts_with('<') {
+                        let images = self.images.take(&record, &text);
                         self.push(Kind::User, text, at);
+                        self.entries.last_mut().unwrap().event.images = images;
                     }
                 }
                 // A hidden turn starter is still the immediately preceding event.
@@ -458,6 +462,44 @@ fn user_text(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn prompt_images_follow_their_own_user_events() {
+        let (dir, records) = super::super::transcript::tests::image_fixture();
+        let path = dir.path().join("transcript.jsonl");
+        std::fs::write(
+            &path,
+            records
+                .iter()
+                .map(|record| format!("{record}\n"))
+                .collect::<String>(),
+        )
+        .unwrap();
+        for missing in [false, true] {
+            if missing {
+                std::fs::remove_file(dir.path().join("images/8.png")).unwrap();
+            }
+            let events = super::tail(&path, 20).unwrap();
+            assert_eq!(events.len(), 2);
+            for (event, numbers) in events
+                .iter()
+                .zip([vec![6], if missing { vec![9] } else { vec![8, 9] }])
+            {
+                assert_eq!(event.kind, crate::log::Kind::User);
+                assert_eq!(
+                    event.images,
+                    numbers
+                        .into_iter()
+                        .map(|number| crate::log::Image {
+                            label: format!("[Image #{number}]"),
+                            path: dir.path().join(format!("images/{number}.png")),
+                        })
+                        .collect::<Vec<_>>()
+                );
+            }
+            assert_eq!(super::tail(&path, 1).unwrap()[0].images, events[1].images);
+        }
+    }
+
     use super::*;
     use serde_json::{Value, json};
     use std::io::Write;

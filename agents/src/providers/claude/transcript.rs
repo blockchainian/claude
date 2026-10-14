@@ -17,6 +17,7 @@ pub(super) struct Summary {
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
     pub prompt: String,
+    pub prompt_images: Vec<crate::log::Image>,
     pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
@@ -197,13 +198,13 @@ impl QueueOperation {
 /// message absorbed into a running turn, which Claude Code stores as an
 /// attachment instead of a user record.
 fn prompt_text(record: &Value) -> Option<String> {
-    if record["isMeta"] == true {
-        return None;
-    }
     match record["type"].as_str()? {
         "user" => {
             if let Some((name, body)) = super::peer::origin_message(record) {
                 return Some(crate::log::participant_text(name, body));
+            }
+            if record["isMeta"] == true {
+                return None;
             }
             let text = content_text(record, false)?;
             Some(match super::peer::wrapped_message(&text) {
@@ -417,7 +418,9 @@ fn read_messages(
     let mut quiet_point = false;
     let mut questions_found = false;
     let mut tool_results = HashSet::new();
+    let mut images = super::images::Companions::default();
     walk_records(file, start, bytes, sidechains, |record| {
+        images.record(&record);
         if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {
             for block in blocks.iter().rev() {
                 if record["type"] == "user"
@@ -483,6 +486,7 @@ fn read_messages(
             && !prompt.trim_start().starts_with('<')
         {
             summary.prompt = printable(&prompt);
+            summary.prompt_images = images.take(&record, &summary.prompt);
             summary.prompt_at = at;
             summary.turn_messages = turn_messages;
             prompt_found = true;
@@ -645,11 +649,73 @@ pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io:
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::io::Write;
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
+
+    pub(in crate::providers::claude) fn image_fixture() -> (tempfile::TempDir, Vec<Value>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut records: Vec<Value> =
+            include_str!("../../../tests/fixtures/claude-prompt-images.jsonl")
+                .lines()
+                .map(|line| {
+                    let line =
+                        line.replace("/redacted/claude-session", dir.path().to_str().unwrap());
+                    serde_json::from_str(&line).unwrap()
+                })
+                .collect();
+        // Pair by paste id even when companion text blocks arrive in another order.
+        records[7]["message"]["content"]
+            .as_array_mut()
+            .unwrap()
+            .reverse();
+        std::fs::create_dir(dir.path().join("images")).unwrap();
+        for number in [6, 8, 9] {
+            std::fs::write(
+                dir.path().join(format!("images/{number}.png")),
+                b"\x89PNG\r\n\x1a\n",
+            )
+            .unwrap();
+        }
+        (dir, records)
+    }
+
+    #[test]
+    fn details_prompt_images_join_the_selected_prompt() {
+        let (dir, records) = image_fixture();
+        let path = dir.path().join("transcript.jsonl");
+        // Split the two-image companion from its prompt across read chunks.
+        let padding = " ".repeat(CHUNK as usize * 3);
+        let mut bytes = String::new();
+        for (index, record) in records.iter().enumerate() {
+            bytes.push_str(&format!("{record}\n"));
+            if index == 4 {
+                bytes.push_str(&format!("{padding}\n"));
+            }
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        for missing in [false, true] {
+            if missing {
+                std::fs::remove_file(dir.path().join("images/8.png")).unwrap();
+            }
+            let summary = read(&path, bytes.len() as u64).unwrap();
+            let session =
+                super::super::session("test".into(), summary, Some(path.clone()), Utc::now());
+            let numbers = if missing { vec![9] } else { vec![8, 9] };
+            assert_eq!(
+                session.prompt_images,
+                numbers
+                    .into_iter()
+                    .map(|number| crate::log::Image {
+                        label: format!("[Image #{number}]"),
+                        path: dir.path().join(format!("images/{number}.png")),
+                    })
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
 
     #[test]
     fn image_companion_is_not_the_details_prompt() {
