@@ -287,15 +287,7 @@ impl View {
         self.selected = if show_more {
             usize::MAX
         } else {
-            match (selected_index, &selected) {
-                (Some(index), _) => index,
-                (None, Some(_)) => self.fallback_selection(),
-                (None, None) => self
-                    .selectable_indices()
-                    .first()
-                    .copied()
-                    .unwrap_or(usize::MAX),
-            }
+            selected_index.unwrap_or_else(|| self.fallback_selection())
         };
         self.reconcile_selection();
         if self.status_filter != status_filter && self.selected_id() == selected.as_ref() {
@@ -552,21 +544,21 @@ impl View {
         }
     }
 
-    /// The row a tab selects when its chosen task is gone: the task that waited longest, leaving
-    /// out subagents, which wait on their task rather than the user; or on Inactive, where old
-    /// tasks wait for nothing, the top row.
+    /// The row a tab selects when no task chosen in it is still listed: the task that waited
+    /// longest, leaving out subagents, which wait on their task rather than the user. Show more
+    /// stands for tasks older than every listed one, so it wins where it is listed.
     fn fallback_selection(&self) -> usize {
         let selectable = self.selectable_indices();
-        if TASK_FILTERS[self.status_filter].1 != [SessionStatus::Inactive]
-            && let Some(longest_waiting) = selectable
-                .iter()
-                .copied()
-                .filter(|&index| self.rows.get(index).is_some_and(|s| s.parent.is_none()))
-                .max_by_key(|&index| session_order(&self.rows[index]))
-        {
-            return longest_waiting;
+        if selectable.contains(&usize::MAX) {
+            return usize::MAX;
         }
-        selectable.first().copied().unwrap_or(usize::MAX)
+        selectable
+            .iter()
+            .copied()
+            .filter(|&index| self.rows[index].parent.is_none())
+            .max_by_key(|&index| session_order(&self.rows[index]))
+            .or_else(|| selectable.first().copied())
+            .unwrap_or(usize::MAX)
     }
     /// Gives a task the next accent the first time it is shown, so neighbors differ and the task
     /// keeps its color while the list changes.

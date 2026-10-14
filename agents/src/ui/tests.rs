@@ -1110,6 +1110,25 @@ fn a_tab_without_its_chosen_task_selects_the_longest_waiting_task() {
 }
 
 #[test]
+fn the_first_load_selects_the_longest_waiting_task() {
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(fixture().rows, true);
+
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
+}
+
+#[test]
+fn inactive_without_its_chosen_task_selects_show_more() {
+    let mut view = fixture();
+    view.set_sessions(view.rows.clone(), true);
+
+    key(&mut view, KeyCode::BackTab);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
+    assert_eq!(view.selected, usize::MAX);
+}
+
+#[test]
 fn returning_to_a_tab_restores_its_selection() {
     let mut view = fixture();
     while view.selected_id() != Some(&session_key("46")) {
@@ -1173,7 +1192,7 @@ fn returning_to_inactive_through_an_empty_tab_restores_its_selection() {
     }
     view.set_sessions(rows, true);
     key(&mut view, KeyCode::BackTab);
-    assert_eq!(view.selected_id(), Some(&session_key("46")));
+    assert_eq!(view.selected, usize::MAX);
     while view.selected_id() != Some(&session_key("45")) {
         key(&mut view, KeyCode::Down);
     }
@@ -1212,6 +1231,7 @@ fn live_center_show_more() {
         vec![session("42", "Recent task", SessionStatus::Inactive, 120)],
         true,
     );
+    key(&mut view, KeyCode::Home);
     key(&mut view, KeyCode::Down);
     assert_eq!(
         screen(&view, 80, 12),
@@ -1239,6 +1259,7 @@ fn agents_overview_model_grouping() {
     })
     .collect();
     view.set_sessions(rows, false);
+    key(&mut view, KeyCode::Home);
     assert_eq!(
         screen(&view, 100, 24),
         include_str!("../../tests/ui_snapshots/agents_overview_model_grouping.txt")
@@ -1265,6 +1286,7 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
             .collect(),
         true,
     );
+    key(&mut view, KeyCode::Home);
     let rendered = screen(&view, 80, 24);
     assert!(rendered.contains("Active 0"));
     assert!(rendered.contains("Inactive 12"));
@@ -1370,6 +1392,7 @@ fn paging_tracks_headings_and_never_wraps() {
             .collect(),
         true,
     );
+    key(&mut view, KeyCode::Home);
     screen(&view, 110, 18);
     key(&mut view, KeyCode::PageDown);
     assert_eq!(view.selected_id(), Some(&session_key("10")));
@@ -1519,6 +1542,7 @@ fn marker_pos_follows_the_selected_row_and_clears_on_help() {
         ],
         false,
     );
+    key(&mut view, KeyCode::Home);
     let area = Rect::new(0, 0, 80, 12);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
@@ -1861,6 +1885,7 @@ fn task_titles_take_the_next_accent_when_first_shown_and_keep_it() {
         session("c", "Charlie task", SessionStatus::Ready, 30),
     ];
     view.set_sessions(first.clone(), false);
+    key(&mut view, KeyCode::Home);
     let title_color = |view: &View, title: &str| {
         let area = Rect::new(0, 0, 80, 12);
         let mut buf = Buffer::empty(area);
@@ -2633,6 +2658,7 @@ fn background_redraw_follows_selection() {
         ],
         false,
     );
+    key(&mut view, KeyCode::Home);
     assert!(view.has_background());
     key(&mut view, KeyCode::Down);
     assert!(!view.has_background());
