@@ -605,10 +605,20 @@ impl Log {
             .filter(|_| entry.background)
             .unwrap_or(&entry.event.body);
         let path = path.map(|_| name.len() + 1..call.len());
-        let call = if body.is_empty() {
-            call
+        // A path call followed by a path call of the same tool shares its verb: "Edit a b".
+        let verb = format!("{name} ");
+        let shared = path.is_some()
+            && body.starts_with(&verb)
+            && entry.event.paths.first().map(|range| range.start) == Some(verb.len());
+        let (body, call) = if shared {
+            for range in &mut entry.event.paths {
+                *range = range.start - verb.len()..range.end - verb.len();
+            }
+            (&body[verb.len()..], format!("{call} "))
+        } else if body.is_empty() {
+            (body, call)
         } else {
-            format!("{call}，")
+            (body, format!("{call}，"))
         };
         for range in &mut entry.event.paths {
             *range = range.start + call.len()..range.end + call.len();
@@ -1831,7 +1841,8 @@ mod tests {
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, Kind::Error);
-        assert_eq!(events[0].body, "Read a，Read b");
+        assert_eq!(events[0].body, "Read a b");
+        assert_eq!(events[0].paths, [5..6, 7..8]);
         assert_eq!(events[0].ended_at, None);
         assert_eq!(events[0].started_at, at(1));
     }
