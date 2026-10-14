@@ -78,10 +78,7 @@ impl View {
             Span::styled(kind_label(&event.kind), label_style),
         ]);
         super::render::line(header, super::render::row(area, 1, 1), buf);
-        let body = match &event.path {
-            Some(path) if !is_prose(&event.kind) => format!("{} {path}", event.body),
-            _ => event.body.clone(),
-        };
+        let body = open_text(event);
         let options = super::line_truncation::prose_wrap_options(usize::from(area.width));
         let mut lines = if is_prose(&event.kind) {
             super::markdown::render_with_options(&body, options)
@@ -266,6 +263,14 @@ fn render_event(
         buf,
     );
     cut
+}
+
+/// The full text an open log event shows below its header.
+pub(super) fn open_text(event: &Event) -> String {
+    match &event.path {
+        Some(path) if !is_prose(&event.kind) => format!("{} {path}", event.body),
+        _ => event.body.clone(),
+    }
 }
 
 fn kind_label(kind: &Kind) -> &'static str {

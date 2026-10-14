@@ -4697,3 +4697,56 @@ fn task_log_open_event_closes_when_selection_changes() {
     );
     assert!(view.log_open.is_none());
 }
+
+fn double_click_text(view: &mut View, screen: &str, text: &str) -> Option<Action> {
+    let (x, y) = rendered_cell(screen, text);
+    let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+    assert!(view.handle_mouse(click).is_none());
+    view.handle_mouse(click)
+}
+
+#[test]
+fn double_click_on_open_log_body_copies_the_whole_event() {
+    let (mut view, now) = log_fixture();
+    let body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph";
+    view.log[6].body = body.into();
+    let list = log_screen(&view, 100, 25, now);
+    click_log_text(&mut view, &list, "A long response", MouseButton::Right);
+    let open = log_screen(&view, 100, 25, now);
+    assert_eq!(
+        double_click_text(&mut view, &open, "A second paragraph"),
+        Some(Action::Copy(body.into()))
+    );
+    assert_eq!(double_click_text(&mut view, &open, "Assistant"), None);
+}
+
+#[test]
+fn double_click_on_details_prompt_or_last_message_copies_it() {
+    let mut view = overflowing_details();
+    let message = "First reply row\n\nSecond reply row";
+    view.rows[view.selected].last_message = Some(message.into());
+    let prompt = view.rows[view.selected].prompt.clone();
+    let now = view.rows[view.selected].updated_at;
+    let screen = log_screen(&view, 120, 40, now);
+    assert_eq!(
+        double_click_text(&mut view, &screen, "First reply row"),
+        Some(Action::Copy(message.into()))
+    );
+    assert_eq!(
+        double_click_text(&mut view, &screen, "A long prompt"),
+        Some(Action::Copy(prompt))
+    );
+    assert_eq!(double_click_text(&mut view, &screen, "Last message"), None);
+}
+
+#[test]
+fn clicks_on_two_bodies_are_not_a_double_click() {
+    let mut view = overflowing_details();
+    let now = view.rows[view.selected].updated_at;
+    let screen = log_screen(&view, 120, 40, now);
+    for text in ["A long prompt", "First reply row"] {
+        let (x, y) = rendered_cell(&screen, text);
+        let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+        assert!(view.handle_mouse(click).is_none());
+    }
+}

@@ -19,7 +19,7 @@ impl View {
             return None;
         }
         let position = (mouse.column, mouse.row).into();
-        let (tab, over_tabs, over_list, over_details, over_log, entry, log_row) = {
+        let (tab, over_tabs, over_list, over_details, over_log, entry, log_row, copy_text) = {
             let viewport = self.viewport.borrow();
             let tab = viewport
                 .tabs
@@ -36,6 +36,18 @@ impl View {
                 .then(|| usize::from(mouse.row - viewport.log.y).checked_sub(1))
                 .flatten()
                 .and_then(|row| viewport.log_rows.get(row).copied());
+            // The open log event's body starts below the rule, its header and a blank row.
+            let copy_text = if viewport.details.contains(position) {
+                viewport
+                    .details_copy
+                    .iter()
+                    .find(|(rows, _)| rows.contains(&mouse.row))
+                    .map(|(_, text)| text.clone())
+            } else if viewport.log.contains(position) && mouse.row >= viewport.log.y + 3 {
+                self.log_open.as_ref().map(super::log::open_text)
+            } else {
+                None
+            };
             (
                 tab,
                 viewport.tab_bar.contains(position),
@@ -44,6 +56,7 @@ impl View {
                 viewport.log.contains(position),
                 entry,
                 log_row,
+                copy_text,
             )
         };
         match mouse.kind {
@@ -69,6 +82,15 @@ impl View {
                         return self.activate();
                     }
                     self.last_click = Some((task, now));
+                } else if let Some(text) = copy_text {
+                    let now = Instant::now();
+                    let double = self.last_copy_click.take().is_some_and(|(last, at)| {
+                        last == text && now.duration_since(at) < DOUBLE_CLICK_INTERVAL
+                    });
+                    if double {
+                        return Some(Action::Copy(text));
+                    }
+                    self.last_copy_click = Some((text, now));
                 }
             }
             MouseEventKind::Down(MouseButton::Right) => {

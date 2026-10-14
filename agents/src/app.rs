@@ -488,6 +488,13 @@ impl App {
                 self.preferences.grouping = grouping;
                 self.save_preferences();
             }
+            Action::Copy(text) => {
+                let notice = match copy_to_clipboard(&text) {
+                    Ok(()) => "Copied".to_owned(),
+                    Err(error) => format!("Failed to copy: {error}"),
+                };
+                self.view.set_notice(Some(notice));
+            }
             Action::Unsupported(what) => {
                 self.view
                     .set_notice(Some(format!("{what} is not supported")));
@@ -547,6 +554,27 @@ impl App {
             return true;
         }
         false
+    }
+}
+
+/// Puts `text` on the macOS clipboard.
+fn copy_to_clipboard(text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .expect("pbcopy stdin is piped")
+        .write_all(text.as_bytes())?;
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "pbcopy exited with {status}"
+        )))
     }
 }
 

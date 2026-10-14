@@ -154,6 +154,8 @@ pub enum Action {
     Back,
     /// Ctrl-c.
     Quit,
+    /// Double click on an open log event: copy its text to the clipboard.
+    Copy(String),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

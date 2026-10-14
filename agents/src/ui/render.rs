@@ -311,7 +311,11 @@ impl View {
         buf: &mut Buffer,
         now: chrono::DateTime<chrono::Utc>,
     ) {
-        self.viewport.borrow_mut().details = Rect::default();
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.details = Rect::default();
+            viewport.details_copy.clear();
+        }
         let Some(session) = self.selected_row() else {
             return;
         };
@@ -376,10 +380,13 @@ impl View {
             prompt => prompt,
         };
         let mut bodies = Vec::new();
+        // The full text a double click copies from each body, parallel to `bodies`.
+        let mut copies: Vec<Option<&str>> = Vec::new();
         let prompt_start = items.len();
         let prompt_body = wrap_details(prompt_text, width, true);
         items.extend(prompt_body.into_iter().map(Item::from));
         bodies.push(prompt_start..items.len());
+        copies.push(Some(session.prompt.as_str()).filter(|prompt| !prompt.trim().is_empty()));
         items.extend(session.queued.iter().map(|queued| {
             let first = wrap_details(queued, width, true)
                 .into_iter()
@@ -415,6 +422,7 @@ impl View {
                 .into(),
             ]);
             bodies.push(start..items.len());
+            copies.push(None);
         }
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
             let mut header = vec!["Last message".dim()];
@@ -436,6 +444,7 @@ impl View {
                     .map(Item::from),
             );
             bodies.push(start..items.len());
+            copies.push(Some(message.as_str()));
         }
 
         // The agent appends an exit marker to the output file when the
@@ -490,6 +499,7 @@ impl View {
                 }));
             }
             bodies.push(start..items.len());
+            copies.push(None);
         }
 
         let mut project = vec!["Project".dim()];
@@ -525,7 +535,7 @@ impl View {
 
         let available = usize::from(area.height);
         let budget = budget_details(&items, &bodies, background, available);
-        let scroll = {
+        let (scroll, body_rows) = {
             let mut viewport = self.viewport.borrow_mut();
             let state = &mut viewport.details_scroll;
             state.content_top = content_top;
@@ -575,7 +585,7 @@ impl View {
                     index += 1;
                     retain
                 });
-                state.reveal.iter().sum::<usize>()
+                (state.reveal.iter().sum::<usize>(), state.bodies.clone())
             } else {
                 state.hidden.clear();
                 state.bodies.clear();
@@ -583,9 +593,25 @@ impl View {
                 let max = total.saturating_sub(available);
                 state.fallback_max = Some(max);
                 state.offset = state.offset.min(max);
-                state.offset
+                let row_of = |index: usize| items[..index].iter().map(Item::height).sum::<usize>();
+                let rows = bodies
+                    .iter()
+                    .map(|body| row_of(body.start)..row_of(body.end))
+                    .collect();
+                (state.offset, rows)
             }
         };
+        self.viewport.borrow_mut().details_copy = body_rows
+            .into_iter()
+            .zip(copies)
+            .filter_map(|(rows, text)| {
+                let start = rows.start.max(scroll);
+                let end = rows.end.min(scroll + available);
+                let screen_row = |row: usize| content_top + (row - scroll) as u16;
+                let text = text.filter(|_| start < end)?;
+                Some((screen_row(start)..screen_row(end), text.to_owned()))
+            })
+            .collect();
         let total = items.iter().map(Item::height).sum::<usize>();
         let content_area = Rect::new(0, 0, area.width, total as u16);
         let mut content = Buffer::empty(content_area);

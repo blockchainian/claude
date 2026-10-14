@@ -85,6 +85,8 @@ struct Viewport {
     log_open_scroll: usize,
     details: Rect,
     details_scroll: DetailsScroll,
+    /// Screen rows of each copyable details body drawn by the last render, with its full text.
+    details_copy: Vec<(std::ops::Range<u16>, String)>,
     /// Screen cell of the selection marker drawn by the last render.
     marker: Option<(u16, u16)>,
 }
@@ -134,6 +136,8 @@ pub struct View {
     viewport: RefCell<Viewport>,
     /// Task row and time of the last left click in the list.
     last_click: Option<(usize, Instant)>,
+    /// Text under the last left click on a copyable body, and when it happened.
+    last_copy_click: Option<(String, Instant)>,
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
 }
@@ -198,6 +202,7 @@ impl View {
             notice: None,
             viewport: RefCell::new(Viewport::default()),
             last_click: None,
+            last_copy_click: None,
             title_slots: RefCell::new(HashMap::new()),
         }
     }
