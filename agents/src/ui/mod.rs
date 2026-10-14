@@ -91,6 +91,9 @@ struct Viewport {
     log_open_max: usize,
     log_text: text_selection::TextRegion,
     details_text: text_selection::TextRegion,
+    task_text: text_selection::TextRegion,
+    log_list_text: text_selection::TextRegion,
+    task_scroll_max: usize,
     details: Rect,
     details_scroll: DetailsScroll,
     /// Screen rows of each copyable details body drawn by the last render, with its full text.

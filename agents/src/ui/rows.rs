@@ -37,7 +37,10 @@ impl View {
         buf: &mut Buffer,
         reference: chrono::DateTime<chrono::Utc>,
     ) {
+        let dragging =
+            self.selecting_list(text_selection::Panel::Tasks) && self.text_selection_dragging();
         let mut state = self.viewport.borrow_mut();
+        state.task_text = text_selection::TextRegion::default();
         state.list = area;
         state.list_rows = Rect::default();
         state.first_entry = 0;
@@ -82,7 +85,8 @@ impl View {
         let height = usize::from(viewport.height);
         state.page_height = height;
         let mut start = state.scroll.min(entries.len().saturating_sub(height));
-        if selected < start {
+        state.task_scroll_max = entries.len().saturating_sub(height);
+        if !dragging && selected < start {
             start = if height > 1
                 && selected > 0
                 && matches!(entries[selected - 1], CenterRow::Group(_))
@@ -92,7 +96,7 @@ impl View {
                 selected
             };
         }
-        if selected >= start + height {
+        if !dragging && selected >= start + height {
             start = selected.saturating_add(/*rhs*/ 1).saturating_sub(height);
         }
         state.scroll = start;
@@ -270,5 +274,8 @@ impl View {
                 buf,
             );
         }
+        let text_area = state.list_rows;
+        drop(state);
+        self.capture_list_text(text_selection::Panel::Tasks, text_area, start, buf);
     }
 }

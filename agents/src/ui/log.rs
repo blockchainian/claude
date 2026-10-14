@@ -14,6 +14,9 @@ pub(super) fn search_input_rect(area: Rect) -> Rect {
 impl View {
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
         self.viewport.borrow_mut().log_text = text_selection::TextRegion::default();
+        if !self.selecting_list(text_selection::Panel::LogList) {
+            self.viewport.borrow_mut().log_list_text = text_selection::TextRegion::default();
+        }
         if area.is_empty() {
             return;
         }
@@ -59,7 +62,9 @@ impl View {
             );
             rows.push((log_index, cut));
         }
+        let text_area = super::render::row(area, 1, rows.len() as u16);
         self.viewport.borrow_mut().log_rows = rows;
+        self.capture_list_text(text_selection::Panel::LogList, text_area, scroll, buf);
     }
 
     /// Draws one log event whole: its time and kind, a blank row, then the full body.

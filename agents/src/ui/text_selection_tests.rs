@@ -326,3 +326,443 @@ fn drag_between_bodies_joins_original_text_with_one_newline() {
         })
     );
 }
+
+fn list_fixture(count: usize) -> View {
+    let mut view = fixture();
+    let template = view.rows[0].clone();
+    let rows = (0..count)
+        .map(|index| {
+            let mut row = template.clone();
+            row.id.id = format!("selection-{index:02}");
+            row.title = format!("{:02} {}", index, template.prompt.lines().next().unwrap());
+            row.updated_at -= chrono::Duration::seconds(index as i64 * 60);
+            row
+        })
+        .collect();
+    view.set_sessions(rows, false);
+    view
+}
+
+fn dashboard(view: &View, area: Rect) -> Buffer {
+    let mut buf = Buffer::empty(area);
+    view.render_at(
+        area,
+        &mut buf,
+        view.rows[0].updated_at + chrono::Duration::seconds(60),
+    );
+    buf
+}
+
+/// Read occupied terminal cells, skipping the continuation cells of wide glyphs.
+fn drawn_cells(buf: &Buffer, y: u16, from: u16, to: u16) -> String {
+    let mut text = String::new();
+    let mut x = from;
+    while x < to {
+        let symbol = buf[(x, y)].symbol();
+        text.push_str(symbol);
+        x += symbol.width().max(1) as u16;
+    }
+    text.trim_end().to_owned()
+}
+
+fn position_in(buf: &Buffer, text: &str, area: Rect) -> (u16, u16) {
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            if drawn_cells(buf, y, x, area.right()).starts_with(text) {
+                return (x, y);
+            }
+        }
+    }
+    panic!("text not drawn in panel: {text}");
+}
+
+fn copied_text(action: Option<Action>) -> String {
+    match action {
+        Some(Action::Copy { text, .. }) => text,
+        other => panic!("missing selection copy: {other:?}"),
+    }
+}
+
+#[test]
+fn task_list_drag_copies_rendered_indicator_ellipsis_and_time() {
+    let mut view = list_fixture(3);
+    let area = Rect::new(0, 0, 160, 30);
+    let initial = dashboard(&view, area);
+    let list = view.viewport.borrow().list_rows;
+    let start = position_in(&initial, "00 对，", list);
+    let end = position_in(&initial, "02 对，", list);
+    let start = (list.x, start.1);
+    let end = (list.right(), end.1);
+    let expected = (start.1..=end.1)
+        .map(|y| drawn_cells(&initial, y, list.x, list.right()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(expected.contains('›'));
+    assert!(expected.contains('…'));
+    assert!(expected.contains("Working"));
+    assert!(expected.contains("1m ago"));
+    assert!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            start.0,
+            start.1
+        ))
+        .is_none()
+    );
+    dashboard(&view, area);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1))
+            .is_none()
+    );
+    let held = dashboard(&view, area);
+    assert!(
+        held[start]
+            .modifier
+            .contains(ratatui::style::Modifier::REVERSED)
+    );
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1))),
+        expected
+    );
+    assert_eq!(dashboard(&view, area), initial);
+}
+
+fn path_log_fixture() -> View {
+    let mut view = fixture();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
+    let events = crate::providers::claude::log::tail(&path, usize::MAX).unwrap();
+    let mut event = events
+        .into_iter()
+        .find(|event| event.kind == crate::log::Kind::User)
+        .unwrap();
+    // Isolate a verbatim path from the real pasted command so abbreviation is visible.
+    let source_path = event
+        .body
+        .split('"')
+        .find(|part| part.starts_with('/'))
+        .unwrap()
+        .to_owned();
+    event.body = source_path.clone();
+    event.paths = std::iter::once(0..source_path.len()).collect();
+    view.rows[0].transcript = Some(path);
+    view.log_session = Some(view.rows[0].id.clone());
+    view.log = vec![event];
+    view
+}
+
+#[test]
+fn log_list_drag_copies_abbreviated_path_as_drawn() {
+    let mut view = path_log_fixture();
+    let area = Rect::new(0, 0, 100, 30);
+    let initial = dashboard(&view, area);
+    let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+    let y = log.y + 1;
+    let expected = drawn_cells(&initial, y, log.x, log.right());
+    assert!(expected.contains('…'), "{expected}");
+    for range in &view.log[0].paths {
+        if range.len() > 60 {
+            assert!(!expected.contains(&view.log[0].body[range.clone()]));
+        }
+    }
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), log.x, y))
+            .is_none()
+    );
+    dashboard(&view, area);
+    assert!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            log.right(),
+            y
+        ))
+        .is_none()
+    );
+    dashboard(&view, area);
+    assert!(
+        view.log_open.is_none(),
+        "drag returns to the list pressed originally"
+    );
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            log.right(),
+            y
+        ))),
+        expected
+    );
+}
+
+#[test]
+fn task_list_edge_drag_caches_and_copies_rows_beyond_first_screen() {
+    let mut view = list_fixture(30);
+    let area = Rect::new(0, 0, 160, 15);
+    let initial = dashboard(&view, area);
+    let list = view.viewport.borrow().list_rows;
+    let start = position_in(&initial, "00 对，", list);
+    let initial_first = view.viewport.borrow().first_entry;
+    let mut rows = std::collections::BTreeMap::new();
+    let remember =
+        |view: &View, buf: &Buffer, rows: &mut std::collections::BTreeMap<usize, String>| {
+            let viewport = view.viewport.borrow();
+            for y in list.y..list.bottom() {
+                rows.insert(
+                    viewport.first_entry + usize::from(y - list.y),
+                    drawn_cells(buf, y, list.x, list.right()),
+                );
+            }
+        };
+    remember(&view, &initial, &mut rows);
+    assert!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            list.x,
+            start.1
+        ))
+        .is_none()
+    );
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        list.right(),
+        list.bottom(),
+    ));
+    dashboard(&view, area);
+    for tick in 1..=5 {
+        assert!(view.tick_text_selection(), "tick {tick} scrolls the list");
+        let drawn = dashboard(&view, area);
+        assert_eq!(view.viewport.borrow().first_entry, initial_first + tick);
+        remember(&view, &drawn, &mut rows);
+    }
+    let last = view.viewport.borrow().first_entry + usize::from(list.height) - 1;
+    let first = initial_first + usize::from(start.1 - list.y);
+    let expected = (first..=last)
+        .map(|row| rows[&row].clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let text = copied_text(view.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        list.right(),
+        list.bottom(),
+    )));
+    assert_eq!(text, expected);
+    assert!(text.lines().count() > usize::from(list.height));
+    assert!(!view.tick_text_selection());
+}
+
+#[test]
+fn task_list_click_and_double_click_keep_actions_without_copying() {
+    let mut view = list_fixture(3);
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Claude,
+        Capabilities {
+            resume: true,
+            ..Default::default()
+        },
+    )]));
+    let area = Rect::new(0, 0, 160, 30);
+    let drawn = dashboard(&view, area);
+    let at = position_in(&drawn, "01 对，", view.viewport.borrow().list_rows);
+    let id = view
+        .rows
+        .iter()
+        .find(|row| row.title.starts_with("01 "))
+        .unwrap()
+        .id
+        .clone();
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+    assert_eq!(view.selected_id(), Some(&id));
+    dashboard(&view, area);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+    assert_eq!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1)),
+        Some(Action::Open(id))
+    );
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+}
+
+#[test]
+fn log_list_click_opens_cut_row_and_stationary_double_click_copies_nothing() {
+    let mut view = path_log_fixture();
+    let area = Rect::new(0, 0, 100, 30);
+    dashboard(&view, area);
+    let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+    let at = (log.x, log.y + 1);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+    dashboard(&view, area);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+    assert_eq!(view.log_open, Some(view.log[0].clone()));
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), at.0, at.1))
+            .is_none()
+    );
+    assert!(view.log_open.is_none());
+}
+
+#[test]
+fn log_list_edge_drag_caches_rows_beyond_first_screen() {
+    let mut view = fixture();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
+    let events = crate::providers::claude::log::tail(&path, usize::MAX).unwrap();
+    view.rows[0].transcript = Some(path);
+    view.log_session = Some(view.rows[0].id.clone());
+    view.log = (0..30)
+        .map(|index| {
+            let mut event = events[index % events.len()].clone();
+            event.started_at += chrono::Duration::seconds(index as i64);
+            event
+        })
+        .collect();
+    let area = Rect::new(0, 0, 100, 30);
+    let initial = dashboard(&view, area);
+    let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+    let height = view.viewport.borrow().log_rows.len();
+    let mut rows = std::collections::BTreeMap::new();
+    let remember =
+        |view: &View, buf: &Buffer, rows: &mut std::collections::BTreeMap<usize, String>| {
+            let viewport = view.viewport.borrow();
+            for offset in 0..viewport.log_rows.len() {
+                rows.insert(
+                    viewport.log_scroll + offset,
+                    drawn_cells(buf, log.y + 1 + offset as u16, log.x, log.right()),
+                );
+            }
+        };
+    remember(&view, &initial, &mut rows);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        log.x,
+        log.y + 1,
+    ));
+    dashboard(&view, area);
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        log.right(),
+        log.bottom(),
+    ));
+    dashboard(&view, area);
+    for tick in 1..=5 {
+        assert!(view.tick_text_selection(), "tick {tick} scrolls log rows");
+        let drawn = dashboard(&view, area);
+        assert_eq!(view.log_scroll(), tick);
+        remember(&view, &drawn, &mut rows);
+    }
+    let expected = (0..height + 5)
+        .map(|row| rows[&row].clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            log.right(),
+            log.bottom()
+        ))),
+        expected
+    );
+    assert!(!view.tick_text_selection());
+}
+
+#[test]
+fn task_list_stream_selection_trims_rows_and_never_splits_wide_cells() {
+    let mut view = list_fixture(3);
+    let area = Rect::new(0, 0, 160, 30);
+    let initial = dashboard(&view, area);
+    let list = view.viewport.borrow().list_rows;
+    let first = position_in(&initial, "00 对，", list);
+    let last = position_in(&initial, "02 对，", list);
+    // Start in the continuation cell of 对, and end before 必 on the last row.
+    let start = (first.0 + 4, first.1);
+    let end = (last.0 + 7, last.1);
+    let expected = [
+        drawn_cells(&initial, first.1, first.0 + 3, list.right()),
+        drawn_cells(&initial, first.1 + 1, list.x, list.right()),
+        drawn_cells(&initial, last.1, list.x, end.0),
+    ]
+    .join("\n");
+    assert!(
+        expected.starts_with("对，"),
+        "first={first:?} expected={expected:?}"
+    );
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1));
+    let selected = dashboard(&view, area);
+    assert!(
+        selected[(start.0 - 1, start.1)]
+            .modifier
+            .contains(ratatui::style::Modifier::REVERSED)
+    );
+    assert!(
+        selected[start]
+            .modifier
+            .contains(ratatui::style::Modifier::REVERSED)
+    );
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1))),
+        expected
+    );
+}
+
+#[test]
+fn task_list_reverse_drag_copies_rendered_rows() {
+    let mut view = list_fixture(3);
+    let area = Rect::new(0, 0, 160, 30);
+    let initial = dashboard(&view, area);
+    let list = view.viewport.borrow().list_rows;
+    let first = position_in(&initial, "00 对，", list);
+    let last = position_in(&initial, "02 对，", list);
+    let expected = (first.1..=last.1)
+        .map(|y| drawn_cells(&initial, y, list.x, list.right()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        list.right() - 1,
+        last.1,
+    ));
+    let pressed = dashboard(&view, area);
+    // Clicking the last row changes its marker; copy the cells actually drawn after the press.
+    let expected = expected
+        .lines()
+        .enumerate()
+        .map(|(offset, _)| drawn_cells(&pressed, first.1 + offset as u16, list.x, list.right()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        list.x,
+        first.1,
+    ));
+    dashboard(&view, area);
+    let text = copied_text(view.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        list.x,
+        first.1,
+    )));
+    assert_eq!(text, expected);
+    assert!(!text.contains("Project"));
+}

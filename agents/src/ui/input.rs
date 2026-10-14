@@ -90,6 +90,7 @@ impl View {
                         last == task && now.duration_since(at) < DOUBLE_CLICK_INTERVAL
                     });
                     self.set_selected(task);
+                    self.begin_text_selection(mouse.column, mouse.row);
                     if double {
                         return self.activate();
                     }

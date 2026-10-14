@@ -1,10 +1,19 @@
 use super::*;
 use std::ops::Range;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Panel {
     Details,
     Log,
+    Tasks,
+    LogList,
+}
+
+impl Panel {
+    fn is_list(self) -> bool {
+        matches!(self, Self::Tasks | Self::LogList)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,7 +46,7 @@ pub(super) struct TextRegion {
 }
 
 impl TextRegion {
-    fn hit(&self, x: u16, y: u16, strict: bool) -> Option<Anchor> {
+    fn hit(&self, x: u16, y: u16, strict: bool, display_columns: bool) -> Option<Anchor> {
         let row = if strict {
             if !self.area.contains((x, y).into()) {
                 return None;
@@ -50,6 +59,12 @@ impl TextRegion {
                 .min_by_key(|row| row.y.abs_diff(y))?
         };
         let column = x.saturating_sub(row.x);
+        if display_columns {
+            return Some(Anchor {
+                segment: row.segment,
+                offset: usize::from(column.min(self.area.width)),
+            });
+        }
         if let Some((_, bytes)) = row.cells.iter().find(|(cells, _)| cells.contains(&column)) {
             return Some(Anchor {
                 segment: row.segment,
@@ -99,12 +114,20 @@ impl Selection {
             return None;
         }
         let from = if source.id == start.segment {
-            start.offset
+            if self.panel.is_list() {
+                column_byte(&source.text, start.offset, false)
+            } else {
+                start.offset
+            }
         } else {
             0
         };
         let to = if source.id == end.segment {
-            end.offset
+            if self.panel.is_list() {
+                column_byte(&source.text, end.offset, true)
+            } else {
+                end.offset
+            }
         } else {
             source.text.len()
         };
@@ -117,7 +140,12 @@ impl Selection {
             .iter()
             .filter_map(|source| {
                 let range = self.range(source)?;
-                Some(&source.text[range])
+                let text = &source.text[range];
+                Some(if self.panel.is_list() {
+                    text.trim_end_matches(' ')
+                } else {
+                    text
+                })
             })
             .collect();
         let text = parts.join("\n");
@@ -142,23 +170,27 @@ impl View {
         match panel {
             Panel::Details => &viewport.details_text,
             Panel::Log => &viewport.log_text,
+            Panel::Tasks => &viewport.task_text,
+            Panel::LogList => &viewport.log_list_text,
         }
     }
 
     pub(super) fn begin_text_selection(&mut self, x: u16, y: u16) {
         let viewport = self.viewport.borrow();
-        let selection = [Panel::Details, Panel::Log].into_iter().find_map(|panel| {
-            let region = Self::text_region(&viewport, panel);
-            let anchor = region.hit(x, y, true)?;
-            Some(Selection {
-                panel,
-                start: anchor,
-                end: anchor,
-                pointer: (x, y),
-                dragged: false,
-                sources: region.sources.clone(),
-            })
-        });
+        let selection = [Panel::Details, Panel::Log, Panel::Tasks, Panel::LogList]
+            .into_iter()
+            .find_map(|panel| {
+                let region = Self::text_region(&viewport, panel);
+                let anchor = region.hit(x, y, true, panel.is_list())?;
+                Some(Selection {
+                    panel,
+                    start: anchor,
+                    end: anchor,
+                    pointer: (x, y),
+                    dragged: false,
+                    sources: region.sources.clone(),
+                })
+            });
         *self.text_selection.borrow_mut() = selection;
     }
 
@@ -167,14 +199,26 @@ impl View {
         let Some(selection) = selection.as_mut() else {
             return;
         };
+        if selection.panel.is_list() && !selection.dragged && selection.pointer == (x, y) {
+            return;
+        }
         selection.dragged = true;
+        if selection.panel == Panel::LogList {
+            self.log_open = None;
+        }
         selection.pointer = (x, y);
-        if let Some(anchor) =
-            Self::text_region(&self.viewport.borrow(), selection.panel).hit(x, y, false)
-        {
+        if let Some(anchor) = Self::text_region(&self.viewport.borrow(), selection.panel).hit(
+            x,
+            y,
+            false,
+            selection.panel.is_list(),
+        ) {
             selection.end = anchor;
         }
         self.last_copy_click = None;
+        if selection.panel.is_list() {
+            self.last_click = None;
+        }
     }
 
     pub(super) fn finish_text_selection(&mut self, x: u16, y: u16) -> Option<Action> {
@@ -215,6 +259,24 @@ impl View {
             return false;
         };
         match selection.panel {
+            Panel::Tasks => {
+                let previous = viewport.scroll;
+                viewport.scroll = if forward {
+                    previous.saturating_add(1).min(viewport.task_scroll_max)
+                } else {
+                    previous.saturating_sub(1)
+                };
+                previous != viewport.scroll
+            }
+            Panel::LogList => {
+                let previous = viewport.log_scroll;
+                viewport.log_scroll = if forward {
+                    previous.saturating_add(1)
+                } else {
+                    previous.saturating_sub(1)
+                };
+                previous != viewport.log_scroll
+            }
             Panel::Log => {
                 let previous = viewport.log_open_scroll;
                 viewport.log_open_scroll = if forward {
@@ -279,11 +341,33 @@ impl View {
         let mut selection = self.text_selection.borrow_mut();
         let Some(selection) = selection
             .as_mut()
-            .filter(|selection| selection.panel == panel && selection.dragged)
+            .filter(|selection| selection.panel == panel)
         else {
             return;
         };
-        if let Some(anchor) = region.hit(selection.pointer.0, selection.pointer.1, false) {
+        if panel.is_list() {
+            for source in &region.sources {
+                if let Some(cached) = selection
+                    .sources
+                    .iter_mut()
+                    .find(|cached| cached.id == source.id)
+                {
+                    *cached = source.clone();
+                } else {
+                    selection.sources.push(source.clone());
+                }
+            }
+            selection.sources.sort_by_key(|source| source.id);
+        }
+        if !selection.dragged {
+            return;
+        }
+        if let Some(anchor) = region.hit(
+            selection.pointer.0,
+            selection.pointer.1,
+            false,
+            panel.is_list(),
+        ) {
             selection.end = anchor;
         }
         for row in &region.rows {
@@ -307,5 +391,79 @@ impl View {
                 }
             }
         }
+    }
+}
+
+/// Snap a display-column boundary to a whole rendered grapheme.
+fn column_byte(text: &str, column: usize, end: bool) -> usize {
+    let mut x = 0;
+    for (byte, grapheme) in text.grapheme_indices(true) {
+        let next = x + grapheme.width();
+        if column < next {
+            return if end && column > x {
+                byte + grapheme.len()
+            } else {
+                byte
+            };
+        }
+        x = next;
+    }
+    text.len()
+}
+
+impl View {
+    pub(super) fn selecting_list(&self, panel: Panel) -> bool {
+        self.text_selection
+            .borrow()
+            .as_ref()
+            .is_some_and(|selection| selection.panel == panel)
+    }
+
+    /// Capture terminal cells before adding the gesture's highlight.
+    pub(super) fn capture_list_text(
+        &self,
+        panel: Panel,
+        area: Rect,
+        first: usize,
+        buf: &mut Buffer,
+    ) {
+        let mut region = TextRegion {
+            area,
+            ..TextRegion::default()
+        };
+        for y in area.top()..area.bottom() {
+            let id = first + usize::from(y - area.y);
+            let mut text = String::new();
+            let mut cells = Vec::new();
+            let mut x = area.x;
+            while x < area.right() {
+                let symbol = buf[(x, y)].symbol();
+                let width = symbol.width().max(1) as u16;
+                let byte = text.len();
+                text.push_str(symbol);
+                cells.push((
+                    x - area.x..(x - area.x + width).min(area.width),
+                    byte..text.len(),
+                ));
+                x += width;
+            }
+            region.sources.push(Source {
+                id,
+                text,
+                label: "Copied selection".into(),
+            });
+            region.rows.push(DrawnRow {
+                segment: id,
+                x: area.x,
+                y,
+                cells,
+            });
+        }
+        match panel {
+            Panel::Tasks => self.viewport.borrow_mut().task_text = region,
+            Panel::LogList => self.viewport.borrow_mut().log_list_text = region,
+            _ => unreachable!("screen cells belong to a list"),
+        }
+        self.highlight_text_selection(panel, buf);
     }
 }
