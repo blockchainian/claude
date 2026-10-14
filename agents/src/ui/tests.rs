@@ -5524,3 +5524,127 @@ fn notice_sits_at_task_list_bottom_left_for_one_second() {
     );
     assert!(!log_screen(&view, 100, 25, now).contains("Resume is not supported"));
 }
+
+#[test]
+fn commit_sha_links_open_vscode_from_log_and_details() {
+    use std::process::Command;
+    let dir = tempfile::Builder::new()
+        .prefix("agents 仓库 #&")
+        .tempdir()
+        .unwrap();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output);
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    git(&["init", "-q"]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "initial",
+    ]);
+    let full = git(&["rev-parse", "HEAD"]);
+    let sha = &full[..7];
+    let root = git(&["rev-parse", "--show-toplevel"]);
+    let encoded: String = root
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect();
+    let target = PathBuf::from(format!(
+        "vscode://blockchainian.git/view-commit?repo={encoded}&sha={sha}"
+    ));
+    let (mut view, now) = log_fixture();
+    view.rows[view.selected].cwd = dir.path().into();
+    view.rows[view.selected].prompt = format!("已提交 `{sha}`，推送了");
+    view.log[7].body = format!("commits {sha} deadbeef {}", "more text ".repeat(30));
+    view.log[7].paths.clear();
+    for kind in [crate::log::Kind::Assistant, crate::log::Kind::Tool] {
+        view.log[7].kind = kind;
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let rendered = loop {
+            let rendered = log_screen(&view, 120, 40, now);
+            if view
+                .viewport
+                .borrow()
+                .log_links
+                .iter()
+                .any(|(_, url)| url == &target)
+            {
+                break rendered;
+            }
+            assert!(Instant::now() < deadline, "SHA never linked: {rendered}");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let (x, y) = rendered_cell(&rendered, sha);
+        let mut buf = Buffer::empty(Rect::new(0, 0, 120, 40));
+        view.render_at(buf.area, &mut buf, now);
+        for column in x..x + sha.len() as u16 {
+            assert!(
+                buf[(column, y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::UNDERLINED)
+            );
+        }
+        assert_eq!(
+            click_text(&mut view, &rendered, sha),
+            Some(Action::OpenPath(target.clone()))
+        );
+        assert!(view.log_open.is_none());
+        assert_eq!(click_text(&mut view, &rendered, "deadbeef"), None);
+        assert!(view.log_open.is_some());
+        let rendered = log_screen(&view, 120, 40, now);
+        assert_eq!(
+            click_text(&mut view, &rendered, sha),
+            Some(Action::OpenPath(target.clone()))
+        );
+        view.set_log_open(None);
+    }
+    let rendered = screen(&view, 120, 40);
+    assert_eq!(
+        click_text(&mut view, &rendered, sha),
+        Some(Action::OpenPath(target))
+    );
+    // Open the layout before the full SHA has been checked; it must gain the link later.
+    view.log[7].body = format!("commit {full}");
+    view.set_log_open(Some(view.log[7].clone()));
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let rendered = log_screen(&view, 120, 40, now);
+        if view
+            .viewport
+            .borrow()
+            .log_links
+            .iter()
+            .any(|(_, url)| url.to_str().unwrap().ends_with(&format!("&sha={full}")))
+        {
+            assert!(matches!(
+                click_text(&mut view, &rendered, &full),
+                Some(Action::OpenPath(_))
+            ));
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "cached layout never gained its SHA link"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}

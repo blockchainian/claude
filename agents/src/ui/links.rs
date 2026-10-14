@@ -29,7 +29,7 @@ pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::log::Image]) -
 
 /// The links of a text whose paths are already known, such as a tool call's arguments.
 pub(super) fn path_links(text: &str, paths: &[Range<usize>], cwd: &Path) -> Vec<Link> {
-    paths
+    let mut links: Vec<_> = paths
         .iter()
         .filter_map(|range| {
             Some(Link {
@@ -37,7 +37,25 @@ pub(super) fn path_links(text: &str, paths: &[Range<usize>], cwd: &Path) -> Vec<
                 target: resolve(&text[range.clone()], cwd)?,
             })
         })
-        .collect()
+        .collect();
+    add_commits(text, cwd, &mut links);
+    links
+}
+
+/// Adds verified commits without covering an existing path, URL or image link.
+pub(super) fn add_commits(text: &str, cwd: &Path, links: &mut Vec<Link>) {
+    for range in super::paths::text_commits(text) {
+        if links
+            .iter()
+            .any(|link| link.range.start < range.end && range.start < link.range.end)
+        {
+            continue;
+        }
+        if let Some(target) = super::commits::target(cwd, &text[range.clone()]) {
+            links.push(Link { range, target });
+        }
+    }
+    links.sort_by_key(|link| link.range.start);
 }
 
 /// Where `path` opens: URLs as they are, and existing paths resolved absolutely,

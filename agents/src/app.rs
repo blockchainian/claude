@@ -227,6 +227,8 @@ impl App {
                 .view
                 .expire_messages(Instant::now())
                 .map_or(timeout, |message| timeout.min(message));
+            let timeout =
+                crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
             let timeout = if self.view.text_selection_dragging() {
                 timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
             } else {

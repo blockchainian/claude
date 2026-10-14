@@ -119,10 +119,13 @@ impl View {
         let body_area = super::render::row(area, 3, area.height.saturating_sub(3));
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
-        let layout = match viewport.log_open_layout.take() {
+        let mut layout = match viewport.log_open_layout.take() {
             Some(layout) if layout.width == area.width => layout,
             _ => open_layout(event, area.width, cwd),
         };
+        for (source, links) in layout.sources.iter().zip(&mut layout.links) {
+            super::links::add_commits(&source.text, cwd, links);
+        }
         viewport.log_open_max = layout.lines.len().saturating_sub(height);
         viewport.log_open_scroll = viewport.log_open_scroll.min(viewport.log_open_max);
         let scroll = viewport.log_open_scroll;

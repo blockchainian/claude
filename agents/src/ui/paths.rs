@@ -36,17 +36,8 @@ pub(super) fn word_path(word: &str) -> Option<Range<usize>> {
                     .len()
         }
     };
-    let mut end = start + trim_closing(&word[start..]).len();
-    // CJK sentence punctuation ends a path without an intervening space.
-    if let Some(cut) = word[start..end].find(['，', '。', '；', '：', '！', '？']) {
-        end = start + trim_closing(&word[start..start + cut]).len();
-    }
-    for marker in ["**", "__", "~~", "*", "_"] {
-        if word[..start].ends_with(marker) && word[start..end].ends_with(marker) {
-            end -= marker.len();
-            break;
-        }
-    }
+    let range = word_bounds(word, start);
+    let end = range.end;
     let path = &word[start..end];
     let shaped = if is_rooted(path) {
         path[1..].contains('/')
@@ -59,6 +50,51 @@ pub(super) fn word_path(word: &str) -> Option<Range<usize>> {
                 .is_some_and(|c| c.is_ascii_alphanumeric() || c == '.')
     };
     shaped.then_some(start..end)
+}
+
+/// Commit-shaped words, sharing the path finder's prose trimming. A range has two words.
+pub(super) fn text_commits(text: &str) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut offset = 0;
+    for part in text.split_inclusive(char::is_whitespace) {
+        let word = part.trim_end_matches(char::is_whitespace);
+        if !word.contains(['/', '~']) && !word.contains("://") {
+            let mut at = 0;
+            for candidate in word.split("..") {
+                let start = candidate.len()
+                    - candidate
+                        .trim_start_matches(['`', '(', '"', '\'', '[', '*', '_', '<'])
+                        .len();
+                let range = word_bounds(candidate, start);
+                let sha = &candidate[range.clone()];
+                if (7..=40).contains(&sha.len())
+                    && sha
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    ranges.push(offset + at + range.start..offset + at + range.end);
+                }
+                at += candidate.len() + 2;
+            }
+        }
+        offset += part.len();
+    }
+    ranges
+}
+
+fn word_bounds(word: &str, start: usize) -> Range<usize> {
+    let mut end = start + trim_closing(&word[start..]).len();
+    // CJK sentence punctuation ends a path without an intervening space.
+    if let Some(cut) = word[start..end].find(['，', '。', '；', '：', '！', '？']) {
+        end = start + trim_closing(&word[start..start + cut]).len();
+    }
+    for marker in ["**", "__", "~~", "*", "_"] {
+        if word[..start].ends_with(marker) && word[start..end].ends_with(marker) {
+            end -= marker.len();
+            break;
+        }
+    }
+    start..end
 }
 
 /// Whether `path` is absolute or under the home directory, so it needs no `cwd`.
@@ -80,6 +116,29 @@ mod tests {
             .into_iter()
             .map(|range| &text[range])
             .collect()
+    }
+
+    #[test]
+    fn commit_candidates_follow_prose_boundaries() {
+        for (text, expected) in [
+            ("已提交 `cd410a5`，推送了", vec!["cd410a5"]),
+            ("commits 604ccc3..e8f6bc8", vec!["604ccc3", "e8f6bc8"]),
+            (
+                "**deadbeef** (1234567), `abcdefabcdef`",
+                vec!["deadbeef", "1234567", "abcdefabcdef"],
+            ),
+            (
+                "abcdef ABCDEF1 abc123 01234567890123456789012345678901234567890",
+                vec![],
+            ),
+            (
+                "/tmp/cd410a5 src/cd410a5 https://host/cd410a5 prefixcd410a5",
+                vec![],
+            ),
+        ] {
+            let found: Vec<_> = text_commits(text).into_iter().map(|r| &text[r]).collect();
+            assert_eq!(found, expected, "{text}");
+        }
     }
 
     #[test]

@@ -1,4 +1,5 @@
 //! Command center adapted from OpenAI Codex's TUI (Apache-2.0).
+pub(crate) mod commits;
 mod formatting;
 mod highlight;
 mod hints;
