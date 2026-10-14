@@ -323,6 +323,12 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     assert_eq!(body, rendered_cell(&before, "run a background job"));
     let jump = rendered_cell(&after, "↑ 1 New");
     assert_eq!((jump.0, jump.1), (body.0, rect.y));
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
+    view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
+    let style = super::style::inactive_tab_style();
+    let arrow = &buf[jump];
+    assert_eq!(arrow.fg, style.fg.unwrap_or(Color::Reset));
+    assert!(arrow.modifier.contains(ratatui::style::Modifier::BOLD));
 }
 
 #[test]
