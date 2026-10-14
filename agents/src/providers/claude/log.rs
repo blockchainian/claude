@@ -653,7 +653,7 @@ fn wrapped_message(text: &str) -> Option<(Kind, Option<String>, String)> {
         return Some((Kind::User, None, user_text(&body)));
     }
     let (kind, (name, body)) = super::peer::wrapped_message(text)?;
-    let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let body = body.trim().to_owned();
     Some((
         kind,
         name.map(str::trim)
@@ -1578,6 +1578,25 @@ pub(crate) mod tests {
             writeln!(file, "{}", json!({"type":"queue-operation", "timestamp":at(second).to_rfc3339(), "operation":"enqueue", "content":content})).unwrap();
             writeln!(file, "{}", record("user", second + 1, json!(content))).unwrap();
         }
+        // Real cross-session body, also exercised through the other peer envelopes.
+        for (second, opening, closing) in [
+            (8, "agent-message from=\"peer\"", "agent-message"),
+            (
+                10,
+                "teammate-message teammate_id=\"peer\"",
+                "teammate-message",
+            ),
+            (
+                12,
+                "cross-session-message from-name=\"peer\"",
+                "cross-session-message",
+            ),
+        ] {
+            let body = include_str!("../../../tests/fixtures/claude-peer-message.txt");
+            let content = format!("<{opening}>\n  {body}  \n</{closing}>");
+            writeln!(file, "{}", json!({"type":"queue-operation", "timestamp":at(second).to_rfc3339(), "operation":"enqueue", "content":content})).unwrap();
+            writeln!(file, "{}", record("user", second + 1, json!(content))).unwrap();
+        }
         for content in [
             "<task-notification>finished</task-notification>",
             "  <system-reminder>hidden</system-reminder>",
@@ -1592,14 +1611,16 @@ pub(crate) mod tests {
     fn wrapped_messages_extract_bodies_and_keep_queue_origin() {
         let file = wrapped_fixture();
         let events = tail(file.path(), 20).unwrap();
-        assert_eq!(events.len(), 6);
+        assert_eq!(events.len(), 12);
+        let peer_body = include_str!("../../../tests/fixtures/claude-peer-message.txt").trim();
+        assert_eq!(peer_body.matches('\n').count(), 11);
         for (pair, kind, sender, body) in [
             (&events[0..2], Kind::User, None, "first line second line"),
             (
                 &events[2..4],
                 Kind::Agent,
                 Some("a113c3cb9c1482c7a"),
-                "Report: /private/tmp/claude-501/mit-dl/agent6.md - Source: css.csail.mit.edu/6.5660/2026/",
+                "Report: /private/tmp/claude-501/mit-dl/agent6.md\n  - Source: css.csail.mit.edu/6.5660/2026/",
             ),
             (
                 &events[4..6],
@@ -1607,6 +1628,9 @@ pub(crate) mod tests {
                 Some("translate-pdf"),
                 "translate-pdf pilots ready for review.",
             ),
+            (&events[6..8], Kind::Agent, Some("peer"), peer_body),
+            (&events[8..10], Kind::Agent, Some("peer"), peer_body),
+            (&events[10..12], Kind::Session, Some("peer"), peer_body),
         ] {
             assert_eq!(pair[0].kind, Kind::QueuedSystem);
             assert_eq!(pair[1].kind, kind);
@@ -1663,7 +1687,7 @@ pub(crate) mod tests {
         assert_eq!(events[0].kind, Kind::Agent);
         assert_eq!(
             events[0].body,
-            "Report without harness The report follows: details"
+            "Report without harness\n  The report follows:\n  details"
         );
     }
 
