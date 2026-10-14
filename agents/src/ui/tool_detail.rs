@@ -52,8 +52,9 @@ impl Part {
                     || value.as_array().is_some_and(|array| !array.is_empty()))
             {
                 if text_start < cursor {
-                    let text = text_boundary(&source[text_start..cursor], text_start > 0, true);
-                    if !text.is_empty() {
+                    if let Some(text) =
+                        text_boundary(&source[text_start..cursor], text_start > 0, true)
+                    {
                         parts.push(Self::text_fragment(text.into(), markdown));
                     }
                 }
@@ -68,8 +69,7 @@ impl Part {
             }
         }
         if text_start < source.len() || parts.is_empty() {
-            let text = text_boundary(&source[text_start..], text_start > 0, false);
-            if !text.is_empty() || parts.is_empty() {
+            if let Some(text) = text_boundary(&source[text_start..], text_start > 0, false) {
                 parts.push(Self::text_fragment(text.into(), markdown));
             }
         }
@@ -218,7 +218,10 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
 }
 
 /// A JSON block boundary already supplies the adjacent line break.
-fn text_boundary(mut source: &str, after_json: bool, before_json: bool) -> &str {
+fn text_boundary(mut source: &str, after_json: bool, before_json: bool) -> Option<&str> {
+    if after_json && before_json && matches!(source, "\n" | "\r\n") {
+        return None;
+    }
     if after_json {
         source = source
             .strip_prefix("\r\n")
@@ -231,7 +234,7 @@ fn text_boundary(mut source: &str, after_json: bool, before_json: bool) -> &str 
             .or_else(|| source.strip_suffix('\n'))
             .unwrap_or(source);
     }
-    source
+    Some(source)
 }
 
 /// Parse one complete balanced JSON value without scanning the trailing output.
@@ -367,6 +370,27 @@ mod tests {
                 texts(&parts, 80),
                 ["before", "{", "  \"ok\": true", "}", "after"]
             );
+        }
+    }
+
+    #[test]
+    fn json_boundaries_preserve_surrounding_blank_lines() {
+        for newline in ["\n", "\r\n"] {
+            for count in 1..=3 {
+                let gap = newline.repeat(count);
+                let source = format!("{gap}{{\"a\":1}}{gap}{{\"b\":2}}{gap}");
+                let parts = Part::text_parts(source, false);
+                let copy = parts
+                    .iter()
+                    .map(|part| part.source.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert_eq!(
+                    copy.replace("\r\n", "\n"),
+                    format!("{gap}{{\n  \"a\": 1\n}}{gap}{{\n  \"b\": 2\n}}{gap}")
+                        .replace("\r\n", "\n")
+                );
+            }
         }
     }
 
