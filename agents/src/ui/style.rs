@@ -125,3 +125,8 @@ pub(super) fn log_time_style(kind: &crate::log::Kind, last: bool) -> Style {
         Style::default()
     }
 }
+
+/// The border labels used to jump through the log and separate input from output.
+pub(super) fn log_jump_style() -> Style {
+    Style::default().bold().not_dim()
+}

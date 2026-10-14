@@ -95,7 +95,7 @@ impl View {
         };
         let x = area.x + (CLOCK_WIDTH + KIND_WIDTH + 1) as u16;
         let jump = Rect::new(x, area.y, label.width() as u16, 1).intersection(area);
-        Line::from(label.bold().not_dim()).render(jump, buf);
+        Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
         viewport.log_jump = jump;
     }
 
@@ -151,18 +151,6 @@ impl View {
         viewport.log_open_max = layout.lines.len().saturating_sub(height);
         viewport.log_open_scroll = viewport.log_open_scroll.min(viewport.log_open_max);
         let scroll = viewport.log_open_scroll;
-        if scroll > 0 {
-            let label = " ↑ Top ";
-            let jump = Rect::new(
-                area.x + (CLOCK_WIDTH + KIND_WIDTH + 1) as u16,
-                area.y,
-                label.width() as u16,
-                1,
-            )
-            .intersection(area);
-            Line::from(label.bold().not_dim()).render(jump, buf);
-            viewport.log_jump = jump;
-        }
         if overflow && height > 0 {
             let thumb = (height * height)
                 .div_ceil(layout.lines.len())
@@ -175,7 +163,7 @@ impl View {
                     .set_symbol(if (top..top + thumb).contains(&row) {
                         "┃"
                     } else {
-                        "│"
+                        " "
                     })
                     .set_style(style);
             }
