@@ -4215,7 +4215,7 @@ mod subagent_rows {
     }
 
     #[test]
-    fn a_tab_without_its_chosen_task_falls_back_to_a_task_not_a_subagent() {
+    fn a_tab_without_its_chosen_task_counts_subagents_when_picking_the_longest_waiting() {
         let mut view = fixture();
         let mut rows = view.rows.clone();
         let mut oldest = session("agent-oldest", "Old subagent", SessionStatus::Ready, 0);
@@ -4232,7 +4232,7 @@ mod subagent_rows {
         key(&mut view, KeyCode::Tab);
 
         assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
-        assert_eq!(view.selected_id(), Some(&session_key("parent")));
+        assert_eq!(view.selected_id(), Some(&session_key("agent-oldest")));
     }
 
     #[test]

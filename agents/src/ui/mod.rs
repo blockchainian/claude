@@ -549,20 +549,17 @@ impl View {
         }
     }
 
-    /// The row a tab selects when no task chosen in it is still listed: the task that waited
-    /// longest, leaving out subagents, which wait on their task rather than the user. Show more
-    /// stands for tasks older than every listed one, so it wins where it is listed.
+    /// The row a tab selects when no task chosen in it is still listed: the task or subagent that
+    /// waited longest. Show more stands for tasks older than every listed one, so it wins where it
+    /// is listed.
     fn fallback_selection(&self) -> usize {
         let selectable = self.selectable_indices();
         if selectable.contains(&usize::MAX) {
             return usize::MAX;
         }
         selectable
-            .iter()
-            .copied()
-            .filter(|&index| self.rows[index].parent.is_none())
+            .into_iter()
             .max_by_key(|&index| session_order(&self.rows[index]))
-            .or_else(|| selectable.first().copied())
             .unwrap_or(usize::MAX)
     }
     /// Gives a task the next accent the first time it is shown, so neighbors differ and the task
