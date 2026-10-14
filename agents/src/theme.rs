@@ -48,6 +48,9 @@ const INLINE_CODE_SCOPES: [&str; 2] = [
     "markup.raw.inline.markdown",
 ];
 
+/// The OKLab lightness the first accent keeps on a dark background, so it does not outshine the rest.
+const MAX_FIRST_DARK_ACCENT_LIGHTNESS: f64 = 0.583;
+
 /// The WCAG contrast Codex keeps between accent text and the terminal background.
 const MIN_TEXT_CONTRAST: f64 = 4.5;
 
@@ -135,15 +138,28 @@ pub fn inline_code_color() -> Color {
     }
 }
 
-/// Darkest first on a light background and lightest first on a dark one.
+/// Darkest first on a light background and lightest first on a dark one, where the lightest is
+/// darkened to `MAX_FIRST_DARK_ACCENT_LIGHTNESS`.
 fn set_accents(mut accents: Vec<Rgb>, light_background: bool) {
     accents.sort_by(|a, b| lightness(*a).total_cmp(&lightness(*b)));
     if !light_background {
         accents.reverse();
+        if let Some(first) = accents.first_mut() {
+            *first = dimmed(*first, MAX_FIRST_DARK_ACCENT_LIGHTNESS);
+        }
     }
     *ACCENTS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = accents;
+}
+
+/// `color` blended toward black until its lightness is at most `max_lightness`.
+fn dimmed(color: Rgb, max_lightness: f64) -> Rgb {
+    (0..=255_u8)
+        .rev()
+        .map(|step| blend(color, (0, 0, 0), f32::from(step) / 255.0))
+        .find(|candidate| lightness(*candidate) <= max_lightness)
+        .unwrap_or((0, 0, 0))
 }
 
 /// Loads the accents of a `.tmTheme` file; returns the reason when it cannot be used.
@@ -297,9 +313,11 @@ mod tests {
     fn accents_start_with_the_strongest_contrast_and_wrap() {
         let _guard = TEST_LOCK.lock().unwrap();
         let (black, gray, white) = ((0, 0, 0), (128, 128, 128), (255, 255, 255));
-        for (light_background, order) in
-            [(true, [black, gray, white]), (false, [white, gray, black])]
-        {
+        let dimmed_white = (123, 123, 123);
+        for (light_background, order) in [
+            (true, [black, gray, white]),
+            (false, [dimmed_white, gray, black]),
+        ] {
             set_accents(vec![white, black, gray], light_background);
             let slots: Vec<_> = (0..4).map(accent).collect();
             let expected: Vec<_> = order
