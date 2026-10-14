@@ -1998,7 +1998,7 @@ fn details_branch_pull_request_snapshot() {
             .enumerate()
             .filter(|(_, cell)| {
                 cell.symbol()
-                    .contains("\x1b]8;;https://github.com/0xbabedead/chadwallet/pull/833")
+                    .contains("\x1b]8;;vscode://blockchainian.git/view-pr?")
             })
             .map(|(index, _)| index % usize::from(width))
             .collect::<Vec<_>>();
@@ -5302,7 +5302,12 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
             mouse(MouseEventKind::Down(MouseButton::Left), x + 8, y)
         ),
         Some(Action::OpenPath(
-            "https://github.com/0xbabedead/chadwallet/pull/833".into()
+            super::vscode::pull_request_link(
+                "https://github.com/0xbabedead/chadwallet/pull/833",
+                dir.path()
+            )
+            .unwrap()
+            .into()
         ))
     );
     assert_eq!(click_text(&mut view, &rendered, "main"), None);

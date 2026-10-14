@@ -122,24 +122,11 @@ fn resolve(cwd: &Path, sha: &str) -> Option<PathBuf> {
     Some(
         format!(
             "vscode://blockchainian.git/view-commit?repo={}&sha={}",
-            encode(repo),
-            encode(sha.as_bytes())
+            super::vscode::encode(repo),
+            super::vscode::encode(sha.as_bytes())
         )
         .into(),
     )
-}
-
-fn encode(value: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut encoded = String::new();
-    for &byte in value {
-        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-            encoded.push(char::from(byte));
-        } else {
-            write!(encoded, "%{byte:02X}").expect("write URL query");
-        }
-    }
-    encoded
 }
 
 #[cfg(test)]

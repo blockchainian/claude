@@ -58,11 +58,13 @@ pub(super) fn add_commits(text: &str, cwd: &Path, links: &mut Vec<Link>) {
     links.sort_by_key(|link| link.range.start);
 }
 
-/// Where `path` opens: URLs as they are, and existing paths resolved absolutely,
+/// Where `path` opens: GitHub pull requests in VS Code, other URLs as they are, and existing paths resolved absolutely,
 /// under the home directory for `~/`, or under `cwd` for relative paths.
 pub(super) fn resolve(path: &str, cwd: &Path) -> Option<PathBuf> {
     if path.contains("://") {
-        return Some(PathBuf::from(path));
+        return Some(
+            super::vscode::pull_request_link(path, cwd).map_or_else(|| path.into(), Into::into),
+        );
     }
     let target = if let Some(rest) = path.strip_prefix("~/") {
         Path::new(&std::env::var_os("HOME")?).join(rest)
@@ -159,7 +161,11 @@ mod tests {
         assert!(resolve("~/C…/.w…/a…/s…/l…/plan.md", dir.path()).is_none());
         assert_eq!(
             resolve("https://github.com/example/project/pull/1", dir.path()),
-            Some("https://github.com/example/project/pull/1".into())
+            super::super::vscode::pull_request_link(
+                "https://github.com/example/project/pull/1",
+                dir.path()
+            )
+            .map(PathBuf::from)
         );
     }
 

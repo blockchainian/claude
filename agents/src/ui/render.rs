@@ -567,8 +567,11 @@ impl View {
             let label = format!("#{}", pr.number);
             project.push(" · ".dim());
             let prefix_width = Line::from(project.clone()).width();
-            let link = line_width_fits(prefix_width + label.len(), width)
-                .then(|| (prefix_width as u16, label.len() as u16, pr.url.clone()));
+            let link = line_width_fits(prefix_width + label.len(), width).then(|| {
+                let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
+                    .unwrap_or_else(|| pr.url.clone());
+                (prefix_width as u16, label.len() as u16, url)
+            });
             project.push(Span::styled(label, self.title_style(&session.id)));
             link
         });
