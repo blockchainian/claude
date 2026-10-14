@@ -1484,9 +1484,9 @@ fn details_include_attention_and_clip_messages() {
     let project = rendered
         .lines()
         .position(|line| line.trim_end().ends_with("/tmp/project"));
-    assert!(position("Prompt") < position("Last message"));
-    assert!(position("Last message") < position("Needs attention"));
-    assert!(position("Needs attention") < position("Project ·"));
+    assert!(position("Needs attention") < position("Last message"));
+    assert!(position("Last message") < position("Prompt"));
+    assert!(position("Prompt") < position("Project ·"));
     assert!(position("Project ·") < project);
     assert!(project < position("Model: claude-opus"));
     assert!(
@@ -2483,7 +2483,7 @@ fn details_background_boxes_tail_and_clip_output() {
         },
     ];
     let rendered = queued_details(row.clone(), 22);
-    assert!(rendered.find("Last message").unwrap() < rendered.find("Background\n").unwrap());
+    assert!(rendered.find("Background\n").unwrap() < rendered.find("Last message").unwrap());
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_background.txt")
@@ -2708,19 +2708,19 @@ fn details_markdown_snapshot() {
         rendered,
         include_str!("../../tests/ui_snapshots/details_markdown.txt")
     );
-    assert_eq!(buffer[(4, 3)].fg, crate::theme::inline_code_color());
+    assert_eq!(buffer[(4, 10)].fg, crate::theme::inline_code_color());
     assert!(
-        buffer[(14, 3)]
+        buffer[(14, 10)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, 4)]
+        buffer[(2, 11)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, 9)].fg, crate::theme::link_color());
-    assert_eq!(buffer[(0, 11)].fg, Color::Cyan);
+    assert_eq!(buffer[(6, 5)].fg, crate::theme::link_color());
+    assert_eq!(buffer[(0, 7)].fg, Color::Cyan);
 }
 
 fn log_fixture() -> (View, chrono::DateTime<Utc>) {
@@ -3341,7 +3341,8 @@ mod details_budget {
                 .any(|line| line.starts_with("─") && line.contains("Check 3"))
         );
         assert!(!rows.iter().any(|line| line.contains("Check 4")));
-        assert_eq!(rows.iter().filter(|line| *line == "…").count(), 2);
+        assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
+        assert!(rows.iter().any(|line| line == "Prompt text…"));
         assert!(rows[23].starts_with("Model:"));
     }
 
@@ -3354,7 +3355,7 @@ mod details_budget {
         let area = Rect::new(0, 0, 120, 6);
         let mut buf = Buffer::empty(area);
         view.render_details(area, &mut buf, Utc::now());
-        assert_eq!(buf[(0, 3)].symbol(), "F");
+        assert_eq!(buf[(0, 3)].symbol(), "O");
         assert_eq!(buf[(0, 5)].symbol(), "…");
     }
 
@@ -3400,16 +3401,17 @@ mod details_budget {
         }
         assert!(!rest[23].is_empty());
         assert_ne!(rest[23], "…");
-        let message = rest.iter().position(|line| line == "Last message").unwrap();
+        let prompt = rest.iter().position(|line| line == "Prompt").unwrap();
+        let project = rest.iter().position(|line| line == "Project").unwrap();
         assert!(
-            rest[..message]
+            rest[prompt + 1..project]
                 .iter()
                 .rev()
                 .find(|line| !line.is_empty())
                 .unwrap()
                 .ends_with('…')
         );
-        view.scroll_content_row(true, false, 0);
+        view.scroll_content_row(true, false, (prompt + 1) as u16);
         assert_eq!(
             view.viewport
                 .borrow()
@@ -3422,8 +3424,8 @@ mod details_budget {
         let scrolled = panel(&view);
         assert_eq!(scrolled[0], rest[0]);
         assert_eq!(scrolled[23], rest[23]);
-        assert_eq!(scrolled[2], "Prompt row 1");
-        view.scroll_content_row(false, false, 0);
+        assert_eq!(scrolled[prompt], "Prompt row 1");
+        view.scroll_content_row(false, false, prompt as u16);
         assert_eq!(panel(&view), rest);
     }
 }
@@ -3500,27 +3502,45 @@ mod details_curtain {
     }
 
     #[test]
-    fn fully_open_prompt_hands_off_to_message() {
+    fn fully_open_message_hands_off_to_prompt() {
         let mut view = fixture();
-        panel(&view);
-        let hidden = view.viewport.borrow().details_scroll.hidden[0];
+        let before = panel(&view);
+        let pointer = (0..24)
+            .find(|&y| text(&before, y).starts_with("Reply row 1"))
+            .unwrap();
+        let hidden = view.viewport.borrow().details_scroll.hidden[1];
+        assert!(hidden > 0);
         for _ in 0..hidden {
-            view.scroll_content_row(true, false, 5);
+            view.scroll_content_row(true, false, pointer);
             panel(&view);
         }
         let opened = panel(&view);
-        let message = (0..24)
-            .find(|&y| text(&opened, y) == "Last message")
-            .unwrap();
-        assert!((1..message).all(|y| !text(&opened, y).ends_with('…')));
-        assert_eq!(text(&opened, message - 2), "Prompt row 12");
-        view.scroll_content_row(true, false, 5);
+        let prompt = (0..24).find(|&y| text(&opened, y) == "Prompt").unwrap();
+        assert!((1..prompt).all(|y| !text(&opened, y).ends_with('…')));
+        assert_eq!(text(&opened, prompt - 2), "Reply row 6");
+        view.scroll_content_row(true, false, pointer);
         let after = panel(&view);
         assert_eq!(
             view.viewport.borrow().details_scroll.reveal,
-            vec![hidden, 1, 0]
+            vec![0, hidden, 1]
         );
         assert_eq!(text(&after, 23), text(&opened, 23));
+        let prompt_pointer = (0..24)
+            .find(|&y| text(&after, y).starts_with("Prompt row"))
+            .unwrap();
+        let prompt_hidden = view.viewport.borrow().details_scroll.hidden[2];
+        for _ in 1..prompt_hidden {
+            view.scroll_content_row(true, false, prompt_pointer);
+            panel(&view);
+        }
+        let fully_open = panel(&view);
+        assert!((1..24).any(|y| text(&fully_open, y) == "Prompt row 12"));
+        assert_eq!(
+            view.viewport.borrow().details_scroll.reveal,
+            vec![0, hidden, prompt_hidden]
+        );
+        view.scroll_content_row(true, false, prompt_pointer);
+        assert_eq!(panel(&view), fully_open);
     }
 
     #[test]
@@ -3567,17 +3587,21 @@ mod details_curtain {
     #[test]
     fn content_updates_clamp_and_body_count_changes_reset() {
         let mut view = fixture();
-        panel(&view);
-        for _ in 0..3 {
-            view.scroll_content_row(true, false, 5);
+        let before = panel(&view);
+        let pointer = (0..24)
+            .find(|&y| text(&before, y) == "Prompt row 3")
+            .unwrap();
+        for _ in 0..4 {
+            view.scroll_content_row(true, false, pointer);
             panel(&view);
         }
+        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 0, 4]);
         view.rows[view.selected].prompt = (1..=8)
             .map(|i| format!("Prompt row {i}"))
             .collect::<Vec<_>>()
             .join("  \n");
         panel(&view);
-        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![2, 0, 0]);
+        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 0, 3]);
         view.rows[view.selected].last_message = None;
         panel(&view);
         assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 0]);
@@ -3590,9 +3614,7 @@ mod details_curtain {
         let pointer = (0..24)
             .find(|&y| text(&before, y) == "Prompt row 3")
             .unwrap();
-        let message = (0..24)
-            .find(|&y| text(&before, y) == "Last message")
-            .unwrap();
+        let project = (0..24).find(|&y| text(&before, y) == "Project").unwrap();
         view.scroll_content_row(true, false, pointer);
         let after = panel(&view);
         for x in 0..120 {
@@ -3600,16 +3622,16 @@ mod details_curtain {
             for y in 1..pointer {
                 assert_eq!(after[(x, y)], before[(x, y + 1)], "shift {x},{y}");
             }
-            for y in message..24 {
+            for y in project..24 {
                 assert_eq!(after[(x, y)], before[(x, y)], "tail {x},{y}");
             }
         }
         assert_eq!(text(&after, pointer), "Prompt row 4");
-        let cut_before = (0..message)
+        let cut_before = (pointer..project)
             .map(|y| text(&before, y))
             .find(|s| s.ends_with('…'))
             .unwrap();
-        let cut_after = (0..message)
+        let cut_after = (pointer..project)
             .map(|y| text(&after, y))
             .find(|s| s.ends_with('…'))
             .unwrap();

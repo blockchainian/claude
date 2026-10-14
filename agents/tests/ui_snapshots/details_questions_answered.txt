@@ -1,11 +1,11 @@
 Needs input · Question task
 
-Prompt
-Question task
-
 Needs attention
 Open task to review.
 Waiting for your response.
+
+Prompt
+Question task
 
 Project
 /tmp/project

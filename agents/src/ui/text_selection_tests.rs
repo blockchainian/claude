@@ -305,8 +305,8 @@ fn drag_between_bodies_joins_original_text_with_one_newline() {
         .unwrap();
     view.rows[0].last_message = Some(event.body);
     let buf = details(&view);
-    let start = position(&buf, "对，");
-    let end = position(&buf, "⏺ Ran");
+    let start = position(&buf, "⏺ Ran");
+    let end = position(&buf, "对，");
     view.handle_mouse(mouse(
         MouseEventKind::Down(MouseButton::Left),
         start.0,
@@ -316,8 +316,8 @@ fn drag_between_bodies_joins_original_text_with_one_newline() {
     let message = view.rows[0].last_message.as_ref().unwrap();
     let expected = format!(
         "{}\n{}",
-        view.rows[0].prompt,
-        &message[..message.find("⏺ Ran").unwrap()]
+        message,
+        &view.rows[0].prompt[..view.rows[0].prompt.find("对，").unwrap()]
     );
     assert_eq!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1)),
