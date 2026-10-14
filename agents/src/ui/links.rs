@@ -3,7 +3,6 @@ use super::text_selection::DrawnRow;
 use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use unicode_width::UnicodeWidthStr;
 
 /// A link inside a text: the bytes it covers and the file, directory or URL it opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,15 +111,20 @@ pub(super) fn drawn_links(rows: &[DrawnRow], links: &[Link]) -> Vec<DrawnLink> {
     drawn
 }
 
-/// The screen columns of `links` on a single drawn line whose text is `text`.
-pub(super) fn line_links(text: &str, links: &[Link]) -> Vec<(Range<u16>, PathBuf)> {
-    links
-        .iter()
-        .filter_map(|link| {
-            let start = text.get(..link.range.start)?.width() as u16;
-            let end = text.get(..link.range.end)?.width() as u16;
-            (start < end).then(|| (start..end, link.target.clone()))
-        })
+/// The columns of `links` on one drawn row whose `cells` map back to the text's bytes.
+pub(super) fn row_links(
+    cells: &[(Range<u16>, Range<usize>)],
+    links: &[Link],
+) -> Vec<(Range<u16>, PathBuf)> {
+    let row = DrawnRow {
+        segment: 0,
+        x: 0,
+        y: 0,
+        cells: cells.to_vec(),
+    };
+    drawn_links(std::slice::from_ref(&row), links)
+        .into_iter()
+        .map(|(rect, target)| (rect.x..rect.right(), target))
         .collect()
 }
 

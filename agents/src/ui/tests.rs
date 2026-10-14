@@ -5021,6 +5021,95 @@ fn open_log_event_links_its_wrapped_path() {
 }
 
 #[test]
+fn details_prompt_links_its_shortened_path_and_image_placeholder() {
+    let mut view = fixture();
+    let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
+    let selected = &mut view.rows[view.selected];
+    selected.prompt = format!("Look at [Image #1] and the report in {path} please");
+    selected.prompt_images = vec![crate::log::Image {
+        label: "[Image #1]".into(),
+        path: "/tmp/images/1.png".into(),
+    }];
+    let rendered = screen(&view, 120, 40);
+    assert!(!rendered.contains(path), "{rendered}");
+    assert!(rendered.contains("report.md"), "{rendered}");
+    assert_eq!(
+        click_text(&mut view, &rendered, "report.md"),
+        Some(Action::OpenPath(path.into()))
+    );
+    assert_eq!(
+        click_text(&mut view, &rendered, "[Image #1]"),
+        Some(Action::OpenPath("/tmp/images/1.png".into()))
+    );
+    assert_eq!(click_text(&mut view, &rendered, "Look at"), None);
+    assert_eq!(
+        click_text(&mut view, &rendered, "Look at"),
+        Some(Action::Copy {
+            text: view.rows[view.selected].prompt.clone(),
+            label: "Copied prompt".into()
+        })
+    );
+}
+
+#[test]
+fn details_relative_paths_link_only_when_they_exist() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/main.rs"), "").unwrap();
+    let mut view = fixture();
+    let selected = &mut view.rows[view.selected];
+    selected.cwd = dir.path().to_owned();
+    selected.prompt = "Fix src/main.rs and/or src/missing.rs".into();
+    let rendered = screen(&view, 120, 40);
+    assert_eq!(
+        click_text(&mut view, &rendered, "src/main.rs"),
+        Some(Action::OpenPath(dir.path().join("src/main.rs")))
+    );
+    assert_eq!(click_text(&mut view, &rendered, "and/or"), None);
+    view.last_copy_click = None;
+    assert_eq!(click_text(&mut view, &rendered, "src/missing.rs"), None);
+}
+
+#[test]
+fn details_project_lines_link_the_pull_request_and_the_directory() {
+    let mut view = fixture();
+    let selected = &mut view.rows[view.selected];
+    selected.git_branch = Some("main".into());
+    selected.pr = Some(crate::model::PullRequest {
+        number: 833,
+        url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
+    });
+    selected.queued = vec!["Then read /tmp/project/notes/todo.md".into()];
+    let rendered = screen(&view, 120, 40);
+    // The OSC 8 escapes around "#833" hide it from a text search; its cells follow the branch.
+    let (x, y) = rendered_cell(&rendered, "main · ");
+    assert_eq!(
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), x + 8, y)
+        ),
+        Some(Action::OpenPath(
+            "https://github.com/0xbabedead/chadwallet/pull/833".into()
+        ))
+    );
+    assert_eq!(click_text(&mut view, &rendered, "main"), None);
+    // The directory sits under the project line; the task list shows the same path as a group.
+    let (x, y) = rendered_cell(&rendered, "Project · ");
+    assert_eq!(
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1)
+        ),
+        Some(Action::OpenPath("/tmp/project".into()))
+    );
+    assert_eq!(
+        click_text(&mut view, &rendered, "todo.md"),
+        Some(Action::OpenPath("/tmp/project/notes/todo.md".into()))
+    );
+    assert_eq!(click_text(&mut view, &rendered, "Then read"), None);
+}
+
+#[test]
 fn task_log_open_event_closes_when_selection_changes() {
     let (mut view, now) = log_fixture();
     let list = log_screen(&view, 100, 25, now);

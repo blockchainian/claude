@@ -328,6 +328,7 @@ impl View {
             let mut viewport = self.viewport.borrow_mut();
             viewport.details = Rect::default();
             viewport.details_copy.clear();
+            viewport.details_links.clear();
             viewport.details_text = text_selection::TextRegion::default();
         }
         let Some(session) = self.selected_row() else {
@@ -396,6 +397,12 @@ impl View {
         let mut bodies = Vec::new();
         // The full text a double click copies from each body, parallel to `bodies`.
         let mut copies: Vec<Option<(&str, &'static str)>> = Vec::new();
+        // The links inside each body's text, parallel to `bodies`.
+        let mut body_links: Vec<Vec<super::links::Link>> = Vec::new();
+        // The columns each item draws a link on, parallel to `items`; bodies fill theirs
+        // once their rows are mapped to their text.
+        let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> =
+            vec![Vec::new(); items.len()];
         let prompt_start = items.len();
         let prompt_body = wrap_details(prompt_text, width, true);
         items.extend(prompt_body.into_iter().map(Item::from));
@@ -404,13 +411,32 @@ impl View {
             Some((session.prompt.as_str(), "Copied prompt"))
                 .filter(|(prompt, _)| !prompt.trim().is_empty()),
         );
-        items.extend(session.queued.iter().map(|queued| {
+        body_links.push(super::links::text_links(
+            &session.prompt,
+            &session.cwd,
+            &session.prompt_images,
+        ));
+        item_links.resize(items.len(), Vec::new());
+        for queued in &session.queued {
             let first = wrap_details(queued, width, true)
                 .into_iter()
                 .next()
                 .unwrap_or_default();
-            truncate_line_with_ellipsis_if_overflow(first, width).into()
-        }));
+            let visible = if first.width() > width { width - 1 } else { width } as u16;
+            let mut cells = super::text_selection_layout::map_lines(
+                queued,
+                std::slice::from_ref(&first),
+                true,
+            )
+            .pop()
+            .unwrap_or_default();
+            cells.retain(|(columns, _)| columns.end <= visible);
+            item_links.push(super::links::row_links(
+                &cells,
+                &super::links::text_links(queued, &session.cwd, &[]),
+            ));
+            items.push(truncate_line_with_ellipsis_if_overflow(first, width).into());
+        }
 
         // Latest activity and Last message share one slot and follow the
         // clock: whichever of the latest tool call and the last reply is newer.
@@ -440,6 +466,11 @@ impl View {
             ]);
             bodies.push(start..items.len());
             copies.push(Some((activity.label.as_str(), "Copied latest activity")));
+            body_links.push(super::links::text_links(
+                &activity.label,
+                &session.cwd,
+                &[],
+            ));
         }
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
             let mut header = vec!["Last message".dim()];
@@ -462,6 +493,7 @@ impl View {
             );
             bodies.push(start..items.len());
             copies.push(Some((message.as_str(), "Copied last message")));
+            body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
         // The agent appends an exit marker to the output file when the
@@ -517,7 +549,9 @@ impl View {
             }
             bodies.push(start..items.len());
             copies.push(None);
+            body_links.push(Vec::new());
         }
+        item_links.resize(items.len(), Vec::new());
 
         let mut project = vec!["Project".dim()];
         if let Some(branch) = &session.git_branch {
@@ -535,13 +569,21 @@ impl View {
             project.push(Span::styled(label, self.title_style(&session.id)));
             link
         });
+        let cwd = super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width);
+        item_links.extend([
+            Vec::new(),
+            link.iter()
+                .map(|(x, width, url)| (*x..x + width, PathBuf::from(url)))
+                .collect(),
+            vec![(0..cwd.width().min(width) as u16, session.cwd.clone())],
+        ]);
         items.extend([
             Line::default().into(),
             Item::Link {
                 line: Line::from(project),
                 link,
             },
-            super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width).into(),
+            cwd.into(),
         ]);
 
         let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
@@ -549,6 +591,7 @@ impl View {
             model.extend([" · ".dim(), effort.clone().into()]);
         }
         items.extend([Line::default().into(), Line::from(model).into()]);
+        item_links.resize(items.len(), Vec::new());
 
         let mut text_rows = vec![None; items.len()];
         let mut sources = Vec::new();
@@ -566,6 +609,7 @@ impl View {
             let markdown = *label != "Copied latest activity";
             let maps = super::text_selection_layout::map_lines(source, &lines, markdown);
             for (index, cells) in body.clone().zip(maps) {
+                item_links[index] = super::links::row_links(&cells, &body_links[id]);
                 text_rows[index] = Some(text_selection::DrawnRow {
                     segment: id,
                     x: area.x,
@@ -620,6 +664,8 @@ impl View {
                                 .cells
                                 .retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
                         }
+                        item_links[body.start + rows - 1]
+                            .retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
                     }
                 }
                 state.bodies = bodies
@@ -643,6 +689,12 @@ impl View {
                 });
                 let mut index = 0;
                 text_rows.retain(|_| {
+                    let retain = keep[index];
+                    index += 1;
+                    retain
+                });
+                let mut index = 0;
+                item_links.retain(|_| {
                     let retain = keep[index];
                     index += 1;
                     retain
@@ -678,13 +730,20 @@ impl View {
         let content_area = Rect::new(0, 0, area.width, total as u16);
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
-        for (item, mapped) in items.into_iter().zip(text_rows) {
-            if let Some(mut mapped) = mapped
-                && offset >= scroll
-                && offset < scroll + available
-            {
-                mapped.y = area.y + (offset - scroll) as u16;
-                self.viewport.borrow_mut().details_text.rows.push(mapped);
+        let mut drawn_links = Vec::new();
+        for ((item, mapped), links) in items.into_iter().zip(text_rows).zip(item_links) {
+            if offset >= scroll && offset < scroll + available {
+                let y = area.y + (offset - scroll) as u16;
+                if let Some(mut mapped) = mapped {
+                    mapped.y = y;
+                    self.viewport.borrow_mut().details_text.rows.push(mapped);
+                }
+                drawn_links.extend(links.into_iter().map(|(columns, target)| {
+                    (
+                        Rect::new(area.x + columns.start, y, columns.end - columns.start, 1),
+                        target,
+                    )
+                }));
             }
             let height = item.height();
             let item_area = row(content_area, offset as u16, height as u16);
@@ -739,7 +798,10 @@ impl View {
                 .details_text
                 .rows
                 .retain(|row| row.y != last.y);
+            drawn_links.retain(|(rect, _)| rect.y != last.y);
         }
+        super::links::underline(buf, &drawn_links);
+        self.viewport.borrow_mut().details_links = drawn_links;
         self.highlight_text_selection(text_selection::Panel::Details, buf);
     }
 }
