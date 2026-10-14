@@ -21,11 +21,7 @@ impl View {
                 .copied()
                 .find(|&index| &self.rows[index].id == id)
         });
-        self.set_selected(
-            remembered
-                .or_else(|| self.selectable_indices().first().copied())
-                .unwrap_or(usize::MAX),
-        );
+        self.set_selected(remembered.unwrap_or_else(|| self.fallback_selection()));
         self.reconcile_selection();
     }
 

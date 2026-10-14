@@ -287,12 +287,15 @@ impl View {
         self.selected = if show_more {
             usize::MAX
         } else {
-            selected_index.unwrap_or_else(|| {
-                self.selectable_indices()
+            match (selected_index, &selected) {
+                (Some(index), _) => index,
+                (None, Some(_)) => self.fallback_selection(),
+                (None, None) => self
+                    .selectable_indices()
                     .first()
                     .copied()
-                    .unwrap_or(usize::MAX)
-            })
+                    .unwrap_or(usize::MAX),
+            }
         };
         self.reconcile_selection();
         if self.status_filter != status_filter && self.selected_id() == selected.as_ref() {
@@ -545,8 +548,24 @@ impl View {
             self.rename.clear();
         }
         if !visible.contains(&self.selected) {
-            self.set_selected(visible.first().copied().unwrap_or(usize::MAX));
+            self.set_selected(self.fallback_selection());
         }
+    }
+
+    /// The row a tab selects when its chosen task is gone: the task that waited longest, or on
+    /// Inactive, where old tasks wait for nothing, the top row.
+    fn fallback_selection(&self) -> usize {
+        let selectable = self.selectable_indices();
+        if TASK_FILTERS[self.status_filter].1 != [SessionStatus::Inactive]
+            && let Some(longest_waiting) = selectable
+                .iter()
+                .copied()
+                .filter(|&index| index != usize::MAX)
+                .max_by_key(|&index| session_order(&self.rows[index]))
+        {
+            return longest_waiting;
+        }
+        selectable.first().copied().unwrap_or(usize::MAX)
     }
     /// Gives a task the next accent the first time it is shown, so neighbors differ and the task
     /// keeps its color while the list changes.

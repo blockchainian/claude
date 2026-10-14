@@ -443,6 +443,7 @@ fn mouse_details_scroll_resets_with_selection_and_filter() {
     details_panel(&view);
     let rect = view.viewport.borrow().details;
     let id = view.selected_id().unwrap().to_owned();
+    view.select(view.selected);
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
     let (_, tab) = view.viewport.borrow().tabs[3];
     click_mouse(
@@ -921,17 +922,17 @@ fn tabs_cycle_in_display_order_and_filter_by_label() {
 fn refresh_follows_selected_ready_session_to_working_tab() {
     let mut view = fixture();
     key(&mut view, KeyCode::Tab);
-    assert_eq!(view.selected_id(), Some(&session_key("42")));
+    assert_eq!(view.selected_id(), Some(&session_key("43")));
     let mut rows = view.rows.clone();
     rows.iter_mut()
-        .find(|s| s.id == session_key("42"))
+        .find(|s| s.id == session_key("43"))
         .unwrap()
         .status = SessionStatus::Working;
 
     view.set_sessions(rows, false);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Working");
-    assert_eq!(view.selected_id(), Some(&session_key("42")));
+    assert_eq!(view.selected_id(), Some(&session_key("43")));
 }
 
 #[test]
@@ -969,8 +970,7 @@ fn refresh_returns_to_active_when_selected_working_session_becomes_inactive() {
     view.set_sessions(rows, false);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.selected_id(), Some(&session_key("42")));
-    assert_eq!(view.selected, view.visible_indices()[0]);
+    assert_eq!(view.selected_id(), Some(&session_key("44")));
 }
 
 #[test]
@@ -990,8 +990,7 @@ fn refresh_returns_to_active_when_selected_working_session_disappears() {
     view.set_sessions(rows, true);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.selected_id(), Some(&session_key("42")));
-    assert_eq!(view.selected, view.visible_indices()[0]);
+    assert_eq!(view.selected_id(), Some(&session_key("44")));
 }
 
 #[test]
@@ -1010,7 +1009,7 @@ fn refresh_keeps_selected_session_on_active_when_ready_becomes_working() {
 }
 
 #[test]
-fn refresh_selects_first_active_session_when_selection_becomes_inactive() {
+fn refresh_selects_longest_waiting_active_session_when_selection_becomes_inactive() {
     let mut view = fixture();
     let mut rows = view.rows.clone();
     rows.iter_mut()
@@ -1021,8 +1020,7 @@ fn refresh_selects_first_active_session_when_selection_becomes_inactive() {
     view.set_sessions(rows, false);
 
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    assert_eq!(view.selected_id(), Some(&session_key("44")));
-    assert_eq!(view.selected, view.visible_indices()[0]);
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
 }
 
 #[test]
@@ -1095,8 +1093,19 @@ fn leaving_inactive_reconciles_show_more_selection() {
 
     key(&mut view, KeyCode::Tab);
 
-    assert_eq!(view.selected, view.visible_indices()[0]);
-    assert_eq!(view.selected_id(), Some(&session_key("42")));
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
+}
+
+#[test]
+fn a_tab_without_its_chosen_task_selects_the_longest_waiting_task() {
+    let mut view = fixture();
+
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    assert_eq!(view.selected_id(), Some(&session_key("43")));
+    key(&mut view, KeyCode::BackTab);
+
+    assert_eq!(view.selected_id(), Some(&session_key("46")));
 }
 
 #[test]
@@ -4190,6 +4199,7 @@ mod subagent_rows {
         rows.push(other);
         view.set_sessions(rows, false);
         set_filter(&mut view, 2);
+        key(&mut view, KeyCode::Home);
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         let rendered = screen(&view, 120, 30);
         let (x, y) = rendered_cell(&rendered, "Parent task");

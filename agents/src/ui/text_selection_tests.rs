@@ -340,6 +340,7 @@ fn list_fixture(count: usize) -> View {
         })
         .collect();
     view.set_sessions(rows, false);
+    view.selected = view.visible_indices()[0];
     view
 }
 
