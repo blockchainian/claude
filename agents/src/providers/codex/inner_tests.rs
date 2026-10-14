@@ -497,3 +497,21 @@ fn prompt_image_pairing_does_not_borrow_another_prompts_paths() {
     write_image_records(&rollout, &[second[0].clone(), first[1].clone()]);
     assert!(tail(&rollout, 100).unwrap()[0].images.is_empty());
 }
+
+#[test]
+fn named_image_blocks_without_prompt_text_show_their_labels() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("rollout.jsonl");
+    let mut records = relocated_image_records("wrapped", &dir.path().join("missing.png"));
+    // Cut the actual image triple from the upstream message, retaining its
+    // recorded label and bytes; no synthetic image protocol is introduced.
+    records[0]["payload"]["content"]
+        .as_array_mut()
+        .unwrap()
+        .truncate(3);
+    write_image_records(&path, &records[..1]);
+    let entries = tail(&path, 100).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].body, "[Image #1]");
+    assert!(entries[0].images.is_empty());
+}

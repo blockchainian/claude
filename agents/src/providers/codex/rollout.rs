@@ -81,6 +81,20 @@ struct Prompt {
     attachments: Vec<(String, Option<String>)>,
 }
 
+impl Prompt {
+    fn body(&self) -> Option<String> {
+        self.text.clone().or_else(|| {
+            (!self.attachments.is_empty()).then(|| {
+                self.attachments
+                    .iter()
+                    .map(|(label, _)| label.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+        })
+    }
+}
+
 /// Image tags are separate blocks around an input_image, never prompt text.
 fn user_prompt(content: &Value) -> Prompt {
     let Some(blocks) = content.as_array() else {
@@ -596,7 +610,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
                 let Some(body) = (if kind == Kind::User {
                     let prompt = user_prompt(&payload["content"]);
                     images = prompt_images(&prompt, payload, completed.as_ref());
-                    prompt.text
+                    prompt.body()
                 } else {
                     content_text(&payload["content"])
                 }) else {
