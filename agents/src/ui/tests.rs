@@ -18,6 +18,14 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     }
 }
 
+fn click_mouse(view: &mut View, press: MouseEvent) -> Option<Action> {
+    assert!(view.handle_mouse(press).is_none(), "press must not act");
+    view.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        ..press
+    })
+}
+
 #[test]
 fn mouse_tab_rects_match_visible_tabs_after_render() {
     let view = fixture();
@@ -51,6 +59,12 @@ fn mouse_left_click_activates_tab_and_resets_scroll() {
         ))
         .is_none()
     );
+    assert_eq!(view.status_filter, 0);
+    assert_eq!(view.viewport.borrow().scroll, 7);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 0, 0))
+            .is_none()
+    );
     assert_eq!(view.status_filter, idx);
     assert_eq!(view.viewport.borrow().scroll, 0);
     assert_eq!(view.selected_row().unwrap().status, SessionStatus::Ready);
@@ -63,8 +77,11 @@ fn mouse_click_outside_tabs_changes_nothing() {
     view.viewport.borrow_mut().scroll = 7;
     let selected = view.selected;
     assert!(
-        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0))
-            .is_none()
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), 0, 0)
+        )
+        .is_none()
     );
     assert_eq!(view.status_filter, 0);
     assert_eq!(view.selected, selected);
@@ -95,11 +112,10 @@ fn mouse_tabs_ignore_overlays() {
         view.viewport.borrow_mut().scroll = 7;
         let selected = view.selected;
         assert!(
-            view.handle_mouse(mouse(
-                MouseEventKind::Down(MouseButton::Left),
-                rect.x,
-                rect.y
-            ))
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
+            )
             .is_none()
         );
         assert_eq!(view.status_filter, 0);
@@ -301,7 +317,10 @@ fn mouse_details_scroll_resets_with_selection_and_filter() {
     let id = view.selected_id().unwrap().to_owned();
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
     let (_, tab) = view.viewport.borrow().tabs[3];
-    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), tab.x, tab.y));
+    click_mouse(
+        &mut view,
+        mouse(MouseEventKind::Down(MouseButton::Left), tab.x, tab.y),
+    );
     assert_eq!(view.selected_id(), Some(&id));
     assert_eq!(
         view.viewport
@@ -408,10 +427,10 @@ fn mouse_list_click_selects_and_double_click_opens_second_task() {
     let id = view.rows[second].id.clone();
     let (x, y) = rendered_cell(&rendered, view.rows[second].display_title());
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-    assert!(view.handle_mouse(click).is_none());
+    assert!(click_mouse(&mut view, click).is_none());
     assert_eq!(view.selected, second);
     assert!(matches!(
-        view.handle_mouse(click),
+        click_mouse(&mut view, click),
         Some(Action::Open(opened)) if opened == id
     ));
 }
@@ -425,11 +444,11 @@ fn mouse_list_slow_or_split_clicks_only_select() {
         let (x, y) = rendered_cell(&rendered, view.rows[row].display_title());
         mouse(MouseEventKind::Down(MouseButton::Left), x, y)
     });
-    assert!(view.handle_mouse(first_click).is_none());
-    assert!(view.handle_mouse(second_click).is_none());
+    assert!(click_mouse(&mut view, first_click).is_none());
+    assert!(click_mouse(&mut view, second_click).is_none());
     assert_eq!(view.selected, second);
     view.last_click.as_mut().unwrap().1 -= DOUBLE_CLICK_INTERVAL;
-    assert!(view.handle_mouse(second_click).is_none());
+    assert!(click_mouse(&mut view, second_click).is_none());
     assert_eq!(view.selected, second);
 }
 
@@ -442,8 +461,11 @@ fn mouse_list_group_and_gap_clicks_do_nothing() {
     let (_, next_group) = rendered_cell(&rendered, "/tmp/project");
     for row in [y, next_group - 1] {
         assert!(
-            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, row))
-                .is_none()
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), x, row)
+            )
+            .is_none()
         );
         assert_eq!(view.selected, selected);
     }
@@ -498,14 +520,20 @@ fn mouse_list_show_more_click_activates_once() {
     let rendered = screen(&view, 120, 40);
     let (x, y) = rendered_cell(&rendered, "Show more");
     assert!(matches!(
-        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y)),
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), x, y)
+        ),
         Some(Action::ShowMore)
     ));
     assert_eq!(view.selected, usize::MAX);
     assert!(view.loading);
     assert!(
-        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y))
-            .is_none()
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), x, y)
+        )
+        .is_none()
     );
 }
 
@@ -541,10 +569,10 @@ fn mouse_list_click_uses_last_render_scroll_offset() {
     assert!(view.viewport.borrow().scroll > 0);
     view.viewport.borrow_mut().scroll = 0;
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-    assert!(view.handle_mouse(click).is_none());
+    assert!(click_mouse(&mut view, click).is_none());
     assert_eq!(view.selected, target);
     assert!(
-        matches!(view.handle_mouse(click), Some(Action::Open(id)) if id == view.rows[target].id)
+        matches!(click_mouse(&mut view, click), Some(Action::Open(id)) if id == view.rows[target].id)
     );
 }
 
@@ -4068,8 +4096,11 @@ mod subagent_rows {
         let rendered = screen(&view, 120, 30);
         let (x, y) = rendered_cell(&rendered, "Parent task");
         assert!(
-            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y))
-                .is_none()
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), x, y)
+            )
+            .is_none()
         );
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         key(&mut view, KeyCode::Down);
@@ -4246,7 +4277,10 @@ mod subagent_rows {
         assert!(rendered.contains("Model: child-model"));
         assert!(!rendered.contains("Needs attention"));
         let (x, y) = rendered_cell(&rendered, "Review results");
-        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+        );
         assert_eq!(view.selected_id(), Some(&session_key("agent-newer")));
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, x, y));
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
@@ -4401,9 +4435,9 @@ mod subagent_actions {
         subagent_rows::screen(&view, 120, 30);
         let (x, y) = view.marker_pos().unwrap();
         let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-        assert_eq!(view.handle_mouse(click), None);
+        assert_eq!(click_mouse(&mut view, click), None);
         assert_eq!(
-            view.handle_mouse(click),
+            click_mouse(&mut view, click),
             Some(Action::Unsupported("Resume"))
         );
     }
@@ -4414,7 +4448,10 @@ mod subagent_actions {
         let before = subagent_rows::screen(&view, 120, 30);
         let (x, y) = view.marker_pos().unwrap();
         assert_eq!(
-            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y)),
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), x, y)
+            ),
             None
         );
         assert_unchanged(&view, &before);
@@ -4483,9 +4520,9 @@ fn unsupported_provider_mouse_activation_emits_notice() {
     let second = view.selectable_indices()[1];
     let (x, y) = rendered_cell(&rendered, view.rows[second].display_title());
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-    view.handle_mouse(click);
+    click_mouse(&mut view, click);
     assert_eq!(
-        view.handle_mouse(click),
+        click_mouse(&mut view, click),
         Some(Action::Unsupported("Resume"))
     );
 }
@@ -4675,7 +4712,15 @@ fn attention_title_style_follows_terminal_background_and_color_support() {
 
 fn click_log_text(view: &mut View, screen: &str, text: &str, button: MouseButton) {
     let (x, y) = rendered_cell(screen, text);
-    view.handle_mouse(mouse(MouseEventKind::Down(button), x, y));
+    if button == MouseButton::Left {
+        click_mouse(view, mouse(MouseEventKind::Down(button), x, y));
+    } else {
+        assert!(
+            view.handle_mouse(mouse(MouseEventKind::Down(button), x, y))
+                .is_none()
+        );
+        view.handle_mouse(mouse(MouseEventKind::Up(button), x, y));
+    }
 }
 
 #[test]
@@ -4756,8 +4801,8 @@ fn task_log_open_event_closes_when_selection_changes() {
 fn double_click_text(view: &mut View, screen: &str, text: &str) -> Option<Action> {
     let (x, y) = rendered_cell(screen, text);
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-    assert!(view.handle_mouse(click).is_none());
-    view.handle_mouse(click)
+    assert!(click_mouse(view, click).is_none());
+    click_mouse(view, click)
 }
 
 #[test]
@@ -4811,7 +4856,7 @@ fn clicks_on_two_bodies_are_not_a_double_click() {
     for text in ["A long prompt", "First reply row"] {
         let (x, y) = rendered_cell(&screen, text);
         let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-        assert!(view.handle_mouse(click).is_none());
+        assert!(click_mouse(&mut view, click).is_none());
     }
 }
 

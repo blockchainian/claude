@@ -572,19 +572,20 @@ fn task_list_click_and_double_click_keep_actions_without_copying() {
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
     );
-    assert_eq!(view.selected_id(), Some(&id));
+    assert_ne!(view.selected_id(), Some(&id));
     dashboard(&view, area);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
             .is_none()
     );
-    assert_eq!(
-        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1)),
-        Some(Action::Open(id))
-    );
+    assert_eq!(view.selected_id(), Some(&id));
     assert!(
-        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
+    );
+    assert_eq!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1)),
+        Some(Action::Open(id))
     );
 }
 
@@ -599,6 +600,7 @@ fn log_list_click_opens_cut_row_and_stationary_double_click_copies_nothing() {
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
     );
+    assert!(view.log_open.is_none());
     dashboard(&view, area);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
@@ -615,6 +617,11 @@ fn log_list_click_opens_cut_row_and_stationary_double_click_copies_nothing() {
     );
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), at.0, at.1))
+            .is_none()
+    );
+    assert!(view.log_open.is_some());
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), at.0, at.1))
             .is_none()
     );
     assert!(view.log_open.is_none());
@@ -765,4 +772,194 @@ fn task_list_reverse_drag_copies_rendered_rows() {
     )));
     assert_eq!(text, expected);
     assert!(!text.contains("Project"));
+}
+
+#[test]
+fn dragging_across_other_task_rows_preserves_selected_task() {
+    let mut view = list_fixture(3);
+    let area = Rect::new(0, 0, 160, 30);
+    let initial = dashboard(&view, area);
+    let selected = view.selected_id().unwrap().clone();
+    let list = view.viewport.borrow().list_rows;
+    let start = position_in(&initial, "01 对，", list);
+    let end = position_in(&initial, "02 对，", list);
+    let expected = (start.1..=end.1)
+        .map(|y| drawn_cells(&initial, y, list.x, list.right()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            list.x,
+            start.1
+        ))
+        .is_none()
+    );
+    assert_eq!(view.selected_id(), Some(&selected));
+    dashboard(&view, area);
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        list.right(),
+        end.1,
+    ));
+    dashboard(&view, area);
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            list.right(),
+            end.1
+        ))),
+        expected
+    );
+    assert_eq!(view.selected_id(), Some(&selected));
+    assert_eq!(dashboard(&view, area), initial);
+}
+
+#[test]
+fn dragging_across_cut_log_rows_never_opens_an_event() {
+    let mut view = path_log_fixture();
+    view.log.push(view.log[0].clone());
+    let area = Rect::new(0, 0, 100, 30);
+    let initial = dashboard(&view, area);
+    let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+    let y = log.y + 1;
+    let expected = (y..=y + 1)
+        .map(|row| drawn_cells(&initial, row, log.x, log.right()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), log.x, y));
+    assert!(view.log_open.is_none());
+    dashboard(&view, area);
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        log.right(),
+        y + 1,
+    ));
+    assert!(view.log_open.is_none());
+    dashboard(&view, area);
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            log.right(),
+            y + 1
+        ))),
+        expected
+    );
+    assert!(view.log_open.is_none());
+    assert_eq!(dashboard(&view, area), initial);
+}
+
+#[test]
+fn second_task_press_drag_is_not_a_double_click() {
+    let mut view = list_fixture(3);
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Claude,
+        Capabilities {
+            resume: true,
+            ..Default::default()
+        },
+    )]));
+    let area = Rect::new(0, 0, 160, 30);
+    let drawn = dashboard(&view, area);
+    let list = view.viewport.borrow().list_rows;
+    let at = position_in(&drawn, "01 对，", list);
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1));
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+    let selected = view.selected;
+    let drawn = dashboard(&view, area);
+    let expected = drawn_cells(&drawn, at.1, at.0, list.right());
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+    assert!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            list.right(),
+            at.1
+        ))
+        .is_none()
+    );
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            list.right(),
+            at.1
+        ))),
+        expected
+    );
+    assert_eq!(view.selected, selected);
+    assert!(view.last_click.is_none());
+}
+
+#[test]
+fn right_drag_does_not_close_open_log() {
+    let mut view = path_log_fixture();
+    view.log_open = Some(view.log[0].clone());
+    let event = view.log_open.clone();
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20));
+    assert_eq!(view.log_open, event);
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Right), 3, 20));
+    view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 3, 20));
+    assert_eq!(view.log_open, event);
+}
+
+#[test]
+fn right_click_closes_log_only_on_release() {
+    let mut view = path_log_fixture();
+    view.log_open = Some(view.log[0].clone());
+    let event = view.log_open.clone();
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20))
+            .is_none()
+    );
+    assert_eq!(view.log_open, event);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 2, 20))
+            .is_none()
+    );
+    assert!(view.log_open.is_none());
+}
+
+#[test]
+fn task_click_uses_press_position_and_completed_click_time() {
+    let mut view = list_fixture(3);
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Claude,
+        Capabilities {
+            resume: true,
+            ..Default::default()
+        },
+    )]));
+    let area = Rect::new(0, 0, 160, 30);
+    let drawn = dashboard(&view, area);
+    let list = view.viewport.borrow().list_rows;
+    let at = position_in(&drawn, "01 对，", list);
+    let other = position_in(&drawn, "02 对，", list);
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1));
+    assert!(view.last_click.is_none());
+    assert!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            other.0,
+            other.1
+        ))
+        .is_none()
+    );
+    let id = view.selected_id().unwrap().clone();
+    assert!(view.selected_row().unwrap().title.starts_with("01 "));
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1));
+    view.last_click.as_mut().unwrap().1 -= DOUBLE_CLICK_INTERVAL;
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
+            .is_none()
+    );
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1));
+    assert_eq!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1)),
+        Some(Action::Open(id))
+    );
 }

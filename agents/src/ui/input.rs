@@ -10,13 +10,55 @@ impl View {
         self.reconcile_selection();
     }
 
-    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+    pub fn handle_mouse(&mut self, mut mouse: MouseEvent) -> Option<Action> {
         if self.confirm_dialog.is_some()
             || self.help
             || self.rename_target.is_some()
             || self.searching
         {
+            self.mouse_press = None;
+            self.text_selection.borrow_mut().take();
             return None;
+        }
+        match mouse.kind {
+            MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) => {
+                self.mouse_press = Some((button, mouse.column, mouse.row, false));
+                if button == MouseButton::Left {
+                    self.begin_text_selection(mouse.column, mouse.row);
+                }
+                return None;
+            }
+            MouseEventKind::Drag(button @ (MouseButton::Left | MouseButton::Right)) => {
+                if let Some((held, _, _, dragged)) = self.mouse_press.as_mut()
+                    && *held == button
+                {
+                    *dragged = true;
+                    if button == MouseButton::Left {
+                        self.extend_text_selection(mouse.column, mouse.row);
+                        self.last_click = None;
+                        self.last_copy_click = None;
+                    }
+                }
+                return None;
+            }
+            MouseEventKind::Up(button @ (MouseButton::Left | MouseButton::Right)) => {
+                let (held, x, y, dragged) = self.mouse_press?;
+                if held != button {
+                    return None;
+                }
+                self.mouse_press = None;
+                let selection = if button == MouseButton::Left {
+                    self.finish_text_selection(mouse.column, mouse.row)
+                } else {
+                    None
+                };
+                if dragged {
+                    return selection;
+                }
+                mouse.column = x;
+                mouse.row = y;
+            }
+            _ => {}
         }
         let position = (mouse.column, mouse.row).into();
         let (tab, over_tabs, over_list, over_details, over_log, entry, log_row, copy_text) = {
@@ -65,14 +107,7 @@ impl View {
             )
         };
         match mouse.kind {
-            MouseEventKind::Drag(MouseButton::Left) => {
-                self.extend_text_selection(mouse.column, mouse.row);
-            }
             MouseEventKind::Up(MouseButton::Left) => {
-                return self.finish_text_selection(mouse.column, mouse.row);
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                self.begin_text_selection(mouse.column, mouse.row);
                 if let Some(idx) = tab {
                     self.set_filter(idx);
                 } else if let Some(entry) = entry {
@@ -90,7 +125,6 @@ impl View {
                         last == task && now.duration_since(at) < DOUBLE_CLICK_INTERVAL
                     });
                     self.set_selected(task);
-                    self.begin_text_selection(mouse.column, mouse.row);
                     if double {
                         return self.activate();
                     }
@@ -111,7 +145,7 @@ impl View {
                     self.last_copy_click = Some((text, now));
                 }
             }
-            MouseEventKind::Down(MouseButton::Right) => self.log_open = None,
+            MouseEventKind::Up(MouseButton::Right) => self.log_open = None,
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let forward = mouse.kind == MouseEventKind::ScrollDown;
                 if over_tabs {

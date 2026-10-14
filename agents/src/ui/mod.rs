@@ -164,6 +164,8 @@ pub struct View {
     viewport: RefCell<Viewport>,
     /// Task row and time of the last left click in the list.
     last_click: Option<(usize, Instant)>,
+    /// Button, origin and drag state of the held mouse press.
+    mouse_press: Option<(MouseButton, u16, u16, bool)>,
     /// Text under the last left click on a copyable body, and when it happened.
     last_copy_click: Option<(String, Instant)>,
     /// The confirmation of the last copy, shown at the footer's right end until it expires.
@@ -233,6 +235,7 @@ impl View {
             notice: None,
             viewport: RefCell::new(Viewport::default()),
             last_click: None,
+            mouse_press: None,
             last_copy_click: None,
             copied: None,
             text_selection: RefCell::new(None),
