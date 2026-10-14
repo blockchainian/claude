@@ -6300,3 +6300,63 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
         );
     }
 }
+
+#[test]
+fn wrapped_messages_keep_list_text_and_open_paragraphs() {
+    let file = crate::providers::claude::log::tests::wrapped_fixture();
+    let events = crate::providers::claude::log::tail(file.path(), 20).unwrap();
+    let (mut view, now) = log_fixture();
+    for event in &events[2..] {
+        let mut collapsed = event.clone();
+        collapsed.body = event.body.split_whitespace().collect::<Vec<_>>().join(" ");
+        for width in [25, 60, 200, 2000] {
+            let row = super::log::body_line(event, width, &view.rows[0].cwd);
+            assert!(!row.to_string().contains('\n'));
+            assert_eq!(
+                row.to_string(),
+                super::log::body_line(&collapsed, width, &view.rows[0].cwd).to_string(),
+                "{:?}, width {width}",
+                event.kind
+            );
+        }
+    }
+    for event in &events[6..] {
+        view.log = vec![event.clone()];
+        view.set_log_open(Some(event.clone()));
+        let area = Rect::new(0, 0, 2000, 25);
+        let mut buffer = Buffer::empty(area);
+        view.render_log(area, &mut buffer, now);
+        let lines: Vec<String> = buffer
+            .content
+            .chunks(2000)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .trim()
+                    .to_owned()
+            })
+            .collect();
+        let state = lines
+            .iter()
+            .position(|line| line.starts_with("State as I understand it:"))
+            .expect("separate second paragraph");
+        let traps = lines.iter().position(|line| *line == "Traps:").unwrap();
+        let first = lines
+            .iter()
+            .position(|line| line.starts_with("1. Version bump"))
+            .unwrap();
+        let second = lines
+            .iter()
+            .position(|line| line.starts_with("2. Your todo"))
+            .unwrap();
+        let last = lines
+            .iter()
+            .position(|line| *line == "No reply needed.")
+            .unwrap();
+        assert!(lines[state - 1].is_empty());
+        assert!(lines[traps - 1].is_empty());
+        assert!(state < traps && traps < first && first < second && second < last);
+        assert!(lines[last - 1].is_empty());
+    }
+}

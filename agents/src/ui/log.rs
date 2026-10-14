@@ -591,15 +591,22 @@ struct FittedBody {
 
 fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> FittedBody {
     let listed;
-    let event = if event.sender.is_some() {
+    let event = if event.sender.is_some() || event.kind == Kind::Agent {
+        // Peer rows keep their one-line Markdown interpretation; open bodies keep blocks.
+        let body = if event.kind == Kind::Agent {
+            collapse_whitespace(event.body.trim())
+        } else {
+            event.body.clone()
+        };
         listed = Event {
-            body: crate::log::participant_text(event.sender.as_deref(), &event.body),
+            body: crate::log::participant_text(event.sender.as_deref(), &body),
             paths: event
                 .paths
                 .iter()
                 .map(|range| {
-                    let offset =
-                        crate::log::participant_text(event.sender.as_deref(), "").len() + 1;
+                    let offset = event.sender.as_deref().map_or(0, |sender| {
+                        crate::log::participant_text(Some(sender), "").len() + 1
+                    });
                     range.start + offset..range.end + offset
                 })
                 .collect(),
