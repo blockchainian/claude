@@ -4994,6 +4994,19 @@ fn task_log_click_on_a_shortened_tool_path_opens_the_full_path() {
 }
 
 #[test]
+fn task_log_click_on_a_path_in_free_tool_text_opens_the_full_path() {
+    let (mut view, now) = log_fixture();
+    let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/plan.md";
+    view.log[7].body = format!("start Implement workstream A of {path} (Claude provider)");
+    let list = log_screen(&view, 100, 25, now);
+    assert!(!list.contains(path), "{list}");
+    assert_eq!(
+        click_text(&mut view, &list, "plan.md"),
+        Some(Action::OpenPath(path.into()))
+    );
+}
+
+#[test]
 fn task_log_click_on_an_image_placeholder_opens_the_image() {
     let (mut view, now) = log_fixture();
     view.log[0].body = "Please look at [Image #1] and [Image #2]".into();

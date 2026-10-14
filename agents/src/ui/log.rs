@@ -136,7 +136,7 @@ impl View {
         let links = if is_prose(&event.kind) {
             super::links::text_links(&body, cwd, &event.images)
         } else {
-            super::links::path_links(&body, &event.paths, cwd)
+            super::links::path_links(&body, &tool_paths(event), cwd)
         };
         let mut viewport = self.viewport.borrow_mut();
         viewport.log_open_max = lines.len().saturating_sub(usize::from(body_area.height));
@@ -492,7 +492,7 @@ fn display_paths(event: &Event) -> (String, Vec<std::ops::Range<usize>>) {
     let mut text = String::new();
     let mut ranges = Vec::new();
     let mut end = 0;
-    for range in &event.paths {
+    for range in &tool_paths(event) {
         text.push_str(&collapse_whitespace(&event.body[end..range.start]));
         let path = super::formatting::format_directory_display(std::path::Path::new(
             &event.body[range.clone()],
@@ -507,6 +507,28 @@ fn display_paths(event: &Event) -> (String, Vec<std::ops::Range<usize>>) {
         *range = range.start - trimmed..range.end - trimmed;
     }
     (text.trim().to_owned(), ranges)
+}
+
+/// The paths in a tool event's body: the ones its provider marked, and any
+/// other absolute or home path its free text mentions.
+fn tool_paths(event: &Event) -> Vec<std::ops::Range<usize>> {
+    let mut paths = event.paths.clone();
+    let mut start = 0;
+    for part in event.body.split_inclusive(char::is_whitespace) {
+        let word = part.trim_end_matches(char::is_whitespace);
+        if let Some(range) = super::line_truncation::wrapped_path(word) {
+            let range = start + range.start..start + range.end;
+            if !paths
+                .iter()
+                .any(|known| known.start < range.end && range.start < known.end)
+            {
+                paths.push(range);
+            }
+        }
+        start += part.len();
+    }
+    paths.sort_by_key(|range| range.start);
+    paths
 }
 
 fn collapse_whitespace(text: &str) -> String {
