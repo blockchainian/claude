@@ -224,6 +224,11 @@ impl View {
         } else {
             line(self.center_footer_hints(), inset(layout.footer), buf);
         }
+        if let Some((label, _)) = self.copied {
+            Line::from(label.dim())
+                .right_aligned()
+                .render(inset(layout.footer), buf);
+        }
         if self.help {
             let body = inset(row(
                 area,
@@ -381,12 +386,15 @@ impl View {
         };
         let mut bodies = Vec::new();
         // The full text a double click copies from each body, parallel to `bodies`.
-        let mut copies: Vec<Option<&str>> = Vec::new();
+        let mut copies: Vec<Option<(&str, &'static str)>> = Vec::new();
         let prompt_start = items.len();
         let prompt_body = wrap_details(prompt_text, width, true);
         items.extend(prompt_body.into_iter().map(Item::from));
         bodies.push(prompt_start..items.len());
-        copies.push(Some(session.prompt.as_str()).filter(|prompt| !prompt.trim().is_empty()));
+        copies.push(
+            Some((session.prompt.as_str(), "Copied prompt"))
+                .filter(|(prompt, _)| !prompt.trim().is_empty()),
+        );
         items.extend(session.queued.iter().map(|queued| {
             let first = wrap_details(queued, width, true)
                 .into_iter()
@@ -444,7 +452,7 @@ impl View {
                     .map(Item::from),
             );
             bodies.push(start..items.len());
-            copies.push(Some(message.as_str()));
+            copies.push(Some((message.as_str(), "Copied last message")));
         }
 
         // The agent appends an exit marker to the output file when the
@@ -608,8 +616,8 @@ impl View {
                 let start = rows.start.max(scroll);
                 let end = rows.end.min(scroll + available);
                 let screen_row = |row: usize| content_top + (row - scroll) as u16;
-                let text = text.filter(|_| start < end)?;
-                Some((screen_row(start)..screen_row(end), text.to_owned()))
+                let (text, label) = text.filter(|_| start < end)?;
+                Some((screen_row(start)..screen_row(end), text.to_owned(), label))
             })
             .collect();
         let total = items.iter().map(Item::height).sum::<usize>();

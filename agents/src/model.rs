@@ -154,8 +154,9 @@ pub enum Action {
     Back,
     /// Ctrl-c.
     Quit,
-    /// Double click on an open log event: copy its text to the clipboard.
-    Copy(String),
+    /// Double click on an open log event or a details body: copy its text to the
+    /// clipboard and confirm with `label`.
+    Copy { text: String, label: &'static str },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

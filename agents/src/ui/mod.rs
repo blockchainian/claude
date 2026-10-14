@@ -55,6 +55,9 @@ const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     ("Inactive", &[SessionStatus::Inactive]),
 ];
 
+/// How long a copy confirmation stays in the footer.
+const COPIED_LIFETIME: Duration = Duration::from_secs(1);
+
 /// Longest gap between two clicks on one task that still opens it.
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -86,7 +89,7 @@ struct Viewport {
     details: Rect,
     details_scroll: DetailsScroll,
     /// Screen rows of each copyable details body drawn by the last render, with its full text.
-    details_copy: Vec<(std::ops::Range<u16>, String)>,
+    details_copy: Vec<(std::ops::Range<u16>, String, &'static str)>,
     /// Screen cell of the selection marker drawn by the last render.
     marker: Option<(u16, u16)>,
 }
@@ -138,6 +141,8 @@ pub struct View {
     last_click: Option<(usize, Instant)>,
     /// Text under the last left click on a copyable body, and when it happened.
     last_copy_click: Option<(String, Instant)>,
+    /// The confirmation of the last copy, shown at the footer's right end until it expires.
+    copied: Option<(&'static str, Instant)>,
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
 }
@@ -203,6 +208,7 @@ impl View {
             viewport: RefCell::new(Viewport::default()),
             last_click: None,
             last_copy_click: None,
+            copied: None,
             title_slots: RefCell::new(HashMap::new()),
         }
     }
@@ -286,6 +292,21 @@ impl View {
     }
     pub fn set_notice(&mut self, notice: Option<String>) {
         self.notice = notice;
+    }
+
+    /// Shows `label` at the footer's right end until `COPIED_LIFETIME` after `now`.
+    pub fn show_copied(&mut self, label: &'static str, now: Instant) {
+        self.copied = Some((label, now + COPIED_LIFETIME));
+    }
+
+    /// Clears an expired copy confirmation, and returns how long the shown one has left.
+    pub fn expire_copied(&mut self, now: Instant) -> Option<Duration> {
+        let (_, expires_at) = self.copied?;
+        if now >= expires_at {
+            self.copied = None;
+            return None;
+        }
+        Some(expires_at - now)
     }
     /// Where the `›` of the selected row was drawn last, so the terminal cursor can rest on it.
     pub fn marker_pos(&self) -> Option<(u16, u16)> {

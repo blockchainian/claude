@@ -4715,7 +4715,10 @@ fn double_click_on_open_log_body_copies_the_whole_event() {
     let open = log_screen(&view, 100, 25, now);
     assert_eq!(
         double_click_text(&mut view, &open, "A second paragraph"),
-        Some(Action::Copy(body.into()))
+        Some(Action::Copy {
+            text: body.into(),
+            label: "Copied"
+        })
     );
     assert_eq!(double_click_text(&mut view, &open, "Assistant"), None);
 }
@@ -4730,11 +4733,17 @@ fn double_click_on_details_prompt_or_last_message_copies_it() {
     let screen = log_screen(&view, 120, 40, now);
     assert_eq!(
         double_click_text(&mut view, &screen, "First reply row"),
-        Some(Action::Copy(message.into()))
+        Some(Action::Copy {
+            text: message.into(),
+            label: "Copied last message"
+        })
     );
     assert_eq!(
         double_click_text(&mut view, &screen, "A long prompt"),
-        Some(Action::Copy(prompt))
+        Some(Action::Copy {
+            text: prompt,
+            label: "Copied prompt"
+        })
     );
     assert_eq!(double_click_text(&mut view, &screen, "Last message"), None);
 }
@@ -4749,4 +4758,34 @@ fn clicks_on_two_bodies_are_not_a_double_click() {
         let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
         assert!(view.handle_mouse(click).is_none());
     }
+}
+
+#[test]
+fn copy_confirmation_sits_at_footer_right_for_one_second() {
+    let (mut view, now) = log_fixture();
+    let start = Instant::now();
+    let hints = log_screen(&view, 100, 25, now)
+        .lines()
+        .last()
+        .unwrap()
+        .to_owned();
+    view.show_copied("Copied prompt", start);
+    let footer = log_screen(&view, 100, 25, now)
+        .lines()
+        .last()
+        .unwrap()
+        .to_owned();
+    assert_eq!(footer, format!("{hints:<85}Copied prompt"));
+    assert_eq!(
+        view.expire_copied(start + std::time::Duration::from_millis(400)),
+        Some(std::time::Duration::from_millis(600))
+    );
+    assert_eq!(
+        view.expire_copied(start + std::time::Duration::from_secs(1)),
+        None
+    );
+    assert_eq!(
+        log_screen(&view, 100, 25, now).lines().last().unwrap(),
+        hints
+    );
 }

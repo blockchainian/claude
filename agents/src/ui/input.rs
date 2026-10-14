@@ -41,10 +41,12 @@ impl View {
                 viewport
                     .details_copy
                     .iter()
-                    .find(|(rows, _)| rows.contains(&mouse.row))
-                    .map(|(_, text)| text.clone())
+                    .find(|(rows, _, _)| rows.contains(&mouse.row))
+                    .map(|(_, text, label)| (text.clone(), *label))
             } else if viewport.log.contains(position) && mouse.row >= viewport.log.y + 3 {
-                self.log_open.as_ref().map(super::log::open_text)
+                self.log_open
+                    .as_ref()
+                    .map(|event| (super::log::open_text(event), "Copied"))
             } else {
                 None
             };
@@ -87,13 +89,13 @@ impl View {
                 {
                     self.log_open = self.log.get(index).cloned();
                     self.viewport.borrow_mut().log_open_scroll = 0;
-                } else if let Some(text) = copy_text {
+                } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();
                     let double = self.last_copy_click.take().is_some_and(|(last, at)| {
                         last == text && now.duration_since(at) < DOUBLE_CLICK_INTERVAL
                     });
                     if double {
-                        return Some(Action::Copy(text));
+                        return Some(Action::Copy { text, label });
                     }
                     self.last_copy_click = Some((text, now));
                 }
