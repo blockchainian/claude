@@ -224,8 +224,8 @@ impl View {
         } else {
             line(self.center_footer_hints(), inset(layout.footer), buf);
         }
-        if let Some((label, _)) = self.copied {
-            Line::from(label.dim())
+        if let Some((label, _)) = &self.copied {
+            Line::from(label.clone().dim())
                 .right_aligned()
                 .render(inset(layout.footer), buf);
         }

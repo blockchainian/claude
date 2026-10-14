@@ -273,6 +273,11 @@ pub(super) fn open_text(event: &Event) -> String {
     }
 }
 
+/// The footer confirmation after copying an open log event, such as "Copied user message".
+pub(super) fn copied_label(event: &Event) -> String {
+    format!("Copied {} message", kind_label(&event.kind).to_lowercase())
+}
+
 fn kind_label(kind: &Kind) -> &'static str {
     match kind {
         Kind::User => "User",

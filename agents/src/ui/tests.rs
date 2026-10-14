@@ -4717,7 +4717,7 @@ fn double_click_on_open_log_body_copies_the_whole_event() {
         double_click_text(&mut view, &open, "A second paragraph"),
         Some(Action::Copy {
             text: body.into(),
-            label: "Copied"
+            label: "Copied assistant message".into()
         })
     );
     assert_eq!(double_click_text(&mut view, &open, "Assistant"), None);
@@ -4735,14 +4735,14 @@ fn double_click_on_details_prompt_or_last_message_copies_it() {
         double_click_text(&mut view, &screen, "First reply row"),
         Some(Action::Copy {
             text: message.into(),
-            label: "Copied last message"
+            label: "Copied last message".into()
         })
     );
     assert_eq!(
         double_click_text(&mut view, &screen, "A long prompt"),
         Some(Action::Copy {
             text: prompt,
-            label: "Copied prompt"
+            label: "Copied prompt".into()
         })
     );
     assert_eq!(double_click_text(&mut view, &screen, "Last message"), None);
@@ -4769,7 +4769,7 @@ fn copy_confirmation_sits_at_footer_right_for_one_second() {
         .last()
         .unwrap()
         .to_owned();
-    view.show_copied("Copied prompt", start);
+    view.show_copied("Copied prompt".into(), start);
     let footer = log_screen(&view, 100, 25, now)
         .lines()
         .last()

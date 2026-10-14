@@ -142,7 +142,7 @@ pub struct View {
     /// Text under the last left click on a copyable body, and when it happened.
     last_copy_click: Option<(String, Instant)>,
     /// The confirmation of the last copy, shown at the footer's right end until it expires.
-    copied: Option<(&'static str, Instant)>,
+    copied: Option<(String, Instant)>,
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
 }
@@ -295,13 +295,14 @@ impl View {
     }
 
     /// Shows `label` at the footer's right end until `COPIED_LIFETIME` after `now`.
-    pub fn show_copied(&mut self, label: &'static str, now: Instant) {
+    pub fn show_copied(&mut self, label: String, now: Instant) {
         self.copied = Some((label, now + COPIED_LIFETIME));
     }
 
     /// Clears an expired copy confirmation, and returns how long the shown one has left.
     pub fn expire_copied(&mut self, now: Instant) -> Option<Duration> {
-        let (_, expires_at) = self.copied?;
+        let (_, expires_at) = self.copied.as_ref()?;
+        let expires_at = *expires_at;
         if now >= expires_at {
             self.copied = None;
             return None;

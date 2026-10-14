@@ -42,11 +42,14 @@ impl View {
                     .details_copy
                     .iter()
                     .find(|(rows, _, _)| rows.contains(&mouse.row))
-                    .map(|(_, text, label)| (text.clone(), *label))
+                    .map(|(_, text, label)| (text.clone(), (*label).to_owned()))
             } else if viewport.log.contains(position) && mouse.row >= viewport.log.y + 3 {
-                self.log_open
-                    .as_ref()
-                    .map(|event| (super::log::open_text(event), "Copied"))
+                self.log_open.as_ref().map(|event| {
+                    (
+                        super::log::open_text(event),
+                        super::log::copied_label(event),
+                    )
+                })
             } else {
                 None
             };
