@@ -1,15 +1,15 @@
   Agent command center  Group: Model  g
    Active 4   Ready 4   Working 0   Needs you 0   Inactive 0                       tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                         Status         Updated  │ Ready · Legacy task
-  Unknown  1                                                │
-  › ○ Legacy task                   Ready           1s ago  │ Prompt
-                                                            │ Legacy task
-  model-a  2                                                │
-    ○ Recent task                   Ready           2s ago  │ Project
-    ○ Older task                    Ready           4s ago  │ /tmp/project
+      Tasks                         Status         Updated  │ Prompt
+  Unknown  1                                                │ Legacy task
+  › ○ Legacy task                   Ready           1s ago  │
+                                                            │ Project
+  model-a  2                                                │ /tmp/project
+    ○ Recent task                   Ready           2s ago  │
+    ○ Older task                    Ready           4s ago  │ Model: Unknown
                                                             │
-  model-b  1                                                │ Model: Unknown
+  model-b  1                                                │
     ○ Other model                   Ready           3s ago  │
                                                             │
                                                             │
@@ -20,5 +20,5 @@
                                                             │
                                                             │
                                                             │
-                                                            │
+                                                            │ ─────── Ready · Legacy task ────────
   ? help  esc back  ↑/↓ move  enter open  n new

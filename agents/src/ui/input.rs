@@ -105,17 +105,22 @@ impl View {
             let log_row = viewport
                 .log
                 .contains(position)
-                .then(|| usize::from(mouse.row - viewport.log.y).checked_sub(1))
+                .then(|| {
+                    usize::from(mouse.row - viewport.log.y)
+                        .checked_sub(usize::from(super::log::LOG_TOP))
+                })
                 .flatten()
                 .and_then(|row| viewport.log_rows.get(row).copied());
-            // The open log event's body starts below the rule, its header and a blank row.
+            // The open log event's body starts below the top rows, its header and a blank row.
             let copy_text = if viewport.details.contains(position) {
                 viewport
                     .details_copy
                     .iter()
                     .find(|(rows, _, _)| rows.contains(&mouse.row))
                     .map(|(_, text, label)| (text.clone(), (*label).to_owned()))
-            } else if viewport.log.contains(position) && mouse.row >= viewport.log.y + 3 {
+            } else if viewport.log.contains(position)
+                && mouse.row >= viewport.log.y + super::log::LOG_TOP + 2
+            {
                 self.log_open.as_ref().map(|event| {
                     (
                         super::log::open_text(event),

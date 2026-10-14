@@ -8,6 +8,9 @@ const CLOCK_FORMAT: &str = "%H:%M:%S";
 const CLOCK_WIDTH: usize = 8;
 const KIND_WIDTH: usize = 9;
 
+/// Rows above the first event: the top rule and a blank row.
+pub(super) const LOG_TOP: u16 = 2;
+
 pub(super) fn search_input_rect(area: Rect) -> Rect {
     super::render::row(area, area.height.saturating_sub(1), 1)
 }
@@ -54,7 +57,7 @@ impl View {
         self.render_log_jump(area, scroll, buf);
         let matching: Vec<_> = self.shown_log_events().collect();
         let end = matching.len().saturating_sub(scroll);
-        let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
+        let start = end.saturating_sub(usize::from(area.height.saturating_sub(LOG_TOP + 1)));
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
         for (index, &(log_index, event)) in matching[start..end].iter().rev().enumerate() {
@@ -64,7 +67,7 @@ impl View {
                 event,
                 &time,
                 last,
-                super::render::row(area, index as u16 + 1, 1),
+                super::render::row(area, index as u16 + LOG_TOP, 1),
                 buf,
                 Some(&self.log_search),
                 &session.cwd,
@@ -72,7 +75,7 @@ impl View {
             rows.push((log_index, cut));
             drawn_links.extend(links);
         }
-        let text_area = super::render::row(area, 1, rows.len() as u16);
+        let text_area = super::render::row(area, LOG_TOP, rows.len() as u16);
         {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_rows = rows;
@@ -128,8 +131,13 @@ impl View {
             };
             header.push(Span::styled(title, label_style));
         }
-        super::render::line(Line::from(header), super::render::row(area, 1, 1), buf);
-        let mut body_area = super::render::row(area, 3, area.height.saturating_sub(3));
+        super::render::line(
+            Line::from(header),
+            super::render::row(area, LOG_TOP, 1),
+            buf,
+        );
+        let mut body_area =
+            super::render::row(area, LOG_TOP + 2, area.height.saturating_sub(LOG_TOP + 2));
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
         let mut layout = match viewport.log_open_layout.take() {

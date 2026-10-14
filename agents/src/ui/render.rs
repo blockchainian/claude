@@ -121,7 +121,12 @@ impl View {
         }
     }
     pub(crate) fn log_event_count(&self, area: Rect) -> usize {
-        usize::from(self.center_layout(area).log.height.saturating_sub(2))
+        usize::from(
+            self.center_layout(area)
+                .log
+                .height
+                .saturating_sub(super::log::LOG_TOP + 1),
+        )
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
@@ -261,11 +266,25 @@ impl View {
             Clear.render(bottom, buf);
             line(notice.clone().dim(), bottom, buf);
         }
-        if !layout.details.is_empty() {
-            self.render_details(layout.details, buf, now);
+        // The details title sits on the task log's top rule, or on a rule of its own
+        // when the log is hidden.
+        let mut details = layout.details;
+        let details_rule = if details.is_empty() {
+            None
+        } else if layout.log.is_empty() {
+            details.height = details.height.saturating_sub(1);
+            Some(row(layout.details, details.height, 1))
+        } else {
+            Some(Rect::new(details.x, layout.log.y, details.width, 1))
+        };
+        if !details.is_empty() {
+            self.render_details(details, buf, now);
         }
         self.viewport.borrow_mut().log = layout.log;
         self.render_log(inset(layout.log), buf, now);
+        if let Some(rule) = details_rule {
+            self.render_details_title(rule, buf, now);
+        }
         if self.log_open.is_some() && self.viewport.borrow().log_open_scroll > 0 {
             let label = " ↑ Top ";
             let width = (label.width() as u16).min(layout.list.width);
@@ -337,27 +356,20 @@ impl View {
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }
-    pub(super) fn render_details(
+    /// Centers the selected task's status, title and elapsed time on the rule row
+    /// `rule`, a space apart from the rule on each side.
+    fn render_details_title(
         &self,
-        area: Rect,
+        rule: Rect,
         buf: &mut Buffer,
         now: chrono::DateTime<chrono::Utc>,
     ) {
-        {
-            let mut viewport = self.viewport.borrow_mut();
-            viewport.details = Rect::default();
-            viewport.details_copy.clear();
-            viewport.details_links.clear();
-            viewport.details_text = text_selection::TextRegion::default();
-        }
         let Some(session) = self.selected_row() else {
             return;
         };
-        self.viewport.borrow_mut().details = area;
-        let width = usize::from(area.width.max(1));
+        // One rule cell and a space on each side.
+        let width = usize::from(rule.width).saturating_sub(4);
         let (status, _) = Self::status(session);
-        // Sections top to bottom: title, background, needs attention, the newer
-        // of latest activity and last message, prompt, project, branch, model.
         let mut header = Line::from(vec![status.into(), " · ".dim()]);
         let elapsed = session
             .started_at
@@ -382,14 +394,38 @@ impl View {
         if let Some(elapsed) = elapsed {
             header.spans.push(elapsed.dim());
         }
-        line(header, row(area, 0, area.height.min(1)), buf);
-        let content_top = area.y + area.height.min(1);
-        let area = Rect::new(
-            area.x,
-            content_top,
-            area.width,
-            area.height.saturating_sub(1),
-        );
+        let mut header = truncate_line_to_width(header, width);
+        header.spans.insert(0, " ".into());
+        header.spans.push(" ".into());
+        let label_width = header.width() as u16;
+        line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
+        let x = rule.x + rule.width.saturating_sub(label_width) / 2;
+        let label = Rect::new(x, rule.y, label_width.min(rule.width), 1).intersection(rule);
+        Clear.render(label, buf);
+        line(header, label, buf);
+    }
+    pub(super) fn render_details(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.details = Rect::default();
+            viewport.details_copy.clear();
+            viewport.details_links.clear();
+            viewport.details_text = text_selection::TextRegion::default();
+        }
+        let Some(session) = self.selected_row() else {
+            return;
+        };
+        self.viewport.borrow_mut().details = area;
+        let width = usize::from(area.width.max(1));
+        // Sections top to bottom: background, needs attention, the newer of latest
+        // activity and last message, prompt, project, branch, model. The title sits
+        // on the rule below the panel.
+        let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
         let mut bodies = Vec::new();
         // The full text a double click copies from each body, parallel to `bodies`.
@@ -415,7 +451,8 @@ impl View {
         let mut background = items.len()..items.len();
         let subagents = self.subagents_for(session).collect::<Vec<_>>();
         if !boxes.is_empty() || !subagents.is_empty() {
-            items.extend([Line::default().into(), "Background".dim().into()]);
+            separate_section(&mut items);
+            items.push("Background".dim().into());
             let start = items.len();
             items.extend(
                 boxes
@@ -429,11 +466,9 @@ impl View {
         }
 
         if session.status == SessionStatus::NeedsInput {
-            let start = items.len() + 1;
-            items.extend([
-                Line::default().into(),
-                Span::styled("Needs attention", style::attention_title_style()).into(),
-            ]);
+            separate_section(&mut items);
+            let start = items.len();
+            items.extend([Span::styled("Needs attention", style::attention_title_style()).into()]);
             if session.pending_questions.is_empty() {
                 items.extend([
                     "Open task to review.".dim().into(),
@@ -468,9 +503,9 @@ impl View {
             if wrapped.len() > 1 {
                 label.push('…');
             }
-            let start = items.len() + 2;
+            separate_section(&mut items);
+            let start = items.len() + 1;
             items.extend([
-                Line::default().into(),
                 Line::from(vec![
                     "Latest activity".dim(),
                     " · ".dim(),
@@ -492,7 +527,8 @@ impl View {
             if let Some(at) = session.last_message_at {
                 header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
             }
-            items.extend([Line::default().into(), Line::from(header).into()]);
+            separate_section(&mut items);
+            items.push(Line::from(header).into());
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(
@@ -527,7 +563,8 @@ impl View {
                 format_duration((end - start).num_seconds().max(0)).dim(),
             ]);
         }
-        items.extend([Line::default().into(), Line::from(header).into()]);
+        separate_section(&mut items);
+        items.push(Line::from(header).into());
         let prompt_text = match session.prompt.trim() {
             "" => "No prompt available.",
             prompt => prompt,
@@ -610,7 +647,12 @@ impl View {
         if let Some(effort) = &session.effort {
             model.extend([" · ".dim(), effort.clone().into()]);
         }
-        items.extend([Line::default().into(), Line::from(model).into()]);
+        // A blank row keeps the model off the bottom rule.
+        items.extend([
+            Line::default().into(),
+            Line::from(model).into(),
+            Line::default().into(),
+        ]);
         item_links.resize(items.len(), Vec::new());
 
         let mut text_rows = vec![None; items.len()];
@@ -823,6 +865,13 @@ impl View {
         super::links::underline(buf, &drawn_links);
         self.viewport.borrow_mut().details_links = drawn_links;
         self.highlight_text_selection(text_selection::Panel::Details, buf);
+    }
+}
+
+/// Puts a blank row between a section and the one above it.
+fn separate_section(items: &mut Vec<Item<'_>>) {
+    if !items.is_empty() {
+        items.push(Line::default().into());
     }
 }
 

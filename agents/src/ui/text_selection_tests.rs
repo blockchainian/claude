@@ -458,7 +458,7 @@ fn log_list_drag_copies_abbreviated_path_as_drawn() {
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
     let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
-    let y = log.y + 1;
+    let y = log.y + super::log::LOG_TOP;
     let expected = drawn_cells(&initial, y, log.x, log.right());
     assert!(expected.contains('…'), "{expected}");
     for range in &view.log[0].paths {
@@ -597,7 +597,7 @@ fn log_list_click_opens_cut_row_and_stationary_double_click_copies_nothing() {
     let area = Rect::new(0, 0, 100, 30);
     dashboard(&view, area);
     let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
-    let at = (log.x, log.y + 1);
+    let at = (log.x, log.y + super::log::LOG_TOP);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
@@ -654,7 +654,12 @@ fn log_list_edge_drag_caches_rows_beyond_first_screen() {
             for offset in 0..viewport.log_rows.len() {
                 rows.insert(
                     viewport.log_scroll + offset,
-                    drawn_cells(buf, log.y + 1 + offset as u16, log.x, log.right()),
+                    drawn_cells(
+                        buf,
+                        log.y + super::log::LOG_TOP + offset as u16,
+                        log.x,
+                        log.right(),
+                    ),
                 );
             }
         };
@@ -662,7 +667,7 @@ fn log_list_edge_drag_caches_rows_beyond_first_screen() {
     view.handle_mouse(mouse(
         MouseEventKind::Down(MouseButton::Left),
         log.x,
-        log.y + 1,
+        log.y + super::log::LOG_TOP,
     ));
     dashboard(&view, area);
     view.handle_mouse(mouse(
@@ -824,7 +829,7 @@ fn dragging_across_cut_log_rows_never_opens_an_event() {
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
     let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
-    let y = log.y + 1;
+    let y = log.y + super::log::LOG_TOP;
     let expected = (y..=y + 1)
         .map(|row| drawn_cells(&initial, row, log.x, log.right()))
         .collect::<Vec<_>>()
