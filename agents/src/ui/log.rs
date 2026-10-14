@@ -13,6 +13,7 @@ pub(super) fn search_input_rect(area: Rect) -> Rect {
 
 impl View {
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
+        self.viewport.borrow_mut().log_text = text_selection::TextRegion::default();
         if area.is_empty() {
             return;
         }
@@ -94,11 +95,35 @@ impl View {
             }
         }
         let body_area = super::render::row(area, 3, area.height.saturating_sub(3));
+        let maps = super::text_selection_layout::map_lines(&body, &lines, is_prose(&event.kind));
         let mut viewport = self.viewport.borrow_mut();
+        viewport.log_open_max = lines.len().saturating_sub(usize::from(body_area.height));
         viewport.log_open_scroll = viewport
             .log_open_scroll
             .min(lines.len().saturating_sub(usize::from(body_area.height)));
+        viewport.log_text = text_selection::TextRegion {
+            area: body_area,
+            sources: vec![text_selection::Source {
+                id: 0,
+                text: body,
+                label: copied_label(event),
+            }],
+            rows: maps
+                .into_iter()
+                .skip(viewport.log_open_scroll)
+                .take(usize::from(body_area.height))
+                .enumerate()
+                .map(|(row, cells)| text_selection::DrawnRow {
+                    segment: 0,
+                    x: body_area.x,
+                    y: body_area.y + row as u16,
+                    cells,
+                })
+                .collect(),
+        };
         Paragraph::new(lines.split_off(viewport.log_open_scroll)).render(body_area, buf);
+        drop(viewport);
+        self.highlight_text_selection(text_selection::Panel::Log, buf);
     }
 
     /// How long until the top log row's time reads differently, or `None` if it never does.

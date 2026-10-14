@@ -81,6 +81,7 @@ pub struct App {
     hub: Hub,
     preferences: Preferences,
     view: View,
+    clipboard: crate::clipboard::Clipboard,
     sessions: Vec<Session>,
     /// Set when the user chose to hand the terminal to a provider process; the dashboard
     /// returns once it exits.
@@ -112,6 +113,7 @@ impl App {
             config_dir,
             preferences,
             view,
+            clipboard: crate::clipboard::Clipboard::new(),
             sessions: Vec::new(),
             launch: None,
             last_session: None,
@@ -191,7 +193,12 @@ impl App {
             MouseReports::Enable
         )?;
         self.refresh();
+        let mut selection_tick = Instant::now();
         loop {
+            if selection_tick.elapsed() >= Duration::from_millis(50) {
+                self.view.tick_text_selection();
+                selection_tick = Instant::now();
+            }
             self.view.expire_copied(Instant::now());
             if schedule.due(Instant::now()) {
                 self.refresh();
@@ -221,6 +228,11 @@ impl App {
                 .view
                 .expire_copied(Instant::now())
                 .map_or(timeout, |copied| timeout.min(copied));
+            let timeout = if self.view.text_selection_dragging() {
+                timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
+            } else {
+                timeout
+            };
             match receiver.recv_timeout(timeout) {
                 Ok(Input::Terminal(event)) => {
                     if self.handle_event(event?) {
@@ -518,7 +530,7 @@ impl App {
                 self.preferences.grouping = grouping;
                 self.save_preferences();
             }
-            Action::Copy { text, label } => match copy_to_clipboard(&text) {
+            Action::Copy { text, label } => match self.clipboard.copy(&text) {
                 Ok(()) => self.view.show_copied(label, Instant::now()),
                 Err(error) => self
                     .view
@@ -583,27 +595,6 @@ impl App {
             return true;
         }
         false
-    }
-}
-
-/// Puts `text` on the macOS clipboard.
-fn copy_to_clipboard(text: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut child = std::process::Command::new("pbcopy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .expect("pbcopy stdin is piped")
-        .write_all(text.as_bytes())?;
-    let status = child.wait()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "pbcopy exited with {status}"
-        )))
     }
 }
 

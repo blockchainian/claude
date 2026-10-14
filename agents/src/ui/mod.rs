@@ -14,6 +14,8 @@ mod rows;
 mod selection_tabs;
 mod shortcut_help;
 mod style;
+mod text_selection;
+mod text_selection_layout;
 #[cfg(test)]
 pub use style::light_background;
 pub use style::set_light_background;
@@ -86,6 +88,9 @@ struct Viewport {
     log_rows: Vec<(usize, bool)>,
     /// Lines of the open log event scrolled off the top.
     log_open_scroll: usize,
+    log_open_max: usize,
+    log_text: text_selection::TextRegion,
+    details_text: text_selection::TextRegion,
     details: Rect,
     details_scroll: DetailsScroll,
     /// Screen rows of each copyable details body drawn by the last render, with its full text.
@@ -160,6 +165,7 @@ pub struct View {
     last_copy_click: Option<(String, Instant)>,
     /// The confirmation of the last copy, shown at the footer's right end until it expires.
     copied: Option<(String, Instant)>,
+    text_selection: RefCell<Option<text_selection::Selection>>,
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
 }
@@ -226,6 +232,7 @@ impl View {
             last_click: None,
             last_copy_click: None,
             copied: None,
+            text_selection: RefCell::new(None),
             title_slots: RefCell::new(HashMap::new()),
         }
     }
@@ -274,6 +281,7 @@ impl View {
         };
         self.reconcile_selection();
         if self.selected_id() != selected.as_ref() {
+            self.text_selection.borrow_mut().take();
             self.log_search.clear();
             self.show_newest_log();
         }
@@ -487,6 +495,7 @@ impl View {
 
     fn set_selected(&mut self, selected: usize) {
         if self.selected != selected {
+            self.text_selection.borrow_mut().take();
             self.log_search.clear();
             self.show_newest_log();
             self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
@@ -537,3 +546,6 @@ impl View {
 mod rename_tests;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod text_selection_tests;

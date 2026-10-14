@@ -325,6 +325,7 @@ impl View {
             let mut viewport = self.viewport.borrow_mut();
             viewport.details = Rect::default();
             viewport.details_copy.clear();
+            viewport.details_text = text_selection::TextRegion::default();
         }
         let Some(session) = self.selected_row() else {
             return;
@@ -435,7 +436,7 @@ impl View {
                 .into(),
             ]);
             bodies.push(start..items.len());
-            copies.push(None);
+            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
         }
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
             let mut header = vec!["Last message".dim()];
@@ -546,6 +547,40 @@ impl View {
         }
         items.extend([Line::default().into(), Line::from(model).into()]);
 
+        let mut text_rows = vec![None; items.len()];
+        let mut sources = Vec::new();
+        for (id, (body, copy)) in bodies.iter().zip(&copies).enumerate() {
+            let Some((source, label)) = copy else {
+                continue;
+            };
+            let lines = items[body.clone()]
+                .iter()
+                .map(|item| match item {
+                    Item::Text(line) => line.clone(),
+                    _ => unreachable!("copyable bodies contain text rows"),
+                })
+                .collect::<Vec<_>>();
+            let markdown = *label != "Copied latest activity";
+            let maps = super::text_selection_layout::map_lines(source, &lines, markdown);
+            for (index, cells) in body.clone().zip(maps) {
+                text_rows[index] = Some(text_selection::DrawnRow {
+                    segment: id,
+                    x: area.x,
+                    y: 0,
+                    cells,
+                });
+            }
+            sources.push(text_selection::Source {
+                id,
+                text: (*source).to_owned(),
+                label: (*label).to_owned(),
+            });
+        }
+        self.viewport.borrow_mut().details_text = text_selection::TextRegion {
+            area,
+            sources,
+            rows: Vec::new(),
+        };
         let available = usize::from(area.height);
         let budget = budget_details(&items, &bodies, background, available);
         let (scroll, body_rows) = {
@@ -577,6 +612,11 @@ impl View {
                         *last =
                             truncate_line_to_width(std::mem::take(last), width.saturating_sub(1));
                         last.spans.push("…".dim());
+                        if let Some(mapped) = &mut text_rows[body.start + rows - 1] {
+                            mapped
+                                .cells
+                                .retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
+                        }
                     }
                 }
                 state.bodies = bodies
@@ -594,6 +634,12 @@ impl View {
                     .collect();
                 let mut index = 0;
                 items.retain(|_| {
+                    let retain = keep[index];
+                    index += 1;
+                    retain
+                });
+                let mut index = 0;
+                text_rows.retain(|_| {
                     let retain = keep[index];
                     index += 1;
                     retain
@@ -629,7 +675,14 @@ impl View {
         let content_area = Rect::new(0, 0, area.width, total as u16);
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
-        for item in items {
+        for (item, mapped) in items.into_iter().zip(text_rows) {
+            if let Some(mut mapped) = mapped
+                && offset >= scroll
+                && offset < scroll + available
+            {
+                mapped.y = area.y + (offset - scroll) as u16;
+                self.viewport.borrow_mut().details_text.rows.push(mapped);
+            }
             let height = item.height();
             let item_area = row(content_area, offset as u16, height as u16);
             match item {
@@ -678,7 +731,13 @@ impl View {
             let last = row(area, (available - 1) as u16, 1);
             Clear.render(last, buf);
             line("…".dim(), last, buf);
+            self.viewport
+                .borrow_mut()
+                .details_text
+                .rows
+                .retain(|row| row.y != last.y);
         }
+        self.highlight_text_selection(text_selection::Panel::Details, buf);
     }
 }
 
