@@ -15,7 +15,9 @@ pub(super) struct Part {
 }
 
 enum Body {
-    /// A call name or section label, in the given style.
+    /// A merged call's right-aligned title.
+    Title(Style),
+    /// A section label, in the given style.
     Label(Style),
     /// A full-width call separator, or a centred input/output arrow.
     Rule(bool),
@@ -98,13 +100,33 @@ impl Part {
         matches!(self.body, Body::Markdown)
     }
 
+    /// Generated title padding has no source bytes to select.
+    pub fn maps(&self, lines: &[Line<'_>]) -> Vec<Vec<super::text_selection_layout::CellMap>> {
+        if !matches!(self.body, Body::Title(_)) {
+            return super::text_selection_layout::map_lines(&self.source, lines, self.markdown());
+        }
+        let mut content = lines.to_vec();
+        let padding: Vec<_> = content
+            .iter_mut()
+            .map(|line| line.spans.remove(0).width() as u16)
+            .collect();
+        let mut maps = super::text_selection_layout::map_lines(&self.source, &content, false);
+        for (cells, padding) in maps.iter_mut().zip(padding) {
+            for (range, _) in cells {
+                range.start += padding;
+                range.end += padding;
+            }
+        }
+        maps
+    }
+
     /// The part drawn `width` columns wide; every line fits so each cell maps to its source.
     pub fn lines(&self, width: usize, body_style: Style) -> Vec<Line<'static>> {
         let drawn = self.source.replace('\t', "    ");
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let lines = match &self.body {
-            Body::Label(style) => split_wide(
+            Body::Title(style) | Body::Label(style) => split_wide(
                 vec![Line::from(Span::styled(source.to_owned(), *style))],
                 width,
             ),
@@ -138,6 +160,10 @@ impl Part {
         lines
             .into_iter()
             .map(|mut line| {
+                if matches!(self.body, Body::Title(_)) {
+                    let padding = width.saturating_sub(line.width());
+                    line.spans.insert(0, Span::raw(" ".repeat(padding)));
+                }
                 for span in &mut line.spans {
                     span.style = body_style.patch(span.style);
                 }
@@ -157,7 +183,7 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
             parts.push(Part::new("", Body::Rule(false)));
         }
         if event.calls.len() > 1 {
-            parts.push(Part::new(call.title.clone(), Body::Label(label_style)));
+            parts.push(Part::new(call.title.clone(), Body::Title(label_style)));
         }
         for section in &call.input {
             push_section(&mut parts, section, label_style, false);
@@ -516,13 +542,13 @@ mod tests {
         assert_eq!(
             texts(&parts, 80),
             [
-                "Bash",
+                &format!("{}Bash", " ".repeat(76)),
                 "cargo test",
                 &format!("{}↓{}", " ".repeat(40), " ".repeat(39)),
                 "running 3 tests",
                 "...",
                 &"─".repeat(80),
-                "Read",
+                &format!("{}Read", " ".repeat(76)),
                 "path: agents/src/log.rs",
                 "range: lines 1–40",
                 "running…",
