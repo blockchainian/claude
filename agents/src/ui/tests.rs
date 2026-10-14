@@ -6634,15 +6634,11 @@ fn usage_chart_draws_output_above_and_input_below_the_log_rule_and_scrolls_back(
         .iter()
         .position(|row| row.contains("Task log example") && row.contains('─'))
         .unwrap();
-    let braille = |row: &str| {
-        row.chars()
-            .filter(|c| ('\u{2801}'..='\u{28ff}').contains(c))
-            .count()
-    };
-    // Full-height output fills the rule's top dots and the row above; input waits off screen.
-    assert_eq!(braille(rows[rule - 1]), 1);
-    assert_eq!(braille(rows[rule]), 1);
-    assert_eq!(braille(rows[rule + 1]), 0);
+    let blocks = |row: &str| row.chars().filter(|c| ('▀'..='▟').contains(c)).count();
+    // Full-height output fills the rule's top half and half the row above; input waits off screen.
+    assert!(rows[rule - 1].contains('▄'));
+    assert!(rows[rule].contains('▀'));
+    assert_eq!(blocks(rows[rule + 1]), 0);
     assert!(rows[rule].starts_with("  ──"));
 
     for _ in 0..100 {
@@ -6652,7 +6648,7 @@ fn usage_chart_draws_output_above_and_input_below_the_log_rule_and_scrolls_back(
     let screen = log_screen(&view, 100, 25, now);
     let rows: Vec<&str> = screen.lines().collect();
     assert!(
-        braille(rows[rule + 1]) > 0,
+        rows[rule + 1].contains('▄'),
         "scrolled-back input hangs below the rule"
     );
     assert!(
