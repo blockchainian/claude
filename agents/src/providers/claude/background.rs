@@ -7,7 +7,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub(super) trait Liveness {
     fn held_outputs(&self) -> io::Result<HashSet<PathBuf>>;
@@ -17,15 +16,11 @@ pub(super) trait Liveness {
 pub(super) struct Processes;
 impl Liveness for Processes {
     fn held_outputs(&self) -> io::Result<HashSet<PathBuf>> {
-        let output = Command::new("lsof").args(["-Fn", "-d", "1,2"]).output()?;
-        // lsof returns 1 when no descriptors match.
-        if !output.status.success() && output.status.code() != Some(1) {
-            return Err(io::Error::other("lsof failed to inspect task outputs"));
-        }
-        Ok(String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| line.strip_prefix('n'))
-            .map(PathBuf::from)
+        // Any process may hold an output: adopted shells outlive the session that started them.
+        Ok(crate::processes::all_pids()
+            .into_iter()
+            .flat_map(|pid| [1, 2].map(|fd| crate::processes::fd_path(pid, fd)))
+            .flatten()
             .collect())
     }
     fn alive(&self, pid: u32) -> io::Result<bool> {

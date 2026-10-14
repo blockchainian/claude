@@ -351,32 +351,19 @@ fn live_writers(directory: &Path) -> io::Result<HashMap<String, u32>> {
     if !directory.is_dir() {
         return Ok(HashMap::new());
     }
-    // lsof identifies the owning process; a shared, read-only lock probe rejects stale open files.
-    let output = Command::new("lsof")
-        .args(["-nP", "-Fpcn", "+D"])
-        .arg(directory)
-        .output()?;
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(io::Error::other(
-            "lsof failed to inspect Codex writer locks",
-        ));
-    }
-    let mut pid = None;
-    let mut codex = false;
+    // A shared, read-only lock probe rejects stale open files.
     let mut live = HashMap::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        if let Some(value) = line.strip_prefix('p') {
-            pid = value.parse::<u32>().ok();
-            codex = false;
-        } else if let Some(value) = line.strip_prefix('c') {
-            codex = value == "codex" || value.starts_with("codex-");
-        } else if let Some(value) = line.strip_prefix('n') {
-            let path = Path::new(value);
-            if codex
-                && path.parent() == Some(directory)
+    for pid in crate::processes::all_pids() {
+        if !crate::processes::name(pid)
+            .is_some_and(|name| name == "codex" || name.starts_with("codex-"))
+        {
+            continue;
+        }
+        for path in crate::processes::open_files(pid) {
+            if path.parent() == Some(directory)
                 && path.extension().is_some_and(|ext| ext == "lock")
-                && let (Some(pid), Some(id)) = (pid, path.file_stem().and_then(|s| s.to_str()))
-                && lock_held(path)?
+                && let Some(id) = path.file_stem().and_then(|s| s.to_str())
+                && lock_held(&path)?
             {
                 live.insert(id.to_owned(), pid);
             }

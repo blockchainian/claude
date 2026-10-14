@@ -2,6 +2,7 @@ mod app;
 mod clipboard;
 mod log;
 mod model;
+mod processes;
 mod providers;
 mod refresh;
 mod repository;

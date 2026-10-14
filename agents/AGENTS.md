@@ -10,6 +10,7 @@ This directory is `agents`, the Rust terminal dashboard that lists every Claude 
 - src/model.rs -- sessions as the dashboard sees them
 - src/providers/ -- one reader per agent: `claude`, `codex`
 - src/sessions/ -- merged snapshots and filesystem notifications
+- src/processes.rs -- running processes and their open files, read through libproc
 - src/log.rs -- task log events and filters
 - src/ui/ -- rendering, input and the task log panel
 - tests/ -- real payload fixtures and rendered UI snapshots

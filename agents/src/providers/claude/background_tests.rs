@@ -2,6 +2,7 @@ use super::*;
 use chrono::Utc;
 use std::cell::Cell;
 use std::os::unix::fs::symlink;
+use std::process::Command;
 
 const RECORDS: &str = include_str!("../../../tests/fixtures/background/records.jsonl");
 
