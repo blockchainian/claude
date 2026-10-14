@@ -328,7 +328,7 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     let style = super::style::inactive_tab_style();
     let arrow = &buf[jump];
     assert_eq!(arrow.fg, style.fg.unwrap_or(Color::Reset));
-    assert!(arrow.modifier.contains(ratatui::style::Modifier::BOLD));
+    assert_eq!(arrow.modifier, ratatui::style::Modifier::BOLD);
 }
 
 #[test]

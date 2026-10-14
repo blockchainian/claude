@@ -87,7 +87,7 @@ impl View {
         };
         let x = area.x + (CLOCK_WIDTH + KIND_WIDTH + 1) as u16;
         let jump = Rect::new(x, area.y, label.width() as u16, 1).intersection(area);
-        Line::styled(label, super::style::inactive_tab_style()).render(jump, buf);
+        Line::styled(label, super::style::inactive_tab_style().not_dim()).render(jump, buf);
         viewport.log_jump = jump;
     }
 
