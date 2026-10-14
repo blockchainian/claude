@@ -12,6 +12,7 @@ This repo is the `blockchainian` plugin marketplace for Claude Code and Codex, a
 - .agents/plugins/ -- the Codex catalog
 - plugins/ -- one directory per plugin
 - agents/ -- `agents`, the Rust session dashboard
+- git/ -- `git`, the VS Code extension that opens a commit's changes from a `vscode://blockchainian.git/view-commit` link
 - tests/ -- the marketplace suite
 
 ## Development
