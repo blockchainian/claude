@@ -430,6 +430,8 @@ impl View {
         let mut bodies = Vec::new();
         // The full text a double click copies from each body, parallel to `bodies`.
         let mut copies: Vec<Option<(&str, &'static str)>> = Vec::new();
+        // A fingerprint of each body's text, parallel to `bodies`.
+        let mut keys = Vec::new();
         // The links inside each body's text, parallel to `bodies`.
         let mut body_links: Vec<Vec<super::links::Link>> = Vec::new();
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
@@ -487,6 +489,7 @@ impl View {
                 }));
             }
             bodies.push(start..items.len());
+            keys.push(body_key("Needs attention", &session.pending_questions));
             copies.push(None);
             body_links.push(Vec::new());
         }
@@ -519,6 +522,7 @@ impl View {
                 .into(),
             ]);
             bodies.push(start..items.len());
+            keys.push(body_key("Latest activity", &activity.label));
             copies.push(Some((activity.label.as_str(), "Copied latest activity")));
             body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }
@@ -543,6 +547,7 @@ impl View {
                     .map(Item::from),
             );
             bodies.push(start..items.len());
+            keys.push(body_key("Last message", message));
             copies.push(Some((message.as_str(), "Copied last message")));
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
@@ -573,6 +578,7 @@ impl View {
         let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
         items.extend(prompt_body.into_iter().map(Item::from));
         bodies.push(prompt_start..items.len());
+        keys.push(body_key("Prompt", &session.prompt));
         copies.push(
             Some((session.prompt.as_str(), "Copied prompt"))
                 .filter(|(prompt, _)| !prompt.trim().is_empty()),
@@ -647,12 +653,7 @@ impl View {
         if let Some(effort) = &session.effort {
             model.extend([" · ".dim(), effort.clone().into()]);
         }
-        // A blank row keeps the model off the bottom rule.
-        items.extend([
-            Line::default().into(),
-            Line::from(model).into(),
-            Line::default().into(),
-        ]);
+        items.extend([Line::default().into(), Line::from(model).into()]);
         item_links.resize(items.len(), Vec::new());
 
         let mut text_rows = vec![None; items.len()];
@@ -696,6 +697,23 @@ impl View {
             let mut viewport = self.viewport.borrow_mut();
             let state = &mut viewport.details_scroll;
             state.content_top = content_top;
+            // Back on a task, a body whose text changed while the user was away opens folded,
+            // and the plain offset starts over.
+            if let Some(left) = state.left_keys.take()
+                && left != keys
+            {
+                state.reveal = keys
+                    .iter()
+                    .map(|key| {
+                        left.iter()
+                            .position(|old| old == key)
+                            .and_then(|index| state.reveal.get(index).copied())
+                            .unwrap_or(0)
+                    })
+                    .collect();
+                state.offset = 0;
+            }
+            state.keys = keys;
             if state.reveal.len() != bodies.len() {
                 state.reveal = vec![0; bodies.len()];
             }
@@ -903,6 +921,14 @@ pub(super) fn allocate(wants: &[usize], budget: usize) -> Vec<usize> {
 struct DetailsBudget {
     bodies: Vec<(usize, usize)>,
     background_cut: Option<std::ops::Range<usize>>,
+}
+
+/// A fingerprint of one details body: its section and the text it shows.
+fn body_key(section: &str, text: &impl std::hash::Hash) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    (section, text).hash(&mut hasher);
+    hasher.finish()
 }
 
 fn budget_details(

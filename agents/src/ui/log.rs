@@ -9,7 +9,7 @@ const CLOCK_WIDTH: usize = 8;
 const KIND_WIDTH: usize = 9;
 
 /// Rows above the first event: the top rule and a blank row.
-pub(super) const LOG_TOP: u16 = 2;
+pub(super) const LOG_TOP: u16 = 1;
 
 pub(super) fn search_input_rect(area: Rect) -> Rect {
     super::render::row(area, area.height.saturating_sub(1), 1)
@@ -223,10 +223,11 @@ impl View {
     /// Replaces the task log. Off the newest row, or while a mouse button is held, the rows on
     /// screen stay put and the newer events count toward the jump button.
     pub(crate) fn set_log(&mut self, events: Vec<Event>) {
-        let newest = self
-            .shown_log_events()
-            .last()
-            .map(|(_, event)| event.started_at);
+        let newest = self.left_log_newest.take().or_else(|| {
+            self.shown_log_events()
+                .last()
+                .map(|(_, event)| event.started_at)
+        });
         self.log = events;
         self.prepare_log_search();
         if let Some(open) = &self.log_open
@@ -281,7 +282,7 @@ impl View {
     }
 
     /// The log events the search lets through, with their index in the log.
-    fn shown_log_events(&self) -> impl Iterator<Item = (usize, &Event)> {
+    pub(super) fn shown_log_events(&self) -> impl Iterator<Item = (usize, &Event)> {
         self.log
             .iter()
             .enumerate()

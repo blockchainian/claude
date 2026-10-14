@@ -5,9 +5,6 @@ const WHEEL_ROWS: usize = 3;
 
 impl View {
     fn set_filter(&mut self, idx: usize) {
-        if self.status_filter != idx {
-            self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
-        }
         // A chosen task may have changed status since; remember it in the tabs that list it now.
         if self.selected_id() == self.chosen.as_ref() {
             self.remember_selection();

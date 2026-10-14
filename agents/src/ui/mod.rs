@@ -128,6 +128,23 @@ struct DetailsScroll {
     content_top: u16,
     /// Maximum plain offset; None when the budget layout applies.
     fallback_max: Option<usize>,
+    /// A fingerprint of each body's text, parallel to `reveal`.
+    keys: Vec<u64>,
+    /// The body fingerprints the task showed when the user left it, until its first render back.
+    left_keys: Option<Vec<u64>>,
+}
+
+/// What a task's details and log panels showed when the user last left it.
+#[derive(Default)]
+struct TaskPanels {
+    details_scroll: DetailsScroll,
+    log_search: log_search::LogSearch,
+    log_open: Option<crate::log::Event>,
+    log_scroll: usize,
+    log_unseen: usize,
+    log_open_scroll: usize,
+    /// When the newest log event shown started, if the task's log was loaded.
+    log_newest: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Copy)]
@@ -194,6 +211,13 @@ pub struct View {
     text_selection: RefCell<Option<text_selection::Selection>>,
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
+    /// The task whose details and log panels are on screen.
+    panels_task: Option<SessionKey>,
+    /// The panels of each task the user left, by task.
+    task_panels: HashMap<SessionKey, TaskPanels>,
+    /// The newest log event the shown task had when the user left it, standing in for the
+    /// loaded log's newest until that task's log loads.
+    left_log_newest: Option<DateTime<Utc>>,
 }
 
 impl Default for View {
@@ -262,6 +286,9 @@ impl View {
             copied: None,
             text_selection: RefCell::new(None),
             title_slots: RefCell::new(HashMap::new()),
+            panels_task: None,
+            task_panels: HashMap::new(),
+            left_log_newest: None,
         }
     }
 
@@ -281,6 +308,9 @@ impl View {
         });
         self.project_groups = sessions.iter().map(ProjectGroup::for_session).collect();
         self.rows = sessions;
+        let rows = &self.rows;
+        self.task_panels
+            .retain(|id, _| rows.iter().any(|session| &session.id == id));
         self.has_more = has_more;
         let selected_index = selected
             .as_ref()
@@ -306,14 +336,7 @@ impl View {
         if self.status_filter != status_filter && self.selected_id() == selected.as_ref() {
             self.remember_selection();
         }
-        if self.selected_id() != selected.as_ref() {
-            self.text_selection.borrow_mut().take();
-            self.log_search.clear();
-            self.show_newest_log();
-        }
-        if self.selected_id() != selected.as_ref() || self.status_filter != status_filter {
-            self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
-        }
+        self.show_selected_panels();
     }
 
     pub fn set_loading(&mut self, loading: bool) {
@@ -514,13 +537,54 @@ impl View {
     }
 
     fn set_selected(&mut self, selected: usize) {
-        if self.selected != selected {
-            self.text_selection.borrow_mut().take();
-            self.log_search.clear();
-            self.show_newest_log();
-            self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
-        }
         self.selected = selected;
+        self.show_selected_panels();
+    }
+
+    /// Keeps the details and log panels with their task: saves what the task the user left
+    /// showed, and shows what the selected task showed when the user last left it.
+    fn show_selected_panels(&mut self) {
+        let selected = self.selected_id().cloned();
+        if self.panels_task == selected {
+            return;
+        }
+        self.text_selection.borrow_mut().take();
+        let log_newest = if self.log_session == self.panels_task {
+            self.shown_log_events()
+                .last()
+                .map(|(_, event)| event.started_at)
+        } else {
+            self.left_log_newest
+        };
+        let viewport = self.viewport.get_mut();
+        let left = TaskPanels {
+            details_scroll: std::mem::take(&mut viewport.details_scroll),
+            log_search: std::mem::take(&mut self.log_search),
+            log_open: self.log_open.take(),
+            log_scroll: viewport.log_scroll,
+            log_unseen: viewport.log_unseen,
+            log_open_scroll: viewport.log_open_scroll,
+            log_newest,
+        };
+        if let Some(id) = self.panels_task.take() {
+            self.task_panels.insert(id, left);
+        }
+        let mut shown = selected
+            .as_ref()
+            .and_then(|id| self.task_panels.remove(id))
+            .unwrap_or_default();
+        if shown.details_scroll.left_keys.is_none() {
+            shown.details_scroll.left_keys = Some(std::mem::take(&mut shown.details_scroll.keys));
+        }
+        viewport.details_scroll = shown.details_scroll;
+        viewport.log_scroll = shown.log_scroll;
+        viewport.log_unseen = shown.log_unseen;
+        viewport.log_open_scroll = shown.log_open_scroll;
+        viewport.log_open_layout = None;
+        self.log_search = shown.log_search;
+        self.log_open = shown.log_open;
+        self.left_log_newest = shown.log_newest.filter(|_| self.log_session != selected);
+        self.panels_task = selected;
     }
 
     /// Selects the row the user chose.

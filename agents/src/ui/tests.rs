@@ -353,6 +353,82 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     assert_eq!(buf[jump].modifier, ratatui::style::Modifier::BOLD);
 }
 
+/// The log fixture with a second task, and the row index of each.
+fn two_task_log_fixture() -> (View, chrono::DateTime<Utc>, usize, usize) {
+    let (mut view, now) = log_fixture();
+    let mut other = view.rows[0].clone();
+    other.id = session_key("other");
+    other.updated_at = now - Duration::seconds(1);
+    view.set_sessions(vec![view.rows[0].clone(), other], false);
+    let index = |view: &View, id: &str| {
+        view.rows
+            .iter()
+            .position(|row| row.id == session_key(id))
+            .unwrap()
+    };
+    let (log, other) = (index(&view, "log"), index(&view, "other"));
+    view.set_selected(log);
+    (view, now, log, other)
+}
+
+/// Selects the task at `index` and loads `events` as its log.
+fn show_task_log(view: &mut View, index: usize, events: Vec<crate::log::Event>) {
+    view.set_selected(index);
+    view.set_log(events);
+    view.log_session = view.selected_id().cloned();
+}
+
+#[test]
+fn log_list_returns_with_its_task_and_counts_events_from_away() {
+    let (mut view, now, log, other) = two_task_log_fixture();
+    log_screen(&view, 100, 25, now);
+    let rect = view.viewport.borrow().log;
+    view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
+    let scroll = view.log_scroll();
+    assert!(scroll > 0);
+    let before = log_screen(&view, 100, 25, now);
+    let newer = log_with_newer_event(&view, now);
+    show_task_log(&mut view, other, Vec::new());
+    assert_eq!(view.log_scroll(), 0);
+    show_task_log(&mut view, log, newer);
+    assert_eq!(view.log_scroll(), scroll + 1);
+    let after = log_screen(&view, 100, 25, now);
+    assert_eq!(
+        rendered_cell(&after, "run a background job"),
+        rendered_cell(&before, "run a background job")
+    );
+    assert!(after.contains("↑ 1 New"), "{after}");
+}
+
+#[test]
+fn open_log_event_and_search_return_with_their_task() {
+    let (mut view, now, log, other) = two_task_log_fixture();
+    view.log[1].body = (1..=40)
+        .map(|i| format!("Reply line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let events = view.log.clone();
+    view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    for letter in "tool".chars() {
+        key(&mut view, KeyCode::Char(letter));
+    }
+    view.set_log_open(Some(events[1].clone()));
+    view.viewport.borrow_mut().log_open_scroll = 5;
+    let before = log_screen(&view, 100, 25, now);
+    show_task_log(&mut view, other, Vec::new());
+    assert!(!view.log_search.active());
+    assert!(view.log_open.is_none());
+    let opened = events[1].body.clone();
+    show_task_log(&mut view, log, events);
+    assert_eq!(view.log_search.query.text(), "tool");
+    assert_eq!(
+        view.log_open.as_ref().map(|event| &event.body),
+        Some(&opened)
+    );
+    assert_eq!(view.viewport.borrow().log_open_scroll, 5);
+    assert_eq!(log_screen(&view, 100, 25, now), before);
+}
+
 #[test]
 fn jump_button_returns_to_the_newest_log_row() {
     let (mut view, now) = log_fixture();
@@ -428,7 +504,7 @@ fn mouse_details_wheel_scrolls_three_rows_per_report() {
 }
 
 #[test]
-fn mouse_details_scroll_resets_with_selection_and_filter() {
+fn mouse_details_scroll_resets_with_selection_and_stays_across_tabs() {
     for code in [KeyCode::Down, KeyCode::End, KeyCode::PageDown, KeyCode::Tab] {
         let mut view = overflowing_details();
         details_panel(&view);
@@ -474,8 +550,61 @@ fn mouse_details_scroll_resets_with_selection_and_filter() {
             .reveal
             .iter()
             .sum::<usize>(),
-        0
+        3
     );
+}
+
+fn details_reveal(view: &View) -> Vec<usize> {
+    view.viewport.borrow().details_scroll.reveal.clone()
+}
+
+#[test]
+fn details_scroll_returns_with_its_task() {
+    let mut view = overflowing_details();
+    details_panel(&view);
+    let rect = view.viewport.borrow().details;
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+    let scrolled = details_reveal(&view);
+    assert_eq!(scrolled.iter().sum::<usize>(), 3);
+    let before = details_panel(&view);
+    key(&mut view, KeyCode::Down);
+    details_panel(&view);
+    assert_eq!(details_reveal(&view).iter().sum::<usize>(), 0);
+    key(&mut view, KeyCode::Up);
+    assert_eq!(details_panel(&view), before);
+    assert_eq!(details_reveal(&view), scrolled);
+}
+
+#[test]
+fn details_body_changed_while_away_opens_folded() {
+    let mut view = overflowing_details();
+    view.rows[view.selected].last_message = Some(
+        (1..=12)
+            .map(|i| format!("Reply row {i}"))
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    );
+    details_panel(&view);
+    let rect = view.viewport.borrow().details;
+    for _ in 0..8 {
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
+        details_panel(&view);
+    }
+    let scrolled = details_reveal(&view);
+    let prompt = scrolled.len() - 1;
+    assert!(
+        scrolled[prompt] > 0 && scrolled[prompt - 1] > 0,
+        "{scrolled:?}"
+    );
+    let index = view.selected;
+    key(&mut view, KeyCode::Down);
+    details_panel(&view);
+    view.rows[index].prompt = "A changed prompt that wraps across several rows. ".repeat(8);
+    key(&mut view, KeyCode::Up);
+    details_panel(&view);
+    let mut expected = scrolled;
+    expected[prompt] = 0;
+    assert_eq!(details_reveal(&view), expected);
 }
 
 #[test]
@@ -834,11 +963,12 @@ fn fixture() -> View {
         false,
     );
     view.set_pinned(&[session_key("42"), session_key("44")]);
-    view.selected = view
+    let selected = view
         .rows
         .iter()
         .position(|s| s.id == session_key("42"))
         .unwrap();
+    view.set_selected(selected);
     view
 }
 fn simple_fixture() -> View {
