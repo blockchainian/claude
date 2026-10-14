@@ -5,7 +5,7 @@ use ratatui::text::Line;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-type CellMap = (Range<u16>, Range<usize>);
+pub(super) type CellMap = (Range<u16>, Range<usize>);
 
 struct Token {
     text: String,

@@ -4973,6 +4973,71 @@ fn task_log_click_opens_a_whole_row_that_has_calls() {
 }
 
 #[test]
+fn merged_tool_titles_align_right_and_copy_without_padding() {
+    for (width, title) in [(100, "Bash"), (30, "  Read 界面  Read 界面  Read 界面")] {
+        let (mut view, now) = open_tool_fixture();
+        let mut event = view.log[7].clone();
+        event.calls[0].title = title.into();
+        view.set_log_open(Some(event));
+        let mut buf = Buffer::empty(Rect::new(0, 0, width, 48));
+        view.render_at(buf.area, &mut buf, now);
+        for title in [title, "Read"] {
+            let (rows, body) = {
+                let viewport = view.viewport.borrow();
+                let region = &viewport.log_text;
+                let source = region
+                    .sources
+                    .iter()
+                    .find(|source| &*source.text == title)
+                    .unwrap();
+                (
+                    region
+                        .rows
+                        .iter()
+                        .filter(|row| row.segment == source.id)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    region.area,
+                )
+            };
+            for row in &rows {
+                assert_eq!(row.cells.last().unwrap().0.end, body.width);
+                let padding = body.width
+                    - row
+                        .cells
+                        .iter()
+                        .map(|(cells, _)| cells.end - cells.start)
+                        .sum::<u16>();
+                assert_eq!(row.cells.first().unwrap().0.start, padding);
+                for x in 0..padding {
+                    assert_eq!(buf[(body.x + x, row.y)].symbol(), " ");
+                }
+                for (cells, bytes) in &row.cells {
+                    assert_eq!(
+                        buf[(row.x + cells.start, row.y)].symbol(),
+                        &title[bytes.clone()]
+                    );
+                }
+            }
+            let first = rows.first().unwrap();
+            let last = rows.last().unwrap();
+            let x1 = first.x + first.cells.first().unwrap().0.start;
+            let x2 = body.right();
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x1, first.y));
+            view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2, last.y));
+            view.render_at(buf.area, &mut buf, now);
+            assert_eq!(
+                view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, last.y)),
+                Some(Action::Copy {
+                    text: title.into(),
+                    label: "Copied tool message".into()
+                })
+            );
+        }
+    }
+}
+
+#[test]
 fn task_log_open_tool_snapshot() {
     let (view, now) = open_tool_fixture();
     let open = log_screen(&view, 100, 48, now);

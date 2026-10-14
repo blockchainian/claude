@@ -480,6 +480,7 @@ fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
         .map(|part| {
             let markdown = part.markdown();
             let lines = part.lines(usize::from(width), body_style);
+            let maps = part.maps(&lines);
             let links = if markdown || (!shows_calls(event) && is_prose(&event.kind)) {
                 let images = if shows_calls(event) {
                     &[][..]
@@ -495,7 +496,7 @@ fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
                 };
                 super::links::path_links(&part.source, &paths, cwd)
             };
-            (part.source, lines, markdown, links)
+            (part.source, lines, maps, links)
         })
         .collect();
     let mut layout = OpenLayout {
@@ -506,8 +507,7 @@ fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
         sources: Vec::new(),
         links: Vec::new(),
     };
-    for (id, (source, lines, markdown, links)) in parts.into_iter().enumerate() {
-        let mut maps = super::text_selection_layout::map_lines(&source, &lines, markdown);
+    for (id, (source, lines, mut maps, links)) in parts.into_iter().enumerate() {
         for cells in &mut maps {
             cells.retain(|(range, _)| range.end <= width);
         }

@@ -4,8 +4,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{FontStyle, Theme};
-use syntect::parsing::{SyntaxReference, SyntaxSet};
+use syntect::highlighting::{FontStyle, Highlighter, Theme};
+use syntect::parsing::{Scope, SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
 use two_face::theme::EmbeddedThemeName;
 
@@ -27,6 +27,23 @@ fn theme() -> &'static Theme {
         two_face::theme::extra()
             .get(EmbeddedThemeName::Base16OceanDark)
             .clone()
+    })
+}
+
+/// The bundled JSON grammar scopes object keys as quoted strings inside mapping keys.
+pub(super) fn json_key_foreground() -> Color {
+    static FOREGROUND: OnceLock<Color> = OnceLock::new();
+    *FOREGROUND.get_or_init(|| {
+        let scopes = [
+            "source.json",
+            "meta.mapping.key.json",
+            "string.quoted.double.json",
+        ]
+        .map(|scope| Scope::new(scope).expect("JSON key scope is valid"));
+        let foreground = Highlighter::new(theme())
+            .style_for_stack(&scopes)
+            .foreground;
+        Color::Rgb(foreground.r, foreground.g, foreground.b)
     })
 }
 
