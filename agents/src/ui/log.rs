@@ -110,22 +110,73 @@ impl View {
     ) {
         let (label_style, _) = super::style::log_styles(&event.kind);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown(event));
-        let header = Line::from(vec![
-            Span::styled(time.to_owned(), time_style),
-            " ".into(),
-            Span::styled(kind_label(&event.kind), label_style),
-        ]);
-        super::render::line(header, super::render::row(area, 1, 1), buf);
-        let body_area = super::render::row(area, 3, area.height.saturating_sub(3));
+        let mut header = vec![Span::styled(time.to_owned(), time_style), " ".into()];
+        if event.kind != Kind::Tool {
+            header.push(Span::styled(kind_label(&event.kind), label_style));
+        }
+        if event.kind == Kind::Tool || shows_calls(event) {
+            if event.kind != Kind::Tool {
+                header.push(" ".into());
+            }
+            let title = if event.calls.len() == 1 {
+                event.calls[0].title.clone()
+            } else {
+                event.body.clone()
+            };
+            header.push(Span::styled(title, label_style));
+        }
+        super::render::line(Line::from(header), super::render::row(area, 1, 1), buf);
+        let mut body_area = super::render::row(area, 3, area.height.saturating_sub(3));
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
         let layout = match viewport.log_open_layout.take() {
-            Some(layout) if layout.width == area.width => layout,
-            _ => open_layout(event, area.width, cwd),
+            Some(layout) if layout.width == area.width && layout.height == height => layout,
+            _ => {
+                let mut layout = open_layout(event, area.width, cwd);
+                if layout.lines.len() > height && area.width > 1 {
+                    layout = open_layout(event, area.width - 1, cwd);
+                    layout.width = area.width;
+                }
+                layout.height = height;
+                layout
+            }
         };
+        let overflow = layout.lines.len() > height && area.width > 1;
+        if overflow {
+            body_area.width -= 1;
+        }
         viewport.log_open_max = layout.lines.len().saturating_sub(height);
         viewport.log_open_scroll = viewport.log_open_scroll.min(viewport.log_open_max);
         let scroll = viewport.log_open_scroll;
+        if scroll > 0 {
+            let label = " ↑ Top ";
+            let jump = Rect::new(
+                area.x + (CLOCK_WIDTH + KIND_WIDTH + 1) as u16,
+                area.y,
+                label.width() as u16,
+                1,
+            )
+            .intersection(area);
+            Line::from(label.bold().not_dim()).render(jump, buf);
+            viewport.log_jump = jump;
+        }
+        if overflow && height > 0 {
+            let thumb = (height * height)
+                .div_ceil(layout.lines.len())
+                .max(1)
+                .min(height);
+            let top = scroll * (height - thumb) / viewport.log_open_max.max(1);
+            let style = super::style::log_styles(&event.kind).1;
+            for row in 0..height {
+                buf[(body_area.right(), body_area.y + row as u16)]
+                    .set_symbol(if (top..top + thumb).contains(&row) {
+                        "┃"
+                    } else {
+                        "│"
+                    })
+                    .set_style(style);
+            }
+        }
         let rows: Vec<_> = layout
             .rows
             .iter()
@@ -162,6 +213,7 @@ impl View {
 
     /// Opens `event` in the log panel, or closes the open event, dropping its cached layout.
     pub(super) fn set_log_open(&mut self, event: Option<Event>) {
+        self.cancel_open_selection();
         self.log_open = event;
         self.viewport.borrow_mut().log_open_layout = None;
     }
@@ -176,10 +228,16 @@ impl View {
         self.log = events;
         self.prepare_log_search();
         if let Some(open) = &self.log_open
-            && let Some(current) = self
-                .log
-                .iter()
-                .find(|event| event.started_at == open.started_at && event.kind == open.kind)
+            && let Some(current) = self.log.iter().find(|event| {
+                if shows_calls(open) {
+                    event
+                        .calls
+                        .iter()
+                        .any(|call| open.calls.iter().any(|old| old.id == call.id))
+                } else {
+                    event.started_at == open.started_at && event.kind == open.kind
+                }
+            })
             && current != open
         {
             self.set_log_open(Some(current.clone()));
@@ -412,6 +470,7 @@ type Cells = Vec<(std::ops::Range<u16>, std::ops::Range<usize>)>;
 /// the width changes.
 pub(super) struct OpenLayout {
     width: u16,
+    height: usize,
     lines: Vec<Line<'static>>,
     /// Each line's text part and the cells mapping it back to that part's bytes.
     rows: Vec<(usize, Cells)>,
@@ -442,44 +501,42 @@ fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
                 })
                 .collect()
         } else {
-            let body = event.body.clone();
-            let options = super::line_truncation::prose_wrap_options(usize::from(width));
-            let mut lines = if is_prose(&event.kind) {
-                super::markdown::render_with_options(&body, options)
-            } else {
-                textwrap::wrap(&body, options)
-                    .into_iter()
-                    .map(|line| Line::from(line.into_owned()))
-                    .collect()
-            };
-            for line in &mut lines {
-                for span in &mut line.spans {
-                    span.style = body_style.patch(span.style);
-                }
-            }
+            let part = super::tool_detail::Part::text(event.body.clone(), is_prose(&event.kind));
+            let markdown = part.markdown();
+            let body = part.source.clone();
+            let lines = part.lines(usize::from(width), body_style);
             let links = if is_prose(&event.kind) {
                 super::links::text_links(&body, cwd, &event.images)
             } else {
-                super::links::path_links(&body, &tool_paths(event, cwd), cwd)
+                let paths = if body == event.body {
+                    tool_paths(event, cwd)
+                } else {
+                    super::paths::text_paths(&body, cwd)
+                };
+                super::links::path_links(&body, &paths, cwd)
             };
-            vec![(body, lines, is_prose(&event.kind), links)]
+            vec![(body, lines, markdown, links)]
         };
     let mut layout = OpenLayout {
         width,
+        height: 0,
         lines: Vec::new(),
         rows: Vec::new(),
         sources: Vec::new(),
         links: Vec::new(),
     };
     for (id, (source, lines, markdown, links)) in parts.into_iter().enumerate() {
-        let maps = super::text_selection_layout::map_lines(&source, &lines, markdown);
+        let mut maps = super::text_selection_layout::map_lines(&source, &lines, markdown);
+        for cells in &mut maps {
+            cells.retain(|(range, _)| range.end <= width);
+        }
         layout
             .rows
             .extend(maps.into_iter().map(|cells| (id, cells)));
         layout.lines.extend(lines);
         layout.sources.push(text_selection::Source {
             id,
-            text: source,
+            text: source.into(),
             label: copied_label(event),
         });
         layout.links.push(links);
@@ -502,7 +559,7 @@ pub(super) fn open_text(event: &Event) -> String {
             .collect::<Vec<_>>()
             .join("\n")
     } else {
-        event.body.clone()
+        super::tool_detail::Part::text(event.body.clone(), is_prose(&event.kind)).source
     }
 }
 

@@ -4924,6 +4924,8 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
+            id: "Bash-fixture".into(),
+            title: "Bash".into(),
             name: "Bash".into(),
             input: vec![Section::Code {
                 label: "command".into(),
@@ -4937,6 +4939,8 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             is_error: false,
         },
         ToolCall {
+            id: "Read-fixture".into(),
+            title: "Read".into(),
             name: "Read".into(),
             input: vec![Section::Fields(vec![
                 ("path".into(), "agents/src/log.rs".into()),
@@ -4978,18 +4982,11 @@ fn task_log_open_tool_snapshot() {
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "cargo test");
     assert!(matches!(buf[(x, y)].fg, Color::Rgb(..)));
-    let (x, y) = rendered_cell(&open, "stdout");
-    assert_eq!(buf[(x, y)].fg, Color::Blue);
-    assert!(
-        buf[(x, y)]
-            .modifier
-            .contains(ratatui::style::Modifier::BOLD)
-    );
     let (x, y) = rendered_cell(&open, "running…");
     assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(
         super::log::open_text(&view.log[7]),
-        "Bash\ncommand\ncargo test\nstdout\nrunning 3 tests\n...\n\nRead\npath: agents/src/log.rs\nrange: lines 1–40\nrunning…"
+        "Bash\ncargo test\n\nrunning 3 tests\n...\n\nRead\npath: agents/src/log.rs\nrange: lines 1–40\nrunning…"
     );
 }
 
@@ -5042,7 +5039,7 @@ fn task_log_open_tool_copies_a_dragged_section() {
     assert_eq!(
         action,
         Some(Action::Copy {
-            text: "cargo test\nstdout\nrunning".into(),
+            text: "cargo test\n\nrunning".into(),
             label: "Copied selection".into()
         })
     );
@@ -5523,4 +5520,343 @@ fn notice_sits_at_task_list_bottom_left_for_one_second() {
         None
     );
     assert!(!log_screen(&view, 100, 25, now).contains("Resume is not supported"));
+}
+
+#[test]
+fn review_refresh_cancels_open_selection() {
+    let (mut view, now) = open_tool_fixture();
+    let open = log_screen(&view, 100, 48, now);
+    let (x, y) = rendered_cell(&open, "cargo test");
+    view.begin_text_selection(x, y);
+    view.extend_text_selection(x + 4, y);
+    let mut events = view.log.clone();
+    events[7].calls[1].output = Some(vec![]);
+    view.set_log(events);
+    assert!(!view.text_selection_dragging());
+    assert!(view.finish_text_selection(x + 4, y).is_none());
+}
+
+#[test]
+fn review_running_call_refreshes_to_error_or_denied() {
+    for kind in [crate::log::Kind::Error, crate::log::Kind::Denied] {
+        let (mut view, now) = open_tool_fixture();
+        log_screen(&view, 100, 48, now);
+        let mut events = view.log.clone();
+        events[7].kind = kind.clone();
+        events[7].calls[1].output = Some(vec![]);
+        view.set_log(events);
+        assert_eq!(view.log_open.as_ref().unwrap().kind, kind);
+    }
+}
+
+#[test]
+fn review_cached_layout_shares_source_bytes() {
+    let (view, now) = open_tool_fixture();
+    log_screen(&view, 100, 48, now);
+    let sources = view.viewport.borrow().log_text.sources.clone();
+    log_screen(&view, 100, 48, now);
+    let viewport = view.viewport.borrow();
+    for (cached, drawn) in sources.iter().zip(&viewport.log_text.sources) {
+        assert_eq!(cached.text.as_ptr(), drawn.text.as_ptr());
+        assert_eq!(drawn.text.as_ptr(), drawn.clone().text.as_ptr());
+    }
+}
+
+#[test]
+fn open_tool_layout_titles_and_rules() {
+    let (mut view, now) = open_tool_fixture();
+    view.log[7].calls.truncate(1);
+    view.log[7].calls[0].title = "Run tests".into();
+    view.set_log_open(Some(view.log[7].clone()));
+    let open = log_screen(&view, 100, 48, now);
+    assert!(
+        open.lines().any(|line| line.trim() == "35s Run tests"),
+        "{open}"
+    );
+    assert!(
+        !open
+            .lines()
+            .any(|line| matches!(line.trim(), "Bash" | "command" | "stdout"))
+    );
+    assert!(
+        open.lines()
+            .any(|line| line.contains('↓') && line.contains('─'))
+    );
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
+    view.render_at(buf.area, &mut buf, now);
+    let (x, y) = rendered_cell(&open, "↓");
+    let area = view.viewport.borrow().log_text.area;
+    assert_eq!(x, area.x + area.width / 2);
+    assert_eq!(buf[(x, y)].fg, Color::Reset);
+    assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+}
+
+#[test]
+fn open_json_body_is_pretty_for_every_kind() {
+    for kind in [
+        crate::log::Kind::Tool,
+        crate::log::Kind::Error,
+        crate::log::Kind::Denied,
+        crate::log::Kind::Assistant,
+        crate::log::Kind::User,
+        crate::log::Kind::Agent,
+        crate::log::Kind::Session,
+        crate::log::Kind::QueuedUser,
+        crate::log::Kind::QueuedSystem,
+    ] {
+        let (mut view, now) = log_fixture();
+        let mut event = view.log[7].clone();
+        event.kind = kind;
+        event.body = "{\"answer\":[1,2]}".into();
+        event.calls.clear();
+        view.set_log_open(Some(event));
+        let open = log_screen(&view, 100, 48, now);
+        assert!(open.contains("\"answer\": ["), "{open}");
+        assert!(open.lines().any(|line| line.trim() == "1,"));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
+        view.render_at(buf.area, &mut buf, now);
+        let area = view.viewport.borrow().log_text.area;
+        assert!(matches!(buf[(area.x + 2, area.y + 1)].fg, Color::Rgb(..)));
+    }
+}
+
+#[test]
+fn open_view_top_button_and_scrollbar() {
+    let (mut view, now) = log_fixture();
+    let mut event = view.log[7].clone();
+    event.body = (0..80)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    view.set_log_open(Some(event));
+    let top = log_screen(&view, 100, 25, now);
+    assert!(!top.contains(" ↑ Top "));
+    let area = view.viewport.borrow().log_text.area;
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
+    view.render_at(buf.area, &mut buf, now);
+    assert_eq!(buf[(area.right(), area.top())].symbol(), "┃");
+    view.viewport.borrow_mut().log_open_scroll = usize::MAX;
+    let bottom = log_screen(&view, 100, 25, now);
+    assert!(bottom.contains(" ↑ Top "), "{bottom}");
+    view.render_at(buf.area, &mut buf, now);
+    assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), "┃");
+    click_text(&mut view, &bottom, " ↑ Top ");
+    assert_eq!(view.viewport.borrow().log_open_scroll, 0);
+    assert!(view.log_open.is_some());
+    assert!(!log_screen(&view, 100, 25, now).contains(" ↑ Top "));
+}
+
+#[test]
+fn real_tool_headers_show_description_agent_skill_and_recipient() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let calls =
+        crate::providers::claude::log::tail(&root.join("claude-tool-calls.jsonl"), 100).unwrap();
+    let messages = crate::providers::claude::log::tail_session(
+        &root.join("claude-tool-details.jsonl"),
+        100,
+        true,
+    )
+    .unwrap();
+    for (name, title) in [
+        ("Bash", "改到持久目录"),
+        ("Agent", "Plan agent 写工具详情计划"),
+        ("Skill", "secrets:secrets-manager"),
+        ("SendMessage", "To "),
+    ] {
+        let event = calls
+            .iter()
+            .chain(&messages)
+            .find(|event| event.calls.iter().any(|call| call.name == name))
+            .unwrap();
+        let call = event.calls.iter().find(|call| call.name == name).unwrap();
+        let mut event = event.clone();
+        event.calls = vec![call.clone()];
+        let (mut view, now) = log_fixture();
+        view.set_log_open(Some(event.clone()));
+        let open = log_screen(&view, 120, 48, now);
+        let header = open
+            .lines()
+            .find(|line| line.replace(' ', "").contains(&title.replace(' ', "")))
+            .unwrap_or_else(|| panic!("{name}: {open}"));
+        assert!(!header.contains(" Tool "), "{header}");
+        assert!(
+            header
+                .replace(' ', "")
+                .ends_with(&call.title.replace(' ', ""))
+        );
+        for kind in [crate::log::Kind::Error, crate::log::Kind::Denied] {
+            event.kind = kind;
+            view.set_log_open(Some(event.clone()));
+            let open = log_screen(&view, 120, 48, now);
+            assert!(
+                open.lines()
+                    .any(|line| line.replace(' ', "").contains(&format!(
+                        "{}{}",
+                        super::log::kind_label(&event.kind),
+                        call.title.replace(' ', "")
+                    )))
+            );
+        }
+    }
+}
+
+#[test]
+fn real_tabs_survive_copy_and_expanded_cell_selection() {
+    let record: serde_json::Value = serde_json::from_str(
+        include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .nth(3)
+            .unwrap(),
+    )
+    .unwrap();
+    let source = record["message"]["content"][0]["content"]
+        .as_str()
+        .unwrap()
+        .lines()
+        .nth(1)
+        .unwrap();
+    assert!(source.contains('\t'));
+    let (mut view, now) = open_tool_fixture();
+    let mut event = view.log[7].clone();
+    event.calls.truncate(1);
+    event.calls[0].input = vec![crate::log::Section::Code {
+        label: "command".into(),
+        lang: "text".into(),
+        text: source.into(),
+    }];
+    event.calls[0].output = None;
+    view.set_log_open(Some(event.clone()));
+    let open = log_screen(&view, 100, 48, now);
+    assert!(super::log::open_text(&event).contains(source));
+    assert!(
+        !open
+            .lines()
+            .any(|line| line.contains('↓') && line.contains('─'))
+    );
+    let (x, y) = rendered_cell(&open, "45    # terminal");
+    view.begin_text_selection(x, y);
+    view.extend_text_selection(x + source.replace('\t', "    ").len() as u16, y);
+    log_screen(&view, 100, 48, now);
+    assert_eq!(
+        view.finish_text_selection(x + source.replace('\t', "    ").len() as u16, y),
+        Some(Action::Copy {
+            text: source.into(),
+            label: "Copied tool message".into()
+        })
+    );
+    view.begin_text_selection(x + 2, y);
+    view.extend_text_selection(x + 4, y);
+    assert_eq!(view.finish_text_selection(x + 4, y), None);
+    // All four display cells refer to one byte, and crossing the tab's end copies it once.
+    view.begin_text_selection(x + 2, y);
+    view.extend_text_selection(x + 6, y);
+    assert_eq!(
+        view.finish_text_selection(x + 6, y),
+        Some(Action::Copy {
+            text: "\t".into(),
+            label: "Copied tool message".into()
+        })
+    );
+}
+
+#[test]
+fn narrow_scrolled_tool_label_drag_stays_inside_the_buffer() {
+    let (mut view, now) = open_tool_fixture();
+    let mut event = view.log[7].clone();
+    event.calls[0].input = vec![crate::log::Section::Diff {
+        label: "/workspace/very/long/path/to/source.rs".repeat(6),
+        text: "+中文".into(),
+    }];
+    view.set_log_open(Some(event));
+    let open = log_screen(&view, 30, 25, now);
+    let (x, y) = rendered_cell(&open, "/workspace");
+    view.begin_text_selection(x, y);
+    view.extend_text_selection(29, y + 4);
+    log_screen(&view, 30, 25, now);
+    let viewport = view.viewport.borrow();
+    for row in &viewport.log_text.rows {
+        assert!(
+            row.cells
+                .iter()
+                .all(|(range, _)| range.end <= viewport.log_text.area.width)
+        );
+    }
+}
+
+#[test]
+fn open_tool_without_calls_keeps_its_row_title() {
+    let (mut view, now) = log_fixture();
+    let event = view.log[7].clone();
+    assert!(event.calls.is_empty());
+    view.set_log_open(Some(event));
+    let open = log_screen(&view, 100, 25, now);
+    assert!(
+        open.lines().any(|line| line.trim() == "35s run tests"),
+        "{open}"
+    );
+}
+
+#[test]
+fn tool_outputs_and_markdown_use_shared_json_rendering() {
+    for output in [
+        crate::log::Section::Text {
+            label: "stdout".into(),
+            text: "{\"answer\":[1,2]}".into(),
+        },
+        crate::log::Section::Markdown {
+            label: "output".into(),
+            text: "{\"answer\":[1,2]}".into(),
+        },
+        crate::log::Section::Code {
+            label: "output".into(),
+            lang: "text".into(),
+            text: "{\"answer\":[1,2]}".into(),
+        },
+    ] {
+        let (mut view, now) = open_tool_fixture();
+        let mut event = view.log[7].clone();
+        event.calls.truncate(1);
+        event.calls[0].output = Some(vec![output]);
+        view.set_log_open(Some(event.clone()));
+        let open = log_screen(&view, 100, 48, now);
+        assert!(open.contains("\"answer\": ["));
+        assert!(super::log::open_text(&event).contains("\n  \"answer\": [\n    1,"));
+    }
+    let (mut view, now) = open_tool_fixture();
+    let mut event = view.log[7].clone();
+    event.calls.truncate(1);
+    event.calls[0].output = Some(vec![]);
+    view.set_log_open(Some(event));
+    let open = log_screen(&view, 100, 48, now);
+    assert!(open.contains("(no output)"));
+    assert!(
+        open.lines()
+            .any(|line| line.contains('↓') && line.contains('─'))
+    );
+    let area = view.viewport.borrow().log_text.area;
+    assert_eq!(area.width, 96);
+    assert!(!open.contains('┃'));
+}
+
+#[test]
+fn pretty_json_body_remaps_provider_path_ranges() {
+    let (mut view, now) = log_fixture();
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let path = dir.path().join("report.md");
+    std::fs::write(&path, "report").unwrap();
+    let path_text = path.to_str().unwrap();
+    let mut event = view.log[7].clone();
+    event.kind = crate::log::Kind::QueuedSystem;
+    event.body = serde_json::json!({"note": "中文", "path": path_text}).to_string();
+    let start = event.body.find(path_text).unwrap();
+    event.paths = vec![start..start + path_text.len()];
+    view.set_log_open(Some(event));
+    log_screen(&view, 100, 48, now);
+    assert!(
+        view.viewport
+            .borrow()
+            .log_links
+            .iter()
+            .any(|(_, target)| target == &path)
+    );
 }

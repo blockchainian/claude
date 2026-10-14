@@ -207,7 +207,8 @@ fn push_text(
         } else {
             range.clone()
         };
-        let displayed: String = grapheme
+        let expanded = grapheme.replace('\t', "    ");
+        let displayed: String = expanded
             .chars()
             .map(|ch| if ch.is_control() { ' ' } else { ch })
             .collect();
