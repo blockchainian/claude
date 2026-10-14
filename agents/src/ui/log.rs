@@ -334,21 +334,31 @@ pub(super) fn body_line(event: &Event, body_width: usize) -> Line<'static> {
 /// and whether any path was shortened.
 fn fitted_body_line(event: &Event, body_width: usize) -> (Line<'static>, bool) {
     let body_style = super::style::log_styles(&event.kind).1;
-    let body = event.body.split_whitespace().collect::<Vec<_>>().join(" ");
     if is_prose(&event.kind) {
+        // Markdown blocks end at line breaks, so they are kept until rendering.
+        let body = event
+            .body
+            .lines()
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>()
+            .join("\n");
         let shortened = super::line_truncation::abbreviate_paths_in_text(&body, body_width);
-        let line = super::markdown::render(&shortened, usize::MAX)
-            .into_iter()
-            .next()
-            .map(|mut line| {
-                for span in &mut line.spans {
-                    span.style = body_style.patch(span.style);
-                }
-                line
-            })
-            .unwrap_or_else(|| Line::from(Span::styled(shortened.clone(), body_style)));
-        (line, shortened != body)
+        let mut spans = Vec::new();
+        for line in super::markdown::render(&shortened, usize::MAX) {
+            if line.spans.iter().all(|span| span.content.trim().is_empty()) {
+                continue;
+            }
+            if !spans.is_empty() {
+                spans.push(Span::styled(" ", body_style));
+            }
+            spans.extend(line.spans.into_iter().map(|mut span| {
+                span.style = body_style.patch(span.style);
+                span
+            }));
+        }
+        (Line::from(spans), shortened != body)
     } else {
+        let body = collapse_whitespace(event.body.trim());
         let (text, paths) = display_paths(event);
         let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width);
         let cut = shortened != body;
@@ -538,6 +548,15 @@ mod log_markdown {
             assert_eq!(buffer[(35, 0)].fg, crate::theme::link_color());
             assert!(buffer[(35, 0)].modifier.contains(Modifier::UNDERLINED));
         }
+    }
+
+    #[test]
+    fn prose_blocks_keep_their_own_styles_on_one_row() {
+        let buffer = body_buffer(Kind::User, "# Title\n\nplain  text\n- item", 80);
+        assert_eq!(body_text(&buffer), "Title plain text • item");
+        assert!(buffer[(19, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(25, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(25, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]

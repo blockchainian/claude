@@ -181,7 +181,7 @@ fn abbreviate_directories(path: &str, max_width: usize) -> String {
 pub(super) fn abbreviate_paths_in_text(text: &str, max_width: usize) -> String {
     let mut ranges = Vec::new();
     let mut start = 0;
-    for word in text.split(' ') {
+    for word in text.split([' ', '\n']) {
         if let Some(range) = prose_path(word) {
             ranges.push(start + range.start..start + range.end);
         }
