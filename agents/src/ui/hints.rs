@@ -26,7 +26,12 @@ impl View {
             .selected_row()
             .is_some_and(|session| !session.can_resume())
         {
-            hint_line(&[("?", "help"), ("esc", "back"), ("↑/↓", "move")])
+            hint_line(&[
+                ("?", "help"),
+                ("esc", "back"),
+                ("↑/↓", "move"),
+                ("n", "new"),
+            ])
         } else if self.searching {
             hint_line(&[("esc", "back"), ("enter", "open")])
         } else {

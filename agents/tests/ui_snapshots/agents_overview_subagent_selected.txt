@@ -27,4 +27,4 @@
                                                                          │
                                                                          │
                                                                          │
-  ? help  esc back  ↑/↓ move
+  ? help  esc back  ↑/↓ move  n new

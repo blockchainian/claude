@@ -4442,7 +4442,7 @@ mod subagent_actions {
         let view = fixture();
         assert_eq!(
             view.center_footer_hints().to_string(),
-            "? help  esc back  ↑/↓ move"
+            "? help  esc back  ↑/↓ move  n new"
         );
         assert_eq!(
             subagent_rows::screen(&view, 120, 30),
