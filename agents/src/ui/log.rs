@@ -34,7 +34,8 @@ impl View {
             return;
         }
         if let Some(event) = &self.log_open {
-            self.render_open_event(event, area, buf);
+            let time = event_time(event, session, self.is_newest_shown(event), now);
+            self.render_open_event(event, &time, area, buf);
             return;
         }
         if self.log_search.active() && area.height > 1 {
@@ -91,23 +92,18 @@ impl View {
         viewport.log_jump = jump;
     }
 
-    /// Draws one log event whole: its time and kind, a blank row, then the full body.
-    fn render_open_event(&self, event: &Event, area: Rect, buf: &mut Buffer) {
-        let (label_style, body_style) = super::style::log_styles(&event.kind);
-        let header = Line::from(vec![
-            Span::styled(
-                event
-                    .started_at
-                    .with_timezone(&Local)
-                    .format(CLOCK_FORMAT)
-                    .to_string(),
-                Style::default(),
-            )
-            .dim(),
-            " · ".dim(),
-            Span::styled(kind_label(&event.kind), label_style),
-        ]);
-        super::render::line(header, super::render::row(area, 1, 1), buf);
+    /// Draws one log event whole: its time and kind as its list row shows them, a blank row,
+    /// then the full body.
+    fn render_open_event(&self, event: &Event, time: &str, area: Rect, buf: &mut Buffer) {
+        let (_, body_style) = super::style::log_styles(&event.kind);
+        render_row_label(
+            event,
+            time,
+            CLOCK_WIDTH,
+            self.is_newest_shown(event),
+            super::render::row(area, 1, 1),
+            buf,
+        );
         let body = open_text(event);
         let options = super::line_truncation::prose_wrap_options(usize::from(area.width));
         let mut lines = if is_prose(&event.kind) {
@@ -181,14 +177,23 @@ impl View {
     /// How long until the top log row's time reads differently, or `None` if it never does.
     pub(crate) fn log_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
         let session = self.selected_row()?;
-        if self.log_scroll() != 0
-            || self.log_open.is_some()
-            || self.log_session.as_ref() != Some(&session.id)
-        {
+        if self.log_session.as_ref() != Some(&session.id) {
             return None;
         }
-        let (_, event) = self.shown_log_events().last()?;
+        let event = match &self.log_open {
+            Some(event) if self.is_newest_shown(event) => event,
+            Some(_) => return None,
+            None if self.log_scroll() != 0 => return None,
+            None => self.shown_log_events().last()?.1,
+        };
         row_time_changes_in(&row_time(event, session, true), now)
+    }
+
+    /// Whether `event` is the newest log event the search lets through.
+    fn is_newest_shown(&self, event: &Event) -> bool {
+        self.shown_log_events()
+            .last()
+            .is_some_and(|(_, newest)| newest.started_at == event.started_at)
     }
 
     /// The log events the search lets through, with their index in the log.
@@ -295,24 +300,10 @@ fn render_event(
     if area.is_empty() {
         return false;
     }
-    let width = usize::from(area.width);
-    let time_width = time_width.min(width);
-    let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
-    let (label_style, _) = super::style::log_styles(&event.kind);
-    let time_style = super::style::log_time_style(&event.kind, last);
-    Line::from(Span::styled(time.to_owned(), time_style))
-        .right_aligned()
-        .render(time_area, buf);
-    let content_width = width.saturating_sub(time_width + 1);
-    if content_width == 0 {
+    let Some(body_area) = render_row_label(event, time, time_width, last, area, buf) else {
         return true;
-    }
-    let content_x = area.x + time_width as u16 + 1;
-    let label = format!("{:<KIND_WIDTH$} ", kind_label(&event.kind));
-    let label_width = label.width().min(content_width);
-    Line::from(Span::styled(label, label_style))
-        .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
-    let body_width = content_width.saturating_sub(label_width);
+    };
+    let body_width = usize::from(body_area.width);
     let (mut body, shortened) = fitted_body_line(event, body_width);
     let cut = shortened || body.width() > body_width;
     if let Some(search) = search.filter(|search| !search.query.is_empty()) {
@@ -339,11 +330,43 @@ fn render_event(
             })
             .collect();
     }
-    truncate_line_with_ellipsis_if_overflow(body, body_width).render(
-        Rect::new(content_x + label_width as u16, area.y, body_width as u16, 1),
-        buf,
-    );
+    truncate_line_with_ellipsis_if_overflow(body, body_width).render(body_area, buf);
     cut
+}
+
+/// Draws a log row's time and kind columns, returning the area left for its body, or `None`
+/// when the time column fills the row.
+fn render_row_label(
+    event: &Event,
+    time: &str,
+    time_width: usize,
+    last: bool,
+    area: Rect,
+    buf: &mut Buffer,
+) -> Option<Rect> {
+    let width = usize::from(area.width);
+    let time_width = time_width.min(width);
+    let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
+    let (label_style, _) = super::style::log_styles(&event.kind);
+    let time_style = super::style::log_time_style(&event.kind, last);
+    Line::from(Span::styled(time.to_owned(), time_style))
+        .right_aligned()
+        .render(time_area, buf);
+    let content_width = width.saturating_sub(time_width + 1);
+    if content_width == 0 {
+        return None;
+    }
+    let content_x = area.x + time_width as u16 + 1;
+    let label = format!("{:<KIND_WIDTH$} ", kind_label(&event.kind));
+    let label_width = label.width().min(content_width);
+    Line::from(Span::styled(label, label_style))
+        .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
+    Some(Rect::new(
+        content_x + label_width as u16,
+        area.y,
+        content_width.saturating_sub(label_width) as u16,
+        1,
+    ))
 }
 
 /// The full text an open log event shows below its header.

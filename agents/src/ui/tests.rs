@@ -4776,6 +4776,25 @@ fn task_log_click_on_whole_row_keeps_list() {
 }
 
 #[test]
+fn task_log_open_event_header_matches_its_list_row() {
+    for body in ["A long response", "The newest reply"] {
+        let (mut view, now) = log_fixture();
+        // The newest row reads its time as "30s ago".
+        view.log[7].kind = crate::log::Kind::Assistant;
+        view.log[7].body = format!("The newest reply {}", "runs long ".repeat(20));
+        let list = log_screen(&view, 100, 25, now);
+        let row = list.lines().find(|line| line.contains(body)).unwrap();
+        let header = row[..row.find(body).unwrap()].trim_end();
+        click_log_text(&mut view, &list, body, MouseButton::Left);
+        let open = log_screen(&view, 100, 25, now);
+        assert!(
+            open.lines().any(|line| line == header),
+            "{header:?}\n{open}"
+        );
+    }
+}
+
+#[test]
 fn task_log_click_opens_row_with_shortened_path() {
     let (mut view, now) = log_fixture();
     let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
