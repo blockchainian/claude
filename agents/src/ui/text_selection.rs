@@ -412,6 +412,22 @@ fn column_byte(text: &str, column: usize, end: bool) -> usize {
 }
 
 impl View {
+    /// Keeps a list selection on its rows after their ids grew by `rows`.
+    pub(super) fn shift_list_selection(&self, panel: Panel, rows: usize) {
+        let mut selection = self.text_selection.borrow_mut();
+        let Some(selection) = selection
+            .as_mut()
+            .filter(|selection| selection.panel == panel)
+        else {
+            return;
+        };
+        selection.start.segment += rows;
+        selection.end.segment += rows;
+        for source in &mut selection.sources {
+            source.id += rows;
+        }
+    }
+
     pub(super) fn selecting_list(&self, panel: Panel) -> bool {
         self.text_selection
             .borrow()

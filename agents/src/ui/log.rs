@@ -175,6 +175,7 @@ impl View {
         let mut viewport = self.viewport.borrow_mut();
         viewport.log_scroll += added;
         viewport.log_unseen += added;
+        self.shift_list_selection(text_selection::Panel::LogList, added);
     }
 
     /// How long until the top log row's time reads differently, or `None` if it never does.

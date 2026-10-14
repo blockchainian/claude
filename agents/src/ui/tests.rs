@@ -280,6 +280,29 @@ fn new_log_events_keep_rows_still_while_mouse_is_held() {
 }
 
 #[test]
+fn new_log_events_while_dragging_copy_the_rows_on_screen() {
+    let (mut view, now) = log_fixture();
+    let before = log_screen(&view, 100, 25, now);
+    let rect = view.viewport.borrow().log;
+    let (x, y) = rendered_cell(&before, "run a background job");
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    view.set_log(log_with_newer_event(&view, now));
+    log_screen(&view, 100, 25, now);
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), rect.x + 40, y + 2));
+    log_screen(&view, 100, 25, now);
+    let Some(Action::Copy { text, .. }) =
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), rect.x + 40, y + 2))
+    else {
+        panic!("no copy");
+    };
+    let lines: Vec<_> = text.lines().collect();
+    assert_eq!(lines.len(), 3, "{text}");
+    assert_eq!(lines[0], "run a background job *");
+    assert!(lines[1].contains("Also inspect the tests"), "{text}");
+    assert!(lines[2].contains("failed check"), "{text}");
+}
+
+#[test]
 fn new_log_events_keep_rows_still_off_the_newest_row() {
     let (mut view, now) = log_fixture();
     log_screen(&view, 100, 25, now);
