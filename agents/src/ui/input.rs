@@ -11,7 +11,7 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
-        if self.delete_dialog.is_some()
+        if self.confirm_dialog.is_some()
             || self.help
             || self.rename_target.is_some()
             || self.searching
@@ -225,7 +225,7 @@ impl View {
         let plain = !key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
-        if self.delete_dialog.is_none()
+        if self.confirm_dialog.is_none()
             && !self.help
             && self.rename_target.is_none()
             && !self.log_search.editing
@@ -234,7 +234,7 @@ impl View {
             && ((plain
                 && (matches!(
                     key.code,
-                    KeyCode::Backspace | KeyCode::Char('f' | 'x' | 'h' | 'p')
+                    KeyCode::Backspace | KeyCode::Char('f' | 'x' | 'a' | 'h' | 'p')
                 ) || (key.code == KeyCode::Char('r')
                     && !self.selected_row().is_some_and(Session::can_resume))))
                 || (key.modifiers.contains(KeyModifiers::CONTROL)
@@ -243,22 +243,27 @@ impl View {
             return None;
         }
         self.notice = None;
-        if let Some(dialog) = &mut self.delete_dialog {
+        if let Some(dialog) = &mut self.confirm_dialog {
             if plain {
                 match key.code {
-                    KeyCode::Esc => self.delete_dialog = None,
+                    KeyCode::Esc => self.confirm_dialog = None,
                     KeyCode::Enter => {
-                        let dialog = self.delete_dialog.take().expect("delete dialog is open");
+                        let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
                         if dialog.confirm {
-                            return Some(Action::Delete(dialog.id));
+                            return Some(dialog.action());
                         }
                     }
                     KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') => {
                         dialog.confirm = !dialog.confirm;
                     }
-                    // Codex's number shortcuts: 1 accepts Cancel at once; the delete item
-                    // requires explicit confirmation, so 2 only selects it.
-                    KeyCode::Char('1') => self.delete_dialog = None,
+                    // Codex's number shortcuts: 1 accepts Cancel at once; 2 accepts archive
+                    // at once, while the delete item requires explicit confirmation, so 2
+                    // only selects it.
+                    KeyCode::Char('1') => self.confirm_dialog = None,
+                    KeyCode::Char('2') if matches!(dialog.removal, Removal::Archive) => {
+                        let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
+                        return Some(dialog.action());
+                    }
                     KeyCode::Home | KeyCode::PageUp => dialog.confirm = false,
                     KeyCode::End | KeyCode::PageDown | KeyCode::Char('2') => dialog.confirm = true,
                     _ => {}
@@ -471,13 +476,26 @@ impl View {
                     self.searching = false;
                 }
             }
-            KeyCode::Char('a') => return Some(Action::Unsupported("Archive")),
+            KeyCode::Char('a') => {
+                if let Some(session) = self.selected_row() {
+                    if !self.selected_capabilities().archive {
+                        return Some(Action::Unsupported("Archive"));
+                    }
+                    self.confirm_dialog = Some(ConfirmDialog {
+                        removal: Removal::Archive,
+                        id: session.id.clone(),
+                        title: session.display_title().to_owned(),
+                        confirm: false,
+                    });
+                }
+            }
             KeyCode::Backspace => {
                 if let Some(session) = self.selected_row() {
                     if !self.selected_capabilities().delete {
                         return Some(Action::Unsupported("Delete"));
                     }
-                    self.delete_dialog = Some(DeleteDialog {
+                    self.confirm_dialog = Some(ConfirmDialog {
+                        removal: Removal::Delete,
                         id: session.id.clone(),
                         title: session.display_title().to_owned(),
                         confirm: false,
@@ -504,7 +522,14 @@ impl View {
                     Action::Unsupported("Fork")
                 });
             }
-            KeyCode::Char('x') => return Some(Action::Unsupported("Stop")),
+            KeyCode::Char('x') => {
+                let id = self.selected_id()?.clone();
+                return Some(if self.selected_capabilities().stop {
+                    Action::Stop(id)
+                } else {
+                    Action::Unsupported("Stop")
+                });
+            }
             KeyCode::Char('h') => {
                 let id = self.selected_id()?.to_owned();
                 self.hide(&id);

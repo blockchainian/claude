@@ -398,6 +398,8 @@ impl App {
             | Action::Fork(id)
             | Action::Rename { id, .. }
             | Action::Delete(id)
+            | Action::Archive(id)
+            | Action::Stop(id)
             | Action::TogglePin { id, .. } => Some(id),
             _ => None,
         };
@@ -478,6 +480,29 @@ impl App {
                     }
                 } else {
                     self.view.set_notice(Some("Nothing to delete".into()));
+                }
+            }
+            Action::Archive(id) => {
+                if let Some(session) = self.session(&id) {
+                    match self.hub.provider(id.provider).archive(&session) {
+                        Ok(()) => {
+                            self.view.hide(&id);
+                            self.refresh();
+                        }
+                        Err(error) => self
+                            .view
+                            .set_notice(Some(format!("Failed to archive: {error}"))),
+                    }
+                }
+            }
+            Action::Stop(id) => {
+                if let Some(session) = self.session(&id) {
+                    match self.hub.provider(id.provider).stop(&session) {
+                        Ok(()) => self.refresh(),
+                        Err(error) => self
+                            .view
+                            .set_notice(Some(format!("Failed to stop: {error}"))),
+                    }
                 }
             }
             Action::Hide(_) => {}

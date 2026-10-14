@@ -1416,26 +1416,26 @@ fn live_center_rename_active() {
 fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
-    assert!(!view.delete_dialog.as_ref().unwrap().confirm);
+    assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
     assert_eq!(
         view.center_footer_hints().to_string(),
         "↑/↓ move  enter select  esc back"
     );
     assert_eq!(key(&mut view, KeyCode::Enter), None);
-    assert!(view.delete_dialog.is_none());
+    assert!(view.confirm_dialog.is_none());
     key(&mut view, KeyCode::Backspace);
     assert_eq!(key(&mut view, KeyCode::Down), None);
     assert_eq!(
         key(&mut view, KeyCode::Enter),
         Some(Action::Delete(session_key("42")))
     );
-    assert!(view.delete_dialog.is_none());
+    assert!(view.confirm_dialog.is_none());
     key(&mut view, KeyCode::Backspace);
     key(&mut view, KeyCode::Esc);
-    assert!(view.delete_dialog.is_none());
+    assert!(view.confirm_dialog.is_none());
     key(&mut view, KeyCode::Backspace);
     assert_eq!(key(&mut view, KeyCode::Char('2')), None);
-    assert!(view.delete_dialog.as_ref().unwrap().confirm);
+    assert!(view.confirm_dialog.as_ref().unwrap().confirm);
     for code in [
         KeyCode::Char('o'),
         KeyCode::Char('n'),
@@ -1443,7 +1443,7 @@ fn delete_dialog_defaults_to_cancel_and_requires_enter() {
         KeyCode::Char(' '),
     ] {
         assert_eq!(key(&mut view, code), None);
-        assert!(view.delete_dialog.is_some());
+        assert!(view.confirm_dialog.is_some());
     }
     assert_eq!(
         key(&mut view, KeyCode::Enter),
@@ -1488,7 +1488,7 @@ fn delete_live_rows_open_the_dialog_and_ignore_show_more() {
         started_at: None,
     });
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
-    assert!(view.delete_dialog.is_some());
+    assert!(view.confirm_dialog.is_some());
     assert!(screen(&view, 120, 24).contains("This stops any running work in this task"));
     assert_eq!(key(&mut view, KeyCode::Down), None);
     assert_eq!(
@@ -1498,7 +1498,56 @@ fn delete_live_rows_open_the_dialog_and_ignore_show_more() {
     view.has_more = true;
     view.selected = usize::MAX;
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
-    assert!(view.delete_dialog.is_none());
+    assert!(view.confirm_dialog.is_none());
+}
+
+fn lifecycle_fixture() -> View {
+    let mut view = fixture();
+    view.set_capabilities(HashMap::from([(
+        ProviderId::Claude,
+        Capabilities {
+            stop: true,
+            archive: true,
+            ..Capabilities::default()
+        },
+    )]));
+    view
+}
+
+#[test]
+fn archive_dialog_shows_codex_copy_and_two_accepts_at_once() {
+    let mut view = lifecycle_fixture();
+    assert_eq!(key(&mut view, KeyCode::Char('a')), None);
+    let rendered = screen(&view, 120, 24);
+    assert!(rendered.contains("Archive “Current task”?"));
+    assert!(rendered.contains("then archives them. Their history can be restored from the"));
+    assert!(rendered.contains("2. Archive task and child agents"));
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    key(&mut view, KeyCode::Char('a'));
+    assert_eq!(
+        key(&mut view, KeyCode::Char('2')),
+        Some(Action::Archive(session_key("42")))
+    );
+    key(&mut view, KeyCode::Char('a'));
+    key(&mut view, KeyCode::Down);
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Archive(session_key("42")))
+    );
+}
+
+#[test]
+fn archive_and_stop_follow_capabilities() {
+    let mut view = lifecycle_fixture();
+    assert_eq!(
+        key(&mut view, KeyCode::Char('x')),
+        Some(Action::Stop(session_key("42")))
+    );
+    let mut view = fixture();
+    assert_eq!(
+        key(&mut view, KeyCode::Char('a')),
+        Some(Action::Unsupported("Archive"))
+    );
 }
 
 #[test]
@@ -1540,13 +1589,13 @@ fn live_center_delete_dialog() {
 fn delete_dialog_number_shortcuts_follow_codex() {
     let mut view = fixture();
     key(&mut view, KeyCode::Backspace);
-    assert!(view.delete_dialog.is_some());
+    assert!(view.confirm_dialog.is_some());
     assert_eq!(key(&mut view, KeyCode::Char('1')), None);
-    assert!(view.delete_dialog.is_none(), "1 accepts Cancel at once");
+    assert!(view.confirm_dialog.is_none(), "1 accepts Cancel at once");
     key(&mut view, KeyCode::Backspace);
     assert_eq!(key(&mut view, KeyCode::Char('2')), None);
     assert!(
-        view.delete_dialog.is_some(),
+        view.confirm_dialog.is_some(),
         "2 only selects the delete item"
     );
     assert_eq!(
@@ -4305,7 +4354,7 @@ mod subagent_actions {
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         assert!(view.rename_target.is_none());
         assert!(view.rename.text().is_empty());
-        assert!(view.delete_dialog.is_none());
+        assert!(view.confirm_dialog.is_none());
         assert!(view.hidden.is_empty());
         assert!(view.pinned.is_empty());
         assert!(!view.searching);
@@ -4334,6 +4383,7 @@ mod subagent_actions {
     ignored_key!(fork, KeyCode::Char('f'), KeyModifiers::NONE);
     ignored_key!(stop, KeyCode::Char('x'), KeyModifiers::NONE);
     ignored_key!(delete, KeyCode::Backspace, KeyModifiers::NONE);
+    ignored_key!(archive, KeyCode::Char('a'), KeyModifiers::NONE);
     ignored_key!(hide, KeyCode::Char('h'), KeyModifiers::NONE);
     ignored_key!(pin, KeyCode::Char('p'), KeyModifiers::NONE);
 
@@ -4416,7 +4466,7 @@ fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
     ] {
         assert_eq!(key(&mut view, code), Some(Action::Unsupported(name)));
         assert!(view.rename_target.is_none());
-        assert!(view.delete_dialog.is_none());
+        assert!(view.confirm_dialog.is_none());
     }
 }
 

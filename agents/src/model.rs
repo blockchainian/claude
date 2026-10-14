@@ -146,6 +146,10 @@ pub enum Action {
     Rename { id: SessionKey, name: String },
     /// Backspace, then confirmation: permanently delete the session transcript.
     Delete(SessionKey),
+    /// `a`, then confirmation: archive the session and its child agents.
+    Archive(SessionKey),
+    /// `x`: interrupt the session's running turn.
+    Stop(SessionKey),
     /// Unsupported provider operations show a notice.
     Unsupported(&'static str),
     /// "Show more" was activated: load the next page of inactive sessions.

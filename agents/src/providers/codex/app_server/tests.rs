@@ -1,9 +1,22 @@
 use crate::providers::codex::*;
+use serde_json::{Value, json};
+use std::time::{Duration, Instant};
 
-#[test]
-#[ignore = "requires the running shared Codex daemon and local auth; creates and deletes a real throwaway thread"]
-fn rename_real_codex_thread() {
-    let provider = CodexProvider::from_config().unwrap();
+struct Cleanup(String, PathBuf);
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let status = Command::new("codex")
+            .args(["delete", "--force", &self.0])
+            .env("CODEX_HOME", &self.1)
+            .stdin(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "throwaway cleanup failed");
+    }
+}
+
+/// Creates a throwaway thread with `codex exec` and deletes it on drop.
+fn throwaway_thread(provider: &CodexProvider) -> (String, Cleanup) {
     // Check before exec: never let exec start a missing daemon for this test.
     let socket = provider
         .home
@@ -23,37 +36,36 @@ fn rename_real_codex_thread() {
         .stdin(Stdio::null())
         .output()
         .unwrap();
-    let event: serde_json::Value = String::from_utf8_lossy(&output.stdout)
+    let event: Value = String::from_utf8_lossy(&output.stdout)
         .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .find(|v| v["type"] == "thread.started")
         .expect("exec must create a thread");
     let id = event["thread_id"].as_str().unwrap().to_owned();
-    struct Cleanup(String, PathBuf);
-    impl Drop for Cleanup {
-        fn drop(&mut self) {
-            let status = Command::new("codex")
-                .args(["delete", "--force", &self.0])
-                .env("CODEX_HOME", &self.1)
-                .stdin(Stdio::null())
-                .status()
-                .unwrap();
-            assert!(status.success(), "throwaway cleanup failed");
-        }
-    }
-    let _cleanup = Cleanup(id.clone(), provider.home.clone());
+    let cleanup = Cleanup(id.clone(), provider.home.clone());
     assert!(output.status.success(), "codex exec failed");
+    (id, cleanup)
+}
+
+fn stored_session(provider: &CodexProvider, id: &str) -> Session {
     let db = Connection::open_with_flags(
         provider.home.join("state_5.sqlite"),
         OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .unwrap();
-    let session = db
-        .query_row("SELECT * FROM threads WHERE id=?1", [&id], |row| {
-            super::super::session(row, &HashMap::new())
-        })
-        .unwrap()
-        .unwrap();
+    db.query_row("SELECT * FROM threads WHERE id=?1", [id], |row| {
+        super::super::session(row, &HashMap::new())
+    })
+    .unwrap()
+    .unwrap()
+}
+
+#[test]
+#[ignore = "requires the running shared Codex daemon and local auth; creates and deletes a real throwaway thread"]
+fn rename_real_codex_thread() {
+    let provider = CodexProvider::from_config().unwrap();
+    let (id, _cleanup) = throwaway_thread(&provider);
+    let session = stored_session(&provider, &id);
     assert!(provider.capabilities().rename);
     provider
         .rename(&session, "  agents-rpc-integration  ")
@@ -73,7 +85,7 @@ fn rename_real_codex_thread() {
     let line = index
         .lines()
         .rev()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .find(|v| v["id"] == id)
         .unwrap();
     assert_eq!(line["thread_name"], name);
@@ -84,5 +96,83 @@ fn rename_real_codex_thread() {
             .unwrap_err()
             .to_string(),
         "thread name must not be empty"
+    );
+}
+
+#[test]
+#[ignore = "requires the running shared Codex daemon and local auth; starts, interrupts, archives and deletes a real throwaway thread"]
+fn stop_and_archive_real_codex_thread() {
+    let provider = CodexProvider::from_config().unwrap();
+    let (id, _cleanup) = throwaway_thread(&provider);
+    let session = stored_session(&provider, &id);
+    assert!(provider.capabilities().stop && provider.capabilities().archive);
+
+    // Load the thread into the daemon and start a long turn on it.
+    let mut owner = super::Client::connect(&provider.home).unwrap();
+    let _: Value = owner
+        .request("thread/resume", json!({"threadId": id}))
+        .unwrap();
+    let started: Value = owner
+        .request(
+            "turn/start",
+            json!({
+                "threadId": id,
+                "input": [{"type": "text", "text": "Do not use tools. Write a 3000-word essay about rivers."}],
+            }),
+        )
+        .unwrap();
+    let turn = started["turn"]["id"].as_str().unwrap().to_owned();
+
+    // Right after turn/start the daemon can still report the turn as interrupted;
+    // wait until it reports the turn running, as a user pressing `x` would see it.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut client = super::Client::connect(&provider.home).unwrap();
+        if super::thread::running_turn(&mut client, &id).unwrap() == Some(turn.clone()) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "turn never reported running");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    provider.stop(&session).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        let mut client = super::Client::connect(&provider.home).unwrap();
+        let turns: Value = client
+            .request(
+                "thread/turns/list",
+                json!({"threadId": id, "limit": 1, "sortDirection": "desc"}),
+            )
+            .unwrap();
+        let latest = &turns["data"][0];
+        assert_eq!(latest["id"], turn);
+        if latest["status"] != "inProgress" || Instant::now() > deadline {
+            break latest["status"].clone();
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert_eq!(status, "interrupted");
+    // No running turn: stop does nothing.
+    provider.stop(&session).unwrap();
+    drop(owner);
+
+    provider.archive(&session).unwrap();
+    let archived: bool = Connection::open_with_flags(
+        provider.home.join("state_5.sqlite"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap()
+    .query_row("SELECT archived FROM threads WHERE id=?1", [&id], |row| {
+        row.get(0)
+    })
+    .unwrap();
+    assert!(archived);
+    assert!(
+        !provider
+            .snapshot(1)
+            .unwrap()
+            .sessions
+            .iter()
+            .any(|candidate| candidate.id == session.id)
     );
 }

@@ -86,7 +86,7 @@ fn other_child_rename_and_all_child_fork_delete_pin_stay_blocked() {
                 None
             );
             assert!(view.rename_target.is_none());
-            assert!(view.delete_dialog.is_none());
+            assert!(view.confirm_dialog.is_none());
             assert!(view.pinned.is_empty());
         }
     }

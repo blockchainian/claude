@@ -105,10 +105,27 @@ struct DetailsScroll {
     fallback_max: Option<usize>,
 }
 
-struct DeleteDialog {
+#[derive(Clone, Copy)]
+enum Removal {
+    Archive,
+    Delete,
+}
+
+/// Codex's confirmation before archiving or deleting a task.
+struct ConfirmDialog {
+    removal: Removal,
     id: SessionKey,
     title: String,
     confirm: bool,
+}
+
+impl ConfirmDialog {
+    fn action(&self) -> Action {
+        match self.removal {
+            Removal::Archive => Action::Archive(self.id.clone()),
+            Removal::Delete => Action::Delete(self.id.clone()),
+        }
+    }
 }
 
 pub struct View {
@@ -131,7 +148,7 @@ pub struct View {
     searching: bool,
     rename_target: Option<SessionKey>,
     rename: line_edit::LineEdit,
-    delete_dialog: Option<DeleteDialog>,
+    confirm_dialog: Option<ConfirmDialog>,
     help: bool,
     loading: bool,
     has_more: bool,
@@ -200,7 +217,7 @@ impl View {
             searching: false,
             rename_target: None,
             rename: line_edit::LineEdit::default(),
-            delete_dialog: None,
+            confirm_dialog: None,
             help: false,
             loading: false,
             has_more: false,

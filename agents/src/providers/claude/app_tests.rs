@@ -797,6 +797,8 @@ fn child_rename_only_reaches_provider_for_manager_threads() {
         for action in [
             Action::Fork(child.id.clone()),
             Action::Delete(child.id.clone()),
+            Action::Archive(child.id.clone()),
+            Action::Stop(child.id.clone()),
             Action::TogglePin {
                 id: child.id.clone(),
                 pinned: true,

@@ -64,6 +64,18 @@ fn request_user_input_pending_answered_and_offline() {
 }
 
 #[test]
+fn archived_threads_are_not_listed() {
+    let (dir, mut provider) = fixture();
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute("UPDATE threads SET archived=1 WHERE id='thread-0'", [])
+        .unwrap();
+    let sessions = provider.refresh(2).sessions;
+    assert_eq!(sessions.len(), 13);
+    assert!(!sessions.iter().any(|session| session.id.id == "thread-0"));
+}
+
+#[test]
 fn reads_named_columns_and_pages_inactive_threads() {
     let (_dir, mut provider) = fixture();
     let first = provider.refresh(1);
@@ -195,7 +207,8 @@ fn capabilities_gate_codex_actions_in_the_view() {
             new: true,
             delete: true,
             rename: true,
-            ..Capabilities::default()
+            stop: true,
+            archive: true,
         }
     );
     let mut session = provider.refresh(1).sessions.remove(0);
@@ -211,6 +224,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
         (KeyCode::Char('o'), Action::Resume(session.id.clone())),
         (KeyCode::Char('f'), Action::Fork(session.id.clone())),
         (KeyCode::Char('n'), Action::New(Some(session.cwd.clone()))),
+        (KeyCode::Char('x'), Action::Stop(session.id.clone())),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
@@ -428,13 +442,23 @@ fn delete_real_codex_sessions() {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            session = provider
-                .snapshot(1)
+            assert!(
+                !provider
+                    .snapshot(1)
+                    .unwrap()
+                    .sessions
+                    .iter()
+                    .any(|candidate| candidate.id == session.id)
+            );
+            let rollout: String = Connection::open(dir.path().join("state_5.sqlite"))
                 .unwrap()
-                .sessions
-                .into_iter()
-                .find(|candidate| candidate.id == session.id)
+                .query_row(
+                    "SELECT rollout_path FROM threads WHERE id=?1",
+                    [&session.id.id],
+                    |row| row.get(0),
+                )
                 .unwrap();
+            session.transcript = Some(PathBuf::from(rollout));
             assert!(
                 session
                     .transcript

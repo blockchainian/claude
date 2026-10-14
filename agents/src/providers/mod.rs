@@ -59,6 +59,7 @@ pub struct Capabilities {
     pub new: bool,
     pub rename: bool,
     pub delete: bool,
+    /// Interrupts the running turn; the session stays.
     pub stop: bool,
     pub archive: bool,
 }
@@ -86,6 +87,8 @@ pub trait Provider {
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command>;
     fn rename(&self, session: &Session, name: &str) -> io::Result<()>;
     fn delete(&self, session: &Session) -> io::Result<()>;
+    fn archive(&self, session: &Session) -> io::Result<()>;
+    fn stop(&self, session: &Session) -> io::Result<()>;
 }
 
 pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {

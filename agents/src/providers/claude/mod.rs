@@ -523,8 +523,7 @@ impl Provider for ClaudeProvider {
             new: true,
             rename: true,
             delete: true,
-            stop: true,
-            archive: true,
+            ..Capabilities::default()
         }
     }
 
@@ -583,6 +582,12 @@ impl Provider for ClaudeProvider {
 
     fn delete(&self, session: &Session) -> io::Result<()> {
         delete_session(&self.config_dir, session)
+    }
+    fn archive(&self, _: &Session) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+    fn stop(&self, _: &Session) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
     }
 }
 
@@ -758,8 +763,8 @@ mod tests {
                 new: true,
                 rename: true,
                 delete: true,
-                stop: true,
-                archive: true,
+                stop: false,
+                archive: false,
             }
         );
     }

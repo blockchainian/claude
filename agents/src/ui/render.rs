@@ -128,7 +128,7 @@ impl View {
         let layout = self.center_layout(area);
         if self.log_search.editing
             && !self.help
-            && self.delete_dialog.is_none()
+            && self.confirm_dialog.is_none()
             && !layout.log.is_empty()
         {
             let input = log::search_input_rect(layout.log.inner(Margin::new(2, 0)));
@@ -136,7 +136,7 @@ impl View {
             return Some((input.x + caret, input.y));
         }
         if !(self.searching || self.rename_target.is_some())
-            || self.delete_dialog.is_some()
+            || self.confirm_dialog.is_some()
             || self.help
             || layout.search.is_empty()
         {
@@ -257,31 +257,36 @@ impl View {
         }
         self.viewport.borrow_mut().log = layout.log;
         self.render_log(inset(layout.log), buf, now);
-        if let Some(dialog) = &self.delete_dialog {
-            self.render_delete_dialog(dialog, layout.list, buf);
+        if let Some(dialog) = &self.confirm_dialog {
+            self.render_confirm_dialog(dialog, layout.list, buf);
             self.viewport.borrow_mut().marker = None;
         }
     }
-    fn render_delete_dialog(&self, dialog: &DeleteDialog, area: Rect, buf: &mut Buffer) {
+    fn render_confirm_dialog(&self, dialog: &ConfirmDialog, area: Rect, buf: &mut Buffer) {
         use ratatui::widgets::{Block, Borders};
         let width = area.width.min(80);
         let content_width = usize::from(width.saturating_sub(4).max(1));
+        let (title, description, label) = match dialog.removal {
+            Removal::Archive => (
+                format!("Archive “{}”?", dialog.title),
+                "This stops any running work in this task and its child agents, then archives them. Their history can be restored from the resume picker.",
+                "Archive task and child agents",
+            ),
+            Removal::Delete => (
+                format!("Permanently delete “{}”?", dialog.title),
+                "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.",
+                "Permanently delete task and child agents",
+            ),
+        };
         let mut lines = Vec::new();
-        for text in textwrap::wrap(
-            &format!("Permanently delete “{}”?", dialog.title),
-            content_width,
-        ) {
+        for text in textwrap::wrap(&title, content_width) {
             lines.push(Line::from(text.into_owned().bold()));
         }
-        let description = "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.";
         for text in textwrap::wrap(description, content_width) {
             lines.push(Line::from(text.into_owned().dim()));
         }
         lines.push(Line::default());
-        for (confirm, label) in [
-            (false, "Cancel"),
-            (true, "Permanently delete task and child agents"),
-        ] {
+        for (confirm, label) in [(false, "Cancel"), (true, label)] {
             let selected = dialog.confirm == confirm;
             let text = format!(
                 "{} {}. {label}",
