@@ -2,7 +2,7 @@
 // ABOUTME: server's daemon conversation (thread start and attach, turn completion, adoption), and the tools codex calls.
 
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -1178,6 +1178,102 @@ test("review points the reviewer at the decisions made during the run", { timeou
     assert.equal(plain.isError, false, plain.text);
     const last = script.messages.filter((message) => message.method === "review/start").at(-1).params;
     assert.doesNotMatch(last.target.instructions, /decisions/);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+// Projected from a real daemon thread/list response captured on 2026-10-13.
+// IDs, names and working directories are redacted; the transport replays these rows across pages.
+const recordedThreadList = JSON.parse(readFileSync(new URL("./fixtures/thread-list.json", import.meta.url), "utf8"));
+
+async function recordedListHome() {
+  const home = await tempHome();
+  await mkdir(home.dir, { recursive: true });
+  const threads = recordedThreadList.data.map((thread, index) => ({
+    id: thread.id, name: `cached-${index}`, cwd: thread.cwd, owner: "agent-a",
+    lastStatus: "completed", waiting: [], detached: true
+  }));
+  threads.push({ id: "missing-from-daemon", name: "keep this name", detached: true });
+  await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 1, threads }));
+  return home;
+}
+
+test("list refreshes registered names in one paged pass and persists only name changes", { timeout: 10_000 }, async () => {
+  const home = await recordedListHome();
+  const script = daemonScript();
+  script.threads = recordedThreadList.data;
+  const stateFile = path.join(home.dir, "state.json");
+  const daemon = await fakeDaemon((message, socket) => {
+    if (message.method === "thread/list" && message.params.cursor && !script.ownerUpdated) {
+      script.ownerUpdated = true;
+      // A concurrent owner update must survive the name refresh.
+      const state = JSON.parse(readFileSync(stateFile, "utf8"));
+      state.threads[0].owner = "agent-b";
+      writeFileSync(stateFile, JSON.stringify(state));
+    }
+    script.handler(message, socket);
+  });
+  const mcp = await mcpChild(home, daemon);
+  try {
+    const before = JSON.parse(await readFile(stateFile, "utf8"));
+    const listed = await mcp.call("list", {});
+    assert.equal(listed.isError, false, listed.text);
+    assert.deepEqual(listed.json.threads.map(thread => thread.name), [...recordedThreadList.data.map(thread => thread.name), "keep this name"]);
+    assert.deepEqual(script.messages.filter(message => message.method === "thread/list").map(message => message.params.cursor), [undefined, "2"]);
+    const saved = JSON.parse(await readFile(stateFile, "utf8"));
+    assert.deepEqual(saved.threads, before.threads.map((thread, index) => ({ ...thread,
+      ...(index < recordedThreadList.data.length ? { name: recordedThreadList.data[index].name } : {}),
+      ...(index === 0 ? { owner: "agent-b" } : {})
+    })));
+    const unchanged = await readFile(stateFile, "utf8");
+    await mcp.call("list", {});
+    assert.equal(await readFile(stateFile, "utf8"), unchanged);
+    assert.equal(script.messages.filter(message => message.method === "thread/list").length, 4);
+    assert.equal(script.messages.some(message => message.method === "thread/resume"), false);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+test("list keeps stored names and state when the daemon is unreachable", { timeout: 10_000 }, async () => {
+  const home = await recordedListHome();
+  const stateFile = path.join(home.dir, "state.json");
+  const before = await readFile(stateFile, "utf8");
+  const mcp = await mcpChild(home, { socketPath: path.join(home.home, "missing.sock") });
+  try {
+    const listed = await mcp.call("list", {});
+    assert.equal(listed.isError, false, listed.text);
+    assert.equal(listed.json.connected, false);
+    assert.deepEqual(listed.json.threads.map(thread => thread.name), JSON.parse(before).threads.map(thread => thread.name));
+    assert.equal(await readFile(stateFile, "utf8"), before);
+  } finally {
+    await mcp.close();
+    await home.close();
+  }
+});
+
+test("list keeps all stored names when the daemon disconnects between pages", { timeout: 10_000 }, async () => {
+  const home = await recordedListHome();
+  const script = daemonScript();
+  script.threads = recordedThreadList.data;
+  const daemon = await fakeDaemon((message, socket) => {
+    if (message.method === "thread/list" && message.params.cursor) return socket.destroy();
+    script.handler(message, socket);
+  });
+  const mcp = await mcpChild(home, daemon);
+  const stateFile = path.join(home.dir, "state.json");
+  const before = await readFile(stateFile, "utf8");
+  try {
+    const listed = await mcp.call("list", {});
+    assert.equal(listed.isError, false, listed.text);
+    assert.equal(listed.json.connected, false);
+    assert.deepEqual(listed.json.threads.map(thread => thread.name), JSON.parse(before).threads.map(thread => thread.name));
+    assert.equal(await readFile(stateFile, "utf8"), before);
   } finally {
     await mcp.close();
     await daemon.close();
