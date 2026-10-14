@@ -92,18 +92,16 @@ impl View {
         viewport.log_jump = jump;
     }
 
-    /// Draws one log event whole: its time and kind as its list row shows them, a blank row,
-    /// then the full body.
+    /// Draws one log event whole: its list row's time and kind, a blank row, then the full body.
     fn render_open_event(&self, event: &Event, time: &str, area: Rect, buf: &mut Buffer) {
-        let (_, body_style) = super::style::log_styles(&event.kind);
-        render_row_label(
-            event,
-            time,
-            CLOCK_WIDTH,
-            self.is_newest_shown(event),
-            super::render::row(area, 1, 1),
-            buf,
-        );
+        let (label_style, body_style) = super::style::log_styles(&event.kind);
+        let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown(event));
+        let header = Line::from(vec![
+            Span::styled(time.to_owned(), time_style),
+            " ".into(),
+            Span::styled(kind_label(&event.kind), label_style),
+        ]);
+        super::render::line(header, super::render::row(area, 1, 1), buf);
         let body = open_text(event);
         let options = super::line_truncation::prose_wrap_options(usize::from(area.width));
         let mut lines = if is_prose(&event.kind) {
@@ -300,10 +298,24 @@ fn render_event(
     if area.is_empty() {
         return false;
     }
-    let Some(body_area) = render_row_label(event, time, time_width, last, area, buf) else {
+    let width = usize::from(area.width);
+    let time_width = time_width.min(width);
+    let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
+    let (label_style, _) = super::style::log_styles(&event.kind);
+    let time_style = super::style::log_time_style(&event.kind, last);
+    Line::from(Span::styled(time.to_owned(), time_style))
+        .right_aligned()
+        .render(time_area, buf);
+    let content_width = width.saturating_sub(time_width + 1);
+    if content_width == 0 {
         return true;
-    };
-    let body_width = usize::from(body_area.width);
+    }
+    let content_x = area.x + time_width as u16 + 1;
+    let label = format!("{:<KIND_WIDTH$} ", kind_label(&event.kind));
+    let label_width = label.width().min(content_width);
+    Line::from(Span::styled(label, label_style))
+        .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
+    let body_width = content_width.saturating_sub(label_width);
     let (mut body, shortened) = fitted_body_line(event, body_width);
     let cut = shortened || body.width() > body_width;
     if let Some(search) = search.filter(|search| !search.query.is_empty()) {
@@ -330,43 +342,11 @@ fn render_event(
             })
             .collect();
     }
-    truncate_line_with_ellipsis_if_overflow(body, body_width).render(body_area, buf);
+    truncate_line_with_ellipsis_if_overflow(body, body_width).render(
+        Rect::new(content_x + label_width as u16, area.y, body_width as u16, 1),
+        buf,
+    );
     cut
-}
-
-/// Draws a log row's time and kind columns, returning the area left for its body, or `None`
-/// when the time column fills the row.
-fn render_row_label(
-    event: &Event,
-    time: &str,
-    time_width: usize,
-    last: bool,
-    area: Rect,
-    buf: &mut Buffer,
-) -> Option<Rect> {
-    let width = usize::from(area.width);
-    let time_width = time_width.min(width);
-    let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
-    let (label_style, _) = super::style::log_styles(&event.kind);
-    let time_style = super::style::log_time_style(&event.kind, last);
-    Line::from(Span::styled(time.to_owned(), time_style))
-        .right_aligned()
-        .render(time_area, buf);
-    let content_width = width.saturating_sub(time_width + 1);
-    if content_width == 0 {
-        return None;
-    }
-    let content_x = area.x + time_width as u16 + 1;
-    let label = format!("{:<KIND_WIDTH$} ", kind_label(&event.kind));
-    let label_width = label.width().min(content_width);
-    Line::from(Span::styled(label, label_style))
-        .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
-    Some(Rect::new(
-        content_x + label_width as u16,
-        area.y,
-        content_width.saturating_sub(label_width) as u16,
-        1,
-    ))
 }
 
 /// The full text an open log event shows below its header.

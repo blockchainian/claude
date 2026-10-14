@@ -4839,7 +4839,7 @@ fn task_log_click_on_whole_row_keeps_list() {
 }
 
 #[test]
-fn task_log_open_event_header_matches_its_list_row() {
+fn task_log_open_event_header_reads_its_list_row_time_left_aligned() {
     for body in ["A long response", "The newest reply"] {
         let (mut view, now) = log_fixture();
         // The newest row reads its time as "30s ago".
@@ -4847,7 +4847,8 @@ fn task_log_open_event_header_matches_its_list_row() {
         view.log[7].body = format!("The newest reply {}", "runs long ".repeat(20));
         let list = log_screen(&view, 100, 25, now);
         let row = list.lines().find(|line| line.contains(body)).unwrap();
-        let header = row[..row.find(body).unwrap()].trim_end();
+        let columns = row[..row.find(body).unwrap()].split_whitespace();
+        let header = format!("  {}", columns.collect::<Vec<_>>().join(" "));
         click_log_text(&mut view, &list, body, MouseButton::Left);
         let open = log_screen(&view, 100, 25, now);
         assert!(
