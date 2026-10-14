@@ -16,9 +16,9 @@
                       p          Pin/unpin
 
   View                Log
-  tab/⇧tab  Filter    *   All
-  f3        Search    m   Model
-  g         Group     t   Tool
-                      u   User
-  … resize to see all
+  tab/⇧tab  Filter    ⌃r  Search
+  f3        Search
+  g         Group
+
+
   esc back

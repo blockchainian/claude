@@ -3550,118 +3550,8 @@ mod log_path_abbrev {
     }
 }
 
-mod log_filters {
+mod log_help {
     use super::*;
-    use crate::log::Kind;
-
-    fn fixture() -> (View, chrono::DateTime<Utc>) {
-        let (mut view, now) = log_fixture();
-        let template = view.log[0].clone();
-        view.log = [
-            Kind::User,
-            Kind::Assistant,
-            Kind::Agent,
-            Kind::Session,
-            Kind::Tool,
-            Kind::Error,
-            Kind::Denied,
-            Kind::QueuedUser,
-            Kind::QueuedSystem,
-        ]
-        .into_iter()
-        .map(|kind| {
-            let mut event = template.clone();
-            event.body = format!("row-{kind:?}-body");
-            event.kind = kind;
-            event
-        })
-        .collect();
-        (view, now)
-    }
-
-    fn rows(view: &View, now: chrono::DateTime<Utc>) -> String {
-        let area = Rect::new(0, 0, 120, 15);
-        let mut buffer = Buffer::empty(area);
-        view.render_log(area, &mut buffer, now);
-        buffer.content.iter().map(|cell| cell.symbol()).collect()
-    }
-
-    #[test]
-    fn model_selection_stays_active_and_all_restores_rows() {
-        let (mut view, now) = fixture();
-        let all = rows(&view, now);
-        view.viewport.borrow_mut().log_scroll = 3;
-        key(&mut view, KeyCode::Char('m'));
-        assert_eq!(view.log_scroll(), 0);
-        let filtered = rows(&view, now);
-        for event in &view.log {
-            assert_eq!(
-                filtered.contains(&event.body),
-                matches!(event.kind, Kind::Assistant | Kind::Agent)
-            );
-        }
-        view.viewport.borrow_mut().log_scroll = 3;
-        key(&mut view, KeyCode::Char('m'));
-        assert_eq!(view.log_scroll(), 3);
-        view.viewport.borrow_mut().log_scroll = 0;
-        assert_eq!(rows(&view, now), filtered);
-        view.viewport.borrow_mut().log_scroll = 3;
-        key(&mut view, KeyCode::Char('*'));
-        assert_eq!(view.log_scroll(), 0);
-        assert_eq!(rows(&view, now), all);
-        view.viewport.borrow_mut().log_scroll = 3;
-        key(&mut view, KeyCode::Char('*'));
-        assert_eq!(view.log_scroll(), 3);
-    }
-
-    #[test]
-    fn kind_selection_replaces_previous_set_and_persists_across_sessions() {
-        for (hotkey, kinds) in [
-            ('t', vec![Kind::Tool]),
-            ('u', vec![Kind::User, Kind::QueuedUser]),
-            ('e', vec![Kind::Error, Kind::Denied]),
-        ] {
-            let (mut view, now) = fixture();
-            key(&mut view, KeyCode::Char('m'));
-            view.viewport.borrow_mut().log_scroll = 3;
-            key(&mut view, KeyCode::Char(hotkey));
-            assert_eq!(view.log_scroll(), 0);
-            let mut second = view.rows[0].clone();
-            second.id = session_key("second");
-            let first = view.rows[0].clone();
-            view.set_sessions(vec![first, second], false);
-            let index = view
-                .rows
-                .iter()
-                .position(|row| row.id == session_key("second"))
-                .unwrap();
-            view.set_selected(index);
-            view.log_session = Some(session_key("second"));
-            let filtered = rows(&view, now);
-            for event in &view.log {
-                assert_eq!(filtered.contains(&event.body), kinds.contains(&event.kind));
-            }
-        }
-    }
-
-    #[test]
-    fn overlays_do_not_change_filters() {
-        for opener in [
-            KeyCode::Char('?'),
-            KeyCode::Char('/'),
-            KeyCode::Char('r'),
-            KeyCode::Backspace,
-        ] {
-            let (mut view, now) = fixture();
-            key(&mut view, opener);
-            for hotkey in ['m', 't', 'u', 'e'] {
-                key(&mut view, KeyCode::Char(hotkey));
-            }
-            key(&mut view, KeyCode::Esc);
-            let rendered = rows(&view, now);
-            assert!(view.log.iter().all(|event| rendered.contains(&event.body)));
-        }
-    }
 
     #[test]
     fn help_has_log_column_right_of_view() {
@@ -3778,6 +3668,10 @@ mod log_search {
             ("^timeout", vec![]),
             ("connection$", vec![]),
             ("!timeout", vec![]),
+            ("tool", vec![1]),
+            ("assistant timeout", vec![0]),
+            ("error conn", vec![2]),
+            ("user café", vec![3]),
         ] {
             open(&mut view);
             for c in query.chars() {
@@ -3789,15 +3683,6 @@ mod log_search {
             assert_eq!(matches, expected, "{query}");
             key(&mut view, KeyCode::Esc);
         }
-        key(&mut view, KeyCode::Char('e'));
-        open(&mut view);
-        for c in "timeout".chars() {
-            key(&mut view, KeyCode::Char(c));
-        }
-        assert_eq!(view.matching_log_count(), 1);
-        assert!(!text(&panel(&view, now)).contains("timeout alone"));
-        key(&mut view, KeyCode::Esc);
-        view.log_filter = crate::log::Filter::default();
         open(&mut view);
         for c in "cafe".chars() {
             key(&mut view, KeyCode::Char(c));

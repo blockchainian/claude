@@ -143,7 +143,6 @@ impl ConfirmDialog {
 pub struct View {
     pub(crate) log: Vec<crate::log::Event>,
     pub(crate) log_session: Option<SessionKey>,
-    pub(crate) log_filter: crate::log::Filter,
     pub(crate) log_search: log_search::LogSearch,
     /// The log event shown whole in the log panel, opened by clicking its cut row.
     log_open: Option<crate::log::Event>,
@@ -218,7 +217,6 @@ impl View {
             log: Vec::new(),
             log_session: None,
             log_open: None,
-            log_filter: crate::log::Filter::default(),
             log_search: log_search::LogSearch::default(),
             capabilities: HashMap::new(),
             rows: Vec::new(),

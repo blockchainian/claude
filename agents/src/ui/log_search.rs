@@ -76,7 +76,13 @@ impl View {
         self.log_search.bodies = self
             .log
             .iter()
-            .map(|event| super::log::body_line(event, usize::MAX).to_string())
+            .map(|event| {
+                format!(
+                    "{} {}",
+                    super::log::kind_label(&event.kind),
+                    super::log::body_line(event, usize::MAX)
+                )
+            })
             .collect();
         self.rematch_log();
     }
@@ -102,10 +108,8 @@ impl View {
         self.log
             .iter()
             .enumerate()
-            .filter(|(index, event)| {
-                self.log_filter.matches(&event.kind)
-                    && (!self.log_search.active()
-                        || self.log_search.matches.binary_search(index).is_ok())
+            .filter(|(index, _)| {
+                !self.log_search.active() || self.log_search.matches.binary_search(index).is_ok()
             })
             .count()
     }

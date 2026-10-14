@@ -482,23 +482,6 @@ impl View {
             return None;
         }
         match key.code {
-            KeyCode::Char(hotkey @ ('*' | 'm' | 't' | 'u' | 'e')) => {
-                use crate::log::Kind;
-                let kinds: &[Kind] = match hotkey {
-                    '*' => &[],
-                    'm' => &[Kind::Assistant, Kind::Agent],
-                    't' => &[Kind::Tool],
-                    'u' => &[Kind::User, Kind::QueuedUser],
-                    'e' => &[Kind::Error, Kind::Denied],
-                    _ => unreachable!(),
-                };
-                let mut filter = crate::log::Filter::default();
-                filter.toggle(kinds);
-                if self.log_filter != filter {
-                    self.log_filter = filter;
-                    self.show_newest_log();
-                }
-            }
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(false),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(true),
             KeyCode::PageUp => self.page_selection(false),

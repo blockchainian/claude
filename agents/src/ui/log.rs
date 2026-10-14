@@ -191,11 +191,12 @@ impl View {
         row_time_changes_in(&row_time(event, session, true), now)
     }
 
-    /// The log events the filter and search let through, with their index in the log.
+    /// The log events the search lets through, with their index in the log.
     fn shown_log_events(&self) -> impl Iterator<Item = (usize, &Event)> {
-        self.log.iter().enumerate().filter(|(index, event)| {
-            self.log_filter.matches(&event.kind) && self.log_matches(*index)
-        })
+        self.log
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.log_matches(*index))
     }
 }
 
@@ -355,7 +356,7 @@ pub(super) fn copied_label(event: &Event) -> String {
     format!("Copied {} message", kind_label(&event.kind).to_lowercase())
 }
 
-fn kind_label(kind: &Kind) -> &'static str {
+pub(super) fn kind_label(kind: &Kind) -> &'static str {
     match kind {
         Kind::User => "User",
         Kind::Assistant => "Assistant",

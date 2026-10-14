@@ -98,7 +98,6 @@ struct LogStamp {
     modified: std::time::SystemTime,
     length: u64,
     count: usize,
-    filter: crate::log::Filter,
 }
 
 impl App {
@@ -333,7 +332,6 @@ impl App {
                     modified: metadata.modified()?,
                     length: metadata.len(),
                     count: usize::MAX,
-                    filter: crate::log::Filter::default(),
                 };
                 if self.full_log_stamp.as_ref() == Some(&stamp) {
                     return Ok(None);
@@ -378,7 +376,6 @@ impl App {
                 modified: metadata.modified()?,
                 length: metadata.len(),
                 count,
-                filter: self.view.log_filter.clone(),
             };
             if self.log_stamp.as_ref() == Some(&stamp) {
                 return Ok(None);
@@ -386,7 +383,7 @@ impl App {
             let events = self.hub.provider(session.provider).log(
                 &selected_session,
                 count,
-                &self.view.log_filter,
+                &crate::log::Filter::default(),
                 selected_session.parent.is_some(),
             )?;
             Ok(Some((stamp, events)))

@@ -42,6 +42,7 @@ pub enum Kind {
 pub struct Filter(std::collections::HashSet<Kind>);
 
 impl Filter {
+    #[cfg(test)]
     pub fn toggle(&mut self, kinds: &[Kind]) {
         if kinds.iter().all(|kind| self.0.contains(kind)) {
             self.0.retain(|kind| !kinds.contains(kind));
