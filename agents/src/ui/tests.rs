@@ -337,7 +337,8 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     assert_eq!((jump.0, jump.1), (body.0, rect.y));
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
-    assert!(buf[jump].modifier.contains(ratatui::style::Modifier::BOLD));
+    assert_eq!(buf[jump].fg, Color::Reset);
+    assert_eq!(buf[jump].modifier, ratatui::style::Modifier::BOLD);
 }
 
 #[test]
