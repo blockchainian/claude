@@ -29,13 +29,14 @@ impl View {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_rows.clear();
             viewport.log_jump = Rect::default();
+            viewport.log_links.clear();
         }
         if self.log_session.as_ref() != Some(&session.id) {
             return;
         }
         if let Some(event) = &self.log_open {
             let time = event_time(event, session, self.is_newest_shown(event), now);
-            self.render_open_event(event, &time, area, buf);
+            self.render_open_event(event, &time, area, buf, &session.cwd);
             return;
         }
         if self.log_search.active() && area.height > 1 {
@@ -55,10 +56,11 @@ impl View {
         let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
         let mut rows = Vec::new();
+        let mut drawn_links = Vec::new();
         for (index, &(log_index, event)) in matching[start..end].iter().rev().enumerate() {
             let last = scroll == 0 && index == 0;
             let time = event_time(event, session, last, now);
-            let cut = render_event(
+            let (cut, links) = render_event(
                 event,
                 &time,
                 CLOCK_WIDTH,
@@ -66,11 +68,17 @@ impl View {
                 super::render::row(area, index as u16 + 1, 1),
                 buf,
                 Some(&self.log_search),
+                &session.cwd,
             );
             rows.push((log_index, cut));
+            drawn_links.extend(links);
         }
         let text_area = super::render::row(area, 1, rows.len() as u16);
-        self.viewport.borrow_mut().log_rows = rows;
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_rows = rows;
+            viewport.log_links = drawn_links;
+        }
         self.capture_list_text(text_selection::Panel::LogList, text_area, scroll, buf);
     }
 
@@ -93,7 +101,14 @@ impl View {
     }
 
     /// Draws one log event whole: its list row's time and kind, a blank row, then the full body.
-    fn render_open_event(&self, event: &Event, time: &str, area: Rect, buf: &mut Buffer) {
+    fn render_open_event(
+        &self,
+        event: &Event,
+        time: &str,
+        area: Rect,
+        buf: &mut Buffer,
+        cwd: &std::path::Path,
+    ) {
         let (label_style, body_style) = super::style::log_styles(&event.kind);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown(event));
         let header = Line::from(vec![
@@ -119,6 +134,11 @@ impl View {
         }
         let body_area = super::render::row(area, 3, area.height.saturating_sub(3));
         let maps = super::text_selection_layout::map_lines(&body, &lines, is_prose(&event.kind));
+        let links = if is_prose(&event.kind) {
+            super::links::text_links(&body, cwd, &event.images)
+        } else {
+            super::links::path_links(&body, &event.paths, cwd)
+        };
         let mut viewport = self.viewport.borrow_mut();
         viewport.log_open_max = lines.len().saturating_sub(usize::from(body_area.height));
         viewport.log_open_scroll = viewport
@@ -144,7 +164,9 @@ impl View {
                 })
                 .collect(),
         };
+        viewport.log_links = super::links::drawn_links(&viewport.log_text.rows, &links);
         Paragraph::new(lines.split_off(viewport.log_open_scroll)).render(body_area, buf);
+        super::links::underline(buf, &viewport.log_links);
         drop(viewport);
         self.highlight_text_selection(text_selection::Panel::Log, buf);
     }
@@ -286,6 +308,7 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
     format_row_time(&row_time(event, session, last), now)
 }
 
+/// Draws one log row and returns whether its body was cut, with the links drawn on it.
 fn render_event(
     event: &Event,
     time: &str,
@@ -294,9 +317,10 @@ fn render_event(
     area: Rect,
     buf: &mut Buffer,
     search: Option<&super::log_search::LogSearch>,
-) -> bool {
+    cwd: &std::path::Path,
+) -> (bool, Vec<super::links::DrawnLink>) {
     if area.is_empty() {
-        return false;
+        return (false, Vec::new());
     }
     let width = usize::from(area.width);
     let time_width = time_width.min(width);
@@ -308,7 +332,7 @@ fn render_event(
         .render(time_area, buf);
     let content_width = width.saturating_sub(time_width + 1);
     if content_width == 0 {
-        return true;
+        return (true, Vec::new());
     }
     let content_x = area.x + time_width as u16 + 1;
     let label = format!("{:<KIND_WIDTH$} ", kind_label(&event.kind));
@@ -316,8 +340,38 @@ fn render_event(
     Line::from(Span::styled(label, label_style))
         .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
     let body_width = content_width.saturating_sub(label_width);
-    let (mut body, shortened) = fitted_body_line(event, body_width);
-    let cut = shortened || body.width() > body_width;
+    let fitted = fitted_body_line(event, body_width);
+    let mut body = fitted.line;
+    let cut = fitted.shortened || body.width() > body_width;
+    let body_x = content_x + label_width as u16;
+    let links = {
+        let links = if is_prose(&event.kind) {
+            super::links::text_links(&fitted.source, cwd, &event.images)
+        } else {
+            super::links::path_links(&fitted.source, &fitted.paths, cwd)
+        };
+        let visible = if body.width() > body_width {
+            body_width.saturating_sub(1)
+        } else {
+            body_width
+        } as u16;
+        let mut maps = super::text_selection_layout::map_lines(
+            &fitted.source,
+            std::slice::from_ref(&body),
+            is_prose(&event.kind),
+        );
+        let mut cells = maps.pop().unwrap_or_default();
+        cells.retain(|(columns, _)| columns.end <= visible);
+        super::links::drawn_links(
+            &[text_selection::DrawnRow {
+                segment: 0,
+                x: body_x,
+                y: area.y,
+                cells,
+            }],
+            &links,
+        )
+    };
     if let Some(search) = search.filter(|search| !search.query.is_empty()) {
         let indices = search.indices(&body.to_string());
         let mut offset = 0u32;
@@ -343,10 +397,11 @@ fn render_event(
             .collect();
     }
     truncate_line_with_ellipsis_if_overflow(body, body_width).render(
-        Rect::new(content_x + label_width as u16, area.y, body_width as u16, 1),
+        Rect::new(body_x, area.y, body_width as u16, 1),
         buf,
     );
-    cut
+    super::links::underline(buf, &links);
+    (cut, links)
 }
 
 /// The full text an open log event shows below its header.
@@ -378,12 +433,22 @@ fn is_prose(kind: &Kind) -> bool {
 }
 
 pub(super) fn body_line(event: &Event, body_width: usize) -> Line<'static> {
-    fitted_body_line(event, body_width).0
+    fitted_body_line(event, body_width).line
 }
 
-/// An event's body as one log row, with paths shortened to fit `body_width`,
-/// and whether any path was shortened.
-fn fitted_body_line(event: &Event, body_width: usize) -> (Line<'static>, bool) {
+/// An event's body as one log row, with paths shortened to fit the row.
+struct FittedBody {
+    line: Line<'static>,
+    /// Whether any path was shortened.
+    shortened: bool,
+    /// The text the row was drawn from, before any shortening: the event's prose with
+    /// its whitespace collapsed, or its tool text with home paths shown as `~`.
+    source: String,
+    /// Byte ranges of the tool paths inside `source`.
+    paths: Vec<std::ops::Range<usize>>,
+}
+
+fn fitted_body_line(event: &Event, body_width: usize) -> FittedBody {
     let body_style = super::style::log_styles(&event.kind).1;
     if is_prose(&event.kind) {
         // Markdown blocks end at line breaks, so they are kept until rendering.
@@ -407,13 +472,21 @@ fn fitted_body_line(event: &Event, body_width: usize) -> (Line<'static>, bool) {
                 span
             }));
         }
-        (Line::from(spans), shortened != body)
+        FittedBody {
+            line: Line::from(spans),
+            shortened: shortened != body,
+            source: body,
+            paths: Vec::new(),
+        }
     } else {
-        let body = collapse_whitespace(event.body.trim());
         let (text, paths) = display_paths(event);
         let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width);
-        let cut = shortened != body;
-        (Line::from(Span::styled(shortened, body_style)), cut)
+        FittedBody {
+            shortened: shortened != collapse_whitespace(event.body.trim()),
+            line: Line::from(Span::styled(shortened, body_style)),
+            source: text,
+            paths,
+        }
     }
 }
 
@@ -470,7 +543,16 @@ mod log_markdown {
             previous_end: None,
             images: Vec::new(),
         };
-        render_event(&event, "12:00:00", 8, false, area, &mut buffer, None);
+        render_event(
+            &event,
+            "12:00:00",
+            8,
+            false,
+            area,
+            &mut buffer,
+            None,
+            std::path::Path::new("/"),
+        );
         buffer
     }
 
@@ -670,7 +752,8 @@ mod log_markdown {
             std::io::Write::write_all(&mut file, format!("{record}\n").as_bytes()).unwrap();
         }
         let events = crate::providers::claude::log::tail(file.path(), 1).unwrap();
-        let (line, cut) = fitted_body_line(&events[0], width);
+        let fitted = fitted_body_line(&events[0], width);
+        let (line, cut) = (fitted.line, fitted.shortened);
         let text = line
             .spans
             .iter()

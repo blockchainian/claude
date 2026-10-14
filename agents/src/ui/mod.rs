@@ -5,6 +5,7 @@ mod hyperlink;
 mod input;
 mod line_edit;
 mod line_truncation;
+mod links;
 mod log;
 mod log_search;
 mod markdown;
@@ -102,6 +103,10 @@ struct Viewport {
     details_scroll: DetailsScroll,
     /// Screen rows of each copyable details body drawn by the last render, with its full text.
     details_copy: Vec<(std::ops::Range<u16>, String, &'static str)>,
+    /// Links drawn by the last render of each panel: the task list, the details and the log.
+    list_links: Vec<links::DrawnLink>,
+    details_links: Vec<links::DrawnLink>,
+    log_links: Vec<links::DrawnLink>,
     /// Screen cell of the selection marker drawn by the last render.
     marker: Option<(u16, u16)>,
 }

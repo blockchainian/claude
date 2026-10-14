@@ -82,6 +82,11 @@ impl View {
             self.show_newest_log();
             return None;
         }
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left)
+            && let Some(target) = self.link_at(position)
+        {
+            return Some(Action::OpenPath(target));
+        }
         let (tab, over_tabs, over_list, over_details, over_log, entry, log_row, copy_text) = {
             let viewport = self.viewport.borrow();
             let tab = viewport
@@ -187,6 +192,20 @@ impl View {
             _ => {}
         }
         None
+    }
+
+    /// What the link drawn at `position` opens, if one is there.
+    fn link_at(&self, position: ratatui::layout::Position) -> Option<PathBuf> {
+        let viewport = self.viewport.borrow();
+        [
+            &viewport.list_links,
+            &viewport.details_links,
+            &viewport.log_links,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|(rect, _)| rect.contains(position))
+        .map(|(_, target)| target.clone())
     }
 
     /// Scrolls the log panel, or the details panel when `over_log` is false, by one row.

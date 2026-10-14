@@ -558,6 +558,24 @@ impl App {
                 self.view
                     .set_notice(Some(format!("{what} is not supported")));
             }
+            Action::OpenPath(target) => {
+                let opened = Command::new("open")
+                    .arg(&target)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                match opened {
+                    // Reaping off the loop keeps `open` from lingering as a zombie.
+                    Ok(mut child) => {
+                        thread::spawn(move || child.wait());
+                    }
+                    Err(error) => self.view.set_notice(Some(format!(
+                        "Failed to open {}: {error}",
+                        target.display()
+                    ))),
+                }
+            }
         }
         false
     }

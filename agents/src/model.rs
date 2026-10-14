@@ -163,6 +163,9 @@ pub enum Action {
     /// Double click on an open log event or a details body: copy its text to the
     /// clipboard and confirm with `label`.
     Copy { text: String, label: String },
+    /// Click on a drawn path, image placeholder or pull request link: open the
+    /// file, directory or URL with macOS `open`.
+    OpenPath(PathBuf),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

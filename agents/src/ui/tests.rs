@@ -4954,6 +4954,72 @@ fn task_log_click_opens_row_with_shortened_path() {
     assert!(open.contains(&path[..96]), "{open}");
 }
 
+fn click_text(view: &mut View, screen: &str, text: &str) -> Option<Action> {
+    let (x, y) = rendered_cell(screen, text);
+    click_mouse(view, mouse(MouseEventKind::Down(MouseButton::Left), x, y))
+}
+
+#[test]
+fn task_log_click_on_a_shortened_tool_path_opens_the_full_path() {
+    let (mut view, now) = log_fixture();
+    let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
+    let event = &mut view.log[7];
+    event
+        .paths
+        .push(event.body.len() + 1..event.body.len() + 1 + path.len());
+    event.body = format!("{} {path}", event.body);
+    let list = log_screen(&view, 100, 25, now);
+    assert!(!list.contains(path), "{list}");
+    assert_eq!(
+        click_text(&mut view, &list, "report.md"),
+        Some(Action::OpenPath(path.into()))
+    );
+    assert!(view.log_open.is_none());
+    let (x, y) = rendered_cell(&list, "report.md");
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
+    view.render_at(buf.area, &mut buf, now);
+    assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::UNDERLINED));
+    let (x, y) = rendered_cell(&list, "run tests");
+    assert!(!buf[(x, y)].modifier.contains(ratatui::style::Modifier::UNDERLINED));
+    assert_eq!(click_text(&mut view, &list, "run tests"), None);
+    assert!(view.log_open.is_some());
+}
+
+#[test]
+fn task_log_click_on_an_image_placeholder_opens_the_image() {
+    let (mut view, now) = log_fixture();
+    view.log[0].body = "Please look at [Image #1] and [Image #2]".into();
+    view.log[0].images = vec![crate::log::Image {
+        label: "[Image #2]".into(),
+        path: "/tmp/images/2.png".into(),
+    }];
+    let list = log_screen(&view, 100, 25, now);
+    assert!(list.contains("[Image #1] and [Image #2]"), "{list}");
+    assert_eq!(click_text(&mut view, &list, "[Image #1]"), None);
+    assert_eq!(
+        click_text(&mut view, &list, "[Image #2]"),
+        Some(Action::OpenPath("/tmp/images/2.png".into()))
+    );
+}
+
+#[test]
+fn open_log_event_links_its_wrapped_path() {
+    let (mut view, now) = log_fixture();
+    let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
+    view.log[6].body = format!(
+        "A long response with **bold** words whose body must be cut before the right edge of the log, see {path} for details"
+    );
+    let list = log_screen(&view, 100, 25, now);
+    click_log_text(&mut view, &list, "A long response", MouseButton::Left);
+    let open = log_screen(&view, 100, 25, now);
+    assert!(open.contains("another-long-directory"), "{open}");
+    assert_eq!(
+        click_text(&mut view, &open, "another-long-directory"),
+        Some(Action::OpenPath(path.into()))
+    );
+    assert_eq!(click_text(&mut view, &open, "for details"), None);
+}
+
 #[test]
 fn task_log_open_event_closes_when_selection_changes() {
     let (mut view, now) = log_fixture();

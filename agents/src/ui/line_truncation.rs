@@ -273,7 +273,7 @@ pub(super) fn abbreviate_paths_for_wrap(text: &str, width: usize) -> String {
         .collect()
 }
 
-fn wrapped_path(word: &str) -> Option<std::ops::Range<usize>> {
+pub(super) fn wrapped_path(word: &str) -> Option<std::ops::Range<usize>> {
     let mut range = prose_path(word)?;
     // CJK sentence punctuation ends a path without an intervening space.
     if let Some(end) = word[range.clone()].find(['，', '。', '；', '：', '！', '？']) {
