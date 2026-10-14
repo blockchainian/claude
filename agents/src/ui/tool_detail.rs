@@ -2,7 +2,7 @@
 
 use super::highlight;
 use crate::log::{Event, Kind, Section};
-use ratatui::style::{Style, Stylize};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -15,12 +15,12 @@ pub(super) struct Part {
 }
 
 enum Body {
-    /// A merged call's right-aligned title.
-    Title(Style),
+    /// A merged call's title centred in a full-width rule.
+    TitleRule,
     /// A section label, in the given style.
     Label(Style),
-    /// A full-width call separator, or a centred input/output arrow.
-    Rule(bool),
+    /// A centred input/output arrow.
+    Arrow,
     /// The dim note that a call has no output yet.
     Running,
     /// `key: value` lines.
@@ -99,24 +99,39 @@ impl Part {
         matches!(self.body, Body::Markdown)
     }
 
-    /// Generated title padding has no source bytes to select.
+    /// Generated rules and title padding have no source bytes to select.
     pub fn maps(&self, lines: &[Line<'_>]) -> Vec<Vec<super::text_selection_layout::CellMap>> {
-        if !matches!(self.body, Body::Title(_)) {
+        if !matches!(self.body, Body::TitleRule) {
             return super::text_selection_layout::map_lines(&self.source, lines, self.markdown());
         }
-        let mut content = lines.to_vec();
-        let padding: Vec<_> = content
-            .iter_mut()
-            .map(|line| line.spans.remove(0).width() as u16)
-            .collect();
-        let mut maps = super::text_selection_layout::map_lines(&self.source, &content, false);
-        for (cells, padding) in maps.iter_mut().zip(padding) {
-            for (range, _) in cells {
-                range.start += padding;
-                range.end += padding;
-            }
-        }
-        maps
+        lines
+            .iter()
+            .map(|line| {
+                let padding = line.spans[0].width() as u16;
+                let mut content = Line::from(line.spans[1..line.spans.len() - 1].to_vec());
+                let truncated = content.width() > 0
+                    && self.source.replace('\t', "    ").width() > content.width();
+                if truncated {
+                    content.spans.pop(); // The ellipsis selects the remaining title bytes.
+                }
+                let mut maps = super::text_selection_layout::map_lines(
+                    &self.source,
+                    std::slice::from_ref(&content),
+                    false,
+                );
+                let cells = &mut maps[0];
+                if truncated {
+                    let start = cells.last().map_or(0, |(_, bytes)| bytes.end);
+                    let column = content.width() as u16;
+                    cells.push((column..column + 1, start..self.source.len()));
+                }
+                for (range, _) in cells.iter_mut() {
+                    range.start += padding;
+                    range.end += padding;
+                }
+                maps.remove(0)
+            })
+            .collect()
     }
 
     /// The part drawn `width` columns wide; every line fits so each cell maps to its source.
@@ -125,20 +140,46 @@ impl Part {
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let lines = match &self.body {
-            Body::Title(style) | Body::Label(style) => split_wide(
+            Body::TitleRule => {
+                let gap = usize::from(width >= 2);
+                let mut title = super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                    Line::from(source.to_owned()),
+                    width.saturating_sub(2 * gap),
+                );
+                for span in &mut title.spans {
+                    span.style = super::style::log_jump_style();
+                }
+                let left = width / 2 - title.width() / 2;
+                let right = width - left - title.width();
+                let mut spans = vec![Span::styled(
+                    format!(
+                        "{}{}",
+                        "─".repeat(left.saturating_sub(gap)),
+                        " ".repeat(gap)
+                    ),
+                    Style::new().dim(),
+                )];
+                spans.extend(title.spans);
+                spans.push(Span::styled(
+                    format!(
+                        "{}{}",
+                        " ".repeat(gap),
+                        "─".repeat(right.saturating_sub(gap))
+                    ),
+                    Style::new().dim(),
+                ));
+                vec![Line::from(spans)]
+            }
+            Body::Label(style) => split_wide(
                 vec![Line::from(Span::styled(source.to_owned(), *style))],
                 width,
             ),
-            Body::Rule(arrow) => {
-                if *arrow {
-                    let mut row = " ".repeat(width);
-                    if width > 0 {
-                        row.replace_range(width / 2..width / 2 + 1, "↓");
-                    }
-                    vec![Line::styled(row, super::style::log_jump_style())]
-                } else {
-                    vec![Line::from("─".repeat(width)).dim()]
+            Body::Arrow => {
+                let mut row = " ".repeat(width);
+                if width > 0 {
+                    row.replace_range(width / 2..width / 2 + 1, "↓");
                 }
+                vec![Line::styled(row, super::style::log_jump_style())]
             }
             Body::Running => vec![Line::from(Span::styled(
                 source.to_owned(),
@@ -180,16 +221,12 @@ impl Part {
                 .map(|line| Line::from(line.into_owned()))
                 .collect(),
         };
-        if matches!(self.body, Body::Rule(_)) {
+        if matches!(self.body, Body::TitleRule | Body::Arrow) {
             return lines;
         }
         lines
             .into_iter()
             .map(|mut line| {
-                if matches!(self.body, Body::Title(_)) {
-                    let padding = width.saturating_sub(line.width());
-                    line.spans.insert(0, Span::raw(" ".repeat(padding)));
-                }
                 for span in &mut line.spans {
                     span.style = body_style.patch(span.style);
                 }
@@ -204,19 +241,16 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
     let label_style = super::style::log_styles(&event.kind).0;
     let error_style = super::style::log_styles(&Kind::Error).0;
     let mut parts = Vec::new();
-    for (index, call) in event.calls.iter().enumerate() {
-        if index > 0 {
-            parts.push(Part::new("", Body::Rule(false)));
-        }
+    for call in &event.calls {
         if event.calls.len() > 1 {
-            parts.push(Part::new(call.title.clone(), Body::Title(label_style)));
+            parts.push(Part::new(call.title.clone(), Body::TitleRule));
         }
         for section in &call.input {
             push_section(&mut parts, section, label_style, false);
         }
         match &call.output {
             Some(output) => {
-                parts.push(Part::new("", Body::Rule(true)));
+                parts.push(Part::new("", Body::Arrow));
                 if output.is_empty() {
                     parts.push(Part::new("(no output)", Body::Text));
                 }
@@ -561,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn merged_calls_have_titles_and_rules_with_a_running_note() {
+    fn merged_calls_start_with_title_rules_and_end_with_content() {
         let parts = parts(&event(vec![
             ToolCall {
                 id: "Bash-fixture".into(),
@@ -600,7 +634,6 @@ mod tests {
                 "cargo test",
                 "",
                 "running 3 tests\n...",
-                "",
                 "Read",
                 "path: agents/src/log.rs\nrange: lines 1–40",
                 "running…",
@@ -609,18 +642,78 @@ mod tests {
         assert_eq!(
             texts(&parts, 80),
             [
-                &format!("{}Bash", " ".repeat(76)),
+                &format!("{} Bash {}", "─".repeat(37), "─".repeat(37)),
                 "cargo test",
                 &format!("{}↓{}", " ".repeat(40), " ".repeat(39)),
                 "running 3 tests",
                 "...",
-                &"─".repeat(80),
-                &format!("{}Read", " ".repeat(76)),
+                &format!("{} Read {}", "─".repeat(37), "─".repeat(37)),
                 "path: agents/src/log.rs",
                 "range: lines 1–40",
                 "running…",
             ]
         );
+    }
+
+    #[test]
+    fn title_rules_fit_one_row_and_share_the_arrow_center_and_style() {
+        for title in [
+            "Bash",
+            "看探针结果",
+            "a",
+            "a界e\u{301}",
+            "  Read 界面  Read 界面  Read 界面",
+        ] {
+            let calls = vec![
+                ToolCall {
+                    id: "title-fixture".into(),
+                    title: title.into(),
+                    name: "Read".into(),
+                    input: vec![],
+                    output: Some(vec![]),
+                    is_error: false,
+                };
+                2
+            ];
+            let parts = parts(&event(calls));
+            for width in 0..=40 {
+                let lines = parts[0].lines(width, Style::default().fg(ratatui::style::Color::Red));
+                assert_eq!(lines.len(), 1);
+                assert_eq!(lines[0].width(), width);
+                if width < 3 {
+                    continue;
+                }
+                let text = lines[0].to_string();
+                let title_row = text.trim_matches('─');
+                assert!(title_row.starts_with(' ') && title_row.ends_with(' '));
+                let drawn = &title_row[1..title_row.len() - 1];
+                let left = text.chars().take_while(|ch| *ch == '─').count() + 1;
+                assert_eq!(left + drawn.width() / 2, width / 2);
+                assert_eq!(
+                    parts[1].lines(width, Style::default())[0]
+                        .to_string()
+                        .find('↓'),
+                    Some(width / 2)
+                );
+                for span in &lines[0].spans[1..lines[0].spans.len() - 1] {
+                    assert_eq!(span.style, super::super::style::log_jump_style());
+                }
+                assert_eq!(lines[0].spans[0].style, Style::new().dim());
+                let maps = parts[0].maps(&lines);
+                let copied: String = maps[0]
+                    .iter()
+                    .map(|(_, bytes)| &parts[0].source[bytes.clone()])
+                    .collect();
+                assert_eq!(copied, title);
+                assert!(maps[0].iter().all(|(cells, _)| cells.start as usize >= left
+                    && cells.end as usize <= left + drawn.width()));
+                if title.width() > width - 2 {
+                    assert!(drawn.ends_with('…'));
+                } else {
+                    assert_eq!(drawn, title);
+                }
+            }
+        }
     }
 
     #[test]
