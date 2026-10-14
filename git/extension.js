@@ -59,11 +59,11 @@ async function viewFolder(path) {
 /**
  * Opens the pull request in the window of `repo`. A link lands in the last active window,
  * so another window records the request and hands focus to the repository's window,
- * which opens it once it is focused.
+ * which opens it once it is focused. Outside a repository it opens in this window.
  */
 async function viewPullRequest(context, path, url) {
   const repo = await repositoryRoot(path);
-  if (isOpenHere(repo)) {
+  if (!repo || isOpenHere(repo)) {
     await openPullRequest(url);
     return;
   }
@@ -89,7 +89,7 @@ function pendingFile(context) {
 function repositoryRoot(path) {
   return new Promise((resolve) => {
     execFile('git', ['-C', path, 'rev-parse', '--show-toplevel'], (error, stdout) => {
-      resolve(error ? path : stdout.trimEnd());
+      resolve(error ? undefined : stdout.trimEnd());
     });
   });
 }

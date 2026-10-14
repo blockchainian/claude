@@ -19,3 +19,5 @@ Link the folder into VS Code's extensions directory, then restart VS Code:
 ```sh
 ln -sfn "$PWD/git" ~/.vscode/extensions/blockchainian.git-0.2.0
 ```
+
+VS Code records the extension by version in `~/.vscode/extensions/extensions.json`, so after a version bump, quit VS Code, rename the link, and point the `blockchainian.git` entry's `version`, `relativeLocation` and `location` at the new name; otherwise VS Code marks the new folder obsolete and skips it.
