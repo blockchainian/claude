@@ -982,17 +982,7 @@ fn render_background_box(
 ) {
     // A rule cell leads the title and a half-width glyph ends the row; a
     // space keeps the title off both.
-    let mut title = truncate_line_with_ellipsis_if_overflow(
-        Line::from(description.to_owned()),
-        usize::from(box_area.width.saturating_sub(4)).saturating_sub(
-            elapsed.map_or(0, |elapsed| elapsed.chars().count() + " · ".chars().count()),
-        ),
-    );
-    if let Some(elapsed) = elapsed {
-        title.spans.extend([" · ".dim(), elapsed.to_owned().dim()]);
-    }
-    title.spans.insert(0, "─ ".dim());
-    title.spans.push(" ".into());
+    let title = super::title_rule::title_rule(description, usize::from(box_area.width), elapsed);
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().dim())

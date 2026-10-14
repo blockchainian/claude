@@ -15,11 +15,11 @@ pub(super) struct Part {
 }
 
 enum Body {
-    /// A merged call's title centred in a full-width rule.
+    /// A merged call's title after a leading rule cell and space.
     TitleRule,
     /// A section label, in the given style.
     Label(Style),
-    /// A centred input/output arrow.
+    /// An input/output arrow at the title column.
     Arrow,
     /// The dim note that a call has no output yet.
     Running,
@@ -107,8 +107,11 @@ impl Part {
         lines
             .iter()
             .map(|line| {
+                if line.spans.len() < 4 {
+                    return Vec::new();
+                }
                 let padding = line.spans[0].width() as u16;
-                let mut content = Line::from(line.spans[1..line.spans.len() - 1].to_vec());
+                let mut content = Line::from(line.spans[1..line.spans.len() - 2].to_vec());
                 let truncated = content.width() > 0
                     && self.source.replace('\t', "    ").width() > content.width();
                 if truncated {
@@ -140,44 +143,15 @@ impl Part {
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let lines = match &self.body {
-            Body::TitleRule => {
-                let gap = usize::from(width >= 2);
-                let mut title = super::line_truncation::truncate_line_with_ellipsis_if_overflow(
-                    Line::from(source.to_owned()),
-                    width.saturating_sub(2 * gap),
-                );
-                for span in &mut title.spans {
-                    span.style = super::style::log_jump_style();
-                }
-                let left = width / 2 - title.width() / 2;
-                let right = width - left - title.width();
-                let mut spans = vec![Span::styled(
-                    format!(
-                        "{}{}",
-                        "─".repeat(left.saturating_sub(gap)),
-                        " ".repeat(gap)
-                    ),
-                    Style::new().dim(),
-                )];
-                spans.extend(title.spans);
-                spans.push(Span::styled(
-                    format!(
-                        "{}{}",
-                        " ".repeat(gap),
-                        "─".repeat(right.saturating_sub(gap))
-                    ),
-                    Style::new().dim(),
-                ));
-                vec![Line::from(spans)]
-            }
+            Body::TitleRule => vec![super::title_rule::title_rule(source, width, None)],
             Body::Label(style) => split_wide(
                 vec![Line::from(Span::styled(source.to_owned(), *style))],
                 width,
             ),
             Body::Arrow => {
                 let mut row = " ".repeat(width);
-                if width > 0 {
-                    row.replace_range(width / 2..width / 2 + 1, "↓");
+                if width > 2 {
+                    row.replace_range(2..3, "↓");
                 }
                 vec![Line::styled(row, super::style::log_jump_style())]
             }
@@ -642,12 +616,12 @@ mod tests {
         assert_eq!(
             texts(&parts, 80),
             [
-                &format!("{} Bash {}", "─".repeat(37), "─".repeat(37)),
+                &format!("─ Bash {}", "─".repeat(73)),
                 "cargo test",
-                &format!("{}↓{}", " ".repeat(40), " ".repeat(39)),
+                &format!("  ↓{}", " ".repeat(77)),
                 "running 3 tests",
                 "...",
-                &format!("{} Read {}", "─".repeat(37), "─".repeat(37)),
+                &format!("─ Read {}", "─".repeat(73)),
                 "path: agents/src/log.rs",
                 "range: lines 1–40",
                 "running…",
@@ -656,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn title_rules_fit_one_row_and_share_the_arrow_center_and_style() {
+    fn title_rules_fit_one_row_with_fixed_title_and_arrow_columns() {
         for title in [
             "Bash",
             "看探针结果",
@@ -680,7 +654,7 @@ mod tests {
                 let lines = parts[0].lines(width, Style::default().fg(ratatui::style::Color::Red));
                 assert_eq!(lines.len(), 1);
                 assert_eq!(lines[0].width(), width);
-                if width < 3 {
+                if width < 5 {
                     continue;
                 }
                 let text = lines[0].to_string();
@@ -688,17 +662,18 @@ mod tests {
                 assert!(title_row.starts_with(' ') && title_row.ends_with(' '));
                 let drawn = &title_row[1..title_row.len() - 1];
                 let left = text.chars().take_while(|ch| *ch == '─').count() + 1;
-                assert_eq!(left + drawn.width() / 2, width / 2);
+                assert_eq!(left, 2);
                 assert_eq!(
                     parts[1].lines(width, Style::default())[0]
                         .to_string()
                         .find('↓'),
-                    Some(width / 2)
+                    Some(2)
                 );
-                for span in &lines[0].spans[1..lines[0].spans.len() - 1] {
-                    assert_eq!(span.style, super::super::style::log_jump_style());
+                for span in &lines[0].spans[1..lines[0].spans.len() - 2] {
+                    assert_eq!(span.style, Style::new().not_dim());
                 }
                 assert_eq!(lines[0].spans[0].style, Style::new().dim());
+                assert_eq!(lines[0].spans.last().unwrap().style, Style::new().dim());
                 let maps = parts[0].maps(&lines);
                 let copied: String = maps[0]
                     .iter()
@@ -707,10 +682,44 @@ mod tests {
                 assert_eq!(copied, title);
                 assert!(maps[0].iter().all(|(cells, _)| cells.start as usize >= left
                     && cells.end as usize <= left + drawn.width()));
-                if title.width() > width - 2 {
+                if title.width() > width - 4 {
                     assert!(drawn.ends_with('…'));
                 } else {
                     assert_eq!(drawn, title);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn single_and_merged_arrows_keep_their_column_style_and_empty_copy_source() {
+        for count in [1, 2] {
+            let calls = vec![
+                ToolCall {
+                    id: "arrow-fixture".into(),
+                    title: "Run checks".into(),
+                    name: "Bash".into(),
+                    input: vec![],
+                    output: Some(vec![]),
+                    is_error: false,
+                };
+                count
+            ];
+            let parts = parts(&event(calls));
+            assert_eq!(
+                parts
+                    .iter()
+                    .filter(|part| matches!(part.body, Body::TitleRule))
+                    .count(),
+                if count == 1 { 0 } else { 2 }
+            );
+            for part in parts.iter().filter(|part| matches!(part.body, Body::Arrow)) {
+                for width in 0..=40 {
+                    let lines = part.lines(width, Style::default().dim());
+                    assert_eq!(lines[0].width(), width);
+                    assert_eq!(lines[0].to_string().find('↓'), (width > 2).then_some(2));
+                    assert_eq!(lines[0].style, super::super::style::log_jump_style());
+                    assert!(part.maps(&lines)[0].is_empty());
                 }
             }
         }
@@ -740,7 +749,7 @@ mod tests {
                 "+中文字符",
                 "串很长",
                 "-short",
-                "    ↓    ",
+                "  ↓      ",
                 "let value",
                 " = \"abcde",
                 "fghij\";",
