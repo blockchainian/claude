@@ -405,13 +405,16 @@ fn render_event(
     (cut, links)
 }
 
+/// The screen cells of one drawn line, each with the source bytes it shows.
+type Cells = Vec<(std::ops::Range<u16>, std::ops::Range<usize>)>;
+
 /// The open log event laid out at one panel width, reused every frame until the event or
 /// the width changes.
 pub(super) struct OpenLayout {
     width: u16,
     lines: Vec<Line<'static>>,
     /// Each line's text part and the cells mapping it back to that part's bytes.
-    rows: Vec<(usize, Vec<(std::ops::Range<u16>, std::ops::Range<usize>)>)>,
+    rows: Vec<(usize, Cells)>,
     sources: Vec<text_selection::Source>,
     /// The links in each text part.
     links: Vec<Vec<super::links::Link>>,
