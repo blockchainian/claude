@@ -197,6 +197,9 @@ impl QueueOperation {
 /// message absorbed into a running turn, which Claude Code stores as an
 /// attachment instead of a user record.
 fn prompt_text(record: &Value) -> Option<String> {
+    if record["isMeta"] == true {
+        return None;
+    }
     match record["type"].as_str()? {
         "user" => {
             if let Some((name, body)) = super::peer::origin_message(record) {
@@ -647,6 +650,28 @@ mod tests {
     use std::io::Write;
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
+
+    #[test]
+    fn image_companion_is_not_the_details_prompt() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(include_bytes!(
+            "../../../tests/fixtures/claude-prompt-images.jsonl"
+        ))
+        .unwrap();
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        let record: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/claude-prompt-images.jsonl")
+                .lines()
+                .nth(4)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(summary.prompt, content_text(&record, false).unwrap());
+        assert_eq!(
+            summary.prompt_at,
+            Some("2026-10-13T19:17:18.224Z".parse().unwrap())
+        );
+    }
 
     #[test]
     fn peer_prompts_show_sender_and_body() {
