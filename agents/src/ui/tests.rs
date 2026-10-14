@@ -6664,3 +6664,55 @@ fn usage_chart_draws_output_above_and_input_below_the_log_rule_and_scrolls_back(
         "scrolling to now follows the newest bins"
     );
 }
+
+#[test]
+fn usage_chart_columns_keep_their_bins_and_full_color_as_time_passes() {
+    use crate::usage::{Bin, bin_of};
+    use ratatui::style::Modifier;
+    let (mut view, now) = log_fixture();
+    let id = view.rows[view.selected].id.clone();
+    let mut bins = std::collections::BTreeMap::new();
+    for offset in 0..12 {
+        let usage = 10_u64.pow(1 + (offset % 4) as u32);
+        bins.insert(
+            bin_of(now) - 30 + offset,
+            Bin {
+                input: usage,
+                output: usage,
+            },
+        );
+    }
+    view.set_usage(&id, bins);
+    let chart = |at: chrono::DateTime<Utc>| {
+        let area = Rect::new(0, 0, 100, 25);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, at);
+        let rule = view.viewport.borrow().usage_chart.y + 1;
+        let cells: Vec<_> = (0..area.width)
+            .map(|x| buf[(x, rule)].clone())
+            .filter(|cell| "█▀▄".contains(cell.symbol()))
+            .collect();
+        cells
+    };
+    let before = chart(now);
+    assert!(!before.is_empty());
+    assert!(
+        before
+            .iter()
+            .all(|cell| !cell.modifier.contains(Modifier::DIM)),
+        "chart cells on the rule are not dimmed like the rule"
+    );
+    let symbols = |cells: &[ratatui::buffer::Cell]| {
+        cells
+            .iter()
+            .map(|cell| (cell.symbol().to_owned(), cell.fg))
+            .collect::<Vec<_>>()
+    };
+    for seconds in [5, 10, 15] {
+        assert_eq!(
+            symbols(&chart(now + Duration::seconds(seconds))),
+            symbols(&before),
+            "after {seconds}s the columns show the same bins"
+        );
+    }
+}

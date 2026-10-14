@@ -67,22 +67,21 @@ impl View {
             return;
         }
         let live = session.status != crate::model::SessionStatus::Inactive;
-        let live_end = if live {
+        let live_end = cell_right(if live {
             bin_of(now)
         } else {
             bins.keys()
                 .next_back()
                 .copied()
                 .unwrap_or_else(|| bin_of(now))
-        };
+        });
         let span = i64::from(area.width) * CELL_BINS;
-        let min_end = bins
-            .keys()
-            .next()
-            .map_or(live_end, |first| (first + span - 1).min(live_end));
-        let end = self
-            .usage_anchor
-            .map_or(live_end, |anchor| anchor.clamp(min_end, live_end));
+        let min_end = bins.keys().next().map_or(live_end, |first| {
+            (cell_right(*first) + span - CELL_BINS).min(live_end)
+        });
+        let end = self.usage_anchor.map_or(live_end, |anchor| {
+            cell_right(anchor).clamp(min_end, live_end)
+        });
         viewport.usage_chart = area;
         viewport.usage_live_end = live_end;
         viewport.usage_min_end = min_end;
@@ -91,7 +90,7 @@ impl View {
 
         let mut columns: BTreeMap<i64, Bin> = BTreeMap::new();
         for (bin, usage) in bins {
-            let column = columns.entry(cell_right(*bin, end)).or_default();
+            let column = columns.entry(cell_right(*bin)).or_default();
             column.input += usage.input;
             column.output += usage.output;
         }
@@ -121,9 +120,10 @@ impl View {
             let output = level(column.output, side_max);
             let input = level(column.input, side_max);
             let mut draw = |row: u16, symbol: char, style: Style| {
-                buf[(area.x + x, area.y + row)]
-                    .set_char(symbol)
-                    .set_style(style);
+                // A fresh cell, so the rule's dim style does not carry into the column.
+                let cell = &mut buf[(area.x + x, area.y + row)];
+                cell.reset();
+                cell.set_char(symbol).set_style(style);
             };
             match (output > 0, input > 0) {
                 (true, true) => draw(1, '█', style),
@@ -184,9 +184,10 @@ impl View {
     }
 }
 
-/// The right bin of the cell holding `bin` when the chart's right cell ends at `end`.
-fn cell_right(bin: i64, end: i64) -> i64 {
-    end - (end - bin).div_euclid(CELL_BINS) * CELL_BINS
+/// The right bin of the column holding `bin`; columns cover fixed bin pairs, so a column keeps
+/// its bins as time passes.
+fn cell_right(bin: i64) -> i64 {
+    bin - bin.rem_euclid(CELL_BINS) + CELL_BINS - 1
 }
 
 /// Height of `tokens` on a log scale up to `max`; any usage shows at least the rule's half.
@@ -228,9 +229,9 @@ mod tests {
     }
 
     #[test]
-    fn cells_pair_bins_ending_at_the_right_edge() {
-        assert_eq!(cell_right(10, 10), 10);
-        assert_eq!(cell_right(9, 10), 10);
-        assert_eq!(cell_right(8, 10), 8);
+    fn columns_pair_fixed_bins() {
+        assert_eq!(cell_right(10), 11);
+        assert_eq!(cell_right(11), 11);
+        assert_eq!(cell_right(-1), -1);
     }
 }
