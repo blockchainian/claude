@@ -136,7 +136,7 @@ impl View {
         let links = if is_prose(&event.kind) {
             super::links::text_links(&body, cwd, &event.images)
         } else {
-            super::links::path_links(&body, &tool_paths(event), cwd)
+            super::links::path_links(&body, &tool_paths(event, cwd), cwd)
         };
         let mut viewport = self.viewport.borrow_mut();
         viewport.log_open_max = lines.len().saturating_sub(usize::from(body_area.height));
@@ -338,7 +338,7 @@ fn render_event(
     Line::from(Span::styled(label, label_style))
         .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
     let body_width = content_width.saturating_sub(label_width);
-    let fitted = fitted_body_line(event, body_width);
+    let fitted = fitted_body_line(event, body_width, cwd);
     let mut body = fitted.line;
     let cut = fitted.shortened || body.width() > body_width;
     let body_x = content_x + label_width as u16;
@@ -428,8 +428,8 @@ fn is_prose(kind: &Kind) -> bool {
     matches!(kind, Kind::User | Kind::Assistant | Kind::Agent)
 }
 
-pub(super) fn body_line(event: &Event, body_width: usize) -> Line<'static> {
-    fitted_body_line(event, body_width).line
+pub(super) fn body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> Line<'static> {
+    fitted_body_line(event, body_width, cwd).line
 }
 
 /// An event's body as one log row, with paths shortened to fit the row.
@@ -444,7 +444,7 @@ struct FittedBody {
     paths: Vec<std::ops::Range<usize>>,
 }
 
-fn fitted_body_line(event: &Event, body_width: usize) -> FittedBody {
+fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> FittedBody {
     let body_style = super::style::log_styles(&event.kind).1;
     if is_prose(&event.kind) {
         // Markdown blocks end at line breaks, so they are kept until rendering.
@@ -454,7 +454,8 @@ fn fitted_body_line(event: &Event, body_width: usize) -> FittedBody {
             .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
             .collect::<Vec<_>>()
             .join("\n");
-        let shortened = super::line_truncation::abbreviate_paths_in_text(&body, body_width);
+        let paths = super::paths::text_paths(&body, cwd);
+        let shortened = super::line_truncation::abbreviate_paths_in_text(&body, &paths, body_width);
         let mut spans = Vec::new();
         for line in super::markdown::render(&shortened, usize::MAX) {
             if line.spans.iter().all(|span| span.content.trim().is_empty()) {
@@ -475,7 +476,7 @@ fn fitted_body_line(event: &Event, body_width: usize) -> FittedBody {
             paths: Vec::new(),
         }
     } else {
-        let (text, paths) = display_paths(event);
+        let (text, paths) = display_paths(event, cwd);
         let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width);
         FittedBody {
             shortened: shortened != collapse_whitespace(event.body.trim()),
@@ -488,11 +489,11 @@ fn fitted_body_line(event: &Event, body_width: usize) -> FittedBody {
 
 /// An event's body with whitespace runs collapsed and home paths shown as
 /// `~`, and the byte ranges of its paths in that text.
-fn display_paths(event: &Event) -> (String, Vec<std::ops::Range<usize>>) {
+fn display_paths(event: &Event, cwd: &std::path::Path) -> (String, Vec<std::ops::Range<usize>>) {
     let mut text = String::new();
     let mut ranges = Vec::new();
     let mut end = 0;
-    for range in &tool_paths(event) {
+    for range in &tool_paths(event, cwd) {
         text.push_str(&collapse_whitespace(&event.body[end..range.start]));
         let path = super::formatting::format_directory_display(std::path::Path::new(
             &event.body[range.clone()],
@@ -510,22 +511,16 @@ fn display_paths(event: &Event) -> (String, Vec<std::ops::Range<usize>>) {
 }
 
 /// The paths in a tool event's body: the ones its provider marked, and any
-/// other absolute or home path its free text mentions.
-fn tool_paths(event: &Event) -> Vec<std::ops::Range<usize>> {
+/// other path its free text mentions.
+fn tool_paths(event: &Event, cwd: &std::path::Path) -> Vec<std::ops::Range<usize>> {
     let mut paths = event.paths.clone();
-    let mut start = 0;
-    for part in event.body.split_inclusive(char::is_whitespace) {
-        let word = part.trim_end_matches(char::is_whitespace);
-        if let Some(range) = super::line_truncation::wrapped_path(word) {
-            let range = start + range.start..start + range.end;
-            if !paths
-                .iter()
-                .any(|known| known.start < range.end && range.start < known.end)
-            {
-                paths.push(range);
-            }
+    for range in super::paths::text_paths(&event.body, cwd) {
+        if !paths
+            .iter()
+            .any(|known| known.start < range.end && range.start < known.end)
+        {
+            paths.push(range);
         }
-        start += part.len();
     }
     paths.sort_by_key(|range| range.start);
     paths
@@ -743,6 +738,46 @@ mod log_markdown {
     }
 
     #[test]
+    fn prose_and_tool_rows_find_the_same_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src/ui")).unwrap();
+        std::fs::write(dir.path().join("src/ui/log.rs"), "").unwrap();
+        let body = "改了 src/ui/log.rs 和 /private/tmp/report.md，已发送";
+        for kind in [Kind::User, Kind::Tool] {
+            let event = Event {
+                kind: kind.clone(),
+                body: body.into(),
+                paths: Vec::new(),
+                started_at: Utc::now(),
+                ended_at: None,
+                duration: None,
+                previous_end: None,
+                images: Vec::new(),
+                calls: Vec::new(),
+            };
+            let fitted = fitted_body_line(&event, 30, dir.path());
+            let links = if is_prose(&kind) {
+                super::super::links::text_links(&fitted.source, dir.path(), &[])
+            } else {
+                super::super::links::path_links(&fitted.source, &fitted.paths, dir.path())
+            };
+            let targets: Vec<_> = links.into_iter().map(|link| link.target).collect();
+            assert_eq!(
+                targets,
+                [
+                    dir.path().join("src/ui/log.rs"),
+                    "/private/tmp/report.md".into()
+                ],
+                "{kind:?}"
+            );
+            assert!(
+                fitted.line.to_string().contains("report.md，已发送"),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
     fn cut_inline_code_keeps_colour_through_the_ellipsis() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         for kind in [Kind::User, Kind::Assistant, Kind::Agent] {
@@ -770,7 +805,7 @@ mod log_markdown {
             std::io::Write::write_all(&mut file, format!("{record}\n").as_bytes()).unwrap();
         }
         let events = crate::providers::claude::log::tail(file.path(), 1).unwrap();
-        let fitted = fitted_body_line(&events[0], width);
+        let fitted = fitted_body_line(&events[0], width, std::path::Path::new("/"));
         let (line, cut) = (fitted.line, fitted.shortened);
         let text = line
             .spans

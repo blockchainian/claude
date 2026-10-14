@@ -17,18 +17,7 @@ pub(super) type DrawnLink = (Rect, PathBuf);
 /// The paths and image placeholders in `text`: absolute and home paths, relative
 /// paths that exist under `cwd`, and the label of each of `images`.
 pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::log::Image]) -> Vec<Link> {
-    let mut links = Vec::new();
-    let mut offset = 0;
-    for part in text.split_inclusive(char::is_whitespace) {
-        let word = part.trim_end_matches(char::is_whitespace);
-        if let Some((range, target)) = word_link(word, cwd) {
-            links.push(Link {
-                range: offset + range.start..offset + range.end,
-                target,
-            });
-        }
-        offset += part.len();
-    }
+    let mut links = path_links(text, &super::paths::text_paths(text, cwd), cwd);
     for image in images {
         links.extend(text.match_indices(&image.label).map(|(at, label)| Link {
             range: at..at + label.len(),
@@ -50,34 +39,6 @@ pub(super) fn path_links(text: &str, paths: &[Range<usize>], cwd: &Path) -> Vec<
             })
         })
         .collect()
-}
-
-/// The path a word links to, with its bytes inside the word.
-fn word_link(word: &str, cwd: &Path) -> Option<(Range<usize>, PathBuf)> {
-    if let Some(range) = super::line_truncation::wrapped_path(word) {
-        return Some((range.clone(), resolve(&word[range], cwd)?));
-    }
-    let range = relative_path(word)?;
-    let target = cwd.join(&word[range.clone()]);
-    target.exists().then_some((range, target))
-}
-
-/// A relative path such as `src/ui/log.rs` inside a word, before any existence check.
-fn relative_path(word: &str) -> Option<Range<usize>> {
-    let start = word.len()
-        - word
-            .trim_start_matches(['`', '(', '"', '\'', '[', '*', '_', '<'])
-            .len();
-    let path = word[start..]
-        .trim_end_matches(['`', ')', '"', '\'', ',', '.', ';', ':', ']', '>', '*', '_']);
-    let plain = path.contains('/')
-        && !path.contains("://")
-        && !path.starts_with('/')
-        && path
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_alphanumeric() || c == '.');
-    plain.then_some(start..start + path.len())
 }
 
 /// Where `path` opens: absolute paths and URLs as they are, `~/` under the home
