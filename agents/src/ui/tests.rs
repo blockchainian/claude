@@ -5849,7 +5849,8 @@ fn pretty_json_body_remaps_provider_path_ranges() {
     event.kind = crate::log::Kind::QueuedSystem;
     event.body = serde_json::json!({"note": "中文", "path": path_text}).to_string();
     let start = event.body.find(path_text).unwrap();
-    event.paths = vec![start..start + path_text.len()];
+    event.paths.clear();
+    event.paths.push(start..start + path_text.len());
     view.set_log_open(Some(event));
     log_screen(&view, 100, 48, now);
     assert!(
