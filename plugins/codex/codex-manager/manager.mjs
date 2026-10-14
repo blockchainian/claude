@@ -278,9 +278,11 @@ class Manager {
     return turns.data?.[0];
   }
 
-  /** Subscribes to a detached thread again, which also loads it when the daemon has unloaded it. */
+  /** Subscribes to a detached attached session again; refuses a thread this session started, which detach archived. */
   async listenAgain(client, threadId) {
-    if (!this.thread(threadId).detached) return;
+    const thread = this.thread(threadId);
+    if (!thread.detached) return;
+    if (!thread.attached) throw new Error(`thread ${threadId} was detached and archived; start a new thread`);
     await this.subscribe(client, threadId);
     this.updateThread(threadId, { detached: undefined });
   }
@@ -450,18 +452,23 @@ class Manager {
     return { threadId, turnId: response.turn.id, name: name ?? null, cwd: absolute, out: target, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when the review is written." };
   }
 
-  /** Finds a session on the daemon by id or exact name, the open one first; the daemon's own searchTerm filters titles, not names. */
-  async findThread(client, wanted) {
-    const named = [];
+  /** Pages through the daemon's sessions without filtering titles or names. */
+  async *daemonThreads(client) {
     let cursor;
     do {
       const page = await client.request("thread/list", { limit: 100, sortKey: "updated_at", cursor });
-      for (const thread of page.data ?? []) {
-        if (thread.id === wanted) return thread;
-        if (thread.name === wanted) named.push(thread);
-      }
+      yield* page.data ?? [];
       cursor = page.nextCursor;
     } while (cursor);
+  }
+
+  /** Finds a session on the daemon by id or exact name, the open one first; the daemon's own searchTerm filters titles, not names. */
+  async findThread(client, wanted) {
+    const named = [];
+    for await (const thread of this.daemonThreads(client)) {
+      if (thread.id === wanted) return thread;
+      if (thread.name === wanted) named.push(thread);
+    }
     if (!named.length) throw new Error(`no codex session has the id or name ${JSON.stringify(wanted)}`);
     // Sessions keep their name after they are closed, so the one that is open is the one meant.
     const open = named.filter((thread) => thread.status?.type !== "notLoaded");
@@ -537,18 +544,45 @@ class Manager {
     return { threadId, turnId: thread.turnId, interrupted: true };
   }
 
-  /** Stops listening to a thread whose work is done, so the daemon unloads it once nobody else is subscribed. */
+  /** Archives a thread this session started, with its spawned agents; only unsubscribes an attached session. */
   async detach({ threadId }) {
     if (!threadId) throw new Error("threadId is required");
-    if (this.thread(threadId).lastStatus === "inProgress") throw new Error(`thread ${threadId} is still running a turn; wait for it or interrupt it first`);
+    const thread = this.thread(threadId);
+    if (thread.lastStatus === "inProgress") throw new Error(`thread ${threadId} is still running a turn; wait for it or interrupt it first`);
     const client = await this.connect();
-    const { status } = await client.request("thread/unsubscribe", { threadId });
+    if (thread.attached) {
+      const { status } = await client.request("thread/unsubscribe", { threadId });
+      this.updateThread(threadId, { detached: true });
+      return { threadId, detached: true, status };
+    }
+    await client.request("thread/archive", { threadId });
     this.updateThread(threadId, { detached: true });
-    return { threadId, detached: true, status };
+    return { threadId, detached: true, archived: true };
   }
 
   async list() {
     if (!this.client) await this.connect().catch((error) => log(`not connected: ${error.message}`));
+    if (this.client && this.state().threads.length) {
+      const registered = new Set(this.state().threads.map((thread) => thread.id));
+      const names = new Map();
+      try {
+        for await (const thread of this.daemonThreads(this.client)) {
+          if (registered.has(thread.id)) names.set(thread.id, thread.name ?? null);
+        }
+      } catch (error) {
+        log(`cannot refresh thread names: ${error.message}`);
+        names.clear();
+      }
+      if (names.size) this.store.updateState((state) => {
+        let changed = false;
+        for (const thread of state.threads) {
+          if (!names.has(thread.id) || thread.name === names.get(thread.id)) continue;
+          thread.name = names.get(thread.id);
+          changed = true;
+        }
+        return changed;
+      });
+    }
     const threads = this.state().threads.map((thread) => ({ ...thread, waiting: this.waiting(thread), unread: this.store.unreadCount(thread.id), await: awaitCommand(thread.id) }));
     return { connected: this.connected(), sessionDir: this.store.dir, threads };
   }
@@ -564,19 +598,19 @@ function reviewInstructions(base, plan, decisions, stance, focus) {
   return `Review the code changes since commit ${base}. Run \`git diff ${base}\` to inspect the changes.${spec}${decided}${adversarial}${focused}${close}Provide prioritized, actionable findings.`;
 }
 
-const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask or approval), you have checked and accepted its result, and you plan no further message. Detach it in that same turn, and before ending a multi-thread run, list the threads and detach every finished one. When a thread asks, check list for waiting requests before you reply: await can return an ask already answered.`;
+const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask or approval), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived and takes no further send. Before ending a multi-thread run, list the threads and detach every finished one. When a thread asks, check list for waiting requests before you reply: await can return an ask already answered.`;
 
 // Reasoning efforts codex accepts for model_reasoning_effort.
 const reasoningEfforts = ["minimal", "low", "medium", "high", "xhigh"];
 
 const TOOLS = [
-  { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute working directory for the worker." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push." }, name: { type: "string", description: "Short human-readable thread name." }, effort: { type: "string", enum: reasoningEfforts, description: "Reasoning effort for every turn of the thread. Omit it to use codex's configured default; pass `high` only for a genuinely hard bug." } }, required: ["cwd", "prompt"] } },
+  { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push." }, name: { type: "string", description: "Short human-readable thread name." }, effort: { type: "string", enum: reasoningEfforts, description: "Reasoning effort for every turn of the thread. Omit it to use codex's configured default; pass `high` only for a genuinely hard bug." } }, required: ["cwd", "prompt"] } },
   { name: "attach", description: "Take over a codex session already running elsewhere, found by its thread id or exact name, so that send, interrupt and the await command work on it. Its approvals stay with the client it runs in.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
   { name: "send", description: "Send a follow-up prompt to a codex thread: it starts a new turn when the thread is idle and is injected into the running turn otherwise. Keep follow-ups small and related, at most three items; start a new thread for unrelated work.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
   { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. The text becomes the result of its ask_claude call or, for an approval request, one of the decisions its inbox event listed. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "list", description: "List the codex threads this session started or attached, with each one's last turn status, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: {} } },
-  { name: "detach", description: "Stop listening to a codex thread, which the daemon then unloads from the Ready list of `codex agents`. The session is kept, and a later send re-attaches it. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
+  { name: "detach", description: "Release a thread you no longer need. A thread you started is archived with its spawned agents and takes no further send; an attached session stays open in its own client, and send or attach takes it back. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "review", description: "Review the commits since a base sha in a read-only thread with codex's built-in review mode, and save the rendered review, priority-tagged findings with an overall verdict, to a file. Pass `stance: \"adversarial\"` for a challenge review. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, decisions: { type: "string", description: "Path of the file listing the rules decided while the changes were built, relative to cwd or absolute." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." }, stance: { type: "string", enum: ["adversarial"], description: "adversarial: the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. Omit for the plain review." }, focus: { type: "string", description: "What the reviewer should weigh most, in a phrase." } }, required: ["cwd", "base", "out"] } }
 ];
 

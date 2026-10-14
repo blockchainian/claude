@@ -76,7 +76,7 @@ with its app-server daemon running (`codex agents` starts one).
 | `reply(threadId, text, callId?)` | Answer what the thread is waiting for: the text becomes the result of its `ask_claude` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
 | `interrupt(threadId)` | `turn/interrupt` the thread's current turn. |
 | `list()` | The threads this Claude session started or attached, their last turn status, and the unread inbox count per thread. |
-| `detach(threadId)` | `thread/unsubscribe` a thread whose work is finished, and keep it recorded as detached so a restart or reconnect does not subscribe to it again. The daemon unloads an idle thread 60 seconds (`thread_unload_delay_secs`) after its last subscriber leaves, which moves it from Ready to Inactive in `codex agents`. Refused while a turn is running. A later `send` or `attach` subscribes again. |
+| `detach(threadId)` | Release a thread no longer needed. A thread this session started gets `thread/archive`, together with its spawned agents, and a later `send` is refused. An attached session only gets `thread/unsubscribe`; it stays open in its own client, and a later `send` or `attach` subscribes again. Refused while a turn is running. |
 | `review(cwd, base, out, plan?, decisions?, name?, stance?, focus?)` | A read-only thread running codex's own review mode (`review/start`, its rubric and P0–P3 priorities) over the commits since `base`; the rendered review — an overall verdict and one finding per line with its file and lines — is saved to `out`. With `plan`, the reviewer reads the spec first and does not flag a behaviour change the spec asks for. With `decisions`, the reviewer also reads the rules decided during the run: it does not report one as a departure from the spec, and judges each on its own, tracing what reads the result, also in code the changes did not touch. `stance: "adversarial"` adds a challenge stance (`codex-manager/adversarial-review.md`): the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. `focus` names what it should weigh most. |
 
 ## Attached sessions
@@ -101,8 +101,9 @@ deliver an already answered ask). A thread is finished only when its turn
 completed (not failed, interrupted or waiting on an ask), its result has been
 checked and accepted, and no further message is planned. Blocked threads and
 results still being checked are not finished. Once finished, `detach` in the
-same turn; a later `send` re-attaches it, so early detachment is safe. Before
-ending a multi-thread run, `list` and detach every finished thread.
+same turn; a thread the session started is then archived and takes no further
+`send`. Before ending a multi-thread run, `list` and detach every finished
+thread.
 
 Every `start`/`send`/`review` result carries an await command. Run it with
 `run_in_background`:
@@ -199,7 +200,11 @@ server `thread/resume`s each recorded thread (which subscribes it to that
 thread's notifications and replays any pending approval) and backfills a
 `completed` event for turns that finished while Claude was away. Codex threads
 outlive the Claude session: a running turn finishes on its own, and the daemon
-unloads an idle, unsubscribed thread after `thread_unload_delay_secs`.
+unloads a thread `thread_unload_delay_secs` after its last subscriber leaves
+(default 1800 s; this setup sets 60 s in `~/.codex/config.toml`). The daemon
+subscribes every connected client to a spawned agent, so unsubscribing leaves
+agents loaded; `detach` archives a thread the session started, which shuts its
+agents down.
 
 The daemon is reached over `~/.codex/app-server-control/app-server-control.sock`
 (override with `CODEX_DAEMON_SOCKET`; state root with
