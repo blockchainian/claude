@@ -1,5 +1,6 @@
 //! Command center adapted from OpenAI Codex's TUI (Apache-2.0).
 mod formatting;
+mod highlight;
 mod hints;
 mod hyperlink;
 mod input;
@@ -17,6 +18,7 @@ mod shortcut_help;
 mod style;
 mod text_selection;
 mod text_selection_layout;
+mod tool_detail;
 #[cfg(test)]
 pub use style::light_background;
 pub use style::set_light_background;
