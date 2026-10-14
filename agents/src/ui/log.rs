@@ -9,7 +9,7 @@ const CLOCK_WIDTH: usize = 8;
 const KIND_WIDTH: usize = 9;
 
 /// Rows above the first event: the top rule and a blank row.
-pub(super) const LOG_TOP: u16 = 1;
+pub(super) const LOG_TOP: u16 = 2;
 
 pub(super) fn search_input_rect(area: Rect) -> Rect {
     super::render::row(area, area.height.saturating_sub(1), 1)

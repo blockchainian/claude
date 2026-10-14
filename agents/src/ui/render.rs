@@ -653,7 +653,12 @@ impl View {
         if let Some(effort) = &session.effort {
             model.extend([" · ".dim(), effort.clone().into()]);
         }
-        items.extend([Line::default().into(), Line::from(model).into()]);
+        // A blank row keeps the model off the bottom rule.
+        items.extend([
+            Line::default().into(),
+            Line::from(model).into(),
+            Line::default().into(),
+        ]);
         item_links.resize(items.len(), Vec::new());
 
         let mut text_rows = vec![None; items.len()];
