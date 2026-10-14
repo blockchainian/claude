@@ -51,12 +51,11 @@ impl Part {
                 && (value.as_object().is_some_and(|object| !object.is_empty())
                     || value.as_array().is_some_and(|array| !array.is_empty()))
             {
-                if text_start < cursor {
-                    if let Some(text) =
+                if text_start < cursor
+                    && let Some(text) =
                         text_boundary(&source[text_start..cursor], text_start > 0, true)
-                    {
-                        parts.push(Self::text_fragment(text.into(), markdown));
-                    }
+                {
+                    parts.push(Self::text_fragment(text.into(), markdown));
                 }
                 parts.push(Self::new(
                     serde_json::to_string_pretty(&value).expect("JSON value serializes"),
@@ -68,10 +67,10 @@ impl Part {
                 cursor += 1;
             }
         }
-        if text_start < source.len() || parts.is_empty() {
-            if let Some(text) = text_boundary(&source[text_start..], text_start > 0, false) {
-                parts.push(Self::text_fragment(text.into(), markdown));
-            }
+        if (text_start < source.len() || parts.is_empty())
+            && let Some(text) = text_boundary(&source[text_start..], text_start > 0, false)
+        {
+            parts.push(Self::text_fragment(text.into(), markdown));
         }
         parts
     }
