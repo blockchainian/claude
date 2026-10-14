@@ -288,11 +288,17 @@ fn new_log_events_while_dragging_copy_the_rows_on_screen() {
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     view.set_log(log_with_newer_event(&view, now));
     log_screen(&view, 100, 25, now);
-    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), rect.x + 40, y + 2));
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        rect.x + 40,
+        y + 2,
+    ));
     log_screen(&view, 100, 25, now);
-    let Some(Action::Copy { text, .. }) =
-        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), rect.x + 40, y + 2))
-    else {
+    let Some(Action::Copy { text, .. }) = view.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        rect.x + 40,
+        y + 2,
+    )) else {
         panic!("no copy");
     };
     let lines: Vec<_> = text.lines().collect();
@@ -332,7 +338,10 @@ fn jump_button_returns_to_the_newest_log_row() {
     assert_eq!(view.log_scroll(), 0);
     let after = log_screen(&view, 100, 25, now);
     assert!(after.contains("run tests"), "{after}");
-    assert!(!after.lines().nth(usize::from(y)).unwrap().contains('↑'), "{after}");
+    assert!(
+        !after.lines().nth(usize::from(y)).unwrap().contains('↑'),
+        "{after}"
+    );
 }
 
 #[test]
@@ -4995,7 +5004,11 @@ fn notice_sits_at_task_list_bottom_left_for_one_second() {
         .skip(usize::from(list.x))
         .take(usize::from(list.width))
         .collect::<String>();
-    assert_eq!(notice_cells.trim_end(), "Resume is not supported", "{rendered}");
+    assert_eq!(
+        notice_cells.trim_end(),
+        "Resume is not supported",
+        "{rendered}"
+    );
     assert_eq!(*lines.last().unwrap(), hints);
     assert!(
         view.expire_messages(Instant::now())

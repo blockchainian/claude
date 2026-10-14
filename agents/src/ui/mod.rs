@@ -558,7 +558,9 @@ mod text_selection_tests;
 /// Clears `message` once `now` reaches its expiry, and returns how long it has left.
 fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Duration> {
     let (_, expires_at) = message.as_ref()?;
-    let left = expires_at.checked_duration_since(now).filter(|left| !left.is_zero());
+    let left = expires_at
+        .checked_duration_since(now)
+        .filter(|left| !left.is_zero());
     if left.is_none() {
         *message = None;
     }
