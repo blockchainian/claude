@@ -125,6 +125,37 @@ pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) 
 }
 
 #[test]
+fn queued_wheel_events_apply_before_the_next_draw() {
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, payload.repeat(20)).unwrap();
+    app.refresh_log(8);
+    let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    let wheel = || {
+        Input::Terminal(Ok(Event::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::ScrollDown,
+            column: 2,
+            row: 14,
+            modifiers: KeyModifiers::NONE,
+        })))
+    };
+    let (sender, receiver) = mpsc::channel();
+    for _ in 0..4 {
+        sender.send(wheel()).unwrap();
+    }
+    let mut schedule = RefreshSchedule::new(std::time::Instant::now(), POLLING_INTERVAL);
+    assert!(
+        !app.handle_inputs(wheel(), &receiver, &mut None, &mut schedule)
+            .unwrap()
+    );
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(app.view.log_scroll(), 5);
+}
+
+#[test]
 fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
     let (_dir, mut app) = fixture();

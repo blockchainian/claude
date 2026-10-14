@@ -234,26 +234,48 @@ impl App {
                 timeout
             };
             match receiver.recv_timeout(timeout) {
-                Ok(Input::Terminal(event)) => {
-                    if self.handle_event(event?) {
+                Ok(input) => {
+                    if self.handle_inputs(input, &receiver, &mut watcher, &mut schedule)? {
                         return Ok(());
                     }
                 }
-                Ok(Input::Filesystem(Ok(()))) if watcher.is_some() => {
-                    schedule.changed(Instant::now());
-                }
-                Ok(Input::Filesystem(Err(error))) if watcher.is_some() => {
-                    self.view
-                        .set_notice(Some(format!("Falling back to polling: {error}")));
-                    watcher = None;
-                    schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
-                }
-                Ok(Input::Filesystem(_)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     return Err(io::Error::other("event readers disconnected"));
                 }
             }
         }
+    }
+
+    /// Handles `first` and every input already queued behind it, so a burst of wheel reports
+    /// costs one draw instead of one per report. Returns true when the dashboard should exit.
+    fn handle_inputs(
+        &mut self,
+        first: Input,
+        receiver: &mpsc::Receiver<Input>,
+        watcher: &mut Option<notify::RecommendedWatcher>,
+        schedule: &mut RefreshSchedule,
+    ) -> io::Result<bool> {
+        for input in std::iter::once(first).chain(std::iter::from_fn(|| receiver.try_recv().ok())) {
+            match input {
+                Input::Terminal(event) => {
+                    if self.handle_event(event?) {
+                        return Ok(true);
+                    }
+                }
+                Input::Filesystem(Ok(())) if watcher.is_some() => {
+                    schedule.changed(Instant::now());
+                }
+                Input::Filesystem(Err(error)) if watcher.is_some() => {
+                    self.view
+                        .set_notice(Some(format!("Falling back to polling: {error}")));
+                    *watcher = None;
+                    *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+                }
+                Input::Filesystem(_) => {}
+            }
+        }
+        Ok(false)
     }
 
     /// `background` is the terminal's reported color, when known.
