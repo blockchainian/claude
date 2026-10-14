@@ -842,11 +842,13 @@ mod log_markdown {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src/ui")).unwrap();
         std::fs::write(dir.path().join("src/ui/log.rs"), "").unwrap();
-        let body = "改了 src/ui/log.rs 和 /private/tmp/report.md，已发送";
+        let report = dir.path().join("report.md");
+        std::fs::write(&report, "").unwrap();
+        let body = format!("改了 src/ui/log.rs 和 {}，已发送", report.display());
         for kind in [Kind::User, Kind::Tool] {
             let event = Event {
                 kind: kind.clone(),
-                body: body.into(),
+                body: body.clone(),
                 paths: Vec::new(),
                 started_at: Utc::now(),
                 ended_at: None,
@@ -864,10 +866,7 @@ mod log_markdown {
             let targets: Vec<_> = links.into_iter().map(|link| link.target).collect();
             assert_eq!(
                 targets,
-                [
-                    dir.path().join("src/ui/log.rs"),
-                    "/private/tmp/report.md".into()
-                ],
+                [dir.path().join("src/ui/log.rs"), report.clone()],
                 "{kind:?}"
             );
             assert!(

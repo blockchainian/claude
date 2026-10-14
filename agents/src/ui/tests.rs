@@ -5091,9 +5091,62 @@ fn click_text(view: &mut View, screen: &str, text: &str) -> Option<Action> {
 }
 
 #[test]
+fn missing_rooted_paths_stay_shortened_without_links_on_log_and_details() {
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let missing = dir
+        .path()
+        .join("a-very-long-directory-name/another-long-directory/report.md");
+    for path in [missing.to_str().unwrap(), "~/C…/.w…/a…/s…/l…/plan.md"] {
+        let filename = path.rsplit('/').next().unwrap();
+        for kind in [crate::log::Kind::Assistant, crate::log::Kind::Tool] {
+            let (mut view, now) = log_fixture();
+            view.log[7].kind = kind;
+            view.log[7].body = format!("Report: {path}");
+            view.log[7].paths.clear();
+            view.log[7].paths.push(8..8 + path.len());
+            let list = log_screen(&view, 100, 25, now);
+            assert!(list.contains(filename), "{list}");
+            assert!(view.viewport.borrow().log_links.is_empty());
+            assert_eq!(click_text(&mut view, &list, filename), None);
+            view.set_log_open(Some(view.log[7].clone()));
+            log_screen(&view, 100, 25, now);
+            assert!(view.viewport.borrow().log_links.is_empty());
+        }
+        let mut view = fixture();
+        view.rows[view.selected].prompt = format!("Report: {path}");
+        let rendered = screen(&view, 120, 40);
+        assert!(rendered.contains(filename), "{rendered}");
+        if path == missing.to_str().unwrap() {
+            assert!(!rendered.contains(path), "{rendered}");
+        }
+        let (x, y) = rendered_cell(&rendered, filename);
+        let mut buf = Buffer::empty(Rect::new(0, 0, 120, 40));
+        view.render_at(buf.area, &mut buf, Utc::now());
+        assert!(
+            !buf[(x, y)]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+        );
+        assert_eq!(click_text(&mut view, &rendered, filename), None);
+    }
+}
+
+fn temp_log_path(filename: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let target = dir
+        .path()
+        .join("a-very-long-directory-name/another-long-directory/and-one-more-level")
+        .join(filename);
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "").unwrap();
+    (dir, target)
+}
+
+#[test]
 fn task_log_click_on_a_shortened_tool_path_opens_the_full_path() {
     let (mut view, now) = log_fixture();
-    let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
+    let (_dir, target) = temp_log_path("report.md");
+    let path = target.to_str().unwrap();
     let event = &mut view.log[7];
     event
         .paths
@@ -5127,7 +5180,8 @@ fn task_log_click_on_a_shortened_tool_path_opens_the_full_path() {
 #[test]
 fn task_log_click_on_a_path_in_free_tool_text_opens_the_full_path() {
     let (mut view, now) = log_fixture();
-    let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/plan.md";
+    let (_dir, target) = temp_log_path("plan.md");
+    let path = target.to_str().unwrap();
     view.log[7].body = format!("start Implement workstream A of {path} (Claude provider)");
     let list = log_screen(&view, 100, 25, now);
     assert!(!list.contains(path), "{list}");
@@ -5157,7 +5211,8 @@ fn task_log_click_on_an_image_placeholder_opens_the_image() {
 #[test]
 fn open_log_event_links_its_wrapped_path() {
     let (mut view, now) = log_fixture();
-    let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
+    let (_dir, target) = temp_log_path("report.md");
+    let path = target.to_str().unwrap();
     view.log[6].body = format!(
         "A long response with **bold** words whose body must be cut before the right edge of the log, see {path} for details"
     );
@@ -5175,7 +5230,8 @@ fn open_log_event_links_its_wrapped_path() {
 #[test]
 fn details_prompt_links_its_shortened_path_and_image_placeholder() {
     let mut view = fixture();
-    let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
+    let (_dir, target) = temp_log_path("report.md");
+    let path = target.to_str().unwrap();
     let selected = &mut view.rows[view.selected];
     selected.prompt = format!("Look at [Image #1] and the report in {path} please");
     selected.prompt_images = vec![crate::log::Image {
@@ -5224,14 +5280,19 @@ fn details_relative_paths_link_only_when_they_exist() {
 
 #[test]
 fn details_project_lines_link_the_pull_request_and_the_directory() {
+    let dir = tempfile::tempdir_in("/tmp").unwrap();
+    let todo = dir.path().join("notes/todo.md");
+    std::fs::create_dir_all(todo.parent().unwrap()).unwrap();
+    std::fs::write(&todo, "").unwrap();
     let mut view = fixture();
     let selected = &mut view.rows[view.selected];
+    selected.cwd = dir.path().to_owned();
     selected.git_branch = Some("main".into());
     selected.pr = Some(crate::model::PullRequest {
         number: 833,
         url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
     });
-    selected.queued = vec!["Then read /tmp/project/notes/todo.md".into()];
+    selected.queued = vec![format!("Then read {}", todo.display())];
     let rendered = screen(&view, 120, 40);
     // The OSC 8 escapes around "#833" hide it from a text search; its cells follow the branch.
     let (x, y) = rendered_cell(&rendered, "main · ");
@@ -5252,11 +5313,11 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1)
         ),
-        Some(Action::OpenPath("/tmp/project".into()))
+        Some(Action::OpenPath(dir.path().to_owned()))
     );
     assert_eq!(
         click_text(&mut view, &rendered, "todo.md"),
-        Some(Action::OpenPath("/tmp/project/notes/todo.md".into()))
+        Some(Action::OpenPath(todo))
     );
     assert_eq!(click_text(&mut view, &rendered, "Then read"), None);
 }

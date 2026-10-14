@@ -14,8 +14,7 @@ pub(super) struct Link {
 /// A link on screen: the cells it covers and what it opens.
 pub(super) type DrawnLink = (Rect, PathBuf);
 
-/// The paths and image placeholders in `text`: absolute and home paths, relative
-/// paths that exist under `cwd`, and the label of each of `images`.
+/// The existing paths in `text`, and the label of each of `images`.
 pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::log::Image]) -> Vec<Link> {
     let mut links = path_links(text, &super::paths::text_paths(text, cwd), cwd);
     for image in images {
@@ -41,16 +40,17 @@ pub(super) fn path_links(text: &str, paths: &[Range<usize>], cwd: &Path) -> Vec<
         .collect()
 }
 
-/// Where `path` opens: absolute paths and URLs as they are, `~/` under the home
-/// directory, and relative paths under `cwd` when they exist there.
+/// Where `path` opens: URLs as they are, and existing paths resolved absolutely,
+/// under the home directory for `~/`, or under `cwd` for relative paths.
 pub(super) fn resolve(path: &str, cwd: &Path) -> Option<PathBuf> {
-    if path.starts_with('/') || path.contains("://") {
+    if path.contains("://") {
         return Some(PathBuf::from(path));
     }
-    if let Some(rest) = path.strip_prefix("~/") {
-        return Some(Path::new(&std::env::var_os("HOME")?).join(rest));
-    }
-    let target = cwd.join(path);
+    let target = if let Some(rest) = path.strip_prefix("~/") {
+        Path::new(&std::env::var_os("HOME")?).join(rest)
+    } else {
+        cwd.join(path)
+    };
     target.exists().then_some(target)
 }
 
@@ -111,18 +111,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rooted_paths_link_only_when_the_target_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("plan.md");
+        let absolute = file.to_str().unwrap();
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let home_path = format!(
+            "~/{}{}",
+            "../".repeat(home.components().count() - 1),
+            file.strip_prefix("/").unwrap().display()
+        );
+        for path in [absolute, &home_path] {
+            assert!(text_links(path, dir.path(), &[]).is_empty());
+            assert!(
+                path_links(path, std::slice::from_ref(&(0..path.len())), dir.path()).is_empty()
+            );
+            assert!(!super::super::paths::text_paths(path, dir.path()).is_empty());
+        }
+        std::fs::write(&file, "").unwrap();
+        for path in [absolute, &home_path] {
+            let target = resolve(path, dir.path()).unwrap();
+            assert_eq!(target.canonicalize().unwrap(), file.canonicalize().unwrap());
+            assert_eq!(text_links(path, dir.path(), &[]).len(), 1);
+            assert_eq!(
+                path_links(path, std::slice::from_ref(&(0..path.len())), dir.path()).len(),
+                1
+            );
+        }
+        assert!(resolve("~/C…/.w…/a…/s…/l…/plan.md", dir.path()).is_none());
+        assert_eq!(
+            resolve("https://github.com/example/project/pull/1", dir.path()),
+            Some("https://github.com/example/project/pull/1".into())
+        );
+    }
+
+    #[test]
     fn text_links_find_absolute_home_existing_relative_paths_and_image_labels() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src/ui")).unwrap();
         std::fs::write(dir.path().join("src/ui/log.rs"), "").unwrap();
-        let home = std::env::var("HOME").unwrap();
-        let text =
-            "see `src/ui/log.rs`, and/or ~/notes.md, /tmp/a/b.md and https://x.io/a/b [Image #1]";
+        let absolute = dir.path().join("a/b.md");
+        std::fs::create_dir_all(absolute.parent().unwrap()).unwrap();
+        std::fs::write(&absolute, "").unwrap();
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let text = format!(
+            "see `src/ui/log.rs`, and/or ~/., {} and https://x.io/a/b [Image #1]",
+            absolute.display()
+        );
         let images = [crate::log::Image {
             label: "[Image #1]".into(),
             path: "/tmp/1.png".into(),
         }];
-        let links = text_links(text, dir.path(), &images);
+        let links = text_links(&text, dir.path(), &images);
         let targets: Vec<_> = links
             .iter()
             .map(|link| (&text[link.range.clone()], link.target.clone()))
@@ -131,8 +171,8 @@ mod tests {
             targets,
             [
                 ("src/ui/log.rs", dir.path().join("src/ui/log.rs")),
-                ("~/notes.md", PathBuf::from(format!("{home}/notes.md"))),
-                ("/tmp/a/b.md", PathBuf::from("/tmp/a/b.md")),
+                ("~/", home),
+                (absolute.to_str().unwrap(), absolute.clone()),
                 ("[Image #1]", PathBuf::from("/tmp/1.png")),
             ]
         );
