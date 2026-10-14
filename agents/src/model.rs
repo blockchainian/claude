@@ -134,8 +134,8 @@ pub enum Action {
     Resume(SessionKey),
     /// `f`: resume as a new session id.
     Fork(SessionKey),
-    /// `n`: start a new session in the given directory.
-    New(Option<PathBuf>),
+    /// `n`: start a new Claude session in the dashboard's directory.
+    New,
     /// `h`: hide the session until the next launch.
     Hide(SessionKey),
     /// `p`: pin or unpin the session.

@@ -487,7 +487,6 @@ impl Provider for CodexProvider {
         Capabilities {
             resume: true,
             fork: true,
-            new: true,
             delete: true,
             rename: true,
             stop: true,
@@ -525,19 +524,11 @@ impl Provider for CodexProvider {
             .unwrap_or_else(|| Ok(vec![]))
     }
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command> {
-        if !matches!(action, Action::New(_)) && session.is_some_and(|session| !session.can_resume())
-        {
+        if session.is_some_and(|session| !session.can_resume()) {
             return None;
         }
         let mut command = Command::new("codex");
         match action {
-            Action::New(cwd) => {
-                let cwd = match cwd {
-                    Some(cwd) if cwd.is_dir() => cwd.clone(),
-                    _ => std::env::current_dir().ok()?,
-                };
-                command.current_dir(cwd);
-            }
             Action::Open(_) | Action::Resume(_) | Action::Fork(_) | Action::Back => {
                 let session = session?;
                 if !session.cwd.is_dir() {

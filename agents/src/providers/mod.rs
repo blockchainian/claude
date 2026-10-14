@@ -56,7 +56,6 @@ impl FromStr for SessionKey {
 pub struct Capabilities {
     pub resume: bool,
     pub fork: bool,
-    pub new: bool,
     pub rename: bool,
     pub delete: bool,
     /// Interrupts the running turn; the session stays.

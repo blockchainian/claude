@@ -472,20 +472,7 @@ impl View {
                 self.viewport.borrow_mut().scroll = 0;
                 return Some(Action::PersistGrouping(self.grouping));
             }
-            KeyCode::Char('n') => {
-                let capabilities = self
-                    .selected_id()
-                    .map(|_| self.selected_capabilities())
-                    .or_else(|| {
-                        (self.capabilities.len() == 1)
-                            .then(|| *self.capabilities.values().next().expect("one provider"))
-                    })
-                    .unwrap_or_default();
-                if !capabilities.new {
-                    return Some(Action::Unsupported("New session"));
-                }
-                return Some(Action::New(self.selected_row().map(|s| s.cwd.clone())));
-            }
+            KeyCode::Char('n') => return Some(Action::New),
             KeyCode::Char('w') => return Some(Action::Unsupported("New worktree")),
             KeyCode::Char('r') => {
                 if let Some(session) = self.selected_row() {

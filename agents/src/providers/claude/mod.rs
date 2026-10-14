@@ -520,7 +520,6 @@ impl Provider for ClaudeProvider {
         Capabilities {
             resume: true,
             fork: true,
-            new: true,
             rename: true,
             delete: true,
             ..Capabilities::default()
@@ -547,13 +546,8 @@ impl Provider for ClaudeProvider {
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command> {
         let mut command = Command::new("claude");
         match action {
-            Action::New(cwd) => {
-                let cwd = cwd
-                    .clone()
-                    .filter(|cwd| cwd.is_dir())
-                    .or_else(|| std::env::current_dir().ok())
-                    .unwrap_or_else(|| PathBuf::from("/"));
-                command.current_dir(cwd);
+            Action::New => {
+                command.current_dir(std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
             }
             Action::Open(_) | Action::Resume(_) | Action::Fork(_) | Action::Back => {
                 let session = session?;
@@ -760,7 +754,6 @@ mod tests {
             Capabilities {
                 resume: true,
                 fork: true,
-                new: true,
                 rename: true,
                 delete: true,
                 stop: false,
@@ -802,10 +795,11 @@ mod tests {
             fork.get_args().collect::<Vec<_>>(),
             ["--resume", id, "--fork-session"]
         );
-        let new = provider
-            .launch(&Action::New(Some(dir.path().into())), Some(&session))
-            .unwrap();
-        assert_eq!(new.get_current_dir(), Some(dir.path()));
+        let new = provider.launch(&Action::New, None).unwrap();
+        assert_eq!(
+            new.get_current_dir(),
+            Some(std::env::current_dir().unwrap().as_path())
+        );
         assert_eq!(new.get_args().count(), 0);
         assert_eq!(
             provider

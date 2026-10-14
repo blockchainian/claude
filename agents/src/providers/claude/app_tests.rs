@@ -899,3 +899,34 @@ fn manager_thread_mutations_reach_app_provider_paths() {
         assert_eq!(std::fs::read(&state).unwrap(), bytes);
     }
 }
+
+#[test]
+fn new_key_opens_a_claude_session_whatever_is_selected() {
+    use crate::providers::{Provider, codex::CodexProvider};
+    let (dir, mut app) = fixture();
+    rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+        .unwrap();
+    let mut codex = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut thread = codex.refresh(1).sessions.remove(0);
+    thread.cwd = dir.path().into();
+    app.hub = Hub::new(vec![
+        Box::new(crate::providers::claude::ClaudeProvider::new(
+            dir.path().to_owned(),
+        )),
+        Box::new(codex),
+    ]);
+    let claude = app.sessions[0].clone();
+    for rows in [vec![claude], vec![thread], vec![]] {
+        app.view.set_sessions(rows, false);
+        assert!(key(&mut app, KeyCode::Char('n')));
+        let command = app.launch.take().expect("n should start a session");
+        assert_eq!(command.get_program(), "claude");
+        assert_eq!(command.get_args().len(), 0);
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::env::current_dir().unwrap().as_path())
+        );
+    }
+}

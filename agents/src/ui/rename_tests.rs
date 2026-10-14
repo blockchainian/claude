@@ -32,7 +32,6 @@ fn child_view(
     view.set_capabilities(HashMap::from([(
         child_provider,
         Capabilities {
-            new: true,
             archive: true,
             stop: true,
             resume: true,
@@ -121,21 +120,6 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
 }
 
 #[test]
-fn codex_spawn_child_new_session_launches_in_row_cwd() {
-    let (dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
-    view.rows[view.selected].cwd = dir.path().into();
-    let action = view
-        .handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
-        .unwrap();
-    assert_eq!(action, Action::New(Some(dir.path().into())));
-    let provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
-    let command = provider.launch(&action, view.selected_row()).unwrap();
-    assert_eq!(command.get_program(), "codex");
-    assert_eq!(command.get_args().count(), 0);
-    assert_eq!(command.get_current_dir(), Some(dir.path()));
-}
-
-#[test]
 fn manager_thread_keys_match_ordinary_codex_threads() {
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::NONE),
@@ -153,7 +137,7 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => Action::Open(session.id),
             KeyCode::Char('o') => Action::Resume(session.id),
             KeyCode::Char('f') => Action::Fork(session.id),
-            KeyCode::Char('n') => Action::New(Some(session.cwd)),
+            KeyCode::Char('n') => Action::New,
             KeyCode::Char('x') => Action::Stop(session.id),
             KeyCode::Char('w') => Action::Unsupported("New worktree"),
             _ => unreachable!(),

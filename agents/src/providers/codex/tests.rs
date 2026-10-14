@@ -138,7 +138,6 @@ fn launches_top_level_threads_in_their_cwd() {
             Action::Fork(session.id.clone()),
             vec!["fork", session.id.id.as_str()],
         ),
-        (Action::New(Some(session.cwd.clone())), vec![]),
     ] {
         let command = provider.launch(&action, Some(&session)).unwrap();
         assert_eq!(command.get_program(), "codex");
@@ -177,22 +176,6 @@ fn launch_rejects_children_missing_sessions_and_missing_cwd() {
 }
 
 #[test]
-fn new_session_uses_requested_cwd_or_current_directory() {
-    let (dir, provider) = fixture();
-    let current = std::env::current_dir().unwrap();
-    for (cwd, expected) in [
-        (Some(dir.path().to_owned()), dir.path().to_owned()),
-        (None, current.clone()),
-        (Some(dir.path().join("missing")), current),
-    ] {
-        let command = provider.launch(&Action::New(cwd), None).unwrap();
-        assert_eq!(command.get_program(), "codex");
-        assert_eq!(command.get_args().count(), 0);
-        assert_eq!(command.get_current_dir(), Some(expected.as_path()));
-    }
-}
-
-#[test]
 fn capabilities_gate_codex_actions_in_the_view() {
     use crate::{model::Grouping, ui::View};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -203,7 +186,6 @@ fn capabilities_gate_codex_actions_in_the_view() {
         Capabilities {
             resume: true,
             fork: true,
-            new: true,
             delete: true,
             rename: true,
             stop: true,
@@ -222,7 +204,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
         (KeyCode::Enter, Action::Open(session.id.clone())),
         (KeyCode::Char('o'), Action::Resume(session.id.clone())),
         (KeyCode::Char('f'), Action::Fork(session.id.clone())),
-        (KeyCode::Char('n'), Action::New(Some(session.cwd.clone()))),
+        (KeyCode::Char('n'), Action::New),
         (KeyCode::Char('x'), Action::Stop(session.id.clone())),
     ] {
         assert_eq!(
@@ -884,11 +866,6 @@ fn manager_children_launch_like_ordinary_threads() {
         command.get_args().collect::<Vec<_>>(),
         ["fork", "thread-12"]
     );
-    assert_eq!(command.get_current_dir(), Some(dir.path()));
-    let command = provider
-        .launch(&Action::New(Some(session.cwd.clone())), Some(&session))
-        .unwrap();
-    assert_eq!(command.get_args().count(), 0);
     assert_eq!(command.get_current_dir(), Some(dir.path()));
 }
 

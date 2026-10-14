@@ -2,8 +2,8 @@
 
 use crate::model::Action;
 use crate::model::Session;
-use crate::providers::SessionKey;
 use crate::providers::Snapshot;
+use crate::providers::{ProviderId, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
 use crate::sessions::Hub;
 use crate::state::Preferences;
@@ -428,7 +428,7 @@ impl App {
             Action::Back => {
                 let Some(session) = self.last_session.as_ref().and_then(|id| self.session(id))
                 else {
-                    return self.launch_new(None);
+                    return self.launch_new();
                 };
                 let id = session.id.clone();
                 return self.launch_session(Action::Resume(id), session);
@@ -448,8 +448,8 @@ impl App {
                     return self.launch_session(Action::Fork(id), session);
                 }
             }
-            Action::New(cwd) => {
-                return self.launch_new(cwd);
+            Action::New => {
+                return self.launch_new();
             }
             Action::Rename { id, name } => {
                 if let Some(session) = self.session(&id) {
@@ -541,16 +541,11 @@ impl App {
         false
     }
 
-    fn launch_new(&mut self, cwd: Option<PathBuf>) -> bool {
-        let selected = self.view.selected_id().and_then(|id| self.session(id));
-        let provider = selected.as_ref().map_or_else(
-            || self.hub.default_provider(),
-            |session| session.id.provider,
-        );
+    fn launch_new(&mut self) -> bool {
         self.launch = self
             .hub
-            .provider(provider)
-            .launch(&Action::New(cwd), selected.as_ref());
+            .provider(ProviderId::Claude)
+            .launch(&Action::New, None);
         self.launch.is_some()
     }
 

@@ -1097,10 +1097,7 @@ fn actions_and_hide_move_to_next_visible_row() {
         key(&mut view, KeyCode::Char('g')),
         Some(Action::PersistGrouping(Grouping::Status))
     );
-    assert_eq!(
-        key(&mut view, KeyCode::Char('n')),
-        Some(Action::New(Some("/tmp/project".into())))
-    );
+    assert_eq!(key(&mut view, KeyCode::Char('n')), Some(Action::New));
 }
 #[test]
 fn paging_tracks_headings_and_never_wraps() {
@@ -4466,7 +4463,6 @@ fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
         (KeyCode::Right, "Resume"),
         (KeyCode::Char('o'), "Resume"),
         (KeyCode::Char('f'), "Fork"),
-        (KeyCode::Char('n'), "New session"),
         (KeyCode::Char('r'), "Rename"),
         (KeyCode::Backspace, "Delete"),
     ] {
@@ -4511,7 +4507,6 @@ fn test_view(grouping: Grouping, use_colors: bool) -> View {
         Capabilities {
             resume: true,
             fork: true,
-            new: true,
             rename: true,
             delete: true,
             stop: false,

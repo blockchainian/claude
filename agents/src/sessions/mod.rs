@@ -30,13 +30,6 @@ impl Hub {
             .as_ref()
     }
 
-    pub fn default_provider(&self) -> ProviderId {
-        self.providers
-            .first()
-            .expect("No providers are registered")
-            .id()
-    }
-
     pub fn capabilities(&self) -> HashMap<ProviderId, Capabilities> {
         self.providers
             .iter()
