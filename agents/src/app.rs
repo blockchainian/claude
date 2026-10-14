@@ -14,6 +14,7 @@ use crossterm::event::Theme;
 use crossterm::terminal;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use std::ffi::OsStr;
 use std::io;
 use std::path::PathBuf;
 use std::process::Command;
@@ -227,6 +228,8 @@ impl App {
                 .view
                 .expire_messages(Instant::now())
                 .map_or(timeout, |message| timeout.min(message));
+            let timeout =
+                crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
             let timeout = if self.view.text_selection_dragging() {
                 timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
             } else {
@@ -559,8 +562,9 @@ impl App {
                     .set_notice(Some(format!("{what} is not supported")));
             }
             Action::OpenPath(target) => {
+                let link = crate::ui::vscode::open_target(&target);
                 let opened = Command::new("open")
-                    .arg(&target)
+                    .arg(link.as_deref().map_or(target.as_os_str(), OsStr::new))
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())

@@ -1,0 +1,19 @@
+{
+  "name": "git",
+  "displayName": "Git Links",
+  "description": "Opens a git commit, a repository folder or a GitHub pull request in VS Code from a vscode:// link.",
+  "version": "0.2.0",
+  "publisher": "blockchainian",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "extensionDependencies": [
+    "vscode.git"
+  ],
+  "activationEvents": [
+    "onUri",
+    "onStartupFinished"
+  ],
+  "main": "./extension.js"
+}

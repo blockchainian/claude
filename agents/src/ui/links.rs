@@ -29,7 +29,7 @@ pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::log::Image]) -
 
 /// The links of a text whose paths are already known, such as a tool call's arguments.
 pub(super) fn path_links(text: &str, paths: &[Range<usize>], cwd: &Path) -> Vec<Link> {
-    paths
+    let mut links: Vec<_> = paths
         .iter()
         .filter_map(|range| {
             Some(Link {
@@ -37,14 +37,34 @@ pub(super) fn path_links(text: &str, paths: &[Range<usize>], cwd: &Path) -> Vec<
                 target: resolve(&text[range.clone()], cwd)?,
             })
         })
-        .collect()
+        .collect();
+    add_commits(text, cwd, &mut links);
+    links
 }
 
-/// Where `path` opens: URLs as they are, and existing paths resolved absolutely,
+/// Adds verified commits without covering an existing path, URL or image link.
+pub(super) fn add_commits(text: &str, cwd: &Path, links: &mut Vec<Link>) {
+    for range in super::paths::text_commits(text) {
+        if links
+            .iter()
+            .any(|link| link.range.start < range.end && range.start < link.range.end)
+        {
+            continue;
+        }
+        if let Some(target) = super::commits::target(cwd, &text[range.clone()]) {
+            links.push(Link { range, target });
+        }
+    }
+    links.sort_by_key(|link| link.range.start);
+}
+
+/// Where `path` opens: GitHub pull requests in VS Code, other URLs as they are, and existing paths resolved absolutely,
 /// under the home directory for `~/`, or under `cwd` for relative paths.
 pub(super) fn resolve(path: &str, cwd: &Path) -> Option<PathBuf> {
     if path.contains("://") {
-        return Some(PathBuf::from(path));
+        return Some(
+            super::vscode::pull_request_link(path, cwd).map_or_else(|| path.into(), Into::into),
+        );
     }
     let target = if let Some(rest) = path.strip_prefix("~/") {
         Path::new(&std::env::var_os("HOME")?).join(rest)
@@ -141,7 +161,11 @@ mod tests {
         assert!(resolve("~/C…/.w…/a…/s…/l…/plan.md", dir.path()).is_none());
         assert_eq!(
             resolve("https://github.com/example/project/pull/1", dir.path()),
-            Some("https://github.com/example/project/pull/1".into())
+            super::super::vscode::pull_request_link(
+                "https://github.com/example/project/pull/1",
+                dir.path()
+            )
+            .map(PathBuf::from)
         );
     }
 
