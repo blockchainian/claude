@@ -156,9 +156,11 @@ impl View {
                     }
                     self.last_click = Some((task, now));
                 } else if self.log_open.is_none()
-                    && let Some((index, true)) = log_row
+                    && let Some((index, cut)) = log_row
+                    && let Some(event) = self.log.get(index)
+                    && (cut || super::log::shows_calls(event))
                 {
-                    self.set_log_open(self.log.get(index).cloned());
+                    self.set_log_open(Some(event.clone()));
                     self.viewport.borrow_mut().log_open_scroll = 0;
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();

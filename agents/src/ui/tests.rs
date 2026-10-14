@@ -4957,6 +4957,16 @@ fn open_tool_fixture() -> (View, chrono::DateTime<Utc>) {
 }
 
 #[test]
+fn task_log_click_opens_a_whole_row_that_has_calls() {
+    let (mut view, now) = log_fixture();
+    view.log[7].calls = tool_calls();
+    let list = log_screen(&view, 100, 25, now);
+    click_log_text(&mut view, &list, "run tests", MouseButton::Left);
+    assert_eq!(view.log_open, Some(view.log[7].clone()));
+    assert!(log_screen(&view, 100, 25, now).contains("cargo test"));
+}
+
+#[test]
 fn task_log_open_tool_snapshot() {
     let (view, now) = open_tool_fixture();
     let open = log_screen(&view, 100, 48, now);

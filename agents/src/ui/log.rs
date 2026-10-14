@@ -487,8 +487,9 @@ fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
     layout
 }
 
-/// Whether an open event draws its tool calls instead of its row body.
-fn shows_calls(event: &Event) -> bool {
+/// Whether an event draws its tool calls when open, which makes its row open on click even
+/// when its body fits the row.
+pub(super) fn shows_calls(event: &Event) -> bool {
     matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) && !event.calls.is_empty()
 }
 
