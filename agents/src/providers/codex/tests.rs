@@ -557,7 +557,8 @@ fn rollout_details_are_read_through_the_provider() {
     let events = provider
         .log(session, 100, &log::Filter::default(), false)
         .unwrap();
-    assert_eq!(events.len(), 2);
+    let bodies: Vec<_> = events.iter().map(|event| event.body.as_str()).collect();
+    assert_eq!(bodies, ["Check the dashboard.", "Checks passed."]);
 }
 
 fn manager_fixture(dir: &Path, provider: &mut CodexProvider, kind: &str) -> PathBuf {

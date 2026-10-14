@@ -77,6 +77,20 @@ fn content_text(content: &Value) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
+/// Whether a user-role message carries context Codex injected, such as
+/// AGENTS.md or the environment, rather than what the user sent. Codex labels
+/// each content item, and its own history hides a message holding any item
+/// not labelled `user.*`.
+fn is_context_message(payload: &Value) -> bool {
+    payload["internal_chat_message_metadata_passthrough"]["content_item_kinds"]
+        .as_array()
+        .is_some_and(|kinds| {
+            kinds
+                .iter()
+                .any(|kind| !kind.as_str().is_some_and(|kind| kind.starts_with("user.")))
+        })
+}
+
 fn assistant_text(record: &Value) -> io::Result<Option<String>> {
     let payload = &record["payload"];
     Ok(match (record["type"].as_str(), payload["type"].as_str()) {
@@ -465,7 +479,7 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
             }
             (Some("response_item"), Some("message")) => {
                 let kind = match payload["role"].as_str() {
-                    Some("user") => Kind::User,
+                    Some("user") if !is_context_message(payload) => Kind::User,
                     Some("assistant") => Kind::Assistant,
                     _ => return Ok(true),
                 };
