@@ -103,14 +103,14 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
             let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
             let id = view.selected_id().unwrap().clone();
             assert!(!view.selected_row().unwrap().can_resume());
-            view.notice = notice.clone();
+            view.set_notice(notice.clone());
             assert_eq!(
                 view.handle_key(KeyEvent::new(code, modifiers)),
                 Some(Action::Unsupported(label)),
                 "{code:?}"
             );
             assert_eq!(view.selected_id(), Some(&id));
-            assert_eq!(view.notice, notice);
+            assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
             assert!(view.rename_target.is_none());
             assert!(view.confirm_dialog.is_none());
             assert!(view.pinned.is_empty());

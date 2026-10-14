@@ -219,11 +219,7 @@ impl View {
             render_input_row(prompt, edit, layout.search, buf);
         }
 
-        if let Some(notice) = &self.notice {
-            line(notice.clone().dim(), inset(layout.footer), buf);
-        } else {
-            line(self.center_footer_hints(), inset(layout.footer), buf);
-        }
+        line(self.center_footer_hints(), inset(layout.footer), buf);
         if let Some((label, _)) = &self.copied {
             Line::from(label.clone().dim())
                 .right_aligned()
@@ -252,6 +248,13 @@ impl View {
             }
         }
         self.render_center_rows(layout.list, buf, now);
+        if let Some((notice, _)) = &self.notice
+            && !layout.list.is_empty()
+        {
+            let bottom = row(layout.list, layout.list.height - 1, 1);
+            Clear.render(bottom, buf);
+            line(notice.clone().dim(), bottom, buf);
+        }
         if !layout.details.is_empty() {
             self.render_details(layout.details, buf, now);
         }

@@ -57,8 +57,8 @@ const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     ("Inactive", &[SessionStatus::Inactive]),
 ];
 
-/// How long a copy confirmation stays in the footer.
-const COPIED_LIFETIME: Duration = Duration::from_secs(1);
+/// How long a copy confirmation or a notice stays on screen.
+const MESSAGE_LIFETIME: Duration = Duration::from_secs(1);
 
 /// Longest gap between two clicks on one task that still opens it.
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
@@ -160,7 +160,8 @@ pub struct View {
     help: bool,
     loading: bool,
     has_more: bool,
-    notice: Option<String>,
+    /// A notice at the task list's bottom-left, shown until it expires.
+    notice: Option<(String, Instant)>,
     viewport: RefCell<Viewport>,
     /// Task row and time of the last left click in the list.
     last_click: Option<(usize, Instant)>,
@@ -321,24 +322,22 @@ impl View {
         }
         self.reconcile_selection();
     }
+    /// Shows `notice` at the task list's bottom-left for `MESSAGE_LIFETIME`.
     pub fn set_notice(&mut self, notice: Option<String>) {
-        self.notice = notice;
+        self.notice = notice.map(|text| (text, Instant::now() + MESSAGE_LIFETIME));
     }
 
-    /// Shows `label` at the footer's right end until `COPIED_LIFETIME` after `now`.
+    /// Shows `label` at the footer's right end until `MESSAGE_LIFETIME` after `now`.
     pub fn show_copied(&mut self, label: String, now: Instant) {
-        self.copied = Some((label, now + COPIED_LIFETIME));
+        self.copied = Some((label, now + MESSAGE_LIFETIME));
     }
 
-    /// Clears an expired copy confirmation, and returns how long the shown one has left.
-    pub fn expire_copied(&mut self, now: Instant) -> Option<Duration> {
-        let (_, expires_at) = self.copied.as_ref()?;
-        let expires_at = *expires_at;
-        if now >= expires_at {
-            self.copied = None;
-            return None;
-        }
-        Some(expires_at - now)
+    /// Clears an expired copy confirmation and notice, and returns how long the first of the
+    /// shown ones has left.
+    pub fn expire_messages(&mut self, now: Instant) -> Option<Duration> {
+        let copied = expire(&mut self.copied, now);
+        let notice = expire(&mut self.notice, now);
+        copied.into_iter().chain(notice).min()
     }
     /// Where the `›` of the selected row was drawn last, so the terminal cursor can rest on it.
     pub fn marker_pos(&self) -> Option<(u16, u16)> {
@@ -551,3 +550,13 @@ mod tests;
 
 #[cfg(test)]
 mod text_selection_tests;
+
+/// Clears `message` once `now` reaches its expiry, and returns how long it has left.
+fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Duration> {
+    let (_, expires_at) = message.as_ref()?;
+    let left = expires_at.checked_duration_since(now).filter(|left| !left.is_zero());
+    if left.is_none() {
+        *message = None;
+    }
+    left
+}

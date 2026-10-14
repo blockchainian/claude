@@ -199,7 +199,7 @@ impl App {
                 self.view.tick_text_selection();
                 selection_tick = Instant::now();
             }
-            self.view.expire_copied(Instant::now());
+            self.view.expire_messages(Instant::now());
             if schedule.due(Instant::now()) {
                 self.refresh();
                 schedule.refreshed(Instant::now());
@@ -226,8 +226,8 @@ impl App {
                 .map_or(timeout, |log| timeout.min(log));
             let timeout = self
                 .view
-                .expire_copied(Instant::now())
-                .map_or(timeout, |copied| timeout.min(copied));
+                .expire_messages(Instant::now())
+                .map_or(timeout, |message| timeout.min(message));
             let timeout = if self.view.text_selection_dragging() {
                 timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
             } else {

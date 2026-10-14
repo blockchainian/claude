@@ -1273,7 +1273,9 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
     assert_empty_task_list(&view);
     key(&mut view, KeyCode::Esc);
     view.set_notice(Some("Notice".into()));
-    assert!(screen(&view, 80, 12).ends_with("  Notice"));
+    let lines = screen(&view, 80, 12);
+    let lines = lines.lines().collect::<Vec<_>>();
+    assert_eq!(lines[lines.len() - 2], "  Notice");
     key(&mut view, KeyCode::Left);
     assert!(view.notice.is_none());
     key(&mut view, KeyCode::Char('?'));
@@ -4397,13 +4399,13 @@ mod subagent_actions {
             fn $name() {
                 for notice in [None, Some("Keep this notice".to_owned())] {
                     let mut view = fixture();
-                    view.notice = notice.clone();
+                    view.set_notice(notice.clone());
                     let before = subagent_rows::screen(&view, 120, 30);
                     assert_eq!(
                         view.handle_key(KeyEvent::new($code, $modifiers)),
                         Some(Action::Unsupported($label))
                     );
-                    assert_eq!(view.notice, notice);
+                    assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
                     assert_unchanged(&view, &before);
                 }
             }
@@ -4877,15 +4879,47 @@ fn copy_confirmation_sits_at_footer_right_for_one_second() {
         .to_owned();
     assert_eq!(footer, format!("{hints:<85}Copied prompt"));
     assert_eq!(
-        view.expire_copied(start + std::time::Duration::from_millis(400)),
+        view.expire_messages(start + std::time::Duration::from_millis(400)),
         Some(std::time::Duration::from_millis(600))
     );
     assert_eq!(
-        view.expire_copied(start + std::time::Duration::from_secs(1)),
+        view.expire_messages(start + std::time::Duration::from_secs(1)),
         None
     );
     assert_eq!(
         log_screen(&view, 100, 25, now).lines().last().unwrap(),
         hints
     );
+}
+
+#[test]
+fn notice_sits_at_task_list_bottom_left_for_one_second() {
+    let (mut view, now) = log_fixture();
+    let area = Rect::new(0, 0, 100, 25);
+    let list = view.center_layout(area).list;
+    let hints = log_screen(&view, 100, 25, now)
+        .lines()
+        .last()
+        .unwrap()
+        .to_owned();
+    view.set_notice(Some("Resume is not supported".into()));
+    let rendered = log_screen(&view, 100, 25, now);
+    let lines = rendered.lines().collect::<Vec<_>>();
+    let notice_row = lines[usize::from(list.bottom() - 1)];
+    let notice_cells = notice_row
+        .chars()
+        .skip(usize::from(list.x))
+        .take(usize::from(list.width))
+        .collect::<String>();
+    assert_eq!(notice_cells.trim_end(), "Resume is not supported", "{rendered}");
+    assert_eq!(*lines.last().unwrap(), hints);
+    assert!(
+        view.expire_messages(Instant::now())
+            .is_some_and(|left| left <= std::time::Duration::from_secs(1))
+    );
+    assert_eq!(
+        view.expire_messages(Instant::now() + std::time::Duration::from_secs(1)),
+        None
+    );
+    assert!(!log_screen(&view, 100, 25, now).contains("Resume is not supported"));
 }
