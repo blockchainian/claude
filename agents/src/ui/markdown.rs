@@ -4,6 +4,23 @@ use ratatui::{
     text::{Line, Span},
 };
 
+/// Recognize supported Markdown structure without treating ordinary line breaks as prose.
+pub(super) fn has_markers(text: &str) -> bool {
+    Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES).any(|event| {
+        matches!(
+            event,
+            Event::Start(
+                Tag::Heading { .. }
+                    | Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Fenced(_))
+                    | Tag::List(_)
+                    | Tag::Strong
+                    | Tag::Link { .. }
+                    | Tag::Table(_)
+            ) | Event::Code(_)
+        )
+    })
+}
+
 pub(crate) fn render(text: &str, width: usize) -> Vec<Line<'static>> {
     render_with_options(text, textwrap::Options::new(width))
 }
@@ -16,11 +33,27 @@ pub(super) fn render_with_options(
         return Vec::new();
     }
     let mut writer = Writer::default();
-    for event in Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH) {
+    for event in Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES) {
         match event {
             Event::Start(tag) => {
                 let style = writer.style();
                 match tag {
+                    Tag::Table(_) => writer.separate(),
+                    Tag::TableHead => {
+                        writer.flush();
+                        writer.table_cells = 0;
+                        writer.styles.push(style.bold());
+                    }
+                    Tag::TableRow => {
+                        writer.flush();
+                        writer.table_cells = 0;
+                    }
+                    Tag::TableCell => {
+                        if writer.table_cells > 0 {
+                            writer.push(" | ", style);
+                        }
+                        writer.table_cells += 1;
+                    }
                     Tag::Paragraph if writer.indent == 0 => writer.separate(),
                     Tag::Heading { level, .. } => {
                         writer.separate();
@@ -71,6 +104,11 @@ pub(super) fn render_with_options(
                 }
             }
             Event::End(tag) => match tag {
+                TagEnd::TableHead => {
+                    writer.flush();
+                    writer.styles.pop();
+                }
+                TagEnd::TableRow | TagEnd::Table => writer.flush(),
                 TagEnd::Paragraph => writer.flush(),
                 TagEnd::Heading(_) | TagEnd::BlockQuote | TagEnd::CodeBlock => {
                     writer.flush();
@@ -131,6 +169,7 @@ struct Writer {
     lists: Vec<Option<u64>>,
     indent: usize,
     code: bool,
+    table_cells: usize,
 }
 
 impl Writer {
@@ -223,6 +262,24 @@ mod tests {
 
     fn plain(lines: &[Line<'_>]) -> Vec<String> {
         lines.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn tables_render_cells_and_preserve_selection_sources() {
+        let source = "| Name | Value |\n| --- | --- |\n| alpha | **two** |";
+        let lines = render(source, 40);
+        assert_eq!(plain(&lines), ["Name | Value", "alpha | two"]);
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        let maps = super::super::text_selection_layout::map_lines(source, &lines, true);
+        let name = source.find("Name").unwrap();
+        let two = source.find("two").unwrap();
+        assert_eq!(maps[0][0].1, name..name + 1);
+        assert_eq!(maps[1].last().unwrap().1, two + 2..two + 3);
     }
 
     #[test]

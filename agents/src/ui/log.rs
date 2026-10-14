@@ -472,42 +472,29 @@ pub(super) struct OpenLayout {
 
 fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
     let body_style = super::style::log_styles(&event.kind).1;
-    let parts: Vec<(String, Vec<Line<'static>>, bool, Vec<super::links::Link>)> =
-        if shows_calls(event) {
-            super::tool_detail::parts(event)
-                .into_iter()
-                .map(|part| {
-                    let markdown = part.markdown();
-                    let lines = part.lines(usize::from(width), body_style);
-                    let links = if markdown {
-                        super::links::text_links(&part.source, cwd, &[])
-                    } else {
-                        super::links::path_links(
-                            &part.source,
-                            &super::paths::text_paths(&part.source, cwd),
-                            cwd,
-                        )
-                    };
-                    (part.source, lines, markdown, links)
-                })
-                .collect()
-        } else {
-            let part = super::tool_detail::Part::text(event.body.clone(), is_prose(&event.kind));
+    let parts: Vec<_> = open_parts(event)
+        .into_iter()
+        .map(|part| {
             let markdown = part.markdown();
-            let body = part.source.clone();
             let lines = part.lines(usize::from(width), body_style);
-            let links = if is_prose(&event.kind) {
-                super::links::text_links(&body, cwd, &event.images)
+            let links = if markdown || (!shows_calls(event) && is_prose(&event.kind)) {
+                let images = if shows_calls(event) {
+                    &[][..]
+                } else {
+                    &event.images[..]
+                };
+                super::links::text_links(&part.source, cwd, images)
             } else {
-                let paths = if body == event.body {
+                let paths = if !shows_calls(event) && part.source == event.body {
                     tool_paths(event, cwd)
                 } else {
-                    super::paths::text_paths(&body, cwd)
+                    super::paths::text_paths(&part.source, cwd)
                 };
-                super::links::path_links(&body, &paths, cwd)
+                super::links::path_links(&part.source, &paths, cwd)
             };
-            vec![(body, lines, markdown, links)]
-        };
+            (part.source, lines, markdown, links)
+        })
+        .collect();
     let mut layout = OpenLayout {
         width,
         height: 0,
@@ -543,14 +530,20 @@ pub(super) fn shows_calls(event: &Event) -> bool {
 
 /// The full text an open log event shows below its header.
 pub(super) fn open_text(event: &Event) -> String {
+    open_parts(event)
+        .into_iter()
+        .map(|part| part.source)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn open_parts(event: &Event) -> Vec<super::tool_detail::Part> {
     if shows_calls(event) {
         super::tool_detail::parts(event)
-            .into_iter()
-            .map(|part| part.source)
-            .collect::<Vec<_>>()
-            .join("\n")
+    } else if is_prose(&event.kind) {
+        vec![super::tool_detail::Part::text(event.body.clone(), true)]
     } else {
-        super::tool_detail::Part::text(event.body.clone(), is_prose(&event.kind)).source
+        super::tool_detail::Part::text_parts(event.body.clone(), false)
     }
 }
 

@@ -19,6 +19,9 @@ pub(super) fn map_lines(source: &str, lines: &[Line<'_>], markdown: bool) -> Vec
     lines
         .iter()
         .map(|line| {
+            while cursor < tokens.len() && matches!(tokens[cursor].text.as_str(), "\n" | "\r") {
+                cursor += 1;
+            }
             let mut cells = 0u16;
             let mut mapped = Vec::new();
             let text = line.to_string();
@@ -123,9 +126,24 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
     }
     let mut lists = Vec::new();
     let mut code = false;
-    for (event, range) in Parser::new_ext(source, Options::ENABLE_STRIKETHROUGH).into_offset_iter()
+    let mut table_cells = 0;
+    for (event, range) in Parser::new_ext(
+        source,
+        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES,
+    )
+    .into_offset_iter()
     {
         match event {
+            Event::Start(Tag::TableHead | Tag::TableRow) => table_cells = 0,
+            Event::Start(Tag::TableCell) => {
+                if table_cells > 0 {
+                    tokens.extend(" | ".graphemes(true).map(|text| Token {
+                        text: text.to_owned(),
+                        source: None,
+                    }));
+                }
+                table_cells += 1;
+            }
             Event::Start(Tag::CodeBlock(_)) => code = true,
             Event::End(TagEnd::CodeBlock) => code = false,
             Event::Start(Tag::List(start)) => lists.push(start),
@@ -210,7 +228,13 @@ fn push_text(
         let expanded = grapheme.replace('\t', "    ");
         let displayed: String = expanded
             .chars()
-            .map(|ch| if ch.is_control() { ' ' } else { ch })
+            .map(|ch| {
+                if ch.is_control() && !matches!(ch, '\n' | '\r') {
+                    ' '
+                } else {
+                    ch
+                }
+            })
             .collect();
         tokens.extend(displayed.graphemes(true).map(|text| Token {
             text: text.to_owned(),
