@@ -82,6 +82,11 @@ impl View {
                         return self.activate();
                     }
                     self.last_click = Some((task, now));
+                } else if self.log_open.is_none()
+                    && let Some((index, true)) = log_row
+                {
+                    self.log_open = self.log.get(index).cloned();
+                    self.viewport.borrow_mut().log_open_scroll = 0;
                 } else if let Some(text) = copy_text {
                     let now = Instant::now();
                     let double = self.last_copy_click.take().is_some_and(|(last, at)| {
@@ -93,14 +98,7 @@ impl View {
                     self.last_copy_click = Some((text, now));
                 }
             }
-            MouseEventKind::Down(MouseButton::Right) => {
-                if self.log_open.is_some() {
-                    self.log_open = None;
-                } else if let Some((index, true)) = log_row {
-                    self.log_open = self.log.get(index).cloned();
-                    self.viewport.borrow_mut().log_open_scroll = 0;
-                }
-            }
+            MouseEventKind::Down(MouseButton::Right) => self.log_open = None,
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let forward = mouse.kind == MouseEventKind::ScrollDown;
                 if over_tabs {
