@@ -1132,6 +1132,25 @@ fn a_task_chosen_in_one_tab_stays_selected_in_tabs_that_list_it() {
 }
 
 #[test]
+fn a_chosen_task_stays_selected_in_the_tab_its_new_status_lists() {
+    let mut view = fixture();
+    key(&mut view, KeyCode::Down);
+    assert_eq!(view.selected_id(), Some(&session_key("44")));
+    let mut rows = view.rows.clone();
+    rows.iter_mut()
+        .find(|s| s.id == session_key("44"))
+        .unwrap()
+        .status = SessionStatus::Ready;
+    view.set_sessions(rows, false);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+
+    key(&mut view, KeyCode::Tab);
+
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    assert_eq!(view.selected_id(), Some(&session_key("44")));
+}
+
+#[test]
 fn returning_to_inactive_through_an_empty_tab_restores_its_selection() {
     let mut view = fixture();
     let mut rows = view.rows.clone();

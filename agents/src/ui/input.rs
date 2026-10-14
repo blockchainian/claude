@@ -8,6 +8,10 @@ impl View {
         if self.status_filter != idx {
             self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
         }
+        // A chosen task may have changed status since; remember it in the tabs that list it now.
+        if self.selected_id() == self.chosen.as_ref() {
+            self.remember_selection();
+        }
         self.status_filter = idx;
         self.viewport.borrow_mut().scroll = 0;
         let visible = self.visible_indices();

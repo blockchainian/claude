@@ -157,6 +157,8 @@ pub struct View {
     status_filter: usize,
     /// The task each tab shows selected when it is entered, by tab index.
     tab_selections: Vec<Option<SessionKey>>,
+    /// The task the user chose last, or the refresh followed to a new tab.
+    chosen: Option<SessionKey>,
     search: line_edit::LineEdit,
     searching: bool,
     rename_target: Option<SessionKey>,
@@ -230,6 +232,7 @@ impl View {
             hidden: HashSet::new(),
             status_filter: 0,
             tab_selections: vec![None; TASK_FILTERS.len()],
+            chosen: None,
             search: line_edit::LineEdit::default(),
             searching: false,
             rename_target: None,
@@ -528,6 +531,7 @@ impl View {
                 self.tab_selections[tab] = Some(id.clone());
             }
         }
+        self.chosen = Some(id);
     }
 
     fn reconcile_selection(&mut self) {
