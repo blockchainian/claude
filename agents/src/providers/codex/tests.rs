@@ -168,7 +168,6 @@ fn launch_rejects_children_missing_sessions_and_missing_cwd() {
             Action::Fork(session.id.clone()),
             Action::Open(session.id.clone()),
             Action::Back,
-            Action::New(Some(session.cwd.clone())),
         ] {
             assert!(provider.launch(&action, Some(&session)).is_none());
         }
@@ -263,15 +262,15 @@ fn capabilities_gate_codex_actions_in_the_view() {
             Some(Action::Unsupported("Resume"))
         );
     }
-    for code in [
-        KeyCode::Char('p'),
-        KeyCode::Char('f'),
-        KeyCode::Char('r'),
-        KeyCode::Backspace,
+    for (code, label) in [
+        (KeyCode::Char('p'), "Pin"),
+        (KeyCode::Char('f'), "Fork"),
+        (KeyCode::Char('r'), "Rename"),
+        (KeyCode::Backspace, "Delete"),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-            None
+            Some(Action::Unsupported(label))
         );
     }
 }
@@ -819,18 +818,28 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
         view.handle_mouse(click),
         Some(Action::Open(key("thread-12".into())))
     );
-    for code in [
-        KeyCode::Char('f'),
-        KeyCode::Backspace,
-        KeyCode::Char('x'),
-        KeyCode::Char('p'),
+    for (code, expected) in [
+        (KeyCode::Char('f'), Action::Fork(key("thread-12".into()))),
+        (KeyCode::Char('x'), Action::Stop(key("thread-12".into()))),
+        (
+            KeyCode::Char('p'),
+            Action::TogglePin {
+                id: parent_key.clone(),
+                pinned: true,
+            },
+        ),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-            None
+            Some(expected)
         );
         assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
     }
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+        None
+    );
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     // Pending and inactive children never populate the parent's Background section.
     for _ in 0..4 {
         view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
@@ -844,7 +853,7 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
 }
 
 #[test]
-fn manager_children_launch_resume_but_not_fork() {
+fn manager_children_launch_like_ordinary_threads() {
     let (dir, mut provider) = fixture();
     manager_fixture(dir.path(), &mut provider, "attached");
     let mut session = provider
@@ -868,16 +877,19 @@ fn manager_children_launch_resume_but_not_fork() {
         );
         assert_eq!(command.get_current_dir(), Some(dir.path()));
     }
-    assert!(
-        provider
-            .launch(&Action::Fork(session.id.clone()), Some(&session))
-            .is_none()
+    let command = provider
+        .launch(&Action::Fork(session.id.clone()), Some(&session))
+        .unwrap();
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["fork", "thread-12"]
     );
-    assert!(
-        provider
-            .launch(&Action::New(Some(session.cwd.clone())), Some(&session))
-            .is_none()
-    );
+    assert_eq!(command.get_current_dir(), Some(dir.path()));
+    let command = provider
+        .launch(&Action::New(Some(session.cwd.clone())), Some(&session))
+        .unwrap();
+    assert_eq!(command.get_args().count(), 0);
+    assert_eq!(command.get_current_dir(), Some(dir.path()));
 }
 
 #[test]
@@ -1026,5 +1038,35 @@ fn file_change_without_start_preserves_session_list() {
     assert_eq!(
         session.activity.as_ref().unwrap().label,
         "apply_patch /workspace/project/design.md"
+    );
+}
+
+#[test]
+fn manager_thread_operations_use_the_provider_paths() {
+    let (dir, mut provider) = fixture();
+    manager_fixture(dir.path(), &mut provider, "attached");
+    let mut session = provider
+        .snapshot(0)
+        .unwrap()
+        .sessions
+        .into_iter()
+        .find(|session| session.id.id == "thread-12")
+        .unwrap();
+    // No daemon is present in this captured fixture; reaching it reports a connection error.
+    for result in [
+        provider.rename(&session, "probe"),
+        provider.archive(&session),
+        provider.stop(&session),
+    ] {
+        assert_ne!(result.unwrap_err().kind(), io::ErrorKind::Unsupported);
+    }
+    session.process = Some(Process {
+        pid: std::process::id(),
+        label: Some("codex".into()),
+        started_at: None,
+    });
+    assert_eq!(
+        provider.delete(&session).unwrap_err().to_string(),
+        "Session process start time changed"
     );
 }

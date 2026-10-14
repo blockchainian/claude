@@ -728,17 +728,19 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
                 );
             }
         }
-        for action in [
-            Action::Fork(child.id.clone()),
-            Action::Delete(child.id.clone()),
-            Action::TogglePin {
-                id: child.id.clone(),
-                pinned: true,
-            },
-        ] {
-            assert!(!app.handle_action(Some(action)));
-            assert!(app.launch.is_none());
-            assert!(app.preferences.pinned.is_empty());
+        if !manager {
+            for action in [
+                Action::Fork(child.id.clone()),
+                Action::Delete(child.id.clone()),
+                Action::TogglePin {
+                    id: child.id.clone(),
+                    pinned: true,
+                },
+            ] {
+                assert!(!app.handle_action(Some(action)));
+                assert!(app.launch.is_none());
+                assert!(app.preferences.pinned.is_empty());
+            }
         }
         let mut claude_child = app.sessions[0].clone();
         claude_child.id = SessionKey {
@@ -796,19 +798,104 @@ fn child_rename_only_reaches_provider_for_manager_threads() {
             child_provider == ProviderId::Codex && parent_provider == ProviderId::Claude
         );
         assert!(app.launch.is_none());
-        for action in [
-            Action::Fork(child.id.clone()),
-            Action::Delete(child.id.clone()),
-            Action::Archive(child.id.clone()),
-            Action::Stop(child.id.clone()),
-            Action::TogglePin {
-                id: child.id.clone(),
-                pinned: true,
-            },
-        ] {
-            assert!(!app.handle_action(Some(action)));
-            assert!(app.launch.is_none());
-            assert!(app.preferences.pinned.is_empty());
+        if !child.can_resume() {
+            for action in [
+                Action::Fork(child.id.clone()),
+                Action::Delete(child.id.clone()),
+                Action::Archive(child.id.clone()),
+                Action::Stop(child.id.clone()),
+                Action::TogglePin {
+                    id: child.id.clone(),
+                    pinned: true,
+                },
+            ] {
+                assert!(!app.handle_action(Some(action)));
+                assert!(app.launch.is_none());
+                assert!(app.preferences.pinned.is_empty());
+            }
         }
+    }
+}
+
+#[test]
+fn manager_thread_fork_reaches_app_launch() {
+    use crate::providers::{Provider, codex::CodexProvider};
+    let (dir, mut app) = fixture();
+    rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+        .unwrap();
+    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut child = provider
+        .refresh(2)
+        .sessions
+        .into_iter()
+        .find(|session| session.id.id == "thread-13")
+        .unwrap();
+    child.parent = Some(app.sessions[0].id.clone());
+    child.cwd = dir.path().into();
+    app.hub = Hub::new(vec![Box::new(provider)]);
+    app.sessions.push(child.clone());
+    assert!(app.handle_action(Some(Action::Fork(child.id))));
+    let command = app.launch.unwrap();
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["fork", "thread-13"]
+    );
+}
+
+#[test]
+fn manager_thread_mutations_reach_app_provider_paths() {
+    use crate::providers::{Provider, codex::CodexProvider};
+    use ratatui::{buffer::Buffer, layout::Rect};
+    for operation in ["archive", "stop", "delete"] {
+        let (dir, mut app) = fixture();
+        rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+            .unwrap()
+            .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+            .unwrap();
+        let manager = dir.path().join("manager");
+        std::fs::create_dir_all(manager.join("threads")).unwrap();
+        std::fs::create_dir_all(manager.join("claude-parent")).unwrap();
+        std::fs::write(
+            manager.join("threads/thread-12.json"),
+            include_bytes!("../../../tests/fixtures/codex-manager/attached-supervisor.json"),
+        )
+        .unwrap();
+        let state = manager.join("claude-parent/state.json");
+        let bytes = include_bytes!("../../../tests/fixtures/codex-manager/attached-state.json");
+        std::fs::write(&state, bytes).unwrap();
+        let mut provider = CodexProvider::new(dir.path().into(), manager);
+        let child = provider
+            .refresh(2)
+            .sessions
+            .into_iter()
+            .find(|session| session.id.id == "thread-12")
+            .unwrap();
+        assert!(child.parent.is_some() && child.can_resume());
+        app.hub = Hub::new(vec![Box::new(provider)]);
+        app.sessions.push(child.clone());
+        let action = match operation {
+            "archive" => Action::Archive(child.id),
+            "stop" => Action::Stop(child.id),
+            "delete" => Action::Delete(child.id),
+            _ => unreachable!(),
+        };
+        assert!(!app.handle_action(Some(action)));
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
+        app.view.render(buffer.area, &mut buffer);
+        let rendered = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        // Captured data has neither a daemon nor a real transcript.
+        let notice = if operation == "delete" {
+            "Nothing to delete".to_owned()
+        } else {
+            format!("Failed to {operation}")
+        };
+        assert!(rendered.contains(&notice), "{rendered}");
+        assert_eq!(std::fs::read(&state).unwrap(), bytes);
     }
 }

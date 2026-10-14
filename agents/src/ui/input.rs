@@ -237,19 +237,20 @@ impl View {
             && self.rename_target.is_none()
             && !self.log_search.editing
             && !self.searching
-            && self.selected_is_subagent()
+            && self
+                .selected_row()
+                .is_some_and(|session| !session.can_resume())
             && ((plain
-                && (matches!(
+                && matches!(
                     key.code,
-                    KeyCode::Backspace | KeyCode::Char('f' | 'x' | 'a' | 'h' | 'p')
-                ) || (key.code == KeyCode::Char('r')
-                    && !self.selected_row().is_some_and(Session::can_resume))))
+                    KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a' | 'h' | 'p')
+                ))
                 || (key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.code == KeyCode::Char('l')))
         {
             return self
-                .selected_id()
-                .filter(|id| id.provider == ProviderId::Claude)
+                .selected_row()
+                .filter(|session| !session.can_resume())
                 .map(|_| {
                     Action::Unsupported(match key.code {
                         KeyCode::Char('l') => "Resume",
@@ -558,8 +559,9 @@ impl View {
                 return Some(Action::Hide(id));
             }
             KeyCode::Char('p') => {
-                let id = self.selected_id()?.to_owned();
-                let pinned = !self.pinned.contains(&id);
+                let group = self.group_index(self.selected)?;
+                let id = self.rows[group].id.clone();
+                let pinned = !self.is_pinned(self.selected);
                 return Some(Action::TogglePin { id, pinned });
             }
             _ => {}

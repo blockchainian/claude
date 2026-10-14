@@ -2,9 +2,12 @@ use crate::providers::codex::*;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
-struct Cleanup(String, PathBuf);
+struct Cleanup(String, PathBuf, bool);
 impl Drop for Cleanup {
     fn drop(&mut self) {
+        if !self.2 {
+            return;
+        }
         let status = Command::new("codex")
             .args(["delete", "--force", &self.0])
             .env("CODEX_HOME", &self.1)
@@ -42,7 +45,7 @@ fn throwaway_thread(provider: &CodexProvider) -> (String, Cleanup) {
         .find(|v| v["type"] == "thread.started")
         .expect("exec must create a thread");
     let id = event["thread_id"].as_str().unwrap().to_owned();
-    let cleanup = Cleanup(id.clone(), provider.home.clone());
+    let cleanup = Cleanup(id.clone(), provider.home.clone(), true);
     assert!(output.status.success(), "codex exec failed");
     (id, cleanup)
 }
@@ -102,9 +105,31 @@ fn rename_real_codex_thread() {
 #[test]
 #[ignore = "requires the running shared Codex daemon and local auth; starts, interrupts, archives and deletes a real throwaway thread"]
 fn stop_and_archive_real_codex_thread() {
-    let provider = CodexProvider::from_config().unwrap();
-    let (id, _cleanup) = throwaway_thread(&provider);
-    let session = stored_session(&provider, &id);
+    stop_and_archive_thread(false);
+}
+
+#[test]
+#[ignore = "requires the shared Codex daemon and local auth; interrupts, archives and deletes a manager-linked throwaway thread"]
+fn operate_real_manager_thread() {
+    stop_and_archive_thread(true);
+}
+
+fn stop_and_archive_thread(manager: bool) {
+    let mut provider = CodexProvider::from_config().unwrap();
+    let manager_dir = tempfile::tempdir().unwrap();
+    let state = manager_dir.path().join("state.json");
+    let manager_bytes =
+        include_bytes!("../../../../tests/fixtures/codex-manager/attached-state.json");
+    std::fs::write(&state, manager_bytes).unwrap();
+    provider.manager_home = manager_dir.path().into();
+    let (id, mut cleanup) = throwaway_thread(&provider);
+    let mut session = stored_session(&provider, &id);
+    if manager {
+        session.parent = Some(SessionKey {
+            provider: ProviderId::Claude,
+            id: "claude-parent".into(),
+        });
+    }
     assert!(provider.capabilities().stop && provider.capabilities().archive);
 
     // Load the thread into the daemon and start a long turn on it.
@@ -175,4 +200,8 @@ fn stop_and_archive_real_codex_thread() {
             .iter()
             .any(|candidate| candidate.id == session.id)
     );
+    assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
+    provider.delete(&session).unwrap();
+    cleanup.2 = false;
+    assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
 }

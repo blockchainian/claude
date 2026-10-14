@@ -61,7 +61,7 @@ pub struct BackgroundTask {
 pub struct Session {
     /// Provider-qualified session identity.
     pub id: SessionKey,
-    /// Parent session id for a subagent.
+    /// Display parent for nesting, including codex-manager ownership links.
     pub parent: Option<SessionKey>,
     pub cwd: PathBuf,
     /// Name the user gave the session (`/rename` or `--name`).
@@ -95,7 +95,7 @@ pub struct Session {
 }
 
 impl Session {
-    /// Cross-provider Codex children are ordinary threads linked by codex-manager.
+    /// Whether provider session operations apply; display nesting does not make a thread a subagent.
     pub fn can_resume(&self) -> bool {
         self.parent.as_ref().is_none_or(|parent| {
             self.id.provider == ProviderId::Codex && parent.provider == ProviderId::Claude

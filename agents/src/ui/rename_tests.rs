@@ -32,11 +32,13 @@ fn child_view(
     view.set_capabilities(HashMap::from([(
         child_provider,
         Capabilities {
+            new: true,
+            archive: true,
+            stop: true,
             resume: true,
             rename: true,
             fork: true,
             delete: true,
-            ..Capabilities::default()
         },
     )]));
     view.set_sessions(vec![parent, child], false);
@@ -69,36 +71,150 @@ fn manager_child_rename_opens_dialog_and_emits_action() {
 }
 
 #[test]
-fn codex_child_session_keys_stay_silent() {
-    for (child, parent) in [
-        (ProviderId::Codex, ProviderId::Claude),
-        (ProviderId::Codex, ProviderId::Codex),
+fn manager_child_session_keys_operate() {
+    let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+    let id = view.selected_id().unwrap().clone();
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
+        Some(Action::Open(id.clone()))
+    );
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE)),
+        Some(Action::Fork(id.clone()))
+    );
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+        Some(Action::Stop(id))
+    );
+}
+
+#[test]
+fn codex_spawn_child_session_keys_emit_unsupported() {
+    for (code, modifiers, label) in [
+        (KeyCode::Char('l'), KeyModifiers::CONTROL, "Resume"),
+        (KeyCode::Char('f'), KeyModifiers::NONE, "Fork"),
+        (KeyCode::Char('r'), KeyModifiers::NONE, "Rename"),
+        (KeyCode::Char('x'), KeyModifiers::NONE, "Stop"),
+        (KeyCode::Char('a'), KeyModifiers::NONE, "Archive"),
+        (KeyCode::Backspace, KeyModifiers::NONE, "Delete"),
+        (KeyCode::Char('h'), KeyModifiers::NONE, "Hide"),
+        (KeyCode::Char('p'), KeyModifiers::NONE, "Pin"),
     ] {
-        let (_dir, mut view) = child_view(child, parent);
-        let mut codes = vec![
-            KeyCode::Char('f'),
-            KeyCode::Char('x'),
-            KeyCode::Char('a'),
-            KeyCode::Backspace,
-            KeyCode::Char('h'),
-            KeyCode::Char('p'),
-        ];
-        if parent != ProviderId::Claude || child != ProviderId::Codex {
-            codes.push(KeyCode::Char('r'));
-        }
-        assert_eq!(
-            view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
-            None
-        );
-        for code in codes {
+        for notice in [None, Some("Keep this notice".to_owned())] {
+            let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
+            let id = view.selected_id().unwrap().clone();
+            assert!(!view.selected_row().unwrap().can_resume());
+            view.notice = notice.clone();
             assert_eq!(
-                view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
-                None
+                view.handle_key(KeyEvent::new(code, modifiers)),
+                Some(Action::Unsupported(label)),
+                "{code:?}"
             );
+            assert_eq!(view.selected_id(), Some(&id));
+            assert_eq!(view.notice, notice);
             assert!(view.rename_target.is_none());
             assert!(view.confirm_dialog.is_none());
             assert!(view.pinned.is_empty());
             assert!(view.hidden.is_empty());
         }
     }
+}
+
+#[test]
+fn codex_spawn_child_new_session_launches_in_row_cwd() {
+    let (dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
+    view.rows[view.selected].cwd = dir.path().into();
+    let action = view
+        .handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+        .unwrap();
+    assert_eq!(action, Action::New(Some(dir.path().into())));
+    let provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let command = provider.launch(&action, view.selected_row()).unwrap();
+    assert_eq!(command.get_program(), "codex");
+    assert_eq!(command.get_args().count(), 0);
+    assert_eq!(command.get_current_dir(), Some(dir.path()));
+}
+
+#[test]
+fn manager_thread_keys_match_ordinary_codex_threads() {
+    for (code, modifiers) in [
+        (KeyCode::Enter, KeyModifiers::NONE),
+        (KeyCode::Right, KeyModifiers::NONE),
+        (KeyCode::Char('l'), KeyModifiers::CONTROL),
+        (KeyCode::Char('o'), KeyModifiers::NONE),
+        (KeyCode::Char('f'), KeyModifiers::NONE),
+        (KeyCode::Char('n'), KeyModifiers::NONE),
+        (KeyCode::Char('x'), KeyModifiers::NONE),
+        (KeyCode::Char('w'), KeyModifiers::NONE),
+    ] {
+        let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+        let session = view.selected_row().unwrap().clone();
+        let expected = match code {
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => Action::Open(session.id),
+            KeyCode::Char('o') => Action::Resume(session.id),
+            KeyCode::Char('f') => Action::Fork(session.id),
+            KeyCode::Char('n') => Action::New(Some(session.cwd)),
+            KeyCode::Char('x') => Action::Stop(session.id),
+            KeyCode::Char('w') => Action::Unsupported("New worktree"),
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            view.handle_key(KeyEvent::new(code, modifiers)),
+            Some(expected)
+        );
+    }
+    for (code, removal) in [
+        (KeyCode::Char('a'), Removal::Archive),
+        (KeyCode::Backspace, Removal::Delete),
+    ] {
+        let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+        let id = view.selected_id().unwrap().clone();
+        assert_eq!(
+            view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
+            None
+        );
+        assert!(view.confirm_dialog.is_some());
+        view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        let expected = match removal {
+            Removal::Archive => Action::Archive(id),
+            Removal::Delete => Action::Delete(id),
+        };
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            Some(expected)
+        );
+    }
+}
+
+#[test]
+fn manager_thread_hides_itself_and_pins_its_parent_group() {
+    let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
+    let child = view.selected_row().unwrap().clone();
+    let parent = child.parent.clone().unwrap();
+    for pinned in [true, false] {
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
+            Some(Action::TogglePin {
+                id: parent.clone(),
+                pinned
+            })
+        );
+        view.set_pinned(if pinned {
+            std::slice::from_ref(&parent)
+        } else {
+            &[]
+        });
+        assert_eq!(view.is_pinned(view.selected), pinned);
+    }
+    assert!(
+        view.center_footer_hints()
+            .to_string()
+            .contains("enter open")
+    );
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)),
+        Some(Action::Hide(child.id.clone()))
+    );
+    assert!(view.hidden.contains(&child.id));
+    assert!(!view.hidden.contains(&parent));
 }

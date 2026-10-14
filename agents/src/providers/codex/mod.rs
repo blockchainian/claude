@@ -525,11 +525,8 @@ impl Provider for CodexProvider {
             .unwrap_or_else(|| Ok(vec![]))
     }
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command> {
-        if session.is_some_and(|session| {
-            session.parent.is_some()
-                && (!session.can_resume()
-                    || !matches!(action, Action::Open(_) | Action::Resume(_) | Action::Back))
-        }) {
+        if !matches!(action, Action::New(_)) && session.is_some_and(|session| !session.can_resume())
+        {
             return None;
         }
         let mut command = Command::new("codex");
@@ -567,14 +564,14 @@ impl Provider for CodexProvider {
         app_server::thread::set_name(&mut client, &session.id.id, name)
     }
     fn archive(&self, session: &Session) -> io::Result<()> {
-        if session.parent.is_some() {
+        if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }
         let mut client = app_server::Client::connect(&self.home)?;
         app_server::thread::archive(&mut client, &session.id.id)
     }
     fn stop(&self, session: &Session) -> io::Result<()> {
-        if session.parent.is_some() {
+        if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }
         let mut client = app_server::Client::connect(&self.home)?;
@@ -584,7 +581,7 @@ impl Provider for CodexProvider {
         }
     }
     fn delete(&self, session: &Session) -> io::Result<()> {
-        if session.parent.is_some() {
+        if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }
         if let Some(process) = &session.process {

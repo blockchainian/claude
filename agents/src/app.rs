@@ -416,15 +416,12 @@ impl App {
             _ => None,
         };
         if let Some(session) = target.and_then(|id| self.session(id))
-            && session.parent.is_some()
+            && !session.can_resume()
         {
             if matches!(action, Action::Open(_) | Action::Resume(_)) {
-                if !session.can_resume() {
-                    return self.handle_action(Some(Action::Unsupported("Resume")));
-                }
-            } else if !matches!(action, Action::Rename { .. }) || !session.can_resume() {
-                return false;
+                return self.handle_action(Some(Action::Unsupported("Resume")));
             }
+            return false;
         }
         match action {
             Action::Quit => return true,
@@ -472,7 +469,7 @@ impl App {
             Action::Delete(id) => {
                 self.refresh();
                 if let Some(session) = self.session(&id) {
-                    if session.parent.is_some() {
+                    if !session.can_resume() {
                         return false;
                     }
                     if session.transcript.is_none() {
@@ -573,10 +570,7 @@ impl App {
 
     /// Hands the terminal to the selected session's provider process.
     fn launch_session(&mut self, action: Action, session: Session) -> bool {
-        if session.parent.is_some()
-            && (!session.can_resume()
-                || !matches!(action, Action::Open(_) | Action::Resume(_) | Action::Back))
-        {
+        if !session.can_resume() {
             return false;
         }
         if !session.cwd.is_dir() {
