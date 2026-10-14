@@ -405,3 +405,95 @@ fn prompt_image_wrappers_are_not_log_text() {
         assert_eq!(entries[0].body, records[0]["payload"]["content"][3]["text"]);
     }
 }
+
+fn relocated_image_records(name: &str, path: &Path) -> Vec<Value> {
+    let mut records: Vec<Value> = std::fs::read_to_string(image_fixture(name))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for record in &mut records {
+        let content = if record["type"] == "response_item" {
+            &mut record["payload"]["content"]
+        } else {
+            &mut record["payload"]["item"]["content"]
+        };
+        for block in content.as_array_mut().unwrap() {
+            if block["type"] == "local_image" {
+                block["path"] = path.to_str().unwrap().into();
+            } else if let Some(text) = block["text"].as_str()
+                && text.starts_with("<image name=")
+                && text.contains(" path=\"")
+            {
+                block["text"] =
+                    format!("<image name=[Image #1] path=\"{}\">", path.display()).into();
+            }
+        }
+    }
+    records
+}
+
+fn write_image_records(path: &Path, records: &[Value]) {
+    std::fs::write(
+        path,
+        records
+            .iter()
+            .map(|record| format!("{record}\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn prompt_image_paths_use_wrapper_then_paired_completed_event() {
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("attachment.png");
+    std::fs::write(&image, b"image").unwrap();
+    let rollout = dir.path().join("rollout.jsonl");
+    for name in ["wrapped", "fallback"] {
+        let records = relocated_image_records(name, &image);
+        write_image_records(&rollout, &records);
+        let entries = tail(&rollout, 1).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].images,
+            [crate::log::Image {
+                label: "[Image #1]".into(),
+                path: image.clone()
+            }]
+        );
+        // The wrapper is enough when the completed event has not been written yet.
+        write_image_records(&rollout, &records[..1]);
+        assert_eq!(
+            tail(&rollout, 1).unwrap()[0].images.len(),
+            usize::from(name == "wrapped")
+        );
+    }
+    std::fs::remove_file(&image).unwrap();
+    for name in ["wrapped", "fallback"] {
+        write_image_records(&rollout, &relocated_image_records(name, &image));
+        assert!(tail(&rollout, 1).unwrap()[0].images.is_empty());
+    }
+}
+
+#[test]
+fn prompt_image_pairing_does_not_borrow_another_prompts_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("attachment.png");
+    std::fs::write(&image, b"image").unwrap();
+    let rollout = dir.path().join("rollout.jsonl");
+    let first = relocated_image_records("fallback", &image);
+    let second = relocated_image_records("wrapped", &dir.path().join("missing.png"));
+    // An older prompt's completed event cannot supply the latest prompt.
+    write_image_records(
+        &rollout,
+        &[first[0].clone(), first[1].clone(), second[0].clone()],
+    );
+    let entries = tail(&rollout, 100).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].images.len(), 1);
+    assert!(entries[1].images.is_empty());
+    // A newer unrelated completed prompt cannot supply the older prompt either.
+    write_image_records(&rollout, &[second[0].clone(), first[1].clone()]);
+    assert!(tail(&rollout, 100).unwrap()[0].images.is_empty());
+}

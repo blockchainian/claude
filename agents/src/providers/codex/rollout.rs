@@ -1,4 +1,4 @@
-use crate::log::{Event, Kind, participant_text, question_texts};
+use crate::log::{Event, Image, Kind, participant_text, question_texts};
 use crate::model::Activity;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -76,24 +76,47 @@ fn content_text(content: &Value) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
+struct Prompt {
+    text: Option<String>,
+    attachments: Vec<(String, Option<String>)>,
+}
+
 /// Image tags are separate blocks around an input_image, never prompt text.
-fn user_text(content: &Value) -> Option<String> {
+fn user_prompt(content: &Value) -> Prompt {
     let Some(blocks) = content.as_array() else {
-        return content_text(content);
+        return Prompt {
+            text: content_text(content),
+            attachments: Vec::new(),
+        };
     };
     let mut wrappers = HashSet::new();
+    let mut attachments = Vec::new();
     for (index, triple) in blocks.windows(3).enumerate() {
-        if triple[0]["type"] == "input_text"
-            && triple[0]["text"]
-                .as_str()
-                .is_some_and(|text| text.starts_with("<image name=") && text.ends_with('>'))
-            && triple[1]["type"] == "input_image"
-            && triple[2]["type"] == "input_text"
-            && triple[2]["text"] == "</image>"
+        if triple[0]["type"] != "input_text"
+            || triple[1]["type"] != "input_image"
+            || triple[2]["type"] != "input_text"
+            || triple[2]["text"] != "</image>"
         {
-            wrappers.insert(index);
-            wrappers.insert(index + 2);
+            continue;
         }
+        let Some(tag) = triple[0]["text"]
+            .as_str()
+            .and_then(|text| text.strip_prefix("<image name="))
+            .and_then(|text| text.strip_suffix('>'))
+        else {
+            continue;
+        };
+        let Some((name, attributes)) = tag.split_once(']') else {
+            continue;
+        };
+        let label = format!("{name}]");
+        let path = attributes
+            .strip_prefix(" path=\"")
+            .and_then(|path| path.strip_suffix('"'))
+            .map(str::to_owned);
+        attachments.push((label, path));
+        wrappers.insert(index);
+        wrappers.insert(index + 2);
     }
     let text = blocks
         .iter()
@@ -102,7 +125,56 @@ fn user_text(content: &Value) -> Option<String> {
         .filter_map(|(_, block)| block["text"].as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    (!text.trim().is_empty()).then_some(text)
+    Prompt {
+        text: (!text.trim().is_empty()).then_some(text),
+        attachments,
+    }
+}
+
+fn completed_user(record: &Value) -> bool {
+    record["type"] == "event_msg"
+        && record["payload"]["type"] == "item_completed"
+        && record["payload"]["item"]["type"] == "UserMessage"
+}
+
+/// Older response messages lack turn IDs; their paired event still has the
+/// same prompt text. Consume each completed event only at its preceding user.
+fn prompt_images(prompt: &Prompt, payload: &Value, completed: Option<&Value>) -> Vec<Image> {
+    let paired = completed.filter(|record| {
+        let response_turn =
+            payload["internal_chat_message_metadata_passthrough"]["turn_id"].as_str();
+        let event_turn = record["payload"]["turn_id"].as_str();
+        (response_turn.is_none() || response_turn == event_turn)
+            && content_text(&record["payload"]["item"]["content"]) == prompt.text
+    });
+    let paths: Vec<_> = paired
+        .and_then(|record| record["payload"]["item"]["content"].as_array())
+        .into_iter()
+        .flatten()
+        .filter(|block| matches!(block["type"].as_str(), Some("local_image" | "image")))
+        .map(|block| block["path"].as_str())
+        .collect();
+    prompt
+        .attachments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (label, path))| {
+            let path = path
+                .as_deref()
+                .filter(|path| Path::new(path).is_file())
+                .or_else(|| {
+                    paths
+                        .get(index)
+                        .copied()
+                        .flatten()
+                        .filter(|path| Path::new(path).is_file())
+                })?;
+            Some(Image {
+                label: label.clone(),
+                path: path.into(),
+            })
+        })
+        .collect()
 }
 
 /// Whether a user-role message carries context Codex injected, such as
@@ -467,11 +539,17 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     let mut entries = Vec::new();
     let mut results = HashMap::new();
     let mut seen = HashSet::new();
+    let mut completed_prompt = None;
     walk(path, |record| {
         let Some(at) = timestamp(&record) else {
             return Ok(true);
         };
+        if completed_user(&record) {
+            completed_prompt = Some(record);
+            return Ok(true);
+        }
         let payload = &record["payload"];
+        let mut images = Vec::new();
         if let Some(event) = completed_tool(&record)? {
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
@@ -510,8 +588,15 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
                     Some("assistant") => Kind::Assistant,
                     _ => return Ok(true),
                 };
+                let completed = if payload["role"] == "user" {
+                    completed_prompt.take()
+                } else {
+                    None
+                };
                 let Some(body) = (if kind == Kind::User {
-                    user_text(&payload["content"])
+                    let prompt = user_prompt(&payload["content"]);
+                    images = prompt_images(&prompt, payload, completed.as_ref());
+                    prompt.text
                 } else {
                     content_text(&payload["content"])
                 }) else {
@@ -549,7 +634,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             ended_at,
             duration: ended_at.map(|end| end - at),
             previous_end: None,
-            images: Vec::new(),
+            images,
         });
         Ok(entries.len() <= count)
     })?;
