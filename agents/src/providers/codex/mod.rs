@@ -1,4 +1,5 @@
-mod exec_summary;
+#[cfg(test)]
+mod inner_tests;
 mod manager;
 mod rollout;
 #[cfg(test)]

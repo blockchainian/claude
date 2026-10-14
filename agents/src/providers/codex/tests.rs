@@ -534,11 +534,11 @@ fn rollout_details_are_read_through_the_provider() {
     let session = &snapshot.sessions[0];
     assert_eq!(session.last_message.as_deref(), Some("Checks passed."));
     assert!(session.last_record_at.is_some());
-    assert!(session.activity.is_some());
+    assert!(session.activity.is_none());
     let events = provider
         .log(session, 100, &log::Filter::default(), false)
         .unwrap();
-    assert_eq!(events.len(), 3);
+    assert_eq!(events.len(), 2);
 }
 
 fn manager_fixture(dir: &Path, provider: &mut CodexProvider, kind: &str) -> PathBuf {

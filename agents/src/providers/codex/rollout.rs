@@ -20,7 +20,7 @@ pub(super) struct Summary {
 }
 
 /// Walk complete JSON records newest first, retaining records spanning chunks.
-fn walk(path: &Path, mut visit: impl FnMut(Value) -> bool) -> io::Result<()> {
+fn walk(path: &Path, mut visit: impl FnMut(Value) -> io::Result<bool>) -> io::Result<()> {
     let mut file = File::open(path)?;
     let mut position = file.metadata()?.len();
     let mut remainder = Vec::new();
@@ -41,7 +41,7 @@ fn walk(path: &Path, mut visit: impl FnMut(Value) -> bool) -> io::Result<()> {
         };
         for line in bytes[first..].split(|b| *b == b'\n').rev() {
             if let Ok(record) = serde_json::from_slice(line)
-                && !visit(record)
+                && !visit(record)?
             {
                 return Ok(());
             }
@@ -100,11 +100,11 @@ fn tool_body(payload: &Value) -> Option<String> {
     if name.rsplit('.').next() == Some("request_user_input") {
         return Some(question_texts(&tool_arguments(payload)?).join(" · "));
     }
-    if name == "exec"
-        && payload["type"] == "custom_tool_call"
-        && let Some(input) = payload["input"].as_str()
-    {
-        return Some(super::exec_summary::summarize(input));
+    if matches!(
+        name.rsplit('.').next(),
+        Some("exec" | "exec_command" | "shell" | "apply_patch" | "view_image")
+    ) {
+        return None;
     }
     let detail = if payload["type"] == "custom_tool_call" {
         payload["input"].as_str().map(str::to_owned)
@@ -146,6 +146,178 @@ fn tool_arguments(payload: &Value) -> Option<Value> {
     serde_json::from_str(payload["arguments"].as_str()?).ok()
 }
 
+fn required_text<'a>(value: &'a Value, key: &str) -> io::Result<&'a str> {
+    value[key].as_str().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Codex activity requires {key}"),
+        )
+    })
+}
+
+fn item_time(payload: &Value, key: &str) -> io::Result<DateTime<Utc>> {
+    payload[key]
+        .as_i64()
+        .and_then(DateTime::from_timestamp_millis)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid Codex activity {key}"),
+            )
+        })
+}
+
+fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
+    let payload = &record["payload"];
+    if record["type"] != "event_msg" || payload["type"] != "item_completed" {
+        return Ok(None);
+    }
+    let item = &payload["item"];
+    let mut path = None;
+    let body = match item["type"].as_str() {
+        Some("CommandExecution") => {
+            let command: Vec<_> = item["command"]
+                .as_array()
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "Codex command requires argv")
+                })?
+                .iter()
+                .map(|arg| {
+                    arg.as_str().ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "Invalid Codex command argument")
+                    })
+                })
+                .collect::<io::Result<_>>()?;
+            if command.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Empty Codex command",
+                ));
+            }
+            let text = if command.len() == 3 && matches!(command[1], "-lc" | "-c") {
+                command[2].to_owned()
+            } else {
+                command.join(" ")
+            };
+            let mut body = format!("exec_command {text}");
+            if let Some(code) = item["exit_code"].as_i64()
+                && code != 0
+            {
+                body.push_str(&format!(" (exit {code})"));
+            }
+            body
+        }
+        Some("FileChange") => {
+            let changes = item["changes"].as_object().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Codex file change requires changes",
+                )
+            })?;
+            if changes.len() == 1 {
+                path = changes.keys().next().cloned();
+                "apply_patch".to_owned()
+            } else if changes.is_empty() {
+                "apply_patch".to_owned()
+            } else {
+                format!(
+                    "apply_patch {}",
+                    changes.keys().cloned().collect::<Vec<_>>().join(" · ")
+                )
+            }
+        }
+        Some("McpToolCall") => format!(
+            "{}.{}",
+            required_text(item, "server")?,
+            required_text(item, "tool")?
+        ),
+        Some("Extension") => {
+            let kind = required_text(item, "kind")?;
+            match item["query"]
+                .as_str()
+                .or_else(|| item["revisedPrompt"].as_str())
+            {
+                Some(detail) => format!("{kind} {detail}"),
+                None => kind.to_owned(),
+            }
+        }
+        Some("ImageView") => {
+            let image = required_text(item, "path")?;
+            path = Some(image.strip_prefix("file://").unwrap_or(image).to_owned());
+            "view_image".to_owned()
+        }
+        Some("SubAgentActivity") => format!(
+            "subagent {} {}",
+            required_text(item, "kind")?,
+            participant_text(Some(required_text(item, "agent_path")?), "")
+        ),
+        Some("CollabAgentToolCall") => {
+            let tool = required_text(item, "tool")?;
+            let targets = item["receiver_thread_ids"]
+                .as_array()
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Codex collaboration requires receivers",
+                    )
+                })?
+                .iter()
+                .map(|id| {
+                    id.as_str().ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Invalid Codex collaboration receiver",
+                        )
+                    })
+                })
+                .collect::<io::Result<Vec<_>>>()?
+                .join(", ");
+            if targets.is_empty() {
+                tool.to_owned()
+            } else {
+                format!("{tool} {}", participant_text(Some(&targets), ""))
+            }
+        }
+        _ => return Ok(None),
+    };
+    let ended_at = item_time(payload, "completed_at_ms")?;
+    let started_at = if item["duration"].is_null() {
+        item_time(payload, "started_at_ms")?
+    } else {
+        let duration = &item["duration"];
+        let seconds = duration["secs"]
+            .as_i64()
+            .filter(|secs| *secs >= 0)
+            .and_then(chrono::Duration::try_seconds);
+        let nanos = duration["nanos"]
+            .as_i64()
+            .filter(|nanos| (0..1_000_000_000).contains(nanos));
+        let elapsed = seconds
+            .zip(nanos)
+            .and_then(|(secs, nanos)| secs.checked_add(&chrono::Duration::nanoseconds(nanos)))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid Codex activity duration",
+                )
+            })?;
+        ended_at.checked_sub_signed(elapsed).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Codex activity duration exceeds timestamp",
+            )
+        })?
+    };
+    Ok(Some(Event {
+        kind: Kind::Tool,
+        body,
+        path,
+        started_at,
+        ended_at: Some(ended_at),
+        previous_end: None,
+    }))
+}
+
 pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     let mut summary = Summary::default();
     let mut boundary = false;
@@ -153,7 +325,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     let mut pending = Vec::new();
     walk(path, |record| {
         let Some(at) = timestamp(&record) else {
-            return true;
+            return Ok(true);
         };
         summary.updated_at.get_or_insert(at);
         let payload = &record["payload"];
@@ -196,6 +368,19 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
             summary.last_message = Some(preview(&text));
             summary.last_message_at = Some(at);
         }
+        if summary.activity.is_none()
+            && let Some(event) = completed_tool(&record)?
+        {
+            let label = match event.path {
+                Some(path) => format!("{} {path}", event.body),
+                None => event.body,
+            };
+            summary.activity = Some(Activity {
+                kind: event.kind,
+                label,
+                at,
+            });
+        }
         if summary.activity.is_none() && record["type"] == "response_item" {
             let activity = match payload["type"].as_str() {
                 Some("function_call" | "custom_tool_call") => tool_body(payload).map(|label| {
@@ -211,7 +396,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
                 summary.activity = Some(Activity { kind, label, at });
             }
         }
-        !(boundary && summary.last_message.is_some() && summary.activity.is_some())
+        Ok(!(boundary && summary.last_message.is_some() && summary.activity.is_some()))
     })?;
     summary.pending_questions = pending.into_iter().rev().flatten().collect();
     Ok(summary)
@@ -227,20 +412,35 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
     let mut matching = 0;
     walk(path, |record| {
         let Some(at) = timestamp(&record) else {
-            return true;
+            return Ok(true);
         };
         let payload = &record["payload"];
+        if let Some(event) = completed_tool(&record)? {
+            if let Some(id) = payload["item"]["id"].as_str()
+                && !seen.insert(id.to_owned())
+            {
+                return Ok(true);
+            }
+            matching += usize::from(filter.matches(&event.kind));
+            entries.push(event);
+            return Ok(matching <= count);
+        }
         let (kind, body, ended_at) = match (record["type"].as_str(), payload["type"].as_str()) {
-            (Some("response_item"), Some("function_call_output" | "custom_tool_call_output")) => {
+            (Some("response_item"), Some("function_call_output")) => {
                 if let Some(id) = payload["call_id"].as_str() {
                     results.insert(id.to_owned(), at);
                 }
-                return true;
+                return Ok(true);
             }
             (Some("response_item"), Some("function_call" | "custom_tool_call")) => {
                 let Some(body) = tool_body(payload) else {
-                    return true;
+                    return Ok(true);
                 };
+                if let Some(id) = payload["call_id"].as_str()
+                    && !seen.insert(id.to_owned())
+                {
+                    return Ok(true);
+                }
                 let ended = payload["call_id"]
                     .as_str()
                     .and_then(|id| results.remove(id));
@@ -254,15 +454,15 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
                 let kind = match payload["role"].as_str() {
                     Some("user") => Kind::User,
                     Some("assistant") => Kind::Assistant,
-                    _ => return true,
+                    _ => return Ok(true),
                 };
                 let Some(body) = content_text(&payload["content"]) else {
-                    return true;
+                    return Ok(true);
                 };
                 if let Some(id) = payload["id"].as_str()
                     && !seen.insert(id.to_owned())
                 {
-                    return true;
+                    return Ok(true);
                 }
                 (kind, body, None)
             }
@@ -273,17 +473,17 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
                 if let Some(id) = item["id"].as_str()
                     && !seen.insert(id.to_owned())
                 {
-                    return true;
+                    return Ok(true);
                 }
                 let Some(body) = content_text(&item["content"]) else {
-                    return true;
+                    return Ok(true);
                 };
                 (Kind::Assistant, body, None)
             }
             (Some("event_msg"), Some("turn_aborted")) => {
                 (Kind::Error, "Turn aborted".to_owned(), Some(at))
             }
-            _ => return true,
+            _ => return Ok(true),
         };
         matching += usize::from(filter.matches(&kind));
         entries.push(Event {
@@ -294,7 +494,7 @@ pub(super) fn tail_filtered(path: &Path, count: usize, filter: &Filter) -> io::R
             ended_at,
             previous_end: None,
         });
-        matching <= count
+        Ok(matching <= count)
     })?;
     entries.reverse();
     let mut previous_end = None;
@@ -470,17 +670,15 @@ mod tests {
     }
 
     #[test]
-    fn exec_summary_keeps_missing_input_and_existing_fallback() {
-        assert_eq!(
-            tool_body(&serde_json::json!({"type":"custom_tool_call", "name":"exec"})).as_deref(),
-            Some("exec")
+    fn exec_wrappers_never_supply_activity() {
+        assert!(
+            tool_body(&serde_json::json!({"type":"custom_tool_call", "name":"exec"})).is_none()
         );
-        assert_eq!(
+        assert!(
             tool_body(
                 &serde_json::json!({"type":"custom_tool_call", "name":"exec", "input":"tools.exec_command({"})
             )
-            .as_deref(),
-            Some("exec tools.exec_command({")
+            .is_none()
         );
     }
     #[test]
@@ -496,12 +694,10 @@ mod tests {
         let events = tail_filtered(&fixture(), 100, &Filter::default()).unwrap();
         assert_eq!(
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
-            vec![&Kind::User, &Kind::Tool, &Kind::Assistant]
+            vec![&Kind::User, &Kind::Assistant]
         );
-        assert_eq!(events[1].body, "javascript");
-        assert!(events[1].ended_at.is_some());
-        assert_eq!(events[2].body, "Checks passed.");
-        assert!(events[2].previous_end.is_some());
+        assert_eq!(events[1].body, "Checks passed.");
+        assert!(events[1].previous_end.is_some());
     }
     #[test]
     fn filtered_tail_counts_matching_events() {
@@ -549,7 +745,7 @@ mod tests {
             writeln!(file, "{line}").unwrap();
         }
         let events = tail_filtered(file.path(), 100, &Filter::default()).unwrap();
-        assert_eq!(events.len(), 3);
+        assert_eq!(events.len(), 2);
     }
 
     #[test]
@@ -580,7 +776,7 @@ mod tests {
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:01Z","type":"response_item","payload":{{"type":"function_call","name":"exec_command","arguments":"{{\"cmd\":\"cargo check\"}}","call_id":"test"}}}}"#).unwrap();
         let result = summary(file.path()).unwrap();
         assert!(!result.turn_ended);
-        assert_eq!(result.activity.unwrap().label, "exec_command cargo check");
+        assert!(result.activity.is_none());
         writeln!(file,r#"{{"timestamp":"2026-10-13T18:00:02Z","type":"event_msg","payload":{{"type":"turn_aborted","reason":"interrupted"}}}}"#).unwrap();
         assert!(summary(file.path()).unwrap().turn_ended);
     }

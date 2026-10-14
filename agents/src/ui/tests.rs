@@ -2504,6 +2504,58 @@ fn task_log_denied_snapshot() {
 }
 
 #[test]
+fn codex_inner_task_log_snapshot() {
+    use crate::providers::Provider;
+    let (mut view, now) = log_fixture();
+    view.rows[0].id.provider = crate::providers::ProviderId::Codex;
+    view.log_session = Some(view.rows[0].id.clone());
+    let dir = tempfile::tempdir().unwrap();
+    let provider = crate::providers::codex::CodexProvider::new(
+        dir.path().to_owned(),
+        dir.path().join("manager"),
+    );
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-inner");
+    let mut filter = crate::log::Filter::default();
+    filter.toggle(&[crate::log::Kind::Tool, crate::log::Kind::Error]);
+    view.log.clear();
+    for (index, fixture) in [
+        "command.jsonl",
+        "file-change.jsonl",
+        "mcp.jsonl",
+        "extension.jsonl",
+        "image-view.jsonl",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        view.rows[0].transcript = Some(root.join(fixture));
+        let events = provider
+            .log(&view.rows[0], usize::MAX, &filter, false)
+            .unwrap();
+        assert_eq!(events.len(), 1, "{fixture}: {events:?}");
+        let mut event = events.into_iter().next().unwrap();
+        let duration = event.ended_at.unwrap() - event.started_at;
+        event.started_at = now - Duration::seconds(100 - index as i64 * 15);
+        event.ended_at = Some(event.started_at + duration);
+        event.previous_end = view.log.last().map(|previous| previous.ended_at.unwrap());
+        view.log.push(event);
+    }
+    assert_eq!(
+        log_screen(&view, 160, 25, now),
+        include_str!("../../tests/ui_snapshots/codex_inner_log.txt")
+    );
+    view.prepare_log_search();
+    view.log_search.query.set_text("affiliates-page-1791341607");
+    view.rematch_log();
+    assert_eq!(view.matching_log_count(), 1);
+    assert!(view.log_matches(4));
+    view.log_search.query.set_text("type gwta");
+    view.rematch_log();
+    assert_eq!(view.matching_log_count(), 1);
+    assert!(view.log_matches(0));
+}
+
+#[test]
 fn task_log_tall_running_snapshot() {
     let (view, now) = log_fixture();
     assert_eq!(

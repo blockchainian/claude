@@ -62,7 +62,7 @@ impl Commands {
 /// Return command names in first-appearance order; an empty result means unsupported shell syntax.
 pub(crate) fn summarize_shell_commands(cmd: &str) -> String {
     let mut commands = Commands::default();
-    shell(cmd, &mut commands, 0)
+    collect(cmd, &mut commands)
         .and_then(|()| commands.finish())
         .unwrap_or_default()
 }
