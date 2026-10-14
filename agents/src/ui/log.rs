@@ -20,7 +20,12 @@ impl View {
             return;
         };
         super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
+        self.viewport.borrow_mut().log_rows.clear();
         if self.log_session.as_ref() != Some(&session.id) {
+            return;
+        }
+        if let Some(event) = &self.log_open {
+            self.render_open_event(event, area, buf);
             return;
         }
         if self.log_search.active() && area.height > 1 {
@@ -38,10 +43,11 @@ impl View {
         let matching: Vec<_> = self.shown_log_events().collect();
         let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(area.height.saturating_sub(2)));
-        for (index, event) in matching[start..end].iter().rev().enumerate() {
+        let mut rows = Vec::new();
+        for (index, &(log_index, event)) in matching[start..end].iter().rev().enumerate() {
             let last = scroll == 0 && index == 0;
             let time = event_time(event, session, last, now);
-            render_event(
+            let cut = render_event(
                 event,
                 &time,
                 CLOCK_WIDTH,
@@ -50,27 +56,72 @@ impl View {
                 buf,
                 Some(&self.log_search),
             );
+            rows.push((log_index, cut));
         }
+        self.viewport.borrow_mut().log_rows = rows;
+    }
+
+    /// Draws one log event whole: its time and kind, a blank row, then the full body.
+    fn render_open_event(&self, event: &Event, area: Rect, buf: &mut Buffer) {
+        let (label_style, body_style) = super::style::log_styles(&event.kind);
+        let header = Line::from(vec![
+            Span::styled(
+                event
+                    .started_at
+                    .with_timezone(&Local)
+                    .format(CLOCK_FORMAT)
+                    .to_string(),
+                Style::default(),
+            )
+            .dim(),
+            " · ".dim(),
+            Span::styled(kind_label(&event.kind), label_style),
+        ]);
+        super::render::line(header, super::render::row(area, 1, 1), buf);
+        let body = match &event.path {
+            Some(path) if !is_prose(&event.kind) => format!("{} {path}", event.body),
+            _ => event.body.clone(),
+        };
+        let options = super::line_truncation::prose_wrap_options(usize::from(area.width));
+        let mut lines = if is_prose(&event.kind) {
+            super::markdown::render_with_options(&body, options)
+        } else {
+            textwrap::wrap(&body, options)
+                .into_iter()
+                .map(|line| Line::from(line.into_owned()))
+                .collect()
+        };
+        for line in &mut lines {
+            for span in &mut line.spans {
+                span.style = body_style.patch(span.style);
+            }
+        }
+        let body_area = super::render::row(area, 3, area.height.saturating_sub(3));
+        let mut viewport = self.viewport.borrow_mut();
+        viewport.log_open_scroll = viewport
+            .log_open_scroll
+            .min(lines.len().saturating_sub(usize::from(body_area.height)));
+        Paragraph::new(lines.split_off(viewport.log_open_scroll)).render(body_area, buf);
     }
 
     /// How long until the top log row's time reads differently, or `None` if it never does.
     pub(crate) fn log_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
         let session = self.selected_row()?;
-        if self.log_scroll() != 0 || self.log_session.as_ref() != Some(&session.id) {
+        if self.log_scroll() != 0
+            || self.log_open.is_some()
+            || self.log_session.as_ref() != Some(&session.id)
+        {
             return None;
         }
-        let event = self.shown_log_events().last()?;
+        let (_, event) = self.shown_log_events().last()?;
         row_time_changes_in(&row_time(event, session, true), now)
     }
 
-    fn shown_log_events(&self) -> impl Iterator<Item = &Event> {
-        self.log
-            .iter()
-            .enumerate()
-            .filter(|(index, event)| {
-                self.log_filter.matches(&event.kind) && self.log_matches(*index)
-            })
-            .map(|(_, event)| event)
+    /// The log events the filter and search let through, with their index in the log.
+    fn shown_log_events(&self) -> impl Iterator<Item = (usize, &Event)> {
+        self.log.iter().enumerate().filter(|(index, event)| {
+            self.log_filter.matches(&event.kind) && self.log_matches(*index)
+        })
     }
 }
 
@@ -98,6 +149,12 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
         } else {
             RowTime::Clock(event.started_at)
         };
+    }
+    if session.id.provider == crate::providers::ProviderId::Codex
+        && event.kind == Kind::Tool
+        && let Some(end) = event.ended_at
+    {
+        return RowTime::Settled((end - event.started_at).num_seconds().max(0));
     }
     let Some(previous) = event.previous_end else {
         return RowTime::Clock(event.started_at);
@@ -156,9 +213,9 @@ fn render_event(
     area: Rect,
     buf: &mut Buffer,
     search: Option<&super::log_search::LogSearch>,
-) {
+) -> bool {
     if area.is_empty() {
-        return;
+        return false;
     }
     let width = usize::from(area.width);
     let time_width = time_width.min(width);
@@ -170,25 +227,16 @@ fn render_event(
         .render(time_area, buf);
     let content_width = width.saturating_sub(time_width + 1);
     if content_width == 0 {
-        return;
+        return true;
     }
     let content_x = area.x + time_width as u16 + 1;
-    let label = match event.kind {
-        Kind::User => "User",
-        Kind::Assistant => "Assistant",
-        Kind::Agent => "Agent",
-        Kind::Session => "Session",
-        Kind::Tool => "Tool",
-        Kind::Error => "Error",
-        Kind::Denied => "Denied",
-        Kind::QueuedUser | Kind::QueuedSystem => "Queue",
-    };
-    let label = format!("{label:<9} ");
+    let label = format!("{:<9} ", kind_label(&event.kind));
     let label_width = label.width().min(content_width);
     Line::from(Span::styled(label, label_style))
         .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
     let body_width = content_width.saturating_sub(label_width);
-    let mut body = body_line(event, body_width);
+    let (mut body, shortened) = fitted_body_line(event, body_width);
+    let cut = shortened || body.width() > body_width;
     if let Some(search) = search.filter(|search| !search.query.is_empty()) {
         let indices = search.indices(&body.to_string());
         let mut offset = 0u32;
@@ -217,14 +265,39 @@ fn render_event(
         Rect::new(content_x + label_width as u16, area.y, body_width as u16, 1),
         buf,
     );
+    cut
+}
+
+fn kind_label(kind: &Kind) -> &'static str {
+    match kind {
+        Kind::User => "User",
+        Kind::Assistant => "Assistant",
+        Kind::Agent => "Agent",
+        Kind::Session => "Session",
+        Kind::Tool => "Tool",
+        Kind::Error => "Error",
+        Kind::Denied => "Denied",
+        Kind::QueuedUser | Kind::QueuedSystem => "Queue",
+    }
+}
+
+/// Whether an event's body is prose the log renders as Markdown.
+fn is_prose(kind: &Kind) -> bool {
+    matches!(kind, Kind::User | Kind::Assistant | Kind::Agent)
 }
 
 pub(super) fn body_line(event: &Event, body_width: usize) -> Line<'static> {
+    fitted_body_line(event, body_width).0
+}
+
+/// An event's body as one log row, with paths shortened to fit `body_width`,
+/// and whether any path was shortened.
+fn fitted_body_line(event: &Event, body_width: usize) -> (Line<'static>, bool) {
     let body_style = super::style::log_styles(&event.kind).1;
     let body = event.body.split_whitespace().collect::<Vec<_>>().join(" ");
-    if matches!(event.kind, Kind::User | Kind::Assistant | Kind::Agent) {
-        let body = super::line_truncation::abbreviate_paths_in_text(&body, body_width);
-        super::markdown::render(&body, usize::MAX)
+    if is_prose(&event.kind) {
+        let shortened = super::line_truncation::abbreviate_paths_in_text(&body, body_width);
+        let line = super::markdown::render(&shortened, usize::MAX)
             .into_iter()
             .next()
             .map(|mut line| {
@@ -233,18 +306,18 @@ pub(super) fn body_line(event: &Event, body_width: usize) -> Line<'static> {
                 }
                 line
             })
-            .unwrap_or_else(|| Line::from(Span::styled(body, body_style)))
+            .unwrap_or_else(|| Line::from(Span::styled(shortened.clone(), body_style)));
+        (line, shortened != body)
+    } else if let Some(path) = &event.path {
+        let path_width = body_width.saturating_sub(body.width() + 1);
+        let shortened = super::line_truncation::abbreviate_path(path, path_width);
+        let cut = shortened != *path;
+        (
+            Line::from(Span::styled(format!("{body} {shortened}"), body_style)),
+            cut,
+        )
     } else {
-        let body = if let Some(path) = &event.path {
-            let path_width = body_width.saturating_sub(body.width() + 1);
-            format!(
-                "{body} {}",
-                super::line_truncation::abbreviate_path(path, path_width)
-            )
-        } else {
-            body
-        };
-        Line::from(Span::styled(body, body_style))
+        (Line::from(Span::styled(body, body_style)), false)
     }
 }
 

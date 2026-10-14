@@ -79,6 +79,10 @@ struct Viewport {
     first_entry: usize,
     log: Rect,
     log_scroll: usize,
+    /// Index into the task log of each drawn log row, top down, and whether its body was cut.
+    log_rows: Vec<(usize, bool)>,
+    /// Lines of the open log event scrolled off the top.
+    log_open_scroll: usize,
     details: Rect,
     details_scroll: DetailsScroll,
     /// Screen cell of the selection marker drawn by the last render.
@@ -107,6 +111,8 @@ pub struct View {
     pub(crate) log_session: Option<SessionKey>,
     pub(crate) log_filter: crate::log::Filter,
     pub(crate) log_search: log_search::LogSearch,
+    /// The log event shown whole in the log panel, opened by clicking its cut row.
+    log_open: Option<crate::log::Event>,
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
@@ -169,6 +175,7 @@ impl View {
         Self {
             log: Vec::new(),
             log_session: None,
+            log_open: None,
             log_filter: crate::log::Filter::default(),
             log_search: log_search::LogSearch::default(),
             capabilities: HashMap::new(),
@@ -240,7 +247,7 @@ impl View {
         self.reconcile_selection();
         if self.selected_id() != selected.as_ref() {
             self.log_search.clear();
-            self.viewport.borrow_mut().log_scroll = 0;
+            self.show_newest_log();
         }
         if self.selected_id() != selected.as_ref() || self.status_filter != status_filter {
             self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
@@ -426,12 +433,19 @@ impl View {
         viewport.log_scroll = viewport.log_scroll.min(max);
     }
 
+    /// Closes the open log event and scrolls the log back to its newest row.
+    fn show_newest_log(&mut self) {
+        self.log_open = None;
+        let mut viewport = self.viewport.borrow_mut();
+        viewport.log_scroll = 0;
+        viewport.log_open_scroll = 0;
+    }
+
     fn set_selected(&mut self, selected: usize) {
         if self.selected != selected {
             self.log_search.clear();
-            let mut viewport = self.viewport.borrow_mut();
-            viewport.details_scroll = DetailsScroll::default();
-            viewport.log_scroll = 0;
+            self.show_newest_log();
+            self.viewport.borrow_mut().details_scroll = DetailsScroll::default();
         }
         self.selected = selected;
     }

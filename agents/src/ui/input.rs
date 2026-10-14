@@ -19,7 +19,7 @@ impl View {
             return None;
         }
         let position = (mouse.column, mouse.row).into();
-        let (tab, over_tabs, over_list, over_details, over_log, entry) = {
+        let (tab, over_tabs, over_list, over_details, over_log, entry, log_row) = {
             let viewport = self.viewport.borrow();
             let tab = viewport
                 .tabs
@@ -30,6 +30,12 @@ impl View {
                 .list_rows
                 .contains(position)
                 .then(|| viewport.first_entry + usize::from(mouse.row - viewport.list_rows.y));
+            let log_row = viewport
+                .log
+                .contains(position)
+                .then(|| usize::from(mouse.row - viewport.log.y).checked_sub(1))
+                .flatten()
+                .and_then(|row| viewport.log_rows.get(row).copied());
             (
                 tab,
                 viewport.tab_bar.contains(position),
@@ -37,6 +43,7 @@ impl View {
                 viewport.details.contains(position),
                 viewport.log.contains(position),
                 entry,
+                log_row,
             )
         };
         match mouse.kind {
@@ -62,8 +69,14 @@ impl View {
                         return self.activate();
                     }
                     self.last_click = Some((task, now));
+                } else if self.log_open.is_none()
+                    && let Some((index, true)) = log_row
+                {
+                    self.log_open = self.log.get(index).cloned();
+                    self.viewport.borrow_mut().log_open_scroll = 0;
                 }
             }
+            MouseEventKind::Down(MouseButton::Right) => self.log_open = None,
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let forward = mouse.kind == MouseEventKind::ScrollDown;
                 if over_tabs {
@@ -75,6 +88,13 @@ impl View {
                     self.set_filter(idx);
                 } else if over_list {
                     self.move_selection(forward);
+                } else if over_log && self.log_open.is_some() {
+                    let mut viewport = self.viewport.borrow_mut();
+                    viewport.log_open_scroll = if forward {
+                        viewport.log_open_scroll.saturating_add(1)
+                    } else {
+                        viewport.log_open_scroll.saturating_sub(1)
+                    };
                 } else if over_log {
                     let mut viewport = self.viewport.borrow_mut();
                     viewport.log_scroll = if forward {
@@ -272,7 +292,7 @@ impl View {
                 }
             }
             self.rematch_log();
-            self.viewport.borrow_mut().log_scroll = 0;
+            self.show_newest_log();
             return None;
         }
         if !self.searching
@@ -281,7 +301,7 @@ impl View {
         {
             self.log_search.editing = true;
             self.prepare_log_search();
-            self.viewport.borrow_mut().log_scroll = 0;
+            self.show_newest_log();
             return None;
         }
         if self.searching {
@@ -365,7 +385,7 @@ impl View {
                 filter.toggle(kinds);
                 if self.log_filter != filter {
                     self.log_filter = filter;
-                    self.viewport.borrow_mut().log_scroll = 0;
+                    self.show_newest_log();
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(false),

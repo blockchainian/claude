@@ -4569,3 +4569,77 @@ fn attention_title_style_follows_terminal_background_and_color_support() {
         }
     }
 }
+
+fn click_log_text(view: &mut View, screen: &str, text: &str, button: MouseButton) {
+    let (x, y) = rendered_cell(screen, text);
+    view.handle_mouse(mouse(MouseEventKind::Down(button), x, y));
+}
+
+#[test]
+fn task_log_click_opens_cut_event_and_right_click_returns() {
+    let (mut view, now) = log_fixture();
+    view.log[6].body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph".into();
+    let list = log_screen(&view, 100, 25, now);
+    click_log_text(&mut view, &list, "A long response", MouseButton::Left);
+    let open = log_screen(&view, 100, 25, now);
+    assert_eq!(
+        open,
+        include_str!("../../tests/ui_snapshots/task_log_open.txt")
+    );
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
+    view.render_at(buf.area, &mut buf, now);
+    let (x, y) = rendered_cell(&open, "bold");
+    assert!(
+        buf[(x, y)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    assert_eq!(view.log_redraw_in(now), None);
+    click_log_text(&mut view, &open, "A second paragraph", MouseButton::Left);
+    assert_eq!(log_screen(&view, 100, 25, now), open);
+    click_log_text(&mut view, &open, "A second paragraph", MouseButton::Right);
+    assert_eq!(log_screen(&view, 100, 25, now), list);
+}
+
+#[test]
+fn task_log_click_on_whole_row_keeps_list() {
+    let (mut view, now) = log_fixture();
+    let list = log_screen(&view, 100, 25, now);
+    click_log_text(&mut view, &list, "run tests", MouseButton::Left);
+    assert_eq!(log_screen(&view, 100, 25, now), list);
+    click_log_text(&mut view, &list, "run tests", MouseButton::Right);
+    assert_eq!(log_screen(&view, 100, 25, now), list);
+}
+
+#[test]
+fn task_log_click_opens_row_with_shortened_path() {
+    let (mut view, now) = log_fixture();
+    let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
+    view.log[7].path = Some(path.into());
+    let list = log_screen(&view, 100, 25, now);
+    assert!(!list.contains(path), "{list}");
+    click_log_text(&mut view, &list, "run tests", MouseButton::Left);
+    let open = log_screen(&view, 100, 25, now);
+    // The open event wraps the full path at the panel edge instead of shortening it.
+    assert!(open.contains(&path[..96]), "{open}");
+}
+
+#[test]
+fn task_log_open_event_closes_when_selection_changes() {
+    let (mut view, now) = log_fixture();
+    let list = log_screen(&view, 100, 25, now);
+    click_log_text(&mut view, &list, "A long response", MouseButton::Left);
+    assert!(view.log_open.is_some());
+    let mut other = session("other", "Other task", SessionStatus::Working, 1);
+    other.transcript = Some("/tmp/other.jsonl".into());
+    let mut rows = view.rows.clone();
+    rows.push(other);
+    view.set_sessions(rows, false);
+    view.set_selected(
+        view.rows
+            .iter()
+            .position(|row| row.id.id == "other")
+            .unwrap(),
+    );
+    assert!(view.log_open.is_none());
+}
