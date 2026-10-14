@@ -17,7 +17,7 @@ pub(super) struct Part {
 enum Body {
     /// A call name or section label, in the given style.
     Label(Style),
-    /// A full-width separator; the input/output rule carries a centred arrow.
+    /// A full-width call separator, or a centred input/output arrow.
     Rule(bool),
     /// The dim note that a call has no output yet.
     Running,
@@ -33,17 +33,63 @@ enum Body {
 
 impl Part {
     fn new(source: impl Into<String>, body: Body) -> Self {
-        let source = source.into();
-        match serde_json::from_str::<serde_json::Value>(&source) {
-            Ok(value) if value.is_object() || value.is_array() => Part {
-                source: serde_json::to_string_pretty(&value).expect("JSON value serializes"),
-                body: Body::Code("json".into()),
-            },
-            _ => Part { source, body },
+        Part {
+            source: source.into(),
+            body,
         }
     }
 
+    /// Text fragments use the shared Markdown renderer; JSON fragments are copied as drawn.
+    pub fn text_parts(source: String, markdown: bool) -> Vec<Self> {
+        let mut parts = Vec::new();
+        let mut cursor = 0;
+        let mut text_start = 0;
+        while cursor < source.len() {
+            let byte = source.as_bytes()[cursor];
+            if matches!(byte, b'{' | b'[')
+                && let Some((end, value)) = embedded_json(&source, cursor)
+                && (value.as_object().is_some_and(|object| !object.is_empty())
+                    || value.as_array().is_some_and(|array| !array.is_empty()))
+            {
+                if text_start < cursor {
+                    if let Some(text) =
+                        text_boundary(&source[text_start..cursor], text_start > 0, true)
+                    {
+                        parts.push(Self::text_fragment(text.into(), markdown));
+                    }
+                }
+                parts.push(Self::new(
+                    serde_json::to_string_pretty(&value).expect("JSON value serializes"),
+                    Body::Code("json".into()),
+                ));
+                cursor = end;
+                text_start = end;
+            } else {
+                cursor += 1;
+            }
+        }
+        if text_start < source.len() || parts.is_empty() {
+            if let Some(text) = text_boundary(&source[text_start..], text_start > 0, false) {
+                parts.push(Self::text_fragment(text.into(), markdown));
+            }
+        }
+        parts
+    }
+
+    fn text_fragment(source: String, markdown: bool) -> Self {
+        let markdown = markdown || super::markdown::has_markers(&source);
+        Self::new(source, if markdown { Body::Markdown } else { Body::Text })
+    }
+
     pub fn text(source: String, markdown: bool) -> Self {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&source)
+            && (value.is_object() || value.is_array())
+        {
+            return Self::new(
+                serde_json::to_string_pretty(&value).expect("JSON value serializes"),
+                Body::Code("json".into()),
+            );
+        }
         Self::new(source, if markdown { Body::Markdown } else { Body::Text })
     }
 
@@ -63,12 +109,15 @@ impl Part {
                 width,
             ),
             Body::Rule(arrow) => {
-                let mut rule = "─".repeat(width);
-                if *arrow && width > 0 {
-                    let middle = width / 2;
-                    rule.replace_range(middle * "─".len()..(middle + 1) * "─".len(), "↓");
+                if *arrow {
+                    let mut row = " ".repeat(width);
+                    if width > 0 {
+                        row.replace_range(width / 2..width / 2 + 1, "↓");
+                    }
+                    vec![Line::styled(row, super::style::log_jump_style())]
+                } else {
+                    vec![Line::from("─".repeat(width)).dim()]
                 }
-                vec![Line::from(rule).dim()]
             }
             Body::Running => vec![Line::from(Span::styled(
                 source.to_owned(),
@@ -111,7 +160,7 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
             parts.push(Part::new(call.title.clone(), Body::Label(label_style)));
         }
         for section in &call.input {
-            push_section(&mut parts, section, label_style);
+            push_section(&mut parts, section, label_style, false);
         }
         match &call.output {
             Some(output) => {
@@ -125,7 +174,7 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
                     label_style
                 };
                 for section in output {
-                    push_section(&mut parts, section, style);
+                    push_section(&mut parts, section, style, true);
                 }
             }
             None => parts.push(Part::new("running…", Body::Running)),
@@ -134,7 +183,7 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
     parts
 }
 
-fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style) {
+fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
         Section::Fields(fields) => {
             let text = fields
@@ -149,13 +198,51 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style) {
             (label, Part::new(cells(text), Body::Code(lang.clone())))
         }
         Section::Diff { label, text } => (label, Part::new(cells(text), Body::Diff)),
-        Section::Markdown { label, text } => (label, Part::new(cells(text), Body::Markdown)),
-        Section::Text { label, text } => (label, Part::new(cells(text), Body::Text)),
+        Section::Markdown { label, text } => (label, Part::text(cells(text), true)),
+        Section::Text { label, text } => {
+            if label == "stderr" {
+                parts.push(Part::new(label.clone(), Body::Label(label_style)));
+            }
+            if text_output {
+                parts.extend(Part::text_parts(cells(text), false));
+            } else {
+                parts.push(Part::text(cells(text), false));
+            }
+            return;
+        }
     };
     if matches!(section, Section::Diff { .. }) || label == "stderr" {
         parts.push(Part::new(label.clone(), Body::Label(label_style)));
     }
     parts.push(body);
+}
+
+/// A JSON block boundary already supplies the adjacent line break.
+fn text_boundary(mut source: &str, after_json: bool, before_json: bool) -> Option<&str> {
+    if after_json && before_json && matches!(source, "\n" | "\r\n") {
+        return None;
+    }
+    if after_json {
+        source = source
+            .strip_prefix("\r\n")
+            .or_else(|| source.strip_prefix('\n'))
+            .unwrap_or(source);
+    }
+    if before_json {
+        source = source
+            .strip_suffix("\r\n")
+            .or_else(|| source.strip_suffix('\n'))
+            .unwrap_or(source);
+    }
+    Some(source)
+}
+
+/// Parse one complete balanced JSON value without scanning the trailing output.
+fn embedded_json(source: &str, start: usize) -> Option<(usize, serde_json::Value)> {
+    let mut values =
+        serde_json::Deserializer::from_str(&source[start..]).into_iter::<serde_json::Value>();
+    let value = values.next()?.ok()?;
+    Some((start + values.byte_offset(), value))
 }
 
 /// Copy sources preserve tabs and omit trailing line breaks.
@@ -229,6 +316,129 @@ mod tests {
     }
 
     #[test]
+    fn embedded_json_keeps_surroundings_and_pretty_copy_sources() {
+        let parts = Part::text_parts(
+            "before {\"text\":\"} \\\" [\",\"items\":[1,2]} after [3,4] end".into(),
+            false,
+        );
+        assert_eq!(parts.len(), 5);
+        assert_eq!(parts[0].source, "before ");
+        assert!(matches!(parts[1].body, Body::Code(ref lang) if lang == "json"));
+        assert!(parts[1].source.contains("\n  \"items\": ["));
+        assert_eq!(parts[2].source, " after ");
+        assert_eq!(parts[3].source, "[\n  3,\n  4\n]");
+        assert_eq!(parts[4].source, " end");
+        for part in &parts {
+            let lines = part.lines(80, Style::default());
+            let maps = super::super::text_selection_layout::map_lines(
+                &part.source,
+                &lines,
+                part.markdown(),
+            );
+            for (line, map) in lines.iter().zip(maps) {
+                if matches!(part.body, Body::Code(_)) {
+                    assert_eq!(
+                        map.iter()
+                            .map(|(cells, _)| (cells.end - cells.start) as usize)
+                            .sum::<usize>(),
+                        line.width()
+                    );
+                }
+                for (cell, bytes) in map {
+                    assert_eq!(
+                        &line.to_string()[cell.start as usize..cell.end as usize],
+                        &part.source[bytes]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn adjacent_json_blocks_do_not_duplicate_boundary_newlines() {
+        for newline in ["\n", "\r\n"] {
+            let source = format!("before{newline}{{\"ok\":true}}{newline}after");
+            let parts = Part::text_parts(source, false);
+            assert_eq!(
+                parts
+                    .iter()
+                    .map(|part| part.source.as_str())
+                    .collect::<Vec<_>>(),
+                ["before", "{\n  \"ok\": true\n}", "after"]
+            );
+            assert_eq!(
+                texts(&parts, 80),
+                ["before", "{", "  \"ok\": true", "}", "after"]
+            );
+        }
+    }
+
+    #[test]
+    fn json_boundaries_preserve_surrounding_blank_lines() {
+        for newline in ["\n", "\r\n"] {
+            for count in 1..=3 {
+                let gap = newline.repeat(count);
+                let source = format!("{gap}{{\"a\":1}}{gap}{{\"b\":2}}{gap}");
+                let parts = Part::text_parts(source, false);
+                let copy = parts
+                    .iter()
+                    .map(|part| part.source.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert_eq!(
+                    copy.replace("\r\n", "\n"),
+                    format!("{gap}{{\n  \"a\": 1\n}}{gap}{{\n  \"b\": 2\n}}{gap}")
+                        .replace("\r\n", "\n")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_outer_json_does_not_hide_valid_inner_or_trivial_text() {
+        let parts = Part::text_parts("{broken: {\"ok\":true}} {} [] [bad]".into(), false);
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].source, "{broken: ");
+        assert_eq!(parts[1].source, "{\n  \"ok\": true\n}");
+        assert_eq!(parts[2].source, "} {} [] [bad]");
+        assert_eq!(Part::text_parts("{} []".into(), false)[0].source, "{} []");
+    }
+
+    #[test]
+    fn text_outputs_detect_markdown_but_code_keeps_source_and_language() {
+        for source in [
+            "# title",
+            "```rust\ncode\n```",
+            "- item",
+            "**bold**",
+            "`code`",
+            "[link](https://example.com)",
+            "| a | b |\n| --- | --- |\n| 1 | 2 |",
+        ] {
+            assert!(
+                Part::text_parts(source.into(), false)[0].markdown(),
+                "{source}"
+            );
+        }
+        let plain = Part::text_parts("one\ntwo\n\nthree".into(), false);
+        assert!(!plain[0].markdown());
+        assert_eq!(texts(&plain, 80), ["one", "two", "", "three"]);
+        let mut parts = Vec::new();
+        push_section(
+            &mut parts,
+            &Section::Code {
+                label: String::new(),
+                lang: "rust".into(),
+                text: "{\"ok\":true}".into(),
+            },
+            Style::default(),
+            true,
+        );
+        assert_eq!(parts[0].source, "{\"ok\":true}");
+        assert!(matches!(parts[0].body, Body::Code(ref lang) if lang == "rust"));
+    }
+
+    #[test]
     fn review_wide_label_fits_drawn_cells() {
         let part = Part::new(
             "/workspace/very/long/path/to/source.rs",
@@ -251,6 +461,7 @@ mod tests {
                 text: "a\tb".into(),
             },
             Style::default(),
+            true,
         );
         assert_eq!(parts[0].source, "a\tb");
         assert_eq!(texts(&parts, 80), ["a    b"]);
@@ -307,7 +518,7 @@ mod tests {
             [
                 "Bash",
                 "cargo test",
-                &format!("{}↓{}", "─".repeat(40), "─".repeat(39)),
+                &format!("{}↓{}", " ".repeat(40), " ".repeat(39)),
                 "running 3 tests",
                 "...",
                 &"─".repeat(80),
@@ -343,7 +554,7 @@ mod tests {
                 "+中文字符",
                 "串很长",
                 "-short",
-                "────↓────",
+                "    ↓    ",
                 "let value",
                 " = \"abcde",
                 "fghij\";",

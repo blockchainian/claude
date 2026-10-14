@@ -266,6 +266,19 @@ impl View {
         }
         self.viewport.borrow_mut().log = layout.log;
         self.render_log(inset(layout.log), buf, now);
+        if self.log_open.is_some() && self.viewport.borrow().log_open_scroll > 0 {
+            let label = " ↑ Top ";
+            let width = (label.width() as u16).min(layout.list.width);
+            let jump = Rect::new(
+                layout.list.x + layout.list.width.saturating_sub(width) / 2,
+                layout.log.y,
+                width,
+                1,
+            )
+            .intersection(inset(layout.log));
+            Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
+            self.viewport.borrow_mut().log_jump = jump;
+        }
         if let Some(dialog) = &self.confirm_dialog {
             self.render_confirm_dialog(dialog, layout.list, buf);
             self.viewport.borrow_mut().marker = None;

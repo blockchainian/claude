@@ -5583,17 +5583,19 @@ fn open_tool_layout_titles_and_rules() {
             .lines()
             .any(|line| matches!(line.trim(), "Bash" | "command" | "stdout"))
     );
-    assert!(
-        open.lines()
-            .any(|line| line.contains('↓') && line.contains('─'))
-    );
+    assert!(open.lines().any(|line| line.trim() == "↓"));
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "↓");
     let area = view.viewport.borrow().log_text.area;
     assert_eq!(x, area.x + area.width / 2);
     assert_eq!(buf[(x, y)].fg, Color::Reset);
-    assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+    assert!(
+        buf[(x, y)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    assert!(!buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
 }
 
 #[test]
@@ -5640,9 +5642,14 @@ fn open_view_top_button_and_scrollbar() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
     assert_eq!(buf[(area.right(), area.top())].symbol(), "┃");
+    assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), " ");
     view.viewport.borrow_mut().log_open_scroll = usize::MAX;
     let bottom = log_screen(&view, 100, 25, now);
     assert!(bottom.contains(" ↑ Top "), "{bottom}");
+    let layout = view.center_layout(Rect::new(0, 0, 100, 25));
+    let jump = view.viewport.borrow().log_jump;
+    assert_eq!(jump.x, layout.list.x + (layout.list.width - jump.width) / 2);
+    assert_eq!(jump.y, layout.log.y);
     view.render_at(buf.area, &mut buf, now);
     assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), "┃");
     click_text(&mut view, &bottom, " ↑ Top ");
@@ -5733,11 +5740,7 @@ fn real_tabs_survive_copy_and_expanded_cell_selection() {
     view.set_log_open(Some(event.clone()));
     let open = log_screen(&view, 100, 48, now);
     assert!(super::log::open_text(&event).contains(source));
-    assert!(
-        !open
-            .lines()
-            .any(|line| line.contains('↓') && line.contains('─'))
-    );
+    assert!(!open.lines().any(|line| line.trim() == "↓"));
     let (x, y) = rendered_cell(&open, "45    # terminal");
     view.begin_text_selection(x, y);
     view.extend_text_selection(x + source.replace('\t', "    ").len() as u16, y);
@@ -5824,8 +5827,16 @@ fn tool_outputs_and_markdown_use_shared_json_rendering() {
         event.calls[0].output = Some(vec![output]);
         view.set_log_open(Some(event.clone()));
         let open = log_screen(&view, 100, 48, now);
-        assert!(open.contains("\"answer\": ["));
-        assert!(super::log::open_text(&event).contains("\n  \"answer\": [\n    1,"));
+        if matches!(
+            event.calls[0].output.as_ref().unwrap()[0],
+            crate::log::Section::Code { .. }
+        ) {
+            assert!(open.contains("{\"answer\":[1,2]}"));
+            assert!(!super::log::open_text(&event).contains("\n  \"answer\": ["));
+        } else {
+            assert!(open.contains("\"answer\": ["));
+            assert!(super::log::open_text(&event).contains("\n  \"answer\": [\n    1,"));
+        }
     }
     let (mut view, now) = open_tool_fixture();
     let mut event = view.log[7].clone();
@@ -5834,10 +5845,7 @@ fn tool_outputs_and_markdown_use_shared_json_rendering() {
     view.set_log_open(Some(event));
     let open = log_screen(&view, 100, 48, now);
     assert!(open.contains("(no output)"));
-    assert!(
-        open.lines()
-            .any(|line| line.contains('↓') && line.contains('─'))
-    );
+    assert!(open.lines().any(|line| line.trim() == "↓"));
     let area = view.viewport.borrow().log_text.area;
     assert_eq!(area.width, 96);
     assert!(!open.contains('┃'));
@@ -6002,5 +6010,120 @@ fn commit_sha_links_open_vscode_from_log_and_details() {
             "cached layout never gained its SHA link"
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn mixed_open_outputs_render_and_copy_pretty_json_with_markdown() {
+    let output = "# Result\n{\"answer\":[1,2]}\n**finished**";
+    for calls in [false, true] {
+        let (mut view, now) = open_tool_fixture();
+        let mut event = view.log[7].clone();
+        if calls {
+            event.calls.truncate(1);
+            event.calls[0].input.clear();
+            event.calls[0].output = Some(vec![crate::log::Section::Text {
+                label: "stdout".into(),
+                text: output.into(),
+            }]);
+        } else {
+            event.calls.clear();
+            event.kind = crate::log::Kind::Error;
+            event.body = output.into();
+        }
+        view.set_log_open(Some(event.clone()));
+        let screen = log_screen(&view, 100, 64, now);
+        assert!(screen.contains("Result"));
+        assert!(screen.contains("\"answer\": ["));
+        assert!(screen.contains("finished"));
+        assert!(!screen.contains("**finished**"));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 64));
+        view.render_at(buf.area, &mut buf, now);
+        let (x, y) = rendered_cell(&screen, "finished");
+        assert!(
+            buf[(x, y)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+        let (x, y) = rendered_cell(&screen, "\"answer\"");
+        assert!(matches!(buf[(x, y)].fg, Color::Rgb(..)));
+        let viewport = view.viewport.borrow();
+        let json = viewport
+            .log_text
+            .sources
+            .iter()
+            .find(|source| source.text.starts_with('{'))
+            .unwrap();
+        assert_eq!(
+            json.text.as_ref(),
+            "{\n  \"answer\": [\n    1,\n    2\n  ]\n}"
+        );
+        for row in viewport
+            .log_text
+            .rows
+            .iter()
+            .filter(|row| row.segment == json.id)
+        {
+            for (cells, bytes) in &row.cells {
+                let drawn: String = (cells.start..cells.end)
+                    .map(|offset| buf[(row.x + offset, row.y)].symbol())
+                    .collect();
+                assert_eq!(drawn, &json.text[bytes.clone()]);
+            }
+        }
+        drop(viewport);
+        let (start_x, start_y) = rendered_cell(&screen, "Result");
+        let (end_x, end_y) = rendered_cell(&screen, "finished");
+        view.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            start_x,
+            start_y,
+        ));
+        view.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            end_x + 8,
+            end_y,
+        ));
+        log_screen(&view, 100, 64, now);
+        assert_eq!(
+            view.handle_mouse(mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                end_x + 8,
+                end_y
+            )),
+            Some(Action::Copy {
+                text: "Result\n{\n  \"answer\": [\n    1,\n    2\n  ]\n}\n**finished".into(),
+                label: "Copied selection".into(),
+            })
+        );
+    }
+}
+
+#[test]
+fn open_top_button_uses_task_rect_for_every_kind_and_width() {
+    for width in [60, 100, 160] {
+        for kind in [
+            crate::log::Kind::User,
+            crate::log::Kind::Assistant,
+            crate::log::Kind::Tool,
+            crate::log::Kind::Error,
+            crate::log::Kind::Denied,
+        ] {
+            let (mut view, now) = log_fixture();
+            let mut event = view.log[7].clone();
+            event.kind = kind;
+            event.body = (0..100).map(|n| format!("row {n}\n\n")).collect();
+            event.calls.clear();
+            view.set_log_open(Some(event));
+            log_screen(&view, width, 25, now);
+            view.viewport.borrow_mut().log_open_scroll = 1;
+            let screen = log_screen(&view, width, 25, now);
+            let layout = view.center_layout(Rect::new(0, 0, width, 25));
+            let jump = view.viewport.borrow().log_jump;
+            assert_eq!(jump.x, layout.list.x + (layout.list.width - jump.width) / 2);
+            assert_eq!(jump.y, layout.log.y);
+            click_text(&mut view, &screen, " ↑ Top ");
+            assert_eq!(view.viewport.borrow().log_open_scroll, 0);
+        }
     }
 }
