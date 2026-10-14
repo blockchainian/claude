@@ -27,7 +27,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 // Bounds reader shutdown before handing the terminal to a provider process.
-const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(250);
+const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(100);
 
 enum Input {
     Terminal(io::Result<Event>),
