@@ -128,10 +128,9 @@ impl Summary {
     }
 }
 
-pub(super) fn preview(text: &str) -> String {
+pub(super) fn printable(text: &str) -> String {
     text.chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
-        .take(512)
         .collect()
 }
 
@@ -139,7 +138,7 @@ fn text(value: &Value, field: &str) -> Option<String> {
     value
         .get(field)?
         .as_str()
-        .map(preview)
+        .map(printable)
         .filter(|text| !text.trim().is_empty())
 }
 
@@ -238,7 +237,7 @@ fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
         .into_iter()
         .filter(|content| !content.trim_start().starts_with('<'))
         .map(|content| {
-            preview(&content)
+            printable(&content)
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ")
@@ -480,7 +479,7 @@ fn read_messages(
             && !prompt.trim().is_empty()
             && !prompt.trim_start().starts_with('<')
         {
-            summary.prompt = preview(&prompt);
+            summary.prompt = printable(&prompt);
             summary.prompt_at = at;
             summary.turn_messages = turn_messages;
             prompt_found = true;
@@ -519,7 +518,7 @@ fn read_messages(
             && record["type"] == "assistant"
             && let Some(message) = content_text(&record, true)
         {
-            summary.last_message = Some(preview(&message));
+            summary.last_message = Some(printable(&message));
             summary.last_message_at = at;
         }
         if prompt_found
@@ -681,7 +680,7 @@ mod tests {
         assert_eq!(summary.ai_title.as_deref(), records[2]["aiTitle"].as_str());
         assert_eq!(
             summary.prompt,
-            preview(records[0]["message"]["content"].as_str().unwrap())
+            printable(records[0]["message"]["content"].as_str().unwrap())
         );
         assert_eq!(summary.cwd, records[0]["cwd"].as_str().map(PathBuf::from));
         assert_eq!(summary.git_branch.as_deref(), Some("main"));
@@ -689,7 +688,7 @@ mod tests {
         assert_eq!(summary.effort.as_deref(), Some("medium"));
         assert_eq!(
             summary.last_message,
-            Some(preview(
+            Some(printable(
                 records[1]["message"]["content"][0]["text"]
                     .as_str()
                     .unwrap()
@@ -1060,14 +1059,14 @@ mod tests {
     }
 
     #[test]
-    fn queue_without_quiet_point_replays_from_start_and_previews_after_matching() {
+    fn queue_without_quiet_point_replays_from_start_and_cleans_after_matching() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         let prefix = "中".repeat(512);
         queue(&mut file, "enqueue", &format!("{prefix}A"));
         queue(&mut file, "enqueue", &format!("{prefix}B"));
         queue(&mut file, "remove", &format!("{prefix}B"));
         queue(&mut file, "enqueue", "A\n\tB\0C");
-        assert_eq!(summary(&file).queued, [prefix, "A BC".into()]);
+        assert_eq!(summary(&file).queued, [format!("{prefix}A"), "A BC".into()]);
     }
 
     #[test]
@@ -1339,9 +1338,9 @@ mod tests {
             write_tool_traffic(&mut file, CHUNK as usize / 2);
             let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
             if kind == "user" {
-                assert_eq!(summary.prompt, preview(&message));
+                assert_eq!(summary.prompt, printable(&message));
             } else {
-                assert_eq!(summary.last_message, Some(preview(&message)));
+                assert_eq!(summary.last_message, Some(printable(&message)));
             }
         }
     }
@@ -1459,9 +1458,9 @@ mod tests {
     }
 
     #[test]
-    fn previews_preserve_unicode_and_allowed_whitespace() {
-        assert_eq!(preview("a\0b\n\t\u{7}c"), "ab\n\tc");
-        assert_eq!(preview(&"中".repeat(600)).chars().count(), 512);
+    fn printable_preserves_unicode_and_allowed_whitespace() {
+        assert_eq!(printable("a\0b\n\t\u{7}c"), "ab\n\tc");
+        assert_eq!(printable(&"中".repeat(600)), "中".repeat(600));
     }
 
     #[test]

@@ -57,10 +57,9 @@ fn timestamp(record: &Value) -> Option<DateTime<Utc>> {
         .map(|at| at.with_timezone(&Utc))
 }
 
-fn preview(text: &str) -> String {
+fn printable(text: &str) -> String {
     text.chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
-        .take(512)
         .collect()
 }
 
@@ -185,7 +184,7 @@ fn tool_body(payload: &Value) -> Option<String> {
         name
     };
     Some(match detail.filter(|text| !text.trim().is_empty()) {
-        Some(detail) => format!("{label} {}", preview(&detail)),
+        Some(detail) => format!("{label} {}", printable(&detail)),
         None => label.to_owned(),
     })
 }
@@ -398,7 +397,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
         if summary.last_message.is_none()
             && let Some(text) = assistant_text(&record)?
         {
-            summary.last_message = Some(preview(&text));
+            summary.last_message = Some(printable(&text));
             summary.last_message_at = Some(at);
         }
         if summary.activity.is_none()
@@ -742,7 +741,7 @@ mod tests {
         }
         write!(file, "{{\"timestamp\":").unwrap();
         let result = summary(file.path()).unwrap();
-        assert_eq!(result.last_message.unwrap(), "中".repeat(512));
+        assert_eq!(result.last_message.unwrap(), text);
         assert!(!result.turn_ended);
     }
     #[test]
