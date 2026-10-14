@@ -2748,6 +2748,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         duration: None,
         previous_end: Some(now - Duration::seconds(age + 5)),
         images: Vec::new(),
+        calls: Vec::new(),
     }).collect();
     let mut previous_end = None;
     for event in &mut view.log {
@@ -3172,6 +3173,7 @@ fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
         duration: None,
         previous_end: None,
         images: Vec::new(),
+        calls: Vec::new(),
     };
     view.log.insert(0, first);
     assert!(!log_screen(&view, 100, 25, now).contains("Discarded event"));

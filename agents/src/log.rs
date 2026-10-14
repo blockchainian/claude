@@ -52,6 +52,38 @@ pub struct Event {
     pub previous_end: Option<DateTime<Utc>>,
     /// Images attached to this prompt whose files still exist.
     pub images: Vec<Image>,
+    /// The tool calls a Tool, Error or Denied row stands for, in the order they ran.
+    pub calls: Vec<ToolCall>,
+}
+
+/// One tool call of a Tool, Error or Denied row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolCall {
+    /// The provider's tool name, such as "Bash", "exec_command" or "apply_patch".
+    pub name: String,
+    pub input: Vec<Section>,
+    /// `None` while the call is running.
+    pub output: Option<Vec<Section>>,
+    pub is_error: bool,
+}
+
+/// One labelled part of a tool call's input or output, as the open log event draws it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Section {
+    /// `key: value` lines, in order.
+    Fields(Vec<(String, String)>),
+    /// Code highlighted by `lang`, a syntax token or file extension such as "bash" or "rs".
+    Code {
+        label: String,
+        lang: String,
+        text: String,
+    },
+    /// Unified diff hunks; the label is the changed file's path.
+    Diff { label: String, text: String },
+    /// Prose rendered as Markdown.
+    Markdown { label: String, text: String },
+    /// Plain text wrapped at the panel width.
+    Text { label: String, text: String },
 }
 
 /// An image attached to a prompt: its placeholder in the prompt text, such as

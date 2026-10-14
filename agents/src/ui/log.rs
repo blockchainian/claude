@@ -560,6 +560,7 @@ mod log_markdown {
             duration: None,
             previous_end: None,
             images: Vec::new(),
+            calls: Vec::new(),
         };
         render_event(
             &event,

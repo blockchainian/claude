@@ -425,6 +425,7 @@ fn last_prose_log_row_ticks_each_second_under_a_minute() {
         duration: None,
         previous_end: None,
         images: Vec::new(),
+        calls: Vec::new(),
     }];
     let at = |seconds| started_at + chrono::Duration::seconds(seconds);
     assert_eq!(app.view.log_redraw_in(at(12)), Some(Duration::from_secs(1)));
