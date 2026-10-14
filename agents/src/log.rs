@@ -73,6 +73,7 @@ pub enum Kind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
     pub kind: Kind,
+    pub sender: Option<String>,
     pub body: String,
     /// Byte ranges of the file paths inside `body`, in order.
     pub paths: Vec<std::ops::Range<usize>>,

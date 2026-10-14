@@ -446,8 +446,9 @@ impl Log {
                 if record["isMeta"] != true
                     && let Some(text) = text.filter(|text| !text.trim().is_empty())
                 {
-                    if let Some((kind, body)) = wrapped_message(&text) {
+                    if let Some((kind, sender, body)) = wrapped_message(&text) {
                         self.push(kind, body, at);
+                        self.entries.last_mut().unwrap().event.sender = sender;
                     } else if !text.trim_start().starts_with('<') {
                         let images = self.images.take(&record, &text);
                         self.push(Kind::User, text, at);
@@ -505,10 +506,11 @@ impl Log {
                     } else {
                         (Kind::QueuedUser, text)
                     };
-                    let body = wrapped_message(body)
-                        .map(|(_, body)| body)
-                        .unwrap_or_else(|| body.to_owned());
+                    let (sender, body) = wrapped_message(body)
+                        .map(|(_, sender, body)| (sender, body))
+                        .unwrap_or_else(|| (None, body.to_owned()));
                     self.push(kind, body, at);
+                    self.entries.last_mut().unwrap().event.sender = sender;
                 }
             }
             _ => {}
@@ -520,6 +522,7 @@ impl Log {
         let ended_at = matches!(kind, Kind::Tool).then_some(started_at);
         self.entries.push(Entry {
             event: Event {
+                sender: None,
                 kind,
                 body,
                 paths: Vec::new(),
@@ -570,6 +573,7 @@ impl Log {
         } else {
             Entry {
                 event: Event {
+                    sender: None,
                     kind,
                     body: String::new(),
                     paths: Vec::new(),
@@ -644,13 +648,19 @@ impl Log {
 }
 
 /// Extracts the visible text of supported harness messages.
-fn wrapped_message(text: &str) -> Option<(Kind, String)> {
+fn wrapped_message(text: &str) -> Option<(Kind, Option<String>, String)> {
     if let Some(body) = pasted_content(text) {
-        return Some((Kind::User, user_text(&body)));
+        return Some((Kind::User, None, user_text(&body)));
     }
     let (kind, (name, body)) = super::peer::wrapped_message(text)?;
     let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
-    Some((kind, participant_text(name, &body)))
+    Some((
+        kind,
+        name.map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned),
+        body,
+    ))
 }
 
 /// Replaces each `<pasted_content>` block with its content, or `None` when
@@ -713,7 +723,7 @@ fn user_text(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #[test]
     fn real_call_titles_and_ids_match_inputs() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1093,7 +1103,10 @@ mod tests {
             std::fs::write(file.path(), line).unwrap();
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, expected);
+            assert_eq!(
+                participant_text(events[0].sender.as_deref(), &events[0].body),
+                expected
+            );
             let record: Value = serde_json::from_str(line).unwrap();
             if record["type"] == "assistant" {
                 let len = file.as_file().metadata().unwrap().len();
@@ -1546,7 +1559,7 @@ mod tests {
         }
         file
     }
-    fn wrapped_fixture() -> tempfile::NamedTempFile {
+    pub(crate) fn wrapped_fixture() -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         for (second, content) in [
             (
@@ -1580,22 +1593,25 @@ mod tests {
         let file = wrapped_fixture();
         let events = tail(file.path(), 20).unwrap();
         assert_eq!(events.len(), 6);
-        for (pair, kind, body) in [
-            (&events[0..2], Kind::User, "first line second line"),
+        for (pair, kind, sender, body) in [
+            (&events[0..2], Kind::User, None, "first line second line"),
             (
                 &events[2..4],
                 Kind::Agent,
-                "(a113c3cb9c1482c7a) Report: /private/tmp/claude-501/mit-dl/agent6.md - Source: css.csail.mit.edu/6.5660/2026/",
+                Some("a113c3cb9c1482c7a"),
+                "Report: /private/tmp/claude-501/mit-dl/agent6.md - Source: css.csail.mit.edu/6.5660/2026/",
             ),
             (
                 &events[4..6],
                 Kind::Session,
-                "(translate-pdf) translate-pdf pilots ready for review.",
+                Some("translate-pdf"),
+                "translate-pdf pilots ready for review.",
             ),
         ] {
             assert_eq!(pair[0].kind, Kind::QueuedSystem);
             assert_eq!(pair[1].kind, kind);
             for event in pair {
+                assert_eq!(event.sender.as_deref(), sender);
                 assert_eq!(event.body, body);
                 assert_eq!(event.ended_at, None);
             }
@@ -1647,7 +1663,7 @@ mod tests {
         assert_eq!(events[0].kind, Kind::Agent);
         assert_eq!(
             events[0].body,
-            "(agent) Report without harness The report follows: details"
+            "Report without harness The report follows: details"
         );
     }
 

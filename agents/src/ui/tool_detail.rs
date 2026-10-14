@@ -294,6 +294,7 @@ mod tests {
 
     fn event(calls: Vec<ToolCall>) -> Event {
         Event {
+            sender: None,
             kind: Kind::Tool,
             body: String::new(),
             paths: Vec::new(),

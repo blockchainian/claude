@@ -648,6 +648,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         None => ended_at,
     };
     Ok(Some(Event {
+        sender: None,
         kind: Kind::Tool,
         body,
         paths,
@@ -893,6 +894,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             _ => return Ok(true),
         };
         entries.push(Event {
+            sender: None,
             kind,
             body,
             paths: Vec::new(),

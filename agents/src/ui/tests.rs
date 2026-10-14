@@ -2743,6 +2743,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Assistant, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
+        sender: None,
         kind, body: body.into(), paths: Vec::new(), started_at: now - Duration::seconds(age),
         ended_at: end.map(|age| now - Duration::seconds(age)),
         duration: None,
@@ -3165,6 +3166,7 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
 fn task_log_shows_only_newest_eight_events_and_hides_without_selection() {
     let (mut view, now) = log_fixture();
     let first = crate::log::Event {
+        sender: None,
         kind: crate::log::Kind::User,
         body: "Discarded event".into(),
         paths: Vec::new(),
@@ -6130,5 +6132,59 @@ fn open_top_button_uses_task_rect_for_every_kind_and_width() {
             click_text(&mut view, &screen, " ↑ Top ");
             assert_eq!(view.viewport.borrow().log_open_scroll, 0);
         }
+    }
+}
+
+#[test]
+fn wrapped_senders_stay_in_list_and_move_to_open_header() {
+    let file = crate::providers::claude::log::tests::wrapped_fixture();
+    let events = crate::providers::claude::log::tail(file.path(), 20).unwrap();
+    let (mut view, now) = log_fixture();
+    for (index, sender, label, body) in [
+        (2, "a113c3cb9c1482c7a", "Queue", "Report:"),
+        (3, "a113c3cb9c1482c7a", "Agent", "Report:"),
+        (
+            4,
+            "translate-pdf",
+            "Queue",
+            "translate-pdf pilots ready for review.",
+        ),
+        (
+            5,
+            "translate-pdf",
+            "Session",
+            "translate-pdf pilots ready for review.",
+        ),
+    ] {
+        let mut event = events[index].clone();
+        event.started_at = now - Duration::seconds(120);
+        // The list retains the complete participant prefix and its rendering.
+        assert!(
+            super::log::body_line(&event, 200, &view.rows[0].cwd)
+                .to_string()
+                .starts_with(&format!("({sender}) {body}"))
+        );
+        let mut previous = event.clone();
+        previous.sender = None;
+        previous.body = crate::log::participant_text(Some(sender), &event.body);
+        for width in [25, 60, 200] {
+            assert_eq!(
+                super::log::body_line(&event, width, &view.rows[0].cwd),
+                super::log::body_line(&previous, width, &view.rows[0].cwd)
+            );
+        }
+        let mut later = event.clone();
+        later.started_at = now;
+        view.log = vec![event.clone(), later];
+        view.set_log_open(Some(event));
+        let rendered = log_screen(&view, 160, 25, now);
+        assert!(
+            rendered.contains(&format!("11:58:00 ({sender}) {label}")),
+            "{rendered}"
+        );
+        assert!(
+            !super::log::open_text(view.log_open.as_ref().unwrap())
+                .contains(&format!("({sender})"))
+        );
     }
 }

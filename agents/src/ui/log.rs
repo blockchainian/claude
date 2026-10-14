@@ -111,6 +111,9 @@ impl View {
         let (label_style, _) = super::style::log_styles(&event.kind);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown(event));
         let mut header = vec![Span::styled(time.to_owned(), time_style), " ".into()];
+        if let Some(sender) = &event.sender {
+            header.push(Span::styled(format!("({sender}) "), label_style));
+        }
         if event.kind != Kind::Tool {
             header.push(Span::styled(kind_label(&event.kind), label_style));
         }
@@ -587,6 +590,25 @@ struct FittedBody {
 }
 
 fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> FittedBody {
+    let listed;
+    let event = if event.sender.is_some() {
+        listed = Event {
+            body: crate::log::participant_text(event.sender.as_deref(), &event.body),
+            paths: event
+                .paths
+                .iter()
+                .map(|range| {
+                    let offset =
+                        crate::log::participant_text(event.sender.as_deref(), "").len() + 1;
+                    range.start + offset..range.end + offset
+                })
+                .collect(),
+            ..event.clone()
+        };
+        &listed
+    } else {
+        event
+    };
     let body_style = super::style::log_styles(&event.kind).1;
     if is_prose(&event.kind) {
         // Markdown blocks end at line breaks, so they are kept until rendering.
@@ -688,6 +710,7 @@ mod log_markdown {
         let area = Rect::new(0, 0, width + 19, 1);
         let mut buffer = Buffer::empty(area);
         let event = Event {
+            sender: None,
             kind,
             body: body.into(),
             paths: Vec::new(),
@@ -888,6 +911,7 @@ mod log_markdown {
         let body = format!("改了 src/ui/log.rs 和 {}，已发送", report.display());
         for kind in [Kind::User, Kind::Tool] {
             let event = Event {
+                sender: None,
                 kind: kind.clone(),
                 body: body.clone(),
                 paths: Vec::new(),
