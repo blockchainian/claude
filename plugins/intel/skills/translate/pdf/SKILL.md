@@ -1,8 +1,8 @@
 ---
 name: translate-pdf
 description: >
-  Translate an English document we print ourselves, a web page (course reading, lab handout, blog post) or a Markdown
-  note, into a Chinese PDF in the translate-epub skill's book look: same page size, dark theme, Baskerville/Songti body,
+  Translate an English document we print ourselves, a web page (course reading, lab handout, blog post), a Markdown
+  note or a plain-text transcript, into a Chinese PDF in the translate-epub skill's book look: same page size, dark theme, Baskerville/Songti body,
   黑体 bold, boxed code, Mermaid diagrams, MathJax math, bookmarks. Code, identifiers, math and diagram labels stay
   English; prose, headings, captions and exercise text are translated through `codex exec`. Translating from the
   source keeps structure, code blocks, exercises and images exact. Use for "/translate-pdf <url or .md>", "把这个网页
@@ -44,6 +44,9 @@ It runs the translate-epub skill's setup (poppler, uv, codex login, Chrome) and 
 ```bash
 # A Markdown note (Mermaid fences become diagrams)
 "$SKILL_DIR/scripts/translate_doc.sh" --md note.md --out ~/Documents/zh/note.pdf
+
+# A plain-text lecture transcript, one sentence per line, regrouped into paragraphs of about 150 words
+"$SKILL_DIR/scripts/translate_doc.sh" --txt lecture.txt --out ~/Documents/zh/lecture.pdf
 
 # A course page, printed as it is
 "$SKILL_DIR/scripts/translate_doc.sh" --url https://example.edu/classes/02-testing/ --out ~/Documents/zh/L02.pdf
