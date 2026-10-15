@@ -96,6 +96,7 @@ A 10k-word page takes about a minute: eight codex calls of about 1,500 words run
 - A `FAILED` line in the run's output: read the segment in `<work>/zh.rejected.json`. A sound translation the checks
   reject (a model that writes `delete()` for the source's `delete` every time) is accepted by copying it into
   `zh.json` and adding its id to `<work>/zh.accepted.json`, a JSON list the recheck skips.
+  `md2pdf.py` does not typeset TeX, so for `--md` and `--txt` rewrite any `$…$` the model added as plain text first.
 - A segment still in English: its source has prose outside code, but its `zh.json` entry has no Chinese. Function
   signatures, names and code drawn as text legitimately stay English.
 - Raw TeX in `pdftotext` output (`$x$`, `\(`, `\begin{`) on a math page means MathJax did not typeset; rerun.
