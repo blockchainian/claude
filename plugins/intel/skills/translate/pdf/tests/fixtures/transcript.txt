@@ -1,0 +1,80 @@
+Hey everyone, welcome to the first and introductory lecture for CS25 Transformers United.
+So CS25 was a class that the three of us created and taught at Stanford in the fall of 2021.
+And the subject of the class is not as the picture might suggest, it's not about robots that can transform into cars.
+It's about deep learning models and specifically a particular kind of deep learning models that have revolutionized multiple fields, starting from natural language processing to things like computer vision and reinforcement learning to name a few.
+We have an exciting set of videos lined up for you.
+We have some truly fantastic speakers come and give talks about how they were applying transformers in their own research.
+And we hope you will enjoy and learn from these talks.
+This video is purely an introductory lecture to talk a little bit about transformers.
+And before we get started, I'd like to introduce the instructors.
+So my name is Advair.
+I am a software engineer at a company called Applied Intuition.
+Before this, I was a master's student in CS at Stanford.
+And I am one of the co -instructors for CS25.
+Chaitanya, if the two of you could introduce yourselves.
+So hi, everyone.
+I am a PhD student at Stanford.
+Before this, I was pursuing a master's here.
+Researching a lot in generative modeling, reinforcement learning, and robotics.
+So nice to meet you all.
+Yeah, that was Div, since he didn't say his name.
+Chaitanya, if you want to introduce yourself.
+Yeah, hi, everyone.
+My name is Chaitanya, and I'm currently working as an ML engineer at a startup called Moonworks.
+Before that, I was a master's student at Stanford, specializing in NLP, and was a member of the prize -winning Stanford team for the Alexa Prize Challenge.
+Right, awesome.
+So moving on to the rest of this talk.
+Essentially, what we hope you will learn watching these videos, and what we hope the people who took our class in the fall of 2021 learned, is three things.
+One is we hope you will have an understanding of how transformers work.
+Secondly, we hope you will learn, and by the end of these talks, understand how transformers are being applied beyond just natural language processing.
+And thirdly, we hope that some of these talks will spark some new ideas within you, and hopefully lead to new directions of research, new kinds of innovation, and things of that sort.
+And to begin, we're going to talk a little bit about transformers, and introduce some of the context behind transformers as well.
+And for that, I'd like to hand it off to Div.
+So hi, everyone.
+So welcome to our transformer seminar.
+So I'll start first with an overview of the attention timeline, and how it came to be.
+The key idea about transformers was the self -attention mechanism that was developed in 2017.
+And this all started with this one paper called Attention is All You Need by Vohaswani et al.
+Before 2017, we used to have this prehistoric era where we had older models like RNNs, LSTMs, and simpler attention mechanisms.
+And eventually, the growth in transformers has exploded into other fields, and has become prominent in all of machine learning.
+And I'll go and see and show how this has been used.
+So in the prehistoric era, there used to be RNNs.
+There were different models like the sequence to sequence, LSTMs, GRUs.
+They were good at encoding some sort of memory, but they did not work for encoding long sequences, and they were very bad at encoding context.
+So here is an example where if you have a sentence like, I grew up in France, dot, dot, dot.
+So I speak fluent dash.
+Then you want to fill this with French based on the context, but an LSTM model might not know what it is, and might just make a very big mistake here.
+Similarly, we can show some sort of correlation map here, where if you have a pronoun like it, we wanted to correlate to one of the past nouns that we have seen so far, like animal.
+But again, older models were like really not good at this context encoding.
+So where we are currently now is on the verge of takeoff.
+We're beginning to realize the potential of transformers in different fields.
+We have started to use them to solve long sequence problems in protein folding, such as like the alpha -fold model from DeepMind, which gets 95 % accuracy on different challenges in offline RL.
+We can use it for few shot and zero shot generalization, for text and image generation.
+And we can also use this for like content generation.
+So here's an example from OpenAI, where you can give a different text prompt and have an AI generator fictional image for you.
+And so there's a talk on this that you can also watch on YouTube, which basically says that LSTMs are dead and long live transformers.
+So what's the future?
+So we can enable a lot more applications for transformers.
+They can be applied to any form of sequence modeling.
+So we could use them for video understanding.
+We can use them for finance and a lot more.
+So basically imagine all sorts of generative modeling problems.
+Nevertheless, there are a lot of missing ingredients.
+So like the human brain, we need some sort of external memory unit, which is the hippocampus for us.
+And there are some early works here.
+So one nice work you might want to check out is called neural tuning machines.
+Similarly, the current attention mechanisms are very computationally complex in terms of time and they scale quadratically, which we will discuss later.
+And we want to make them more linear.
+And the third problem is like we want to align our current sort of language models with how the human brain works and human values.
+And this is also a big issue.
+So now I will dive deeper into the attention mechanisms and show how they came out to be.
+So initially they used to be very simple mechanisms.
+Attention was inspired by the process of importance reading or putting attention on different parts of image where like similar to a human, where you might focus more on like a foreground if you have an image of a dog compared to like the rest of the background.
+So in the case of soft attention, what you do is you learn this simple soft attention rating for each pixel, which can be a weight between zero to one.
+The problem over here is that this is a very expensive computation.
+And then you can as it's shown in the figure on the left, you can see we are calculating this attention for the whole image.
+What you can do instead is you can just get it as zero to one attention map, where we directly put a one on wherever the dog is and a zero wherever it's a background.
+This is like a less competition expensive, but the problem is it's not differentiable and makes things harder to train.
+Going forward, we also have different varieties of basic attention mechanisms that were proposed before self -attention.
+So the first variety here is global attention models.
+So in global attention models for each hidden layer input, hidden layer output, you learn an attention rate A of P, and this is element wise multiply with your current output to get to your final output YT.
