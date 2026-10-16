@@ -612,7 +612,8 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
                 .collect();
             assert_eq!(clock, format!("{time:>8}"));
             assert_eq!(buffer[(right - 9, y)].symbol(), " ");
-            assert_eq!(buffer[(right - 10, y)].symbol(), "…");
+            assert_eq!(buffer[(right - 10, y)].symbol(), " ");
+            assert_eq!(buffer[(right - 11, y)].symbol(), "…");
             assert_eq!(buffer[(x, y)].symbol(), "l");
         }
     }

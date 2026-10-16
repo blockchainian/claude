@@ -3201,7 +3201,7 @@ fn dashboard_log_bodies_start_at_the_left_padding() {
             view.render_at(area, &mut buf, now);
             let log = view.viewport.borrow().log;
             let y = log.y + view.log_rows_top();
-            let body = super::log::body_line(&event, usize::from(log.width - 9), &view.rows[0].cwd)
+            let body = super::log::body_line(&event, usize::from(log.width - 10), &view.rows[0].cwd)
                 .to_string();
             for (offset, ch) in body.chars().take(12).enumerate() {
                 let cell = &buf[(log.x + offset as u16, y)];
@@ -3516,8 +3516,8 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
             };
             assert_eq!(text(log.x, log.x + 10), "long body ", "width {width}");
             assert_eq!(text(log.right() - 8, log.right()), format!("{time:>8}"));
-            assert_eq!(buffer[(log.right() - 9, y)].symbol(), " ");
-            assert_eq!(buffer[(log.right() - 10, y)].symbol(), "…");
+            assert_eq!(text(log.right() - 10, log.right() - 8), "  ");
+            assert_eq!(buffer[(log.right() - 11, y)].symbol(), "…");
             assert_eq!(buffer[(log.x, y)].symbol(), "l");
         }
         view.scroll_content_row(true, true, top);
@@ -3824,7 +3824,7 @@ fn task_log_preserves_time_when_truncated() {
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    assert_eq!(buf[(89, 16)].symbol(), "…");
+    assert_eq!(buf[(88, 16)].symbol(), "…");
     assert_eq!(buf[(98, 16)].fg, Color::Reset);
     assert!(
         !buf[(98, 16)]

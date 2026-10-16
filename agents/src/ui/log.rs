@@ -484,7 +484,7 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
 /// Reserves the same trailing clock column and separator for every row.
 fn log_row_areas(area: Rect) -> (Rect, Rect) {
     let time_width = (CLOCK_WIDTH as u16).min(area.width);
-    let content_width = area.width.saturating_sub(time_width + 1);
+    let content_width = area.width.saturating_sub(time_width + 2);
     (
         Rect::new(area.x, area.y, content_width, area.height),
         Rect::new(area.right() - time_width, area.y, time_width, area.height),
@@ -840,7 +840,7 @@ mod log_markdown {
     use ratatui::style::Modifier;
 
     fn body_buffer(kind: Kind, body: &str, width: u16) -> Buffer {
-        let area = Rect::new(0, 0, width + 9, 1);
+        let area = Rect::new(0, 0, width + 10, 1);
         let mut buffer = Buffer::empty(area);
         let event = Event {
             sender: None,
@@ -867,7 +867,7 @@ mod log_markdown {
     }
 
     fn body_text(buffer: &Buffer) -> String {
-        buffer.content[..buffer.content.len() - 9]
+        buffer.content[..buffer.content.len() - 10]
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>()
