@@ -6827,6 +6827,109 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
 }
 
 #[test]
+fn shell_commands_share_center_and_copy_original_without_connector_hits() {
+    let command = "cat /workspace/a && printf longer; echo done && pwd\n";
+    let (mut view, now) = open_tool_fixture();
+    let mut event = view.log[7].clone();
+    event.calls.truncate(1);
+    event.calls[0].input = vec![
+        crate::log::Section::Code {
+            label: "command".into(),
+            lang: "bash".into(),
+            text: command.into(),
+        },
+        crate::log::Section::Fields(vec![("timeout".into(), "1000".into())]),
+    ];
+    view.select_log_event(Some(event));
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
+    view.render_at(buf.area, &mut buf, now);
+    let (body, rows) = {
+        let viewport = view.viewport.borrow();
+        let region = &viewport.log_text;
+        let source = region
+            .sources
+            .iter()
+            .find(|source| &*source.text == command)
+            .unwrap();
+        let rows: Vec<_> = region
+            .rows
+            .iter()
+            .filter(|row| row.segment == source.id)
+            .cloned()
+            .collect();
+        assert_eq!(rows.len(), 4);
+        let offset = (region.area.width - ("cat /workspace/a".len() as u16 + 2)) / 2;
+        assert!(
+            rows.iter()
+                .all(|row| row.cells.first().unwrap().0.start == offset)
+        );
+        let fields = region
+            .sources
+            .iter()
+            .find(|source| &*source.text == "timeout: 1000")
+            .unwrap();
+        let fields_row = region
+            .rows
+            .iter()
+            .find(|row| row.segment == fields.id)
+            .unwrap();
+        assert_eq!(fields_row.cells.first().unwrap().0.start, offset);
+        for row in &rows {
+            for x in region.area.x..region.area.right() {
+                if matches!(buf[(x, row.y)].symbol(), "┐" | "┘" | "┤") {
+                    assert!(
+                        !row.cells
+                            .iter()
+                            .any(|(cells, _)| cells.contains(&(x - region.area.x)))
+                    );
+                    assert!(
+                        !viewport
+                            .log_links
+                            .iter()
+                            .any(|link| link.0.contains((x, row.y).into()))
+                    );
+                }
+            }
+        }
+        (region.area, rows)
+    };
+    let first = &rows[0];
+    let last = rows.last().unwrap();
+    let x1 = body.x + first.cells[0].0.start;
+    let x2 = body.right() - 1;
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x1, first.y));
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2, last.y));
+    view.render_at(buf.area, &mut buf, now);
+    // A drag covers visible bytes; a whole-section copy also retains its trailing newline.
+    assert_eq!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, last.y)),
+        Some(Action::Copy {
+            text: command.trim_end_matches('\n').into(),
+            label: "Copied tool message".into(),
+        })
+    );
+    let full_screen = log_screen(&view, 100, 48, now);
+    assert_eq!(
+        double_click_text(&mut view, &full_screen, "printf longer"),
+        Some(Action::Copy {
+            text: format!("{command}\ntimeout: 1000\n\nrunning 3 tests\n..."),
+            label: "Copied tool message".into(),
+        })
+    );
+    let screen = full_screen
+        .lines()
+        .skip(usize::from(body.y))
+        .take(usize::from(body.height))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let screen = screen.trim_end_matches('\n').to_owned() + "\n";
+    assert_eq!(
+        screen,
+        include_str!("../../tests/ui_snapshots/task_log_shell_commands.txt")
+    );
+}
+
+#[test]
 fn task_log_selected_tool_snapshot() {
     let (view, now) = open_tool_fixture();
     let open = log_screen(&view, 100, 48, now);

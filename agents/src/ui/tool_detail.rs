@@ -29,6 +29,8 @@ enum Body {
     Fields(Vec<std::ops::Range<usize>>),
     /// Code highlighted as the given language.
     Code(String),
+    /// Shell command ranges retain original bytes while separators are display-only.
+    Shell(Vec<super::shell_commands::Command>),
     /// Parsed JSON with multiline string values.
     Json(serde_json::Value),
     Diff,
@@ -116,6 +118,9 @@ impl Part {
 
     /// Generated rules and title padding have no source bytes to select.
     pub fn maps(&self, lines: &[Line<'_>]) -> Vec<Vec<super::text_selection_layout::CellMap>> {
+        if let Body::Shell(commands) = &self.body {
+            return shell_maps(&self.source, commands, lines);
+        }
         if !matches!(self.body, Body::TitleRule) {
             return super::text_selection_layout::map_lines(&self.source, lines, self.markdown());
         }
@@ -200,6 +205,7 @@ impl Part {
                 split_wide(lines.collect(), width)
             }
             Body::Code(lang) => split_wide(highlight::code_lines(source, lang), width),
+            Body::Shell(commands) => shell_lines(&self.source, commands, width),
             Body::Json(value) => split_wide(json_lines(value), width),
             Body::Diff => split_wide(highlight::diff_lines(source), width),
             Body::Markdown => super::markdown::render_with_options(source, options),
@@ -221,6 +227,116 @@ impl Part {
             })
             .collect()
     }
+}
+
+/// Use original source offsets for selection, including separators between selected rows.
+fn shell_part(source: String, prefix: usize) -> Part {
+    let Some(mut commands) = super::shell_commands::split(&source[prefix..]) else {
+        return Part::new(source, Body::Code("bash".into()));
+    };
+    for command in &mut commands {
+        command.range.start += prefix;
+        command.range.end += prefix;
+    }
+    if prefix > 0
+        && let Some(first) = commands.first_mut()
+    {
+        first.range.start = 0;
+    }
+    Part::new(source, Body::Shell(commands))
+}
+
+fn shell_lines(
+    source: &str,
+    commands: &[super::shell_commands::Command],
+    width: usize,
+) -> Vec<Line<'static>> {
+    let connected = commands.iter().any(|command| command.and_next);
+    let text_width = if connected && width > 2 {
+        width - 2
+    } else {
+        width
+    };
+    let mut lines = Vec::new();
+    let mut rows = Vec::new();
+    for command in commands {
+        let start = lines.len();
+        let text = source[command.range.clone()].replace('\t', "    ");
+        lines.extend(split_wide(highlight::code_lines(&text, "bash"), text_width));
+        rows.push(start..lines.len());
+    }
+    let mut connectors = vec![std::collections::BTreeMap::new(); lines.len()];
+    for (index, command) in commands.iter().enumerate() {
+        if !command.and_next || index + 1 == commands.len() {
+            continue;
+        }
+        let upper = rows[index].end - 1;
+        let lower = rows[index + 1].start;
+        let column = lines[upper].width().max(lines[lower].width()) + 1;
+        if width > 0 && column >= width {
+            continue;
+        }
+        for (row, glyph) in [(upper, '┐'), (lower, '┘')] {
+            connectors[row]
+                .entry(column)
+                .and_modify(|ch| *ch = '┤')
+                .or_insert(glyph);
+        }
+    }
+    for (line, connectors) in lines.iter_mut().zip(connectors) {
+        for (column, glyph) in connectors {
+            // Decorations have their own dim spans and never receive a source map.
+            let padding = column.saturating_sub(line.width());
+            line.spans.push(Span::styled(
+                format!("{}{glyph}", " ".repeat(padding)),
+                Style::new().dim(),
+            ));
+        }
+    }
+    lines
+}
+
+fn shell_maps(
+    source: &str,
+    commands: &[super::shell_commands::Command],
+    lines: &[Line<'_>],
+) -> Vec<Vec<super::text_selection_layout::CellMap>> {
+    let mut displayed = String::new();
+    let mut ranges = Vec::new();
+    for command in commands {
+        if !displayed.is_empty() {
+            displayed.push('\n');
+        }
+        let start = displayed.len();
+        displayed.push_str(&source[command.range.clone()]);
+        ranges.push((start..displayed.len(), command.range.start));
+    }
+    let content: Vec<_> = lines
+        .iter()
+        .map(|line| {
+            let mut line = line.clone();
+            while line.spans.last().is_some_and(|span| {
+                span.style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM)
+                    && span.content.contains(['┐', '┘', '┤'])
+            }) {
+                line.spans.pop();
+            }
+            line
+        })
+        .collect();
+    let mut maps = super::text_selection_layout::map_lines(&displayed, &content, false);
+    for cells in &mut maps {
+        for (_, bytes) in cells {
+            let (range, original) = ranges
+                .iter()
+                .find(|(range, _)| range.contains(&bytes.start))
+                .expect("shell cell belongs to command");
+            *bytes = original + bytes.start - range.start..original + bytes.end - range.start;
+        }
+    }
+    maps
 }
 
 /// Pretty JSON with string line breaks aligned to the opening content column.
@@ -392,6 +508,25 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
         Section::Fields(fields) => {
+            if !text_output
+                && fields
+                    .iter()
+                    .any(|(key, _)| matches!(key.as_str(), "command" | "cmd"))
+            {
+                for (key, value) in fields {
+                    if matches!(key.as_str(), "command" | "cmd") {
+                        parts.push(shell_part(format!("{key}: {value}"), key.len() + 2));
+                    } else {
+                        push_section(
+                            parts,
+                            &Section::Fields(vec![(key.clone(), value.clone())]),
+                            label_style,
+                            text_output,
+                        );
+                    }
+                }
+                return;
+            }
             let mut text = String::new();
             let mut keys = Vec::new();
             for (key, value) in fields {
@@ -407,6 +542,10 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             return;
         }
         Section::Code { label, lang, text } => {
+            if !text_output && label == "command" && lang == "bash" {
+                parts.push(shell_part(text.clone(), 0));
+                return;
+            }
             (label, Part::new(cells(text), Body::Code(lang.clone())))
         }
         Section::Diff { label, text } => (label, Part::new(cells(text), Body::Diff)),
@@ -785,6 +924,138 @@ mod tests {
         assert!(matches!(parts[0].body, Body::Code(ref lang) if lang == "rust"));
     }
 
+    const SHELL_SAMPLE: &str = r#"cd ~/Code/blockchainian/dot && F="darwin/Library/Application Support/Code/User/settings.json" && git diff --stat -- "$F"; sed -i '' 's/^  "workbench.panel.defaultLocation": "left",$/  "workbench.panel.defaultLocation": "left",\n  "workbench.panel.showLabels": false,/' "$F" && sed -n 6,9p "$F""#;
+
+    fn command_part(command: &str) -> Part {
+        let mut parts = Vec::new();
+        push_section(
+            &mut parts,
+            &Section::Code {
+                label: "command".into(),
+                lang: "bash".into(),
+                text: command.into(),
+            },
+            Style::default(),
+            false,
+        );
+        parts.remove(0)
+    }
+
+    #[test]
+    fn shell_sample_connectors_and_original_copy() {
+        let part = command_part(SHELL_SAMPLE);
+        let lines = part.lines(500, Style::default());
+        assert_eq!(lines.len(), 5);
+        let commands = [
+            "cd ~/Code/blockchainian/dot",
+            r#"F="darwin/Library/Application Support/Code/User/settings.json""#,
+            r#"git diff --stat -- "$F""#,
+            r#"sed -i '' 's/^  "workbench.panel.defaultLocation": "left",$/  "workbench.panel.defaultLocation": "left",\n  "workbench.panel.showLabels": false,/' "$F""#,
+            r#"sed -n 6,9p "$F""#,
+        ];
+        let maps = part.maps(&lines);
+        for (row, command) in commands.iter().enumerate() {
+            assert!(lines[row].to_string().starts_with(command));
+            assert_eq!(maps[row].last().unwrap().0.end as usize, command.width());
+        }
+        for (upper, lower) in [(0, 1), (1, 2), (3, 4)] {
+            let column = commands[upper].width().max(commands[lower].width()) + 1;
+            let upper_glyph = if upper == 1 { '┤' } else { '┐' };
+            let lower_glyph = if lower == 1 { '┤' } else { '┘' };
+            assert_eq!(
+                lines[upper].to_string().chars().nth(column),
+                Some(upper_glyph)
+            );
+            assert_eq!(
+                lines[lower].to_string().chars().nth(column),
+                Some(lower_glyph)
+            );
+        }
+        assert_eq!(part.source, SHELL_SAMPLE);
+        assert!(
+            lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .filter(|span| span.content.contains(['┐', '┘', '┤']))
+                .all(|span| span
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM))
+        );
+        assert_eq!(
+            command_part("a && bb && cccc")
+                .lines(100, Style::default())
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["a  ┐", "bb ┘ ┐", "cccc ┘"]
+        );
+        assert_eq!(command_part("a && b\n").source, "a && b\n");
+    }
+
+    #[test]
+    fn shell_wrapping_and_fields_keep_source_maps() {
+        for command in [
+            "echo 中文 && printf done; pwd",
+            "echo 'a && b; c' && next",
+            "echo $(a && b) || next && last",
+            "cat <<'EOF'\na && b; c\nEOF\necho done && next",
+            "  a && b  ",
+        ] {
+            let part = command_part(command);
+            for width in [3, 12, 80] {
+                let lines = part.lines(width, Style::default());
+                let maps = part.maps(&lines);
+                assert_eq!(maps.len(), lines.len());
+                assert!(lines.iter().all(|line| line.width() <= width));
+                for (line, map) in lines.iter().zip(maps) {
+                    let displayed = line.to_string();
+                    for (cells, bytes) in map {
+                        let text: String = displayed
+                            .graphemes(true)
+                            .scan(0usize, |column, text| {
+                                let start = *column;
+                                *column += text.width();
+                                Some((start, text))
+                            })
+                            .filter(|(column, _)| {
+                                (*column as u16) >= cells.start && (*column as u16) < cells.end
+                            })
+                            .map(|(_, text)| text)
+                            .collect();
+                        assert_eq!(text, part.source[bytes]);
+                    }
+                }
+            }
+        }
+        let mut parts = Vec::new();
+        push_section(
+            &mut parts,
+            &Section::Fields(vec![
+                ("command".into(), "a && bb".into()),
+                ("timeout".into(), "1000".into()),
+            ]),
+            Style::default(),
+            false,
+        );
+        assert_eq!(
+            parts
+                .iter()
+                .map(|part| part.source.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            "command: a && bb\ntimeout: 1000"
+        );
+        assert_eq!(
+            texts(&parts, 80),
+            ["command: a ┐", "bb         ┘", "timeout: 1000"]
+        );
+        assert_eq!(
+            command_part("echo 'broken && next").lines(80, Style::default())[0].to_string(),
+            "echo 'broken && next"
+        );
+    }
+
     #[test]
     fn fields_keys_match_json_key_foregrounds() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
@@ -886,7 +1157,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "Bash",
-                "cargo test",
+                "cargo test\n",
                 "",
                 "running 3 tests\n...",
                 "",

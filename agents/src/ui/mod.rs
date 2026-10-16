@@ -24,6 +24,7 @@ mod prompt_box;
 mod render;
 mod rows;
 mod selection_tabs;
+mod shell_commands;
 mod shortcut_help;
 mod style;
 mod text_selection;
