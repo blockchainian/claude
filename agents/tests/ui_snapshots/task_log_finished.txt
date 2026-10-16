@@ -14,12 +14,12 @@
   Task log example · Running in a terminal; open it to type
   ──────────────────────────────────────────────────────────────── Working · Task log example ────
 
-       30s Tool      run tests
-  11:59:20 Assistant A long response whose whitespace collapses and whose body must be truncated …
-        5s Tool      run a background job *
-  11:59:00 Queue     Also inspect the tests
-       15s Error     failed check
-       15s Tool      Read src/main.rs， Read src/app.rs
-       10s Assistant I will check the files
+  Tool      run tests                                                                          30s
+  Assistant A long response whose whitespace collapses and whose body must be truncated … 11:59:20
+  Tool      run a background job *                                                              5s
+  Queue     Also inspect the tests                                                        11:59:00
+  Error     failed check                                                                       15s
+  Tool      Read src/main.rs， Read src/app.rs                                                  15s
+  Assistant I will check the files                                                             10s
 
   ? help  esc back  ↑/↓ move  enter open  n new

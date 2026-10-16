@@ -140,7 +140,7 @@ impl View {
             0 => " ↑ Latest ".to_owned(),
             unseen => format!(" ↑ {unseen} New "),
         };
-        let x = area.x + (CLOCK_WIDTH + KIND_WIDTH + 1) as u16;
+        let x = area.x + KIND_WIDTH as u16;
         let jump = Rect::new(x, area.y, label.width() as u16, 1).intersection(area);
         Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
         viewport.log_jump = jump;
@@ -157,7 +157,7 @@ impl View {
     ) {
         let (label_style, _) = super::style::log_styles(&event.kind);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown(event));
-        let mut header = vec![Span::styled(time.to_owned(), time_style), " ".into()];
+        let mut header = Vec::new();
         if let Some(sender) = &event.sender {
             header.push(Span::styled(format!("({sender}) "), label_style));
         }
@@ -175,11 +175,11 @@ impl View {
             };
             header.push(Span::styled(title, label_style));
         }
-        super::render::line(
-            Line::from(header),
-            super::render::row(area, LOG_TOP, 1),
-            buf,
-        );
+        let (content_area, time_area) = log_row_areas(super::render::row(area, LOG_TOP, 1));
+        super::render::line(Line::from(header), content_area, buf);
+        Line::from(Span::styled(time.to_owned(), time_style))
+            .right_aligned()
+            .render(time_area, buf);
         let mut body_area =
             super::render::row(area, LOG_TOP + 2, area.height.saturating_sub(LOG_TOP + 2));
         if self.log_detail_search.active() {
@@ -474,6 +474,16 @@ fn event_time(event: &Event, session: &Session, last: bool, now: DateTime<Utc>) 
     format_row_time(&row_time(event, session, last), now)
 }
 
+/// Reserves the same trailing clock column and separator for every row.
+fn log_row_areas(area: Rect) -> (Rect, Rect) {
+    let time_width = (CLOCK_WIDTH as u16).min(area.width);
+    let content_width = area.width.saturating_sub(time_width + 1);
+    (
+        Rect::new(area.x, area.y, content_width, area.height),
+        Rect::new(area.right() - time_width, area.y, time_width, area.height),
+    )
+}
+
 /// Draws one log row and returns whether its body was cut, with the links drawn on it.
 fn render_event(
     event: &Event,
@@ -487,19 +497,17 @@ fn render_event(
     if area.is_empty() {
         return (false, Vec::new());
     }
-    let width = usize::from(area.width);
-    let time_width = CLOCK_WIDTH.min(width);
-    let time_area = Rect::new(area.x, area.y, time_width as u16, 1);
+    let (content_area, time_area) = log_row_areas(area);
     let (label_style, _) = super::style::log_styles(&event.kind);
     let time_style = super::style::log_time_style(&event.kind, last);
     Line::from(Span::styled(time.to_owned(), time_style))
         .right_aligned()
         .render(time_area, buf);
-    let content_width = width.saturating_sub(time_width + 1);
+    let content_width = usize::from(content_area.width);
     if content_width == 0 {
         return (true, Vec::new());
     }
-    let content_x = area.x + time_width as u16 + 1;
+    let content_x = content_area.x;
     let label = format!("{:<KIND_WIDTH$} ", kind_label(&event.kind));
     let label_width = label.width().min(content_width);
     Line::from(Span::styled(label, label_style))
@@ -857,7 +865,7 @@ mod log_markdown {
     }
 
     fn body_text(buffer: &Buffer) -> String {
-        buffer.content[19..]
+        buffer.content[10..buffer.content.len() - 9]
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>()
@@ -968,12 +976,12 @@ mod log_markdown {
                 80,
             );
             assert_eq!(body_text(&buffer), "plain code bold link");
-            assert_eq!(buffer[(19, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert_eq!(buffer[(25, 0)].fg, crate::theme::inline_code_color());
-            assert_eq!(buffer[(30, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(buffer[(30, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buffer[(35, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(!buffer[(35, 0)].modifier.contains(Modifier::UNDERLINED));
+            assert_eq!(buffer[(10, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert_eq!(buffer[(16, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(buffer[(21, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(buffer[(21, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(26, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(26, 0)].modifier.contains(Modifier::UNDERLINED));
         }
     }
 
@@ -981,9 +989,9 @@ mod log_markdown {
     fn prose_blocks_keep_their_own_styles_on_one_row() {
         let buffer = body_buffer(Kind::User, "# Title\n\nplain  text\n- item", 80);
         assert_eq!(body_text(&buffer), "Title plain text • item");
-        assert!(buffer[(19, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buffer[(25, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buffer[(25, 0)].modifier.contains(Modifier::BOLD));
+        assert!(buffer[(10, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(16, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(16, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -999,8 +1007,8 @@ mod log_markdown {
             let base = super::super::style::log_styles(&kind).1;
             let buffer = body_buffer(kind, "  `code`\n **bold** [link](url)  ", 80);
             assert_eq!(body_text(&buffer), "`code` **bold** [link](url)");
-            assert_eq!(buffer[(19, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(!buffer[(19, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(10, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(10, 0)].modifier.contains(Modifier::BOLD));
         }
     }
 
@@ -1070,7 +1078,7 @@ mod log_markdown {
         for kind in [Kind::User, Kind::Assistant, Kind::Agent] {
             let buffer = body_buffer(kind, "ok `abcdefghijklmnop`", 10);
             assert_eq!(body_text(&buffer), "ok abcdef…");
-            for x in 22..29 {
+            for x in 13..20 {
                 assert_eq!(buffer[(x, 0)].fg, crate::theme::inline_code_color());
             }
         }

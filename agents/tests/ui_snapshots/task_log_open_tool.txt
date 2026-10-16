@@ -30,7 +30,7 @@
   Task log example · Running in a terminal; open it to type
   ──────────────────────────────────────────────────────────────── Working · Task log example ────
 
-  35s run tests
+  run tests                                                                                    35s
 
   ─ Bash ─────────────────────────────────────────────────────────────────────────────────────────
   cargo test

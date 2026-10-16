@@ -566,3 +566,58 @@ fn narrow_render_survives_wide_resize_unchanged() {
         assert_eq!(before, after);
     }
 }
+
+#[test]
+fn log_rows_keep_fixed_content_and_right_aligned_times() {
+    use chrono::TimeZone;
+    let (_directory, mut app) = fixture();
+    for _ in 0..4 {
+        key(&mut app, KeyCode::Tab);
+    }
+    key(&mut app, KeyCode::Home);
+    draw(&mut app, 100);
+    let source = crate::providers::claude::log::tail_session(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl"),
+        200,
+        true,
+    )
+    .unwrap()
+    .into_iter()
+    .find(|event| event.kind == crate::log::Kind::Tool)
+    .unwrap();
+    let at = chrono::Local
+        .with_ymd_and_hms(2026, 10, 12, 10, 6, 26)
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let events = [2, 590, 0]
+        .into_iter()
+        .map(|seconds| {
+            let mut event = source.clone();
+            event.body = "long body ".repeat(40);
+            event.calls.clear();
+            event.paths.clear();
+            event.started_at = at;
+            event.ended_at = Some(at);
+            event.previous_end = (seconds > 0).then_some(at - chrono::Duration::seconds(seconds));
+            event
+        })
+        .collect::<Vec<_>>();
+    for width in [100, 149, 150, 200] {
+        draw(&mut app, width);
+        app.view.set_log(events.clone());
+        let buffer = draw(&mut app, width);
+        let (x, top) = position(&buffer, "Tool      long");
+        let right = width - if width < 150 { 2 } else { 4 };
+        assert_eq!(x, if width < 150 { 2 } else { width - width / 3 });
+        for (offset, time) in ["2s", "9m 50s", "10:06:26"].into_iter().enumerate() {
+            let y = top - offset as u16;
+            let clock: String = (right - 8..right)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            assert_eq!(clock, format!("{time:>8}"));
+            assert_eq!(buffer[(right - 9, y)].symbol(), " ");
+            assert_eq!(buffer[(right - 10, y)].symbol(), "…");
+            assert_eq!(buffer[(x, y)].symbol(), "T");
+        }
+    }
+}

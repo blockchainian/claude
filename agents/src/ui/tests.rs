@@ -189,7 +189,12 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
     view.log.insert(0, older);
     let before = log_screen(&view, 100, 32, now);
     let rect = view.center_layout(Rect::new(0, 0, 100, 32)).log;
-    assert!(before.contains("35s Tool      run tests"), "{before}");
+    assert!(
+        before
+            .lines()
+            .any(|line| line.contains("Tool      run tests") && line.ends_with("35s")),
+        "{before}"
+    );
     view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
     let after = log_screen(&view, 100, 32, now);
     assert!(after.contains("Older event"), "{after}");
@@ -205,12 +210,22 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
     view.log[7].body = "Earlier unfinished tool".into();
     let after = log_screen(&view, 100, 32, now);
     assert!(
-        after.contains("5s Tool      Earlier unfinished tool"),
+        after
+            .lines()
+            .any(|line| line.contains("Tool      Earlier unfinished tool") && line.ends_with("5s")),
         "{after}"
     );
-    assert!(!after.contains("35s Tool"));
+    assert!(
+        !after
+            .lines()
+            .any(|line| line.contains("Tool") && line.ends_with("35s"))
+    );
     view.scroll_content_row(false, true, rect.y + super::log::LOG_TOP);
-    assert!(log_screen(&view, 100, 32, now).contains("35s Tool      run tests"));
+    assert!(
+        log_screen(&view, 100, 32, now)
+            .lines()
+            .any(|line| line.contains("Tool      run tests") && line.ends_with("35s"))
+    );
 }
 
 #[test]
@@ -231,8 +246,18 @@ fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
     view.log.last_mut().unwrap().previous_end = None;
     let before = log_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
-    assert!(before.contains("11:59:30 Tool      Event 11"), "{before}");
-    assert!(before.contains("12s Tool      Event 10"), "{before}");
+    assert!(
+        before
+            .lines()
+            .any(|line| line.contains("Tool      Event 11") && line.ends_with("11:59:30")),
+        "{before}"
+    );
+    assert!(
+        before
+            .lines()
+            .any(|line| line.contains("Tool      Event 10") && line.ends_with("12s")),
+        "{before}"
+    );
     let (before_x, before_y) = rendered_cell(&before, "Event 10");
     view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
     let after = log_screen(&view, 100, 25, now);
@@ -327,7 +352,7 @@ fn new_log_events_while_dragging_copy_the_rows_on_screen() {
     };
     let lines: Vec<_> = text.lines().collect();
     assert_eq!(lines.len(), 3, "{text}");
-    assert_eq!(lines[0], "run a background job *");
+    assert_eq!(lines[0], format!("{:<84}5s", "run a background job *"));
     assert!(lines[1].contains("Also inspect the tests"), "{text}");
     assert!(lines[2].contains("failed check"), "{text}");
 }
@@ -3084,6 +3109,57 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
 }
 
 #[test]
+fn task_log_time_column_and_ellipses_align_in_both_layouts() {
+    use crate::log::Kind;
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+    let source = crate::providers::claude::log::tail_session(&path, 200, true)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.kind == Kind::Tool)
+        .unwrap();
+    for width in [100, 149, 150, 200] {
+        let (mut view, now) = log_fixture();
+        view.log = [2, 590, 0]
+            .into_iter()
+            .map(|seconds| {
+                let mut event = source.clone();
+                event.body = "long body ".repeat(40);
+                event.calls.clear();
+                event.paths.clear();
+                event.started_at = now - Duration::seconds(10);
+                event.ended_at = Some(event.started_at);
+                event.previous_end =
+                    (seconds > 0).then_some(event.started_at - Duration::seconds(seconds));
+                event
+            })
+            .collect();
+        let area = Rect::new(0, 0, width, 40);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, now);
+        let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+        let top = log.y + view.log_rows_top();
+        for (offset, time) in ["11:59:50", "9m 50s", "2s"].into_iter().enumerate() {
+            let y = top + offset as u16;
+            let text = |start, end| {
+                (start..end)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            };
+            assert_eq!(text(log.x, log.x + 10), "Tool      ", "width {width}");
+            assert_eq!(text(log.right() - 8, log.right()), format!("{time:>8}"));
+            assert_eq!(buffer[(log.right() - 9, y)].symbol(), " ");
+            assert_eq!(buffer[(log.right() - 10, y)].symbol(), "…");
+            assert_eq!(buffer[(log.x + 10, y)].symbol(), "l");
+        }
+        view.scroll_content_row(true, true, top);
+        view.render_at(area, &mut buffer, now);
+        let jump = view.viewport.borrow().log_jump;
+        assert_eq!(jump.x, log.x + 9);
+    }
+}
+
+#[test]
 fn task_log_labels_are_left_aligned_in_nine_columns() {
     let (mut view, now) = log_fixture();
     view.log.pop();
@@ -3093,7 +3169,7 @@ fn task_log_labels_are_left_aligned_in_nine_columns() {
             .lines()
             .nth(22)
             .unwrap()
-            .starts_with("  11:58:00 User      Please")
+            .starts_with("  User      Please")
     );
 }
 
@@ -3259,14 +3335,14 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .nth(16)
             .unwrap()
-            .starts_with("       35s ")
+            .ends_with("35s")
     );
     assert!(
         log_screen(&view, 100, 25, now + Duration::seconds(1))
             .lines()
             .nth(16)
             .unwrap()
-            .starts_with("       36s ")
+            .ends_with("36s")
     );
     view.rows[view.selected].process = None;
     assert!(
@@ -3274,7 +3350,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .nth(16)
             .unwrap()
-            .starts_with("       25s ")
+            .ends_with("25s")
     );
     view.log.last_mut().unwrap().body.push_str(" *");
     assert!(
@@ -3282,7 +3358,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
             .lines()
             .nth(16)
             .unwrap()
-            .starts_with("        5s ")
+            .ends_with("5s")
     );
 }
 
@@ -3295,7 +3371,7 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
             .lines()
             .nth(16)
             .unwrap()
-            .starts_with("   40s ago ")
+            .ends_with("40s ago")
     );
     view.rows[view.selected].transcript = None;
     let rendered = log_screen(&view, 100, 25, now);
@@ -3320,8 +3396,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (17, Color::Red, true),
         (16, Color::Reset, true),
     ] {
-        let label = &buf[(11, y)];
-        let body = &buf[(21, y)];
+        let label = &buf[(2, y)];
+        let body = &buf[(12, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
         assert_eq!(label.modifier.contains(Modifier::BOLD), bold, "row {y}");
@@ -3332,8 +3408,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         );
     }
     for y in 17..21 {
-        assert_eq!(buf[(9, y)].fg, Color::Reset, "time row {y}");
-        assert!(buf[(9, y)].modifier.is_empty(), "time row {y}");
+        assert_eq!(buf[(97, y)].fg, Color::Reset, "time row {y}");
+        assert!(buf[(97, y)].modifier.is_empty(), "time row {y}");
     }
     for (kind, colour) in [
         (Kind::User, Color::Reset),
@@ -3354,7 +3430,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         view.log.first_mut().unwrap().previous_end = None;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let time = &buf[(9, 20)];
+        let time = &buf[(97, 20)];
         let time_style = super::style::log_time_style(&kind, false);
         assert_eq!(time_style, Style::default());
         assert_eq!(time.fg, Color::Reset);
@@ -3371,18 +3447,18 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
                     .lines()
                     .nth(16)
                     .unwrap()
-                    .starts_with(&format!("    1m ago {expected_label:<9} Also"))
+                    .starts_with(&format!("  {expected_label:<9} Also"))
             );
         }
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        for x in [11, 21] {
+        for x in [2, 12] {
             let cell = &buf[(x, 16)];
             assert_eq!(cell.fg, colour);
-            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 11);
+            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 2);
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
-        let time = &buf[(9, 16)];
+        let time = &buf[(97, 16)];
         assert_ne!(time.symbol(), " ");
         assert_eq!(time.fg, colour);
         assert!(time.modifier.contains(Modifier::BOLD));
@@ -3398,10 +3474,10 @@ fn task_log_preserves_time_when_truncated() {
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    assert_eq!(buf[(97, 17)].symbol(), "…");
-    assert_eq!(buf[(2, 17)].fg, Color::Reset);
+    assert_eq!(buf[(88, 17)].symbol(), "…");
+    assert_eq!(buf[(97, 17)].fg, Color::Reset);
     assert!(
-        !buf[(2, 17)]
+        !buf[(97, 17)]
             .modifier
             .intersects(Modifier::DIM | Modifier::BOLD)
     );
@@ -3421,7 +3497,7 @@ fn task_log_preserves_time_when_truncated() {
                 .lines()
                 .nth(16)
                 .unwrap()
-                .starts_with("   30s ago ")
+                .ends_with("30s ago")
         );
     }
 }
@@ -3444,13 +3520,9 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
             .lines()
             .skip(16)
             .take(3)
-            .map(|line| line.chars().skip(2).take(18).collect::<String>())
+            .map(|line| line.chars().skip(2).take(9).collect::<String>())
             .collect::<Vec<_>>(),
-        [
-            " 44m ago Assistant",
-            "12:03:45 Assistant",
-            "      3s Tool     "
-        ]
+        ["Assistant", "Assistant", "Tool     "]
     );
     for (line, (time, label)) in rendered.lines().skip(16).take(3).zip([
         ("44m ago", "Assistant"),
@@ -3458,15 +3530,11 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
         ("3s", "Tool"),
     ]) {
         assert_eq!(
-            line.find(time).unwrap() + time.len(),
-            10,
+            line[..line.find(time).unwrap()].chars().count() + time.len(),
+            98,
             "times end at the same column"
         );
-        assert_eq!(
-            line.find(label),
-            Some(11),
-            "labels start at the same column"
-        );
+        assert_eq!(line.find(label), Some(2), "labels start at the same column");
     }
 }
 
@@ -4106,7 +4174,7 @@ mod log_search {
         assert!(text(&buf).contains("plain timeout bold"));
         assert!(!text(&buf).contains("unrelated"));
         assert!(!text(&buf).contains("t........"));
-        for x in 25..32 {
+        for x in 16..23 {
             assert!(buf[(x, 2)].modifier.contains(Modifier::BOLD));
             assert_eq!(buf[(x, 2)].fg, crate::theme::inline_code_color());
         }
@@ -4176,12 +4244,12 @@ mod log_search {
         }
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain café link"));
-        for x in 25..29 {
+        for x in 16..20 {
             assert_eq!(buf[(x, 2)].fg, crate::theme::inline_code_color());
             assert!(buf[(x, 2)].modifier.contains(Modifier::BOLD));
         }
-        assert!(!buf[(30, 2)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buf[(30, 2)].modifier.contains(Modifier::BOLD));
+        assert!(!buf[(21, 2)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buf[(21, 2)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -5214,8 +5282,8 @@ fn pending_question_log_uses_model_color() {
             .content
             .chunks(160)
             .find(|cells| {
-                cells[usize::from(view.viewport.borrow().log.x) + 11
-                    ..usize::from(view.viewport.borrow().log.x) + 20]
+                cells[usize::from(view.viewport.borrow().log.x) + 2
+                    ..usize::from(view.viewport.borrow().log.x) + 11]
                     .iter()
                     .map(|cell| cell.symbol())
                     .collect::<String>()
@@ -5223,7 +5291,7 @@ fn pending_question_log_uses_model_color() {
             })
             .expect("question log row");
         assert_eq!(
-            question_row[usize::from(view.viewport.borrow().log.x) + 21].fg,
+            question_row[usize::from(view.viewport.borrow().log.x) + 12].fg,
             Color::Yellow
         );
     }
@@ -5558,7 +5626,7 @@ fn task_log_open_tool_copies_a_dragged_section() {
 }
 
 #[test]
-fn task_log_open_event_header_reads_its_list_row_time_left_aligned() {
+fn task_log_open_event_header_keeps_kind_left_and_time_right() {
     for body in ["A long response", "The newest reply"] {
         let (mut view, now) = log_fixture();
         // The newest row reads its time as "30s ago".
@@ -5566,8 +5634,8 @@ fn task_log_open_event_header_reads_its_list_row_time_left_aligned() {
         view.log[7].body = format!("The newest reply {}", "runs long ".repeat(20));
         let list = log_screen(&view, 100, 25, now);
         let row = list.lines().find(|line| line.contains(body)).unwrap();
-        let columns = row[..row.find(body).unwrap()].split_whitespace();
-        let header = format!("  {}", columns.collect::<Vec<_>>().join(" "));
+        let time = row.chars().skip(90).take(8).collect::<String>();
+        let header = format!("  {:<88}{time}", "Assistant");
         click_log_text(&mut view, &list, body, MouseButton::Left);
         let open = log_screen(&view, 100, 25, now);
         assert!(
@@ -6092,7 +6160,8 @@ fn open_tool_layout_titles_and_rules() {
     view.set_log_open(Some(view.log[7].clone()));
     let open = log_screen(&view, 100, 48, now);
     assert!(
-        open.lines().any(|line| line.trim() == "35s Run tests"),
+        open.lines()
+            .any(|line| line.trim_start().starts_with("Run tests") && line.ends_with("35s")),
         "{open}"
     );
     assert!(
@@ -6215,7 +6284,7 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         assert!(
             header
                 .replace(' ', "")
-                .ends_with(&call.title.replace(' ', ""))
+                .starts_with(&call.title.replace(' ', ""))
         );
         for kind in [crate::log::Kind::Error, crate::log::Kind::Denied] {
             event.kind = kind;
@@ -6320,7 +6389,8 @@ fn open_tool_without_calls_keeps_its_row_title() {
     view.set_log_open(Some(event));
     let open = log_screen(&view, 100, 25, now);
     assert!(
-        open.lines().any(|line| line.trim() == "35s run tests"),
+        open.lines()
+            .any(|line| line.trim_start().starts_with("run tests") && line.ends_with("35s")),
         "{open}"
     );
 }
@@ -6711,7 +6781,10 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
         view.set_log_open(Some(event));
         let rendered = log_screen(&view, 160, 25, now);
         assert!(
-            rendered.contains(&format!("11:58:00 ({sender}) {label}")),
+            rendered.lines().any(|line| line
+                .trim_start()
+                .starts_with(&format!("({sender}) {label}"))
+                && line.ends_with("11:58:00")),
             "{rendered}"
         );
         assert!(
