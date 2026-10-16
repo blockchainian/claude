@@ -157,7 +157,7 @@ fn stop_and_archive_thread(manager: bool) {
         assert!(Instant::now() < deadline, "turn never reported running");
         std::thread::sleep(Duration::from_millis(100));
     }
-    provider.stop(&session).unwrap();
+    provider.send(&session, SessionInput::Interrupt).unwrap()().unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     let status = loop {
         let mut client = super::Client::connect(&provider.home).unwrap();
@@ -176,7 +176,7 @@ fn stop_and_archive_thread(manager: bool) {
     };
     assert_eq!(status, "interrupted");
     // No running turn: stop does nothing.
-    provider.stop(&session).unwrap();
+    provider.send(&session, SessionInput::Interrupt).unwrap()().unwrap();
     drop(owner);
 
     provider.archive(&session).unwrap();

@@ -495,16 +495,6 @@ impl Provider for CodexProvider {
         let mut client = app_server::Client::connect(&self.home)?;
         app_server::thread::archive(&mut client, &session.id.id)
     }
-    fn stop(&self, session: &Session) -> io::Result<()> {
-        if !session.can_resume() {
-            return Err(io::ErrorKind::Unsupported.into());
-        }
-        let mut client = app_server::Client::connect(&self.home)?;
-        match app_server::thread::running_turn(&mut client, &session.id.id)? {
-            Some(turn) => app_server::thread::interrupt(&mut client, &session.id.id, &turn),
-            None => Ok(()),
-        }
-    }
     fn delete(&self, session: &Session) -> io::Result<()> {
         if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());

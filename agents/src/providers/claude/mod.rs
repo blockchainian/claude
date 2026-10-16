@@ -813,9 +813,6 @@ impl Provider for ClaudeProvider {
     fn archive(&self, _: &Session) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }
-    fn stop(&self, _: &Session) -> io::Result<()> {
-        Err(io::ErrorKind::Unsupported.into())
-    }
 }
 
 fn resume_prompt(session: &Session, text: &str) -> Command {

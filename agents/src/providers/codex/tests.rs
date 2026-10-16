@@ -840,7 +840,7 @@ fn manager_thread_operations_use_the_provider_paths() {
     for result in [
         provider.rename(&session, "probe"),
         provider.archive(&session),
-        provider.stop(&session),
+        provider.send(&session, SessionInput::Interrupt).unwrap()(),
     ] {
         assert_ne!(result.unwrap_err().kind(), io::ErrorKind::Unsupported);
     }

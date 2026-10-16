@@ -118,7 +118,6 @@ pub trait Provider {
     fn rename(&self, session: &Session, name: &str) -> io::Result<()>;
     fn delete(&self, session: &Session) -> io::Result<()>;
     fn archive(&self, session: &Session) -> io::Result<()>;
-    fn stop(&self, session: &Session) -> io::Result<()>;
 }
 
 pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {
