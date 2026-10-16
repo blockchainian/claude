@@ -97,17 +97,18 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
             } else {
                 width - 1
             };
-            for (label, group) in [
+            for (label, middle, group) in [
                 (
                     if activity {
                         "Latest activity"
                     } else {
                         "Last message"
                     },
+                    None,
                     if activity { "1m ago" } else { "2m ago" },
                 ),
-                ("Prompt · 3 messages", "1m 5s"),
-                ("Project · main", "#13"),
+                ("Prompt", Some("3 messages"), "1m 5s"),
+                ("Project", Some("main"), "#13"),
             ] {
                 let (x, y) = position(buffer, label);
                 assert_eq!(x, left);
@@ -116,20 +117,32 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                 assert!(actual.ends_with(group), "{width}: {actual:?}");
                 let group_start = right - group.chars().count() as u16;
                 assert!(group_start > left + label.len() as u16);
-                assert!(
-                    row_text(buffer, y, left + label.len() as u16, group_start)
-                        .chars()
-                        .all(|c| c == ' ')
-                );
-                for offset in label
-                    .match_indices('·')
-                    .map(|(i, _)| label[..i].chars().count() as u16)
-                {
+                if let Some(middle) = middle {
+                    let gap =
+                        (usize::from(right - left) - label.len() - middle.len() - group.len()) / 2;
+                    let middle_start = left + (label.len() + gap) as u16;
                     assert_eq!(
-                        row_text(buffer, y, left + offset - 1, left + offset + 2),
-                        " · "
+                        row_text(buffer, y, middle_start, middle_start + middle.len() as u16),
+                        middle
                     );
-                    assert!(buffer[(left + offset, y)].modifier.contains(Modifier::DIM));
+                    let gaps = [
+                        (left + label.len() as u16, middle_start),
+                        (middle_start + middle.len() as u16, group_start),
+                    ];
+                    assert!((gaps[1].1 - gaps[1].0) - (gaps[0].1 - gaps[0].0) <= 1);
+                    for (start, end) in gaps {
+                        let dot = start + (end - start - 1) / 2;
+                        for x in start..end {
+                            assert_eq!(cell_text(buffer, x, y), if x == dot { "·" } else { " " });
+                        }
+                        assert!(buffer[(dot, y)].modifier.contains(Modifier::DIM));
+                    }
+                } else {
+                    assert!(
+                        row_text(buffer, y, left + label.len() as u16, group_start)
+                            .chars()
+                            .all(|c| c == ' ')
+                    );
                 }
             }
             let (_, background_y) = position(buffer, "Check files");

@@ -771,9 +771,7 @@ impl View {
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
-        let mut prompt_header = vec!["Prompt".dim()];
-        let mut prompt_duration = Line::default();
-        if let Some(start) = session.prompt_at {
+        let prompt_header = if let Some(start) = session.prompt_at {
             let end = if session.status == SessionStatus::Working {
                 now
             } else {
@@ -781,17 +779,20 @@ impl View {
             };
             let messages = session.turn_messages;
             let label = if messages == 1 { "message" } else { "messages" };
-            prompt_header.extend([" · ".dim(), format!("{messages} {label}").dim()]);
-            prompt_duration = format_duration((end - start).num_seconds().max(0))
-                .dim()
-                .into();
-        }
+            justified_header(
+                "Prompt".dim().into(),
+                format!("{messages} {label}").dim().into(),
+                format_duration((end - start).num_seconds().max(0))
+                    .dim()
+                    .into(),
+                width,
+            )
+            .0
+        } else {
+            left_right("Prompt".dim().into(), Line::default(), width).0
+        };
         separate_section(&mut items);
-        items.push(
-            left_right(Line::from(prompt_header), prompt_duration, width)
-                .0
-                .into(),
-        );
+        items.push(prompt_header.into());
         let prompt_text = match session.prompt.trim() {
             "" => "No prompt available.",
             prompt => prompt,
@@ -835,29 +836,36 @@ impl View {
 
         item_links.resize(items.len(), Vec::new());
 
-        let mut project = vec!["Project".dim()];
-        if let Some(branch) = &session.git_branch {
-            project.extend([
-                " · ".dim(),
-                Span::styled(branch.clone(), self.title_style(&session.id)),
-            ]);
-        }
-        let mut pull_request = Line::default();
-        let link = session.pr.as_ref().and_then(|pr| {
-            let label = format!("#{}", pr.number);
-            let link =
-                line_width_fits(Line::from(project.clone()).width() + 1 + label.len(), width).then(
-                    || {
-                        let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
-                            .unwrap_or_else(|| pr.url.clone());
-                        (label.len() as u16, url)
-                    },
-                );
-            pull_request = Span::styled(label, self.title_style(&session.id)).into();
-            link
+        let project_label = Line::from("Project".dim());
+        let branch = session
+            .git_branch
+            .as_ref()
+            .map(|branch| Line::from(Span::styled(branch.clone(), self.title_style(&session.id))));
+        let pull_request = session.pr.as_ref().map(|pr| {
+            Line::from(Span::styled(
+                format!("#{}", pr.number),
+                self.title_style(&session.id),
+            ))
         });
-        let (project, right_start) = left_right(Line::from(project), pull_request, width);
-        let link = link.map(|(width, url)| (right_start as u16, width, url));
+        let (project, right_start) = match (branch, pull_request) {
+            (Some(branch), Some(pr)) => justified_header(project_label, branch, pr, width),
+            (branch, pr) => {
+                let mut label = project_label;
+                if let Some(branch) = branch {
+                    label.spans.push(" · ".dim());
+                    label.spans.extend(branch.spans);
+                }
+                let pr = pr.unwrap_or_default();
+                let fits = line_width_fits(label.width() + 1 + pr.width(), width);
+                let (line, start) = left_right(label, pr, width);
+                (line, fits.then_some(start))
+            }
+        };
+        let link = session.pr.as_ref().zip(right_start).map(|(pr, start)| {
+            let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
+                .unwrap_or_else(|| pr.url.clone());
+            (start as u16, format!("#{}", pr.number).len() as u16, url)
+        });
         let cwd = super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width);
         item_links.extend([
             Vec::new(),
@@ -1269,6 +1277,40 @@ fn left_right(label: Line<'static>, group: Line<'static>, width: usize) -> (Line
     spans.push(" ".repeat(start - used).dim());
     spans.extend(group.spans);
     (Line::from(spans), start)
+}
+
+/// Spreads three parts across the row and returns the fully visible last part's offset.
+fn justified_header(
+    first: Line<'static>,
+    middle: Line<'static>,
+    last: Line<'static>,
+    width: usize,
+) -> (Line<'static>, Option<usize>) {
+    let used = first.width() + middle.width() + last.width();
+    let remaining = width.saturating_sub(used);
+    let mut spans = first.spans;
+    if remaining < 6 {
+        spans.push(" · ".dim());
+        spans.extend(middle.spans);
+        spans.push(" · ".dim());
+        spans.extend(last.spans);
+        return (
+            truncate_line_with_ellipsis_if_overflow(Line::from(spans), width),
+            None,
+        );
+    }
+    let left_gap = remaining / 2;
+    let right_gap = remaining - left_gap;
+    let gap = |cells: usize| {
+        let before = (cells - 1) / 2;
+        format!("{}·{}", " ".repeat(before), " ".repeat(cells - before - 1)).dim()
+    };
+    spans.push(gap(left_gap));
+    spans.extend(middle.spans);
+    spans.push(gap(right_gap));
+    let start = width - last.width();
+    spans.extend(last.spans);
+    (Line::from(spans), Some(start))
 }
 
 fn line_width_fits(line_width: usize, width: usize) -> bool {

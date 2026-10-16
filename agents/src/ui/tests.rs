@@ -2179,7 +2179,7 @@ fn details_branch_and_pull_request_use_session_title_color() {
         })
         .expect("Project header");
     for (offset, symbol) in "main".chars().enumerate() {
-        let cell = &buf[(10 + offset as u16, project_y)];
+        let cell = &buf[(19 + offset as u16, project_y)];
         assert_eq!(cell.symbol(), symbol.to_string());
         assert_eq!(cell.fg, color);
     }
@@ -2250,7 +2250,7 @@ fn details_branch_pull_request_snapshot() {
             .collect::<Vec<_>>();
         assert_eq!(
             link_cells,
-            if width >= 19 {
+            if width >= 21 {
                 vec![usize::from(width) - 4]
             } else {
                 vec![]
@@ -2431,21 +2431,21 @@ fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
             Some(now - Duration::seconds(45)),
             None,
             1,
-            "Prompt · 1 message                   45s",
+            "Prompt     ·     1 message     ·     45s",
         ),
         (
             SessionStatus::Ready,
             Some(now),
             Some(now - Duration::seconds(1)),
             0,
-            "Prompt · 0 messages                   0s",
+            "Prompt     ·     0 messages     ·     0s",
         ),
         (
             SessionStatus::Working,
             Some(now + Duration::seconds(1)),
             None,
             0,
-            "Prompt · 0 messages                   0s",
+            "Prompt     ·     0 messages     ·     0s",
         ),
         (SessionStatus::Ready, None, Some(now), 0, "Prompt"),
     ] {
@@ -6288,7 +6288,7 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
     selected.queued = vec![format!("Then read {}", todo.display())];
     let rendered = screen(&view, 120, 40);
     // The PR occupies the right edge; its OSC 8 escapes hide it from a text search.
-    let (_, y) = rendered_cell(&rendered, "Project · main");
+    let (_, y) = rendered_cell(&rendered, "│ Project");
     let x = view.center_layout(Rect::new(0, 0, 120, 40)).details.right() - 4;
     assert_eq!(
         click_mouse(
@@ -7356,3 +7356,6 @@ mod click_log_tests;
 
 #[path = "prompt_view_tests.rs"]
 mod prompt_view_tests;
+
+#[path = "justified_header_tests.rs"]
+mod justified_header_tests;
