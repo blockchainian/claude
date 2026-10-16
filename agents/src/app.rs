@@ -244,12 +244,20 @@ impl App {
         &mut self,
         terminal: &mut Terminal<B>,
     ) -> Result<(), B::Error> {
+        self.draw_at(terminal, chrono::Utc::now())
+    }
+
+    fn draw_at<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), B::Error> {
         terminal.draw(|frame| {
             let area = frame.area();
             self.refresh_log(self.view.log_event_count(area));
             self.refresh_usage();
-            self.refresh_activity(area.width);
-            self.view.render(area, frame.buffer_mut());
+            self.refresh_activity(area.width, now);
+            self.view.render_at(area, frame.buffer_mut(), now);
             self.view.underline_links(frame.buffer_mut());
             if let Some((x, y)) = self.view.cursor_pos(area) {
                 frame.set_cursor_position((x, y));
@@ -271,33 +279,8 @@ impl App {
         schedule: &mut RefreshSchedule,
         selection_tick: Instant,
     ) -> io::Result<bool> {
-        let timeout = schedule.redraw_timeout(Instant::now(), self.view.has_background());
-        let timeout = self
-            .view
-            .log_redraw_in(chrono::Utc::now())
-            .map_or(timeout, |log| timeout.min(log));
-        let timeout = self
-            .view
-            .tool_redraw_in(chrono::Utc::now())
-            .map_or(timeout, |tool| timeout.min(tool));
-        let timeout = self
-            .view
-            .expire_messages(Instant::now())
-            .map_or(timeout, |message| timeout.min(message));
-        let timeout = self
-            .view
-            .pending_click_in(Instant::now())
-            .map_or(timeout, |click| timeout.min(click));
-        let timeout = self
-            .view
-            .timeline_redraw_in(chrono::Utc::now())
-            .map_or(timeout, |usage| timeout.min(usage));
-        let timeout = crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
-        let timeout = if self.view.text_selection_dragging() {
-            timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
-        } else {
-            timeout
-        };
+        let timeout =
+            self.input_timeout(schedule, selection_tick, Instant::now(), chrono::Utc::now());
         match self.receiver.recv_timeout(timeout) {
             Ok(input) => {
                 if self.handle_inputs(input, watcher, schedule)? {
@@ -311,6 +294,45 @@ impl App {
         }
         let action = self.view.flush_pending_click(Instant::now());
         Ok(self.handle_action(action))
+    }
+
+    fn input_timeout(
+        &mut self,
+        schedule: &RefreshSchedule,
+        selection_tick: Instant,
+        now: Instant,
+        wall_now: chrono::DateTime<chrono::Utc>,
+    ) -> Duration {
+        let timeout = schedule.redraw_timeout(now, self.view.has_background());
+        let timeout = self
+            .view
+            .log_redraw_in(wall_now)
+            .map_or(timeout, |log| timeout.min(log));
+        let timeout = self
+            .view
+            .tool_redraw_in(wall_now)
+            .map_or(timeout, |tool| timeout.min(tool));
+        let timeout = self
+            .view
+            .expire_messages(now)
+            .map_or(timeout, |message| timeout.min(message));
+        let timeout = self
+            .view
+            .pending_click_in(now)
+            .map_or(timeout, |click| timeout.min(click));
+        let timeout = self
+            .view
+            .timeline_redraw_in(wall_now)
+            .map_or(timeout, |usage| timeout.min(usage));
+        let timeout = crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
+        if self.view.text_selection_dragging() {
+            timeout.min(
+                Duration::from_millis(50)
+                    .saturating_sub(now.saturating_duration_since(selection_tick)),
+            )
+        } else {
+            timeout
+        }
     }
 
     /// Handles `first` and every input already queued behind it, so a burst of wheel reports
@@ -523,8 +545,7 @@ impl App {
 
     /// Reads when each task worked within a timeline `width` cells wide and hands the view the
     /// bins any of them worked in; a task idle since before the timeline is not read.
-    fn refresh_activity(&mut self, width: u16) {
-        let now = chrono::Utc::now();
+    fn refresh_activity(&mut self, width: u16, now: chrono::DateTime<chrono::Utc>) {
         let since = now - chrono::Duration::seconds(crate::ui::timeline_seconds(width));
         let mut bins = std::collections::BTreeSet::new();
         for session in &self.sessions {

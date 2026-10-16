@@ -254,6 +254,7 @@ impl View {
         Some((layout.search.x + caret, layout.search.y))
     }
 
+    #[cfg(test)]
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         self.render_at(area, buf, chrono::Utc::now());
     }

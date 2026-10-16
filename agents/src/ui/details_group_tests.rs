@@ -73,6 +73,7 @@ fn section_labels_stay_centered_before_right_values() {
 
 #[test]
 fn project_line_combines_parts_and_keeps_visible_links() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     for (branch, pr, width, expected) in [
         (Some("main"), true, 60, "/tmp/project · main · #13"),
         (None, true, 60, "/tmp/project · #13"),

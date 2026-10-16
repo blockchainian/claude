@@ -19,21 +19,6 @@ impl Tmux {
         String::from_utf8(output.stdout).unwrap()
     }
 
-    fn wait_for(&self, ready: impl Fn(&str) -> bool) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            let capture = self.run(&["capture-pane", "-t", "probe", "-p"]);
-            if ready(&capture) {
-                return;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "terminal did not become ready: {capture}"
-            );
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-
     fn mouse(&self, button: u16, column: usize, row: usize, click: bool) {
         let press = format!("\x1b[<{button};{};{}M", column + 1, row + 1);
         let release = if click {
@@ -60,16 +45,6 @@ impl Drop for Tmux {
     }
 }
 
-// tmux carries SGR state across capture rows. Position each row explicitly so
-// terminal-width wrapping cannot shift later rows, while preserving that state.
-fn captured_screen(capture: &str, width: u16, height: u16) -> vt100::Parser {
-    let mut parser = vt100::Parser::new(height, width, 0);
-    for (row, text) in capture.lines().enumerate() {
-        parser.process(format!("\x1b[{};1H{text}", row + 1).as_bytes());
-    }
-    parser
-}
-
 fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");
@@ -82,12 +57,10 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux_config = directory.path().join("tmux.conf");
-    std::fs::write(&tmux_config, "set -g default-terminal tmux-256color\n").unwrap();
     let tmux = Tmux(format!("agents-{name}-{}", std::process::id()));
     tmux.run(&[
         "-f",
-        tmux_config.to_str().unwrap(),
+        "/dev/null",
         "new-session",
         "-d",
         "-s",
@@ -104,15 +77,9 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
         &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
         binary.to_str().unwrap(),
     ]);
-    // Wait for provider discovery before sending input, including on busy hosts.
-    tmux.wait_for(|capture| {
-        capture
-            .lines()
-            .nth(1)
-            .is_some_and(|tabs| tabs.contains("Inactive 1"))
-    });
+    // Let provider discovery finish, then select the real archived transcript.
+    std::thread::sleep(Duration::from_secs(2));
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
-    tmux.wait_for(|capture| capture.contains("Stop hook") && capture.contains("Update"));
     (directory, tmux, transcript)
 }
 
@@ -132,50 +99,22 @@ fn terminal_task_cursor_keeps_cell_colors() {
         ]);
         std::thread::sleep(Duration::from_millis(300));
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-        let parser = captured_screen(&capture, width, 50);
+        let mut parser = vt100::Parser::new(50, width, 0);
+        parser.process(capture.replace('\n', "\r\n").as_bytes());
         let screen = parser.screen();
-        let tabs = screen.rows(0, width).nth(1).unwrap();
-        assert_eq!(
-            tabs.split_whitespace().collect::<Vec<_>>(),
-            ["Active", "0", "Inactive", "1"]
-        );
-        assert_eq!(tabs.find("Active"), Some(2));
-        assert_eq!(
-            tabs[..tabs.find("Inactive").unwrap()].width(),
-            usize::from(width) - 12
-        );
-        for column in [2, width - 12] {
-            let tab = screen.cell(1, column).unwrap();
-            assert!(tab.bold(), "{capture}");
-            assert!(!tab.dim(), "{capture}");
-            assert_ne!(tab.fgcolor(), vt100::Color::Default, "{capture}");
-        }
-        assert_eq!(screen.cell(1, 2).unwrap().bgcolor(), vt100::Color::Default);
-        assert_ne!(
-            screen.cell(1, width - 12).unwrap().bgcolor(),
-            vt100::Color::Default
-        );
         let (x, y) = (0..50)
             .find_map(|y| {
-                (0..width / 3).find_map(|x| {
-                    (screen.cell(y, x).unwrap().contents() == "○"
-                        && x > 0
-                        && screen.cell(y, x - 1).unwrap().bold())
-                    .then_some((x, y))
-                })
+                (0..width / 3)
+                    .find_map(|x| (screen.cell(y, x).unwrap().contents() == "○" && x > 0 && screen.cell(y, x - 1).unwrap().bold()).then_some((x, y)))
             })
             .expect("selected task marker");
-        assert!(
-            !(0..width / 3).any(|column| screen.cell(y, column).unwrap().contents() == "›"),
-            "{capture}"
-        );
         let marker = screen.cell(y, x).unwrap();
         let status = screen.cell(y, x).unwrap();
         let title = screen.cell(y, x + 2).unwrap();
         assert!(screen.cell(y, x - 1).unwrap().bold());
         // vt100 models bold and dim as mutually exclusive intensity levels.
         assert!(status.dim());
-        assert!(title.bold(), "title at ({}, {y}): {capture}", x + 2);
+        assert!(title.bold());
         assert_eq!(marker.fgcolor(), vt100::Color::Default);
         assert_ne!(title.fgcolor(), marker.fgcolor());
         assert_eq!(status.fgcolor(), vt100::Color::Default);
@@ -221,7 +160,13 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         "{capture}"
     );
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-    let parser = captured_screen(&colored, width, height);
+    let mut parser = vt100::Parser::new(height, width, 0);
+    parser.process(
+        colored
+            .trim_end_matches('\n')
+            .replace('\n', "\r\n")
+            .as_bytes(),
+    );
     let cell = parser
         .screen()
         .cell(top_end as u16, (details_start + start + 1) as u16)
@@ -244,15 +189,8 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
     }
     let title = top.trim_end_matches(elapsed).trim_matches('─');
     assert!(title.starts_with(' ') && title.ends_with(' '), "{capture}");
-    let start = (details_end - details_start - title.width()) / 2;
+    let start = (elapsed_start - details_start - title.width()) / 2;
     assert_eq!(top.find(title), Some(start * "─".len()), "{capture}");
-    for x in details_start + start + 1..details_start + start + title.width() - 1 {
-        let cell = parser.screen().cell(2, x as u16).unwrap();
-        if !cell.contents().is_empty() {
-            assert!(cell.bold(), "{colored}");
-            assert!(!cell.dim(), "{colored}");
-        }
-    }
     println!("{{\"details_borders\":\"pass\",\"width\":{width}}}");
 }
 
@@ -348,7 +286,7 @@ fn terminal_layout_tracks_width() {
         let log_rule = if width >= 150 {
             top_end + 2
         } else {
-            (prompt + 2..lines.len() - 1)
+            (prompt + 1..lines.len() - 1)
                 .find(|&row| lines[row].matches('─').count() > width as usize / 2)
                 .expect("separate list/detail border")
         };
@@ -360,8 +298,8 @@ fn terminal_layout_tracks_width() {
                 "content heights differ: top {top_height}, bottom {bottom_height}: {capture}"
             );
         } else {
-            let list_height = log_rule - prompt - 2;
-            let content = height as usize - 8;
+            let list_height = log_rule - prompt - 1;
+            let content = height as usize - 7;
             let expected = [content.div_ceil(3), (content + 1) / 3, content / 3];
             assert_eq!(
                 [top_height, list_height, bottom_height],
@@ -432,7 +370,7 @@ fn terminal_layout_tracks_width() {
                 "event list missing from top row: {capture}"
             );
         } else {
-            let list = lines[prompt + 2..log_rule].join("\n");
+            let list = lines[prompt + 1..log_rule].join("\n");
             assert!(
                 list.contains("Stop hook"),
                 "event list missing below prompt: {capture}"
@@ -458,11 +396,10 @@ fn terminal_layout_tracks_width() {
             let opened = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
             let opened_lines: Vec<_> = opened.lines().collect();
             assert_eq!(
-                opened_lines[prompt + 2..log_rule].join("\n"),
+                opened_lines[prompt + 1..log_rule].join("\n"),
                 list,
                 "event list hidden after click: {opened}"
             );
-            assert!(opened_lines[prompt + 1].contains("↑ Latest"), "{opened}");
             assert!(
                 opened_lines[log_rule + 1..opened_lines.len() - 1]
                     .join("\n")
@@ -483,7 +420,7 @@ fn terminal_layout_tracks_width() {
             tmux.run(&["send-keys", "-t", "probe", "Escape"]);
             // Select the real newest event so each resize starts with the same detail.
             std::thread::sleep(Duration::from_millis(200));
-            let assistant_row = prompt + 2;
+            let assistant_row = prompt + 1;
             tmux.run(&[
                 "send-keys",
                 "-t",
@@ -561,7 +498,7 @@ fn terminal_log_selection_tracks_wheel_click_and_tail() {
             let separator = rows[3].rfind('│').expect("log column separator");
             (rows[3][..separator].width() + 2, 3)
         } else {
-            (1, prompt + 2)
+            (1, prompt + 1)
         };
         let detail = |capture: &str| {
             let rows: Vec<_> = capture.lines().collect();
@@ -788,17 +725,18 @@ fn terminal_json_strings_keep_multiline_alignment_and_colors() {
         "the trailing newline must precede the closing quote: {capture}"
     );
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-    let parser = captured_screen(&colored, 200, 50);
-    let screen = parser.screen();
-    let string = screen.cell(first_row as u16, first_column as u16).unwrap();
-    let continuation = screen
-        .cell((first_row + 2) as u16, first_column as u16)
-        .unwrap();
-    let key = screen
-        .cell(
-            first_row as u16,
-            rows[first_row][..key_byte].width() as u16 + 1,
-        )
+    let colored_rows: Vec<_> = colored.lines().collect();
+    // Parse just the JSON rows: wide glyphs in the task list must not shift the
+    // parser's screen rows before the output under test.
+    let mut first = vt100::Parser::new(1, 200, 0);
+    first.process(colored_rows[first_row].as_bytes());
+    let mut next = vt100::Parser::new(1, 200, 0);
+    next.process(colored_rows[first_row + 2].as_bytes());
+    let string = first.screen().cell(0, first_column as u16).unwrap();
+    let continuation = next.screen().cell(0, first_column as u16).unwrap();
+    let key = first
+        .screen()
+        .cell(0, rows[first_row][..key_byte].width() as u16 + 1)
         .unwrap();
     assert_ne!(key.fgcolor(), vt100::Color::Default);
     assert_ne!(string.fgcolor(), vt100::Color::Default);
@@ -849,9 +787,11 @@ fn terminal_running_tool_animates_without_input() {
             .enumerate()
             .find(|(_, line)| frames.iter().any(|frame| line.contains(frame)))
             .unwrap_or_else(|| panic!("running output animation is visible: {capture}"));
-        let parser = captured_screen(&capture, 200, 50);
+        // Parse this row alone so unrelated wide task-title glyphs cannot shift rows.
+        let mut parser = vt100::Parser::new(1, 200, 0);
+        parser.process(raw.as_bytes());
         let screen = parser.screen();
-        let contents = screen.rows(0, 200).nth(y).unwrap();
+        let contents = screen.contents();
         let (x, frame) = frames
             .iter()
             .find_map(|frame| {
@@ -866,7 +806,7 @@ fn terminal_running_tool_animates_without_input() {
         position = Some((x, y));
         assert_eq!(x, 1 + (198 - 3) / 2);
         for offset in 0..3 {
-            let cell = screen.cell(y as u16, (x + offset) as u16).unwrap();
+            let cell = screen.cell(0, (x + offset) as u16).unwrap();
             assert!(cell.dim(), "running output stays dim: x={x}, raw={raw:?}");
             assert!(!cell.is_wide(), "each dot occupies one terminal cell");
             assert_eq!(

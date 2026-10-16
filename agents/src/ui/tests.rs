@@ -8520,6 +8520,7 @@ fn usage_chart_rises_in_braille_below_the_task_rows_and_keeps_its_bins_as_time_p
 
 #[test]
 fn usage_chart_and_activity_strip_share_the_same_style() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     use crate::usage::{Bin, bin_of};
 
     let (mut view, now) = log_fixture();
@@ -8561,6 +8562,7 @@ fn usage_chart_and_activity_strip_share_the_same_style() {
 
 #[test]
 fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_inline_code_color() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (mut view, now) = log_fixture();
     view.use_colors = true;
     let area = Rect::new(0, 0, 100, 25);

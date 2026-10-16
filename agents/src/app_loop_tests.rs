@@ -35,12 +35,13 @@ fn idle_loop_finishes_click_without_delaying_log_selection() {
         directory.path().into(),
     );
     app.refresh();
+    let now = chrono::Utc::now();
     app.handle_event(Event::Key(KeyEvent::new(
         KeyCode::BackTab,
         KeyModifiers::NONE,
     )));
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-    app.draw(&mut terminal).unwrap();
+    app.draw_at(&mut terminal, now).unwrap();
     let before = screen(&terminal);
     let (row, line) = before
         .iter()
@@ -48,7 +49,7 @@ fn idle_loop_finishes_click_without_delaying_log_selection() {
         .find(|(_, line)| line.contains("持"))
         .unwrap_or_else(|| panic!("real tool event missing:\n{}", before.join("\n")));
     let column = line.chars().position(|c| c == '持').unwrap() as u16;
-    let started = Instant::now();
+    let monotonic_now = Instant::now();
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
         MouseEventKind::Up(MouseButton::Left),
@@ -60,31 +61,39 @@ fn idle_loop_finishes_click_without_delaying_log_selection() {
             modifiers: KeyModifiers::NONE
         })));
     }
-    app.draw(&mut terminal).unwrap();
+    app.draw_at(&mut terminal, now).unwrap();
     assert_ne!(screen(&terminal), before, "row selection must be immediate");
     let selected = screen(&terminal);
     assert!(selected.join("\n").contains("pkill") || selected.join("\n").contains("run_boxes"));
-    // No terminal or filesystem event is queued. The real receive timeout must wake
-    // for the pending click, then dispatch it before the next frame.
-    let mut schedule = RefreshSchedule::new(started, Duration::from_secs(5));
-    let mut watcher = None;
-    while app.view.pending_click_in(Instant::now()).is_some()
-        && started.elapsed() < Duration::from_secs(1)
-    {
-        assert!(
-            !app.wait_for_input(&mut watcher, &mut schedule, Instant::now())
-                .unwrap()
-        );
-        app.draw(&mut terminal).unwrap();
-    }
-    assert!(
-        started.elapsed() >= Duration::from_millis(80),
-        "saved double-click interval was ignored"
+    let deadline = monotonic_now
+        + app
+            .view
+            .pending_click_in(monotonic_now)
+            .expect("click must be pending");
+    let mut schedule = RefreshSchedule::new(monotonic_now, Duration::from_secs(5));
+    assert_eq!(
+        app.input_timeout(
+            &schedule,
+            monotonic_now,
+            deadline - Duration::from_millis(1),
+            now,
+        ),
+        Duration::from_millis(1),
+        "pending click must constrain the receive timeout"
     );
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "idle receive did not wake for the click"
+    assert_eq!(
+        app.input_timeout(&schedule, monotonic_now, deadline, now),
+        Duration::ZERO,
+        "an expired click must not wait for the periodic refresh"
     );
+    // Exercise the real empty channel without counting rendering or OS scheduling
+    // time as a receive deadline. The injected instants above check the timeout.
+    assert!(
+        !app.wait_for_input(&mut None, &mut schedule, monotonic_now)
+            .unwrap()
+    );
+    assert!(app.view.pending_click_in(Instant::now()).is_none());
+    app.draw_at(&mut terminal, now).unwrap();
     let after = screen(&terminal).join("\n");
     assert_eq!(
         screen(&terminal),

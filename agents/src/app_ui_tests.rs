@@ -934,10 +934,16 @@ fn narrow_render_survives_wide_resize_unchanged() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (_directory, mut app) = fixture();
     select_archive(&mut app);
+    let now = chrono::Utc::now();
+    let mut draw = |width| {
+        let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+        app.draw_at(&mut terminal, now).unwrap();
+        terminal.backend().buffer().clone()
+    };
     for width in [80, 120, 149] {
-        let before = draw(&mut app, width);
-        draw(&mut app, 200);
-        let after = draw(&mut app, width);
+        let before = draw(width);
+        draw(200);
+        let after = draw(width);
         let changed: Vec<_> = before
             .content
             .iter()
