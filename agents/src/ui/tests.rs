@@ -6713,8 +6713,9 @@ fn usage_chart_rises_in_braille_below_the_task_rows_and_keeps_its_bins_as_time_p
 }
 
 #[test]
-fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_jump_style() {
+fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_inline_code_color() {
     let (mut view, now) = log_fixture();
+    view.use_colors = true;
     let area = Rect::new(0, 0, 100, 25);
     let layout = view.center_layout(area);
     let (y, right) = (layout.log.y, layout.list.right() - 1);
@@ -6725,9 +6726,8 @@ fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_jump_style() {
     view.render_at(area, &mut buf, now);
     let cell = |x: u16| &buf[(x, y)];
     assert_eq!(cell(right).symbol(), "⠒");
-    let modifier = cell(right).modifier;
-    assert!(modifier.contains(ratatui::style::Modifier::BOLD));
-    assert!(!modifier.contains(ratatui::style::Modifier::DIM));
+    assert_eq!(cell(right).fg, crate::theme::inline_code_color());
+    assert!(!cell(right).modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(cell(right - 1).symbol(), "─");
     assert_eq!(cell(right - 2).symbol(), "⠂");
     assert!(view.timeline_redraw_in(now).is_some());

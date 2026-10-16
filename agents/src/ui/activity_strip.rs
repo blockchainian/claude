@@ -1,5 +1,6 @@
 //! Whether any task worked, dotted on the task log's top rule below the task list: each dot column
-//! of the shared timeline is one bin, raised in the jump button's style when a task worked in it.
+//! of the shared timeline is one bin, dotted in Markdown's inline code color when a task worked
+//! in it.
 
 use super::View;
 use super::timeline::cell_bins;
@@ -34,8 +35,10 @@ impl View {
                 // A fresh cell, so the rule's dim style does not carry into the dots.
                 let cell = &mut buf[(x, area.y)];
                 cell.reset();
-                cell.set_char(char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '))
-                    .set_style(super::style::log_jump_style());
+                cell.set_char(char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '));
+                if self.use_colors {
+                    cell.set_fg(crate::theme::inline_code_color());
+                }
             }
         }
     }
