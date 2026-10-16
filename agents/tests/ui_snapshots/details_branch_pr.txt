@@ -1,4 +1,4 @@
-Prompt
+                 Prompt
 PR task
 
 
@@ -12,8 +12,8 @@ PR task
 
 
 
-Project                      main · #833
-/tmp/project
+                Project
+/tmp/project · main · #833
 
-Model                            Unknown
+Model           Unknown
 

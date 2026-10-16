@@ -1,12 +1,12 @@
-Background
+               Background
 ─ Run checks                          0s
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ─ Waiting for output                  0s
 
-Update
+                 Update
 Checking the project
 
-Prompt
+                 Prompt
 Background task
 
 
@@ -16,7 +16,7 @@ Background task
 
 
 
-Project
+                Project
 /tmp/project
 
-Model                            Unknown
+Model           Unknown

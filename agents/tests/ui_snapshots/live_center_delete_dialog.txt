@@ -1,16 +1,16 @@
  Agent command center  Group: Project  g
   Active 0                                                                  Inactive 1
  ────────────────────────────────────────────────────────── Unloaded task ─────────────
- ┌────────────────────────────────────────┐ │ Prompt
+ ┌────────────────────────────────────────┐ │                  Prompt
  │ Permanently delete “Unloaded task”?    │ │ Unloaded task
  │ This stops any running work in this    │ │
  │ task and its child agents, then        │ │
  │ permanently deletes their history.     │ │
  │ This cannot be undone.                 │ │
- │                                        │ │ Project
+ │                                        │ │                  Project
  │ › 1. Cancel                            │ │ /tmp/project
  │   2. Permanently delete task and child │ │
- └────────────────────────────────────────┘ │ Model                             Unknown
+ └────────────────────────────────────────┘ │ Model            Unknown
                                             │ ─────────────── Inactive ────────────────
  Unloaded task ›
  ↑/↓ move  enter select  esc back

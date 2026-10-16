@@ -1,11 +1,11 @@
-Update
+                 Update
 Result
 
 Built agents.
 
 cargo test
 
-Prompt
+                 Prompt
 Use cargo and tests
 • queued prompt
 
@@ -15,7 +15,7 @@ Use cargo and tests
 
 
 
-Project
+                Project
 /tmp/project
 
-Model                            Unknown
+Model           Unknown

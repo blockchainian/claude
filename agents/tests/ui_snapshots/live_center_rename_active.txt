@@ -1,16 +1,16 @@
  Agent command center  Group: Project  g
   Active 1                                                                  Inactive 0
  ────────────────────────────────────────────────────────── Task to find ──────────────
- Rename › Task to find                      │ Prompt
+ Rename › Task to find                      │                  Prompt
  /tmp/project                               │ Task to find
  ○ Task to find                 Ready       │
                                             │
                                             │
                                             │
-                                            │ Project
+                                            │                  Project
                                             │ /tmp/project
                                             │
-                                            │ Model                             Unknown
+                                            │ Model            Unknown
                                             │ ───────────────── Ready ─────────────────
  Task to find ›
  esc back  enter rename

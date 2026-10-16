@@ -10,90 +10,61 @@ fn visible(cell: &ratatui::buffer::Cell) -> &str {
         .unwrap()
 }
 
+fn text(buf: &Buffer, area: Rect, y: u16) -> String {
+    (area.x..area.right())
+        .map(|x| visible(&buf[(x, y)]))
+        .collect()
+}
+
 #[test]
-fn details_groups_are_right_aligned() {
+fn section_labels_stay_centered_before_right_values() {
     let now = Utc::now();
-    for width in 32..=61 {
-        let mut row = session("header", "Header task", SessionStatus::Working, 0);
-        row.git_branch = Some("agents-panel".into());
-        row.pr = Some(crate::model::PullRequest {
-            number: 13,
-            url: "https://github.com/blockchainian/claude/pull/13".into(),
-        });
-        row.prompt_at = Some(now - Duration::seconds(64));
-        row.turn_messages = 10;
-        row.effort = Some("high".into());
-        let mut view = test_view(Grouping::Project, true);
-        view.set_sessions(vec![row], false);
-        let area = Rect::new(5, 3, width, 24);
+    let mut row = session("header", "Header task", SessionStatus::NeedsInput, 0);
+    row.prompt_at = Some(now - Duration::seconds(64));
+    row.last_record_at = Some(now);
+    row.turn_messages = 10;
+    row.last_message = Some("Reply".into());
+    row.last_message_at = Some(now - Duration::seconds(7));
+    row.activity = Some(crate::model::Activity {
+        kind: crate::log::Kind::Tool,
+        label: "Thinking".into(),
+        at: now - Duration::seconds(7),
+    });
+    let output = tempfile::NamedTempFile::new().unwrap();
+    row.background.push(crate::model::BackgroundTask {
+        description: "Background work".into(),
+        output: output.path().into(),
+        started_at: now,
+    });
+    let mut view = test_view(Grouping::Project, true);
+    view.set_sessions(vec![row], false);
+    for width in 15..=61 {
+        let area = Rect::new(5, 3, width, 40);
         let mut buf = Buffer::empty(area);
         view.render_details(area, &mut buf, now);
-        for parts in [
-            ["Project", "agents-panel", "#13"],
-            ["Prompt", "10 messages", "1m 4s"],
-            ["Model", "high", "Unknown"],
+        for (label, value) in [
+            ("Latest activity", "7s ago"),
+            ("Background", ""),
+            ("Update", "7s ago"),
+            ("Prompt", "1m 4s"),
+            ("Needs attention", ""),
+            ("Project", ""),
         ] {
             let y = (area.y..area.bottom())
-                .find(|&y| {
-                    (area.x..area.right())
-                        .map(|x| visible(&buf[(x, y)]))
-                        .collect::<String>()
-                        .starts_with(parts[0])
-                })
+                .find(|&y| text(&buf, area, y).contains(label))
                 .unwrap();
-            let text = (area.x..area.right())
-                .map(|x| visible(&buf[(x, y)]))
-                .collect::<String>();
-            let middle = usize::from(width) - parts[1].len() - 3 - parts[2].len();
-            let right = usize::from(width) - parts[2].len();
-            assert_eq!(
-                text.find(parts[1])
-                    .map(|index| text[..index].chars().count()),
-                Some(middle),
-                "{text}"
-            );
-            assert_eq!(
-                text.find(parts[2])
-                    .map(|index| text[..index].chars().count()),
-                Some(right),
-                "{text}"
-            );
-            let dots = text
-                .chars()
-                .enumerate()
-                .filter_map(|(x, c)| (c == '·').then_some(x))
-                .collect::<Vec<_>>();
-            let expected = [middle + parts[1].len() + 1];
-            assert_eq!(dots, expected, "{text}");
-            for x in dots {
-                assert!(
-                    buf[(area.x + x as u16, y)]
-                        .modifier
-                        .contains(ratatui::style::Modifier::DIM)
-                );
+            let rendered = text(&buf, area, y);
+            let start = (usize::from(width) - label.len()) / 2;
+            assert_eq!(rendered.find(label), Some(start), "{width}: {rendered}");
+            assert!(!rendered.contains("message"));
+            if !value.is_empty() && usize::from(width) - start - label.len() > value.len() {
+                assert!(rendered.ends_with(value), "{rendered}");
             }
-            if parts[0] == "Project" {
-                assert_eq!(
-                    buf[(area.x + middle as u16, y)].style(),
-                    buf[(area.x, y)].style()
-                );
-                assert_eq!(
-                    click_mouse(
-                        &mut view,
-                        mouse(
-                            MouseEventKind::Down(MouseButton::Left),
-                            area.x + right as u16,
-                            y
-                        )
-                    ),
-                    Some(Action::OpenPath(
-                        super::super::vscode::pull_request_link(
-                            "https://github.com/blockchainian/claude/pull/13",
-                            std::path::Path::new("/tmp/project")
-                        )
-                        .unwrap()
-                        .into()
-                    ))
+            if !value.is_empty() {
+                let tail = rendered[start + label.len()..].trim();
+                assert!(
+                    tail.is_empty() || value.starts_with(tail.trim_end_matches('…')),
+                    "{rendered}"
                 );
             }
         }
@@ -101,49 +72,60 @@ fn details_groups_are_right_aligned() {
 }
 
 #[test]
-fn narrow_details_groups_preserve_labels() {
-    let now = Utc::now();
-    let mut row = session("header", "Header task", SessionStatus::Working, 0);
-    row.git_branch = Some("agents-panel".into());
-    row.pr = Some(crate::model::PullRequest {
-        number: 13,
-        url: "https://github.com/blockchainian/claude/pull/13".into(),
-    });
-    row.prompt_at = Some(now - Duration::seconds(64));
-    row.turn_messages = 10;
-    row.effort = Some("high".into());
-    let mut view = test_view(Grouping::Project, true);
-    view.set_sessions(vec![row], false);
-    for width in 1..29 {
-        let area = Rect::new(0, 0, width, 24);
+fn project_line_combines_parts_and_keeps_visible_links() {
+    for (branch, pr, width, expected) in [
+        (Some("main"), true, 60, "/tmp/project · main · #13"),
+        (None, true, 60, "/tmp/project · #13"),
+        (Some("main"), false, 60, "/tmp/project · main"),
+        (None, false, 60, "/tmp/project"),
+        (Some("main"), true, 24, "/t…/project · main · #13"),
+        (Some("main"), true, 22, "/t…/proj… · main · #13"),
+    ] {
+        let mut row = session("project", "Project task", SessionStatus::Ready, 0);
+        row.git_branch = branch.map(str::to_owned);
+        row.pr = pr.then(|| crate::model::PullRequest {
+            number: 13,
+            url: "https://github.com/blockchainian/claude/pull/13".into(),
+        });
+        let mut view = test_view(Grouping::Project, true);
+        view.set_sessions(vec![row], false);
+        let area = Rect::new(5, 3, width, 30);
         let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, now);
-        if width >= 7 {
-            for (label, group) in [
-                ("Project", "agents-panel · #13"),
-                ("Prompt", "10 messages · 1m 4s"),
-                ("Model", "high · Unknown"),
-            ] {
-                let available = usize::from(width).saturating_sub(label.len() + 1);
-                let group = if available == 0 {
-                    String::new()
-                } else if group.chars().count() > available {
-                    group.chars().take(available - 1).collect::<String>() + "…"
-                } else {
-                    group.to_owned()
-                };
-                let expected = format!(
-                    "{label}{}{group}",
-                    " ".repeat(usize::from(width) - label.len() - group.chars().count())
-                );
+        view.render_details(area, &mut buf, Utc::now());
+        let y = area.bottom() - 3;
+        assert_eq!(text(&buf, area, y).trim_end(), expected);
+        assert_eq!(text(&buf, area, y - 1).trim(), "Project");
+        let links = view.viewport.borrow().details_links.clone();
+        for (rect, target) in links {
+            assert_eq!(rect.y, y);
+            assert_eq!(
+                click_mouse(
+                    &mut view,
+                    mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
+                ),
+                Some(Action::OpenPath(target))
+            );
+        }
+        let viewport = view.viewport.borrow();
+        assert_eq!(viewport.details_links.len(), if pr { 2 } else { 1 });
+        assert_eq!(viewport.details_links[0].1, PathBuf::from("/tmp/project"));
+        if pr {
+            let (rect, target) = &viewport.details_links[1];
+            assert_eq!(text(&buf, *rect, y), "#13");
+            assert!(
+                target
+                    .to_str()
+                    .unwrap()
+                    .starts_with("vscode://blockchainian.git/view-pr?")
+            );
+            assert_eq!(buf[(rect.x, y)].fg, style::thread_color(0));
+        }
+        for (x, c) in expected.chars().enumerate() {
+            if c == '·' {
                 assert!(
-                    buf.content.chunks(usize::from(width)).any(|row| row
-                        .iter()
-                        .map(visible)
-                        .collect::<String>()
-                        .trim_end()
-                        == expected.trim_end()),
-                    "{width}: {expected}"
+                    buf[(area.x + x as u16, y)]
+                        .modifier
+                        .contains(ratatui::style::Modifier::DIM)
                 );
             }
         }

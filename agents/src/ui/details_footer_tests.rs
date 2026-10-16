@@ -19,7 +19,7 @@ fn details_footer_pins_project_and_model_below_spare_rows() {
         assert!(text(area.bottom() - 1).starts_with("Model"));
         assert!(text(area.bottom() - 2).trim().is_empty());
         assert_eq!(text(area.bottom() - 3).trim(), "/tmp/project");
-        assert!(text(area.bottom() - 4).starts_with("Project"));
+        assert!(text(area.bottom() - 4).trim() == "Project");
         for y in area.y + 2..area.bottom() - 4 {
             assert!(text(y).trim().is_empty(), "unexpected row {y}: {}", text(y));
         }
@@ -55,7 +55,7 @@ fn details_footer_shifted_links_keep_click_targets_in_both_layouts() {
         let project_y = area.bottom() - 4;
         let links = view.viewport.borrow().details_links.clone();
         for (target, y) in [
-            (PathBuf::from("https://example.com/pull/833"), project_y),
+            (PathBuf::from("https://example.com/pull/833"), project_y + 1),
             (PathBuf::from("/tmp/project"), project_y + 1),
         ] {
             let rect = links.iter().find(|(_, path)| *path == target).unwrap().0;
@@ -132,8 +132,21 @@ fn details_footer_keeps_filled_and_overflowing_rows_unchanged() {
             if expected == "Model" {
                 assert!(text.starts_with(expected), "{text}");
             } else {
-                assert_eq!(text.trim_end(), expected);
+                assert_eq!(text.trim(), expected);
             }
         }
     }
+}
+
+#[test]
+fn hidden_model_row_has_no_field_targets() {
+    let mut view = fixture();
+    let selected = &mut view.rows[view.selected];
+    selected.prompt = "Short prompt".into();
+    selected.last_message = None;
+    selected.activity = None;
+    let area = Rect::new(7, 4, 40, 7);
+    let mut buf = Buffer::empty(area);
+    view.render_details(area, &mut buf, Utc::now());
+    assert!(view.viewport.borrow().field_targets.is_empty());
 }

@@ -77,11 +77,11 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
             let mut terminal = Terminal::new(TestBackend::new(width, 60)).unwrap();
             app.draw(&mut terminal).unwrap();
             let buffer = terminal.backend().buffer();
-            let (left, project_y) = position(buffer, "Project");
+            let (_, project_y) = position(buffer, "Project");
             let separators: Vec<_> = (0..width)
                 .filter(|&x| cell_text(buffer, x, 3) == "│")
                 .collect();
-            assert_eq!(left, separators[0] + 2);
+            let left = separators[0] + 2;
             if separators[0] - 2 >= 56 {
                 let updated_end = (1..separators[0])
                     .rfind(|&x| cell_text(buffer, x, 4) != " ")
@@ -90,62 +90,43 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                 assert_eq!(updated_end, separators[0] - 1);
             }
             let right = if width >= 150 {
-                (left..width)
-                    .find(|&x| cell_text(buffer, x, project_y) == "│")
-                    .unwrap()
-                    - 1
+                separators[1] - 1
             } else {
                 width - 1
             };
-            for (label, middle, group) in [
+            for (label, value) in [
                 (
                     if activity {
                         "Latest activity"
                     } else {
                         "Update"
                     },
-                    None,
                     if activity { "1m ago" } else { "2m ago" },
                 ),
-                ("Prompt", Some("3 messages"), "1m 5s"),
-                ("Project", Some("main"), "#13"),
+                ("Prompt", "1m 5s"),
+                ("Project", ""),
             ] {
                 let (x, y) = position(buffer, label);
-                assert_eq!(x, left);
+                assert_eq!(x, left + (right - left - label.len() as u16) / 2);
                 let actual = row_text(buffer, y, left, right);
-                assert!(actual.starts_with(label), "{actual:?}");
-                assert!(actual.ends_with(group), "{width}: {actual:?}");
-                let group_start = right - group.chars().count() as u16;
-                assert!(group_start > left + label.len() as u16);
-                if let Some(middle) = middle {
-                    let middle_start = group_start - middle.len() as u16 - 3;
-                    assert_eq!(
-                        row_text(buffer, y, middle_start, group_start),
-                        format!("{middle} · ")
-                    );
-                    assert!(
-                        row_text(buffer, y, left + label.len() as u16, middle_start)
-                            .chars()
-                            .all(|c| c == ' ')
-                    );
-                    assert!(
-                        buffer[(group_start - 2, y)]
-                            .modifier
-                            .contains(Modifier::DIM)
-                    );
-                } else {
-                    assert!(
-                        row_text(buffer, y, left + label.len() as u16, group_start)
-                            .chars()
-                            .all(|c| c == ' ')
-                    );
-                }
+                assert!(actual.ends_with(value), "{width}: {actual:?}");
+                assert!(!actual.contains("messages"));
             }
+            assert_eq!(
+                row_text(buffer, project_y + 1, left, right).trim_end(),
+                "/tmp/project · main · #13"
+            );
+            assert!(
+                buffer[(left + 13, project_y + 1)]
+                    .modifier
+                    .contains(Modifier::DIM)
+            );
+
             let (_, background_y) = position(buffer, "Check files");
             assert_eq!(row_text(buffer, background_y, right - 5, right), "1h 0m");
-            for x in right - 3..right {
+            for x in left + 22..left + 25 {
                 assert_eq!(click_link(&mut app, MouseEvent {
-                    kind: MouseEventKind::Down(MouseButton::Left), column: x, row: project_y, modifiers: KeyModifiers::NONE,
+                    kind: MouseEventKind::Down(MouseButton::Left), column: x, row: project_y + 1, modifiers: KeyModifiers::NONE,
                 }), Some(Action::OpenPath("vscode://blockchainian.git/view-pr?repo=%2Ftmp%2Fproject&url=https%3A%2F%2Fgithub.com%2Fblockchainian%2Fclaude%2Fpull%2F13".into())));
             }
             assert_eq!(
@@ -178,7 +159,7 @@ fn app_details_narrow_groups_preserve_labels_and_do_not_leave_pr_hitboxes() {
         let end = (left..width)
             .find(|&x| cell_text(buffer, x, y) == "│")
             .unwrap_or(width);
-        assert!(row_text(buffer, y, left, end).contains('…'));
+        assert!(row_text(buffer, y + 1, left, end).contains('…'));
         for x in left..end {
             assert_eq!(
                 click_link(

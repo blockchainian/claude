@@ -1,4 +1,4 @@
-Prompt
+                 Prompt
 PR task
 
 
@@ -12,8 +12,8 @@ PR task
 
 
 
-Project                             main
-/tmp/project
+                Project
+/tmp/project · main
 
-Model                            Unknown
+Model           Unknown
 

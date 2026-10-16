@@ -1,4 +1,4 @@
-Prompt
+                 Prompt
 Current prompt
 
 
@@ -9,7 +9,7 @@ Current prompt
 
 
 
-Project
+                Project
 /tmp/project
 
-Model                            Unknown
+Model           Unknown

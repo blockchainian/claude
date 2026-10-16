@@ -1,10 +1,10 @@
  Agent command center  Group: Project  g
   Active 3                                                                                                  Inactive 0
  ─────────────────────────────────────────────────────────────────────────────────── Parent task ──────────────────────
- /tmp/project                                               │ Background
+ /tmp/project                                               │                        Background
  ○ Parent task                       Ready           2m ago │ ─ Check files ──────────────────────────────────────────╴
  ├─ ○ Review results                 Ready              now │
- └─ ● Check files                    Working         1m ago │ Prompt
+ └─ ● Check files                    Working         1m ago │                          Prompt
                                                             │ Parent task
                                                             │
                                                             │
@@ -21,10 +21,10 @@
                                                             │
                                                             │
                                                             │
-                                                            │ Project
+                                                            │                          Project
                                                             │ /tmp/project
                                                             │
-                                                            │ Model                                        parent-model
+                                                            │ Model                 parent-model
                                                             │ ───────────────────────── Ready ─────────────────────────
  Parent task ›
  ? help  esc back  ↑/↓ move  enter open  n new

@@ -636,7 +636,7 @@ impl View {
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
         // Sections top to bottom: activity, background, message, prompt,
-        // needs attention, project, branch, model. The title
+        // needs attention, project, model. The title
         // sits on the rule above the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
@@ -663,7 +663,7 @@ impl View {
             separate_section(&mut items);
             let start = items.len() + 1;
             items.extend([
-                left_right(
+                centered_header(
                     "Latest activity".dim().into(),
                     Span::styled(
                         format_relative_time(now, Some(activity.at)),
@@ -672,7 +672,6 @@ impl View {
                     .into(),
                     width,
                 )
-                .0
                 .into(),
                 truncate_line_with_ellipsis_if_overflow(
                     Line::from(Span::styled(label, style::log_styles(&activity.kind).1)),
@@ -701,7 +700,7 @@ impl View {
         let subagents = self.subagents_for(session).collect::<Vec<_>>();
         if !boxes.is_empty() || !subagents.is_empty() {
             separate_section(&mut items);
-            items.push("Background".dim().into());
+            items.push(centered_header("Background".dim().into(), Line::default(), width).into());
             let start = items.len();
             items.extend(
                 boxes
@@ -723,7 +722,7 @@ impl View {
                     Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
-            items.push(left_right("Update".dim().into(), header, width).0.into());
+            items.push(centered_header("Update".dim().into(), header, width).into());
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(
@@ -749,20 +748,15 @@ impl View {
             } else {
                 session.last_record_at.unwrap_or(start)
             };
-            let messages = session.turn_messages;
-            let label = if messages == 1 { "message" } else { "messages" };
-            left_right(
+            centered_header(
                 "Prompt".dim().into(),
-                Line::from(vec![
-                    format!("{messages} {label}").dim(),
-                    " · ".dim(),
-                    format_duration((end - start).num_seconds().max(0)).dim(),
-                ]),
+                format_duration((end - start).num_seconds().max(0))
+                    .dim()
+                    .into(),
                 width,
             )
-            .0
         } else {
-            left_right("Prompt".dim().into(), Line::default(), width).0
+            centered_header("Prompt".dim().into(), Line::default(), width)
         };
         separate_section(&mut items);
         items.push(prompt_header.into());
@@ -816,7 +810,14 @@ impl View {
         if session.status == SessionStatus::NeedsInput || needs.is_some() {
             separate_section(&mut items);
             let start = items.len();
-            items.extend([Span::styled("Needs attention", style::attention_title_style()).into()]);
+            items.push(
+                centered_header(
+                    Span::styled("Needs attention", style::attention_title_style()).into(),
+                    Line::default(),
+                    width,
+                )
+                .into(),
+            );
             if let Some(needs) = needs {
                 items.extend(
                     textwrap::wrap(needs, width.max(1))
@@ -851,53 +852,55 @@ impl View {
         item_links.resize(items.len(), Vec::new());
 
         let project_item = items.len();
-        let project_label = Line::from("Project".dim());
-        let branch = session
-            .git_branch
-            .as_ref()
-            .map(|branch| Line::from(Span::styled(branch.clone(), style::time_style())));
-        let pull_request = session.pr.as_ref().map(|pr| {
-            Line::from(Span::styled(
+        let mut suffix = Line::default();
+        if let Some(branch) = &session.git_branch {
+            suffix.spans.extend([
+                " · ".dim(),
+                Span::styled(branch.clone(), style::time_style()),
+            ]);
+        }
+        let pr_offset = session.pr.as_ref().map(|pr| {
+            suffix.spans.push(" · ".dim());
+            let offset = suffix.width();
+            suffix.spans.push(Span::styled(
                 format!("#{}", pr.number),
                 self.title_style(&session.id),
-            ))
+            ));
+            offset
         });
-        let mut group = branch.unwrap_or_default();
-        let pr_offset = if let Some(pr) = pull_request {
-            if group.width() > 0 {
-                group.spans.push(" · ".dim());
-            }
-            let offset = group.width();
-            group.spans.extend(pr.spans);
-            Some(offset)
-        } else {
-            None
-        };
-        let fits = project_label.width() + 1 + group.width() <= width;
-        let (project, group_start) = left_right(project_label, group, width);
-        let right_start = pr_offset
-            .filter(|_| fits)
-            .map(|offset| group_start + offset);
-        let link = session.pr.as_ref().zip(right_start).map(|(pr, start)| {
-            let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
-                .unwrap_or_else(|| pr.url.clone());
-            (start as u16, format!("#{}", pr.number).len() as u16, url)
+        let cwd = super::line_truncation::abbreviate_path(
+            &session.cwd.to_string_lossy(),
+            width.saturating_sub(suffix.width()),
+        );
+        let path_width = cwd.width();
+        let mut project = Line::from(Span::styled(cwd, style::time_style()));
+        project.spans.extend(suffix.spans);
+        let visible = width.saturating_sub(usize::from(project.width() > width));
+        let project = truncate_line_with_ellipsis_if_overflow(project, width);
+        let link = session.pr.as_ref().zip(pr_offset).and_then(|(pr, offset)| {
+            let start = path_width + offset;
+            let length = format!("#{}", pr.number)
+                .len()
+                .min(visible.saturating_sub(start));
+            (length > 0).then(|| {
+                let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
+                    .unwrap_or_else(|| pr.url.clone());
+                (start as u16, length as u16, url)
+            })
         });
-        let cwd = super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width);
-        item_links.extend([
-            Vec::new(),
+        let mut project_links = vec![(0..path_width.min(visible) as u16, session.cwd.clone())];
+        project_links.extend(
             link.iter()
-                .map(|(x, width, url)| (*x..x + width, PathBuf::from(url)))
-                .collect(),
-            vec![(0..cwd.width().min(width) as u16, session.cwd.clone())],
-        ]);
+                .map(|(x, width, url)| (*x..x + width, PathBuf::from(url))),
+        );
+        item_links.extend([Vec::new(), Vec::new(), project_links]);
         items.extend([
             Line::default().into(),
+            centered_header("Project".dim().into(), Line::default(), width).into(),
             Item::Link {
                 line: project,
                 link,
             },
-            Line::from(Span::styled(cwd, style::time_style())).into(),
         ]);
 
         let effort = match session.effort.as_deref() {
@@ -913,24 +916,45 @@ impl View {
             }
             None => None,
         };
-        let mut model = Vec::new();
-        if let Some(effort) = effort {
-            model.extend([
-                Span::styled(effort.to_owned(), style::time_style()),
-                " · ".dim(),
-            ]);
+        // Reserve equal space on both sides so the name stays at the panel's center.
+        let name_space = |effort: Option<&str>| {
+            let left = width.saturating_sub(12);
+            // Centering rounds left; the right margin can have one extra cell.
+            effort.map_or(left, |value| {
+                left.min(width.saturating_sub(2 * (value.width() + 1) - 1))
+            })
+        };
+        let effort = effort.filter(|_| name_space(effort) > 0);
+        let mut name = truncate_line_with_ellipsis_if_overflow(
+            Line::from(Span::styled(
+                session.model_name().to_owned(),
+                style::time_style(),
+            )),
+            name_space(effort),
+        );
+        for span in &mut name.spans {
+            span.style = style::time_style();
         }
-        model.push(Span::styled(
-            session.model_name().to_owned(),
-            style::time_style(),
-        ));
-        let group = Line::from(model);
-        let available = width.saturating_sub("Model".len() + 1);
-        let truncated = group.width() > available;
-        let (model, model_start) = left_right("Model".dim().into(), group, width);
-        let model_visible = model
-            .width()
-            .saturating_sub(model_start + usize::from(truncated));
+        let name_width = name.width();
+        let model_start = (width - name_width) / 2;
+        let mut model = truncate_line_with_ellipsis_if_overflow("Model".dim().into(), width);
+        let mut model_fields = Vec::new();
+        if name_width > 0 {
+            model
+                .spans
+                .push(" ".repeat(model_start - model.width()).dim());
+            model.spans.extend(name.spans);
+            model_fields.push((model_start, name_width, Field::Model));
+        }
+        if let Some(effort) = effort {
+            let start = width - effort.width();
+            model.spans.push(" ".repeat(start - model.width()).dim());
+            model
+                .spans
+                .push(Span::styled(effort.to_owned(), style::time_style()));
+            model_fields.push((start, effort.width(), Field::Effort));
+        }
+
         let mut model_item = items.len() + 1;
         // A blank row keeps the model off the bottom rule.
         items.extend([Line::default().into(), model.into(), Line::default().into()]);
@@ -1113,21 +1137,9 @@ impl View {
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
                 if item_index == model_item {
-                    let model_offset = effort.map_or(0, |effort| effort.width() + " · ".width());
-                    for (offset, width, field) in [
-                        (0, effort.map_or(0, str::width), Field::Effort),
-                        (model_offset, session.model_name().width(), Field::Model),
-                    ] {
-                        let visible = width.min(model_visible.saturating_sub(offset));
-                        if visible > 0 {
-                            let rect = Rect::new(
-                                area.x + (model_start + offset) as u16,
-                                y,
-                                visible as u16,
-                                1,
-                            );
-                            self.viewport.borrow_mut().field_targets.push((rect, field));
-                        }
+                    for &(start, width, field) in &model_fields {
+                        let rect = Rect::new(area.x + start as u16, y, width as u16, 1);
+                        self.viewport.borrow_mut().field_targets.push((rect, field));
                     }
                 }
                 if let Some(mut mapped) = mapped {
@@ -1204,6 +1216,10 @@ impl View {
                 .rows
                 .retain(|row| row.y != last.y);
             drawn_links.retain(|(rect, _)| rect.y != last.y);
+            self.viewport
+                .borrow_mut()
+                .field_targets
+                .retain(|(rect, _)| !rect.intersects(last));
         }
         self.viewport.borrow_mut().details_links = drawn_links;
         self.highlight_text_selection(text_selection::Panel::Details, buf);
@@ -1300,6 +1316,23 @@ fn budget_details(
         bodies,
         background_cut,
     })
+}
+
+/// Centers a section label, fitting its right value into the space after it.
+fn centered_header(label: Line<'static>, value: Line<'static>, width: usize) -> Line<'static> {
+    let label = truncate_line_with_ellipsis_if_overflow(label, width);
+    let start = (width - label.width()) / 2;
+    let available = width.saturating_sub(start + label.width() + 1);
+    let value = truncate_line_with_ellipsis_if_overflow(value, available);
+    let mut header = Line::from(" ".repeat(start).dim());
+    header.spans.extend(label.spans);
+    if value.width() > 0 {
+        header
+            .spans
+            .push(" ".repeat(width - header.width() - value.width()).dim());
+        header.spans.extend(value.spans);
+    }
+    header
 }
 
 /// Keeps the label intact before fitting a trailing group into the remaining cells.

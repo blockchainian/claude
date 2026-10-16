@@ -1,7 +1,7 @@
  Agent command center  Group: Model  g
   Active 4                                                                              Inactive 0
  ──────────────────────────────────────────────────────────────────── Legacy task ─────────────────
- Unknown                                          │ Prompt
+ Unknown                                          │                     Prompt
  ○ Legacy task             Ready           1s ago │ Legacy task
                                                   │
  model-a                                          │
@@ -15,10 +15,10 @@
                                                   │
                                                   │
                                                   │
-                                                  │ Project
+                                                  │                     Project
                                                   │ /tmp/project
                                                   │
-                                                  │ Model                                   Unknown
+                                                  │ Model               Unknown
                                                   │ ──────────────────── Ready ────────────────────
  Legacy task ›
  ? help  esc back  ↑/↓ move  enter open  n new

@@ -357,12 +357,12 @@ fn details_model_section_keeps_controls_on_the_header_row() {
         );
     }
     assert_eq!(text(model.x, model.y, model.width), model_name);
-    assert_eq!(model.right(), details.right());
+    assert_eq!(model.x, details.x + (details.width - model.width) / 2);
     assert_eq!(effort.y, model.y);
-    assert_eq!(model.x, effort.right() + 3);
-    assert_eq!(text(effort.right(), model.y, 3), " · ");
+    assert_eq!(effort.right(), details.right());
+    assert!(model.right() < effort.x);
     assert!(
-        buffer[(effort.right() + 1, model.y)]
+        buffer[(effort.x, model.y)]
             .modifier
             .contains(ratatui::style::Modifier::DIM)
     );
@@ -449,28 +449,19 @@ fn details_model_targets_cover_only_visible_value_cells() {
             let mut buffer = Buffer::empty(Rect::new(0, 0, 50, 310));
             view.viewport.borrow_mut().field_targets.clear();
             view.render_details(area, &mut buffer, Utc::now());
-            let group = if effort.is_some() {
-                "medium · claude-opus-5-5"
+            let available = width.saturating_sub(if effort.is_some() && width >= 14 {
+                13
             } else {
-                "claude-opus-5-5"
-            };
-            let group_width = group.chars().count();
-            let available = usize::from(width.saturating_sub(6));
-            let visible = if group_width > available {
-                available.saturating_sub(1)
-            } else {
-                group_width
-            };
-            let start = area.right() - group_width.min(available) as u16;
+                12
+            });
+            let name_width = available.min("claude-opus-5-5".len() as u16);
+            let start = area.x + (width - name_width) / 2;
             let targets = view.viewport.borrow().field_targets.clone();
             let y = area.bottom() - 1;
             for x in area.x..area.right() {
-                let offset = usize::from(x.saturating_sub(start));
-                let expected = if x < start || offset >= visible {
-                    None
-                } else if effort.is_none() || offset >= 9 {
+                let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
                     Some(Field::Model)
-                } else if offset < 6 {
+                } else if effort.is_some() && width >= 14 && x >= area.right() - 6 {
                     Some(Field::Effort)
                 } else {
                     None
@@ -484,8 +475,13 @@ fn details_model_targets_cover_only_visible_value_cells() {
                     "width={width}, x={x}, effort={effort:?}"
                 );
                 if let Some(field) = expected {
-                    let symbol = group.chars().nth(offset).unwrap().to_string();
-                    assert_eq!(buffer[(x, y)].symbol(), symbol);
+                    let symbol = buffer[(x, y)].symbol();
+                    assert!(!symbol.trim().is_empty());
+                    assert!(
+                        buffer[(x, y)]
+                            .modifier
+                            .contains(ratatui::style::Modifier::DIM)
+                    );
                     assert_eq!(click(&mut view, x, y), None);
                     assert_eq!(click(&mut view, x, y), None);
                     assert_eq!(view.picker.as_ref().unwrap().field, field);

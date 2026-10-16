@@ -1,4 +1,4 @@
-Prompt
+                 Prompt
 Current prompt Current prompt Current
 prompt Current prompt Current prompt
 Current prompt Current prompt Current
@@ -9,7 +9,7 @@ Queued prompt that extends beyond the
 
 
 
-Project
+                Project
 /tmp/project
 
-Model                            Unknown
+Model           Unknown

@@ -1,7 +1,7 @@
-Prompt
+                                                                             Prompt
 Question task
 
-Needs attention
+                                                                        Needs attention
 Open task to review.
 Waiting for your response.
 
@@ -18,7 +18,7 @@ Waiting for your response.
 
 
 
-Project
+                                                                            Project
 /tmp/project
 
-Model                                                                                                                                                    Unknown
+Model                                                                       Unknown

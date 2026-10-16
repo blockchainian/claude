@@ -1,4 +1,4 @@
-Prompt
+                 Prompt
 Current prompt
 First queued prompt
 Second queued prompt
@@ -9,7 +9,7 @@ Second queued prompt
 
 
 
-Project
+                Project
 /tmp/project
 
-Model                            Unknown
+Model           Unknown

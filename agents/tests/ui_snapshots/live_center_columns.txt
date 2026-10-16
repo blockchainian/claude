@@ -1,13 +1,13 @@
  Agent command center  Group: Project  g
   Active 5                                                                                                                                          Inactive 1
  ───────────────────────────────────────────────────── Current task ───────────────────────────────────────────────────────────────────────────────────────────
- Pinned                                 │ Prompt                                 │
+ Pinned                                 │                 Prompt                 │
  ○ Current task             Ready       │ Current task                           │
  ● Needs an answer          Needs input │                                        │
-                                        │ Project                                │
+                                        │                Project                 │
  /tmp/project                           │ /tmp/project                           │
  ○ A longer task title th…  Ready       │                                        │
- ● Failed task              Needs input │ Model                          Unknown │
+ ● Failed task              Needs input │ Model          Unknown                 │
  ↓                                      │                                        │
  ──────────────────────────────────────────────────────── Ready ───────────────────────────────────────────────────────────────────────────────────────────────
  Current task ›

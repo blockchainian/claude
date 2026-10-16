@@ -319,7 +319,7 @@ fn terminal_layout_tracks_width() {
             .find(|line| line.contains("Model"))
             .expect("Model header");
         assert!(
-            model.contains("claude-opus-5-5 · medium"),
+            model.contains("claude-opus-5-5") && model.contains("medium"),
             "model group missing: {capture}"
         );
         assert_details_borders(&tmux, width, height, &capture);
@@ -580,7 +580,7 @@ fn terminal_update_click_selects_source_row() {
         .find_map(|(y, line)| {
             line.rfind("Stop hook").and_then(|byte| {
                 let x = line[..byte].width();
-                (x > update_x + 45 && y < 20).then_some((y, x))
+                (x > update_x && y < 20).then_some((y, x))
             })
         })
         .expect("user log row");
@@ -590,7 +590,12 @@ fn terminal_update_click_selects_source_row() {
         before.lines().skip(22).any(|line| line.contains("User")),
         "{before}"
     );
-    tmux.mouse(0, update_x, update_y + 1, true);
+    let body_x = lines[update_y + 1]
+        .find('│')
+        .map(|byte| lines[update_y + 1][..byte].width())
+        .unwrap()
+        + 2;
+    tmux.mouse(0, body_x, update_y + 1, true);
     std::thread::sleep(Duration::from_secs(1));
     let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     assert!(
@@ -819,4 +824,74 @@ fn terminal_running_tool_animates_without_input() {
     println!(
         "{{\"running_animation\":\"pass\",\"frames\":3,\"single_width\":true,\"dim\":true,\"centered\":true}}"
     );
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_details_section_positions() {
+    let (_directory, tmux, _transcript) = start_probe("details-sections");
+    for width in [112, 200] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        std::thread::sleep(Duration::from_millis(500));
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        println!("{width} columns:\n{capture}");
+        let lines: Vec<_> = capture.lines().collect();
+        let separators: Vec<_> = lines[3]
+            .match_indices('│')
+            .map(|(byte, _)| lines[3][..byte].width())
+            .collect();
+        let left = separators[0] + 2;
+        let right = if width >= 150 {
+            separators[1] - 1
+        } else {
+            width as usize - 1
+        };
+        let panel_width = right - left;
+        let mut parser = vt100::Parser::new(50, width, 0);
+        parser.process(
+            capture
+                .trim_end_matches('\n')
+                .replace('\n', "\r\n")
+                .as_bytes(),
+        );
+        let panel: Vec<String> = (3..25)
+            .map(|y| {
+                (left..right)
+                    .map(|x| parser.screen().cell(y, x as u16).unwrap().contents())
+                    .collect()
+            })
+            .collect();
+        for label in ["Update", "Prompt", "Project"] {
+            let row = panel.iter().find(|row| row.contains(label)).unwrap();
+            let byte = row.find(label).unwrap();
+            assert_eq!(
+                row[..byte].width(),
+                (panel_width - label.len()) / 2,
+                "{row}"
+            );
+            assert!(!row.contains("messages"));
+        }
+        let project = panel
+            .iter()
+            .position(|row| row.trim() == "Project")
+            .unwrap();
+        assert!(panel[project + 1].trim_end().ends_with(" · main"));
+        let model = panel.iter().find(|row| row.starts_with("Model")).unwrap();
+        let name = "claude-opus-5-5";
+        assert_eq!(
+            model[..model.find(name).unwrap()].width(),
+            (panel_width - name.len()) / 2
+        );
+        assert!(model.ends_with("medium"));
+        assert!(!model.contains('·'));
+        println!("{{\"details_sections\":\"pass\",\"width\":{width}}}");
+    }
 }

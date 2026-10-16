@@ -1,2 +1,2 @@
-Model           medium · claude-opus-5-5
+Model       claude-opus-5-5       medium
 dddddddddddddddddddddddddddddddddddddddd

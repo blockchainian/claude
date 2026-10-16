@@ -133,7 +133,7 @@ fn background_children_keep_start_order_through_provider_refreshes() {
                 // Background label.
                 let background = rows
                     .iter()
-                    .position(|line| line.trim_end() == "Background")
+                    .position(|line| line.trim() == "Background")
                     .unwrap_or_else(|| panic!("missing Background: {}", rows.join("\n")));
                 let position = background
                     + rows[background..]

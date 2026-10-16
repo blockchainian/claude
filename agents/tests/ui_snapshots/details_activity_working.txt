@@ -1,10 +1,10 @@
-Latest activity                   7s ago
+            Latest activity       7s ago
 Run checks
 
-Update                            1h ago
+                 Update           1h ago
 Checking the project
 
-Prompt              42 messages · 1h 10m
+                 Prompt           1h 10m
 Activity task
 
 
@@ -18,7 +18,7 @@ Activity task
 
 
 
-Project
+                Project
 /tmp/project
 
-Model                            Unknown
+Model           Unknown
