@@ -3152,6 +3152,26 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 }
 
 #[test]
+fn details_sections_run_activity_background_update_prompt() {
+    let mut row = session("order", "Order task", SessionStatus::Ready, 120);
+    row.activity = Some(crate::model::Activity {
+        kind: crate::log::Kind::Tool,
+        label: "Run checks".into(),
+        at: Utc::now(),
+    });
+    row.last_message = Some("Checking the project".into());
+    row.background = vec![crate::model::BackgroundTask {
+        description: "Waiting for output".into(),
+        output: std::path::PathBuf::from("/nonexistent/output"),
+        started_at: Utc::now(),
+    }];
+    let rendered = queued_details(row, 40);
+    let positions = ["Latest activity", "Background\n", "Update", "Prompt\n"]
+        .map(|label| rendered.find(label).expect(label));
+    assert!(positions.is_sorted(), "{rendered}");
+}
+
+#[test]
 fn details_background_boxes_tail_and_clip_output() {
     use std::io::Write;
     let mut output = tempfile::NamedTempFile::new().unwrap();

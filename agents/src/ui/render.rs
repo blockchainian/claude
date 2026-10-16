@@ -635,7 +635,7 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: background, activity, message, prompt,
+        // Sections top to bottom: activity, background, message, prompt,
         // needs attention, project, branch, model. The title
         // sits on the rule above the panel.
         let content_top = area.y;
@@ -650,37 +650,6 @@ impl View {
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
         let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
-
-        // The agent appends an exit marker to the output file when the
-        // command ends, which lands before the completion notification does.
-        let boxes = session
-            .background
-            .iter()
-            .map(|task| (task, tail_lines(&task.output, 1)))
-            .filter(|(_, lines)| {
-                !lines
-                    .last()
-                    .is_some_and(|last| last.starts_with("[exited with code"))
-            })
-            .collect::<Vec<_>>();
-        let mut background = items.len()..items.len();
-        let subagents = self.subagents_for(session).collect::<Vec<_>>();
-        if !boxes.is_empty() || !subagents.is_empty() {
-            separate_section(&mut items);
-            items.push("Background".dim().into());
-            let start = items.len();
-            items.extend(
-                boxes
-                    .into_iter()
-                    .map(|(task, output)| Item::Background { task, output }),
-            );
-            items.extend(subagents.into_iter().map(Item::Subagent));
-            // Tasks showing output come first; each group keeps its order.
-            items[start..].sort_by_key(|item| item.height() == 1);
-            background = start..items.len();
-        }
-
-        item_links.resize(items.len(), Vec::new());
 
         let activity = session.activity.as_ref();
         if let Some(activity) = activity {
@@ -716,6 +685,37 @@ impl View {
             copies.push(Some((activity.label.as_str(), "Copied latest activity")));
             body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }
+        // The agent appends an exit marker to the output file when the
+        // command ends, which lands before the completion notification does.
+        let boxes = session
+            .background
+            .iter()
+            .map(|task| (task, tail_lines(&task.output, 1)))
+            .filter(|(_, lines)| {
+                !lines
+                    .last()
+                    .is_some_and(|last| last.starts_with("[exited with code"))
+            })
+            .collect::<Vec<_>>();
+        let mut background = items.len()..items.len();
+        let subagents = self.subagents_for(session).collect::<Vec<_>>();
+        if !boxes.is_empty() || !subagents.is_empty() {
+            separate_section(&mut items);
+            items.push("Background".dim().into());
+            let start = items.len();
+            items.extend(
+                boxes
+                    .into_iter()
+                    .map(|(task, output)| Item::Background { task, output }),
+            );
+            items.extend(subagents.into_iter().map(Item::Subagent));
+            // Tasks showing output come first; each group keeps its order.
+            items[start..].sort_by_key(|item| item.height() == 1);
+            background = start..items.len();
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
         if let Some(message) = session.last_message.as_ref() {
             let mut header = Line::default();
             if let Some(at) = session.last_message_at {
