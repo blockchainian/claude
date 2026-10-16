@@ -5792,6 +5792,67 @@ mod subagent_rows {
     }
 
     #[test]
+    fn child_connectors_use_tees_until_the_last_visible_sibling() {
+        for count in [1, 3] {
+            let mut view = fixture();
+            let parent = view
+                .rows
+                .iter()
+                .find(|row| row.parent.is_none())
+                .unwrap()
+                .clone();
+            let mut rows = vec![parent.clone()];
+            for index in 0..count {
+                let mut child = session(
+                    &format!("child-{index}"),
+                    &format!("Child {index}"),
+                    SessionStatus::Working,
+                    index,
+                );
+                child.parent = Some(parent.id.clone());
+                rows.push(child);
+            }
+            view.set_sessions(rows, false);
+            for width in [100, 200] {
+                let area = Rect::new(0, 0, width, 30);
+                let mut buf = Buffer::empty(area);
+                view.render(area, &mut buf);
+                let list = view.center_layout(area).list;
+                for index in 0..count {
+                    let y = (list.y..list.bottom())
+                        .find(|&y| {
+                            (list.x..list.right())
+                                .map(|x| buf[(x, y)].symbol())
+                                .collect::<String>()
+                                .contains(&format!("Child {index}"))
+                        })
+                        .unwrap();
+                    let prefix = (list.x..list.x + 3)
+                        .map(|x| buf[(x, y)].symbol())
+                        .collect::<String>();
+                    assert_eq!(
+                        prefix,
+                        if index + 1 == count {
+                            "└─ "
+                        } else {
+                            "├─ "
+                        }
+                    );
+                    assert_eq!(buf[(list.x + 3, y)].symbol(), "●");
+                    click_mouse(
+                        &mut view,
+                        mouse(MouseEventKind::Down(MouseButton::Left), list.x, y),
+                    );
+                    assert_eq!(
+                        view.selected_id(),
+                        Some(&session_key(&format!("child-{index}")))
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn children_follow_same_newest_first_order_as_top_level_rows() {
         let mut view = fixture();
         let mut rows = view.rows.clone();
@@ -5852,9 +5913,9 @@ mod subagent_rows {
             .position(|l| l.contains("○ Parent task"))
             .unwrap();
         let lines: Vec<_> = rendered.lines().collect();
-        assert!(lines[parent + 2].contains("└ ● Check files"), "{rendered}");
+        assert!(lines[parent + 2].contains("└─ ● Check files"), "{rendered}");
         assert!(lines[parent + 2].contains("Working"));
-        assert!(lines[parent + 1].contains("└ ○ Review results"));
+        assert!(lines[parent + 1].contains("├─ ○ Review results"));
         assert!(lines[parent + 1].contains("Ready"));
     }
 
@@ -6078,7 +6139,7 @@ mod subagent_rows {
                 .position(|line| line.contains("○ Parent task"))
                 .unwrap();
             assert!(lines[parent - 1].contains("Other task"));
-            assert!(lines[parent + 1].contains("└ ● Check files"));
+            assert!(lines[parent + 1].contains("└─ ● Check files"));
             let heading = if grouping == Grouping::Project {
                 "/tmp/project"
             } else {
@@ -6139,7 +6200,7 @@ mod subagent_rows {
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
         let rendered = screen(&view, 120, 30);
         assert!(rendered.contains("Parent task"));
-        assert!(rendered.contains("└ ● Check files"));
+        assert!(rendered.contains("└─ ● Check files"));
         assert!(
             !rendered.lines().any(|line| line
                 .split('│')
@@ -6184,10 +6245,10 @@ mod subagent_rows {
             let mut buf = Buffer::empty(area);
             view.render_center_rows(area, &mut buf, "2026-10-13T12:00:00Z".parse().unwrap());
             let row = (0..area.height)
-                .find(|&y| buf[(0, y)].symbol() == "└" && buf[(2, y)].symbol() == "●")
+                .find(|&y| buf[(0, y)].symbol() == "└" && buf[(3, y)].symbol() == "●")
                 .unwrap();
-            assert_eq!(buf[(2, row)].symbol(), "●");
-            assert_eq!(buf[(4, row)].symbol(), "界");
+            assert_eq!(buf[(3, row)].symbol(), "●");
+            assert_eq!(buf[(5, row)].symbol(), "界");
             if width >= 57 {
                 let text: String = (0..width).map(|x| buf[(x, row)].symbol()).collect();
                 assert!(text.contains("Working"), "{text}");

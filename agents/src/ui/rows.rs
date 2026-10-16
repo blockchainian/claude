@@ -6,13 +6,13 @@ use super::render::{fill_list_row, line};
 use super::style::cursor_style;
 use super::*;
 
-fn columns(area: Rect) -> (Rect, Rect, Rect) {
+fn columns(area: Rect, indent: u16) -> (Rect, Rect, Rect) {
     const MIN_TITLE_WIDTH: u16 = 20;
     const STATUS_WIDTH: u16 = 11;
     const UPDATED_WIDTH: u16 = 9;
     const GAP: u16 = 2;
 
-    let gutter = area.width.min(2);
+    let gutter = area.width.min(2 + indent);
     let available = area.width - gutter;
     let status_metadata = GAP + STATUS_WIDTH;
     let all_metadata = status_metadata + GAP + UPDATED_WIDTH;
@@ -214,16 +214,19 @@ impl View {
             if selected {
                 state.marker = Some((rect.x, rect.y));
             }
-            let indent = if task.parent.is_some() { 2 } else { 0 };
+            let indent = if task.parent.is_some() { 3 } else { 0 };
             if indent > 0 {
+                let has_next_sibling = entries.get(start + offset + 1).is_some_and(|entry| {
+                    matches!(entry, CenterRow::Task(next) if self.rows[*next].parent == task.parent)
+                });
                 line(
-                    Line::from("└ ").style(style),
-                    Rect::new(
-                        rect.x,
-                        rect.y,
-                        rect.width.min(2),
-                        1,
-                    ),
+                    Line::from(if has_next_sibling {
+                        "├─ "
+                    } else {
+                        "└─ "
+                    })
+                    .style(style),
+                    Rect::new(rect.x, rect.y, rect.width.min(indent), 1),
                     buf,
                 );
             }
@@ -237,10 +240,7 @@ impl View {
                 ),
                 buf,
             );
-            let (mut title, status_area, updated) = columns(rect);
-            let indent = title.width.min(indent);
-            title.x += indent;
-            title.width -= indent;
+            let (title, status_area, updated) = columns(rect, indent);
             let title_style = if header {
                 style
             } else {
