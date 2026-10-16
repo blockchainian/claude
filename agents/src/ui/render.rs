@@ -725,7 +725,7 @@ impl View {
             items.extend([
                 left_right(
                     "Latest activity".dim().into(),
-                    format_relative_time(now, Some(activity.at)).dim().into(),
+                    Span::styled(format_relative_time(now, Some(activity.at)), style::time_style()).into(),
                     width,
                 )
                 .0
@@ -744,7 +744,7 @@ impl View {
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
             let mut header = Line::default();
             if let Some(at) = session.last_message_at {
-                header = format_relative_time(now, Some(at)).dim().into();
+                header = Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
             items.push(
@@ -779,12 +779,13 @@ impl View {
             };
             let messages = session.turn_messages;
             let label = if messages == 1 { "message" } else { "messages" };
-            justified_header(
+            left_right(
                 "Prompt".dim().into(),
-                format!("{messages} {label}").dim().into(),
-                format_duration((end - start).num_seconds().max(0))
-                    .dim()
-                    .into(),
+                Line::from(vec![
+                    format!("{messages} {label}").dim(),
+                    " · ".dim(),
+                    format_duration((end - start).num_seconds().max(0)).dim(),
+                ]),
                 width,
             )
             .0
@@ -847,20 +848,22 @@ impl View {
                 self.title_style(&session.id),
             ))
         });
-        let (project, right_start) = match (branch, pull_request) {
-            (Some(branch), Some(pr)) => justified_header(project_label, branch, pr, width),
-            (branch, pr) => {
-                let mut label = project_label;
-                if let Some(branch) = branch {
-                    label.spans.push(" · ".dim());
-                    label.spans.extend(branch.spans);
-                }
-                let pr = pr.unwrap_or_default();
-                let fits = line_width_fits(label.width() + 1 + pr.width(), width);
-                let (line, start) = left_right(label, pr, width);
-                (line, fits.then_some(start))
+        let mut group = branch.unwrap_or_default();
+        let pr_offset = if let Some(pr) = pull_request {
+            if group.width() > 0 {
+                group.spans.push(" · ".dim());
             }
+            let offset = group.width();
+            group.spans.extend(pr.spans);
+            Some(offset)
+        } else {
+            None
         };
+        let fits = project_label.width() + 1 + group.width() <= width;
+        let (project, group_start) = left_right(project_label, group, width);
+        let right_start = pr_offset
+            .filter(|_| fits)
+            .map(|offset| group_start + offset);
         let link = session.pr.as_ref().zip(right_start).map(|(pr, start)| {
             let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
                 .unwrap_or_else(|| pr.url.clone());
@@ -900,14 +903,16 @@ impl View {
         if let Some(effort) = effort {
             model.extend([" · ".dim(), effort.to_owned().into()]);
         }
-        let mut model_item = items.len() + 2;
+        let group = Line::from(model);
+        let available = width.saturating_sub("Model".len() + 1);
+        let truncated = group.width() > available;
+        let (model, model_start) = left_right("Model".dim().into(), group, width);
+        let model_visible = model
+            .width()
+            .saturating_sub(model_start + usize::from(truncated));
+        let mut model_item = items.len() + 1;
         // A blank row keeps the model off the bottom rule.
-        items.extend([
-            Line::default().into(),
-            "Model".dim().into(),
-            Line::from(model).into(),
-            Line::default().into(),
-        ]);
+        items.extend([Line::default().into(), model.into(), Line::default().into()]);
         item_links.resize(items.len(), Vec::new());
 
         let mut text_rows = vec![None; items.len()];
@@ -1072,16 +1077,20 @@ impl View {
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
                 if item_index == model_item {
-                    let model_width =
-                        session.model_name().width().min(usize::from(area.width)) as u16;
-                    self.viewport
-                        .borrow_mut()
-                        .field_targets
-                        .push((Rect::new(area.x, y, model_width, 1), Field::Model));
+                    let model_width = session.model_name().width().min(model_visible) as u16;
+                    self.viewport.borrow_mut().field_targets.push((
+                        Rect::new(area.x + model_start as u16, y, model_width, 1),
+                        Field::Model,
+                    ));
                     if let Some(effort) = effort {
                         let offset = session.model_name().width() + " · ".width();
-                        let rect = Rect::new(area.x + offset as u16, y, effort.width() as u16, 1)
-                            .intersection(area);
+                        let visible = effort.width().min(model_visible.saturating_sub(offset));
+                        let rect = Rect::new(
+                            area.x + (model_start + offset.min(model_visible)) as u16,
+                            y,
+                            visible as u16,
+                            1,
+                        );
                         if !rect.is_empty() {
                             self.viewport
                                 .borrow_mut()
@@ -1277,44 +1286,6 @@ fn left_right(label: Line<'static>, group: Line<'static>, width: usize) -> (Line
     spans.push(" ".repeat(start - used).dim());
     spans.extend(group.spans);
     (Line::from(spans), start)
-}
-
-/// Spreads three parts across the row and returns the fully visible last part's offset.
-fn justified_header(
-    first: Line<'static>,
-    middle: Line<'static>,
-    last: Line<'static>,
-    width: usize,
-) -> (Line<'static>, Option<usize>) {
-    let used = first.width() + middle.width() + last.width();
-    let remaining = width.saturating_sub(used);
-    let mut spans = first.spans;
-    if remaining < 6 {
-        spans.push(" · ".dim());
-        spans.extend(middle.spans);
-        spans.push(" · ".dim());
-        spans.extend(last.spans);
-        return (
-            truncate_line_with_ellipsis_if_overflow(Line::from(spans), width),
-            None,
-        );
-    }
-    let left_gap = remaining / 2;
-    let right_gap = remaining - left_gap;
-    let gap = |cells: usize| {
-        let before = (cells - 1) / 2;
-        format!("{}·{}", " ".repeat(before), " ".repeat(cells - before - 1)).dim()
-    };
-    spans.push(gap(left_gap));
-    spans.extend(middle.spans);
-    spans.push(gap(right_gap));
-    let start = width - last.width();
-    spans.extend(last.spans);
-    (Line::from(spans), Some(start))
-}
-
-fn line_width_fits(line_width: usize, width: usize) -> bool {
-    line_width <= width
 }
 
 /// One row-aligned piece of the details panel.

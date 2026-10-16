@@ -7,8 +7,8 @@
                                                                          │ Project
                                                                          │ /tmp/child-project
                                                                          │
-                                                                         │ Model
-                                                                         │ child-model
+                                                                         │ Model                            child-model
+                                                                         │
                                                                          │
                                                                          │
                                                                          │

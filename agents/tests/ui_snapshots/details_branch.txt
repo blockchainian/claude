@@ -1,9 +1,8 @@
 Prompt
 PR task
 
-Project · main
+Project                             main
 /tmp/project
 
-Model
-Unknown
+Model                            Unknown
 

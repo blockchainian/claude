@@ -317,7 +317,7 @@ fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
 }
 
 #[test]
-fn details_model_section_keeps_controls_on_the_value_row() {
+fn details_model_section_keeps_controls_on_the_header_row() {
     let (_directory, mut view) = fixture();
     view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
@@ -347,15 +347,17 @@ fn details_model_section_keeps_controls_on_the_value_row() {
             .map(|x| buffer[(x, y)].symbol())
             .collect::<String>()
     };
-    assert_eq!(text(model.x, model.y - 1, 5), "Model");
-    for x in model.x..model.x + 5 {
+    let details = view.viewport.borrow().details;
+    assert_eq!(text(details.x, model.y, 5), "Model");
+    for x in details.x..details.x + 5 {
         assert!(
-            buffer[(x, model.y - 1)]
+            buffer[(x, model.y)]
                 .modifier
                 .contains(ratatui::style::Modifier::DIM)
         );
     }
     assert_eq!(text(model.x, model.y, model.width), model_name);
+    assert_eq!(effort.right(), details.right());
     assert_eq!(effort.y, model.y);
     assert_eq!(effort.x, model.right() + 3);
     assert_eq!(text(model.right(), model.y, 3), " · ");

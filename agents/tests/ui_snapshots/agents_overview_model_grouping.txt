@@ -7,8 +7,8 @@
  model-a  2                                                  │ Project
    ○ Recent task                      Ready           2s ago │ /tmp/project
    ○ Older task                       Ready           4s ago │
-                                                             │ Model
- model-b  1                                                  │ Unknown
+                                                             │ Model                        Unknown
+ model-b  1                                                  │
    ○ Other model                      Ready           3s ago │
                                                              │
                                                              │

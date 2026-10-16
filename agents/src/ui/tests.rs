@@ -1737,8 +1737,8 @@ fn details_include_attention_and_clip_messages() {
     let area = Rect::new(0, 0, 38, 22);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
-    assert_eq!(buf[(0, 19)].symbol(), "M");
-    assert_eq!(buf[(0, 20)].symbol(), "c");
+    assert_eq!(buf[(0, 20)].symbol(), "M");
+    assert_eq!(buf[(20, 20)].symbol(), "c");
     assert_eq!(buf[(0, 21)].symbol(), " ");
 }
 
@@ -2179,7 +2179,7 @@ fn details_branch_and_pull_request_use_session_title_color() {
         })
         .expect("Project header");
     for (offset, symbol) in "main".chars().enumerate() {
-        let cell = &buf[(19 + offset as u16, project_y)];
+        let cell = &buf[(29 + offset as u16, project_y)];
         assert_eq!(cell.symbol(), symbol.to_string());
         assert_eq!(cell.fg, color);
     }
@@ -2250,7 +2250,7 @@ fn details_branch_pull_request_snapshot() {
             .collect::<Vec<_>>();
         assert_eq!(
             link_cells,
-            if width >= 21 {
+            if width >= 19 {
                 vec![usize::from(width) - 4]
             } else {
                 vec![]
@@ -2431,21 +2431,21 @@ fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
             Some(now - Duration::seconds(45)),
             None,
             1,
-            "Prompt     ·     1 message     ·     45s",
+            "Prompt                   1 message · 45s",
         ),
         (
             SessionStatus::Ready,
             Some(now),
             Some(now - Duration::seconds(1)),
             0,
-            "Prompt     ·     0 messages     ·     0s",
+            "Prompt                   0 messages · 0s",
         ),
         (
             SessionStatus::Working,
             Some(now + Duration::seconds(1)),
             None,
             0,
-            "Prompt     ·     0 messages     ·     0s",
+            "Prompt                   0 messages · 0s",
         ),
         (SessionStatus::Ready, None, Some(now), 0, "Prompt"),
     ] {
@@ -2747,8 +2747,8 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     }
     buf.reset();
     view.render_details(area, &mut buf, now);
-    assert_eq!(line(&buf, 3), "Model");
-    assert_eq!(line(&buf, 4), "Unknown");
+    assert_eq!(line(&buf, 3), "");
+    assert_eq!(line(&buf, 4), "Model                            Unknown");
     assert_eq!(line(&buf, 5), "");
 }
 
@@ -2822,7 +2822,7 @@ fn details_background_boxes_tail_and_clip_output() {
     assert!(clipped.starts_with("Background\n…\n"), "{clipped}");
     assert!(clipped.contains("Last message"));
     assert!(clipped.contains("Project"));
-    assert!(clipped.ends_with("Model\nUnknown"));
+    assert!(clipped.ends_with("Model                            Unknown"));
     assert!(!clipped.contains("xxxxxxxx"));
 }
 
@@ -3821,6 +3821,53 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
 }
 
 #[test]
+fn non_current_log_time_matches_unselected_task_and_details_times() {
+    let (mut view, now) = log_fixture();
+    view.log.truncate(5);
+    let mut other = view.rows[0].clone();
+    other.id = session_key("other");
+    other.title = "Other task".into();
+    other.updated_at = now - Duration::minutes(1);
+    let current = view.rows[0].clone();
+    view.set_sessions(vec![current, other], false);
+
+    let area = Rect::new(0, 0, 100, 25);
+    let mut tasks = Buffer::empty(area);
+    view.render_center_rows(area, &mut tasks, now);
+    let task_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| tasks[(x, y)].symbol())
+                .collect::<String>()
+                .contains("Other task")
+        })
+        .expect("unselected task row");
+    let task_time = &tasks[(99, task_y)];
+    assert_ne!(task_time.symbol(), " ");
+    assert!(task_time.modifier.contains(ratatui::style::Modifier::DIM));
+
+    let mut log = Buffer::empty(area);
+    view.render_at(area, &mut log, now);
+    assert_ne!(log[(98, 19)].symbol(), " ");
+    assert_eq!(log[(98, 19)].style(), task_time.style());
+
+    view.rows[view.selected].last_message = Some("Reply".into());
+    view.rows[view.selected].last_message_at = Some(now - Duration::minutes(1));
+    let mut details = Buffer::empty(area);
+    view.render_details(area, &mut details, now);
+    let details_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| details[(x, y)].symbol())
+                .collect::<String>()
+                .contains("Last message")
+        })
+        .expect("last message header");
+    assert_ne!(details[(99, details_y)].symbol(), " ");
+    assert_eq!(details[(99, details_y)].style(), task_time.style());
+}
+
+#[test]
 fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     use crate::log::Kind;
     use ratatui::style::Modifier;
@@ -3849,7 +3896,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     }
     for y in 16..20 {
         assert_eq!(buf[(98, y)].fg, Color::Reset, "time row {y}");
-        assert!(buf[(98, y)].modifier.is_empty(), "time row {y}");
+        assert_eq!(buf[(98, y)].modifier, Modifier::DIM, "time row {y}");
     }
     for (kind, colour) in [
         (Kind::User, Color::Reset),
@@ -3872,9 +3919,9 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         view.render_at(area, &mut buf, now);
         let time = &buf[(98, 19)];
         let time_style = super::style::log_time_style(&kind, false);
-        assert_eq!(time_style, Style::default());
+        assert_eq!(time_style, super::style::time_style());
         assert_eq!(time.fg, Color::Reset);
-        assert!(time.modifier.is_empty());
+        assert_eq!(time.modifier, Modifier::DIM);
         view.log.last_mut().unwrap().kind = kind;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
@@ -3902,11 +3949,7 @@ fn task_log_preserves_time_when_truncated() {
     view.render_at(area, &mut buf, now);
     assert_eq!(buf[(88, 16)].symbol(), "…");
     assert_eq!(buf[(98, 16)].fg, Color::Reset);
-    assert!(
-        !buf[(98, 16)]
-            .modifier
-            .intersects(Modifier::DIM | Modifier::BOLD)
-    );
+    assert_eq!(buf[(98, 16)].modifier, Modifier::DIM);
     for kind in [
         Kind::User,
         Kind::Assistant,
@@ -4145,10 +4188,10 @@ mod details_budget {
                 .any(|line| line.starts_with("─") && line.contains("Check 3")),
             "{rows:?}"
         );
-        assert!(!rows.iter().any(|line| line.contains("Check 4")));
+        assert!(!rows.iter().any(|line| line.contains("Check 5")));
         assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
         assert!(rows.iter().any(|line| line == "Prompt text…"));
-        assert!(rows[21] == "Model" && rows[22] == "Unknown");
+        assert!(rows[22] == format!("Model{}Unknown", " ".repeat(108)));
         assert!(rows[23].is_empty());
     }
 
@@ -4207,7 +4250,7 @@ mod details_budget {
         for header in ["Prompt", "Last message", "Needs attention"] {
             assert!(rest.iter().any(|line| line == header), "{header}: {rest:?}");
         }
-        assert!(rest[21] == "Model" && rest[22] == "Unknown");
+        assert!(rest[22] == format!("Model{}Unknown", " ".repeat(108)));
         assert!(rest[23].is_empty());
         let prompt = rest.iter().position(|line| line == "Prompt").unwrap();
         let project = rest.iter().position(|line| line == "Project").unwrap();
@@ -7357,5 +7400,5 @@ mod click_log_tests;
 #[path = "prompt_view_tests.rs"]
 mod prompt_view_tests;
 
-#[path = "justified_header_tests.rs"]
-mod justified_header_tests;
+#[path = "details_group_tests.rs"]
+mod details_group_tests;

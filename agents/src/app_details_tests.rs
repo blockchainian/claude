@@ -118,25 +118,21 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                 let group_start = right - group.chars().count() as u16;
                 assert!(group_start > left + label.len() as u16);
                 if let Some(middle) = middle {
-                    let gap =
-                        (usize::from(right - left) - label.len() - middle.len() - group.len()) / 2;
-                    let middle_start = left + (label.len() + gap) as u16;
+                    let middle_start = group_start - middle.len() as u16 - 3;
                     assert_eq!(
-                        row_text(buffer, y, middle_start, middle_start + middle.len() as u16),
-                        middle
+                        row_text(buffer, y, middle_start, group_start),
+                        format!("{middle} · ")
                     );
-                    let gaps = [
-                        (left + label.len() as u16, middle_start),
-                        (middle_start + middle.len() as u16, group_start),
-                    ];
-                    assert!((gaps[1].1 - gaps[1].0) - (gaps[0].1 - gaps[0].0) <= 1);
-                    for (start, end) in gaps {
-                        let dot = start + (end - start - 1) / 2;
-                        for x in start..end {
-                            assert_eq!(cell_text(buffer, x, y), if x == dot { "·" } else { " " });
-                        }
-                        assert!(buffer[(dot, y)].modifier.contains(Modifier::DIM));
-                    }
+                    assert!(
+                        row_text(buffer, y, left + label.len() as u16, middle_start)
+                            .chars()
+                            .all(|c| c == ' ')
+                    );
+                    assert!(
+                        buffer[(group_start - 2, y)]
+                            .modifier
+                            .contains(Modifier::DIM)
+                    );
                 } else {
                     assert!(
                         row_text(buffer, y, left + label.len() as u16, group_start)

@@ -11,7 +11,7 @@ fn visible(cell: &ratatui::buffer::Cell) -> &str {
 }
 
 #[test]
-fn three_parts_and_dots_fill_the_content_width() {
+fn details_groups_are_right_aligned() {
     let now = Utc::now();
     for width in 32..=61 {
         let mut row = session("header", "Header task", SessionStatus::Working, 0);
@@ -22,6 +22,7 @@ fn three_parts_and_dots_fill_the_content_width() {
         });
         row.prompt_at = Some(now - Duration::seconds(64));
         row.turn_messages = 10;
+        row.effort = Some("high".into());
         let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
         let area = Rect::new(5, 3, width, 24);
@@ -30,6 +31,7 @@ fn three_parts_and_dots_fill_the_content_width() {
         for parts in [
             ["Project", "agents-panel", "#13"],
             ["Prompt", "10 messages", "1m 4s"],
+            ["Model", "Unknown", "high"],
         ] {
             let y = (area.y..area.bottom())
                 .find(|&y| {
@@ -42,8 +44,7 @@ fn three_parts_and_dots_fill_the_content_width() {
             let text = (area.x..area.right())
                 .map(|x| visible(&buf[(x, y)]))
                 .collect::<String>();
-            let gap = (usize::from(width) - parts.iter().map(|part| part.len()).sum::<usize>()) / 2;
-            let middle = parts[0].len() + gap;
+            let middle = usize::from(width) - parts[1].len() - 3 - parts[2].len();
             let right = usize::from(width) - parts[2].len();
             assert_eq!(
                 text.find(parts[1])
@@ -62,10 +63,7 @@ fn three_parts_and_dots_fill_the_content_width() {
                 .enumerate()
                 .filter_map(|(x, c)| (c == '·').then_some(x))
                 .collect::<Vec<_>>();
-            let expected = [
-                parts[0].len() + (gap - 1) / 2,
-                middle + parts[1].len() + (right - middle - parts[1].len() - 1) / 2,
-            ];
+            let expected = [middle + parts[1].len() + 1];
             assert_eq!(dots, expected, "{text}");
             for x in dots {
                 assert!(
@@ -100,7 +98,7 @@ fn three_parts_and_dots_fill_the_content_width() {
 }
 
 #[test]
-fn narrow_three_part_headers_use_compact_truncation() {
+fn narrow_details_groups_preserve_labels() {
     let now = Utc::now();
     let mut row = session("header", "Header task", SessionStatus::Working, 0);
     row.git_branch = Some("agents-panel".into());
@@ -110,6 +108,7 @@ fn narrow_three_part_headers_use_compact_truncation() {
     });
     row.prompt_at = Some(now - Duration::seconds(64));
     row.turn_messages = 10;
+    row.effort = Some("high".into());
     let mut view = test_view(Grouping::Project, true);
     view.set_sessions(vec![row], false);
     for width in 1..29 {
@@ -117,23 +116,30 @@ fn narrow_three_part_headers_use_compact_truncation() {
         let mut buf = Buffer::empty(area);
         view.render_details(area, &mut buf, now);
         if width >= 7 {
-            for text in [
-                "Project · agents-panel · #13",
-                "Prompt · 10 messages · 1m 4s",
+            for (label, group) in [
+                ("Project", "agents-panel · #13"),
+                ("Prompt", "10 messages · 1m 4s"),
+                ("Model", "Unknown · high"),
             ] {
-                let expected =
-                    super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(
-                        ratatui::text::Line::from(text),
-                        usize::from(width),
-                    )
-                    .to_string();
+                let available = usize::from(width).saturating_sub(label.len() + 1);
+                let group = if available == 0 {
+                    String::new()
+                } else if group.chars().count() > available {
+                    group.chars().take(available - 1).collect::<String>() + "…"
+                } else {
+                    group.to_owned()
+                };
+                let expected = format!(
+                    "{label}{}{group}",
+                    " ".repeat(usize::from(width) - label.len() - group.chars().count())
+                );
                 assert!(
                     buf.content.chunks(usize::from(width)).any(|row| row
                         .iter()
                         .map(visible)
                         .collect::<String>()
                         .trim_end()
-                        == expected),
+                        == expected.trim_end()),
                     "{width}: {expected}"
                 );
             }

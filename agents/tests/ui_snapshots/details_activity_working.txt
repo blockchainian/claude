@@ -1,11 +1,10 @@
 Latest activity                   7s ago
 Run checks
 
-Prompt   ·    42 messages    ·    1h 10m
+Prompt              42 messages · 1h 10m
 Activity task
 
 Project
 /tmp/project
 
-Model
-Unknown
+Model                            Unknown

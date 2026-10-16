@@ -103,6 +103,14 @@ fn terminal_layout_tracks_width() {
             !lines[32].trim().is_empty(),
             "blank row below log rule: {capture}"
         );
+        let model = lines
+            .iter()
+            .find(|line| line.contains("Model"))
+            .expect("Model header");
+        assert!(
+            model.contains("claude-opus-5-5 · medium"),
+            "model group missing: {capture}"
+        );
         if width >= 150 {
             assert_eq!(separators[1], width as usize - width as usize / 3 - 3);
             for line in &lines[3..29] {
