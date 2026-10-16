@@ -33,9 +33,9 @@ fn details_section_order_preserves_clicks_and_copies() {
             .collect::<Vec<_>>()
             .join("\n");
         let label = if activity {
-            "Latest activity"
+            "Activity"
         } else {
-            "Latest message"
+            "Message"
         };
         let sections = [
             "Background",
@@ -63,9 +63,9 @@ fn details_section_order_preserves_clicks_and_copies() {
                     "Moved reply"
                 },
                 if activity {
-                    "Copied latest activity"
+                    "Copied activity"
                 } else {
-                    "Copied latest message"
+                    "Copied message"
                 },
             ),
         ] {

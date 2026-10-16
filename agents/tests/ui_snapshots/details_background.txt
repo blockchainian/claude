@@ -6,7 +6,7 @@ Background
 Prompt
 Background task
 
-Latest message
+Message
 Checking the project
 
 Project

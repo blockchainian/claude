@@ -1,10 +1,10 @@
 Prompt              42 messages · 10m 5s
 Activity task
 
-Latest activity                   7s ago
+Activity                          7s ago
 Run checks
 
-Latest message                    1h ago
+Message                           1h ago
 Checking the project
 
 Project

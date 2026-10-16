@@ -100,9 +100,9 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
             for (label, middle, group) in [
                 (
                     if activity {
-                        "Latest activity"
+                        "Activity"
                     } else {
-                        "Latest message"
+                        "Message"
                     },
                     None,
                     if activity { "1m ago" } else { "2m ago" },

@@ -622,7 +622,7 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: background, prompt, latest activity, latest message,
+        // Sections top to bottom: background, prompt, activity, message,
         // needs attention, project, branch, model. The title
         // sits on the rule below the panel.
         let content_top = area.y;
@@ -748,7 +748,7 @@ impl View {
             let start = items.len() + 1;
             items.extend([
                 left_right(
-                    "Latest activity".dim().into(),
+                    "Activity".dim().into(),
                     Span::styled(
                         format_relative_time(now, Some(activity.at)),
                         style::time_style(),
@@ -765,8 +765,8 @@ impl View {
                 .into(),
             ]);
             bodies.push(start..items.len());
-            keys.push(body_key("Latest activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
+            keys.push(body_key("Activity", &activity.label));
+            copies.push(Some((activity.label.as_str(), "Copied activity")));
             body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }
         if let Some(message) = session.last_message.as_ref() {
@@ -777,7 +777,7 @@ impl View {
             }
             separate_section(&mut items);
             items.push(
-                left_right("Latest message".dim().into(), header, width)
+                left_right("Message".dim().into(), header, width)
                     .0
                     .into(),
             );
@@ -795,8 +795,8 @@ impl View {
                     .map(Item::from),
             );
             bodies.push(start..items.len());
-            keys.push(body_key("Latest message", message));
-            copies.push(Some((message.as_str(), "Copied latest message")));
+            keys.push(body_key("Message", message));
+            copies.push(Some((message.as_str(), "Copied message")));
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
@@ -932,7 +932,7 @@ impl View {
                     _ => unreachable!("copyable bodies contain text rows"),
                 })
                 .collect::<Vec<_>>();
-            let markdown = *label != "Copied latest activity";
+            let markdown = *label != "Copied activity";
             let maps = super::text_selection_layout::map_lines(source, &lines, markdown);
             for (index, cells) in body.clone().zip(maps) {
                 item_links[index] = super::links::row_links(&cells, &body_links[id]);
@@ -1513,7 +1513,7 @@ mod wrapped_path_tests {
                 .count(),
             2
         );
-        assert!(rows.iter().any(|row| row.contains("Latest message")));
+        assert!(rows.iter().any(|row| row.contains("Message")));
         assert!(!rows.iter().any(|row| row.contains("/private/")));
     }
 

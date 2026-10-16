@@ -82,6 +82,18 @@ fn terminal_layout_tracks_width() {
         println!("{width} columns:\n{capture}");
         let lines: Vec<_> = capture.lines().collect();
         assert!(
+            capture.contains("Message"),
+            "message header missing: {capture}"
+        );
+        assert!(
+            !capture.contains("Latest activity"),
+            "stale activity header: {capture}"
+        );
+        assert!(
+            !capture.contains("Latest message"),
+            "stale message header: {capture}"
+        );
+        assert!(
             capture.contains("4165651d") || capture.contains("Stop hook"),
             "fixture not selected: {capture}"
         );
