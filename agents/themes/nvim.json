@@ -1,0 +1,7372 @@
+{
+ "comment.block.documentation": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "comment.block.documentation.js": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "comment.block.documentation.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "comment.line.documentation": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "comment.line.documentation.rust": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "comment.line.double-slash": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "comment.line.double-slash.js": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "comment.line.double-slash.rust": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "comment.line.number-sign": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "comment.line.number-sign.python": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "comment.line.number-sign.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "constant.character.escape": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "constant.character.escape.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "constant.language": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.language.boolean.true": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.language.boolean.true.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.language.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.language.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.language.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.language.undefined": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "constant.language.undefined.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "constant.numeric.float.decimal": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.numeric.float.decimal.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.numeric.float.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.numeric.integer.decimal": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.numeric.integer.decimal.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.numeric.integer.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.numeric.integer.decimal.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.numeric.integer.hexadecimal": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.numeric.integer.hexadecimal.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "constant.other": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "constant.other.character-class.escape.backslash.regexp": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "constant.other.placeholder": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "constant.other.placeholder.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "constant.other.placeholder.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "constant.other.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "entity.name.enum": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "entity.name.enum.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "entity.name.function": {
+  "dark": [
+   24,
+   "bold italic"
+  ],
+  "light": [
+   18,
+   "bold italic"
+  ]
+ },
+ "entity.name.function.js": {
+  "dark": [
+   24,
+   "bold italic"
+  ],
+  "light": [
+   18,
+   "bold italic"
+  ]
+ },
+ "entity.name.function.rust": {
+  "dark": [
+   24,
+   "bold italic"
+  ],
+  "light": [
+   18,
+   "bold italic"
+  ]
+ },
+ "entity.name.impl": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "entity.name.impl.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "entity.name.module": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "entity.name.module.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "entity.name.section": {
+  "dark": [
+   24,
+   "bold"
+  ],
+  "light": [
+   18,
+   "bold"
+  ]
+ },
+ "entity.name.section.markdown": {
+  "dark": [
+   24,
+   "bold"
+  ],
+  "light": [
+   18,
+   "bold"
+  ]
+ },
+ "entity.name.struct": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "entity.name.struct.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "keyword.control": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.anchor.regexp": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.else": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.else.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.else.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.end": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.end.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.if": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.if.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.if.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.if.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.then": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.conditional.then.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.exception.catch": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.exception.catch.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.exception.try": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.exception.try.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.await": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.await.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.break": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.break.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.break.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.continue": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.continue.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.return": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.return.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.return.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.throw": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.throw.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.with": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.with.as": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.with.as.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.flow.with.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.import": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.import-export": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.import-export.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.import.from": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.import.from.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.import.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.for": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.for.generator": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.for.generator.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.for.in": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.for.in.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.for.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.for.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.while": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.while.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.loop.while.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.control.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.declaration.function": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.declaration.function.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.arithmetic": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.arithmetic.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.arithmetic.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.assignment": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.assignment.augmented": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.assignment.augmented.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.assignment.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.assignment.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.assignment.redirection": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.assignment.redirection.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.assignment.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.bitwise": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.bitwise.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.comparison": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.comparison.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.comparison.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.comparison.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.logical": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.logical.continue": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.logical.continue.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.logical.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.logical.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.logical.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.logical.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.quantifier.regexp": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.range": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.range.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.relational": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.relational.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.unpacking.sequence": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.unpacking.sequence.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.word": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.word.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.word.new": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.operator.word.new.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "keyword.other": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "keyword.other.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "markup.bold": {
+  "dark": [
+   30,
+   ""
+  ],
+  "light": [
+   235,
+   ""
+  ]
+ },
+ "markup.bold.markdown": {
+  "dark": [
+   30,
+   ""
+  ],
+  "light": [
+   235,
+   ""
+  ]
+ },
+ "markup.quote": {
+  "dark": [
+   24,
+   ""
+  ],
+  "light": [
+   18,
+   ""
+  ]
+ },
+ "markup.quote.markdown": {
+  "dark": [
+   24,
+   ""
+  ],
+  "light": [
+   18,
+   ""
+  ]
+ },
+ "markup.raw.inline": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "markup.raw.inline.markdown": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.annotation.parameters.rust meta.group.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.annotation.rust keyword.operator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.annotation.rust punctuation.definition.annotation.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.annotation.rust punctuation.section.group.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.annotation.rust punctuation.section.group.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.annotation.rust string.quoted.double.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.annotation.rust variable.annotation.rust": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.binding.destructuring.mapping.js keyword.operator.assignment.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.binding.destructuring.mapping.js punctuation.accessor.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.binding.destructuring.mapping.js punctuation.section.block.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.binding.destructuring.mapping.js punctuation.section.block.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.binding.destructuring.mapping.js punctuation.separator.parameter.function.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.binding.destructuring.mapping.js support.constant.node.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.binding.name.js variable.other.readwrite.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.binding.name.js variable.parameter.function.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block-level.markdown markup.quote.markdown": {
+  "dark": [
+   24,
+   ""
+  ],
+  "light": [
+   18,
+   ""
+  ]
+ },
+ "meta.block.js comment.line.double-slash.js": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "meta.block.js constant.language.undefined.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js keyword.control.flow.await.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js keyword.control.flow.break.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js keyword.control.flow.return.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js keyword.control.flow.throw.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js keyword.operator.assignment.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js keyword.operator.logical.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js keyword.operator.word.new.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js meta.property.object.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js punctuation.accessor.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js punctuation.section.block.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js punctuation.section.block.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js punctuation.terminator.statement.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js storage.type.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.js variable.other.readwrite.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust comment.line.documentation.rust": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "meta.block.rust comment.line.double-slash.rust": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "meta.block.rust constant.language.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.block.rust constant.numeric.integer.decimal.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.block.rust constant.other.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.block.rust entity.name.function.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust keyword.control.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust keyword.operator.arithmetic.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust keyword.operator.assignment.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust keyword.operator.bitwise.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust keyword.operator.comparison.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust keyword.operator.logical.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust keyword.operator.range.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust keyword.operator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust keyword.other.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.block.rust meta.block.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust meta.function.closure.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust meta.generic.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.block.rust meta.group.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust meta.path.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.block.rust punctuation.accessor.dot.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust punctuation.section.block.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust punctuation.section.block.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust punctuation.separator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust punctuation.separator.type.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust punctuation.terminator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust storage.modifier.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust storage.type.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust string.quoted.double.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.block.rust support.function.rust": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.block.rust support.macro.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.block.rust support.type.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.block.rust variable.language.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.block.rust variable.other.member.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.brackets.js constant.numeric.integer.decimal.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.brackets.js punctuation.section.brackets.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.brackets.js punctuation.section.brackets.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.brackets.js variable.other.readwrite.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.catch.js keyword.control.exception.catch.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.conditional.js keyword.control.conditional.else.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.conditional.js keyword.control.conditional.if.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.enum.rust entity.name.enum.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.enum.rust meta.block.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.enum.rust storage.type.enum.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.export.js keyword.control.import-export.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.expression.generator.python keyword.control.loop.for.generator.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.expression.generator.python keyword.control.loop.for.in.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.expression.generator.python meta.generic-name.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.expression.generator.python punctuation.separator.target-list.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.for.js keyword.control.loop.for.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.python constant.numeric.float.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.python constant.numeric.integer.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.python keyword.operator.arithmetic.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.python keyword.operator.comparison.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.python keyword.operator.unpacking.sequence.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.python punctuation.section.arguments.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.python punctuation.section.arguments.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.python punctuation.separator.arguments.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.python storage.type.string.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.function-call.arguments.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.shell keyword.operator.assignment.redirection.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.arguments.shell string.quoted.double.shell": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.function-call.arguments.shell variable.parameter.option.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.constructor.js support.class.builtin.js": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.function-call.js support.class.builtin.js": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.function-call.js support.function.node.js": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function-call.js variable.function.js": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.function-call.method.js punctuation.accessor.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.method.js support.constant.builtin.js": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.function-call.method.js support.function.builtin.js": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.function-call.method.js variable.function.js": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.function-call.method.js variable.other.readwrite.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function-call.shell support.function.command.shell": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function-call.shell support.function.echo.shell": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function-call.shell support.function.exit.shell": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function-call.shell support.function.set.shell": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function-call.shell variable.function.shell": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.function.closure": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.closure.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.closure.rust constant.other.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.closure.rust keyword.operator.bitwise.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.closure.rust keyword.operator.comparison.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.closure.rust meta.block.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.closure.rust meta.function.parameters.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.closure.rust meta.group.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.closure.rust meta.path.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.closure.rust punctuation.accessor.dot.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.closure.rust support.function.rust": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.function.closure.rust support.macro.rust": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.function.closure.rust variable.language.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.declaration.js entity.name.function.js": {
+  "dark": [
+   24,
+   "bold italic"
+  ],
+  "light": [
+   18,
+   "bold italic"
+  ]
+ },
+ "meta.function.declaration.js keyword.operator.assignment.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.declaration.js punctuation.accessor.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.declaration.js punctuation.section.group.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.declaration.js punctuation.section.group.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.declaration.js punctuation.separator.parameter.function.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.declaration.js storage.type.function.arrow.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.declaration.js storage.type.function.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.declaration.js storage.type.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.declaration.js support.constant.node.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.parameters.python punctuation.section.parameters.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.python punctuation.section.parameters.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.python punctuation.separator.parameters.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.python variable.parameter.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.parameters.rust keyword.operator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.rust meta.generic.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.parameters.rust meta.group.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.rust meta.path.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.parameters.rust punctuation.section.parameters.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.rust punctuation.section.parameters.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.rust punctuation.separator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.rust storage.modifier.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.rust storage.type.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.parameters.rust variable.parameter.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.python punctuation.section.function.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.return-type": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.return-type.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.return-type.rust keyword.operator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.return-type.rust meta.generic.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.return-type.rust meta.path.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.return-type.rust punctuation.section.group.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.return-type.rust punctuation.section.group.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.return-type.rust punctuation.separator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.return-type.rust storage.modifier.lifetime.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.return-type.rust storage.type.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.rust entity.name.function.rust": {
+  "dark": [
+   24,
+   "bold italic"
+  ],
+  "light": [
+   18,
+   "bold italic"
+  ]
+ },
+ "meta.function.rust meta.block.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.rust meta.function.parameters.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.rust meta.function.return-type.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.function.rust storage.modifier.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.function.rust storage.type.function.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.generic-name": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic-name.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.generic.rust keyword.operator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic.rust meta.generic.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.generic.rust meta.path.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.generic.rust punctuation.definition.generic.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic.rust punctuation.definition.generic.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic.rust punctuation.section.group.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic.rust punctuation.section.group.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic.rust storage.modifier.lifetime.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic.rust storage.type.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.generic.rust support.type.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.group": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js constant.numeric.float.decimal.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.group.js constant.numeric.integer.decimal.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.group.js keyword.control.flow.await.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js keyword.operator.comparison.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js keyword.operator.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js keyword.operator.logical.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js keyword.operator.relational.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js keyword.operator.word.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js meta.property.object.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js punctuation.accessor.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js punctuation.section.group.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js punctuation.section.group.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js punctuation.section.group.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js punctuation.separator.comma.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js storage.type.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.js variable.other.readwrite.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.python constant.numeric.float.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.group.python constant.numeric.integer.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.group.python keyword.operator.arithmetic.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.python punctuation.section.group.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.python punctuation.section.group.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.python punctuation.separator.tuple.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.python storage.type.string.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.group.regexp constant.other.character-class.escape.backslash.regexp": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.regexp keyword.operator.quantifier.regexp": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.regexp punctuation.definition.group.begin.regexp": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.regexp punctuation.definition.group.end.regexp": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust constant.language.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.group.rust constant.numeric.integer.decimal.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.group.rust constant.numeric.integer.hexadecimal.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.group.rust constant.other.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.group.rust keyword.control.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust keyword.operator.arithmetic.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust keyword.operator.bitwise.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust keyword.operator.comparison.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust keyword.operator.logical.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust keyword.operator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust keyword.other.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.group.rust meta.block.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust meta.function.closure.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust meta.generic.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.group.rust meta.group.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust meta.path.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.group.rust punctuation.accessor.dot.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust punctuation.section.group.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust punctuation.section.group.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust punctuation.separator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust storage.modifier.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust storage.type.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.group.rust string.quoted.double.raw.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.group.rust string.quoted.double.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.group.rust string.quoted.single.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.group.rust support.function.rust": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.group.rust support.macro.rust": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.group.rust support.type.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.group.rust variable.language.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.group.rust variable.parameter.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.impl": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.impl.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.impl.rust entity.name.impl.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.impl.rust keyword.other.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.impl.rust meta.path.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.impl.rust storage.type.impl.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.import-name": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.import-name.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.import-path.python meta.import-name.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.import.js keyword.control.import-export.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.import.js punctuation.terminator.statement.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.import.js variable.other.readwrite.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.interpolation.js punctuation.section.interpolation.begin.js": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.interpolation.js punctuation.section.interpolation.end.js": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.interpolation.js variable.other.readwrite.js": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.interpolation.python punctuation.section.interpolation.begin.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.interpolation.python punctuation.section.interpolation.end.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.item-access.arguments.python constant.numeric.integer.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.item-access.arguments.python keyword.operator.arithmetic.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.item-access.arguments.python punctuation.separator.slice.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.item-access.python punctuation.section.brackets.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.item-access.python punctuation.section.brackets.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.js comment.line.double-slash.js": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "meta.mapping.js constant.language.boolean.true.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.mapping.js meta.mapping.key.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.js meta.property.object.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.js punctuation.accessor.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.js punctuation.section.block.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.js punctuation.section.block.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.js punctuation.separator.comma.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.js punctuation.separator.key-value.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.js variable.other.readwrite.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.json punctuation.section.mapping.begin.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.json punctuation.separator.mapping.key-value.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.key": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.key.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.key.json string.quoted.double.json": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   240,
+   ""
+  ]
+ },
+ "meta.mapping.python keyword.control.conditional.if.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.python keyword.operator.logical.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.python punctuation.section.mapping.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.python punctuation.section.mapping.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.python punctuation.separator.mapping.key-value.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.python punctuation.separator.mapping.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.value.json constant.language.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.mapping.value.json punctuation.section.mapping.end.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.value.json punctuation.separator.mapping.key-value.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.value.json punctuation.separator.mapping.pair.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.value.json string.quoted.double.json": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.mapping.value.python constant.numeric.integer.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.mapping.value.python keyword.control.conditional.else.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.mapping.value.python keyword.control.conditional.if.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.module.rust entity.name.module.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.module.rust punctuation.terminator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.module.rust storage.type.module.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.paragraph": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.paragraph.list": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.paragraph.list.markdown": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.paragraph.list.markdown markup.bold.markdown": {
+  "dark": [
+   30,
+   ""
+  ],
+  "light": [
+   235,
+   ""
+  ]
+ },
+ "meta.paragraph.list.markdown markup.raw.inline.markdown": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.paragraph.markdown": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.paragraph.markdown markup.raw.inline.markdown": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "meta.path": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.path.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.path.rust keyword.other.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.path.rust punctuation.accessor.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.property.object": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.property.object.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.qualified-name.python meta.generic-name.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.qualified-name.python punctuation.accessor.dot.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.qualified-name.python support.type.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.qualified-name.python support.variable.magic.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.qualified-name.python variable.other.constant.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.sequence.js punctuation.section.brackets.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.js punctuation.section.brackets.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.js punctuation.separator.comma.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.list.python keyword.control.conditional.if.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.list.python keyword.operator.comparison.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.list.python keyword.operator.logical.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.list.python punctuation.section.sequence.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.list.python punctuation.section.sequence.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.list.python punctuation.separator.sequence.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.tuple.python constant.numeric.float.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.sequence.tuple.python constant.numeric.integer.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.sequence.tuple.python punctuation.section.sequence.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.tuple.python punctuation.section.sequence.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.sequence.tuple.python punctuation.separator.sequence.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.conditional.if.python constant.numeric.float.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.statement.conditional.if.python keyword.control.conditional.else.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.conditional.if.python keyword.control.conditional.if.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.conditional.if.python keyword.operator.arithmetic.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.conditional.if.python keyword.operator.comparison.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.conditional.if.python keyword.operator.logical.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.conditional.if.python punctuation.section.block.conditional.if.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.import.python keyword.control.import.from.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.import.python keyword.control.import.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.import.python meta.generic-name.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.statement.loop.for.python keyword.control.loop.for.in.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.loop.for.python keyword.control.loop.for.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.loop.for.python meta.generic-name.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.loop.for.python punctuation.section.block.loop.for.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.loop.while.python constant.language.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "meta.statement.loop.while.python keyword.control.loop.while.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.loop.while.python punctuation.section.block.loop.while.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.with.python keyword.control.flow.with.as.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.with.python keyword.control.flow.with.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.with.python meta.generic-name.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.statement.with.python punctuation.section.block.with.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.string.interpolated.python string.quoted.double.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.string.js string.quoted.double.js": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.string.js string.quoted.other.js": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.string.js string.quoted.single.js": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.string.python string.quoted.double.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "meta.struct.rust entity.name.struct.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.struct.rust meta.block.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "meta.struct.rust storage.modifier.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.struct.rust storage.type.struct.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.try.js keyword.control.exception.try.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "meta.while.js keyword.control.loop.while.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.accessor": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.accessor.dot": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.accessor.dot.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.accessor.dot.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.accessor.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.accessor.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.annotation": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.annotation.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.blockquote": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.blockquote.markdown": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.bold.begin": {
+  "dark": [
+   30,
+   ""
+  ],
+  "light": [
+   235,
+   ""
+  ]
+ },
+ "punctuation.definition.bold.begin.markdown": {
+  "dark": [
+   30,
+   ""
+  ],
+  "light": [
+   235,
+   ""
+  ]
+ },
+ "punctuation.definition.bold.end": {
+  "dark": [
+   30,
+   ""
+  ],
+  "light": [
+   235,
+   ""
+  ]
+ },
+ "punctuation.definition.bold.end.markdown": {
+  "dark": [
+   30,
+   ""
+  ],
+  "light": [
+   235,
+   ""
+  ]
+ },
+ "punctuation.definition.comment": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "punctuation.definition.comment.begin": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.comment.begin.js": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "punctuation.definition.comment.begin.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.comment.begin.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.comment.end": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.comment.end.js": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "punctuation.definition.comment.end.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.comment.js": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "punctuation.definition.comment.python": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "punctuation.definition.comment.rust": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   65,
+   ""
+  ]
+ },
+ "punctuation.definition.generic.begin": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.generic.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.generic.end": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.generic.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.group.begin.regexp": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.group.end.regexp": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.heading.begin": {
+  "dark": [
+   24,
+   "bold"
+  ],
+  "light": [
+   18,
+   "bold"
+  ]
+ },
+ "punctuation.definition.heading.begin.markdown": {
+  "dark": [
+   24,
+   "bold"
+  ],
+  "light": [
+   18,
+   "bold"
+  ]
+ },
+ "punctuation.definition.list_item": {
+  "dark": [
+   24,
+   ""
+  ],
+  "light": [
+   18,
+   ""
+  ]
+ },
+ "punctuation.definition.list_item.markdown": {
+  "dark": [
+   24,
+   ""
+  ],
+  "light": [
+   18,
+   ""
+  ]
+ },
+ "punctuation.definition.parameter": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.parameter.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.definition.raw.begin": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "punctuation.definition.raw.begin.markdown": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "punctuation.definition.raw.end": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "punctuation.definition.raw.end.markdown": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.begin": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.begin.js": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.begin.json": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   240,
+   ""
+  ]
+ },
+ "punctuation.definition.string.begin.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.begin.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.begin.shell": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.end": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.end.js": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.end.json": {
+  "dark": [
+   240,
+   ""
+  ],
+  "light": [
+   240,
+   ""
+  ]
+ },
+ "punctuation.definition.string.end.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.end.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.definition.string.end.shell": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "punctuation.section.arguments.begin": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.arguments.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.arguments.end": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.arguments.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.begin": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.conditional.if": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.conditional.if.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.end": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.loop.for": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.loop.for.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.loop.while": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.loop.while.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.with": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.block.with.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.brackets.begin": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.brackets.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.brackets.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.brackets.end": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.brackets.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.brackets.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.function.begin": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.function.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group.begin": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group.begin.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group.end": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group.end.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.group.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.interpolation.begin": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "punctuation.section.interpolation.begin.js": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "punctuation.section.interpolation.begin.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "punctuation.section.interpolation.end": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "punctuation.section.interpolation.end.js": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "punctuation.section.interpolation.end.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "punctuation.section.mapping.begin": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.mapping.begin.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.mapping.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.mapping.end": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.mapping.end.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.mapping.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.parameters.begin": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.parameters.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.parameters.begin.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.parameters.end": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.parameters.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.parameters.end.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.sequence.begin": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.sequence.begin.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.sequence.end": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.section.sequence.end.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.arguments": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.arguments.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.comma": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.comma.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.decimal": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "punctuation.separator.decimal.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "punctuation.separator.decimal.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "punctuation.separator.key-value": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.key-value.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.mapping": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.mapping.key-value": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.mapping.key-value.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.mapping.key-value.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.mapping.pair": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.mapping.pair.json": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.mapping.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.parameter.function": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.parameter.function.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.parameters": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.parameters.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.sequence": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.sequence.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.slice": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.slice.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.target-list": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.target-list.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.tuple": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.tuple.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.type": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.separator.type.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.terminator": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.terminator.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.terminator.statement": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "punctuation.terminator.statement.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.modifier": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.modifier.lifetime": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.modifier.lifetime.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.modifier.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.enum": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.enum.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.function": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.function.arrow": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.function.arrow.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.function.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.function.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.impl": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.impl.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.module": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.module.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.string": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "storage.type.string.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "storage.type.string.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "storage.type.struct": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "storage.type.struct.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "string.quoted.double": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.double.js": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.double.json": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.double.python": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.double.raw": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.double.raw.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.double.rust": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.double.shell": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.other": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.other.js": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.single": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.single.js": {
+  "dark": [
+   29,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "string.quoted.single.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "support.class.builtin": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "support.class.builtin.js": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "support.constant.builtin": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "support.constant.builtin.js": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   124,
+   "italic"
+  ]
+ },
+ "support.constant.node": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "support.constant.node.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "support.function": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "support.function.builtin": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.builtin.js": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "support.function.builtin.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.command": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.command.shell": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.echo": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.echo.shell": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.exit": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.exit.shell": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.node": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.node.js": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.rust": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "support.function.set": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.function.set.shell": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.macro": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.macro.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.type": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.type.python": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.type.rust": {
+  "dark": [
+   23,
+   "italic"
+  ],
+  "light": [
+   30,
+   "italic"
+  ]
+ },
+ "support.variable.magic": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "support.variable.magic.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.annotation": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "variable.annotation.rust": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "variable.function": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "variable.function.js": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "variable.function.shell": {
+  "dark": [
+   24,
+   "italic"
+  ],
+  "light": [
+   18,
+   "italic"
+  ]
+ },
+ "variable.language": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.language.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.other.constant": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "variable.other.constant.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   124,
+   ""
+  ]
+ },
+ "variable.other.member": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.other.member.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.other.readwrite": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.other.readwrite.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.parameter": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.parameter.function": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.parameter.function.js": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.parameter.option": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.parameter.option.shell": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.parameter.python": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ },
+ "variable.parameter.rust": {
+  "dark": [
+   23,
+   ""
+  ],
+  "light": [
+   30,
+   ""
+  ]
+ }
+}

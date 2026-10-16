@@ -5340,7 +5340,7 @@ fn task_log_open_tool_snapshot() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "cargo test");
-    assert!(matches!(buf[(x, y)].fg, Color::Rgb(..)));
+    assert!(matches!(buf[(x, y)].fg, Color::Rgb(..) | Color::Indexed(..)));
     let (x, y) = rendered_cell(&open, "running…");
     assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(
@@ -6020,7 +6020,7 @@ fn open_json_body_is_pretty_for_every_kind() {
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
         view.render_at(buf.area, &mut buf, now);
         let area = view.viewport.borrow().log_text.area;
-        assert!(matches!(buf[(area.x + 2, area.y + 1)].fg, Color::Rgb(..)));
+        assert!(matches!(buf[(area.x + 2, area.y + 1)].fg, Color::Rgb(..) | Color::Indexed(..)));
     }
 }
 
@@ -6449,7 +6449,7 @@ fn mixed_open_outputs_render_and_copy_pretty_json_with_markdown() {
                 .contains(ratatui::style::Modifier::BOLD)
         );
         let (x, y) = rendered_cell(&screen, "\"answer\"");
-        assert!(matches!(buf[(x, y)].fg, Color::Rgb(..)));
+        assert!(matches!(buf[(x, y)].fg, Color::Rgb(..) | Color::Indexed(..)));
         let viewport = view.viewport.borrow();
         let json = viewport
             .log_text

@@ -1,9 +1,11 @@
 """Builds light.tmTheme and dark.tmTheme, the syntax themes agents embeds, from GitHub's VS Code
 themes in github/ (primer/github-vscode-theme 6.3.5, built with @primer/primitives 7.10.0).
 
-Both themes color function names like the Nvim setup they sit beside: definitions bold italic and
-calls italic, in a terminal palette color. The dark theme also maps every foreground's OKLab
-lightness into DARK_LIGHTNESS, keeping hue, and draws plain text in the terminal palette's TEXT.
+Both themes then take the color and style Nvim draws for each scope from nvim.json, measured byte by
+byte with the user's Nvim colorscheme over sample files in Rust, JavaScript, Python, shell, JSON and
+Markdown; each language-suffixed scope also gives a generic scope without the suffix. Scopes Nvim
+was not measured on keep GitHub's colors, which the dark theme maps into DARK_LIGHTNESS (OKLab
+lightness, hue kept).
 
 Run: python3 build.py
 """
@@ -13,9 +15,8 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 DARK_LIGHTNESS = (0.52, 0.62)
-# Palette indexes, written as bat's alpha-0 colors: text, and function names on each background.
-DARK_TEXT = 23
-FUNCTION = {"light": 18, "dark": 24}
+# Nvim's Normal text color on each background, as a palette index.
+TEXT = {"light": 30, "dark": 23}
 
 
 def palette(index):
@@ -69,18 +70,23 @@ def foregrounds(theme):
     return [rule["settings"] for rule in theme["settings"] if len(rule["settings"].get("foreground", "")) in (7, 9)]
 
 
-def dim(theme, low, high, text):
-    """Maps foreground lightness into [low, high] and replaces the base text color with `text`.
-    Colors already darker than `low`, such as a near-background ignored-file color, stay."""
+def use_text(theme, text):
+    """Replaces the base text color with `text` in every rule that uses it."""
     base = theme["settings"][0]["settings"]["foreground"][:7].lower()
-    lights = [oklab(s["foreground"][:7])[0] for s in foregrounds(theme)]
+    for style in foregrounds(theme):
+        if style["foreground"][:7].lower() == base:
+            style["foreground"] = text
+
+
+def dim(theme, low, high):
+    """Maps RGB foreground lightness into [low, high]. Colors already darker than `low`, such as a
+    near-background ignored-file color, stay."""
+    rgb_styles = [s for s in foregrounds(theme) if len(s["foreground"]) == 7 or s["foreground"][7:].lower() == "ff"]
+    lights = [oklab(s["foreground"][:7])[0] for s in rgb_styles]
     lights = [value for value in lights if value > low]
     source_low, source_high = min(lights), max(lights)
-    for style in foregrounds(theme):
+    for style in rgb_styles:
         color = style["foreground"]
-        if color[:7].lower() == base:
-            style["foreground"] = text
-            continue
         lightness, a, b = oklab(color[:7])
         if lightness <= low:
             continue
@@ -94,18 +100,20 @@ def dim(theme, low, high, text):
         style["foreground"] = "#" + "".join("%02x" % round(max(0.0, min(1.0, gamma(max(0.0, c)))) * 255) for c in rgb) + color[7:]
 
 
-def color_functions(theme, index):
-    # `source` raises these above GitHub's own function rules.
-    theme["settings"] += [
-        {"name": "Function definition", "scope": "source entity.name.function", "settings": {"foreground": palette(index), "fontStyle": "bold italic"}},
-        {"name": "Function call", "scope": "source support.function, source meta.function-call entity.name.function", "settings": {"foreground": palette(index), "fontStyle": "italic"}},
-    ]
+def match_nvim(theme, appearance):
+    """Appends one rule per measured scope; `source` raises them above GitHub's own rules."""
+    for scope, styles in json.loads((HERE / "nvim.json").read_text()).items():
+        index, font_style = styles[appearance]
+        theme["settings"].append(
+            {"name": f"Nvim {scope}", "scope": f"source {scope}, text {scope}", "settings": {"foreground": palette(index), "fontStyle": font_style}}
+        )
 
 
 for appearance in ("light", "dark"):
     theme = tm_theme(json.loads((HERE / "github" / f"{appearance}-default.json").read_text()), appearance)
+    use_text(theme, palette(TEXT[appearance]))
     if appearance == "dark":
-        dim(theme, *DARK_LIGHTNESS, palette(DARK_TEXT))
-    color_functions(theme, FUNCTION[appearance])
+        dim(theme, *DARK_LIGHTNESS)
+    match_nvim(theme, appearance)
     with open(HERE / f"{appearance}.tmTheme", "wb") as file:
         plistlib.dump(theme, file)
