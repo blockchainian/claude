@@ -1,7 +1,6 @@
 use super::formatting::{
     format_duration, format_relative_time, format_session_duration, tail_lines,
 };
-use super::hints::hint_line;
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
 use ratatui::widgets::{Block, Borders};
@@ -306,28 +305,10 @@ impl View {
                             })
                     })
                     .count();
-                let count = if *group == [SessionStatus::Inactive] {
-                    self.inactive_total.unwrap_or(count)
-                } else {
-                    count
-                };
                 format!("{label} {count}")
             })
             .collect::<Vec<_>>();
-        let mut tabs = inset(row(layout.header, 1, 1));
-        let filter_hint = if self.searching || self.rename_target.is_some() {
-            Line::default()
-        } else {
-            hint_line(&[("tab/⇧tab", "filter")])
-        };
-        if tabs.width >= 80 && filter_hint.width() > 0 {
-            let width = filter_hint.width() as u16;
-            filter_hint.render(
-                Rect::new(tabs.right() - width, tabs.y, width, tabs.height),
-                buf,
-            );
-            tabs.width = tabs.width.saturating_sub(width + 2);
-        }
+        let tabs = inset(row(layout.header, 1, 1));
         self.viewport.borrow_mut().tab_bar = tabs;
         self.viewport.borrow_mut().tabs = super::selection_tabs::render_filled_tab_bar(
             &labels.iter().map(String::as_str).collect::<Vec<_>>(),

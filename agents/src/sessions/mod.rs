@@ -76,11 +76,9 @@ impl Hub {
 fn merge(snapshots: impl Iterator<Item = Snapshot>) -> Snapshot {
     let mut sessions = Vec::new();
     let mut has_more = false;
-    let mut inactive_total = 0;
     for snapshot in snapshots {
         sessions.extend(snapshot.sessions);
         has_more |= snapshot.has_more;
-        inactive_total += snapshot.inactive_total;
     }
     // Remove orphaned descendants too, so every retained parent remains in the snapshot.
     loop {
@@ -120,7 +118,6 @@ fn merge(snapshots: impl Iterator<Item = Snapshot>) -> Snapshot {
     Snapshot {
         sessions: parents,
         has_more,
-        inactive_total,
     }
 }
 

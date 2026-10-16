@@ -42,7 +42,13 @@ pub(crate) fn render_filled_tab_bar(
     }
     let right = area.right().saturating_sub(u16::from(show_right) * 2);
     let mut regions = Vec::new();
+    let justify = start == 0 && end == labels.len() && labels.len() > 1;
+    let spare = usize::from(area.width).saturating_sub(widths.iter().sum());
     for idx in start..end {
+        if justify {
+            x = area.x
+                + (widths[..idx].iter().sum::<usize>() + spare * idx / (labels.len() - 1)) as u16;
+        }
         let width = widths[idx].min(usize::from(right.saturating_sub(x))) as u16;
         let line = Line::from(format!(" {} ", labels[idx]));
         let line = truncate_line_with_ellipsis_if_overflow(line, usize::from(width));

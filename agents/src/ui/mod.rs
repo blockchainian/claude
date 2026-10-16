@@ -225,7 +225,6 @@ pub struct View {
     help: bool,
     loading: bool,
     has_more: bool,
-    inactive_total: Option<usize>,
     /// A notice at the task list's bottom-left, shown until it expires.
     notice: Option<(String, Instant)>,
     viewport: RefCell<Viewport>,
@@ -342,7 +341,6 @@ impl View {
             help: false,
             loading: false,
             has_more: false,
-            inactive_total: None,
             notice: None,
             viewport: RefCell::new(Viewport::default()),
             last_click: None,
@@ -507,10 +505,6 @@ impl View {
         }
         self.reconcile_drafts();
         self.show_selected_panels();
-    }
-
-    pub(crate) fn set_inactive_total(&mut self, count: usize) {
-        self.inactive_total = Some(count);
     }
 
     pub fn set_loading(&mut self, loading: bool) {

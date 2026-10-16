@@ -1,5 +1,5 @@
  Agent command center  Group: Project  g
-  Active 2   Inactive 1
+  Active 2                                      Inactive 1
  ──────────────────────────────────────────────────────────
  Task shortcuts
 

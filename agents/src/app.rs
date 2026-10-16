@@ -571,9 +571,7 @@ impl App {
         let Snapshot {
             sessions,
             has_more,
-            inactive_total,
         } = self.hub.refresh();
-        self.view.set_inactive_total(inactive_total);
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);

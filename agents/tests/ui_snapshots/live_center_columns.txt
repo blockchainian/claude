@@ -1,5 +1,5 @@
  Agent command center  Group: Project  g
-  Active 5   Inactive 1                                                                                                                         tab/⇧tab filter
+  Active 5                                                                                                                                          Inactive 1
  ───────────────────────────────────────────────────── Current task ───────────────────────────────────────────────────────────────────────────────────────────
  Pinned                                 │ Prompt                                 │
  › ○ Current task           Ready       │ Current task                           │

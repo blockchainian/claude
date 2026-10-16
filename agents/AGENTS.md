@@ -22,7 +22,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 ## Task tabs
 
 - `Active` lists every non-inactive status; `Inactive` lists inactive tasks. Tab and Shift-Tab cycle the two tabs.
-- Each provider initially loads its ten most recently updated inactive tasks; `Show more` loads another page per provider. Tab counts include tasks not loaded yet.
+- Each provider initially loads its ten most recently updated inactive tasks; `Show more` loads another page per provider. Tab counts include only loaded tasks.
 - Tabs start on Active; saved fields for removed status tabs are ignored.
 
 ## Details panel

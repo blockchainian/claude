@@ -1078,11 +1078,11 @@ fn tab_fixture(count: usize) -> (tempfile::TempDir, App) {
 }
 
 #[test]
-fn task_tabs_only_active_and_inactive_with_real_totals() {
+fn task_tabs_only_active_and_inactive_with_loaded_counts() {
     let (_directory, mut app) = tab_fixture(23);
     let rendered = lines(&draw(&mut app, 160)).join("\n");
     assert!(rendered.contains("Active 0"));
-    assert!(rendered.contains("Inactive 23"), "{rendered}");
+    assert!(rendered.contains("Inactive 10"), "{rendered}");
     for removed in ["Ready 0", "Working 0", "Needs you 0"] {
         assert!(!rendered.contains(removed), "{rendered}");
     }
@@ -1120,12 +1120,14 @@ fn task_tabs_inactive_starts_with_ten_then_reveals_next_page() {
     assert!(
         lines(&draw(&mut app, 160))
             .join("\n")
-            .contains("Inactive 23")
+            .contains("Inactive 20")
     );
     key(&mut app, KeyCode::End);
     key(&mut app, KeyCode::Enter);
     assert_eq!(app.sessions.len(), 23);
-    assert!(!lines(&draw(&mut app, 160)).join("\n").contains("Show more"));
+    let rendered = lines(&draw(&mut app, 160)).join("\n");
+    assert!(rendered.contains("Inactive 23"));
+    assert!(!rendered.contains("Show more"));
 }
 
 #[test]

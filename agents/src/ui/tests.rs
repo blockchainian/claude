@@ -33,6 +33,84 @@ fn click_mouse(view: &mut View, press: MouseEvent) -> Option<Action> {
 }
 
 #[test]
+fn task_tabs_have_no_filter_hint() {
+    for width in [60, 160] {
+        let view = fixture();
+        let rendered = screen(&view, width, 22);
+        let y = view.viewport.borrow().tab_bar.y;
+        let row = rendered.lines().nth(usize::from(y)).unwrap();
+        assert!(!row.contains("tab/⇧tab"), "{row}");
+        assert!(!row.contains("filter"), "{row}");
+    }
+}
+
+#[test]
+fn task_tabs_justify_labels_and_click_targets() {
+    for width in [30, 60, 160] {
+        let mut view = fixture();
+        let rendered = screen(&view, width, 22);
+        let area = Rect::new(0, 0, width, 22);
+        let content = view.center_layout(area).header.inner(Margin::new(1, 0));
+        let tabs = view.viewport.borrow().tabs.clone();
+        assert_eq!(tabs.len(), 2);
+        assert_eq!(tabs[0].1.x, content.x);
+        assert_eq!(tabs[1].1.right(), content.right());
+        let row = rendered.lines().nth(usize::from(tabs[0].1.y)).unwrap();
+        assert_eq!(
+            row.chars()
+                .skip(usize::from(content.x))
+                .take(10)
+                .collect::<String>(),
+            " Active 5 "
+        );
+        assert!(row.trim_end().ends_with("Inactive 1"), "{row}");
+        for idx in [1, 0] {
+            let rect = tabs[idx].1;
+            for x in [rect.x, rect.right() - 1] {
+                view.status_filter = 1 - idx;
+                click_mouse(
+                    &mut view,
+                    mouse(MouseEventKind::Down(MouseButton::Left), x, rect.y),
+                );
+                assert_eq!(view.status_filter, idx);
+                assert!(
+                    view.visible_indices()
+                        .iter()
+                        .all(|&i| (view.rows[i].status == SessionStatus::Inactive) == (idx == 1))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn task_tabs_count_loaded_inactive_pages() {
+    use crate::providers::{Provider, claude::ClaudeProvider};
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    for index in 0..21 {
+        std::fs::write(
+            project.join(format!("00000000-0000-0000-0000-{index:012}.jsonl")),
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+    }
+    let mut provider = ClaudeProvider::new(dir.path().into());
+    let mut view = test_view(Grouping::Project, false);
+    for (pages, loaded) in [(1, 10), (2, 20), (3, 21)] {
+        let snapshot = provider.refresh(pages);
+        assert_eq!(snapshot.sessions.len(), loaded);
+        assert_eq!(snapshot.has_more, loaded < 21);
+        view.set_sessions(snapshot.sessions, snapshot.has_more);
+        let rendered = screen(&view, 100, 22);
+        let y = view.viewport.borrow().tab_bar.y;
+        let row = rendered.lines().nth(usize::from(y)).unwrap();
+        assert!(row.contains(&format!("Inactive {loaded}")), "{row}");
+    }
+}
+
+#[test]
 fn mouse_tab_rects_match_visible_tabs_after_render() {
     let view = fixture();
     let rendered = screen(&view, 120, 40);

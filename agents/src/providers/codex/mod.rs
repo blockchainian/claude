@@ -68,7 +68,6 @@ impl CodexProvider {
             return Ok(Snapshot {
                 sessions: vec![],
                 has_more: false,
-                inactive_total: 0,
             });
         }
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -126,8 +125,7 @@ impl CodexProvider {
             .map(|s| s.id.clone())
             .collect();
         let shown = pages.saturating_mul(PAGE_SIZE);
-        let inactive_total = inactive.len();
-        let has_more = inactive_total > shown;
+        let has_more = inactive.len() > shown;
         let mut selected: HashSet<_> = sessions
             .iter()
             .filter(|s| {
@@ -183,15 +181,9 @@ impl CodexProvider {
                 session.status = SessionStatus::NeedsInput;
             }
         }
-        let inactive_total = inactive_total.saturating_sub(shown)
-            + sessions
-                .iter()
-                .filter(|session| session.status == SessionStatus::Inactive)
-                .count();
         Ok(Snapshot {
             sessions,
             has_more,
-            inactive_total,
         })
     }
 }
@@ -428,7 +420,6 @@ impl Provider for CodexProvider {
             Snapshot {
                 sessions: vec![],
                 has_more: false,
-                inactive_total: 0,
             }
         })
     }

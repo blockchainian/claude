@@ -377,8 +377,7 @@ impl ClaudeProvider {
             .collect();
         inactive.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         let shown = pages.saturating_mul(PAGE_SIZE);
-        let inactive_total = inactive.len();
-        let has_more = inactive_total > shown;
+        let has_more = inactive.len() > shown;
         for (id, _) in inactive.into_iter().take(shown) {
             let (summary, path, modified) = self.summary(&id);
             self.background.observe(&id, &summary);
@@ -403,15 +402,9 @@ impl ClaudeProvider {
         }
         self.summaries.retain(|path, _| paths.contains(path));
         sessions.extend(children);
-        let inactive_total = inactive_total.saturating_sub(shown)
-            + sessions
-                .iter()
-                .filter(|session| session.status == SessionStatus::Inactive)
-                .count();
         Snapshot {
             sessions,
             has_more,
-            inactive_total,
         }
     }
 
