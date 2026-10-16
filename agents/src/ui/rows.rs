@@ -46,10 +46,6 @@ impl View {
         state.list_rows = Rect::default();
         state.first_entry = 0;
         let row_width = area.width;
-        let area = Rect {
-            width: row_width.saturating_sub(/*rhs*/ 1),
-            ..area
-        };
         if area.is_empty() {
             return;
         }

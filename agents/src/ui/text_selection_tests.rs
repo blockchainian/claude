@@ -768,7 +768,12 @@ fn task_list_reverse_drag_copies_rendered_rows() {
     let expected = expected
         .lines()
         .enumerate()
-        .map(|(offset, _)| drawn_cells(&pressed, first.1 + offset as u16, list.x, list.right()))
+        .map(|(offset, _)| {
+            let y = first.1 + offset as u16;
+            // The selection ends at the pressed cell's left boundary.
+            let right = list.right() - u16::from(y == last.1);
+            drawn_cells(&pressed, y, list.x, right)
+        })
         .collect::<Vec<_>>()
         .join("\n");
     view.handle_mouse(mouse(

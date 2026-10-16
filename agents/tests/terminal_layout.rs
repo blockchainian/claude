@@ -107,7 +107,7 @@ fn terminal_layout_tracks_width() {
                     .iter()
                     .any(|label| log.trim_start().starts_with(label))
                 {
-                    assert_eq!(log.len() - log.trim_start().len(), 2, "log left: {line}");
+                    assert_eq!(log.len() - log.trim_start().len(), 1, "log left: {line}");
                     assert_eq!(
                         line.trim_end().width(),
                         width as usize - 2,

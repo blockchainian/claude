@@ -66,13 +66,8 @@ impl CenterLayout {
         if self.log_detail.is_empty() {
             self.log.inner(Margin::new(2, 0))
         } else {
-            // The body already reserves the terminal's outer padding.
-            Rect::new(
-                self.log.x + 1,
-                self.log.y,
-                self.log.width.saturating_sub(1),
-                self.log.height,
-            )
+            // The body reserves the screen padding and the separator's one-cell gap.
+            self.log
         }
     }
 }
@@ -391,11 +386,6 @@ impl View {
             Some(Rect::new(details.x, layout.log.y, details.width, 1))
         };
         if !details.is_empty() {
-            details.x += 1;
-            details.width = details.width.saturating_sub(1);
-            if !layout.log_detail.is_empty() {
-                details.width = details.width.saturating_sub(1);
-            }
             self.render_details(details, buf, now);
         }
         {

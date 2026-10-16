@@ -512,7 +512,7 @@ fn wide_border_labels_stay_in_their_columns() {
         let middle = prompt - 1;
         let tasks = 2..separators[0] - 1;
         let details = separators[0] + 2..separators[1] - 1;
-        let log = separators[1] + 3..width - 2;
+        let log = separators[1] + 2..width - 2;
         assert!(
             segment(&buffer, tasks.clone(), middle)
                 .chars()
@@ -613,7 +613,7 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
             if width < 150 {
                 2
             } else {
-                width - width / 3 - 1
+                width - width / 3 - 2
             }
         );
         for (offset, time) in ["2s", "9m 50s", "10:06:26"].into_iter().enumerate() {
@@ -642,7 +642,7 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
             let separators: Vec<_> = (0..width)
                 .filter(|&x| buffer[(x, 3)].symbol() == "│")
                 .collect();
-            let left = if width == 200 { separators[1] + 3 } else { 2 };
+            let left = if width == 200 { separators[1] + 2 } else { 2 };
             let (x, y) = position(&buffer, "User      ");
             assert_eq!(x, left);
             assert_eq!(

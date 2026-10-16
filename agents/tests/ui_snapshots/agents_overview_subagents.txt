@@ -1,16 +1,16 @@
   Agent command center  Group: Project  g
    Active 3   Ready 2   Working 1   Needs you 0   Inactive 0                                           tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                      Status         Updated  │  Background
-  /tmp/project  3                                                        │  ─ Check files ───────────────────────────╴
-  › ○ Parent task                                Ready           2m ago  │
-    └ ○ Review results                           Ready              now  │  Prompt
-    └ ● Check files                              Working         1m ago  │  Parent task
+      Tasks                                       Status         Updated │ Background
+  /tmp/project  3                                                        │ ─ Check files ────────────────────────────╴
+  › ○ Parent task                                 Ready           2m ago │
+    └ ○ Review results                            Ready              now │ Prompt
+    └ ● Check files                               Working         1m ago │ Parent task
                                                                          │
-                                                                         │  Project
-                                                                         │  /tmp/project
+                                                                         │ Project
+                                                                         │ /tmp/project
                                                                          │
-                                                                         │  Model: parent-model
+                                                                         │ Model: parent-model
                                                                          │
                                                                          │
                                                                          │

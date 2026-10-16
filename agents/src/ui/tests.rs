@@ -1724,8 +1724,8 @@ fn details_include_attention_and_clip_messages() {
     });
     assert!(position("Needs attention") < position("Last message"));
     assert!(position("Last message") < position("Prompt"));
-    assert!(position("Prompt") < position("│  Project"));
-    assert!(position("│  Project") < project);
+    assert!(position("Prompt") < position("│ Project"));
+    assert!(position("│ Project") < project);
     assert!(project < position("Model: claude-opus"));
     assert!(
         rendered
@@ -3157,17 +3157,17 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         let left = separators[0];
         let right = separators.get(1).copied().unwrap_or(width);
         let updated = text(3, 0, left);
-        assert_eq!(updated.trim_end().chars().count() as u16, left - 2);
+        assert_eq!(updated.trim_end().chars().count() as u16, left - 1);
         for label in ["Background", "Last message", "Prompt", "Project"] {
             let y = (3..35)
                 .find(|&y| text(y, left + 1, right).contains(label))
                 .unwrap_or_else(|| panic!("missing {label} at width {width}"));
             let cells = text(y, left + 1, right);
-            assert_eq!(cells.find(label), Some(2), "{label} left at {width}");
+            assert_eq!(cells.find(label), Some(1), "{label} left at {width}");
             if label != "Background" {
                 assert_eq!(
                     (left + 1..right).rfind(|&x| buf[(x, y)].symbol() != " "),
-                    Some(right - 3),
+                    Some(right - if width >= 150 { 2 } else { 3 }),
                     "{label} right at {width}"
                 );
             }
@@ -3178,18 +3178,31 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         assert!(text(y, left + 1, right).trim_end().ends_with("25s"));
         assert_eq!(
             text(y, left + 1, right).trim_end().chars().count() as u16,
-            right - left - 3,
+            right - left - if width >= 150 { 2 } else { 3 },
             "background time at {width}"
         );
         // Wrapped bodies, selections and links stay inside the same content bounds.
         for y in 3..view.center_layout(area).details.bottom() {
-            for x in [left + 1, left + 2, right - 2, right - 1] {
+            for x in [left + 1, right - 1] {
                 assert_eq!(buf[(x, y)].symbol(), " ", "padding ({x}, {y}) at {width}");
             }
         }
         let viewport = view.viewport.borrow();
-        assert_eq!(viewport.details_text.area.x, left + 3);
-        assert_eq!(viewport.details_text.area.right(), right - 2);
+        if width == 200 {
+            println!(
+                "200 cols: separators={separators:?}, task Updated end={}, details={}..{}, log={}..{}",
+                updated.trim_end().chars().count(),
+                viewport.details_text.area.x,
+                viewport.details_text.area.right(),
+                viewport.log.x,
+                viewport.log.right()
+            );
+        }
+        assert_eq!(viewport.details_text.area.x, left + 2);
+        assert_eq!(
+            viewport.details_text.area.right(),
+            right - if width >= 150 { 1 } else { 2 }
+        );
     }
 }
 
@@ -3205,7 +3218,7 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             let separators: Vec<_> = (0..width)
                 .filter(|&x| buf[(x, 3)].symbol() == "│")
                 .collect();
-            let left = if wide { separators[1] + 3 } else { 2 };
+            let left = if wide { separators[1] + 2 } else { 2 };
             let y = if wide {
                 4
             } else {
@@ -3221,7 +3234,6 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             assert_ne!(buf[(left, y)].symbol(), " ", "log left at {width}");
             if wide {
                 assert_eq!(buf[(left - 1, y)].symbol(), " ");
-                assert_eq!(buf[(left - 2, y)].symbol(), " ");
             }
             let selected = {
                 let viewport = view.viewport.borrow();
@@ -3255,7 +3267,7 @@ fn dashboard_log_search_uses_the_row_padding() {
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let left = if width == 200 { 133 } else { 2 };
+        let left = if width == 200 { 132 } else { 2 };
         let y = view.viewport.borrow().log.bottom() - 1;
         let input: String = (left..left + 13).map(|x| buf[(x, y)].symbol()).collect();
         assert_eq!(input, "Search › Tool");
@@ -6050,8 +6062,8 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
     );
     assert_eq!(click_text(&mut view, &rendered, "main"), None);
     // The directory sits under the project line; the task list shows the same path as a group.
-    let (x, y) = rendered_cell(&rendered, "│  Project");
-    let x = x + 3;
+    let (x, y) = rendered_cell(&rendered, "│ Project");
+    let x = x + 2;
     assert_eq!(
         click_mouse(
             &mut view,
@@ -6075,8 +6087,8 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
         url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
     });
     let rendered = screen(&view, 120, 40);
-    let (x, y) = rendered_cell(&rendered, "│  Project");
-    let x = x + 3;
+    let (x, y) = rendered_cell(&rendered, "│ Project");
+    let x = x + 2;
     let cwd_cell = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1);
     assert_eq!(
         click_mouse(&mut view, cwd_cell),

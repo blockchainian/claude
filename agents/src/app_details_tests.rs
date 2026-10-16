@@ -81,16 +81,16 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
             let separators: Vec<_> = (0..width)
                 .filter(|&x| cell_text(buffer, x, 3) == "│")
                 .collect();
-            assert_eq!(left, separators[0] + 3);
+            assert_eq!(left, separators[0] + 2);
             if width != 150 {
                 let (updated_x, _) = position(buffer, "Updated");
-                assert_eq!(updated_x + 7, separators[0] - 2);
+                assert_eq!(updated_x + 7, separators[0] - 1);
             }
             let right = if width >= 150 {
                 (left..width)
                     .find(|&x| cell_text(buffer, x, project_y) == "│")
                     .unwrap()
-                    - 2
+                    - 1
             } else {
                 width - 2
             };
