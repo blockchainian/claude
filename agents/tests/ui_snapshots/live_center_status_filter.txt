@@ -1,12 +1,12 @@
  Agent command center  Group: Project …
   Active 2   Inactive 1
- ──────────────────────────────────────
+ ────────────────────── Unloaded task ─
  /tmp/project       │ Prompt
  › ○ Unloaded task  │ Unloaded task
                     │
                     │ Project
                     │ /tmp/project
                     │ …
-                    │ ─ U… · Inactive ─
+                    │ Inactive ────────
  Unloaded tas ›
  ? help  esc back  ↑/↓ move  enter ope…

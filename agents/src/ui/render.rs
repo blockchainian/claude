@@ -389,7 +389,7 @@ impl View {
             Clear.render(bottom, buf);
             line(notice.clone().dim(), bottom, buf);
         }
-        // Panel labels share the horizontal rule immediately above the prompt.
+        // Activity and task status share the rule immediately above the prompt.
         let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
         if !layout.log_detail.is_empty() {
             line(
@@ -432,7 +432,13 @@ impl View {
             self.render_activity_strip(rule, buf, now);
         }
         if let Some(rule) = details_rule {
-            self.render_details_title(rule, buf, now);
+            if layout.header.height >= 3 {
+                self.render_details_title(
+                    Rect::new(rule.x, layout.header.y + 2, rule.width, 1),
+                    buf,
+                );
+            }
+            self.render_details_status(rule, buf, now);
         }
         if self.log_selected.is_some() && self.viewport.borrow().log_detail_scroll > 0 {
             let label = " ↑ Top ";
@@ -518,30 +524,16 @@ impl View {
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }
-    /// Centers the selected task's title, status and elapsed time on the rule row
+    /// Centers the selected task's title on the rule row
     /// `rule`, a space apart from the rule on each side.
-    fn render_details_title(
-        &self,
-        rule: Rect,
-        buf: &mut Buffer,
-        now: chrono::DateTime<chrono::Utc>,
-    ) {
+    fn render_details_title(&self, rule: Rect, buf: &mut Buffer) {
         let Some(session) = self.selected_row() else {
             return;
         };
         // One rule cell and a space on each side.
         let width = usize::from(rule.width).saturating_sub(4);
-        let (status, _) = Self::status(session);
-        let status = Line::from(vec![" · ".dim(), status.into()]);
-        let elapsed = session
-            .started_at
-            .map(|at| format!(" · {}", format_session_duration((now - at).num_seconds())));
-        let elapsed_width = elapsed
-            .as_deref()
-            .map_or(0, unicode_width::UnicodeWidthStr::width);
-        let title_width = width.saturating_sub(status.width() + elapsed_width);
         let title_style = self.title_style(&session.id).bold();
-        let title = if title_width <= 1 {
+        let title = if width <= 1 {
             Line::from(Span::styled("…", title_style))
         } else {
             truncate_line_with_ellipsis_if_overflow(
@@ -549,15 +541,10 @@ impl View {
                     session.display_title().to_owned(),
                     title_style,
                 )),
-                title_width,
+                width,
             )
         };
-        let mut header = title;
-        header.spans.extend(status.spans);
-        if let Some(elapsed) = elapsed {
-            header.spans.push(elapsed.dim());
-        }
-        let mut header = truncate_line_to_width(header, width);
+        let mut header = truncate_line_to_width(title, width);
         header.spans.insert(0, " ".into());
         header.spans.push(" ".into());
         let label_width = header.width() as u16;
@@ -566,6 +553,37 @@ impl View {
         let label = Rect::new(x, rule.y, label_width.min(rule.width), 1).intersection(rule);
         Clear.render(label, buf);
         line(header, label, buf);
+    }
+    /// Aligns status and elapsed time with the details panel's content edges.
+    fn render_details_status(
+        &self,
+        rule: Rect,
+        buf: &mut Buffer,
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
+        let Some(session) = self.selected_row() else {
+            return;
+        };
+        line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
+        let (status, _) = Self::status(session);
+        let status = Line::from(vec![status.into(), " ".into()]);
+        let status_width = status.width();
+        Clear.render(
+            Rect::new(rule.x, rule.y, (status_width as u16).min(rule.width), 1),
+            buf,
+        );
+        line(status, rule, buf);
+        if let Some(at) = session.started_at {
+            let elapsed = format_session_duration((now - at).num_seconds());
+            let label = Line::from(vec![" ".into(), elapsed.dim()]);
+            let width = label.width();
+            if status_width + width <= usize::from(rule.width) {
+                label.render(
+                    Rect::new(rule.right() - width as u16, rule.y, width as u16, 1),
+                    buf,
+                );
+            }
+        }
     }
     pub(super) fn render_details(
         &self,
@@ -630,7 +648,7 @@ impl View {
         let width = usize::from(area.width.max(1));
         // Sections top to bottom: background, activity, message, prompt,
         // needs attention, project, branch, model. The title
-        // sits on the rule below the panel.
+        // sits on the rule above the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
         let mut bodies = Vec::new();

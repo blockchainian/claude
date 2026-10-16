@@ -1,6 +1,6 @@
  Agent command center  Group: Project  g
   Active 3   Inactive 0                                                                                 tab/⇧tab filter
- ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ─────────────────────────────────────────────────────────────────────────────────── Check files ──────────────────────
  /tmp/project                                               │ Prompt
    ○ Parent task                     Ready           2m ago │ Check files
    └ ○ Review results                Ready              now │
@@ -25,6 +25,6 @@
                                                             │ /tmp/child-project
                                                             │
                                                             │ Model                                         child-model
-                                                            │ ───────────────── Check files · Working ─────────────────
+                                                            │ Working ─────────────────────────────────────────────────
  Check files · Subagent cannot take input
  ? help  esc back  ↑/↓ move  n new

@@ -1,13 +1,13 @@
  Agent command center  Group: Project  g
   Active 1   Inactive 0                                                             tab/⇧tab filter
- ──────────────────────────────────────────────────────────────────────────────────────────────────
+ ───────────────────────────────────────────────────────────────── Task log example ───────────────
  /tmp/project                                     │ Prompt
  › ● Task log example      Working            now │ Task log example
                                                   │
                                                   │ Project
                                                   │ /tmp/project
                                                   │ …
- ──────────────────────────────────────────────────────────── Task log example · Working ──────────
+ ───────────────────────────────────────────────────Working ───────────────────────────────────────
  Task log example · Running in a terminal; open it to type
  ──────────────────────────────────────────────────────────────────────────────────────────────────
  run tests                                                                                      30s

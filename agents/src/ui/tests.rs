@@ -2660,13 +2660,7 @@ mod details_header {
     fn rule_at_width(view: &View, now: chrono::DateTime<Utc>, width: u16) -> (Buffer, Rect) {
         let area = Rect::new(0, 0, width, 25);
         let layout = view.center_layout(area);
-        let y = if !layout.log_detail.is_empty() {
-            layout.prompt.y - 1
-        } else if layout.log.is_empty() {
-            layout.details.bottom() - 1
-        } else {
-            layout.log.y
-        };
+        let y = layout.header.y + 2;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         (buf, Rect::new(layout.details.x, y, layout.details.width, 1))
@@ -2715,12 +2709,18 @@ mod details_header {
                     view.selected = view.rows.iter().position(|row| row.id == id).unwrap();
                     for advance in [0, 86401] {
                         let (buf, rule) = rule(&view, now + Duration::seconds(advance));
-                        let header = label(&buf, rule);
+                        let layout = view.center_layout(buf.area);
+                        let bottom = Rect::new(
+                            rule.x,
+                            view.viewport.borrow().details.bottom(),
+                            rule.width,
+                            1,
+                        );
+                        let header = label(&buf, bottom);
+                        assert_eq!(label(&buf, rule), "Fix login bug");
+                        assert!(bottom.y > layout.header.bottom());
                         if advance == 0 {
-                            assert_eq!(
-                                header.trim_end(),
-                                format!("Fix login bug · Working · {expected}")
-                            );
+                            assert!(header.ends_with(expected), "{header}");
                         } else {
                             assert!(header.contains("d "), "{header}");
                         }
@@ -2731,18 +2731,18 @@ mod details_header {
     }
 
     #[test]
-    fn title_precedes_status_in_wide_and_narrow_layouts() {
+    fn title_alone_is_on_top_in_wide_and_narrow_layouts() {
         let row = session("header", "Header task", SessionStatus::Working, 0);
         let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
         for width in [112, 200] {
             let (buf, rule) = rule_at_width(&view, Utc::now(), width);
-            assert_eq!(label(&buf, rule), "Header task · Working");
+            assert_eq!(label(&buf, rule), "Header task");
         }
     }
 
     #[test]
-    fn narrow_and_wide_truncate_only_the_title_before_status_and_elapsed() {
+    fn narrow_and_wide_truncate_the_title_on_top() {
         let now = "2026-10-13T12:00:00Z".parse().unwrap();
         let mut row = session(
             "header",
@@ -2757,12 +2757,12 @@ mod details_header {
             let (buf, rule) = rule_at_width(&view, now, width);
             let header = label(&buf, rule);
             assert!(header.starts_with('升'), "{header}");
-            assert!(header.ends_with("… · Working · 3h 12m"), "{header}");
+            assert!(header.ends_with("…"), "{header}");
         }
     }
 
     #[test]
-    fn separator_is_dim_and_status_keeps_its_style() {
+    fn title_and_status_keep_their_styles() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         for status in [
             SessionStatus::Working,
@@ -2778,27 +2778,24 @@ mod details_header {
             };
             view.set_sessions(vec![session("header", "Header task", status, 0)], false);
             let (buf, rule) = rule(&view, Utc::now());
-            let status_label = status.label();
             let header = label(&buf, rule);
-            assert_eq!(header, format!("Header task · {status_label}"));
+            assert_eq!(header, "Header task");
             let start = rule.x + (rule.width - (header.width() as u16 + 2)) / 2 + 1;
-            for x in start + 14..start + 14 + status_label.len() as u16 {
-                let cell = &buf[(x, rule.y)];
-                assert_eq!(cell.fg, ratatui::style::Color::Reset);
-                assert!(!cell.modifier.contains(Modifier::DIM));
-            }
             let title = &buf[(start, rule.y)];
             assert_eq!(title.fg, view.title_color(&session_key("header")));
             assert!(title.modifier.contains(Modifier::BOLD));
             assert!(!title.modifier.contains(Modifier::DIM));
-            for x in start + 11..start + 14 {
-                assert!(buf[(x, rule.y)].modifier.contains(Modifier::DIM));
+            let bottom = view.viewport.borrow().details.bottom();
+            for x in rule.x..rule.x + status.label().len() as u16 {
+                let cell = &buf[(x, bottom)];
+                assert_eq!(cell.fg, ratatui::style::Color::Reset);
+                assert!(!cell.modifier.contains(Modifier::DIM));
             }
         }
     }
 
     #[test]
-    fn truncated_title_keeps_elapsed_time() {
+    fn truncated_title_keeps_full_width() {
         let now = "2026-10-13T12:00:00Z".parse().unwrap();
         let mut row = session(
             "header",
@@ -2813,7 +2810,7 @@ mod details_header {
         let (buf, rule) = rule(&view, now);
         let header = label(&buf, rule);
         assert!(header.starts_with("A very long"), "{header}");
-        assert!(header.ends_with("… · Working · 3h 12m"), "{header}");
+        assert!(header.ends_with("…"), "{header}");
         assert_eq!(
             details_at(row, 15, now),
             include_str!("../../tests/ui_snapshots/details_header_elapsed.txt")
@@ -2821,7 +2818,7 @@ mod details_header {
     }
 
     #[test]
-    fn truncates_title_and_preserves_trailing_status() {
+    fn truncates_title_on_top_border() {
         let mut row = session(
             "header",
             "A very long session title that exceeds the panel width",
@@ -2834,47 +2831,78 @@ mod details_header {
         let (buf, rule) = rule(&view, Utc::now());
         let header = label(&buf, rule);
         let rendered = queued_details(row, 15);
-        let title = header.strip_suffix(" · Working").expect("visible status");
-        assert!(title.ends_with('…'), "{title}");
-        assert_eq!(header, "A very long session title that exceeds… · Working");
+        assert!(header.ends_with('…'), "{header}");
         assert_eq!(
             rendered,
             include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
         );
     }
     #[test]
-    fn title_is_centered_on_log_rule_and_no_log_fallback() {
+    fn borders_keep_title_status_elapsed_activity_and_log_jump_separate() {
         let (mut view, now) = log_fixture();
-        for with_log in [true, false] {
-            if !with_log {
-                view.rows[view.selected].transcript = None;
-            }
-            let (buf, rule) = rule(&view, now);
-            let layout = view.center_layout(buf.area);
-            assert_eq!(layout.log.is_empty(), !with_log);
-            assert_eq!(
-                rule.y,
-                if with_log {
-                    layout.prompt.y - 1
-                } else {
-                    layout.details.bottom() - 1
+        view.select_log_event(Some(view.log[6].clone()));
+        view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
+        view.set_activity([crate::usage::bin_of(now)].into());
+        for width in [112, 200] {
+            for with_log in [true, false] {
+                view.rows[view.selected].transcript =
+                    with_log.then(|| "/tmp/task-log.jsonl".into());
+                let (buf, top) = rule_at_width(&view, now, width);
+                let layout = view.center_layout(buf.area);
+                let bottom = view.viewport.borrow().details.bottom();
+                let expected = " Task log example ";
+                let start = top.x + (top.width - expected.width() as u16) / 2;
+                for (offset, symbol) in expected.chars().enumerate() {
+                    assert_eq!(
+                        buf[(start + offset as u16, top.y)].symbol(),
+                        symbol.to_string()
+                    );
                 }
-            );
-            let expected = " Task log example · Working ";
-            let start = rule.x + (rule.width - expected.width() as u16) / 2;
-            for (offset, symbol) in expected.chars().enumerate() {
-                assert_eq!(
-                    buf[(start + offset as u16, rule.y)].symbol(),
-                    symbol.to_string()
+                assert!((top.x..start).all(|x| buf[(x, top.y)].symbol() == "─"));
+                assert!(
+                    (start + expected.width() as u16..top.right())
+                        .all(|x| buf[(x, top.y)].symbol() == "─")
                 );
+                let bottom_text = (top.x..top.right())
+                    .map(|x| buf[(x, bottom)].symbol())
+                    .collect::<String>();
+                assert!(bottom_text.starts_with("Working "), "{bottom_text}");
+                assert!(bottom_text.ends_with(" 3h 12m"), "{bottom_text}");
+                assert!(!bottom_text.contains("Task log example"));
+                assert!(!label(&buf, top).contains("Working"));
+                assert!(!label(&buf, top).contains("3h 12m"));
+                if !layout.log.is_empty() {
+                    let strip = &buf[(layout.list.right() - 1, bottom)];
+                    assert!(
+                        strip
+                            .symbol()
+                            .chars()
+                            .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+                    );
+                    if width >= super::super::render::WIDE_LAYOUT_COLUMNS {
+                        assert_eq!(view.viewport.borrow().log_jump.y, bottom);
+                        assert!(view.viewport.borrow().log_jump.x >= top.right());
+                    }
+                }
             }
-            assert!((rule.x..start).all(|x| buf[(x, rule.y)].symbol() == "─"));
-            assert!(
-                (start + expected.width() as u16..rule.right())
-                    .all(|x| buf[(x, rule.y)].symbol() == "─")
-            );
-            assert_eq!(view.viewport.borrow().details.bottom(), rule.y);
         }
+    }
+
+    #[test]
+    fn tight_bottom_border_drops_elapsed_before_status() {
+        let (mut view, now) = log_fixture();
+        view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
+        let area = Rect::new(0, 0, 26, 25);
+        let layout = view.center_layout(area);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let bottom = Rect::new(
+            layout.details.x,
+            view.viewport.borrow().details.bottom(),
+            layout.details.width,
+            1,
+        );
+        assert_eq!(label(&buf, bottom), "Working");
     }
 }
 
@@ -3709,7 +3737,9 @@ fn dashboard_screen_padding_is_one_cell() {
         assert_eq!(buf[(1, 0)].symbol(), "A");
         assert_eq!(view.viewport.borrow().tab_bar.x, 1);
         for x in 1..width - 1 {
-            assert_eq!(buf[(x, 2)].symbol(), "─");
+            if x < layout.details.x || x >= layout.details.right() {
+                assert_eq!(buf[(x, 2)].symbol(), "─");
+            }
         }
         for y in 0..area.height {
             assert_eq!(buf[(0, y)].symbol(), " ");
@@ -4089,8 +4119,13 @@ fn task_log_rules_match_header_and_footer_gap_is_empty() {
         for x in 0..100 {
             for y in [middle, layout.log_detail.y] {
                 if y != middle || x < layout.details.x || x >= layout.details.right() {
-                    assert_eq!(buf[(x, y)].symbol(), buf[(x, 2)].symbol());
-                    assert_eq!(buf[(x, y)].modifier, buf[(x, 2)].modifier);
+                    let rule = if (layout.details.x..layout.details.right()).contains(&x) {
+                        &buf[(1, 2)]
+                    } else {
+                        &buf[(x, 2)]
+                    };
+                    assert_eq!(buf[(x, y)].symbol(), rule.symbol());
+                    assert_eq!(buf[(x, y)].modifier, rule.modifier);
                 }
             }
             if !loaded {
@@ -4545,7 +4580,7 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
     assert_eq!(layout.prompt.y, layout.details.bottom() + 1);
     assert_eq!(
         buf[(layout.details.x, layout.details.bottom())].symbol(),
-        "─"
+        "W"
     );
     assert_eq!(buf[(layout.details.x, layout.log_detail.y)].symbol(), "─");
     if wide {
@@ -5891,9 +5926,10 @@ mod subagent_rows {
         let layout = view.center_layout(Rect::new(0, 0, 120, 30));
         let header = rendered
             .lines()
-            .nth(usize::from(layout.details.bottom() - 1))
+            .nth(usize::from(layout.header.y + 2))
             .unwrap();
-        assert!(header.contains("Check files · Working"), "{header}");
+        assert!(header.contains("Check files"), "{header}");
+        assert!(!header.contains("Working"), "{header}");
         let rendered = screen(&view, 120, 30);
         assert!(rendered.contains("child-model"));
         assert!(!rendered.contains("Needs attention"));
