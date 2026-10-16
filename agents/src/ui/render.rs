@@ -106,7 +106,7 @@ impl View {
                     .is_some_and(|session| session.transcript.is_some()));
         let content_height = area
             .height
-            .saturating_sub(header_height + footer_height + prompt_height + 2);
+            .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!wide));
         let (top_height, list_height, detail_height) = if !show_log {
             (
                 area.height
@@ -130,7 +130,7 @@ impl View {
             prompt_height,
         );
         let log = if show_log && !wide {
-            row(area, prompt.bottom() - area.y, list_height)
+            row(area, prompt.bottom() - area.y + 1, list_height)
                 .inner(Margin::new(HORIZONTAL_PADDING, 0))
         } else {
             Rect::default()
@@ -138,7 +138,7 @@ impl View {
         let log_detail = if show_log {
             row(
                 area,
-                header_height + top_height + 1 + prompt_height + list_height,
+                header_height + top_height + 1 + prompt_height + u16::from(!wide) + list_height,
                 detail_height + 1,
             )
         } else {
@@ -420,10 +420,14 @@ impl View {
             self.render_log_detail(inset(layout.log_detail), buf, now);
         }
         if !layout.log.is_empty() {
-            self.render_log_jump(
-                Rect::new(layout.log.x, layout.log.bottom(), layout.log.width, 1),
-                buf,
-            );
+            let jump_y = if area.width >= WIDE_LAYOUT_COLUMNS {
+                layout.log.bottom()
+            } else {
+                let border = inset(row(area, layout.prompt.bottom() - area.y, 1));
+                line("─".repeat(usize::from(border.width)).dim(), border, buf);
+                border.y
+            };
+            self.render_log_jump(Rect::new(layout.log.x, jump_y, layout.log.width, 1), buf);
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
@@ -432,10 +436,10 @@ impl View {
         }
         if self.log_selected.is_some() && self.viewport.borrow().log_detail_scroll > 0 {
             let label = " ↑ Top ";
-            let width = (label.width() as u16).min(layout.list.width);
             let panel = layout.log_detail;
+            let width = (label.width() as u16).min(panel.width);
             let jump = Rect::new(
-                layout.list.x + layout.list.width.saturating_sub(width) / 2,
+                panel.x + panel.width.saturating_sub(width) / 2,
                 panel.y,
                 width,
                 1,

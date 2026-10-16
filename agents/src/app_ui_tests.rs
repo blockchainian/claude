@@ -66,7 +66,7 @@ fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     let (left, rows) = if separators.len() == 2 {
         (separators[1] + 2, 3..prompt - 1)
     } else {
-        (1, prompt + 1..log_list_end(buffer, prompt))
+        (1, prompt + 2..log_list_end(buffer, prompt))
     };
     for y in rows.rev() {
         for x in left..buffer.area.width - 1 {
@@ -82,7 +82,7 @@ fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
 }
 
 fn log_list_end(buffer: &ratatui::buffer::Buffer, prompt: u16) -> u16 {
-    (prompt + 1..buffer.area.height - 1)
+    (prompt + 2..buffer.area.height - 1)
         .find(|&y| {
             (1..buffer.area.width - 1)
                 .filter(|&x| buffer[(x, y)].symbol() == "─")
@@ -688,7 +688,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
 
 #[test]
 fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
-    for (width, height, expected) in [(120, 60, [18, 18, 17]), (100, 45, [13, 13, 12])] {
+    for (width, height, expected) in [(120, 60, [18, 17, 17]), (100, 45, [13, 12, 12])] {
         let (_directory, mut app) = fixture();
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, height);
@@ -697,7 +697,7 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
         let list_end = log_list_end(&buffer, prompt);
         let heights = [
             middle - 3,
-            list_end.saturating_sub(prompt + 1),
+            list_end.saturating_sub(prompt + 2),
             height.saturating_sub(2 + list_end),
         ];
         assert_eq!(
@@ -713,8 +713,8 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
         let opened = draw_size(&mut app, width, height);
         assert!(detail(&opened).contains("run_in_background"));
         assert_eq!(
-            lines(&opened)[usize::from(prompt + 1)..usize::from(list_end)],
-            lines(&buffer)[usize::from(prompt + 1)..usize::from(list_end)],
+            lines(&opened)[usize::from(prompt + 2)..usize::from(list_end)],
+            lines(&buffer)[usize::from(prompt + 2)..usize::from(list_end)],
             "opening an event must preserve the visible event list"
         );
         let (x, y) = log_position(&opened, "对");

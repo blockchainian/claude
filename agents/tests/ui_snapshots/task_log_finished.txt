@@ -9,6 +9,7 @@
                                                   │ …
  ──────────────────────────────────────────────────────────── Task log example · Working ──────────
  Task log example · Running in a terminal; open it to type
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
  run tests                                                                                      30s
  A long response whose whitespace collapses and whose body must be truncated before the …  11:59:20
  run a background job *                                                                          5s
@@ -19,7 +20,6 @@
                                              run tests                                          30s
 
                                              run tests
-
 
 
  ? help  esc back  ↑/↓ move  enter open  n new

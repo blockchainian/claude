@@ -16,6 +16,7 @@
                                                   │
  ──────────────────────────────────────────────────────────── Task log example · Working ──────────
  Task log example · Running in a terminal; open it to type
+ ──────────────────────────────────────────── ↑ Latest ────────────────────────────────────────────
  run tests                                                                                      35s
  A long response with bold words whose body must be cut before the right edge of the log…  11:59:20
  run a background job *                                                                          5s
@@ -28,8 +29,7 @@
 
 
 
-
- ──────────────────────────────────────────── ↑ Latest ────────────────────────────────────────────
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
                                              Assistant                                     11:59:20
 
       A long response with bold words whose body must be cut before the right edge of the log

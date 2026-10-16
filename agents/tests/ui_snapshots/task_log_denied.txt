@@ -9,6 +9,7 @@
                                                   │ …
  ──────────────────────────────────────────────────────────── Task log example · Working ──────────
  Task log example · Running in a terminal; open it to type
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
  Edit: Dangerous                                                                                10s
  Bash: Safety Check                                                                             10s
  Bash: Create Unsafe Agents                                                                     15s
@@ -18,8 +19,7 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                             Denied Edit                                         10s
 
-
-                                                 ↓
-       Reason: The server-side auto mode classifier judged this action dangerous (it gave no
-       explanation). If you have other tasks…
+                                                                                                  │
+                                                 ↓                                                │
+       Reason: The server-side auto mode classifier judged this action dangerous (it gave no      │
  ? help  esc back  ↑/↓ move  enter open  n new

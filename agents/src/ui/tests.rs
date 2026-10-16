@@ -394,7 +394,7 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     let label = " ↑ 1 New ".width() as u16;
     assert_eq!(
         (jump.0, jump.1),
-        (rect.x + (rect.width - label) / 2 + 1, rect.bottom())
+        (rect.x + (rect.width - label) / 2 + 1, rect.y - 1)
     );
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
@@ -2179,7 +2179,11 @@ fn details_branch_uses_header_style_and_links_keep_their_styles() {
         assert_eq!(cell.style(), buf[(0, project_y)].style());
     }
     for x in 33..36 {
-        assert!(buf[(x, project_y)].modifier.contains(ratatui::style::Modifier::DIM));
+        assert!(
+            buf[(x, project_y)]
+                .modifier
+                .contains(ratatui::style::Modifier::DIM)
+        );
     }
     for x in 36..40 {
         assert_eq!(buf[(x, project_y)].fg, color);
@@ -3137,7 +3141,9 @@ fn background_box_dims_border_but_not_title_or_output() {
     let parts = super::tool_detail::parts(&event);
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
     (&parts[0].lines(40, Style::default())[0]).render(title_buf.area, &mut title_buf);
-    let title_x = (0..40).find(|x| title_buf[(*x, 0)].symbol() == "R").unwrap();
+    let title_x = (0..40)
+        .find(|x| title_buf[(*x, 0)].symbol() == "R")
+        .unwrap();
     assert_eq!(title_buf[(0, 0)], buf[(0, top)]);
     assert_eq!(title_buf[(title_x, 0)], buf[(2, top)]);
     assert_eq!(buf[(2, top + 1)].symbol(), "t");
@@ -4043,7 +4049,7 @@ fn task_log_short_terminal_splits_content_equally() {
     view.log_session = view.selected_id().cloned();
     let layout = view.center_layout(Rect::new(0, 0, 140, 22));
     assert_eq!(layout.log.height, 5);
-    assert_eq!(layout.log_detail.height, 6);
+    assert_eq!(layout.log_detail.height, 5);
     assert_eq!(layout.list.height, 5);
     let rendered = screen(&view, 140, 22);
     assert!(rendered.contains("Also inspect the tests"));
@@ -4509,7 +4515,12 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
         .filter(|&y| buf[(layout.gap.x + 1, y)].symbol() == "│")
         .count() as u16;
     let wide = width >= super::render::WIDE_LAYOUT_COLUMNS;
-    let available = height - layout.header.height - layout.footer.height - layout.prompt.height - 2;
+    let available = height
+        - layout.header.height
+        - layout.footer.height
+        - layout.prompt.height
+        - 2
+        - u16::from(!wide);
     let detail = layout.log_detail.height.saturating_sub(1);
     let expected = if wide {
         (available.div_ceil(2), available.div_ceil(2), available / 2)
@@ -4531,7 +4542,7 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
     if wide {
         assert_eq!(layout.prompt.bottom(), layout.log_detail.y);
     } else {
-        assert_eq!(layout.prompt.bottom(), layout.log.y);
+        assert_eq!(layout.prompt.bottom() + 1, layout.log.y);
         assert_eq!(layout.log.bottom(), layout.log_detail.y);
         assert_eq!(layout.log_detail.bottom(), layout.footer.y);
         assert!(buf[(0, layout.log.y)].symbol() != "│");
@@ -4569,11 +4580,11 @@ fn assert_wide_buffer_ranges(width: u16, expected: [std::ops::Range<u16>; 3]) {
 #[test]
 fn center_layout_golden_rects_follow_each_area() {
     let (view, _) = log_fixture();
-    for (width, height, top, log_height, list_width, details_width, body_height) in [
-        (80, 24, 17, 6, 38, 37, 6),
-        (120, 40, 27, 12, 58, 57, 11),
-        (200, 60, 32, 27, 48, 48, 27),
-        (80, 24, 17, 6, 38, 37, 6),
+    for (width, height, top, log_height, list_width, details_width, body_height, list_height) in [
+        (80, 24, 17, 6, 38, 37, 6, 5),
+        (120, 40, 28, 11, 58, 57, 11, 11),
+        (200, 60, 32, 27, 48, 48, 27, 27),
+        (80, 24, 17, 6, 38, 37, 6, 5),
     ] {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
@@ -4586,7 +4597,7 @@ fn center_layout_golden_rects_follow_each_area() {
         } else {
             assert_eq!(
                 layout.log,
-                Rect::new(6, 10 + body_height + 2, width - 2, body_height)
+                Rect::new(6, 10 + body_height + 3, width - 2, list_height)
             );
             layout.log_detail
         };
@@ -4614,7 +4625,7 @@ fn center_layout_log_and_details_hide_thresholds() {
     }
     let layout = view.center_layout(Rect::new(0, 0, 94, 20));
     assert_eq!(layout.log.height, 4);
-    assert_eq!(layout.list.height, 5);
+    assert_eq!(layout.list.height, 4);
     assert_eq!(layout.log_detail.height, 5);
     assert!(layout.details.width > 0);
     assert!(
@@ -4642,7 +4653,7 @@ fn task_log_event_count_follows_height() {
             event
         })
         .collect();
-    for (height, count) in [(24, 6), (40, 11), (60, 18), (19, 0), (24, 6)] {
+    for (height, count) in [(24, 5), (40, 11), (60, 17), (19, 0), (24, 5)] {
         let rendered = log_list_screen(&view, 120, height, now);
         let events: Vec<_> = rendered
             .lines()
@@ -6571,10 +6582,10 @@ fn task_log_selected_tool_highlighting_refreshes_when_theme_changes() {
 fn task_log_selected_tool_layout_is_cached_until_selection_or_width_changes() {
     let (mut view, now) = open_tool_fixture();
     assert!(view.viewport.borrow().log_detail_layout.is_none());
-    let open = log_screen(&view, 100, 25, now);
+    let open = log_screen(&view, 100, 28, now);
     assert!(view.viewport.borrow().log_detail_layout.is_some());
-    assert_eq!(log_screen(&view, 100, 25, now), open);
-    let narrow = log_screen(&view, 60, 25, now);
+    assert_eq!(log_screen(&view, 100, 28, now), open);
+    let narrow = log_screen(&view, 60, 28, now);
     assert_ne!(narrow, open);
     assert!(narrow.contains("running 3 tests"));
     view.select_log_event(Some(view.log[6].clone()));
@@ -6604,7 +6615,7 @@ fn task_log_selected_tool_gains_its_output_when_the_log_refreshes() {
 #[test]
 fn task_log_selected_tool_copies_a_dragged_section() {
     let (mut view, now) = open_tool_fixture();
-    let open = log_screen(&view, 100, 25, now);
+    let open = log_screen(&view, 100, 28, now);
     let (x1, y1) = rendered_cell(&open, "cargo test");
     let (x2, y2) = rendered_cell(&open, "running 3 tests");
     assert!(
@@ -6612,7 +6623,7 @@ fn task_log_selected_tool_copies_a_dragged_section() {
             .is_none()
     );
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2 + 7, y2));
-    log_screen(&view, 100, 25, now);
+    log_screen(&view, 100, 28, now);
     let action = view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2 + 7, y2));
     assert_eq!(
         action,
@@ -7240,7 +7251,10 @@ fn open_view_top_button_and_scrollbar() {
     assert!(bottom.contains(" ↑ Top "), "{bottom}");
     let layout = view.center_layout(Rect::new(0, 0, 100, 25));
     let jump = view.viewport.borrow().log_detail_jump;
-    assert_eq!(jump.x, layout.list.x + (layout.list.width - jump.width) / 2);
+    assert_eq!(
+        jump.x,
+        layout.log_detail.x + (layout.log_detail.width - jump.width) / 2
+    );
     assert_eq!(jump.y, layout.log_detail.y);
     view.render_at(buf.area, &mut buf, now);
     assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), "│");
@@ -7705,7 +7719,54 @@ fn mixed_open_outputs_render_and_copy_pretty_json_with_markdown() {
 }
 
 #[test]
-fn open_top_button_uses_task_rect_for_every_kind_and_width() {
+fn log_jump_buttons_center_on_separate_panel_borders() {
+    for width in [60, 100, 149, 150, 200] {
+        for unseen in [0, 3] {
+            let (mut view, now) = log_fixture();
+            let mut event = view.log[6].clone();
+            event.body = (0..100).map(|n| format!("row {n}\n\n")).collect();
+            event.calls.clear();
+            view.select_log_event(Some(event));
+            log_screen(&view, width, 40, now);
+            view.viewport.borrow_mut().log_detail_scroll = 1;
+            view.viewport.borrow_mut().log_unseen = unseen;
+            let screen = log_screen(&view, width, 40, now);
+            let layout = view.center_layout(Rect::new(0, 0, width, 40));
+            let viewport = view.viewport.borrow();
+            let latest = viewport.log_jump;
+            let top = viewport.log_detail_jump;
+            let border_y = if width < super::render::WIDE_LAYOUT_COLUMNS {
+                assert_eq!(layout.log.y, layout.prompt.bottom() + 1);
+                layout.log.y - 1
+            } else {
+                layout.log.bottom()
+            };
+            assert_eq!(
+                latest.x,
+                layout.log.x + (layout.log.width - latest.width) / 2
+            );
+            assert_eq!(latest.y, border_y);
+            assert_eq!(
+                top.x,
+                layout.log_detail.x + (layout.log_detail.width - top.width) / 2
+            );
+            assert_eq!(top.y, layout.log_detail.y);
+            assert_ne!(latest.y, top.y);
+            let label = if unseen == 0 {
+                " ↑ Latest "
+            } else {
+                " ↑ 3 New "
+            };
+            assert_eq!(rendered_cell(&screen, label), (latest.x, latest.y));
+            assert_eq!(rendered_cell(&screen, " ↑ Top "), (top.x, top.y));
+            let row = screen.lines().nth(usize::from(border_y)).unwrap();
+            assert_eq!(row.chars().nth(1), Some('─'));
+        }
+    }
+}
+
+#[test]
+fn open_top_button_centers_on_the_detail_panel_for_every_kind_and_width() {
     for width in [60, 100, 160] {
         for kind in [
             crate::log::Kind::User,
@@ -7725,7 +7786,10 @@ fn open_top_button_uses_task_rect_for_every_kind_and_width() {
             let screen = log_screen(&view, width, 25, now);
             let layout = view.center_layout(Rect::new(0, 0, width, 25));
             let jump = view.viewport.borrow().log_detail_jump;
-            assert_eq!(jump.x, layout.list.x + (layout.list.width - jump.width) / 2);
+            assert_eq!(
+                jump.x,
+                layout.log_detail.x + (layout.log_detail.width - jump.width) / 2
+            );
             assert_eq!(jump.y, layout.log_detail.y);
             click_text(&mut view, &screen, " ↑ Top ");
             assert_eq!(view.viewport.borrow().log_detail_scroll, 0);

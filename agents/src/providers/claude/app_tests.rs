@@ -103,7 +103,7 @@ fn task_log_cache_rereads_when_event_count_changes() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
-    for (height, count) in [(24, 6), (40, 11), (60, 18), (19, 0), (24, 6)] {
+    for (height, count) in [(24, 5), (40, 11), (60, 17), (19, 0), (24, 5)] {
         app.refresh_log(
             app.view
                 .log_event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
@@ -219,7 +219,7 @@ fn queued_wheel_events_apply_before_the_next_draw() {
             .unwrap()
     );
     assert!(app.receiver.try_recv().is_err());
-    assert_eq!(app.view.log_scroll(), 0);
+    assert_eq!(app.view.log_scroll(), 1);
     let detail = log_detail(&app);
     assert!(detail.contains("Transcript copy 17"), "{detail}");
     assert!(detail.contains("User"), "{detail}");
@@ -237,9 +237,9 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
         scroll_log(&mut app, ScrollDown);
     }
     app.refresh_log(8);
-    assert_eq!(app.view.log_scroll(), 1);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
-    assert_eq!(app.view.log.len(), 9);
+    assert_eq!(app.view.log_scroll(), 2);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 10);
+    assert_eq!(app.view.log.len(), 10);
     assert!(log_detail(&app).contains("Transcript copy 16"));
     let cached = app.view.log.clone();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
