@@ -79,6 +79,15 @@ pub(super) fn format_duration(seconds: i64) -> String {
     }
 }
 
+pub(super) fn format_log_duration(duration: chrono::Duration) -> String {
+    let duration = duration.max(chrono::Duration::zero());
+    if duration < chrono::Duration::seconds(1) {
+        format!("{}ms", (duration.subsec_nanos() + 500_000) / 1_000_000)
+    } else {
+        format_duration(duration.num_seconds())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,6 +125,29 @@ mod tests {
         let long_line = "x".repeat(4096);
         write!(file, "discard\n{long_line}\nsecond\nthird\n").unwrap();
         assert_eq!(tail_lines(file.path(), 3), [&long_line, "second", "third"]);
+    }
+
+    #[test]
+    fn log_durations_round_subseconds_to_whole_milliseconds() {
+        for (nanos, expected) in [
+            (-1, "0ms"),
+            (0, "0ms"),
+            (499_999, "0ms"),
+            (500_000, "1ms"),
+            (339_499_999, "339ms"),
+            (339_500_000, "340ms"),
+            (999_499_999, "999ms"),
+            (999_500_000, "1000ms"),
+            (1_000_000_000, "1s"),
+            (1_999_999_999, "1s"),
+            (60_000_000_000, "1m 0s"),
+            (3_600_000_000_000, "1h 0m"),
+        ] {
+            assert_eq!(
+                format_log_duration(chrono::Duration::nanoseconds(nanos)),
+                expected
+            );
+        }
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use super::formatting::{format_duration, format_relative_time};
+use super::formatting::{format_log_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
 use crate::log::{Event, Kind};
@@ -404,7 +404,7 @@ enum RowTime {
     /// The wall-clock time the event started.
     Clock(DateTime<Utc>),
     /// A duration that no longer changes.
-    Settled(i64),
+    Settled(chrono::Duration),
     /// A duration still growing from the given start.
     Running(DateTime<Utc>),
     /// The time elapsed since the given moment, as "12s ago".
@@ -418,7 +418,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
         } else if event.kind == Kind::Assistant
             && let Some(reference) = event.previous_end
         {
-            RowTime::Settled((event.started_at - reference).num_seconds().max(0))
+            RowTime::Settled(event.started_at - reference)
         } else {
             RowTime::Clock(event.started_at)
         };
@@ -428,7 +428,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
         && let Some(end) = event.ended_at
     {
         return match event.duration {
-            Some(duration) => RowTime::Settled(duration.num_seconds().max(0)),
+            Some(duration) => RowTime::Settled(duration),
             None => RowTime::Clock(end),
         };
     }
@@ -447,14 +447,14 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
         }
         None => return RowTime::Running(previous),
     };
-    RowTime::Settled((end - previous).num_seconds().max(0))
+    RowTime::Settled(end - previous)
 }
 
 fn format_row_time(time: &RowTime, now: DateTime<Utc>) -> String {
     match *time {
         RowTime::Clock(at) => at.with_timezone(&Local).format(CLOCK_FORMAT).to_string(),
-        RowTime::Settled(seconds) => format_duration(seconds),
-        RowTime::Running(start) => format_duration((now - start).num_seconds().max(0)),
+        RowTime::Settled(duration) => format_log_duration(duration),
+        RowTime::Running(start) => format_log_duration(now - start),
         RowTime::Ago(at) => format_relative_time(now, Some(at)),
     }
 }
@@ -876,6 +876,53 @@ mod log_markdown {
     }
 
     #[test]
+    fn real_transcript_subsecond_tool_time_is_right_aligned_in_milliseconds() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut store = crate::providers::claude::ClaudeProvider::new(dir.path().to_owned());
+        let mut session = crate::providers::Provider::refresh(&mut store, 1)
+            .sessions
+            .remove(0);
+        session.id.provider = crate::providers::ProviderId::Codex;
+        session.transcript = Some(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/codex-inner/inline-array.jsonl"),
+        );
+        let provider = crate::providers::codex::CodexProvider::new(
+            std::path::PathBuf::new(),
+            std::path::PathBuf::new(),
+        );
+        let events = crate::providers::Provider::log(&provider, &session, 100, false).unwrap();
+        let event = &events[1];
+        assert_eq!(event.kind, Kind::Tool);
+        assert_eq!(
+            event.started_at.to_rfc3339(),
+            "2026-10-14T00:08:29.800660750+00:00"
+        );
+        assert_eq!(
+            event.ended_at.unwrap().to_rfc3339(),
+            "2026-10-14T00:08:30.171+00:00"
+        );
+        assert_eq!(
+            event.duration,
+            Some(chrono::Duration::nanoseconds(370_339_250))
+        );
+        let time = event_time(event, &session, true, event.ended_at.unwrap());
+        assert_eq!(time, "370ms");
+        let area = Rect::new(0, 0, 40, 1);
+        let mut buffer = Buffer::empty(area);
+        render_event(event, &time, true, area, &mut buffer, None, &session.cwd);
+        let column: String = (32..40).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert_eq!(column, "   370ms");
+    }
+
+    #[test]
     fn working_subagent_tool_time_advances_without_process_and_ready_time_freezes() {
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("projects/project");
@@ -963,7 +1010,10 @@ mod log_markdown {
         assert_eq!(row_time_changes_in(&ago(125), now), secs(55));
         assert_eq!(row_time_changes_in(&ago(7300), now), secs(3500));
         assert_eq!(row_time_changes_in(&RowTime::Running(now), now), secs(1));
-        assert_eq!(row_time_changes_in(&RowTime::Settled(5), now), None);
+        assert_eq!(
+            row_time_changes_in(&RowTime::Settled(chrono::Duration::seconds(5)), now),
+            None
+        );
         assert_eq!(row_time_changes_in(&RowTime::Clock(now), now), None);
     }
 
