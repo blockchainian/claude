@@ -168,15 +168,14 @@ impl View {
                 .max(1)
                 .min(height);
             let top = scroll * (height - thumb) / viewport.log_open_max.max(1);
-            let style = super::style::log_styles(&event.kind).1;
             for row in 0..height {
-                buf[(body_area.right(), body_area.y + row as u16)]
-                    .set_symbol(if (top..top + thumb).contains(&row) {
+                buf[(body_area.right(), body_area.y + row as u16)].set_symbol(
+                    if (top..top + thumb).contains(&row) {
                         "│"
                     } else {
                         " "
-                    })
-                    .set_style(style);
+                    },
+                );
             }
         }
         let rows: Vec<_> = layout

@@ -6001,6 +6001,7 @@ fn open_view_top_button_and_scrollbar() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
     assert_eq!(buf[(area.right(), area.top())].symbol(), "│");
+    assert_eq!(buf[(area.right(), area.top())].fg, Color::Reset);
     assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), " ");
     view.viewport.borrow_mut().log_open_scroll = usize::MAX;
     let bottom = log_screen(&view, 100, 25, now);
