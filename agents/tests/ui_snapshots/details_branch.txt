@@ -4,5 +4,6 @@ PR task
 Project · main
 /tmp/project
 
-Model: Unknown
+Model
+Unknown
 

@@ -317,6 +317,63 @@ fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
 }
 
 #[test]
+fn details_model_section_keeps_controls_on_the_value_row() {
+    let (_directory, mut view) = fixture();
+    view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
+        id: "e772d00b".into(),
+        needs: None,
+    });
+    view.rows[view.selected].process = Some(crate::model::Process {
+        pid: std::process::id(),
+        label: Some("bg".into()),
+        started_at: None,
+    });
+    view.rows[view.selected].effort = Some("high".into());
+    let model_name = view.rows[view.selected].model_name().to_owned();
+    let buffer = render(&view);
+    let targets = view.viewport.borrow().field_targets.clone();
+    let model = targets
+        .iter()
+        .find(|(_, field)| *field == Field::Model)
+        .unwrap()
+        .0;
+    let effort = targets
+        .iter()
+        .find(|(_, field)| *field == Field::Effort)
+        .unwrap()
+        .0;
+    let text = |x, y, width| {
+        (x..x + width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+    };
+    assert_eq!(text(model.x, model.y - 1, 5), "Model");
+    for x in model.x..model.x + 5 {
+        assert!(
+            buffer[(x, model.y - 1)]
+                .modifier
+                .contains(ratatui::style::Modifier::DIM)
+        );
+    }
+    assert_eq!(text(model.x, model.y, model.width), model_name);
+    assert_eq!(effort.y, model.y);
+    assert_eq!(effort.x, model.right() + 3);
+    assert_eq!(text(model.right(), model.y, 3), " · ");
+    assert!(
+        buffer[(model.right() + 1, model.y)]
+            .modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
+    assert_eq!(text(effort.x, effort.y, effort.width), "high");
+    for (rect, field) in [(model, Field::Model), (effort, Field::Effort)] {
+        assert_eq!(click(&mut view, rect.x, rect.y), None);
+        assert_eq!(click(&mut view, rect.x, rect.y), None);
+        assert_eq!(view.picker.as_ref().unwrap().field, field);
+        key(&mut view, KeyCode::Esc);
+    }
+}
+
+#[test]
 fn live_effort_picker_remains_available_when_transcript_omits_effort() {
     let (_directory, mut view) = fixture();
     let id = view.selected_id().unwrap().clone();

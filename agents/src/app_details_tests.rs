@@ -122,6 +122,10 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                     .match_indices('·')
                     .map(|(i, _)| label[..i].chars().count() as u16)
                 {
+                    assert_eq!(
+                        row_text(buffer, y, left + offset - 1, left + offset + 2),
+                        " · "
+                    );
                     assert!(buffer[(left + offset, y)].modifier.contains(Modifier::DIM));
                 }
             }

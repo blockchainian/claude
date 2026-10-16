@@ -6,4 +6,5 @@ Second queued prompt
 Project
 /tmp/project
 
-Model: Unknown
+Model
+Unknown

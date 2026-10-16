@@ -7,8 +7,8 @@
  │ task and its child agents, then        │ │ Project
  │ permanently deletes their history.     │ │ /tmp/project
  │ This cannot be undone.                 │ │
- │                                        │ │ Model: Unknown
- │ › 1. Cancel                            │ │
+ │                                        │ │ Model
+ │ › 1. Cancel                            │ │ Unknown
  │   2. Permanently delete task and child │ │
  └────────────────────────────────────────┘ │
                                             │ ─────── Inactive · Unloaded task ────────

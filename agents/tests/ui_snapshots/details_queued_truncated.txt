@@ -9,4 +9,5 @@ Queued prompt that extends beyond the
 Project
 /tmp/project
 
-Model: Unknown
+Model
+Unknown

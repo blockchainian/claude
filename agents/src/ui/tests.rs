@@ -1704,7 +1704,7 @@ fn details_include_attention_and_clip_messages() {
     view.set_sessions(vec![row], false);
     let rendered = screen(&view, 160, 50);
     for label in [
-        "Model: claude-opus",
+        "claude-opus",
         "Project",
         "main",
         "Needs attention",
@@ -1726,17 +1726,18 @@ fn details_include_attention_and_clip_messages() {
     assert!(position("Last message") < position("Prompt"));
     assert!(position("Prompt") < position("│ Project"));
     assert!(position("│ Project") < project);
-    assert!(project < position("Model: claude-opus"));
+    assert!(project < position("claude-opus"));
     assert!(
         rendered
             .lines()
-            .any(|line| line.contains("Model: claude-opus · high"))
+            .any(|line| line.contains("claude-opus · high"))
     );
     assert!(!rendered.contains("Reasoning"));
     let area = Rect::new(0, 0, 38, 22);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
-    assert_eq!(buf[(0, 20)].symbol(), "M");
+    assert_eq!(buf[(0, 19)].symbol(), "M");
+    assert_eq!(buf[(0, 20)].symbol(), "c");
     assert_eq!(buf[(0, 21)].symbol(), " ");
 }
 
@@ -2745,7 +2746,8 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     }
     buf.reset();
     view.render_details(area, &mut buf, now);
-    assert_eq!(line(&buf, 4), "Model: Unknown");
+    assert_eq!(line(&buf, 3), "Model");
+    assert_eq!(line(&buf, 4), "Unknown");
     assert_eq!(line(&buf, 5), "");
 }
 
@@ -2815,11 +2817,11 @@ fn details_background_boxes_tail_and_clip_output() {
         queued_details(row.clone(), 22),
         include_str!("../../tests/ui_snapshots/details_background_long_title.txt")
     );
-    let clipped = queued_details(row, 14);
-    assert!(clipped.starts_with("Background\n…\n"));
+    let clipped = queued_details(row, 15);
+    assert!(clipped.starts_with("Background\n…\n"), "{clipped}");
     assert!(clipped.contains("Last message"));
     assert!(clipped.contains("Project"));
-    assert!(clipped.ends_with("Model: Unknown"));
+    assert!(clipped.ends_with("Model\nUnknown"));
     assert!(!clipped.contains("xxxxxxxx"));
 }
 
@@ -4015,12 +4017,13 @@ mod details_budget {
         assert!(rows.iter().any(|line| line == "Queued work"));
         assert!(
             rows.iter()
-                .any(|line| line.starts_with("─") && line.contains("Check 4"))
+                .any(|line| line.starts_with("─") && line.contains("Check 3")),
+            "{rows:?}"
         );
-        assert!(!rows.iter().any(|line| line.contains("Check 5")));
+        assert!(!rows.iter().any(|line| line.contains("Check 4")));
         assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
         assert!(rows.iter().any(|line| line == "Prompt text…"));
-        assert!(rows[22].starts_with("Model:"));
+        assert!(rows[21] == "Model" && rows[22] == "Unknown");
         assert!(rows[23].is_empty());
     }
 
@@ -4079,7 +4082,7 @@ mod details_budget {
         for header in ["Prompt", "Last message", "Needs attention"] {
             assert!(rest.iter().any(|line| line == header), "{header}: {rest:?}");
         }
-        assert!(rest[22].starts_with("Model:"));
+        assert!(rest[21] == "Model" && rest[22] == "Unknown");
         assert!(rest[23].is_empty());
         let prompt = rest.iter().position(|line| line == "Prompt").unwrap();
         let project = rest.iter().position(|line| line == "Project").unwrap();
@@ -5166,7 +5169,7 @@ mod subagent_rows {
             .unwrap();
         assert!(header.contains("Working · Check files"), "{header}");
         let rendered = screen(&view, 120, 30);
-        assert!(rendered.contains("Model: child-model"));
+        assert!(rendered.contains("child-model"));
         assert!(!rendered.contains("Needs attention"));
         let (x, y) = rendered_cell(&rendered, "Review results");
         click_mouse(
