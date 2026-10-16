@@ -6782,6 +6782,7 @@ fn task_log_click_opens_row_with_shortened_path() {
     let (mut view, now) = log_fixture();
     let path = "/private/workspace/a-very-long-directory-name/another-long-directory/and-one-more-level/report.md";
     let event = &mut view.log[7];
+    event.kind = crate::log::Kind::Error;
     event
         .paths
         .push(event.body.len() + 1..event.body.len() + 1 + path.len());
@@ -7338,6 +7339,10 @@ fn open_json_body_is_pretty_for_every_kind() {
         event.kind = kind;
         event.body = "{\"answer\":[1,2]}".into();
         event.calls.clear();
+        if event.kind == crate::log::Kind::Tool {
+            assert!(super::log::open_text(&event).is_empty());
+            continue;
+        }
         view.select_log_event(Some(event));
         let open = log_screen(&view, 100, 48, now);
         assert!(open.contains("\"answer\": ["), "{open}");
@@ -7355,7 +7360,7 @@ fn open_json_body_is_pretty_for_every_kind() {
 #[test]
 fn open_view_top_button_and_scrollbar() {
     let (mut view, now) = log_fixture();
-    let mut event = view.log[7].clone();
+    let mut event = view.log[1].clone();
     event.body = (0..80)
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
@@ -7903,6 +7908,10 @@ fn open_top_button_centers_on_the_detail_panel_for_every_kind_and_width() {
             event.kind = kind;
             event.body = (0..100).map(|n| format!("row {n}\n\n")).collect();
             event.calls.clear();
+            if event.kind == crate::log::Kind::Tool {
+                assert!(super::log::open_text(&event).is_empty());
+                continue;
+            }
             view.select_log_event(Some(event));
             log_screen(&view, width, 25, now);
             view.viewport.borrow_mut().log_detail_scroll = 1;
@@ -7996,7 +8005,7 @@ fn wrapped_messages_keep_list_text_and_open_paragraphs() {
             );
         }
     }
-    for event in &events[6..] {
+    for event in &events[6..12] {
         view.log = vec![event.clone()];
         view.select_log_event(Some(event.clone()));
         let area = Rect::new(0, 0, 2000, 25);
@@ -8255,4 +8264,55 @@ fn details_click_selects_source(index: usize, label: &'static str) {
         None
     );
     assert!(view.log_selected.is_none());
+}
+
+#[test]
+fn task_notification_detail_keeps_summary_only_in_header() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/claude-task-notifications.jsonl");
+    let events = crate::providers::claude::log::tail(&path, 10).unwrap();
+    let (mut view, now) = log_fixture();
+    for event in events {
+        let summary = event.body.clone();
+        view.log = vec![event.clone()];
+        view.select_log_event(Some(event));
+        let area = Rect::new(0, 0, 160, 15);
+        let mut buffer = Buffer::empty(area);
+        view.render_log_detail(area, &mut buffer, now);
+        let lines: Vec<_> = buffer
+            .content
+            .chunks(160)
+            .map(|row| {
+                let mut text = String::new();
+                let mut column = 0;
+                while column < row.len() {
+                    let symbol = row[column].symbol();
+                    text.push_str(symbol);
+                    column += unicode_width::UnicodeWidthStr::width(symbol).max(1);
+                }
+                text
+            })
+            .collect();
+        assert_eq!(
+            lines.iter().filter(|line| line.contains(&summary)).count(),
+            1, "{lines:#?}"
+        );
+        let header = lines
+            .iter()
+            .position(|line| line.contains(&summary))
+            .unwrap();
+        assert!(
+            lines[header + 1..]
+                .iter()
+                .any(|line| line.contains("task-id: b9wi31ww0"))
+        );
+        assert!(
+            lines[header + 1..]
+                .iter()
+                .any(|line| line.contains("status: completed"))
+        );
+        assert!(lines[header + 1..].iter().any(|line| {
+            line.contains("output-file: /tmp/agents-notification/tasks/b9wi31ww0.output")
+        }));
+    }
 }

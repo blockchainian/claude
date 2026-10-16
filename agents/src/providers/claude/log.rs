@@ -444,6 +444,7 @@ impl Log {
                 });
                 if record["isMeta"] != true
                     && let Some(text) = text.filter(|text| !text.trim().is_empty())
+                    && !self.notification(&text, at, record["uuid"].as_str())
                 {
                     if let Some((kind, sender, body)) = wrapped_message(&text) {
                         self.push(kind, body, at);
@@ -495,24 +496,10 @@ impl Log {
             }
             Some("queue-operation") if record["operation"] == "enqueue" => {
                 if let Some(text) = record["content"].as_str() {
-                    let (kind, body) = if let Some(notification) = text
-                        .trim()
-                        .strip_prefix("<task-notification>")
-                        .and_then(|text| text.strip_suffix("</task-notification>"))
-                    {
-                        let summary = notification
-                            .split_once("<summary>")
-                            .and_then(|(_, text)| text.split_once("</summary>"))
-                            .map(|(summary, _)| summary.trim())
-                            .unwrap_or_else(|| {
-                                notification
-                                    .lines()
-                                    .map(str::trim)
-                                    .find(|line| !line.is_empty())
-                                    .unwrap_or("")
-                            });
-                        (Kind::Tool, summary)
-                    } else if text.starts_with('<') {
+                    if self.notification(text, at, record["uuid"].as_str()) {
+                        return !self.ready(count);
+                    }
+                    let (kind, body) = if text.starts_with('<') {
                         (Kind::QueuedSystem, text)
                     } else {
                         (Kind::QueuedUser, text)
@@ -529,6 +516,50 @@ impl Log {
             _ => {}
         }
         !self.ready(count)
+    }
+
+    fn notification(&mut self, text: &str, at: DateTime<Utc>, source: Option<&str>) -> bool {
+        let Some(notification) = text
+            .trim()
+            .strip_prefix("<task-notification>")
+            .and_then(|text| {
+                text.split_once("</task-notification>")
+                    .map(|(body, _)| body)
+            })
+        else {
+            return false;
+        };
+        let field = |key: &str| {
+            notification
+                .split_once(&format!("<{key}>"))
+                .and_then(|(_, text)| text.split_once(&format!("</{key}>")))
+                .map(|(value, _)| value.trim())
+        };
+        let summary = field("summary").unwrap_or_else(|| {
+            notification
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("")
+        });
+        let fields: Vec<_> = ["task-id", "status", "output-file"]
+            .into_iter()
+            .filter_map(|key| field(key).map(|value| (key.to_owned(), value.to_owned())))
+            .collect();
+        self.push(Kind::Tool, summary.to_owned(), at);
+        let event = &mut self.entries.last_mut().unwrap().event;
+        event.source = source.map(str::to_owned);
+        if !fields.is_empty() {
+            event.calls.push(ToolCall {
+                id: field("task-id").unwrap_or("").to_owned(),
+                title: summary.to_owned(),
+                name: "task-notification".to_owned(),
+                input: Vec::new(),
+                output: Some(vec![Section::Fields(fields)]),
+                is_error: false,
+            });
+        }
+        true
     }
 
     fn push(&mut self, kind: Kind, body: String, started_at: DateTime<Utc>) {
@@ -1692,7 +1723,9 @@ pub(crate) mod tests {
     fn wrapped_messages_extract_bodies_and_keep_queue_origin() {
         let file = wrapped_fixture();
         let events = tail(file.path(), 20).unwrap();
-        assert_eq!(events.len(), 12);
+        assert_eq!(events.len(), 13);
+        assert_eq!(events[12].kind, Kind::Tool);
+        assert_eq!(events[12].body, "finished");
         let peer_body = include_str!("../../../tests/fixtures/claude-peer-message.txt").trim();
         assert_eq!(peer_body.matches('\n').count(), 11);
         for (pair, kind, sender, body) in [
@@ -1944,7 +1977,7 @@ pub(crate) mod tests {
     fn groups_interleaved_parallel_calls_and_tracks_predecessors() {
         let file = fixture();
         let events = tail(file.path(), 8).unwrap();
-        assert_eq!(events.len(), 7);
+        assert_eq!(events.len(), 8);
         assert_eq!(
             events.iter().map(|e| &e.kind).collect::<Vec<_>>(),
             [
@@ -1954,6 +1987,7 @@ pub(crate) mod tests {
                 &Kind::Tool,
                 &Kind::QueuedUser,
                 &Kind::QueuedSystem,
+                &Kind::Tool,
                 &Kind::Tool
             ]
         );
@@ -1983,6 +2017,9 @@ pub(crate) mod tests {
         );
         assert_eq!(events[6].started_at, at(43));
         assert_eq!(events[6].ended_at, Some(at(43)));
+        assert_eq!(events[7].body, "finished");
+        assert_eq!(events[7].started_at, at(41));
+        assert_eq!(events[7].ended_at, Some(at(41)));
         assert_eq!(events[0].previous_end, None);
         for pair in events.windows(2) {
             let end = if matches!(pair[0].kind, Kind::Tool | Kind::Error) {
@@ -1992,7 +2029,7 @@ pub(crate) mod tests {
             };
             assert_eq!(pair[1].previous_end, end);
         }
-        assert_eq!(tail(file.path(), 2).unwrap(), events[5..]);
+        assert_eq!(tail(file.path(), 2).unwrap(), events[6..]);
         assert!(tail(file.path(), 0).unwrap().is_empty());
     }
     #[test]
@@ -2101,10 +2138,7 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(measured.bytes_read, 64 * 1024);
         assert_eq!(measured.earliest, len - 64 * 1024);
-        assert_eq!(
-            log.entries[0].event.body,
-            "Background command \"等 Codex 做日志面板\" completed (exit code 0)"
-        );
+        assert_eq!(log.entries[0].event.body, "finished");
     }
 
     #[test]

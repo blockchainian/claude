@@ -98,7 +98,11 @@ fn whole_log_row_double_click_focuses_input_and_keeps_the_detail() {
         log_screen(&view, width, 60, now);
         let viewport = view.viewport.borrow();
         assert!(!viewport.log_rows.is_empty());
-        assert!(!viewport.log_text.rows.is_empty());
+        if expected.kind == crate::log::Kind::Tool && expected.calls.is_empty() {
+            assert!(viewport.log_text.rows.is_empty());
+        } else {
+            assert!(!viewport.log_text.rows.is_empty());
+        }
     }
 }
 

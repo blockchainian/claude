@@ -518,3 +518,42 @@ fn terminal_update_click_selects_source_row() {
     );
     println!("Update click selected the real transcript's assistant row in tmux.");
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_task_notification_shows_summary_and_fields() {
+    use std::io::Write;
+    let (_directory, tmux, transcript) = start_probe("task-notification");
+    let record = include_str!("fixtures/claude-task-notifications.jsonl")
+        .lines()
+        .next()
+        .unwrap();
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(transcript)
+            .unwrap(),
+        "{record}"
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_secs(1));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    println!("{capture}");
+    let rows: Vec<_> = capture.lines().collect();
+    let rule = rows
+        .iter()
+        .rposition(|line| line.matches('─').count() > 100)
+        .expect("log detail rule");
+    let detail = rows[rule + 1..rows.len() - 1].join("\n");
+    let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
+    assert_eq!(detail.matches(summary).count(), 1, "{capture}");
+    for field in [
+        "task-id: b9wi31ww0",
+        "status: completed",
+        "output-file: /tmp/agents-notification/tasks/b9wi31ww0.output",
+    ] {
+        assert!(detail.contains(field), "{capture}");
+    }
+    assert!(!detail.contains("tool-use-id"), "{capture}");
+    println!("{{\"task_notification\":\"pass\",\"summary_once\":true,\"fields\":true}}");
+}

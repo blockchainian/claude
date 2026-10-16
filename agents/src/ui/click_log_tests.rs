@@ -287,11 +287,7 @@ fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
         "Background double click must open its full log"
     );
     assert!(
-        view.log_selected
-            .as_ref()
-            .unwrap()
-            .body
-            .contains("globalState")
+        super::super::log::open_text(view.log_selected.as_ref().unwrap()).contains("globalState")
     );
     assert_eq!(view.pending_click_in(Instant::now()), None);
 }

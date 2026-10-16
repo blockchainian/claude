@@ -794,6 +794,8 @@ pub(super) fn open_text(event: &Event) -> String {
 fn open_parts(event: &Event) -> Vec<super::tool_detail::Part> {
     if shows_calls(event) {
         super::tool_detail::parts(event)
+    } else if event.kind == Kind::Tool {
+        Vec::new()
     } else if is_prose(&event.kind) {
         vec![super::tool_detail::Part::text(event.body.clone(), true)]
     } else {
@@ -989,6 +991,74 @@ fn highlight_matches(line: &mut Line<'static>, search: &super::log_search::LogSe
 mod log_markdown {
     use super::*;
     use ratatui::style::Modifier;
+
+    #[test]
+    fn task_notifications_show_fields_and_link_without_repeating_summary() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-task-notifications.jsonl");
+        let events = crate::providers::claude::log::tail(&path, 10).unwrap();
+        assert_eq!(events.len(), 2);
+        for event in events {
+            let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
+            assert_eq!(event.kind, Kind::Tool);
+            assert_eq!(event.body, summary);
+            assert_eq!(event.calls[0].title, summary);
+            let body = open_text(&event);
+            assert!(body.contains("task-id: b9wi31ww0"), "{body}");
+            assert!(body.contains("status: completed"), "{body}");
+            assert!(
+                body.contains("output-file: /tmp/agents-notification/tasks/b9wi31ww0.output"),
+                "{body}"
+            );
+            assert!(!body.contains(summary), "{body}");
+            assert!(!body.contains("tool-use-id"), "{body}");
+            let dir = tempfile::tempdir().unwrap();
+            let output = dir.path().join("b9wi31ww0.output");
+            std::fs::write(&output, "done").unwrap();
+            let mut linked = event.clone();
+            if let Some(crate::log::Section::Fields(fields)) =
+                linked.calls[0].output.as_mut().unwrap().first_mut()
+            {
+                fields
+                    .iter_mut()
+                    .find(|(key, _)| key == "output-file")
+                    .unwrap()
+                    .1 = output.display().to_string();
+            }
+            let layout = detail_layout(&linked, 120, dir.path());
+            assert!(
+                layout
+                    .links
+                    .iter()
+                    .flatten()
+                    .any(|link| link.target == output)
+            );
+        }
+    }
+
+    #[test]
+    fn tool_without_calls_has_no_body_below_its_title() {
+        let event = &Event {
+            source: None,
+            sender: None,
+            kind: Kind::Tool,
+            body: "finished".into(),
+            paths: Vec::new(),
+            started_at: Utc::now(),
+            ended_at: None,
+            duration: None,
+            previous_end: None,
+            images: Vec::new(),
+            calls: Vec::new(),
+        };
+        assert!(event.calls.is_empty());
+        assert!(open_parts(event).is_empty());
+        assert!(open_text(event).is_empty());
+        assert_eq!(
+            detail_layout(event, 100, std::path::Path::new("/")).height,
+            0
+        );
+    }
 
     #[test]
     fn running_times_keep_zero_milliseconds() {

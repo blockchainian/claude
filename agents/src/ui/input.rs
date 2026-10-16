@@ -157,14 +157,24 @@ impl View {
             kind: crate::log::Kind::Tool,
             source: None,
             sender: None,
-            body,
+            body: task.description.clone(),
             paths: Vec::new(),
             started_at: task.started_at,
             ended_at: None,
             duration: None,
             previous_end: None,
             images: Vec::new(),
-            calls: Vec::new(),
+            calls: vec![crate::log::ToolCall {
+                id: String::new(),
+                title: task.description,
+                name: "background".into(),
+                input: Vec::new(),
+                output: Some(vec![crate::log::Section::Text {
+                    label: String::new(),
+                    text: body,
+                }]),
+                is_error: false,
+            }],
         }));
         self.viewport.borrow_mut().log_detail_scroll = 0;
     }
