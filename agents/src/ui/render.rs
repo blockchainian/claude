@@ -103,6 +103,8 @@ impl View {
                 || self
                     .selected_row()
                     .is_some_and(|session| session.transcript.is_some()));
+        // Exclude both rules around the prompt and, in narrow mode, the list/detail rule.
+        // The detail rectangle adds its top rule back below; it is not content.
         let content_height = area
             .height
             .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!wide));
@@ -114,6 +116,7 @@ impl View {
                 0,
             )
         } else if wide {
+            // Give an odd content row to the top; narrow remainders go top, then list.
             (content_height.div_ceil(2), 0, content_height / 2)
         } else {
             (

@@ -4734,8 +4734,10 @@ fn center_layout_narrow_buffer_ranges_at_120_columns() {
 }
 
 #[test]
-fn center_layout_wide_equal_content_buffer_at_200x60() {
-    assert_equal_content_buffer(200, 60, "");
+fn center_layout_wide_balances_inner_content_across_sizes() {
+    for (width, height) in [(200, 60), (200, 61), (180, 40), (160, 50), (150, 50)] {
+        assert_equal_content_buffer(width, height, "");
+    }
 }
 
 #[test]
@@ -4745,7 +4747,18 @@ fn center_layout_wide_equal_content_buffer_at_200x45() {
 
 #[test]
 fn center_layout_equal_content_buffer_with_growing_input() {
-    for (width, height) in [(200, 60), (200, 45), (120, 60), (120, 45)] {
+    for (width, height) in [
+        (200, 60),
+        (200, 61),
+        (200, 45),
+        (180, 40),
+        (160, 50),
+        (120, 60),
+        (120, 61),
+        (120, 45),
+        (100, 40),
+        (149, 50),
+    ] {
         for lines in 2..=7 {
             assert_equal_content_buffer(width, height, &vec!["input"; lines].join("\n"));
         }
@@ -4754,8 +4767,10 @@ fn center_layout_equal_content_buffer_with_growing_input() {
 }
 
 #[test]
-fn center_layout_narrow_equal_content_buffer_at_120x60() {
-    assert_equal_content_buffer(120, 60, "");
+fn center_layout_narrow_balances_inner_content_across_sizes() {
+    for (width, height) in [(120, 60), (120, 61), (100, 40), (149, 50)] {
+        assert_equal_content_buffer(width, height, "");
+    }
 }
 
 #[test]
@@ -4781,6 +4796,16 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
         - 2
         - u16::from(!wide);
     let detail = layout.log_detail.height.saturating_sub(1);
+    // Count content between the rendered detail rule and footer, excluding the rule.
+    assert_eq!(detail, layout.footer.y - layout.log_detail.y - 1);
+    let heights = if wide {
+        vec![top, detail]
+    } else {
+        vec![top, layout.log.height, detail]
+    };
+    assert_eq!(heights.iter().sum::<u16>(), available);
+    assert!(heights.windows(2).all(|pair| pair[0] >= pair[1]));
+    assert!(heights[0] - heights[heights.len() - 1] <= 1);
     let expected = if wide {
         (available.div_ceil(2), available.div_ceil(2), available / 2)
     } else {
