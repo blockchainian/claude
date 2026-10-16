@@ -12,6 +12,9 @@ This directory is `agents`, the Rust terminal dashboard that lists every Claude 
 - src/sessions/ -- merged snapshots and filesystem notifications
 - src/processes.rs -- running processes and their open files, read through libproc
 - src/log.rs -- task log events and filters
+- src/usage.rs -- a transcript's token usage in time bins, for the usage chart
+- src/activity.rs -- when a transcript's turns ran, for the activity strip
+- src/jsonl.rs -- a growing transcript read by complete lines, forward or backward
 - src/ui/ -- rendering, input and the task log panel
 - tests/ -- real payload fixtures and rendered UI snapshots
 

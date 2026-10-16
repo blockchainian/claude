@@ -92,6 +92,8 @@ pub struct App {
     full_log_stamp: Option<LogStamp>,
     /// Token usage of each transcript the user has selected, kept up to date while selected.
     usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
+    /// When each recently active transcript's turns ran.
+    activity: std::collections::HashMap<PathBuf, crate::activity::Turns>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -122,6 +124,7 @@ impl App {
             log_stamp: None,
             full_log_stamp: None,
             usage: std::collections::HashMap::new(),
+            activity: std::collections::HashMap::new(),
         }
     }
 
@@ -212,6 +215,7 @@ impl App {
                 let area = frame.area();
                 self.refresh_log(self.view.log_event_count(area));
                 self.refresh_usage();
+                self.refresh_activity(area.width);
                 self.view.render(area, frame.buffer_mut());
                 self.view.underline_links(frame.buffer_mut());
                 if let Some((x, y)) = self.view.cursor_pos(area) {
@@ -236,7 +240,7 @@ impl App {
                 .map_or(timeout, |message| timeout.min(message));
             let timeout = self
                 .view
-                .usage_redraw_in(chrono::Utc::now())
+                .timeline_redraw_in(chrono::Utc::now())
                 .map_or(timeout, |usage| timeout.min(usage));
             let timeout =
                 crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
@@ -437,6 +441,35 @@ impl App {
                     .set_notice(Some(format!("Failed to read task log: {error}")));
             }
         }
+    }
+
+    /// Reads when each task worked within a timeline `width` cells wide and hands the view the
+    /// bins any of them worked in; a task idle since before the timeline is not read.
+    fn refresh_activity(&mut self, width: u16) {
+        let now = chrono::Utc::now();
+        let since = now - chrono::Duration::seconds(crate::ui::timeline_seconds(width));
+        let mut bins = std::collections::BTreeSet::new();
+        for session in &self.sessions {
+            let Some(path) = &session.transcript else {
+                continue;
+            };
+            let works = session.status == crate::model::SessionStatus::Working;
+            let recent = std::fs::metadata(path)
+                .and_then(|metadata| metadata.modified())
+                .is_ok_and(|at| chrono::DateTime::<chrono::Utc>::from(at) >= since);
+            if !works && !recent {
+                self.activity.remove(path);
+                continue;
+            }
+            let turns = self.activity.entry(path.clone()).or_default();
+            if turns.update(path, session.id.provider, since).is_err() {
+                continue;
+            }
+            for (start, end) in turns.spans(now, works) {
+                bins.extend(crate::usage::bin_of(start.max(since))..=crate::usage::bin_of(end));
+            }
+        }
+        self.view.set_activity(bins);
     }
 
     /// Reads what the selected task's transcript gained and hands its usage to the view.

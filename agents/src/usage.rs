@@ -9,14 +9,11 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io;
 use std::path::Path;
 
 /// Seconds of activity one bin sums.
 pub const BIN_SECONDS: i64 = 5;
-
-/// Bytes read per step, so a large transcript is never held whole.
-const CHUNK: usize = 8 << 20;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Bin {
@@ -57,25 +54,9 @@ impl Series {
         if len == self.read {
             return Ok(false);
         }
-        file.seek(SeekFrom::Start(self.read))?;
         let before = self.bins.clone();
-        let mut pending = Vec::new();
-        let mut chunk = vec![0; CHUNK];
-        loop {
-            let count = file.read(&mut chunk)?;
-            if count == 0 {
-                break;
-            }
-            pending.extend_from_slice(&chunk[..count]);
-            let Some(end) = pending.iter().rposition(|&byte| byte == b'\n') else {
-                continue;
-            };
-            for line in pending[..end].split(|&byte| byte == b'\n') {
-                self.record(line, provider);
-            }
-            self.read += end as u64 + 1;
-            pending.drain(..=end);
-        }
+        self.read =
+            crate::jsonl::read_lines(&mut file, self.read, |line| self.record(line, provider))?;
         Ok(self.bins != before)
     }
 

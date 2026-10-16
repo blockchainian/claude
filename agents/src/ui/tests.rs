@@ -5340,7 +5340,10 @@ fn task_log_open_tool_snapshot() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "cargo test");
-    assert!(matches!(buf[(x, y)].fg, Color::Rgb(..) | Color::Indexed(..)));
+    assert!(matches!(
+        buf[(x, y)].fg,
+        Color::Rgb(..) | Color::Indexed(..)
+    ));
     let (x, y) = rendered_cell(&open, "running…");
     assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(
@@ -6020,7 +6023,10 @@ fn open_json_body_is_pretty_for_every_kind() {
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
         view.render_at(buf.area, &mut buf, now);
         let area = view.viewport.borrow().log_text.area;
-        assert!(matches!(buf[(area.x + 2, area.y + 1)].fg, Color::Rgb(..) | Color::Indexed(..)));
+        assert!(matches!(
+            buf[(area.x + 2, area.y + 1)].fg,
+            Color::Rgb(..) | Color::Indexed(..)
+        ));
     }
 }
 
@@ -6449,7 +6455,10 @@ fn mixed_open_outputs_render_and_copy_pretty_json_with_markdown() {
                 .contains(ratatui::style::Modifier::BOLD)
         );
         let (x, y) = rendered_cell(&screen, "\"answer\"");
-        assert!(matches!(buf[(x, y)].fg, Color::Rgb(..) | Color::Indexed(..)));
+        assert!(matches!(
+            buf[(x, y)].fg,
+            Color::Rgb(..) | Color::Indexed(..)
+        ));
         let viewport = view.viewport.borrow();
         let json = viewport
             .log_text
@@ -6701,4 +6710,25 @@ fn usage_chart_rises_in_braille_below_the_task_rows_and_keeps_its_bins_as_time_p
             "after {seconds}s the chart shows the same bins"
         );
     }
+}
+
+#[test]
+fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_jump_style() {
+    let (mut view, now) = log_fixture();
+    let area = Rect::new(0, 0, 100, 25);
+    let layout = view.center_layout(area);
+    let (y, right) = (layout.log.y, layout.list.right() - 1);
+    let [left_bin, right_bin] = super::timeline::cell_bins(layout.list, right, now);
+    // The newest cell's both bins, then a gap, then a cell's left bin only.
+    view.set_activity([left_bin, right_bin, left_bin - 4].into());
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    let cell = |x: u16| &buf[(x, y)];
+    assert_eq!(cell(right).symbol(), "⠶");
+    let modifier = cell(right).modifier;
+    assert!(modifier.contains(ratatui::style::Modifier::BOLD));
+    assert!(!modifier.contains(ratatui::style::Modifier::DIM));
+    assert_eq!(cell(right - 1).symbol(), "─");
+    assert_eq!(cell(right - 2).symbol(), "⠆");
+    assert!(view.timeline_redraw_in(now).is_some());
 }

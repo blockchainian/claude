@@ -3,8 +3,9 @@
 //! The chart looks at most half as tall as it is wide, so a tall list keeps it to its bottom part.
 
 use super::View;
+use super::timeline::cell_bins;
 use crate::providers::SessionKey;
-use crate::usage::{Bin, bin_of};
+use crate::usage::Bin;
 use chrono::{DateTime, Utc};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -16,9 +17,6 @@ const CELL_DOTS: u16 = 4;
 
 /// The percentile of bin totals that fills the chart.
 const TOP_PERCENTILE: usize = 95;
-
-/// Bins one cell holds, one per dot column.
-const CELL_BINS: i64 = 2;
 
 /// The braille bits of a cell's left and right dot columns, bottom to top.
 const DOT_BITS: [[u8; 4]; 2] = [[0x40, 0x04, 0x02, 0x01], [0x80, 0x20, 0x10, 0x08]];
@@ -32,27 +30,23 @@ impl View {
         self.usage.as_ref().map(|(id, _)| id)
     }
 
-    /// The selected task's usage bins, when the view holds them.
+    /// The selected task's usage bins, when the view holds any.
     fn selected_usage(&self) -> Option<&BTreeMap<i64, Bin>> {
         let session = self.selected_row()?;
         let (id, bins) = self.usage.as_ref()?;
-        (*id == session.id).then_some(bins)
+        (*id == session.id && !bins.is_empty()).then_some(bins)
     }
 
-    /// Draws the selected task's usage into the blank rows below the list's content in `area`,
-    /// ending at now for a live task and at its last usage otherwise.
+    pub(super) fn shows_usage(&self) -> bool {
+        self.selected_usage().is_some()
+    }
+
+    /// Draws the selected task's usage up to now into the blank rows below the list's content in
+    /// `area`.
     pub(super) fn render_usage_chart(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
-        let (Some(session), Some(bins)) = (self.selected_row(), self.selected_usage()) else {
+        let Some(bins) = self.selected_usage() else {
             return;
         };
-        let Some(&last) = bins.keys().next_back() else {
-            return;
-        };
-        let end = cell_right(if session.status == crate::model::SessionStatus::Inactive {
-            last
-        } else {
-            bin_of(now)
-        });
         let max = chart_top(bins.values().map(total).collect());
         let height = chart_rows(area, self.cell_aspect) * CELL_DOTS;
         let dots = |bin: i64| {
@@ -66,8 +60,7 @@ impl View {
         for y in content_bottom..area.bottom() {
             let floor = (area.bottom() - 1 - y) * CELL_DOTS;
             for x in area.left()..area.right() {
-                let right = end - i64::from(area.right() - 1 - x) * CELL_BINS;
-                let bits = [right - 1, right]
+                let bits = cell_bins(area, x, now)
                     .iter()
                     .zip(DOT_BITS)
                     .map(|(&bin, column)| {
@@ -82,18 +75,6 @@ impl View {
             }
         }
     }
-
-    /// Time until the live chart moves to its next bin.
-    pub(crate) fn usage_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
-        self.selected_usage()?;
-        if self.selected_row()?.status == crate::model::SessionStatus::Inactive {
-            return None;
-        }
-        let next = (bin_of(now) + 1) * crate::usage::BIN_SECONDS * 1000;
-        u64::try_from(next - now.timestamp_millis())
-            .ok()
-            .map(std::time::Duration::from_millis)
-    }
 }
 
 fn total(usage: &Bin) -> u64 {
@@ -103,12 +84,6 @@ fn total(usage: &Bin) -> u64 {
 /// A cell nothing has drawn on since the frame was cleared.
 fn is_blank(cell: &ratatui::buffer::Cell) -> bool {
     cell.symbol() == " " && cell.bg == Color::Reset
-}
-
-/// The right bin of the cell holding `bin`; cells cover fixed bin pairs, so a cell keeps its
-/// bins as time passes.
-fn cell_right(bin: i64) -> i64 {
-    bin - bin.rem_euclid(CELL_BINS) + CELL_BINS - 1
 }
 
 /// Rows the chart fills in `area`, whose cells are `cell_aspect` times taller than wide: as many
@@ -166,12 +141,5 @@ mod tests {
         assert_eq!(chart_rows(Rect::new(0, 0, 70, 60), 3.0), 12);
         // A list shorter than that gives the chart all its rows.
         assert_eq!(chart_rows(Rect::new(0, 0, 94, 10), 3.0), 10);
-    }
-
-    #[test]
-    fn cells_pair_fixed_bins() {
-        assert_eq!(cell_right(10), 11);
-        assert_eq!(cell_right(11), 11);
-        assert_eq!(cell_right(-1), -1);
     }
 }

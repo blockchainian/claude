@@ -283,6 +283,11 @@ impl View {
         }
         self.viewport.borrow_mut().log = layout.log;
         self.render_log(inset(layout.log), buf, now);
+        if !layout.log.is_empty() {
+            let rule = Rect::new(layout.list.x, layout.log.y, layout.list.width, 1)
+                .intersection(inset(layout.log));
+            self.render_activity_strip(rule, buf, now);
+        }
         if let Some(rule) = details_rule {
             self.render_details_title(rule, buf, now);
         }

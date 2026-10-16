@@ -1,4 +1,5 @@
 //! Command center adapted from OpenAI Codex's TUI (Apache-2.0).
+mod activity_strip;
 pub(crate) mod commits;
 mod formatting;
 mod highlight;
@@ -20,6 +21,7 @@ mod shortcut_help;
 mod style;
 mod text_selection;
 mod text_selection_layout;
+mod timeline;
 mod title_rule;
 mod tool_detail;
 mod usage_chart;
@@ -28,6 +30,7 @@ pub use highlight::use_theme as use_highlight_theme;
 #[cfg(test)]
 pub use style::light_background;
 pub use style::set_light_background;
+pub(crate) use timeline::timeline_seconds;
 
 use crate::model::{Action, Grouping, Session, SessionStatus};
 use crate::providers::{Capabilities, ProviderId, SessionKey};
@@ -227,6 +230,8 @@ pub struct View {
     )>,
     /// How many times taller than wide one terminal cell looks.
     cell_aspect: f64,
+    /// The timeline bins some task worked in.
+    activity: std::collections::BTreeSet<i64>,
 }
 
 /// Cell height over width assumed when the terminal reports no pixels.
@@ -315,6 +320,7 @@ impl View {
             left_log_newest: None,
             usage: None,
             cell_aspect: DEFAULT_CELL_ASPECT,
+            activity: std::collections::BTreeSet::new(),
         }
     }
 
