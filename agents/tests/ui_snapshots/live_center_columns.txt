@@ -1,10 +1,10 @@
  Agent command center  Group: Project  g
   Active 3   Ready 2   Working 1   Needs you 2   Inactive 1                                                                                     tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Pinned  1 of 2                         │ Prompt                                 │
+ Pinned                                 │ Prompt                                 │
  › ○ Current task                       │ Current task                           │
                                         │                                        │
- /tmp/project  2 of 4                   │ Project                                │
+ /tmp/project                           │ Project                                │
    ○ A longer task title that uses the… │ /tmp/project                           │
  ↓                                      │ …                                      │
  ───────────────────────────────────────────────── Current task · Ready ───────────────────────────────────────────────────────────────────────────────────────

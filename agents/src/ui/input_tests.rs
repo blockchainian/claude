@@ -38,8 +38,11 @@ fn click(view: &mut View, x: u16, y: u16) -> Option<Action> {
 #[test]
 fn heading_only_path_opens_but_entire_row_double_clicks() {
     let (directory, mut view) = fixture();
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 300, 40));
+    view.render_at(buffer.area, &mut buffer, Utc::now());
     let (path, _) = view.viewport.borrow().list_links[0].clone();
     let edge = view.viewport.borrow().list_rows.right() - 1;
+    assert!(edge >= path.right());
     assert!(click(&mut view, edge, path.y).is_none());
     assert_eq!(
         view.flush_pending_click(Instant::now() + view.double_click_interval),

@@ -171,31 +171,15 @@ impl View {
                             .to_owned(),
                     }
                 };
-                let count = indices
-                    .iter()
-                    .filter(|&&candidate| {
-                        candidate != usize::MAX && self.same_group(self.grouping, candidate, index)
-                    })
-                    .count();
-                let total = (0..self.rows.len())
-                    .filter(|&candidate| self.same_group(self.grouping, candidate, index))
-                    .count();
-                let count = if count == total {
-                    count.to_string()
-                } else {
-                    format!("{count} of {total}")
-                };
                 let group = if self.grouping == Grouping::Project && !self.is_pinned(index) {
                     super::line_truncation::abbreviate_path(
                         &group,
-                        usize::from(rect.width)
-                            .saturating_sub(count.width() + 2)
-                            .min(/*other*/ 64),
+                        usize::from(rect.width).min(/*other*/ 64),
                     )
                 } else {
                     group
                 };
-                line(format!("{group}  {count}").dim(), rect, buf);
+                line(group.clone().dim(), rect, buf);
                 if self.grouping == Grouping::Project && !self.is_pinned(index) {
                     let link =
                         Rect::new(rect.x, rect.y, group.width() as u16, 1).intersection(rect);

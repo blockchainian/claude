@@ -1454,6 +1454,62 @@ fn live_center_show_more() {
     assert!(screen(&view, 80, 12).contains("Loading more…"));
 }
 #[test]
+fn group_headers_have_no_count() {
+    for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
+        for pinned in [false, true] {
+            for filter in [0, 1] {
+                let mut view = test_view(grouping, false);
+                view.set_sessions(
+                    vec![
+                        session("ready", "Ready task", SessionStatus::Ready, 0),
+                        session("working", "Working task", SessionStatus::Working, 0),
+                    ],
+                    false,
+                );
+                if pinned {
+                    view.set_pinned(&[session_key("ready"), session_key("working")]);
+                }
+                view.status_filter = filter;
+                let area = Rect::new(0, 0, 80, 12);
+                let mut buf = Buffer::empty(area);
+                view.render_center_rows(area, &mut buf, Utc::now());
+                let entries = view.center_rows(&view.selectable_indices(), grouping);
+                let mut headers = 0;
+                for (y, entry) in entries.iter().enumerate() {
+                    let navigation::CenterRow::Group(index) = entry else {
+                        continue;
+                    };
+                    headers += 1;
+                    let expected = if pinned {
+                        "Pinned"
+                    } else {
+                        match grouping {
+                            Grouping::Project => "/tmp/project",
+                            Grouping::Status => view.rows[*index].status.label(),
+                            Grouping::Model => view.rows[*index].model_name(),
+                        }
+                    };
+                    let heading = (0..area.width)
+                        .map(|x| buf[(x, y as u16)].symbol())
+                        .collect::<String>();
+                    assert_eq!(
+                        heading.trim_end(),
+                        expected,
+                        "{grouping:?}, pinned={pinned}, filter={filter}"
+                    );
+                    assert!(
+                        buf[(0, y as u16)]
+                            .modifier
+                            .contains(ratatui::style::Modifier::DIM)
+                    );
+                }
+                assert!(headers > 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn agents_overview_model_grouping() {
     let mut view = test_view(Grouping::Model, false);
     let rows = [
@@ -1502,7 +1558,10 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
     let rendered = screen(&view, 80, 24);
     assert!(rendered.contains("Active 0"));
     assert!(rendered.contains("Inactive 12"));
-    assert!(rendered.contains("/  12"));
+    assert_eq!(
+        rendered.lines().nth(3).unwrap().split('│').next().unwrap().trim(),
+        "/"
+    );
     let expected = include_str!("../../tests/ui_snapshots/agents_overview_recent_sessions.txt");
     // The reference loads ten rows. Twelve rows change only counts and append Task 2 / Task 1.
     for (actual, expected) in rendered
@@ -4703,7 +4762,7 @@ fn path_abbreviation_in_group_header_preserves_last_component() {
         })
         .find(|row| row.starts_with('/'))
         .unwrap();
-    assert_eq!(heading, "/U…/v…/C…/.w…/agents-panel  1");
+    assert_eq!(heading, "/U…/v…/C…/.w…/agents-panel");
 }
 
 mod log_path_abbrev {
@@ -5374,8 +5433,16 @@ mod subagent_rows {
                 .count(),
             2
         );
-        assert!(rendered.contains("Working  1"));
-        assert!(rendered.contains("Ready  2"));
+        assert!(
+            rendered
+                .lines()
+                .any(|line| line.split('│').next().unwrap().trim() == "Working")
+        );
+        assert!(
+            rendered
+                .lines()
+                .any(|line| line.split('│').next().unwrap().trim() == "Ready")
+        );
     }
 
     #[test]
@@ -5463,14 +5530,14 @@ mod subagent_rows {
             assert!(lines[parent - 1].contains("Other task"));
             assert!(lines[parent + 1].contains("└ ● Check files"));
             let heading = if grouping == Grouping::Project {
-                "/tmp/project  2 of 4"
+                "/tmp/project"
             } else {
-                "parent-model  2 of 4"
+                "parent-model"
             };
             assert!(rendered.contains(heading), "{rendered}");
             view.set_pinned(&[session_key("parent")]);
             assert_eq!(ids(&view), ["agent-older", "other"]);
-            assert!(screen(&view, 120, 30).contains("Pinned  1 of 3"));
+            assert!(screen(&view, 120, 30).contains("Pinned"));
         }
         view.hide(&session_key("agent-older"));
         assert_eq!(ids(&view), ["other"]);
