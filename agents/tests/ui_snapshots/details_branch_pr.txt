@@ -1,7 +1,7 @@
 Prompt
 PR task
 
-Project · main · #833
+Project                      main · #833
 /tmp/project
 
 Model: Unknown

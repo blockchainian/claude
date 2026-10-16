@@ -1705,7 +1705,7 @@ fn details_include_attention_and_clip_messages() {
     let rendered = screen(&view, 160, 50);
     for label in [
         "Model: claude-opus",
-        "Project · main",
+        "Project",
         "main",
         "Needs attention",
         "Open task to review.",
@@ -1724,8 +1724,8 @@ fn details_include_attention_and_clip_messages() {
     });
     assert!(position("Needs attention") < position("Last message"));
     assert!(position("Last message") < position("Prompt"));
-    assert!(position("Prompt") < position("Project ·"));
-    assert!(position("Project ·") < project);
+    assert!(position("Prompt") < position("│ Project"));
+    assert!(position("│ Project") < project);
     assert!(project < position("Model: claude-opus"));
     assert!(
         rendered
@@ -2173,15 +2173,15 @@ fn details_branch_and_pull_request_use_session_title_color() {
             (0..area.width)
                 .map(|x| buf[(x, *y)].symbol())
                 .collect::<String>()
-                .starts_with("Project · ")
+                .starts_with("Project ")
         })
         .expect("Project header");
     for (offset, symbol) in "main".chars().enumerate() {
-        let cell = &buf[(10 + offset as u16, project_y)];
+        let cell = &buf[(29 + offset as u16, project_y)];
         assert_eq!(cell.symbol(), symbol.to_string());
         assert_eq!(cell.fg, color);
     }
-    for x in 17..21 {
+    for x in 36..40 {
         assert_eq!(buf[(x, project_y)].fg, color);
     }
 }
@@ -2246,11 +2246,18 @@ fn details_branch_pull_request_snapshot() {
             })
             .map(|(index, _)| index % usize::from(width))
             .collect::<Vec<_>>();
-        assert_eq!(link_cells, if width >= 21 { vec![17] } else { vec![] });
+        assert_eq!(
+            link_cells,
+            if width >= 19 {
+                vec![usize::from(width) - 4]
+            } else {
+                vec![]
+            }
+        );
     }
     row.git_branch = None;
     view.set_sessions(vec![row.clone()], false);
-    assert!(render(&view).contains("Project · #833"));
+    assert!(render(&view).contains("Project                             #833"));
     row.pr = None;
     view.set_sessions(vec![row], false);
     assert!(render(&view).contains("\nProject\n/tmp/project\n"));
@@ -2295,7 +2302,7 @@ fn details_activity_follows_the_clock() {
         rendered,
         include_str!("../../tests/ui_snapshots/details_activity_working.txt")
     );
-    assert!(rendered.contains("Latest activity · 7s ago"));
+    assert!(rendered.contains("Latest activity                   7s ago"));
     assert!(!rendered.contains("Last message"));
     row.activity.as_mut().unwrap().label =
         "Run checks on every changed surface in the project".into();
@@ -2308,7 +2315,7 @@ fn details_activity_follows_the_clock() {
     row.activity.as_mut().unwrap().label = "Run checks".into();
     row.status = SessionStatus::Ready;
     view.set_sessions(vec![row.clone()], false);
-    assert!(render(&view).contains("Latest activity · 7s ago"));
+    assert!(render(&view).contains("Latest activity                   7s ago"));
     assert_eq!(
         render(&view),
         include_str!("../../tests/ui_snapshots/details_activity_ready.txt")
@@ -2341,7 +2348,7 @@ fn details_activity_uses_tool_color() {
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, now);
-    let header = "Latest activity · 2m ago";
+    let header = "Latest activity                                       2m ago";
     let y = (0..area.height)
         .find(|y| buf[(0, *y)].symbol() == "L")
         .expect("activity header");
@@ -2377,7 +2384,7 @@ fn details_message_uses_model_color_under_markdown() {
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, now);
-    let header = "Last message · 2m ago";
+    let header = "Last message                                          2m ago";
     let y = (0..area.height)
         .find(|y| buf[(0, *y)].symbol() == "L")
         .expect("message header");
@@ -2422,21 +2429,21 @@ fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
             Some(now - Duration::seconds(45)),
             None,
             1,
-            "Prompt · 1 message · 45s",
+            "Prompt                   1 message · 45s",
         ),
         (
             SessionStatus::Ready,
             Some(now),
             Some(now - Duration::seconds(1)),
             0,
-            "Prompt · 0 messages · 0s",
+            "Prompt                   0 messages · 0s",
         ),
         (
             SessionStatus::Working,
             Some(now + Duration::seconds(1)),
             None,
             0,
-            "Prompt · 0 messages · 0s",
+            "Prompt                   0 messages · 0s",
         ),
         (SessionStatus::Ready, None, Some(now), 0, "Prompt"),
     ] {
@@ -2909,7 +2916,7 @@ fn details_background_includes_only_working_subagents() {
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
-    assert!(text.contains("Worker command · 0s"));
+    assert!(text.contains(&format!("Worker command{:>24}", "0s")));
     assert!(!text.contains("Nested agent"));
     assert!(!text.contains("Review files"));
 }
@@ -2944,7 +2951,7 @@ fn background_box_dims_border_but_not_title_or_output() {
     let parts = super::tool_detail::parts(&event);
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
     (&parts[0].lines(40, Style::default())[0]).render(title_buf.area, &mut title_buf);
-    for x in (0..12).chain(30..39) {
+    for x in 0..12 {
         assert_eq!(title_buf[(x, 0)], buf[(x, top)], "title cell {x}");
     }
     assert_eq!(buf[(2, top + 1)].symbol(), "t");
@@ -5890,7 +5897,7 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
     );
     assert_eq!(click_text(&mut view, &rendered, "main"), None);
     // The directory sits under the project line; the task list shows the same path as a group.
-    let (x, y) = rendered_cell(&rendered, "Project · ");
+    let (x, y) = rendered_cell(&rendered, "Project                         ");
     assert_eq!(
         click_mouse(
             &mut view,
@@ -5914,7 +5921,7 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
         url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
     });
     let rendered = screen(&view, 120, 40);
-    let (x, y) = rendered_cell(&rendered, "Project · ");
+    let (x, y) = rendered_cell(&rendered, "Project                         ");
     let cwd_cell = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1);
     assert_eq!(
         click_mouse(&mut view, cwd_cell),

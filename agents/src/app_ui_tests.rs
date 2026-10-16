@@ -621,3 +621,6 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
         }
     }
 }
+
+#[path = "app_details_tests.rs"]
+mod details_alignment;

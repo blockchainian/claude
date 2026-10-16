@@ -375,6 +375,9 @@ impl View {
             Some(Rect::new(details.x, layout.log.y, details.width, 1))
         };
         if !details.is_empty() {
+            if !layout.log_detail.is_empty() {
+                details.width = details.width.saturating_sub(1);
+            }
             self.render_details(details, buf, now);
         }
         {
@@ -694,11 +697,12 @@ impl View {
             separate_section(&mut items);
             let start = items.len() + 1;
             items.extend([
-                Line::from(vec![
-                    "Latest activity".dim(),
-                    " · ".dim(),
-                    format_relative_time(now, Some(activity.at)).dim(),
-                ])
+                left_right(
+                    "Latest activity".dim().into(),
+                    format_relative_time(now, Some(activity.at)).dim().into(),
+                    width,
+                )
+                .0
                 .into(),
                 truncate_line_with_ellipsis_if_overflow(
                     Line::from(Span::styled(label, style::log_styles(&activity.kind).1)),
@@ -712,12 +716,16 @@ impl View {
             body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
-            let mut header = vec!["Last message".dim()];
+            let mut header = Line::default();
             if let Some(at) = session.last_message_at {
-                header.extend([" · ".dim(), format_relative_time(now, Some(at)).dim()]);
+                header = format_relative_time(now, Some(at)).dim().into();
             }
             separate_section(&mut items);
-            items.push(Line::from(header).into());
+            items.push(
+                left_right("Last message".dim().into(), header, width)
+                    .0
+                    .into(),
+            );
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(
@@ -737,7 +745,7 @@ impl View {
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
-        let mut header = vec!["Prompt".dim()];
+        let mut header = Vec::new();
         if let Some(start) = session.prompt_at {
             let end = if session.status == SessionStatus::Working {
                 now
@@ -747,14 +755,17 @@ impl View {
             let messages = session.turn_messages;
             let label = if messages == 1 { "message" } else { "messages" };
             header.extend([
-                " · ".dim(),
                 format!("{messages} {label}").dim(),
                 " · ".dim(),
                 format_duration((end - start).num_seconds().max(0)).dim(),
             ]);
         }
         separate_section(&mut items);
-        items.push(Line::from(header).into());
+        items.push(
+            left_right("Prompt".dim().into(), Line::from(header), width)
+                .0
+                .into(),
+        );
         let prompt_text = match session.prompt.trim() {
             "" => "No prompt available.",
             prompt => prompt,
@@ -798,25 +809,27 @@ impl View {
 
         item_links.resize(items.len(), Vec::new());
 
-        let mut project = vec!["Project".dim()];
+        let mut project = Vec::new();
         if let Some(branch) = &session.git_branch {
-            project.extend([
-                " · ".dim(),
-                Span::styled(branch.clone(), self.title_style(&session.id)),
-            ]);
+            project.push(Span::styled(branch.clone(), self.title_style(&session.id)));
         }
         let link = session.pr.as_ref().and_then(|pr| {
             let label = format!("#{}", pr.number);
-            project.push(" · ".dim());
+            if !project.is_empty() {
+                project.push(" · ".dim());
+            }
             let prefix_width = Line::from(project.clone()).width();
-            let link = line_width_fits(prefix_width + label.len(), width).then(|| {
-                let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
-                    .unwrap_or_else(|| pr.url.clone());
-                (prefix_width as u16, label.len() as u16, url)
-            });
+            let link = line_width_fits("Project".width() + 1 + prefix_width + label.len(), width)
+                .then(|| {
+                    let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
+                        .unwrap_or_else(|| pr.url.clone());
+                    (prefix_width as u16, label.len() as u16, url)
+                });
             project.push(Span::styled(label, self.title_style(&session.id)));
             link
         });
+        let (project, right_start) = left_right("Project".dim().into(), Line::from(project), width);
+        let link = link.map(|(x, width, url)| (x + right_start as u16, width, url));
         let cwd = super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width);
         item_links.extend([
             Vec::new(),
@@ -828,7 +841,7 @@ impl View {
         items.extend([
             Line::default().into(),
             Item::Link {
-                line: Line::from(project),
+                line: project,
                 link,
             },
             cwd.into(),
@@ -1213,6 +1226,23 @@ fn budget_details(
     })
 }
 
+/// Keeps the label intact before fitting a trailing group into the remaining cells.
+/// Returns the group's column offset for links drawn inside it.
+fn left_right(label: Line<'static>, group: Line<'static>, width: usize) -> (Line<'static>, usize) {
+    let label = truncate_line_with_ellipsis_if_overflow(label, width);
+    if group.width() == 0 {
+        return (label, width);
+    }
+    let group =
+        truncate_line_with_ellipsis_if_overflow(group, width.saturating_sub(label.width() + 1));
+    let start = width - group.width();
+    let mut spans = label.spans;
+    let used: usize = spans.iter().map(Span::width).sum();
+    spans.push(" ".repeat(start - used).dim());
+    spans.extend(group.spans);
+    (Line::from(spans), start)
+}
+
 fn line_width_fits(line_width: usize, width: usize) -> bool {
     line_width <= width
 }
@@ -1291,18 +1321,31 @@ fn render_background_box(
     box_area: Rect,
     buf: &mut Buffer,
 ) {
-    // A rule cell leads the title and a half-width glyph ends the row; a
-    // space keeps the title off both.
-    let title = super::title_rule::title_rule(description, usize::from(box_area.width), elapsed);
     let block = Block::default()
         .borders(Borders::TOP)
-        .border_style(Style::default().dim())
-        .title_style(Style::default().not_dim())
-        .title(title);
+        .border_style(Style::default().dim());
     let inner = block.inner(box_area);
     block.render(box_area, buf);
-    if box_area.width > 0 {
-        buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
+    let label = Line::from(vec!["─ ".dim(), description.to_owned().not_dim()]);
+    let time = elapsed
+        .map(|text| Line::from(text.to_owned().dim()))
+        .unwrap_or_default();
+    let label = truncate_line_with_ellipsis_if_overflow(
+        label,
+        usize::from(box_area.width).saturating_sub(time.width() + 1),
+    );
+    let (title, _) = left_right(label, time, usize::from(box_area.width));
+    if elapsed.is_some() {
+        line(title, row(box_area, 0, 1), buf);
+    } else {
+        line(
+            super::title_rule::title_rule(description, usize::from(box_area.width), None),
+            row(box_area, 0, 1),
+            buf,
+        );
+        if !box_area.is_empty() {
+            buf[(box_area.right() - 1, box_area.y)].set_symbol("╴");
+        }
     }
     // Output lines up with the title text under the rule.
     let inner = Rect {
