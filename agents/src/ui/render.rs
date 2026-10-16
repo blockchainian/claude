@@ -413,7 +413,17 @@ impl View {
                 border.y
             };
             let log_rule = Rect::new(layout.log.x, jump_y, layout.log.width, 1);
-            self.render_log_model(log_rule, buf);
+            // The model and effort sit between the separator's joint, or the left padding in the
+            // narrow layout, and the right padding.
+            let left = if area.width >= WIDE_LAYOUT_COLUMNS {
+                layout.log.x.saturating_sub(2)
+            } else {
+                area.x
+            };
+            self.render_log_model(
+                Rect::new(left, jump_y, area.right().saturating_sub(left), 1),
+                buf,
+            );
             self.render_log_jump(log_rule, buf);
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
@@ -426,8 +436,28 @@ impl View {
                     now,
                 );
             }
-            self.render_details_status(rule, buf);
+            // The status line runs from the separator's joint on the left to the log's joint or
+            // the right padding.
+            let left = layout.gap.x + 1;
+            let right = if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
+                layout.log.x - 1
+            } else {
+                area.right()
+            };
+            self.render_details_status(Rect::new(left, rule.y, right - left, 1), buf);
         }
+        let mut separators = vec![];
+        if layout.gap.width > 1 {
+            separators.push((layout.gap.x + 1, layout.gap.y, layout.gap.bottom()));
+        }
+        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
+            separators.push((
+                layout.log.x.saturating_sub(2),
+                layout.log.y,
+                layout.log.bottom(),
+            ));
+        }
+        join_separators(&separators, area, buf);
         if self.log_selected.is_some() && self.viewport.borrow().log_detail_scroll > 0 {
             let label = " ↑ Top ";
             let panel = layout.log_detail;
@@ -559,12 +589,14 @@ impl View {
         Clear.render(label, buf);
         line(header, label, buf);
     }
-    /// Centers the bold status on the rule, a space apart on each side.
+    /// Centers the bold status on the rule between its two corner cells, a space apart on each
+    /// side.
     fn render_details_status(&self, rule: Rect, buf: &mut Buffer) {
         let Some(session) = self.selected_row() else {
             return;
         };
-        line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
+        let dashes = Rect::new(rule.x + 1, rule.y, rule.width.saturating_sub(2), 1);
+        line("─".repeat(usize::from(dashes.width)).dim(), dashes, buf);
         let (status, _) = Self::status(session);
         let width = usize::from(rule.width).saturating_sub(4);
         let mut status = truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width);
@@ -580,12 +612,10 @@ impl View {
         Clear.render(status_area, buf);
         line(status, status_area, buf);
         // The project folder's name and its pull request flank the status.
-        let folder = session
-            .cwd
-            .file_name()
-            .map_or_else(|| session.cwd.display().to_string(), |name| {
-                name.to_string_lossy().into_owned()
-            });
+        let folder = session.cwd.file_name().map_or_else(
+            || session.cwd.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
         let pr = session
             .pr
             .as_ref()
@@ -1338,8 +1368,29 @@ fn left_right(label: Line<'static>, group: Line<'static>, width: usize) -> (Line
     (Line::from(spans), start)
 }
 
-/// Draws `left` after the rule's first cell and `right` before its last, each between spaces,
-/// keeping clear the `center` columns in the rule's middle. Returns where each text landed.
+/// Joins each vertical separator, given as its column and rows, to the rules above and below it.
+fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer) {
+    for &(x, top, bottom) in separators {
+        for (y, joint) in [(top.checked_sub(1), "┬"), (Some(bottom), "┴")] {
+            let Some(y) = y.filter(|&y| y >= area.y && y < area.bottom()) else {
+                continue;
+            };
+            let cell = &mut buf[(x, y)];
+            match (cell.symbol(), joint) {
+                ("─", _) => {
+                    cell.set_symbol(joint);
+                }
+                ("┬", "┴") | ("┴", "┬") => {
+                    cell.set_symbol("┼");
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Draws `left` one rule cell after the rule's first corner cell and `right` one rule cell before
+/// its last, each between spaces, keeping clear the `center` columns in the rule's middle. Returns where each text landed.
 fn render_rule_ends(
     rule: Rect,
     center: u16,
@@ -1347,9 +1398,9 @@ fn render_rule_ends(
     right: Option<Span<'static>>,
     buf: &mut Buffer,
 ) -> (Option<Rect>, Option<Rect>) {
-    // Each side keeps a rule cell at the edge, a space on both sides of its text and a rule
+    // Each side keeps its corner cell, a rule cell, a space on both sides of its text and a rule
     // cell before the center.
-    let side = usize::from(rule.width.saturating_sub(center) / 2).saturating_sub(4);
+    let side = usize::from(rule.width.saturating_sub(center) / 2).saturating_sub(5);
     let mut place = |text: Option<Span<'static>>, from_left: bool| {
         let style = text.as_ref()?.style;
         let text = truncate_line_with_ellipsis_if_overflow(Line::from(text?), side);
@@ -1358,9 +1409,9 @@ fn render_rule_ends(
             return None;
         }
         let x = if from_left {
-            rule.x + 2
+            rule.x + 3
         } else {
-            rule.right() - 2 - width
+            rule.right() - 3 - width
         };
         let area = Rect::new(x, rule.y, width, 1);
         Clear.render(Rect::new(x - 1, rule.y, width + 2, 1), buf);

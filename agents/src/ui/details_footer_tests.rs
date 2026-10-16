@@ -103,7 +103,7 @@ fn log_border_places_model_label_and_effort_targets_in_both_layouts() {
             };
             assert_eq!(model.y, y);
             assert_eq!(effort.y, y);
-            assert_eq!(model.x, layout.log.x + 2);
+            assert_eq!(model.x, layout.log.x + if width >= 150 { 1 } else { 2 });
             assert_eq!(effort.right(), layout.log.right() - 2);
             let text = |rect: Rect| {
                 (rect.x..rect.right())

@@ -1,6 +1,6 @@
  Agent command center  Group: Project  g
   Active 3                                                                                                  Inactive 0
- ─────────────────────────────────────────────────────────────────────────────────── Parent task ──────────────────────
+ ───────────────────────────────────────────────────────────┬─────────────────────── Parent task ──────────────────────
                         /tmp/project                        │                        Background
  ○ Parent task                       Ready           2m ago │ ─ Check files ──────────────────────────────────────────╴
  ├─ ○ Review results                 Ready              now │
@@ -25,6 +25,6 @@
                                                             │
                                                             │
                                                             │
-                                                            │ ─ project ─────────────── Ready ─────────────────────────
+                                                            │─ project ─────────────── Ready ──────────────────────────
  Parent task ›
  ? help  esc back  ↑/↓ move  enter open  n new

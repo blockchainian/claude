@@ -353,7 +353,7 @@ fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts(
         };
         let log = view.viewport.borrow().log;
         assert_eq!(text(model.x, model.y, model.width), model_name);
-        assert_eq!(model.x, log.x + 2);
+        assert_eq!(model.x, log.x + if width >= 150 { 1 } else { 2 });
         assert_eq!(
             model.y,
             if width >= 150 {
@@ -454,20 +454,21 @@ fn log_model_targets_cover_only_visible_border_value_cells() {
             let mut buffer = Buffer::empty(frame);
             view.render_at(frame, &mut buffer, Utc::now());
             let area = view.viewport.borrow().log;
+            let rule_left = if width >= 150 { area.x - 2 } else { 0 };
             let rule = Rect::new(
-                area.x,
+                rule_left,
                 if width >= 150 {
                     area.bottom()
                 } else {
                     area.y - 1
                 },
-                area.width,
+                width - rule_left,
                 1,
             );
-            let available = (area.width / 2).saturating_sub(4);
+            let available = (rule.width / 2).saturating_sub(5);
             let show_effort = effort.is_some() && available > 0;
             let name_width = available.min("claude-opus-5-5".len() as u16);
-            let start = area.x + 2;
+            let start = rule.x + 3;
             let expected_name = if name_width == 0 {
                 String::new()
             } else if name_width < "claude-opus-5-5".len() as u16 {

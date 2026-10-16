@@ -111,8 +111,8 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
                 assert!(actual.ends_with(value), "{width}: {actual:?}");
                 assert!(!actual.contains("messages"));
             }
-            let folder_x = left + 2;
-            let pr_x = right - 5;
+            let folder_x = left + 1;
+            let pr_x = right - if width >= 150 { 4 } else { 5 };
             assert_eq!(
                 row_text(buffer, status_y, folder_x, folder_x + 7),
                 "project"

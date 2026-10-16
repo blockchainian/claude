@@ -2366,9 +2366,13 @@ fn log_model_and_effort_use_dim_style_and_picker_targets() {
                     assert_eq!(
                         rect.x,
                         if field == Field::Model {
-                            layout.log.x + 2
+                            (if width >= 150 {
+                                layout.log.x - 2
+                            } else {
+                                area.x
+                            }) + 3
                         } else {
-                            layout.log.right() - 2 - rect.width
+                            area.right() - 3 - rect.width
                         }
                     );
                     for (offset, symbol) in text.chars().enumerate() {
@@ -2905,7 +2909,7 @@ mod details_header {
             assert!(title.modifier.contains(Modifier::BOLD));
             assert!(!title.modifier.contains(Modifier::DIM));
             let bottom = view.viewport.borrow().details.bottom();
-            let start = rule.x + (rule.width - (status.label().len() as u16 + 2)) / 2 + 1;
+            let start = rule.x - 2 + (rule.width + 3 - (status.label().len() as u16 + 2)) / 2 + 1;
             for (offset, symbol) in status.label().chars().enumerate() {
                 let cell = &buf[(start + offset as u16, bottom)];
                 assert_eq!(cell.symbol(), symbol.to_string());
@@ -2989,7 +2993,7 @@ mod details_header {
                 let bottom_text = (top.x..top.right())
                     .map(|x| buf[(x, bottom)].symbol())
                     .collect::<String>();
-                let status_start = (usize::from(top.width) - " Working ".len()) / 2;
+                let status_start = (usize::from(top.width + 3) - " Working ".len()) / 2 - 2;
                 assert_eq!(
                     bottom_text
                         .chars()
@@ -3965,7 +3969,8 @@ fn dashboard_log_list_fills_rows_next_to_rules() {
                 assert_eq!(layout.list.bottom(), rule_y);
                 assert_eq!(layout.details.bottom(), rule_y);
                 assert_eq!(log.bottom(), rule_y);
-                assert_eq!(buf[(log.x, rule_y)].symbol(), "─");
+                assert_eq!(buf[(log.x - 2, rule_y)].symbol(), "┴");
+                assert_eq!(buf[(log.x, rule_y)].symbol(), " ");
             }
         }
     }
@@ -4002,7 +4007,8 @@ fn dashboard_screen_padding_is_one_cell() {
         assert_eq!(view.viewport.borrow().tab_bar.x, 1);
         for x in 1..width - 1 {
             if x < layout.details.x || x >= layout.details.right() {
-                assert_eq!(buf[(x, 2)].symbol(), "─");
+                let joint = x == layout.gap.x + 1 || (width >= 150 && x == layout.log.x - 2);
+                assert_eq!(buf[(x, 2)].symbol(), if joint { "┬" } else { "─" });
             }
         }
         for y in 0..area.height {
@@ -4392,7 +4398,14 @@ fn task_log_rules_match_header_and_footer_gap_is_empty() {
                     } else {
                         &buf[(x, 2)]
                     };
-                    assert_eq!(buf[(x, y)].symbol(), rule.symbol());
+                    let expected = if y == middle && x == layout.gap.x + 1 {
+                        "┴"
+                    } else if y == layout.log_detail.y && x == layout.gap.x + 1 {
+                        "─"
+                    } else {
+                        rule.symbol()
+                    };
+                    assert_eq!(buf[(x, y)].symbol(), expected);
                     assert_eq!(buf[(x, y)].modifier, rule.modifier);
                 }
             }
@@ -4874,9 +4887,11 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
     assert_eq!((top, layout.log.height, detail), expected);
     assert_eq!(layout.details.height, top);
     assert_eq!(layout.prompt.y, layout.details.bottom() + 1);
+    let status_left = layout.gap.x + 1;
+    let status_right = if wide { layout.log.x - 1 } else { area.right() };
     assert_eq!(
         buf[(
-            layout.details.x + (layout.details.width - 9) / 2 + 1,
+            status_left + (status_right - status_left - 9) / 2 + 1,
             layout.details.bottom(),
         )]
             .symbol(),
@@ -8424,3 +8439,23 @@ mod codex_exit_tests;
 
 #[path = "details_tasks_tests.rs"]
 mod details_tasks;
+
+#[test]
+fn wide_separators_join_the_rules_above_and_below() {
+    let (view, now) = column_padding_fixture();
+    for width in [150, 200, 240] {
+        let area = Rect::new(0, 0, width, 60);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let layout = view.center_layout(area);
+        for (x, top, bottom) in [
+            (layout.gap.x + 1, layout.gap.y, layout.gap.bottom()),
+            (layout.log.x - 2, layout.log.y, layout.log.bottom()),
+        ] {
+            assert_eq!(buf[(x, top - 1)].symbol(), "┬");
+            assert_eq!(buf[(x, top)].symbol(), "│");
+            assert_eq!(buf[(x, bottom - 1)].symbol(), "│");
+            assert_eq!(buf[(x, bottom)].symbol(), "┴");
+        }
+    }
+}
