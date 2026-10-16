@@ -3,6 +3,9 @@ use std::process::Command;
 use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
 
+#[path = "support/terminal_questions.rs"]
+mod terminal_questions;
+
 struct Tmux(String);
 
 impl Tmux {

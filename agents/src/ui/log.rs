@@ -811,7 +811,9 @@ fn detail_layout(
 /// Whether an event draws its tool calls when open, which makes its row open on click even
 /// when its body fits the row.
 pub(super) fn shows_calls(event: &Event) -> bool {
-    matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) && !event.calls.is_empty()
+    !event.calls.is_empty()
+        && (matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied)
+            || event.calls.iter().any(|call| call.name == "AskUserQuestion"))
 }
 
 /// The full text an open log event shows below its header.

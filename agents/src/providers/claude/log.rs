@@ -220,6 +220,28 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         .unwrap_or("");
     let value = result.map(|result| &result.value);
     let mut sections = match name {
+        "AskUserQuestion" => {
+            let mut lines = Vec::new();
+            for question in input["questions"].as_array().into_iter().flatten() {
+                let Some(text) = question["question"].as_str() else {
+                    continue;
+                };
+                let suffix = if question["multiSelect"] == true {
+                    " (multi-select)"
+                } else {
+                    ""
+                };
+                lines.push(format!("• {text}{suffix}"));
+                for option in question["options"].as_array().into_iter().flatten() {
+                    if let (Some(label), Some(description)) =
+                        (option["label"].as_str(), option["description"].as_str())
+                    {
+                        lines.push(format!("  • {label}: {description}"));
+                    }
+                }
+            }
+            vec![text_section("questions", &lines.join("\n"))]
+        }
         "Bash" => vec![code_section(
             "command",
             "bash",
@@ -299,6 +321,19 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
     let output = result.map(|result| {
         let fallback = || vec![text_section("output", &result.content)];
         let value = &result.value;
+        if name == "AskUserQuestion"
+            && result.error
+            && let Some((explanation, questions)) = result.content.split_once("Questions asked:")
+        {
+            return vec![text_section(
+                "output",
+                &format!(
+                    "Questions asked:{}\n\n{}",
+                    questions.trim_end(),
+                    explanation.trim_end()
+                ),
+            )];
+        }
         if result.error {
             return fallback();
         }
@@ -602,6 +637,8 @@ impl Log {
         let detail = tool_detail(name, input);
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
             format!("{name}: {reason}")
+        } else if name == "AskUserQuestion" {
+            crate::log::tool_title(name, input)
         } else if let Some(path) = path {
             format!("{name} {path}")
         } else {
@@ -1138,7 +1175,7 @@ pub(crate) mod tests {
             write!(file, "{fixture}").unwrap();
             let events = tail(file.path(), 8).unwrap();
             assert_eq!(events.len(), 1);
-            assert_eq!(events[0].body, expected);
+            assert_eq!(events[0].body, "AskUserQuestion · 子命令 · cd");
             assert_eq!(events[0].kind, Kind::Assistant);
             let len = file.as_file().metadata().unwrap().len();
             let summary = super::super::transcript::read(file.path(), len).unwrap();

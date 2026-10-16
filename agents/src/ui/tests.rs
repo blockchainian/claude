@@ -12,6 +12,9 @@ fn session_key(id: &str) -> SessionKey {
 mod details_footer;
 
 use super::*;
+
+#[path = "ask_question_tests.rs"]
+mod ask_question_tests;
 use chrono::{Duration, Utc};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 

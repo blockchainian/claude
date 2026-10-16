@@ -12,6 +12,20 @@ pub(crate) fn tool_title(name: &str, input: &Value) -> String {
     let text = |key: &str| input[key].as_str().filter(|text| !text.trim().is_empty());
     let tool = name.rsplit('.').next().unwrap_or(name);
     match tool {
+        "AskUserQuestion" => std::iter::once(name)
+            .chain(
+                input["questions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|question| {
+                        question["header"]
+                            .as_str()
+                            .filter(|header| !header.trim().is_empty())
+                    }),
+            )
+            .collect::<Vec<_>>()
+            .join(" · "),
         "Agent" | "Task" | "spawn_agent" => {
             let agent = text("subagent_type")
                 .map(|kind| format!("{kind} agent"))
