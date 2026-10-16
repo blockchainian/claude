@@ -6724,11 +6724,11 @@ fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_jump_style() {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     let cell = |x: u16| &buf[(x, y)];
-    assert_eq!(cell(right).symbol(), "⠒");
+    assert_eq!(cell(right).symbol(), "⠛");
     let modifier = cell(right).modifier;
     assert!(modifier.contains(ratatui::style::Modifier::BOLD));
     assert!(!modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(cell(right - 1).symbol(), "─");
-    assert_eq!(cell(right - 2).symbol(), "⠂");
+    assert_eq!(cell(right - 2).symbol(), "⠃");
     assert!(view.timeline_redraw_in(now).is_some());
 }
