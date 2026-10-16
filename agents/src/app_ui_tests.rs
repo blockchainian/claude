@@ -510,9 +510,9 @@ fn wide_border_labels_stay_in_their_columns() {
         assert_eq!(separators.len(), 2);
         let prompt = position(&buffer, "›").1;
         let middle = prompt - 1;
-        let tasks = 2..separators[0] - 1;
+        let tasks = 1..separators[0] - 1;
         let details = separators[0] + 2..separators[1] - 1;
-        let log = separators[1] + 2..width - 2;
+        let log = separators[1] + 2..width - 1;
         assert!(
             segment(&buffer, tasks.clone(), middle)
                 .chars()
@@ -522,7 +522,7 @@ fn wide_border_labels_stay_in_their_columns() {
         );
         assert!(segment(&buffer, details.clone(), middle).contains("Working ·"));
         assert!(segment(&buffer, details.clone(), middle).contains(" · 2m"));
-        assert!(segment(&buffer, 2..width - 2, 2).chars().all(|c| c == '─'));
+        assert!(segment(&buffer, 1..width - 1, 2).chars().all(|c| c == '─'));
         for y in 3..middle {
             for range in [details.clone(), log.clone()] {
                 let text = segment(&buffer, range, y);
@@ -607,13 +607,13 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
         app.view.set_log(events.clone());
         let buffer = draw(&mut app, width);
         let (x, top) = position(&buffer, "Tool      long");
-        let right = width - 2;
+        let right = width - 1;
         assert_eq!(
             x,
             if width < 150 {
-                2
+                1
             } else {
-                width - width / 3 - 2
+                width - width / 3 - 1
             }
         );
         for (offset, time) in ["2s", "9m 50s", "10:06:26"].into_iter().enumerate() {
@@ -642,14 +642,14 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
             let separators: Vec<_> = (0..width)
                 .filter(|&x| buffer[(x, 3)].symbol() == "│")
                 .collect();
-            let left = if width == 200 { separators[1] + 2 } else { 2 };
+            let left = if width == 200 { separators[1] + 2 } else { 1 };
             let (x, y) = position(&buffer, "User      ");
             assert_eq!(x, left);
             assert_eq!(
                 (left..width).rfind(|&x| buffer[(x, y)].symbol() != " "),
-                Some(width - 3)
+                Some(width - 2)
             );
-            click(&mut app, if edge { width - 3 } else { left }, y);
+            click(&mut app, if edge { width - 2 } else { left }, y);
             app.view
                 .flush_pending_click(Instant::now() + Duration::from_secs(1));
             let buffer = draw(&mut app, width);
@@ -659,10 +659,10 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
                 detail_y > prompt_y,
                 "clicked event must open below the prompt"
             );
-            assert_eq!(detail_x, 2);
+            assert_eq!(detail_x, 1);
             assert_eq!(
-                (2..width).rfind(|&x| buffer[(x, detail_y)].symbol() != " "),
-                Some(width - 3)
+                (1..width).rfind(|&x| buffer[(x, detail_y)].symbol() != " "),
+                Some(width - 2)
             );
             assert!(
                 lines(&buffer)[usize::from(detail_y)..]

@@ -1,10 +1,10 @@
-  Agent command center  Group: Project  g
-   Active 3   Ready 2   Working 1   Needs you 0   Inactive 0                                           tab/⇧tab filter
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                       Status         Updated │ Background
-  /tmp/project  2 of 3                                                   │ ─ Check files ────────────────────────────╴
-  › ○ Parent task                                 Ready           2m ago │
-    └ ○ Review results                            Ready              now │ Prompt
+ Agent command center  Group: Project  g
+  Active 3   Ready 2   Working 1   Needs you 0   Inactive 0                                             tab/⇧tab filter
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     Tasks                                        Status         Updated │ Background
+ /tmp/project  2 of 3                                                    │ ─ Check files ─────────────────────────────╴
+ › ○ Parent task                                  Ready           2m ago │
+   └ ○ Review results                             Ready              now │ Prompt
                                                                          │ Parent task
                                                                          │
                                                                          │ Project
@@ -25,6 +25,6 @@
                                                                          │
                                                                          │
                                                                          │
-                                                                         │ ─────────── Ready · Parent task ───────────
-  Parent task ›
-  ? help  esc back  ↑/↓ move  enter open  n new
+                                                                         │ ─────────── Ready · Parent task ────────────
+ Parent task ›
+ ? help  esc back  ↑/↓ move  enter open  n new

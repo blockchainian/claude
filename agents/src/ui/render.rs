@@ -48,6 +48,8 @@ pub(super) fn render_input_row(
     buf.set_style(area, Style { fg: None, ..style });
 }
 
+const HORIZONTAL_PADDING: u16 = 1;
+
 pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
 
 pub(super) struct CenterLayout {
@@ -64,7 +66,7 @@ pub(super) struct CenterLayout {
 impl CenterLayout {
     pub(super) fn log_content(&self) -> Rect {
         if self.log_detail.is_empty() {
-            self.log.inner(Margin::new(2, 0))
+            self.log.inner(Margin::new(HORIZONTAL_PADDING, 0))
         } else {
             // The body reserves the screen padding and the separator's one-cell gap.
             self.log
@@ -102,7 +104,10 @@ impl View {
         let log = row(area, area.height - footer_height - log_height, log_height);
         let prompt_height = self
             .input_box
-            .height(area.width.saturating_sub(4), &self.input_label())
+            .height(
+                area.width.saturating_sub(2 * HORIZONTAL_PADDING),
+                &self.input_label(),
+            )
             .min(log.y.saturating_sub(header.bottom()));
         let prompt = row(
             area,
@@ -114,7 +119,7 @@ impl View {
             header_height,
             prompt.y.saturating_sub(header.bottom()),
         )
-        .inner(Margin::new(2, 0));
+        .inner(Margin::new(HORIZONTAL_PADDING, 0));
         let wide = area.width >= WIDE_LAYOUT_COLUMNS;
         if wide && !log.is_empty() {
             body.height = body.height.saturating_sub(1);
@@ -198,9 +203,10 @@ impl View {
             return Some((rect.x + caret, rect.y));
         }
         if self.input_box.focused && !self.help && self.confirm_dialog.is_none() {
-            return self
-                .input_box
-                .cursor(layout.prompt.inner(Margin::new(2, 0)), &self.input_label());
+            return self.input_box.cursor(
+                layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
+                &self.input_label(),
+            );
         }
         if (self.log_search.editing || self.log_detail_search.editing)
             && !self.help
@@ -208,7 +214,7 @@ impl View {
             && !layout.log.is_empty()
         {
             let search_area = if self.log_detail_search.editing && !layout.log_detail.is_empty() {
-                layout.log_detail.inner(Margin::new(2, 0))
+                layout.log_detail.inner(Margin::new(HORIZONTAL_PADDING, 0))
             } else {
                 layout.log_content()
             };
@@ -257,12 +263,12 @@ impl View {
         let layout = self.center_layout(area);
         self.viewport.borrow_mut().prompt = layout.prompt;
         self.input_box.render(
-            layout.prompt.inner(Margin::new(2, 0)),
+            layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
             buf,
             &self.input_label(),
             self.input_disabled(),
         );
-        let inset = |area: Rect| area.inner(Margin::new(2, 0));
+        let inset = |area: Rect| area.inner(Margin::new(HORIZONTAL_PADDING, 0));
         line(
             vec![
                 "Agent command center".bold(),
@@ -311,7 +317,7 @@ impl View {
             buf,
         );
         line(
-            "─".repeat(usize::from(area.width.saturating_sub(4))).dim(),
+            "─".repeat(usize::from(inset(layout.header).width)).dim(),
             inset(row(layout.header, 2, 1)),
             buf,
         );

@@ -1,25 +1,25 @@
-  Agent command center  Group: Project  g
-   Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                       tab/⇧tab filter
-  ────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                          Status         Updated │ Prompt
-  /tmp/project  1                                           │ Task log example
-  › ● Task log example               Working            now │
-                                                            │ Project
-                                                            │ /tmp/project
-                                                            │
-                                                            │ Model: Unknown
-                                                            │
-                                                            │
-                                                            │
-  Task log example · Running in a terminal; open it to type
-  ──────────────────────────────────────────────────────────────── Working · Task log example ────
+ Agent command center  Group: Project  g
+  Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                         tab/⇧tab filter
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+     Tasks                            Status         Updated │ Prompt
+ /tmp/project  1                                             │ Task log example
+ › ● Task log example                 Working            now │
+                                                             │ Project
+                                                             │ /tmp/project
+                                                             │
+                                                             │ Model: Unknown
+                                                             │
+                                                             │
+                                                             │
+ Task log example · Running in a terminal; open it to type
+ ────────────────────────────────────────────────────────────────── Working · Task log example ────
 
-  Denied    Edit: Dangerous                                                                    10s
-  Denied    Bash: Safety Check                                                                 10s
-  Denied    Bash: Create Unsafe Agents                                                         15s
-  User      Please inspect the task                                                       11:58:00
-
-
+ Denied    Edit: Dangerous                                                                      10s
+ Denied    Bash: Safety Check                                                                   10s
+ Denied    Bash: Create Unsafe Agents                                                           15s
+ User      Please inspect the task                                                         11:58:00
 
 
-  ? help  esc back  ↑/↓ move  enter open  n new
+
+
+ ? help  esc back  ↑/↓ move  enter open  n new

@@ -352,7 +352,7 @@ fn new_log_events_while_dragging_copy_the_rows_on_screen() {
     };
     let lines: Vec<_> = text.lines().collect();
     assert_eq!(lines.len(), 3, "{text}");
-    assert_eq!(lines[0], format!("{:<84}5s", "run a background job *"));
+    assert_eq!(lines[0], format!("{:<86}5s", "run a background job *"));
     assert!(lines[1].contains("Also inspect the tests"), "{text}");
     assert!(lines[2].contains("failed check"), "{text}");
 }
@@ -1278,7 +1278,7 @@ fn live_center_search_active() {
         screen(&view, 88, 16),
         include_str!("../../tests/ui_snapshots/live_center_search_active.txt")
     );
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((15, 3)));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((14, 3)));
 }
 #[test]
 fn show_more_is_only_listed_on_inactive() {
@@ -1761,7 +1761,7 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
             .next()
             .unwrap()
             .trim_end(),
-        "  Notice"
+        " Notice"
     );
     key(&mut view, KeyCode::Left);
     assert!(view.notice.is_none());
@@ -1816,7 +1816,7 @@ fn rename_edits_title_and_commits_trimmed_text() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     assert!(screen(&view, 88, 16).contains("Rename › Current task"));
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((23, 3)));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((22, 3)));
     for c in " updated  ".chars() {
         key(&mut view, KeyCode::Char(c));
     }
@@ -2639,7 +2639,7 @@ mod details_header {
         let rendered = queued_details(row, 15);
         let title = header.strip_prefix("Working · ").expect("visible status");
         assert!(title.ends_with('…'), "{title}");
-        assert_eq!(header, "Working · A very long session title…");
+        assert_eq!(header, "Working · A very long session title …");
         assert_eq!(
             rendered,
             include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
@@ -3140,8 +3140,38 @@ fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
 }
 
 #[test]
+fn dashboard_screen_padding_is_one_cell() {
+    for width in [100, 149, 150, 200] {
+        let (mut view, now) = column_padding_fixture();
+        let area = Rect::new(0, 0, width, 60);
+        let mut buf = Buffer::empty(area);
+        view.input_box.focused = true;
+        view.render_at(area, &mut buf, now);
+        let layout = view.center_layout(area);
+        assert_eq!(layout.list.x, 1);
+        assert_eq!(buf[(1, 0)].symbol(), "A");
+        assert_eq!(view.viewport.borrow().tab_bar.x, 1);
+        for x in 1..width - 1 {
+            assert_eq!(buf[(x, 2)].symbol(), "─");
+        }
+        for y in 0..area.height {
+            assert_eq!(buf[(0, y)].symbol(), " ");
+            assert_eq!(buf[(width - 1, y)].symbol(), " ");
+        }
+        let prompt_y = layout.prompt.y;
+        assert_ne!(buf[(1, prompt_y)].symbol(), " ");
+        assert_eq!(
+            view.cursor_pos(area).unwrap().0,
+            4 + view.input_label().width() as u16
+        );
+        assert_ne!(buf[(1, layout.footer.y)].symbol(), " ");
+        println!("{width} cols: screen/header/tabs/rules/input/footer padding=1/1");
+    }
+}
+
+#[test]
 fn dashboard_column_padding_matches_separators_in_buffer() {
-    for width in [149, 200] {
+    for width in [100, 149, 150, 200] {
         let (view, now) = column_padding_fixture();
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
@@ -3167,7 +3197,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             if label != "Background" {
                 assert_eq!(
                     (left + 1..right).rfind(|&x| buf[(x, y)].symbol() != " "),
-                    Some(right - if width >= 150 { 2 } else { 3 }),
+                    Some(right - 2),
                     "{label} right at {width}"
                 );
             }
@@ -3178,7 +3208,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         assert!(text(y, left + 1, right).trim_end().ends_with("25s"));
         assert_eq!(
             text(y, left + 1, right).trim_end().chars().count() as u16,
-            right - left - if width >= 150 { 2 } else { 3 },
+            right - left - 2,
             "background time at {width}"
         );
         // Wrapped bodies, selections and links stay inside the same content bounds.
@@ -3188,9 +3218,9 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             }
         }
         let viewport = view.viewport.borrow();
-        if width == 200 {
+        if matches!(width, 100 | 200) {
             println!(
-                "200 cols: separators={separators:?}, task Updated end={}, details={}..{}, log={}..{}",
+                "{width} cols: separators={separators:?}, task Updated end={}, details={}..{}, log={}..{}",
                 updated.trim_end().chars().count(),
                 viewport.details_text.area.x,
                 viewport.details_text.area.right(),
@@ -3199,26 +3229,23 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             );
         }
         assert_eq!(viewport.details_text.area.x, left + 2);
-        assert_eq!(
-            viewport.details_text.area.right(),
-            right - if width >= 150 { 1 } else { 2 }
-        );
+        assert_eq!(viewport.details_text.area.right(), right - 1);
     }
 }
 
 #[test]
 fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
-    for width in [149, 200] {
+    for width in [100, 149, 150, 200] {
         for edge in [false, true] {
             let (mut view, now) = column_padding_fixture();
             let area = Rect::new(0, 0, width, 60);
             let mut buf = Buffer::empty(area);
             view.render_at(area, &mut buf, now);
-            let wide = width == 200;
+            let wide = width >= 150;
             let separators: Vec<_> = (0..width)
                 .filter(|&x| buf[(x, 3)].symbol() == "│")
                 .collect();
-            let left = if wide { separators[1] + 2 } else { 2 };
+            let left = if wide { separators[1] + 2 } else { 1 };
             let y = if wide {
                 4
             } else {
@@ -3228,7 +3255,7 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             let log: String = (left..width).map(|x| buf[(x, y)].symbol()).collect();
             assert_eq!(
                 log.trim_end().chars().count() as u16 + left,
-                width - 2,
+                width - 1,
                 "log time right at {width}: {row}"
             );
             assert_ne!(buf[(left, y)].symbol(), " ", "log left at {width}");
@@ -3239,10 +3266,10 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
                 let viewport = view.viewport.borrow();
                 let index = viewport.log_rows[1].0;
                 assert_eq!(viewport.log_list_text.area.x, left);
-                assert_eq!(viewport.log_list_text.area.right(), width - 2);
+                assert_eq!(viewport.log_list_text.area.right(), width - 1);
                 view.log[index].clone()
             };
-            let x = if edge { width - 3 } else { left };
+            let x = if edge { width - 2 } else { left };
             click_mouse(
                 &mut view,
                 mouse(MouseEventKind::Down(MouseButton::Left), x, y),
@@ -3251,8 +3278,8 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             assert_eq!(view.log_open, Some(selected), "edge click at {width}");
             if wide {
                 let detail = view.viewport.borrow().log_text.area;
-                assert_eq!(detail.x, 2);
-                assert_eq!(detail.right(), width - 2);
+                assert_eq!(detail.x, 1);
+                assert_eq!(detail.right(), width - 1);
             }
         }
     }
@@ -3260,25 +3287,29 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
 
 #[test]
 fn dashboard_log_search_uses_the_row_padding() {
-    for width in [149, 200] {
+    for width in [100, 149, 150, 200] {
         let (mut view, now) = column_padding_fixture();
         view.log_search.editing = true;
         view.log_search.query.set_text("Tool");
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let left = if width == 200 { 132 } else { 2 };
+        let left = if width >= 150 {
+            width - width / 3 - 1
+        } else {
+            1
+        };
         let y = view.viewport.borrow().log.bottom() - 1;
         let input: String = (left..left + 13).map(|x| buf[(x, y)].symbol()).collect();
         assert_eq!(input, "Search › Tool");
         assert_eq!(view.cursor_pos(area), Some((left + 13, y)));
         view.log_search.editing = false;
         view.render_at(area, &mut buf, now);
-        let query: String = (width - 6..width - 2)
+        let query: String = (width - 5..width - 1)
             .map(|x| buf[(x, y)].symbol())
             .collect();
         assert_eq!(query, "Tool");
-        assert_eq!(buf[(width - 2, y)].symbol(), " ");
+        assert_eq!(buf[(width - 1, y)].symbol(), " ");
     }
 }
 
@@ -3343,7 +3374,7 @@ fn task_log_labels_are_left_aligned_in_nine_columns() {
             .lines()
             .nth(22)
             .unwrap()
-            .starts_with("  User      Please")
+            .starts_with(" User      Please")
     );
 }
 
@@ -3570,8 +3601,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (17, Color::Red, true),
         (16, Color::Reset, true),
     ] {
-        let label = &buf[(2, y)];
-        let body = &buf[(12, y)];
+        let label = &buf[(1, y)];
+        let body = &buf[(11, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
         assert_eq!(label.modifier.contains(Modifier::BOLD), bold, "row {y}");
@@ -3582,8 +3613,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         );
     }
     for y in 17..21 {
-        assert_eq!(buf[(97, y)].fg, Color::Reset, "time row {y}");
-        assert!(buf[(97, y)].modifier.is_empty(), "time row {y}");
+        assert_eq!(buf[(98, y)].fg, Color::Reset, "time row {y}");
+        assert!(buf[(98, y)].modifier.is_empty(), "time row {y}");
     }
     for (kind, colour) in [
         (Kind::User, Color::Reset),
@@ -3604,7 +3635,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         view.log.first_mut().unwrap().previous_end = None;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let time = &buf[(97, 20)];
+        let time = &buf[(98, 20)];
         let time_style = super::style::log_time_style(&kind, false);
         assert_eq!(time_style, Style::default());
         assert_eq!(time.fg, Color::Reset);
@@ -3621,18 +3652,18 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
                     .lines()
                     .nth(16)
                     .unwrap()
-                    .starts_with(&format!("  {expected_label:<9} Also"))
+                    .starts_with(&format!(" {expected_label:<9} Also"))
             );
         }
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        for x in [2, 12] {
+        for x in [1, 11] {
             let cell = &buf[(x, 16)];
             assert_eq!(cell.fg, colour);
-            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 2);
+            assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 1);
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
-        let time = &buf[(97, 16)];
+        let time = &buf[(98, 16)];
         assert_ne!(time.symbol(), " ");
         assert_eq!(time.fg, colour);
         assert!(time.modifier.contains(Modifier::BOLD));
@@ -3648,10 +3679,10 @@ fn task_log_preserves_time_when_truncated() {
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    assert_eq!(buf[(88, 17)].symbol(), "…");
-    assert_eq!(buf[(97, 17)].fg, Color::Reset);
+    assert_eq!(buf[(89, 17)].symbol(), "…");
+    assert_eq!(buf[(98, 17)].fg, Color::Reset);
     assert!(
-        !buf[(97, 17)]
+        !buf[(98, 17)]
             .modifier
             .intersects(Modifier::DIM | Modifier::BOLD)
     );
@@ -3694,7 +3725,7 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
             .lines()
             .skip(16)
             .take(3)
-            .map(|line| line.chars().skip(2).take(9).collect::<String>())
+            .map(|line| line.chars().skip(1).take(9).collect::<String>())
             .collect::<Vec<_>>(),
         ["Assistant", "Assistant", "Tool     "]
     );
@@ -3705,10 +3736,10 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
     ]) {
         assert_eq!(
             line[..line.find(time).unwrap()].chars().count() + time.len(),
-            98,
+            99,
             "times end at the same column"
         );
-        assert_eq!(line.find(label), Some(2), "labels start at the same column");
+        assert_eq!(line.find(label), Some(1), "labels start at the same column");
     }
 }
 
@@ -3739,15 +3770,15 @@ fn task_log_shows_only_newest_seven_events_and_hides_without_selection() {
 fn center_layout_golden_rects_follow_each_area() {
     let (view, _) = log_fixture();
     for (width, height, top, log_height, list_width, details_width, body_height) in [
-        (80, 24, 13, 10, 37, 36, 9),
-        (120, 40, 25, 14, 70, 43, 21),
-        (200, 60, 37, 22, 77, 47, 32),
-        (80, 24, 13, 10, 37, 36, 9),
+        (80, 24, 13, 10, 38, 37, 9),
+        (120, 40, 25, 14, 71, 44, 21),
+        (200, 60, 37, 22, 78, 48, 32),
+        (80, 24, 13, 10, 38, 37, 9),
     ] {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
         assert_eq!(layout.header, Rect::new(5, 7, width, 3));
-        assert_eq!(layout.list, Rect::new(7, 10, list_width, body_height));
+        assert_eq!(layout.list, Rect::new(6, 10, list_width, body_height));
         let bottom = if width >= super::render::WIDE_LAYOUT_COLUMNS {
             assert_eq!(layout.log.y, layout.list.y);
             assert_eq!(layout.log.width, width / 3);
@@ -3761,10 +3792,10 @@ fn center_layout_golden_rects_follow_each_area() {
             assert_eq!(layout.details, Rect::default());
             assert_eq!(layout.gap, Rect::default());
         } else {
-            assert_eq!(layout.gap, Rect::new(7 + list_width, 10, 3, body_height));
+            assert_eq!(layout.gap, Rect::new(6 + list_width, 10, 3, body_height));
             assert_eq!(
                 layout.details,
-                Rect::new(10 + list_width, 10, details_width, body_height)
+                Rect::new(9 + list_width, 10, details_width, body_height)
             );
         }
     }
@@ -4513,9 +4544,9 @@ mod line_edit {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let y = view.center_layout(area).log.bottom() - 1;
-        assert_eq!(buf[(11, y)].symbol(), "你");
-        assert_eq!(buf[(13, y)].symbol(), "好");
-        assert_eq!(view.cursor_pos(area), Some((15, y)));
+        assert_eq!(buf[(10, y)].symbol(), "你");
+        assert_eq!(buf[(12, y)].symbol(), "好");
+        assert_eq!(view.cursor_pos(area), Some((14, y)));
     }
 
     #[test]
@@ -4574,6 +4605,7 @@ mod input_row {
                 for width in [14, 24, 88] {
                     let (task, task_row, mut log, mut log_row, _, log_view) =
                         rendered_inputs(width, "你好 query", false);
+                    Clear.render(log_row, &mut log);
                     log_row.width = task_row.width;
                     super::super::render::render_input_row(
                         "Search › ",
@@ -5806,8 +5838,8 @@ fn task_log_open_event_header_keeps_kind_left_and_time_right() {
         view.log[7].body = format!("The newest reply {}", "runs long ".repeat(20));
         let list = log_screen(&view, 100, 25, now);
         let row = list.lines().find(|line| line.contains(body)).unwrap();
-        let time = row.chars().skip(90).take(8).collect::<String>();
-        let header = format!("  {:<88}{time}", "Assistant");
+        let time = row.chars().skip(91).take(8).collect::<String>();
+        let header = format!(" {:<90}{time}", "Assistant");
         click_log_text(&mut view, &list, body, MouseButton::Left);
         let open = log_screen(&view, 100, 25, now);
         assert!(
@@ -5974,7 +6006,7 @@ fn open_log_event_links_its_wrapped_path() {
         click_text(&mut view, &open, "another-long-directory"),
         Some(Action::OpenPath(path.into()))
     );
-    assert_eq!(click_text(&mut view, &open, "for details"), None);
+    assert_eq!(click_text(&mut view, &open, "details"), None);
 }
 
 #[test]
@@ -6235,7 +6267,7 @@ fn copy_confirmation_sits_at_footer_right_for_one_second() {
         .last()
         .unwrap()
         .to_owned();
-    assert_eq!(footer, format!("{hints:<85}Copied prompt"));
+    assert_eq!(footer, format!("{hints:<86}Copied prompt"));
     assert_eq!(
         view.expire_messages(start + std::time::Duration::from_millis(400)),
         Some(std::time::Duration::from_millis(600))
@@ -6612,7 +6644,7 @@ fn tool_outputs_and_markdown_use_shared_json_rendering() {
     assert!(open.contains("(no output)"));
     assert!(open.lines().any(|line| line.trim() == "↓"));
     let area = view.viewport.borrow().log_text.area;
-    assert_eq!(area.width, 96);
+    assert_eq!(area.width, 98);
     let lines: Vec<&str> = open.lines().collect();
     assert!(
         (area.top()..area.bottom()).all(|y| {

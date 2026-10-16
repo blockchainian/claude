@@ -92,7 +92,7 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                     .unwrap()
                     - 1
             } else {
-                width - 2
+                width - 1
             };
             for (label, group) in [
                 (

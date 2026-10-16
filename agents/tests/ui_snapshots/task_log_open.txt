@@ -1,25 +1,25 @@
-  Agent command center  Group: Project  g
-   Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                       tab/⇧tab filter
-  ────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                          Status         Updated │ Prompt
-  /tmp/project  1                                           │ Task log example
-  › ● Task log example               Working            now │
-                                                            │ Project
-                                                            │ /tmp/project
-                                                            │
-                                                            │ Model: Unknown
-                                                            │
-                                                            │
-                                                            │
-  Task log example · Running in a terminal; open it to type
-  ──────────────────────────────────────────────────────────────── Working · Task log example ────
+ Agent command center  Group: Project  g
+  Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                         tab/⇧tab filter
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+     Tasks                            Status         Updated │ Prompt
+ /tmp/project  1                                             │ Task log example
+ › ● Task log example                 Working            now │
+                                                             │ Project
+                                                             │ /tmp/project
+                                                             │
+                                                             │ Model: Unknown
+                                                             │
+                                                             │
+                                                             │
+ Task log example · Running in a terminal; open it to type
+ ────────────────────────────────────────────────────────────────── Working · Task log example ────
 
-  Assistant                                                                               11:59:20
+ Assistant                                                                                 11:59:20
 
-  A long response with bold words whose body must be cut before the right edge of the log
+ A long response with bold words whose body must be cut before the right edge of the log
 
-  A second paragraph
+ A second paragraph
 
 
 
-  ? help  esc back  ↑/↓ move  enter open  n new
+ ? help  esc back  ↑/↓ move  enter open  n new

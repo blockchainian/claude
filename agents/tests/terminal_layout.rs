@@ -67,7 +67,7 @@ fn terminal_layout_tracks_width() {
     // Let provider discovery finish, then select the real archived transcript.
     std::thread::sleep(Duration::from_secs(2));
     tmux.run(&["send-keys", "-t", "probe", "Tab", "Tab", "Tab", "Tab"]);
-    for width in [200, 149, 150, 200] {
+    for width in [200, 100, 149, 150, 200] {
         tmux.run(&[
             "resize-window",
             "-t",
@@ -100,7 +100,7 @@ fn terminal_layout_tracks_width() {
             .map(|(index, _)| top[..index].width())
             .collect();
         if width >= 150 {
-            assert_eq!(separators[1], width as usize - width as usize / 3 - 4);
+            assert_eq!(separators[1], width as usize - width as usize / 3 - 3);
             for line in &lines[3..29] {
                 let log = line.split('│').next_back().unwrap();
                 if ["Tool", "User", "Assistant"]
@@ -110,7 +110,7 @@ fn terminal_layout_tracks_width() {
                     assert_eq!(log.len() - log.trim_start().len(), 1, "log left: {line}");
                     assert_eq!(
                         line.trim_end().width(),
-                        width as usize - 2,
+                        width as usize - 1,
                         "log time right: {line}"
                     );
                 }
