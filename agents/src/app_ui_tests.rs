@@ -1035,7 +1035,8 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
                 detail_y > prompt_y,
                 "clicked event must open below the prompt"
             );
-            assert_eq!(detail_x, 1);
+            // The kind centers between the time column's widths on both sides.
+            assert_eq!(detail_x, 11 + (width - 22 - "User".len() as u16) / 2);
             assert_eq!(
                 (1..width).rfind(|&x| buffer[(x, detail_y)].symbol() != " "),
                 Some(width - 2)

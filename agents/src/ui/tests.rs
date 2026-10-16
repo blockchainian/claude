@@ -3137,9 +3137,9 @@ fn background_box_dims_border_but_not_title_or_output() {
     let parts = super::tool_detail::parts(&event);
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
     (&parts[0].lines(40, Style::default())[0]).render(title_buf.area, &mut title_buf);
-    for x in 0..12 {
-        assert_eq!(title_buf[(x, 0)], buf[(x, top)], "title cell {x}");
-    }
+    let title_x = (0..40).find(|x| title_buf[(*x, 0)].symbol() == "R").unwrap();
+    assert_eq!(title_buf[(0, 0)], buf[(0, top)]);
+    assert_eq!(title_buf[(title_x, 0)], buf[(2, top)]);
     assert_eq!(buf[(2, top + 1)].symbol(), "t");
     assert!(!buf[(2, top + 1)].modifier.contains(Modifier::DIM));
 }
@@ -3604,8 +3604,10 @@ fn dashboard_log_bodies_start_at_the_left_padding() {
             }
             if width >= 150 && event.kind == crate::log::Kind::Assistant {
                 let detail = view.center_layout(area).log_detail;
-                let header: String = (1..10).map(|x| buf[(x, detail.y + 1)].symbol()).collect();
-                assert_eq!(header, "Assistant");
+                let header: String = (detail.x..detail.right())
+                    .map(|x| buf[(x, detail.y + 1)].symbol())
+                    .collect();
+                assert_eq!(header.trim().split("  ").next(), Some("Assistant"));
             }
         }
     }
@@ -3673,9 +3675,8 @@ fn dashboard_log_detail_starts_directly_below_rule() {
         view.render_at(area, &mut buf, now);
         let layout = view.center_layout(area);
         let detail = layout.log_detail;
-        assert_ne!(
-            buf[(1, detail.y + 1)].symbol(),
-            " ",
+        assert!(
+            (detail.x..detail.right()).any(|x| buf[(x, detail.y + 1)].symbol() != " "),
             "detail header at {width}"
         );
     }
@@ -6453,7 +6454,8 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_start_at_content_column()
             let row = &rows[0];
             let start = row.cells.first().unwrap().0.start;
             let end = row.cells.last().unwrap().0.end;
-            assert_eq!(start, 2);
+            let (left, right) = (start - 1, body.width - end - 1);
+            assert!(right == left || right == left + 1, "{left} {right}");
             if start > 1 {
                 assert_eq!(buf[(body.x, row.y)].symbol(), "─");
             }
@@ -6617,7 +6619,7 @@ fn task_log_selected_tool_copies_a_dragged_section() {
 }
 
 #[test]
-fn task_log_selected_event_header_keeps_kind_left_and_time_right() {
+fn task_log_selected_event_header_centers_kind_and_keeps_time_right() {
     for body in ["A long response", "The newest reply"] {
         let (mut view, now) = log_fixture();
         // The newest row reads its time as "30s ago".
@@ -6626,7 +6628,7 @@ fn task_log_selected_event_header_keeps_kind_left_and_time_right() {
         let list = log_screen(&view, 100, 25, now);
         let row = list.lines().find(|line| line.contains(body)).unwrap();
         let time = row.chars().skip(91).take(8).collect::<String>();
-        let header = format!(" {:<90}{time}", "Assistant");
+        let header = format!("{:<91}{time}", format!("{}Assistant", " ".repeat(45)));
         click_log_text(&mut view, &list, body, MouseButton::Left);
         let open = log_screen(&view, 100, 25, now);
         assert!(

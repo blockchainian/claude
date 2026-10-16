@@ -16,7 +16,7 @@
  failed check                                                                                   15s
  Read src/main.rs， Read src/app.rs                                                              15s
  ──────────────────────────────────────────────────────────────────────────────────────────────────
- run tests                                                                                      35s
+                                             run tests                                          35s
 
  run tests
 

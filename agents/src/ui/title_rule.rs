@@ -24,3 +24,17 @@ pub(super) fn title_rule(title: &str, width: usize, elapsed: Option<&str>) -> Li
     spans.push(Span::styled("─".repeat(remaining), Style::new().dim()));
     Line::from(spans)
 }
+
+/// A title rule with the title centered between equal dim rules.
+pub(super) fn centered_title_rule(title: &str, width: usize) -> Line<'static> {
+    let mut line = title_rule(title, width, None);
+    if line.spans.len() < 4 {
+        return line;
+    }
+    let last = line.spans.len() - 1;
+    let dashes = line.spans[0].width() - 1 + line.spans[last].width();
+    let left = dashes / 2;
+    line.spans[0] = Span::styled(format!("{} ", "─".repeat(left)), Style::new().dim());
+    line.spans[last] = Span::styled("─".repeat(dashes - left), Style::new().dim());
+    line
+}

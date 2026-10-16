@@ -166,8 +166,21 @@ impl View {
             };
             header.push(Span::styled(title, label_style));
         }
-        let (content_area, time_area) = log_row_areas(super::render::row(area, LOG_TOP, 1));
-        super::render::line(Line::from(header), content_area, buf);
+        let header_row = super::render::row(area, LOG_TOP, 1);
+        let (content_area, time_area) = log_row_areas(header_row);
+        // The header centers on the panel, so it keeps the time column's width clear on both sides.
+        let margin = header_row.width - content_area.width;
+        let header_area = Rect::new(
+            header_row.x + margin,
+            header_row.y,
+            header_row.width.saturating_sub(margin * 2),
+            1,
+        );
+        if !header_area.is_empty() {
+            truncate_line_with_ellipsis_if_overflow(Line::from(header), header_area.width.into())
+                .centered()
+                .render(header_area, buf);
+        }
         Line::from(Span::styled(time.to_owned(), time_style))
             .right_aligned()
             .render(time_area, buf);

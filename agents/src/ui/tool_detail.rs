@@ -143,7 +143,7 @@ impl Part {
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let lines = match &self.body {
-            Body::TitleRule => vec![super::title_rule::title_rule(source, width, None)],
+            Body::TitleRule => vec![super::title_rule::centered_title_rule(source, width)],
             Body::Label(style) => split_wide(
                 vec![Line::from(Span::styled(source.to_owned(), *style))],
                 width,
@@ -622,13 +622,13 @@ mod tests {
         assert_eq!(
             texts(&parts, 80),
             [
-                &format!("─ Bash {}", "─".repeat(73)),
+                &format!("{} Bash {}", "─".repeat(37), "─".repeat(37)),
                 "cargo test",
                 &format!("↓{}", " ".repeat(79)),
                 "running 3 tests",
                 "...",
                 "",
-                &format!("─ Read {}", "─".repeat(73)),
+                &format!("{} Read {}", "─".repeat(37), "─".repeat(37)),
                 "agents/src/log.rs:1-40",
                 "running…",
             ]
@@ -636,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn title_rules_fit_one_row_with_fixed_title_and_arrow_columns() {
+    fn title_rules_fit_one_row_with_centered_titles_and_fixed_arrows() {
         for title in [
             "Bash",
             "看探针结果",
@@ -668,7 +668,7 @@ mod tests {
                 assert!(title_row.starts_with(' ') && title_row.ends_with(' '));
                 let drawn = &title_row[1..title_row.len() - 1];
                 let left = text.chars().take_while(|ch| *ch == '─').count() + 1;
-                assert_eq!(left, 2);
+                assert_eq!(left, (width - drawn.width() - 2) / 2 + 1);
                 assert_eq!(
                     parts[1].lines(width, Style::default())[0]
                         .to_string()
