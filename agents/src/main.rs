@@ -11,6 +11,7 @@ mod repository;
 mod sessions;
 mod shell_summary;
 mod state;
+mod tasks;
 mod terminal_background;
 mod theme;
 mod ui;

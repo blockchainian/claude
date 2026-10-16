@@ -137,7 +137,7 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => Action::Open(session.id),
             KeyCode::Char('o') => Action::Resume(session.id),
             KeyCode::Char('f') => Action::Fork(session.id),
-            KeyCode::Char('n') => Action::New,
+            KeyCode::Char('n') => Action::NewDraft { cwd: session.cwd },
             KeyCode::Char('x') => Action::Stop(session.id),
             KeyCode::Char('w') => Action::Unsupported("New worktree"),
             _ => unreachable!(),

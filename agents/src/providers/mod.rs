@@ -3,7 +3,12 @@ pub(crate) mod codex;
 
 use crate::log;
 use crate::model::{Action, Session};
-use std::{fmt, io, path::PathBuf, process::Command, str::FromStr};
+use std::{
+    fmt, io,
+    path::PathBuf,
+    process::{Command, Output},
+    str::FromStr,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ProviderId {
@@ -76,6 +81,12 @@ pub enum SessionInput {
     SetEffort(String),
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct InputChoices {
+    pub models: Vec<String>,
+    pub efforts: Vec<String>,
+}
+
 pub type Job = Box<dyn FnOnce() -> io::Result<()> + Send>;
 
 pub trait Provider {
@@ -85,6 +96,18 @@ pub trait Provider {
     fn capabilities(&self) -> Capabilities;
     fn send(&self, _session: &Session, _input: SessionInput) -> Option<Job> {
         None
+    }
+    fn create(&self, _request: &crate::tasks::NewTask) -> Option<io::Result<Command>> {
+        None
+    }
+    fn input_choices(&self) -> InputChoices {
+        InputChoices::default()
+    }
+    fn task_defaults(&self) -> Option<io::Result<crate::tasks::TaskDefaults>> {
+        None
+    }
+    fn created_job(&self, _output: &Output) -> io::Result<String> {
+        Err(io::ErrorKind::Unsupported.into())
     }
     /// Returns this provider's sessions, including children with provider-qualified parents.
     fn refresh(&mut self, pages: usize) -> Snapshot;

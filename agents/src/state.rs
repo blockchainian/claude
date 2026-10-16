@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Preferences {
+    pub worktree_root: Option<PathBuf>,
     pub double_click_ms: u64,
     pub grouping: Grouping,
     pub pinned: Vec<SessionKey>,
@@ -23,6 +24,11 @@ pub struct Preferences {
 
 #[derive(Deserialize, Serialize)]
 struct StoredPreferences {
+    #[serde(
+        default = "default_worktree_root",
+        skip_serializing_if = "Option::is_none"
+    )]
+    worktree_root: Option<PathBuf>,
     #[serde(default = "default_double_click_ms")]
     double_click_ms: u64,
     grouping: String,
@@ -35,6 +41,24 @@ struct StoredPreferences {
     dark_theme: Option<PathBuf>,
 }
 
+fn worktree_root(
+    worktrees: Option<std::ffi::OsString>,
+    workspace: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    worktrees
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            workspace
+                .filter(|value| !value.is_empty())
+                .map(|value| PathBuf::from(value).join(".worktrees"))
+        })
+}
+
+fn default_worktree_root() -> Option<PathBuf> {
+    worktree_root(std::env::var_os("WORKTREES"), std::env::var_os("WORKSPACE"))
+}
+
 fn default_double_click_ms() -> u64 {
     300
 }
@@ -42,6 +66,7 @@ fn default_double_click_ms() -> u64 {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            worktree_root: default_worktree_root(),
             double_click_ms: default_double_click_ms(),
             grouping: Grouping::default(),
             pinned: Vec::new(),
@@ -64,6 +89,7 @@ impl Preferences {
             return Self::default();
         };
         Self {
+            worktree_root: stored.worktree_root,
             double_click_ms: stored.double_click_ms,
             grouping,
             pinned: stored
@@ -89,6 +115,7 @@ impl Preferences {
             serde_json::to_writer(
                 &mut file,
                 &StoredPreferences {
+                    worktree_root: self.worktree_root.clone(),
                     double_click_ms: self.double_click_ms,
                     grouping: self.grouping.as_str().into(),
                     pinned: self.pinned.iter().map(ToString::to_string).collect(),
@@ -111,6 +138,26 @@ impl Preferences {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worktree_root_defaults_and_round_trips() {
+        assert_eq!(
+            worktree_root(Some("/tmp/trees".into()), Some("/tmp/workspace".into())),
+            Some(PathBuf::from("/tmp/trees"))
+        );
+        assert_eq!(
+            worktree_root(None, Some("/tmp/workspace".into())),
+            Some(PathBuf::from("/tmp/workspace/.worktrees"))
+        );
+        assert_eq!(worktree_root(None, None), None);
+        let directory = tempfile::tempdir().unwrap();
+        let preferences = Preferences {
+            worktree_root: Some(directory.path().join("trees")),
+            ..Preferences::default()
+        };
+        preferences.save(directory.path()).unwrap();
+        assert_eq!(Preferences::load(directory.path()), preferences);
+    }
 
     #[test]
     fn double_click_interval_defaults_and_round_trips() {
@@ -159,6 +206,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(Preferences::load(dir.path()), Preferences::default());
         let preferences = Preferences {
+            worktree_root: Some(dir.path().join("trees")),
             double_click_ms: 300,
             grouping: Grouping::Model,
             pinned: vec![

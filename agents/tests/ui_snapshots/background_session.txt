@@ -1,11 +1,11 @@
   Agent command center  Group: Project  g
-   Active 2   Ready 1   Working 0   Needs you 1   Inactive 1                                                                                   tab/⇧tab filter
+   All 3   Ready 1   Working 0   Needs you 1   Inactive 1                                                                                      tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                                               Status         Updated  │ Needs attention
-  /tmp/project  2 of 3                                                                            │ send a prompt to start
-    ● Needs an answer                                                     Needs input     2m ago  │
-  › ○ bg Current task                                                     Ready           2m ago  │ Prompt
-                                                                                                  │ Current task
+  /tmp/project  3                                                                                 │ send a prompt to start
+  › ○ bg Current task                                                     Ready           2m ago  │
+    ● Needs an answer                                                     Needs input     2m ago  │ Prompt
+    ○ Unloaded task                                                       Inactive        2m ago  │ Current task
                                                                                                   │
                                                                                                   │ Project
                                                                                                   │ /tmp/project

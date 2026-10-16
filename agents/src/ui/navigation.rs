@@ -2,6 +2,8 @@ use super::*;
 
 pub(super) enum CenterRow {
     Group(usize),
+    DraftGroup(crate::model::DraftId),
+    Draft(crate::model::DraftId),
     Task(usize),
     Parent(usize),
     Gap,
@@ -36,10 +38,95 @@ impl View {
             entries.push(CenterRow::Task(index));
             previous = Some(index);
         }
+        if self.status_filter == 0 {
+            for draft in &self.drafts {
+                let group = entries.iter().position(|entry| match entry {
+                    CenterRow::Group(index) => {
+                        self.project_groups[*index].heading == draft.heading()
+                    }
+                    CenterRow::DraftGroup(id) => self
+                        .drafts
+                        .iter()
+                        .any(|other| other.id == *id && other.heading() == draft.heading()),
+                    _ => false,
+                });
+                if let Some(group) = group {
+                    let next = entries
+                        .iter()
+                        .enumerate()
+                        .skip(group + 1)
+                        .find(|(_, entry)| {
+                            matches!(
+                                entry,
+                                CenterRow::Group(_) | CenterRow::DraftGroup(_) | CenterRow::Gap
+                            )
+                        })
+                        .map_or(entries.len(), |(index, _)| index);
+                    entries.insert(next, CenterRow::Draft(draft.id));
+                } else {
+                    if !entries.is_empty() {
+                        entries.push(CenterRow::Gap);
+                    }
+                    entries.push(CenterRow::DraftGroup(draft.id));
+                    entries.push(CenterRow::Draft(draft.id));
+                }
+            }
+        }
         entries
     }
 
     pub(super) fn page_selection(&mut self, forward: bool) {
+        if self.status_filter == 0 && !self.drafts.is_empty() {
+            let entries = self.center_rows(&self.selectable_indices(), self.grouping);
+            let targets: Vec<_> = entries
+                .iter()
+                .enumerate()
+                .filter_map(|(position, row)| match row {
+                    CenterRow::Task(index) => Some((position, Some(*index), None)),
+                    CenterRow::Draft(id) => Some((position, None, Some(*id))),
+                    CenterRow::ShowMore => Some((position, Some(usize::MAX), None)),
+                    _ => None,
+                })
+                .collect();
+            if targets.is_empty() {
+                return;
+            }
+            let current = targets
+                .iter()
+                .find(|(_, index, draft)| {
+                    if let Some(id) = draft {
+                        self.selected_draft == Some(*id)
+                    } else {
+                        self.selected_draft.is_none() && *index == Some(self.selected)
+                    }
+                })
+                .map_or(0, |(position, _, _)| *position);
+            let height = self.viewport.borrow().page_height.max(1);
+            let desired = if forward {
+                current.saturating_add(height)
+            } else {
+                current.saturating_sub(height)
+            };
+            let target = if forward {
+                targets
+                    .iter()
+                    .find(|(position, _, _)| *position >= desired)
+                    .unwrap_or_else(|| targets.last().unwrap())
+            } else {
+                targets
+                    .iter()
+                    .rev()
+                    .find(|(position, _, _)| *position <= desired)
+                    .unwrap_or(&targets[0])
+            };
+            self.viewport.borrow_mut().scroll = target.0.min(entries.len().saturating_sub(height));
+            if let Some(id) = target.2 {
+                self.select_draft(id);
+            } else if let Some(index) = target.1 {
+                self.select(index);
+            }
+            return;
+        }
         let indices = self.selectable_indices();
         let mut state = self.viewport.borrow_mut();
         if indices.is_empty() {

@@ -204,7 +204,12 @@ fn capabilities_gate_codex_actions_in_the_view() {
         (KeyCode::Enter, Action::Open(session.id.clone())),
         (KeyCode::Char('o'), Action::Resume(session.id.clone())),
         (KeyCode::Char('f'), Action::Fork(session.id.clone())),
-        (KeyCode::Char('n'), Action::New),
+        (
+            KeyCode::Char('n'),
+            Action::NewDraft {
+                cwd: session.cwd.clone(),
+            },
+        ),
         (KeyCode::Char('x'), Action::Stop(session.id.clone())),
     ] {
         assert_eq!(
@@ -550,6 +555,10 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     let mut view = View::new(Grouping::Project, false);
     view.set_capabilities(hub.capabilities());
     view.set_sessions(snapshot.sessions, snapshot.has_more);
+    // Needs you shows the inactive parent as context above its waiting child.
+    for _ in 0..3 {
+        view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    }
     assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
     let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
     view.render(buffer.area, &mut buffer);
@@ -622,9 +631,7 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     );
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     // Pending and inactive children never populate the parent's Background section.
-    for _ in 0..4 {
-        view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    }
+    view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     while view.selected_id() != Some(&parent_key) {
         let previous = view.selected_id().cloned();
         view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));

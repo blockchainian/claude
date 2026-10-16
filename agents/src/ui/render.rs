@@ -149,6 +149,17 @@ impl View {
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout = self.center_layout(area);
+        if let Some(editor) = &self.branch_editor
+            && let Some((rect, _)) = self
+                .viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .find(|(_, field)| *field == Field::Branch)
+        {
+            let (_, caret) = input_row("Branch › ", &editor.editor, *rect);
+            return Some((rect.x + caret, rect.y));
+        }
         if self.input_box.focused && !self.help && self.confirm_dialog.is_none() {
             return self
                 .input_box
@@ -194,6 +205,7 @@ impl View {
             // A panel this frame leaves out keeps no links from the last one.
             let mut viewport = self.viewport.borrow_mut();
             viewport.marker = None;
+            viewport.field_targets.clear();
             viewport.details = Rect::default();
             viewport.log = Rect::default();
             viewport.details_links.clear();
@@ -339,6 +351,7 @@ impl View {
             Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
             self.viewport.borrow_mut().log_jump = jump;
         }
+        self.render_controls(details, buf);
         if let Some(dialog) = &self.confirm_dialog {
             self.render_confirm_dialog(dialog, layout.list, buf);
             self.viewport.borrow_mut().marker = None;
@@ -468,6 +481,38 @@ impl View {
             viewport.details_background.clear();
             viewport.details_links.clear();
             viewport.details_text = text_selection::TextRegion::default();
+        }
+        if let Some(draft) = self.selected_draft() {
+            self.viewport.borrow_mut().details = area;
+            let lines = [
+                "New task".to_owned(),
+                draft.setup.cwd.display().to_string(),
+                format!(
+                    "Model: {}",
+                    draft.setup.model.as_deref().unwrap_or("Default")
+                ),
+                format!(
+                    "Effort: {}",
+                    draft.setup.effort.as_deref().unwrap_or("Default")
+                ),
+                format!("Branch: {}", draft.setup.branch),
+            ];
+            for (index, text) in lines.into_iter().enumerate() {
+                line(text, row(area, index as u16, 1), buf);
+            }
+            for (index, field) in [(2, Field::Model), (3, Field::Effort), (4, Field::Branch)] {
+                let rect = row(area, index, 1);
+                if !rect.is_empty() {
+                    self.viewport.borrow_mut().field_targets.push((rect, field));
+                }
+            }
+            if draft.working || draft.job.is_some() {
+                line("Creating…", row(area, 5, 1), buf);
+            }
+            if let Some(error) = &draft.error {
+                line(error.clone().red(), row(area, 6, 1), buf);
+            }
+            return;
         }
         let Some(session) = self.selected_row() else {
             return;
@@ -714,10 +759,24 @@ impl View {
             cwd.into(),
         ]);
 
+        let effort = match session.effort.as_deref() {
+            Some(effort) => Some(effort),
+            None if session.is_live_background()
+                && session.input_disabled_reason().is_none()
+                && self
+                    .input_choices
+                    .get(&session.id.provider)
+                    .is_some_and(|choices| !choices.efforts.is_empty()) =>
+            {
+                Some("Unknown")
+            }
+            None => None,
+        };
         let mut model = vec!["Model: ".dim(), session.model_name().to_owned().into()];
-        if let Some(effort) = &session.effort {
-            model.extend([" · ".dim(), effort.clone().into()]);
+        if let Some(effort) = effort {
+            model.extend([" · ".dim(), effort.to_owned().into()]);
         }
+        let mut model_item = items.len() + 1;
         // A blank row keeps the model off the bottom rule.
         items.extend([
             Line::default().into(),
@@ -831,6 +890,7 @@ impl View {
                         start..start + budget.bodies[i].0 + state.reveal[i]
                     })
                     .collect();
+                model_item = keep[..model_item].iter().filter(|keep| **keep).count();
                 let mut index = 0;
                 items.retain(|_| {
                     let retain = keep[index];
@@ -881,9 +941,31 @@ impl View {
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
-        for ((item, mapped), links) in items.into_iter().zip(text_rows).zip(item_links) {
+        for (item_index, ((item, mapped), links)) in
+            items.into_iter().zip(text_rows).zip(item_links).enumerate()
+        {
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
+                if item_index == model_item {
+                    let model_width = ("Model: ".width() + session.model_name().width())
+                        .min(usize::from(area.width)) as u16;
+                    self.viewport
+                        .borrow_mut()
+                        .field_targets
+                        .push((Rect::new(area.x, y, model_width, 1), Field::Model));
+                    if let Some(effort) = effort {
+                        let offset =
+                            "Model: ".width() + session.model_name().width() + " · ".width();
+                        let rect = Rect::new(area.x + offset as u16, y, effort.width() as u16, 1)
+                            .intersection(area);
+                        if !rect.is_empty() {
+                            self.viewport
+                                .borrow_mut()
+                                .field_targets
+                                .push((rect, Field::Effort));
+                        }
+                    }
+                }
                 if let Some(mut mapped) = mapped {
                     mapped.y = y;
                     self.viewport.borrow_mut().details_text.rows.push(mapped);

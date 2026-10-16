@@ -4,6 +4,8 @@ mod attach;
 #[cfg(test)]
 mod attach_live_tests;
 mod background;
+#[cfg(test)]
+mod create_tests;
 mod images;
 pub(crate) mod log;
 mod peer;
@@ -229,6 +231,13 @@ fn config_dir() -> PathBuf {
         std::env::var_os("HOME").expect("HOME is required when CLAUDE_CONFIG_DIR is unset"),
     )
     .join(".claude")
+}
+
+pub(crate) fn trust_config_path() -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| config_dir().with_extension("json"))
 }
 
 #[derive(Clone)]
@@ -616,6 +625,90 @@ impl Provider for ClaudeProvider {
             .as_deref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Session has no transcript"))?;
         log::tail_session(path, count, sidechains)
+    }
+
+    fn create(&self, request: &crate::tasks::NewTask) -> Option<io::Result<Command>> {
+        let mut command = Command::new("claude");
+        command.arg("--bg").current_dir(&request.cwd);
+        if let Some(model) = &request.model {
+            command.args(["--model", model]);
+        }
+        if let Some(effort) = &request.effort {
+            command.args(["--effort", effort]);
+        }
+        command.arg(&request.prompt);
+        Some(Ok(command))
+    }
+
+    fn input_choices(&self) -> crate::providers::InputChoices {
+        crate::providers::InputChoices {
+            models: ["fable", "opus", "sonnet", "haiku"]
+                .map(str::to_owned)
+                .into(),
+            efforts: ["low", "medium", "high", "xhigh", "max"]
+                .map(str::to_owned)
+                .into(),
+        }
+    }
+
+    fn task_defaults(&self) -> Option<io::Result<crate::tasks::TaskDefaults>> {
+        Some((|| {
+            let bytes = match fs::read(self.config_dir.join("settings.json")) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    return Ok(crate::tasks::TaskDefaults::default());
+                }
+                Err(error) => return Err(error),
+            };
+            let settings: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_slice(&bytes)?;
+            let field = |name: &str| -> io::Result<Option<String>> {
+                match settings.get(name) {
+                    None => Ok(None),
+                    Some(serde_json::Value::String(value)) => Ok(Some(value.clone())),
+                    Some(_) => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Claude setting {name} must be a string"),
+                    )),
+                }
+            };
+            Ok(crate::tasks::TaskDefaults {
+                model: field("model")?,
+                effort: field("effortLevel")?,
+            })
+        })())
+    }
+
+    fn created_job(&self, output: &std::process::Output) -> io::Result<String> {
+        if !output.status.success() {
+            return Err(io::Error::other(format!(
+                "Claude task creation failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let stdout = std::str::from_utf8(&output.stdout)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let mut ids = stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix("backgrounded · "));
+        let id = ids.next().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Claude did not report a background job id",
+            )
+        })?;
+        if id.is_empty()
+            || id.starts_with('-')
+            || id.chars().any(char::is_whitespace)
+            || ids.next().is_some()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Claude reported an invalid background job id",
+            ));
+        }
+        Ok(id.to_owned())
     }
 
     fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {

@@ -1,7 +1,13 @@
 //! Command center adapted from OpenAI Codex's TUI (Apache-2.0).
 mod activity_strip;
 pub(crate) mod commits;
+mod draft_controls;
+#[cfg(test)]
+mod draft_flow_tests;
+mod drafts;
+use draft_controls::{BranchEditor, Field, Picker};
 mod formatting;
+pub(crate) use drafts::DraftSetup;
 mod highlight;
 mod hints;
 mod hyperlink;
@@ -57,11 +63,12 @@ use unicode_width::UnicodeWidthStr;
 
 const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     (
-        "Active",
+        "All",
         &[
             SessionStatus::Working,
             SessionStatus::Ready,
             SessionStatus::NeedsInput,
+            SessionStatus::Inactive,
         ],
     ),
     ("Ready", &[SessionStatus::Ready]),
@@ -97,6 +104,8 @@ struct Viewport {
     first_entry: usize,
     log: Rect,
     prompt: Rect,
+    field_targets: Vec<(Rect, Field)>,
+    picker_rows: Vec<(Rect, usize)>,
     log_scroll: usize,
     /// Events that arrived above the rows on screen since the log left its newest row.
     log_unseen: usize,
@@ -188,6 +197,12 @@ impl ConfirmDialog {
 }
 
 pub struct View {
+    drafts: Vec<drafts::Draft>,
+    selected_draft: Option<crate::model::DraftId>,
+    next_draft: crate::model::DraftId,
+    input_choices: HashMap<ProviderId, crate::providers::InputChoices>,
+    picker: Option<Picker>,
+    branch_editor: Option<BranchEditor>,
     pub(crate) log: Vec<crate::log::Event>,
     pub(crate) log_session: Option<SessionKey>,
     pub(crate) log_search: log_search::LogSearch,
@@ -307,6 +322,12 @@ impl View {
             log_background_return: None,
             log_detail_search: log_search::LogSearch::default(),
             log_search: log_search::LogSearch::default(),
+            drafts: Vec::new(),
+            selected_draft: None,
+            next_draft: 1,
+            input_choices: HashMap::new(),
+            picker: None,
+            branch_editor: None,
             input_box: prompt_box::PromptBox::default(),
             capabilities: HashMap::new(),
             rows: Vec::new(),
@@ -361,12 +382,19 @@ impl View {
     }
 
     fn input_label(&self) -> String {
+        if self.selected_draft().is_some() {
+            return "New task".into();
+        }
         self.selected_row()
             .map(|session| session.display_title().to_owned())
             .unwrap_or_else(|| "No task".into())
     }
 
     fn input_disabled(&self) -> Option<&'static str> {
+        if let Some(draft) = self.selected_draft() {
+            return (draft.working || draft.job.is_some())
+                .then_some("Creating task; waiting for session");
+        }
         match self.selected_row() {
             Some(session) => session.input_disabled_reason(),
             None => Some("Select a task to type"),
@@ -459,6 +487,7 @@ impl View {
         if self.status_filter != status_filter && self.selected_id() == selected.as_ref() {
             self.remember_selection();
         }
+        self.reconcile_drafts();
         self.show_selected_panels();
     }
 
@@ -529,6 +558,9 @@ impl View {
         self.selected_row().map(|s| &s.id)
     }
     fn selected_row(&self) -> Option<&Session> {
+        if self.selected_draft.is_some() {
+            return None;
+        }
         self.rows
             .get(self.selected)
             .filter(|_| self.visible_indices().contains(&self.selected))
@@ -660,6 +692,7 @@ impl View {
     }
 
     fn set_selected(&mut self, selected: usize) {
+        self.save_draft_input();
         self.selected = selected;
         self.show_selected_panels();
     }
@@ -738,6 +771,9 @@ impl View {
     }
 
     fn reconcile_selection(&mut self) {
+        if self.selected_draft.is_some() && self.status_filter == 0 {
+            return;
+        }
         let visible = self.selectable_indices();
         if let Some(id) = &self.rename_target
             && !visible
@@ -760,8 +796,13 @@ impl View {
         if selectable.contains(&usize::MAX) {
             return usize::MAX;
         }
+        let prefer_active = self.status_filter == 0
+            && selectable
+                .iter()
+                .any(|&index| self.rows[index].status != SessionStatus::Inactive);
         selectable
             .into_iter()
+            .filter(|&index| !prefer_active || self.rows[index].status != SessionStatus::Inactive)
             .max_by_key(|&index| session_order(&self.rows[index]))
             .unwrap_or(usize::MAX)
     }

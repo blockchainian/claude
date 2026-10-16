@@ -54,7 +54,7 @@ impl View {
             return;
         }
         let indices = self.selectable_indices();
-        if indices.is_empty() {
+        if indices.is_empty() && (self.status_filter != 0 || self.drafts.is_empty()) {
             return;
         }
         let entries = self.center_rows(&indices, self.grouping);
@@ -68,7 +68,8 @@ impl View {
         let selected = entries
             .iter()
             .position(|row| match row {
-                CenterRow::Task(index) => *index == self.selected,
+                CenterRow::Task(index) => self.selected_draft.is_none() && *index == self.selected,
+                CenterRow::Draft(id) => self.selected_draft == Some(*id),
                 CenterRow::ShowMore => self.selected == usize::MAX,
                 _ => false,
             })
@@ -107,11 +108,38 @@ impl View {
             ..viewport
         };
         for (offset, entry) in entries.iter().skip(start).take(height).enumerate() {
+            if let CenterRow::Draft(id) | CenterRow::DraftGroup(id) = entry {
+                let draft = self
+                    .drafts
+                    .iter()
+                    .find(|draft| draft.id == *id)
+                    .expect("visible draft");
+                let rect = row(viewport, offset as u16, 1);
+                if matches!(entry, CenterRow::DraftGroup(_)) {
+                    line(format!("{}", draft.heading().display()).dim(), rect, buf);
+                } else {
+                    let selected = self.selected_draft == Some(*id);
+                    if selected {
+                        state.marker = Some((rect.x, rect.y));
+                    }
+                    let text = format!("{}   New task", if selected { "›" } else { " " });
+                    line(
+                        Line::from(text).style(if selected {
+                            selection_style()
+                        } else {
+                            Style::default()
+                        }),
+                        rect,
+                        buf,
+                    );
+                }
+                continue;
+            }
             let index = match entry {
                 CenterRow::Group(index) | CenterRow::Task(index) | CenterRow::Parent(index) => {
                     *index
                 }
-                CenterRow::Gap => continue,
+                CenterRow::Gap | CenterRow::Draft(_) | CenterRow::DraftGroup(_) => continue,
                 CenterRow::ShowMore => {
                     let rect = row(viewport, offset as u16, /*height*/ 1);
                     let selected = self.selected == usize::MAX;
@@ -199,7 +227,7 @@ impl View {
                 continue;
             }
             let header = matches!(entry, CenterRow::Parent(_));
-            let selected = !header && index == self.selected;
+            let selected = !header && self.selected_draft.is_none() && index == self.selected;
             let style = if header {
                 Style::default().dim()
             } else if selected {

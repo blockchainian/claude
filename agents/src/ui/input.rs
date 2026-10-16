@@ -11,6 +11,8 @@ pub(super) enum ClickTarget {
     },
     Background(crate::model::BackgroundTask),
     Link(PathBuf),
+    Heading(PathBuf),
+    Field(Field),
 }
 
 pub(super) struct PendingClick {
@@ -42,7 +44,8 @@ impl View {
                 }
                 None
             }
-            ClickTarget::Link(path) => Some(Action::OpenPath(path)),
+            ClickTarget::Link(path) | ClickTarget::Heading(path) => Some(Action::OpenPath(path)),
+            ClickTarget::Field(_) => None,
             ClickTarget::Background(_) => None,
         }
     }
@@ -66,6 +69,12 @@ impl View {
 
     fn right_click(&mut self) {
         self.pending_click = None;
+        if self.picker.take().is_some() {
+            return;
+        }
+        if self.branch_editor.take().is_some() {
+            return;
+        }
         if self.confirm_dialog.take().is_some() {
             return;
         }
@@ -140,6 +149,7 @@ impl View {
         if self.selected_id() == self.chosen.as_ref() {
             self.remember_selection();
         }
+        self.save_draft_input();
         self.status_filter = idx;
         self.viewport.borrow_mut().scroll = 0;
         let visible = self.visible_indices();
@@ -219,6 +229,65 @@ impl View {
             _ => {}
         }
         let position = (mouse.column, mouse.row).into();
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+            if self.picker.is_some() {
+                let chosen = self
+                    .viewport
+                    .borrow()
+                    .picker_rows
+                    .iter()
+                    .find(|(rect, _)| rect.contains(position))
+                    .map(|(_, index)| *index);
+                return chosen.and_then(|index| self.apply_choice(index));
+            }
+            if self.branch_editor.is_some() {
+                return None;
+            }
+            let field = self
+                .viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .find(|(rect, _)| rect.contains(position))
+                .map(|(_, field)| *field);
+            if let Some(field) = field {
+                if self.defer_click(ClickTarget::Field(field)) {
+                    self.open_field(field);
+                }
+                return None;
+            }
+            let heading = {
+                let viewport = self.viewport.borrow();
+                if viewport.list_rows.contains(position) {
+                    let entry =
+                        viewport.first_entry + usize::from(mouse.row - viewport.list_rows.y);
+                    match self
+                        .center_rows(&self.selectable_indices(), self.grouping)
+                        .get(entry)
+                    {
+                        Some(super::navigation::CenterRow::Group(index)) => {
+                            Some(self.project_groups[*index].heading.clone())
+                        }
+                        Some(super::navigation::CenterRow::DraftGroup(id)) => self
+                            .drafts
+                            .iter()
+                            .find(|draft| draft.id == *id)
+                            .map(|draft| draft.setup.cwd.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(cwd) = heading
+                && self.grouping == Grouping::Project
+            {
+                if self.defer_click(ClickTarget::Heading(cwd.clone())) {
+                    return Some(Action::NewDraft { cwd });
+                }
+                return None;
+            }
+        }
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && self.viewport.borrow().prompt.contains(position)
         {
@@ -355,6 +424,10 @@ impl View {
                 } else if let Some(entry) = entry {
                     let entries = self.center_rows(&self.selectable_indices(), self.grouping);
                     let task = match entries.get(entry) {
+                        Some(super::navigation::CenterRow::Draft(id)) => {
+                            self.select_draft(*id);
+                            return None;
+                        }
                         Some(super::navigation::CenterRow::Task(index)) => *index,
                         Some(super::navigation::CenterRow::ShowMore) => {
                             self.select(usize::MAX);
@@ -482,7 +555,40 @@ impl View {
         }
     }
 
-    fn move_selection(&mut self, forward: bool) {
+    pub(super) fn move_selection(&mut self, forward: bool) {
+        if self.status_filter == 0 && !self.drafts.is_empty() {
+            let targets: Vec<_> = self
+                .center_rows(&self.selectable_indices(), self.grouping)
+                .into_iter()
+                .filter_map(|row| match row {
+                    super::navigation::CenterRow::Task(index) => Some((Some(index), None)),
+                    super::navigation::CenterRow::Draft(id) => Some((None, Some(id))),
+                    super::navigation::CenterRow::ShowMore => Some((Some(usize::MAX), None)),
+                    _ => None,
+                })
+                .collect();
+            if targets.is_empty() {
+                return;
+            }
+            let current = targets
+                .iter()
+                .position(|(index, draft)| match draft {
+                    Some(id) => self.selected_draft == Some(*id),
+                    None => self.selected_draft.is_none() && *index == Some(self.selected),
+                })
+                .unwrap_or(0);
+            let next = if forward {
+                (current + 1) % targets.len()
+            } else {
+                (current + targets.len() - 1) % targets.len()
+            };
+            match targets[next] {
+                (Some(index), _) => self.select(index),
+                (_, Some(id)) => self.select_draft(id),
+                _ => unreachable!(),
+            };
+            return;
+        }
         let visible = self.selectable_indices();
         if visible.is_empty() {
             return;
@@ -499,6 +605,10 @@ impl View {
         self.select(selected);
     }
     fn activate(&mut self) -> Option<Action> {
+        if self.selected_draft.is_some() {
+            self.focus_input();
+            return None;
+        }
         if self
             .selected_row()
             .is_some_and(|session| !session.can_resume())
@@ -536,13 +646,35 @@ impl View {
         if key.kind == KeyEventKind::Release {
             return None;
         }
+        if let Some(action) = self.control_key(key) {
+            return action;
+        }
         if self.input_box.focused {
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
-                Some(prompt_box::PromptAction::Submit(text)) => self
-                    .selected_id()
-                    .cloned()
-                    .map(|id| Action::SendPrompt { id, text }),
+                Some(prompt_box::PromptAction::Submit(text)) => {
+                    if let Some(id) = self.selected_draft {
+                        let draft = self.drafts.iter_mut().find(|draft| draft.id == id)?;
+                        if draft.working || draft.job.is_some() {
+                            return None;
+                        }
+                        draft.working = true;
+                        Some(Action::CreateTask {
+                            draft_id: id,
+                            provider: draft.setup.provider,
+                            request: crate::tasks::NewTask {
+                                cwd: draft.setup.cwd.clone(),
+                                model: draft.setup.model.clone(),
+                                effort: draft.setup.effort.clone(),
+                                prompt: text,
+                            },
+                        })
+                    } else {
+                        self.selected_id()
+                            .cloned()
+                            .map(|id| Action::SendPrompt { id, text })
+                    }
+                }
                 None => None,
             };
         }
@@ -765,6 +897,41 @@ impl View {
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(true),
             KeyCode::PageUp => self.page_selection(false),
             KeyCode::PageDown => self.page_selection(true),
+            KeyCode::Home if self.status_filter == 0 && !self.drafts.is_empty() => {
+                let target = self
+                    .center_rows(&self.selectable_indices(), self.grouping)
+                    .into_iter()
+                    .find(|row| {
+                        matches!(
+                            row,
+                            super::navigation::CenterRow::Task(_)
+                                | super::navigation::CenterRow::Draft(_)
+                        )
+                    });
+                match target {
+                    Some(super::navigation::CenterRow::Task(index)) => self.select(index),
+                    Some(super::navigation::CenterRow::Draft(id)) => self.select_draft(id),
+                    _ => {}
+                }
+            }
+            KeyCode::End if self.status_filter == 0 && !self.drafts.is_empty() => {
+                let target = self
+                    .center_rows(&self.selectable_indices(), self.grouping)
+                    .into_iter()
+                    .rev()
+                    .find(|row| {
+                        matches!(
+                            row,
+                            super::navigation::CenterRow::Task(_)
+                                | super::navigation::CenterRow::Draft(_)
+                        )
+                    });
+                match target {
+                    Some(super::navigation::CenterRow::Task(index)) => self.select(index),
+                    Some(super::navigation::CenterRow::Draft(id)) => self.select_draft(id),
+                    _ => {}
+                }
+            }
             KeyCode::Home => {
                 let selected = self
                     .selectable_indices()
@@ -788,7 +955,20 @@ impl View {
                 self.viewport.borrow_mut().scroll = 0;
                 return Some(Action::PersistGrouping(self.grouping));
             }
-            KeyCode::Char('n') => return Some(Action::New),
+            KeyCode::Char('n') => {
+                let cwd = self
+                    .selected_draft()
+                    .map(|draft| draft.heading())
+                    .or_else(|| {
+                        self.selected_row().map(|_| {
+                            self.project_groups
+                                [self.group_index(self.selected).unwrap_or(self.selected)]
+                            .heading
+                            .clone()
+                        })
+                    });
+                return cwd.map(|cwd| Action::NewDraft { cwd });
+            }
             KeyCode::Char('w') => return Some(Action::Unsupported("New worktree")),
             KeyCode::Char('r') => {
                 if let Some(session) = self.selected_row() {
@@ -817,6 +997,19 @@ impl View {
                 }
             }
             KeyCode::Backspace => {
+                if let Some(id) = self.selected_draft {
+                    if self
+                        .selected_draft()
+                        .is_some_and(|draft| draft.working || draft.job.is_some())
+                    {
+                        return None;
+                    }
+                    self.save_draft_input();
+                    self.drafts.retain(|draft| draft.id != id);
+                    self.reconcile_selection();
+                    self.show_selected_panels();
+                    return None;
+                }
                 if let Some(session) = self.selected_row() {
                     if !self.selected_capabilities().delete {
                         return Some(Action::Unsupported("Delete"));

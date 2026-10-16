@@ -610,13 +610,13 @@ fn escape_remembers_resume_and_fork_but_not_new() {
         let (_dir, mut app) = fixture();
         assert!(key(&mut app, code));
         app.launch.take().unwrap();
-        assert!(key(&mut app, KeyCode::Char('n')));
+        assert!(app.handle_action(Some(Action::New)));
         app.launch.take().unwrap();
         assert!(key(&mut app, KeyCode::Esc));
         assert_resume(&app);
     }
     let (_dir, mut app) = fixture();
-    assert!(key(&mut app, KeyCode::Char('n')));
+    assert!(app.handle_action(Some(Action::New)));
     app.launch.take().unwrap();
     assert!(key(&mut app, KeyCode::Esc));
     assert!(app.launch.is_some());
@@ -884,9 +884,32 @@ fn manager_thread_mutations_reach_app_provider_paths() {
 }
 
 #[test]
-fn new_key_opens_a_claude_session_whatever_is_selected() {
+fn new_key_adds_a_claude_draft_whatever_is_selected() {
     use crate::providers::{Provider, codex::CodexProvider};
     let (dir, mut app) = fixture();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec![
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
     rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
         .unwrap()
         .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
@@ -902,14 +925,27 @@ fn new_key_opens_a_claude_session_whatever_is_selected() {
     ]);
     let claude = app.sessions[0].clone();
     for rows in [vec![claude], vec![thread], vec![]] {
+        let has_project = !rows.is_empty();
+        app.view = crate::ui::View::default();
+        app.view.set_capabilities(app.hub.capabilities());
+        app.view.set_input_choices(app.hub.input_choices());
         app.view.set_sessions(rows, false);
-        assert!(key(&mut app, KeyCode::Char('n')));
-        let command = app.launch.take().expect("n should start a session");
-        assert_eq!(command.get_program(), "claude");
-        assert_eq!(command.get_args().len(), 0);
-        assert_eq!(
-            command.get_current_dir(),
-            Some(std::env::current_dir().unwrap().as_path())
+        assert!(!key(&mut app, KeyCode::Char('n')));
+        assert!(
+            app.launch.is_none(),
+            "a draft must not start an interactive process"
         );
+        assert!(
+            app.view.selected_id().is_none(),
+            "a draft has no session key"
+        );
+        let mut buffer = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 120, 40));
+        app.view.render(buffer.area, &mut buffer);
+        let rendered = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert_eq!(rendered.contains("New task"), has_project, "{rendered}");
     }
 }

@@ -1,7 +1,7 @@
 //! Terminal loop: reacts to session changes and keyboard input, renders the view and executes actions.
 
 use crate::model::Action;
-use crate::model::Session;
+use crate::model::{DraftId, Session};
 use crate::providers::Snapshot;
 use crate::providers::{Job, ProviderId, SessionInput, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
@@ -33,6 +33,15 @@ const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(100);
 enum Input {
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<()>),
+    Created {
+        draft_id: DraftId,
+        provider: ProviderId,
+        result: io::Result<std::process::Output>,
+    },
+    WorktreeCreated {
+        draft_id: DraftId,
+        result: io::Result<(PathBuf, String)>,
+    },
     Sent {
         id: SessionKey,
         input: SessionInput,
@@ -121,6 +130,7 @@ impl App {
         view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
         view.set_capabilities(hub.capabilities());
+        view.set_input_choices(hub.input_choices());
         let (sender, receiver) = mpsc::channel();
         Self {
             sender,
@@ -309,6 +319,19 @@ impl App {
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
+                Input::Created {
+                    draft_id,
+                    provider,
+                    result,
+                } => {
+                    let result =
+                        result.and_then(|output| self.hub.provider(provider).created_job(&output));
+                    self.view.draft_created(draft_id, result);
+                    schedule.changed(Instant::now());
+                }
+                Input::WorktreeCreated { draft_id, result } => {
+                    self.view.draft_worktree_complete(draft_id, result);
+                }
                 Input::Sent { id, input, result } => {
                     self.pending_inputs.remove(&id);
                     self.view.input_complete(&id, &input, result);
@@ -571,6 +594,96 @@ impl App {
         }
     }
 
+    fn new_draft(&mut self, cwd: PathBuf) {
+        let result: io::Result<crate::ui::DraftSetup> = (|| {
+            let (provider, defaults) = self
+                .hub
+                .task_defaults()
+                .ok_or_else(|| io::Error::other("No provider supports new tasks"))?;
+            let defaults = defaults?;
+            let repository = crate::tasks::repository(&cwd)?;
+            Ok(crate::ui::DraftSetup {
+                provider,
+                cwd: repository.directory,
+                model: defaults.model,
+                effort: defaults.effort,
+                branch: repository.branch,
+                trunk: repository.trunk,
+            })
+        })();
+        match result {
+            Ok(setup) => {
+                self.view.add_draft(setup);
+            }
+            Err(error) => self
+                .view
+                .set_notice(Some(format!("Cannot create draft: {error}"))),
+        }
+    }
+
+    fn create_task(
+        &mut self,
+        draft_id: DraftId,
+        provider: ProviderId,
+        request: crate::tasks::NewTask,
+    ) {
+        let command = self
+            .hub
+            .provider(provider)
+            .create(&request)
+            .unwrap_or_else(|| Err(io::Error::other("Provider cannot create tasks")));
+        let mut command = match command {
+            Ok(command) => command,
+            Err(error) => {
+                self.view.draft_created(draft_id, Err(error));
+                return;
+            }
+        };
+        let sender = self.sender.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("agents-create".into())
+            .spawn(move || {
+                let result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| command.output()))
+                        .unwrap_or_else(|_| Err(io::Error::other("Task creation job panicked")));
+                let _ = sender.send(Input::Created {
+                    draft_id,
+                    provider,
+                    result,
+                });
+            })
+        {
+            self.view.draft_created(draft_id, Err(error));
+        }
+    }
+
+    fn create_worktree(&mut self, draft_id: DraftId, cwd: PathBuf, branch: String) {
+        let Some(root) = self.preferences.worktree_root.clone() else {
+            self.view.draft_worktree_complete(
+                draft_id,
+                Err(io::Error::other(
+                    "Set worktree_root, WORKTREES, or WORKSPACE",
+                )),
+            );
+            return;
+        };
+        let config = crate::providers::claude::trust_config_path();
+        let sender = self.sender.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("agents-worktree".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::tasks::create_worktree(&cwd, &root, &branch, &config)
+                        .map(|cwd| (cwd, branch))
+                }))
+                .unwrap_or_else(|_| Err(io::Error::other("Worktree job panicked")));
+                let _ = sender.send(Input::WorktreeCreated { draft_id, result });
+            })
+        {
+            self.view.draft_worktree_complete(draft_id, Err(error));
+        }
+    }
+
     fn handle_action(&mut self, action: Option<Action>) -> bool {
         let Some(action) = action else {
             return false;
@@ -596,6 +709,21 @@ impl App {
         }
         match action {
             Action::Quit => return true,
+            Action::NewDraft { cwd } => self.new_draft(cwd),
+            Action::CreateTask {
+                draft_id,
+                provider,
+                request,
+            } => self.create_task(draft_id, provider, request),
+            Action::CreateWorktree {
+                draft_id,
+                cwd,
+                branch,
+            } => self.create_worktree(draft_id, cwd, branch),
+            Action::SetModel { id, model } => self.send_input(id, SessionInput::SetModel(model)),
+            Action::SetEffort { id, effort } => {
+                self.send_input(id, SessionInput::SetEffort(effort))
+            }
             Action::SendPrompt { id, text } => {
                 self.send_input(id, SessionInput::Prompt(text));
             }

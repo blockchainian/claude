@@ -37,6 +37,21 @@ impl Hub {
             .collect()
     }
 
+    pub fn input_choices(&self) -> HashMap<ProviderId, crate::providers::InputChoices> {
+        self.providers
+            .iter()
+            .map(|provider| (provider.id(), provider.input_choices()))
+            .collect()
+    }
+
+    pub fn task_defaults(&self) -> Option<(ProviderId, io::Result<crate::tasks::TaskDefaults>)> {
+        self.providers.iter().find_map(|provider| {
+            provider
+                .task_defaults()
+                .map(|defaults| (provider.id(), defaults))
+        })
+    }
+
     pub fn watch_roots(&self) -> io::Result<Vec<PathBuf>> {
         let mut roots = Vec::new();
         for provider in &self.providers {

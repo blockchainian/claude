@@ -158,6 +158,8 @@ impl Session {
     }
 }
 
+pub type DraftId = u64;
+
 /// What the view asks the app to do; the view never touches processes or files itself.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {
@@ -167,11 +169,33 @@ pub enum Action {
         id: SessionKey,
         text: String,
     },
+    /// `n` or a project heading double click: add a draft in that project.
+    NewDraft {
+        cwd: PathBuf,
+    },
+    CreateTask {
+        draft_id: DraftId,
+        provider: ProviderId,
+        request: crate::tasks::NewTask,
+    },
+    CreateWorktree {
+        draft_id: DraftId,
+        cwd: PathBuf,
+        branch: String,
+    },
+    SetModel {
+        id: SessionKey,
+        model: String,
+    },
+    SetEffort {
+        id: SessionKey,
+        effort: String,
+    },
     /// `o`: resume the session in this terminal.
     Resume(SessionKey),
     /// `f`: resume as a new session id.
     Fork(SessionKey),
-    /// `n`: start a new Claude session in the dashboard's directory.
+    /// Start a session when there is no previous task to return to.
     New,
     /// `h`: hide the session until the next launch.
     Hide(SessionKey),

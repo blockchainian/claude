@@ -105,18 +105,14 @@ impl Summary {
                     self.last_prompt = Some(prompt);
                 }
             }
-            Some("assistant") => {
-                if let Some(model) =
-                    text(record, "requestedModel").or_else(|| text(&record["message"], "model"))
-                {
-                    self.model = Some(model);
-                }
-                if let Some(effort) = text(record, "effort") {
-                    self.effort = Some(effort);
-                }
-            }
+            Some("assistant") => self.record_assistant_metadata(record),
             _ => {}
         }
+    }
+
+    fn record_assistant_metadata(&mut self, record: &Value) {
+        self.model = text(record, "requestedModel").or_else(|| text(&record["message"], "model"));
+        self.effort = text(record, "effort");
     }
 
     fn record_pr(&mut self, record: &Value) {
@@ -424,9 +420,14 @@ fn read_messages(
     let mut dequeued_user = None;
     let mut quiet_point = false;
     let mut questions_found = false;
+    let mut assistant_metadata_found = false;
     let mut tool_results = HashSet::new();
     let mut images = super::images::Companions::default();
     walk_records(file, start, bytes, sidechains, |record| {
+        if !assistant_metadata_found && record["type"] == "assistant" {
+            summary.record_assistant_metadata(&record);
+            assistant_metadata_found = true;
+        }
         images.record(&record);
         if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {
             for block in blocks.iter().rev() {
@@ -1392,6 +1393,51 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn background_metadata_survives_the_real_prompt_snapshot_attachment() {
+        // Actual Haiku/low records; private attachment strings are redacted byte-for-byte.
+        let fixture = include_bytes!("../../../tests/fixtures/claude-bg-metadata.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(fixture).unwrap();
+        let lines: Vec<_> = fixture
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .collect();
+        assert_eq!(lines.last().unwrap().len(), 73654);
+        let summary = read(file.path(), fixture.len() as u64).unwrap();
+        assert_eq!(
+            summary.last_message.as_deref(),
+            Some("agents-stage5-ux-1792167241")
+        );
+        assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
+        assert_eq!(summary.effort.as_deref(), Some("low"));
+        // The original metadata tail is entirely inside the oversized attachment.
+        assert_eq!(summary.timestamp, None);
+    }
+
+    #[test]
+    fn latest_visited_assistant_does_not_inherit_older_effort() {
+        let fixture = include_str!("../../../tests/fixtures/claude-bg-metadata.jsonl");
+        let mut rows: Vec<Value> = fixture
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let index = rows
+            .iter()
+            .position(|row| row["type"] == "assistant")
+            .unwrap();
+        let older = rows[index].clone();
+        rows[index].as_object_mut().unwrap().remove("effort");
+        rows.insert(index, older);
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for row in rows {
+            writeln!(file, "{row}").unwrap();
+        }
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
+        assert_eq!(summary.effort, None);
+    }
+
+    #[test]
     fn messages_survive_multiple_chunks_of_tool_traffic() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(FIXTURE.as_bytes()).unwrap();
@@ -1400,7 +1446,7 @@ pub(super) mod tests {
         let expected = read_fixture();
         assert_eq!(summary.prompt, expected.prompt);
         assert_eq!(summary.last_message, expected.last_message);
-        // Older replies must not restore metadata outside the original tail.
+        // The latest tool-only assistant has no metadata; do not infer it from the older reply.
         assert_eq!(summary.model, None);
         assert_eq!(summary.effort, None);
         assert_eq!(
