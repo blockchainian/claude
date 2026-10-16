@@ -843,7 +843,7 @@ impl View {
         let branch = session
             .git_branch
             .as_ref()
-            .map(|branch| Line::from(Span::styled(branch.clone(), self.title_style(&session.id))));
+            .map(|branch| Line::from(branch.clone()));
         let pull_request = session.pr.as_ref().map(|pr| {
             Line::from(Span::styled(
                 format!("#{}", pr.number),
@@ -901,10 +901,9 @@ impl View {
             }
             None => None,
         };
-        let title_style = self.title_style(&session.id);
-        let mut model = vec![Span::styled(session.model_name().to_owned(), title_style)];
+        let mut model = vec![Span::raw(session.model_name().to_owned())];
         if let Some(effort) = effort {
-            model.extend([" · ".dim(), Span::styled(effort.to_owned(), title_style)]);
+            model.extend([" · ".dim(), Span::raw(effort.to_owned())]);
         }
         let group = Line::from(model);
         let available = width.saturating_sub("Model".len() + 1);

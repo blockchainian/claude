@@ -2180,6 +2180,23 @@ fn details_branch_uses_default_foreground_and_pull_request_keeps_title_color() {
     for x in 36..40 {
         assert_eq!(buf[(x, project_y)].fg, color);
     }
+    let path_y = project_y + 1;
+    let path = "/tmp/project";
+    assert!(view.viewport.borrow().details_links.contains(&(
+        Rect::new(0, path_y, path.len() as u16, 1),
+        PathBuf::from(path),
+    )));
+    for (x, symbol) in path.chars().enumerate() {
+        let cell = &buf[(x as u16, path_y)];
+        assert_eq!(cell.symbol(), symbol.to_string());
+        assert_eq!(cell.fg, ratatui::style::Color::Reset);
+    }
+    view.underline_links(&mut buf);
+    for (x, symbol) in path.chars().enumerate() {
+        let cell = &buf[(x as u16, path_y)];
+        assert_eq!(cell.symbol(), format!("\x1b[4:4m{symbol}\x1b[24m"));
+        assert_eq!(cell.fg, ratatui::style::Color::Reset);
+    }
 }
 
 #[test]
