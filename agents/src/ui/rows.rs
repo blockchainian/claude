@@ -39,7 +39,33 @@ fn columns(area: Rect, indent: u16) -> (Rect, Rect, Rect) {
     (title, status, updated)
 }
 
+pub(super) fn heading_rect(text: &str, area: Rect) -> Rect {
+    let width = text.width().min(usize::from(area.width)) as u16;
+    Rect::new(area.x + (area.width - width) / 2, area.y, width, 1)
+}
+
 impl View {
+    pub(super) fn group_heading(&self, index: usize, width: u16) -> String {
+        let group = if self.is_pinned(index) {
+            "Pinned".to_owned()
+        } else {
+            match self.grouping {
+                Grouping::Project => self.project_groups[self.group_index(index).unwrap()]
+                    .directory()
+                    .map_or_else(|| "No directory".to_owned(), format_directory_display),
+                Grouping::Status => self.rows[index].status.label().to_owned(),
+                Grouping::Model => self.rows[self.group_index(index).unwrap()]
+                    .model_name()
+                    .to_owned(),
+            }
+        };
+        if self.grouping == Grouping::Project && !self.is_pinned(index) {
+            super::line_truncation::abbreviate_path(&group, usize::from(width).min(/*other*/ 64))
+        } else {
+            group
+        }
+    }
+
     pub(super) fn render_center_rows(
         &self,
         area: Rect,
@@ -112,7 +138,8 @@ impl View {
                     .expect("visible draft");
                 let rect = row(viewport, offset as u16, 1);
                 if matches!(entry, CenterRow::DraftGroup(_)) {
-                    line(format!("{}", draft.heading().display()).dim(), rect, buf);
+                    let heading = format!("{}", draft.heading().display());
+                    line(heading.clone().dim(), heading_rect(&heading, rect), buf);
                 } else {
                     let selected = self.selected_draft == Some(*id);
                     if selected {
@@ -165,27 +192,8 @@ impl View {
             let task = &self.rows[index];
             let rect = row(viewport, offset as u16, /*height*/ 1);
             if matches!(entry, CenterRow::Group(_)) {
-                let group = if self.is_pinned(index) {
-                    "Pinned".to_owned()
-                } else {
-                    match self.grouping {
-                        Grouping::Project => self.project_groups[self.group_index(index).unwrap()]
-                            .directory()
-                            .map_or_else(|| "No directory".to_owned(), format_directory_display),
-                        Grouping::Status => task.status.label().to_owned(),
-                        Grouping::Model => self.rows[self.group_index(index).unwrap()]
-                            .model_name()
-                            .to_owned(),
-                    }
-                };
-                let group = if self.grouping == Grouping::Project && !self.is_pinned(index) {
-                    super::line_truncation::abbreviate_path(
-                        &group,
-                        usize::from(rect.width).min(/*other*/ 64),
-                    )
-                } else {
-                    group
-                };
+                let group = self.group_heading(index, rect.width);
+                let rect = heading_rect(&group, rect);
                 line(group.clone().dim(), rect, buf);
                 if self.grouping == Grouping::Project
                     && !self.is_pinned(index)

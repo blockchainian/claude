@@ -1,6 +1,9 @@
 #[path = "task_cursor_tests.rs"]
 mod task_cursor;
 
+#[path = "heading_tests.rs"]
+mod heading_tests;
+
 fn session_key(id: &str) -> SessionKey {
     SessionKey {
         provider: crate::providers::ProviderId::Claude,
@@ -1508,12 +1511,12 @@ fn group_headers_have_no_count() {
                         .map(|x| buf[(x, y as u16)].symbol())
                         .collect::<String>();
                     assert_eq!(
-                        heading.trim_end(),
+                        heading.trim(),
                         expected,
                         "{grouping:?}, pinned={pinned}, filter={filter}"
                     );
                     assert!(
-                        buf[(0, y as u16)]
+                        buf[((area.width - expected.len() as u16) / 2, y as u16)]
                             .modifier
                             .contains(ratatui::style::Modifier::DIM)
                     );
@@ -5419,9 +5422,9 @@ fn path_abbreviation_in_group_header_preserves_last_component() {
                 .trim_end()
                 .to_owned()
         })
-        .find(|row| row.starts_with('/'))
+        .find(|row| row.trim_start().starts_with('/'))
         .unwrap();
-    assert_eq!(heading, "/U…/v…/C…/.w…/agents-panel");
+    assert_eq!(heading.trim(), "/U…/v…/C…/.w…/agents-panel");
 }
 
 mod log_path_abbrev {

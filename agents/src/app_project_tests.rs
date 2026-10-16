@@ -136,7 +136,7 @@ fn project_groups_put_directoryless_sessions_last_in_every_tab_through_app() {
         let buffer = terminal.backend().buffer();
         let task_rows: Vec<String> = (3..buffer.area.height)
             .map(|y| {
-                (0..35)
+                (0..buffer.area.width / 2 - 1)
                     .map(|x| buffer[(x, y)].symbol())
                     .collect::<String>()
                     .replace("\u{1b}[4:4m", "")
@@ -150,7 +150,11 @@ fn project_groups_put_directoryless_sessions_last_in_every_tab_through_app() {
                     || line.contains("No directory")
             })
             .map(|line| match line.find("Project task") {
-                Some(start) => line[start..].trim_end().to_owned(),
+                Some(start) => line[start..]
+                    .split_whitespace()
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 None => line.trim().to_owned(),
             })
             .collect();

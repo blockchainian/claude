@@ -36,7 +36,7 @@ fn click(view: &mut View, x: u16, y: u16) -> Option<Action> {
     })
 }
 #[test]
-fn heading_only_path_opens_but_entire_row_double_clicks() {
+fn heading_text_opens_and_double_clicks_but_blank_sides_do_not() {
     let (directory, mut view) = fixture();
     let mut buffer = Buffer::empty(Rect::new(0, 0, 300, 40));
     view.render_at(buffer.area, &mut buffer, Utc::now());
@@ -49,6 +49,7 @@ fn heading_only_path_opens_but_entire_row_double_clicks() {
         None
     );
     assert!(click(&mut view, edge, path.y).is_none());
+    assert!(click(&mut view, path.x, path.y).is_none());
     assert_eq!(
         click(&mut view, path.x, path.y),
         Some(Action::NewDraft {

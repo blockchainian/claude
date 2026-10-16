@@ -185,7 +185,7 @@ fn project_heading_defers_single_open_and_double_creates_in_actual_directory() {
     render(&view);
     let (x, y) = {
         let viewport = view.viewport.borrow();
-        (viewport.list_rows.x, viewport.list_rows.y)
+        (viewport.list_links[0].0.x, viewport.list_links[0].0.y)
     };
     assert_eq!(click(&mut view, x, y), None);
     assert_eq!(

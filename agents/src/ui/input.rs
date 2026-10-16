@@ -223,20 +223,32 @@ impl View {
             return None;
         }
         let entry = viewport.first_entry + usize::from(position.y - viewport.list_rows.y);
-        match self
+        let rect = Rect::new(
+            viewport.list_rows.x,
+            position.y,
+            viewport.list_rows.width,
+            1,
+        );
+        let (heading, target) = match self
             .center_rows(&self.selectable_indices(), self.grouping)
-            .get(entry)
+            .get(entry)?
         {
-            Some(super::navigation::CenterRow::Group(index)) => {
-                Some(self.project_groups[*index].heading.clone())
+            super::navigation::CenterRow::Group(index) => (
+                self.group_heading(*index, rect.width),
+                self.project_groups[*index].heading.clone(),
+            ),
+            super::navigation::CenterRow::DraftGroup(id) => {
+                let draft = self.drafts.iter().find(|draft| draft.id == *id)?;
+                (
+                    format!("{}", draft.heading().display()),
+                    draft.setup.cwd.clone(),
+                )
             }
-            Some(super::navigation::CenterRow::DraftGroup(id)) => self
-                .drafts
-                .iter()
-                .find(|draft| draft.id == *id)
-                .map(|draft| draft.setup.cwd.clone()),
-            _ => None,
-        }
+            _ => return None,
+        };
+        super::rows::heading_rect(&heading, rect)
+            .contains(position)
+            .then_some(target)
     }
 
     fn click_target_at(&self, position: ratatui::layout::Position) -> Option<ClickTarget> {

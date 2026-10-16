@@ -1,7 +1,7 @@
  Agent command center  Group: Project  g
   Active 0                                                          Inactive 1
  ──────────────────────────────────────────────────────────────────────────────
- /tmp/project                           │
+              /tmp/project              │
  ○ Recent task              Inactive    │
                                         │
    Show more                            │

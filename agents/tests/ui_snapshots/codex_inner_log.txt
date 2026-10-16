@@ -1,7 +1,7 @@
  Agent command center  Group: Project  g
   Active 1                                                                                                                                          Inactive 0
  ─────────────────────────────────────────────────── Task log example ─────────────────────────────────────────────────────────────────────────────────────────
- /tmp/project                           │                 Prompt                 │ view_image /tmp/affiliates-page-1791341607.png
+              /tmp/project              │                 Prompt                 │ view_image /tmp/affiliates-page-1791341607.png
  ● Task log example         Working     │ Task log example                       │ web.search site:pond.dflow.net "dev-quote-api.dflow.net"                  1s
                                         │                                        │ claude.ask_claude                                                        28s
                                         │                                        │ apply_patch ~/Documents/case-studies/khaby-lame/drafts/06.md            17ms

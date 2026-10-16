@@ -2,7 +2,7 @@
   Active 1                                                                  Inactive 0
  ────────────────────────────────────────────────────────── Task to find ──────────────
  Search › find                              │                  Prompt
- /tmp/project                               │ Task to find
+                /tmp/project                │ Task to find
  ○ Task to find                 Ready       │
                                             │
                                             │
