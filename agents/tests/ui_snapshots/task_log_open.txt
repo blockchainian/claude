@@ -17,14 +17,14 @@
  ────────────────────────────────────────────────────────────────────── Working ───────────────────
  Task log example · Running in a terminal; open it to type
  ──────────────────────────────────────────── ↑ Latest ────────────────────────────────────────────
- run tests                                                                                      35s
+                                        run tests                                               35s
  A long response with bold words whose body must be cut before the right edge of the log…  11:59:20
- run a background job *                                                                          5s
- Also inspect the tests                                                                    11:59:00
- failed check                                                                                   15s
- Read src/main.rs， Read src/app.rs                                                              15s
- I will check the files                                                                         10s
- Please inspect the task                                                                   11:58:00
+                                  run a background job *                                         5s
+                                  Also inspect the tests                                   11:59:00
+                                       failed check                                             15s
+                            Read src/main.rs， Read src/app.rs                                   15s
+                                  I will check the files                                        10s
+                                 Please inspect the task                                   11:58:00
 
 
 

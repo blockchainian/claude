@@ -658,11 +658,11 @@ fn render_event(
     if content_width == 0 {
         return Vec::new();
     }
-    let content_x = content_area.x;
     let body_width = content_width;
     let fitted = fitted_body_line(event, body_width, cwd);
     let mut body = fitted.line;
-    let body_x = content_x;
+    let padding = body_width.saturating_sub(body.width()) / 2;
+    let body_x = content_area.x + padding as u16;
     let links = {
         let links = if is_prose(&event.kind) {
             super::links::text_links(&fitted.source, cwd, &event.images)
@@ -694,8 +694,10 @@ fn render_event(
     if let Some(search) = search {
         highlight_matches(&mut body, search);
     }
-    truncate_line_with_ellipsis_if_overflow(body, body_width)
-        .render(Rect::new(body_x, area.y, body_width as u16, 1), buf);
+    truncate_line_with_ellipsis_if_overflow(body, body_width).render(
+        Rect::new(body_x, area.y, (body_width - padding) as u16, 1),
+        buf,
+    );
     links
 }
 
@@ -1134,6 +1136,12 @@ mod log_markdown {
         buffer
     }
 
+    fn body_padding(buffer: &Buffer) -> usize {
+        (0..buffer.area.width)
+            .position(|x| buffer[(x, 0)].symbol() != " ")
+            .unwrap_or(0)
+    }
+
     fn body_text(buffer: &Buffer) -> String {
         buffer.content[..buffer.content.len() - 10]
             .iter()
@@ -1295,23 +1303,25 @@ mod log_markdown {
                 "plain `code` **bold** [link](https://example.com)",
                 80,
             );
-            assert_eq!(body_text(&buffer), "plain code bold link");
-            assert_eq!(buffer[(0, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert_eq!(buffer[(6, 0)].fg, crate::theme::inline_code_color());
-            assert_eq!(buffer[(11, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(buffer[(11, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buffer[(16, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(!buffer[(16, 0)].modifier.contains(Modifier::UNDERLINED));
+            let x = body_padding(&buffer) as u16;
+            assert_eq!(body_text(&buffer).trim(), "plain code bold link");
+            assert_eq!(buffer[(x, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert_eq!(buffer[(x + 6, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(buffer[(x + 11, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(buffer[(x + 11, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(x + 16, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(x + 16, 0)].modifier.contains(Modifier::UNDERLINED));
         }
     }
 
     #[test]
     fn prose_blocks_keep_their_own_styles_on_one_row() {
         let buffer = body_buffer(Kind::User, "# Title\n\nplain  text\n- item", 80);
-        assert_eq!(body_text(&buffer), "Title plain text • item");
-        assert!(buffer[(0, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buffer[(6, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buffer[(6, 0)].modifier.contains(Modifier::BOLD));
+        let x = body_padding(&buffer) as u16;
+        assert_eq!(body_text(&buffer).trim(), "Title plain text • item");
+        assert!(buffer[(x, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(x + 6, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(x + 6, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -1326,9 +1336,10 @@ mod log_markdown {
         ] {
             let base = super::super::style::log_styles(&kind).1;
             let buffer = body_buffer(kind, "  `code`\n **bold** [link](url)  ", 80);
-            assert_eq!(body_text(&buffer), "`code` **bold** [link](url)");
-            assert_eq!(buffer[(0, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(!buffer[(0, 0)].modifier.contains(Modifier::BOLD));
+            let x = body_padding(&buffer) as u16;
+            assert_eq!(body_text(&buffer).trim(), "`code` **bold** [link](url)");
+            assert_eq!(buffer[(x, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(x, 0)].modifier.contains(Modifier::BOLD));
         }
     }
 

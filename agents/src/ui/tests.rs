@@ -1,3 +1,6 @@
+#[path = "log_center_tests.rs"]
+mod log_center_tests;
+
 #[path = "task_cursor_tests.rs"]
 mod task_cursor;
 
@@ -445,27 +448,22 @@ fn new_log_events_keep_rows_still_while_mouse_is_held() {
 fn new_log_events_while_dragging_copy_the_rows_on_screen() {
     let (mut view, now) = log_fixture();
     let before = log_screen(&view, 100, 25, now);
-    let rect = view.viewport.borrow().log;
+    let end_x = rendered_cell(&before, "failed check").0 + "failed check".len() as u16;
     let (x, y) = rendered_cell(&before, "run a background job");
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     view.set_log(log_with_newer_event(&view, now));
     log_screen(&view, 100, 25, now);
-    view.handle_mouse(mouse(
-        MouseEventKind::Drag(MouseButton::Left),
-        rect.x + 40,
-        y + 2,
-    ));
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end_x, y + 2));
     log_screen(&view, 100, 25, now);
-    let Some(Action::Copy { text, .. }) = view.handle_mouse(mouse(
-        MouseEventKind::Up(MouseButton::Left),
-        rect.x + 40,
-        y + 2,
-    )) else {
+    let Some(Action::Copy { text, .. }) =
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end_x, y + 2))
+    else {
         panic!("no copy");
     };
     let lines: Vec<_> = text.lines().collect();
     assert_eq!(lines.len(), 3, "{text}");
-    assert_eq!(lines[0], format!("{:<96}5s", "run a background job *"));
+    let before_row = before.lines().nth(usize::from(y)).unwrap();
+    assert_eq!(lines[0], &before_row[usize::from(x)..]);
     assert!(lines[1].contains("Also inspect the tests"), "{text}");
     assert!(lines[2].contains("failed check"), "{text}");
 }
@@ -3829,7 +3827,7 @@ fn dashboard_task_rows_use_the_header_row_and_keep_click_offsets() {
 }
 
 #[test]
-fn dashboard_log_bodies_start_at_the_left_padding() {
+fn dashboard_log_bodies_center_in_the_content_column() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = log_fixture();
         for event in view.log.clone() {
@@ -3843,7 +3841,8 @@ fn dashboard_log_bodies_start_at_the_left_padding() {
                 super::log::body_line(&event, usize::from(log.width - 10), &view.rows[0].cwd)
                     .to_string();
             for (offset, ch) in body.chars().take(12).enumerate() {
-                let cell = &buf[(log.x + offset as u16, y)];
+                let padding = (usize::from(log.width - 10).saturating_sub(body.width())) / 2;
+                let cell = &buf[(log.x + padding as u16 + offset as u16, y)];
                 assert_eq!(
                     cell.symbol(),
                     ch.to_string(),
@@ -3881,27 +3880,26 @@ fn dashboard_log_list_fills_rows_next_to_rules() {
                 .unwrap()
                 .clone();
             view.log_search.editing = search;
-            let first_symbol = super::log::body_line(&event, 100, &view.rows[0].cwd)
-                .to_string()
-                .chars()
-                .next()
-                .unwrap()
-                .to_string();
+            let body_event = event.clone();
             view.set_log(vec![event; 100]);
             let area = Rect::new(0, 0, width, 60);
             let mut buf = Buffer::empty(area);
             view.render_at(area, &mut buf, now);
             let layout = view.center_layout(area);
             let log = view.viewport.borrow().log;
+            let body =
+                super::log::body_line(&body_event, usize::from(log.width - 10), &view.rows[0].cwd);
+            let x = log.x + (usize::from(log.width - 10).saturating_sub(body.width()) / 2) as u16;
+            let first_symbol = body.to_string().chars().next().unwrap().to_string();
             let first = log.y;
             let last = log.bottom() - 1 - u16::from(search);
             assert_eq!(
-                buf[(log.x, first)].symbol(),
+                buf[(x, first)].symbol(),
                 first_symbol,
                 "first row at {width}, search={search}"
             );
             assert_eq!(
-                buf[(log.x, last)].symbol(),
+                buf[(x, last)].symbol(),
                 first_symbol,
                 "last row at {width}, search={search}"
             );
@@ -4175,7 +4173,7 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
 }
 
 #[test]
-fn task_log_body_starts_at_the_left_padding() {
+fn task_log_body_centers_within_its_content_column() {
     let (mut view, now) = log_fixture();
     view.log.pop();
     let rendered = log_screen(&view, 100, 32, now);
@@ -4184,7 +4182,7 @@ fn task_log_body_starts_at_the_left_padding() {
             .lines()
             .nth(view.viewport.borrow().log.y as usize + 6)
             .unwrap()
-            .starts_with(" Please")
+            .starts_with(&format!("{}Please", " ".repeat(1 + (88 - 23) / 2)))
     );
 }
 
@@ -4563,8 +4561,9 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         (0, Color::Reset),
     ] {
         let y = top + offset;
-        let label = &buf[(1, y)];
-        let body = &buf[(1, y)];
+        let x = (1..89).find(|&x| buf[(x, y)].symbol() != " ").unwrap();
+        let label = &buf[(x, y)];
+        let body = &buf[(x, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
         assert!(!label.modifier.contains(Modifier::BOLD), "row {y}");
@@ -4605,7 +4604,8 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         view.log.last_mut().unwrap().kind = kind;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        for x in [1, 11] {
+        let x = (1..89).find(|&x| buf[(x, top)].symbol() != " ").unwrap();
+        for x in [x, x + 10] {
             let cell = &buf[(x, top)];
             assert_eq!(cell.fg, colour);
             assert!(!cell.modifier.contains(Modifier::BOLD));
@@ -4653,7 +4653,7 @@ fn task_log_preserves_time_when_truncated() {
 }
 
 #[test]
-fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
+fn task_log_right_aligns_mixed_width_times_and_centers_content() {
     use crate::log::Kind;
     let (mut view, now) = log_fixture();
     view.log.truncate(3);
@@ -4670,7 +4670,7 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
             .lines()
             .skip(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
             .take(3)
-            .map(|line| line.chars().skip(1).take(9).collect::<String>())
+            .map(|line| line.trim_start().chars().take(9).collect::<String>())
             .collect::<Vec<_>>(),
         ["Read src/", "I will ch", "Please in"]
     );
@@ -4689,7 +4689,8 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
             99,
             "times end at the same column"
         );
-        assert_eq!(line.find(label), Some(1), "labels start at the same column");
+        let content = line[..89].trim();
+        assert_eq!(line.find(label), Some(1 + (88 - content.width()) / 2));
     }
 }
 
@@ -5518,7 +5519,8 @@ mod log_search {
         assert!(text(&buf).contains("plain timeout bold"));
         assert!(!text(&buf).contains("unrelated"));
         assert!(!text(&buf).contains("t........"));
-        for x in 6..13 {
+        let start = text(&buf).find("plain timeout bold").unwrap() as u16;
+        for x in start + 6..start + 13 {
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
             assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
         }
@@ -5588,12 +5590,13 @@ mod log_search {
         }
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain café link"));
-        for x in 6..10 {
+        let start = text(&buf).find("plain café link").unwrap() as u16;
+        for x in start + 6..start + 10 {
             assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
         }
-        assert!(!buf[(11, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(buf[(11, 0)].modifier.contains(Modifier::BOLD));
+        assert!(!buf[(start + 11, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(buf[(start + 11, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -6673,7 +6676,10 @@ fn pending_question_log_uses_model_color() {
         let viewport = view.viewport.borrow();
         let log = viewport.log;
         let y = log.y;
-        assert_eq!(buf[(log.x, y)].fg, Color::Yellow);
+        let x = (log.x..log.right() - 10)
+            .find(|&x| buf[(x, y)].symbol() != " ")
+            .unwrap();
+        assert_eq!(buf[(x, y)].fg, Color::Yellow);
     }
 }
 
