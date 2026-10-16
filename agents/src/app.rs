@@ -299,6 +299,11 @@ impl App {
             self.view
                 .set_notice(Some(format!("Theme not loaded: {error}")));
         }
+        if let Err(error) = crate::ui::use_highlight_theme(light, self.preferences.theme.as_deref())
+        {
+            self.view
+                .set_notice(Some(format!("Theme not loaded: {error}")));
+        }
     }
 
     fn handle_event(&mut self, event: Event) -> bool {

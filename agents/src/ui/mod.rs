@@ -24,6 +24,7 @@ mod title_rule;
 mod tool_detail;
 mod usage_chart;
 pub(crate) mod vscode;
+pub use highlight::use_theme as use_highlight_theme;
 #[cfg(test)]
 pub use style::light_background;
 pub use style::set_light_background;
