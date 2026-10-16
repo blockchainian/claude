@@ -153,6 +153,10 @@ fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
         label: Some("bg".into()),
         started_at: None,
     });
+    session.background_job = Some(crate::model::BackgroundJob {
+        id: "50517e58".into(),
+        needs: None,
+    });
     let mut sessions = [session];
     let observed = Observed {
         held: HashSet::new(),
@@ -341,4 +345,63 @@ fn real_sleep_output_liveness_and_refresh_cost() {
         .refresh(dir.path(), &mut sessions, &Processes)
         .unwrap();
     assert!(sessions[0].background.is_empty());
+}
+
+#[test]
+fn adoption_uses_registered_job_id_with_a_real_live_process() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("adopted.output");
+    fs::write(
+        &output,
+        include_bytes!("../../../tests/fixtures/background/running.output"),
+    )
+    .unwrap();
+    struct Running(std::process::Child);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let child = Running(
+        Command::new("sleep")
+            .arg("15")
+            .stdout(File::create(&output).unwrap())
+            .spawn()
+            .unwrap(),
+    );
+    let mut adoption: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/background/adopt.json"
+    ))
+    .unwrap();
+    adoption["shells"][0]["pid"] = child.0.id().into();
+    adoption["shells"][0]["outputPath"] = output.to_string_lossy().as_ref().into();
+    let jobs = directory.path().join("jobs/distinct-job-id");
+    fs::create_dir_all(&jobs).unwrap();
+    fs::write(
+        jobs.join("adopt.json"),
+        serde_json::to_vec(&adoption).unwrap(),
+    )
+    .unwrap();
+    let mut row = super::super::session(
+        "50517e58-041e-49c8-95e0-a41879199991".into(),
+        transcript::Summary::default(),
+        None,
+        Utc::now(),
+    );
+    row.process = Some(crate::model::Process {
+        pid: std::process::id(),
+        label: Some("bg".into()),
+        started_at: None,
+    });
+    row.background_job = Some(crate::model::BackgroundJob {
+        id: "distinct-job-id".into(),
+        needs: None,
+    });
+    let mut rows = [row];
+    Tasks::new(directory.path().join("tasks"))
+        .refresh(directory.path(), &mut rows, &Processes)
+        .unwrap();
+    assert_eq!(rows[0].background.len(), 1);
+    assert_eq!(rows[0].background[0].output, output);
 }

@@ -269,6 +269,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         pr: None,
         status: SessionStatus::Inactive,
         process: None,
+        background_job: None,
         updated_at,
         started_at: column::<i64>(row, "created_at_ms")?.and_then(DateTime::from_timestamp_millis),
         last_message: None,

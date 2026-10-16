@@ -360,11 +360,21 @@ impl View {
                 "Permanently delete task and child agents",
             ),
         };
+        let description = if matches!(dialog.removal, Removal::Delete)
+            && self
+                .rows
+                .iter()
+                .any(|session| session.id == dialog.id && session.background_job.is_some())
+        {
+            format!("{description} Worktrees and branches created by agents remain.")
+        } else {
+            description.to_owned()
+        };
         let mut lines = Vec::new();
         for text in textwrap::wrap(&title, content_width) {
             lines.push(Line::from(text.into_owned().bold()));
         }
-        for text in textwrap::wrap(description, content_width) {
+        for text in textwrap::wrap(&description, content_width) {
             lines.push(Line::from(text.into_owned().dim()));
         }
         lines.push(Line::default());
@@ -509,11 +519,21 @@ impl View {
             background = start..items.len();
         }
 
-        if session.status == SessionStatus::NeedsInput {
+        let needs = session
+            .background_job
+            .as_ref()
+            .and_then(|job| job.needs.as_deref());
+        if session.status == SessionStatus::NeedsInput || needs.is_some() {
             separate_section(&mut items);
             let start = items.len();
             items.extend([Span::styled("Needs attention", style::attention_title_style()).into()]);
-            if session.pending_questions.is_empty() {
+            if let Some(needs) = needs {
+                items.extend(
+                    textwrap::wrap(needs, width.max(1))
+                        .into_iter()
+                        .map(|text| Line::from(text.into_owned()).into()),
+                );
+            } else if session.pending_questions.is_empty() {
                 items.extend([
                     "Open task to review.".dim().into(),
                     "Waiting for your response.".into(),
@@ -531,7 +551,10 @@ impl View {
                 }));
             }
             bodies.push(start..items.len());
-            keys.push(body_key("Needs attention", &session.pending_questions));
+            keys.push(body_key(
+                "Needs attention",
+                &(needs, &session.pending_questions),
+            ));
             copies.push(None);
             body_links.push(Vec::new());
         }
@@ -1224,6 +1247,7 @@ mod wrapped_path_tests {
             last_message_at: None,
             activity: None,
             pending_questions: Vec::new(),
+            background_job: None,
             background: Vec::new(),
             last_prompt: None,
             transcript: None,

@@ -58,6 +58,12 @@ pub struct BackgroundTask {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackgroundJob {
+    pub id: String,
+    pub needs: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Session {
     /// Provider-qualified session identity.
     pub id: SessionKey,
@@ -82,6 +88,7 @@ pub struct Session {
     pub pr: Option<PullRequest>,
     pub status: SessionStatus,
     pub process: Option<Process>,
+    pub background_job: Option<BackgroundJob>,
     pub updated_at: DateTime<Utc>,
     /// Start of the session or thread, independent of its process and activity.
     pub started_at: Option<DateTime<Utc>>,
@@ -102,6 +109,15 @@ impl Session {
         self.parent.as_ref().is_none_or(|parent| {
             self.id.provider == ProviderId::Codex && parent.provider == ProviderId::Claude
         })
+    }
+
+    pub fn is_live_background(&self) -> bool {
+        self.id.provider == ProviderId::Claude
+            && self.background_job.is_some()
+            && self
+                .process
+                .as_ref()
+                .is_some_and(|process| process.label.as_deref() == Some("bg"))
     }
 
     pub fn input_disabled_reason(&self) -> Option<&'static str> {

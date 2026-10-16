@@ -23,6 +23,43 @@ pub(super) struct Entry {
     pub status: Option<String>,
 }
 
+pub(super) fn background_jobs(config: &Path) -> HashMap<String, crate::model::BackgroundJob> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct State {
+        session_id: String,
+        template: String,
+        needs: Option<String>,
+    }
+    let mut jobs = HashMap::new();
+    for entry in fs::read_dir(config.join("jobs"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+    {
+        let Ok(bytes) = fs::read(entry.path().join("state.json")) else {
+            continue;
+        };
+        let Ok(state) = serde_json::from_slice::<State>(&bytes) else {
+            continue;
+        };
+        if state.template != "bg" || state.session_id.is_empty() {
+            continue;
+        }
+        let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        jobs.insert(
+            state.session_id,
+            crate::model::BackgroundJob {
+                id,
+                needs: state.needs,
+            },
+        );
+    }
+    jobs
+}
+
 /// Maps the status strings written by Claude Code's session registry.
 pub(super) fn from_registry(status: &str) -> Option<SessionStatus> {
     match status {
@@ -109,6 +146,37 @@ pub(super) mod tests {
         value["procStart"] = start.format("%a %b %e %H:%M:%S %Y").to_string().into();
         fs::create_dir_all(dir.join("sessions")).unwrap();
         value
+    }
+
+    #[test]
+    fn stopped_background_job_matches_exact_state_session_id() {
+        let directory = tempfile::tempdir().unwrap();
+        let jobs = directory.path().join("jobs/job-distinct-from-session");
+        fs::create_dir_all(&jobs).unwrap();
+        // Safe fields copied from the real Claude Code 2.1.299 e772d00b state payload.
+        let state = r#"{"state":"done","template":"bg","sessionId":"e772d00b-c424-4632-a8df-74bc9c7b1629","respawnFlags":[],"backend":"daemon"}"#;
+        fs::write(jobs.join("state.json"), state).unwrap();
+        let found = background_jobs(directory.path());
+        let job = found.get("e772d00b-c424-4632-a8df-74bc9c7b1629").unwrap();
+        assert_eq!(job.id, "job-distinct-from-session");
+        assert_eq!(job.needs, None);
+    }
+
+    #[test]
+    fn background_job_reads_needs_from_updated_real_state_payload() {
+        let directory = tempfile::tempdir().unwrap();
+        let jobs = directory.path().join("jobs/e772d00b");
+        fs::create_dir_all(&jobs).unwrap();
+        let mut state: serde_json::Value = serde_json::from_str(r#"{"state":"done","template":"bg","sessionId":"e772d00b-c424-4632-a8df-74bc9c7b1629","respawnFlags":[],"backend":"daemon"}"#).unwrap();
+        state["needs"] = "send a prompt to start".into();
+        fs::write(jobs.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+        let found = background_jobs(directory.path());
+        assert_eq!(
+            found["e772d00b-c424-4632-a8df-74bc9c7b1629"]
+                .needs
+                .as_deref(),
+            Some("send a prompt to start")
+        );
     }
 
     #[test]

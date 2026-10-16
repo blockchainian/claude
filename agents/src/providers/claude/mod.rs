@@ -90,7 +90,28 @@ pub fn delete_session(config_dir: &Path, session: &Session) -> io::Result<()> {
         {
             return Err(io::Error::other("Session registry changed"));
         }
-        stop_process(&entry)?;
+        if let Some(job) = &session.background_job {
+            if entry.kind.as_deref() != Some("bg") || entry.job_id.as_deref() != Some(&job.id) {
+                return Err(io::Error::other("Background job identity changed"));
+            }
+            background_command("stop", &job.id)?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while process_exists(pid)? {
+                let starts = registry::process_starts(&[pid]);
+                if !starts
+                    .get(&pid)
+                    .is_some_and(|actual| registry::matches_start(&entry, actual))
+                {
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(io::Error::other("Claude background session did not stop"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        } else {
+            stop_process(&entry)?;
+        }
         // A process may remove its own registry entry while shutting down.
         match fs::read(&path) {
             Ok(bytes) => {
@@ -119,7 +140,25 @@ pub fn delete_session(config_dir: &Path, session: &Session) -> io::Result<()> {
             }
         }
     }
+    if let Some(job) = &session.background_job {
+        background_command("rm", &job.id)?;
+    }
     delete(transcript)
+}
+
+fn background_command(action: &str, job_id: &str) -> io::Result<()> {
+    if job_id.is_empty() || job_id.starts_with('-') {
+        return Err(io::Error::other("Invalid background job id"));
+    }
+    let output = Command::new("claude").args([action, job_id]).output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "Claude {action} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )))
+    }
 }
 
 fn remove_if_present(path: &Path) -> io::Result<()> {
@@ -245,6 +284,7 @@ impl ClaudeProvider {
 
     fn snapshot(&mut self, pages: usize) -> Snapshot {
         self.list_transcripts();
+        let jobs = registry::background_jobs(&self.config_dir);
         // Claude Code writes a transcript only after the first prompt, and
         // `claude --resume` cannot open a session without one.
         let live: Vec<_> = registry::live(&self.config_dir)
@@ -299,6 +339,15 @@ impl ClaudeProvider {
             if let Some(updated) = entry.updated_at.and_then(DateTime::from_timestamp_millis) {
                 session.updated_at = session.last_record_at.map_or(updated, |at| at.max(updated));
             }
+            if entry.kind.as_deref() == Some("bg") {
+                session.background_job = entry.job_id.filter(|id| !id.is_empty()).map(|id| {
+                    let needs = jobs
+                        .get(&session.id.id)
+                        .filter(|job| job.id == id)
+                        .and_then(|job| job.needs.clone());
+                    crate::model::BackgroundJob { id, needs }
+                });
+            }
             session.process = entry.pid.map(|pid| Process {
                 pid,
                 label: entry.kind,
@@ -324,6 +373,11 @@ impl ClaudeProvider {
             let (summary, path, modified) = self.summary(&id);
             self.background.observe(&id, &summary);
             sessions.push(session(id, summary, path, modified));
+        }
+        for session in &mut sessions {
+            if session.process.is_none() {
+                session.background_job = jobs.get(&session.id.id).cloned();
+            }
         }
         if let Err(error) =
             self.background
@@ -530,7 +584,12 @@ impl Provider for ClaudeProvider {
             .mode(0o700)
             .recursive(true)
             .create(&sessions)?;
-        Ok(vec![sessions, self.config_dir.join("projects")])
+        let jobs = self.config_dir.join("jobs");
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(&jobs)?;
+        Ok(vec![sessions, self.config_dir.join("projects"), jobs])
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -618,6 +677,19 @@ impl Provider for ClaudeProvider {
                 let session = session?;
                 if session.parent.is_some() || !session.cwd.is_dir() {
                     return None;
+                }
+                if session.is_live_background() && !matches!(action, Action::Fork(_)) {
+                    command
+                        .args([
+                            "attach",
+                            &session
+                                .background_job
+                                .as_ref()
+                                .expect("live background job")
+                                .id,
+                        ])
+                        .current_dir(&session.cwd);
+                    return Some(command);
                 }
                 command
                     .args(["--resume", &session.id.id])
@@ -715,6 +787,7 @@ fn session(
         pr: summary.pr,
         status: SessionStatus::Inactive,
         process: None,
+        background_job: None,
         updated_at,
         started_at: summary.started_at,
         last_message: summary.last_message,
@@ -734,6 +807,35 @@ mod tests {
     use std::time::Duration;
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
+
+    #[test]
+    fn live_background_open_attaches_the_job_not_the_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let provider = ClaudeProvider::new(directory.path().into());
+        let mut row = session(
+            "50517e58-041e-49c8-95e0-a41879199991".into(),
+            transcript::Summary::default(),
+            None,
+            Utc::now(),
+        );
+        row.cwd = directory.path().into();
+        row.process = Some(Process {
+            pid: std::process::id(),
+            label: Some("bg".into()),
+            started_at: None,
+        });
+        row.background_job = Some(crate::model::BackgroundJob {
+            id: "actual-job-id".into(),
+            needs: None,
+        });
+        let command = provider
+            .launch(&Action::Open(row.id.clone()), Some(&row))
+            .unwrap();
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["attach", "actual-job-id"]
+        );
+    }
 
     #[test]
     fn resumed_prompt_has_no_flags_that_fork_the_session() {
@@ -862,7 +964,11 @@ mod tests {
         let mut provider = ClaudeProvider::new(dir.path().into());
         assert_eq!(
             provider.watch_roots().unwrap(),
-            vec![dir.path().join("sessions"), dir.path().join("projects")]
+            vec![
+                dir.path().join("sessions"),
+                dir.path().join("projects"),
+                dir.path().join("jobs")
+            ]
         );
         assert_eq!(
             fs::metadata(dir.path().join("sessions"))

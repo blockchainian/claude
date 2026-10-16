@@ -679,14 +679,7 @@ impl App {
                 }
             }
             Action::Stop(id) => {
-                if let Some(session) = self.session(&id) {
-                    match self.hub.provider(id.provider).stop(&session) {
-                        Ok(()) => self.refresh(),
-                        Err(error) => self
-                            .view
-                            .set_notice(Some(format!("Failed to stop: {error}"))),
-                    }
-                }
+                self.send_input(id, SessionInput::Interrupt);
             }
             Action::Hide(_) => {}
             Action::TogglePin { id, pinned } => {

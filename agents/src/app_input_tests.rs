@@ -68,3 +68,16 @@ fn failed_input_job_releases_the_session_for_retry() {
     assert!(!app.pending_inputs.contains(&id));
     assert!(app.start_input_job(id, SessionInput::Interrupt, Box::new(|| Ok(()))));
 }
+
+#[test]
+fn stop_uses_input_job_and_reports_completion_through_event_channel() {
+    let (_directory, mut app) = tests::fixture();
+    let id = app.sessions[0].id.clone();
+    assert!(app.sessions[0].process.is_none());
+    assert!(!app.handle_action(Some(Action::Stop(id.clone()))));
+    assert!(app.pending_inputs.contains(&id));
+    let event = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+    let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+    app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    assert!(!app.pending_inputs.contains(&id));
+}

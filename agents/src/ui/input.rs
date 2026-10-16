@@ -851,11 +851,15 @@ impl View {
             }
             KeyCode::Char('x') => {
                 let id = self.selected_id()?.clone();
-                return Some(if self.selected_capabilities().stop {
-                    Action::Stop(id)
-                } else {
-                    Action::Unsupported("Stop")
-                });
+                return Some(
+                    if self.selected_capabilities().stop
+                        || self.selected_row().is_some_and(Session::is_live_background)
+                    {
+                        Action::Stop(id)
+                    } else {
+                        Action::Unsupported("Stop")
+                    },
+                );
             }
             KeyCode::Char('h') => {
                 let id = self.selected_id()?.to_owned();

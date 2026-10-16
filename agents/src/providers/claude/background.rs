@@ -255,8 +255,11 @@ impl Tasks {
         session: &mut Session,
         liveness: &impl Liveness,
     ) -> io::Result<()> {
-        let prefix: String = session.id.id.chars().take(8).collect();
-        let bytes = match fs::read(config.join("jobs").join(prefix).join("adopt.json")) {
+        let job = session
+            .background_job
+            .as_ref()
+            .ok_or_else(|| io::Error::other("Background session has no job id"))?;
+        let bytes = match fs::read(config.join("jobs").join(&job.id).join("adopt.json")) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error),

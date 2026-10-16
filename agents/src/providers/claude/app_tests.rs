@@ -849,6 +849,22 @@ fn manager_thread_mutations_reach_app_provider_paths() {
             _ => unreachable!(),
         };
         assert!(!app.handle_action(Some(action)));
+        if operation == "stop" {
+            let input = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(matches!(
+                &input,
+                Input::Sent {
+                    input: SessionInput::Interrupt,
+                    result: Err(_),
+                    ..
+                }
+            ));
+            let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+            app.handle_inputs(input, &mut None, &mut schedule).unwrap();
+            assert!(app.pending_inputs.is_empty());
+            assert_eq!(std::fs::read(&state).unwrap(), bytes);
+            continue;
+        }
         let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
         app.view.render(buffer.area, &mut buffer);
         let rendered = buffer
