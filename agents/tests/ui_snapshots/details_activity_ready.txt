@@ -1,11 +1,11 @@
-Prompt              42 messages · 10m 5s
-Activity task
-
 Activity                          7s ago
 Run checks
 
 Message                           1h ago
 Checking the project
+
+Prompt              42 messages · 10m 5s
+Activity task
 
 Project
 /tmp/project

@@ -616,9 +616,9 @@ fn details_body_changed_while_away_opens_folded() {
         details_panel(&view);
     }
     let scrolled = details_reveal(&view);
-    let prompt = 0;
+    let prompt = 1;
     assert!(
-        scrolled[prompt] > 0 && scrolled[1] > 0,
+        scrolled[prompt] > 0 && scrolled[0] > 0,
         "{scrolled:?}"
     );
     let index = view.selected;
@@ -1782,8 +1782,8 @@ fn details_include_attention_and_clip_messages() {
             .collect::<String>()
             .contains("/tmp/project")
     });
-    assert!(position("Prompt") < position("Message"));
-    assert!(position("Message") < position("Needs attention"));
+    assert!(position("Message") < position("Prompt"));
+    assert!(position("Prompt") < position("Needs attention"));
     assert!(position("Needs attention") < position("│ Project"));
     assert!(position("│ Project") < project);
     assert!(project < position("claude-opus"));
@@ -2405,11 +2405,18 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
     let now = Utc::now();
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("reports")).unwrap();
-    for name in ["reports/activity.md", "reports/reply.md"] {
+    for name in [
+        "reports/activity.md",
+        "reports/reply.md",
+        "reports/prompt.md",
+        "reports/queued.md",
+    ] {
         std::fs::write(dir.path().join(name), "report").unwrap();
     }
     let mut row = session("activity", "Activity task", SessionStatus::Ready, 0);
     row.cwd = dir.path().into();
+    row.prompt = "Request reports/prompt.md".into();
+    row.queued = vec!["Queued reports/queued.md".into()];
     let activity = "Check reports/activity.md";
     let message = "Reply reports/reply.md";
     row.activity = Some(crate::model::Activity {
@@ -2425,6 +2432,11 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
     for (body, label, path) in [
         (activity, "Copied activity", "reports/activity.md"),
         (message, "Copied message", "reports/reply.md"),
+        (
+            "Request reports/prompt.md",
+            "Copied prompt",
+            "reports/prompt.md",
+        ),
     ] {
         view.last_copy_click = None;
         assert_eq!(
@@ -2439,6 +2451,11 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
             Some(Action::OpenPath(dir.path().join(path)))
         );
     }
+    assert_eq!(
+        click_text(&mut view, &rendered, "reports/queued.md"),
+        Some(Action::OpenPath(dir.path().join("reports/queued.md")))
+    );
+    view.rows[view.selected].queued.clear();
     view.rows[view.selected].prompt = "Prompt row\n".repeat(20);
     view.rows[view.selected].last_message = Some("Reply row\n".repeat(20));
     for height in [16, 8] {
@@ -2449,8 +2466,8 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
         if height == 16 {
             assert_eq!(viewport.details_scroll.fallback_max, None);
             assert_eq!(viewport.details_copy.len(), 3);
-            assert_eq!(viewport.details_scroll.hidden[1], 0);
-            assert!(viewport.details_scroll.hidden[0] > 0);
+            assert_eq!(viewport.details_scroll.hidden[0], 0);
+            assert!(viewport.details_scroll.hidden[1] > 0);
             assert!(viewport.details_scroll.hidden[2] > 0);
         } else {
             assert!(viewport.details_scroll.fallback_max.unwrap() > 0);
@@ -2983,7 +3000,7 @@ fn details_background_boxes_tail_and_clip_output() {
     );
     let clipped = queued_details(row, 15);
     assert!(
-        clipped.starts_with("Background\n…\n\nPrompt\nBackground task\n"),
+        clipped.starts_with("Background\n…\n\nMessage\nChecking the project\n"),
         "{clipped}"
     );
     assert!(clipped.contains("Message"));
@@ -3200,19 +3217,19 @@ fn details_markdown_snapshot() {
         rendered,
         include_str!("../../tests/ui_snapshots/details_markdown.txt")
     );
-    assert_eq!(buffer[(4, 1)].fg, crate::theme::inline_code_color());
+    assert_eq!(buffer[(4, 8)].fg, crate::theme::inline_code_color());
     assert!(
-        buffer[(14, 1)]
+        buffer[(14, 8)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, 2)]
+        buffer[(2, 9)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, 7)].fg, Color::Yellow);
-    assert_eq!(buffer[(0, 9)].fg, Color::Cyan);
+    assert_eq!(buffer[(6, 3)].fg, Color::Yellow);
+    assert_eq!(buffer[(0, 5)].fg, Color::Cyan);
 }
 
 fn log_fixture() -> (View, chrono::DateTime<Utc>) {
@@ -4469,9 +4486,9 @@ mod details_budget {
         assert!(rest[22] == format!("Model{}Unknown", " ".repeat(108)));
         assert!(rest[23].is_empty());
         let prompt = rest.iter().position(|line| line == "Prompt").unwrap();
-        let message = rest.iter().position(|line| line == "Message").unwrap();
+        let needs = rest.iter().position(|line| line == "Needs attention").unwrap();
         assert!(
-            rest[prompt + 1..message]
+            rest[prompt + 1..needs]
                 .iter()
                 .rev()
                 .find(|line| !line.is_empty())
@@ -4570,11 +4587,11 @@ mod details_curtain {
     }
 
     #[test]
-    fn fully_open_prompt_hands_off_to_message() {
+    fn fully_open_message_hands_off_to_prompt() {
         let mut view = fixture();
         let before = panel(&view);
         let pointer = (0..24)
-            .find(|&y| text(&before, y).starts_with("Prompt row 1"))
+            .find(|&y| text(&before, y).starts_with("Reply row 1"))
             .unwrap();
         let hidden = view.viewport.borrow().details_scroll.hidden[0];
         assert!(hidden > 0);
@@ -4583,11 +4600,11 @@ mod details_curtain {
             panel(&view);
         }
         let opened = panel(&view);
-        let message = (0..24)
-            .find(|&y| text(&opened, y) == "Message")
+        let prompt = (0..24)
+            .find(|&y| text(&opened, y) == "Prompt")
             .unwrap();
-        assert!((1..message).all(|y| !text(&opened, y).ends_with('…')));
-        assert_eq!(text(&opened, message - 2), "Prompt row 12");
+        assert!((1..prompt).all(|y| !text(&opened, y).ends_with('…')));
+        assert_eq!(text(&opened, prompt - 2), "Reply row 7");
         view.scroll_content_row(true, false, pointer);
         let after = panel(&view);
         assert_eq!(
@@ -4595,21 +4612,21 @@ mod details_curtain {
             vec![hidden, 1, 0]
         );
         assert_eq!(text(&after, 23), text(&opened, 23));
-        let message_pointer = (0..24)
-            .find(|&y| text(&after, y).starts_with("Reply row"))
+        let prompt_pointer = (0..24)
+            .find(|&y| text(&after, y).starts_with("Prompt row"))
             .unwrap();
-        let message_hidden = view.viewport.borrow().details_scroll.hidden[1];
-        for _ in 1..message_hidden {
-            view.scroll_content_row(true, false, message_pointer);
+        let prompt_hidden = view.viewport.borrow().details_scroll.hidden[1];
+        for _ in 1..prompt_hidden {
+            view.scroll_content_row(true, false, prompt_pointer);
             panel(&view);
         }
         let fully_open = panel(&view);
-        assert!((1..24).any(|y| text(&fully_open, y) == "Reply row 7"));
+        assert!((1..24).any(|y| text(&fully_open, y) == "Prompt row 12"));
         assert_eq!(
             view.viewport.borrow().details_scroll.reveal,
-            vec![hidden, message_hidden, 0]
+            vec![hidden, prompt_hidden, 0]
         );
-        view.scroll_content_row(true, false, message_pointer);
+        view.scroll_content_row(true, false, prompt_pointer);
         assert_eq!(panel(&view), fully_open);
     }
 
@@ -4644,7 +4661,7 @@ mod details_curtain {
                 .any(|cell| cell.symbol().contains("https://example.com/pull/833"))
         );
         let pointer = (0..24)
-            .find(|&y| text(&before, y) == "Prompt row 1")
+            .find(|&y| text(&before, y).starts_with("Prompt row 1"))
             .unwrap();
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, pointer));
         let after = panel(&view);
@@ -4668,13 +4685,13 @@ mod details_curtain {
             view.scroll_content_row(true, false, pointer);
             panel(&view);
         }
-        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![4, 0, 0]);
+        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 4, 0]);
         view.rows[view.selected].prompt = (1..=8)
             .map(|i| format!("Prompt row {i}"))
             .collect::<Vec<_>>()
             .join("  \n");
         panel(&view);
-        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![2, 0, 0]);
+        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 3, 0]);
         view.rows[view.selected].last_message = None;
         panel(&view);
         assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 0]);

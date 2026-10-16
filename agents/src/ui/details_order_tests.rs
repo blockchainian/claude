@@ -32,20 +32,15 @@ fn details_section_order_preserves_clicks_and_copies() {
             .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n");
-        let label = if activity {
-            "Activity"
-        } else {
-            "Message"
-        };
-        let sections = [
-            "Background",
-            "Prompt",
-            "Queued prompt",
-            label,
-            "Project",
-            "Model",
-        ];
-        let positions = sections.map(|text| rendered.find(text).unwrap());
+        let mut sections = vec!["Background"];
+        if activity {
+            sections.push("Activity");
+        }
+        sections.extend(["Message", "Prompt", "Queued prompt", "Project", "Model"]);
+        let positions: Vec<_> = sections
+            .iter()
+            .map(|text| rendered.find(text).unwrap())
+            .collect();
         assert!(
             positions.windows(2).all(|pair| pair[0] < pair[1]),
             "{rendered}"
@@ -54,21 +49,14 @@ fn details_section_order_preserves_clicks_and_copies() {
             let (x, y) = rendered_cell(&rendered, text);
             (x + area.x, y + area.y)
         };
-        for (body, copied) in [
+        let mut copies = vec![
+            ("Moved reply", "Copied message"),
             ("Moved prompt", "Copied prompt"),
-            (
-                if activity {
-                    "Moved activity"
-                } else {
-                    "Moved reply"
-                },
-                if activity {
-                    "Copied activity"
-                } else {
-                    "Copied message"
-                },
-            ),
-        ] {
+        ];
+        if activity {
+            copies.push(("Moved activity", "Copied activity"));
+        }
+        for (body, copied) in copies {
             let (x, y) = point(body);
             let press = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
             assert_eq!(click_mouse(&mut view, press), None);

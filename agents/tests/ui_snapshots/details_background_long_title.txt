@@ -3,11 +3,11 @@ Background
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ─ Waiting for output                  0s
 
-Prompt
-Background task
-
 Message
 Checking the project
+
+Prompt
+Background task
 
 Project
 /tmp/project

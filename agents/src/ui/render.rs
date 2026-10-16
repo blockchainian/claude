@@ -622,7 +622,7 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: background, prompt, activity, message,
+        // Sections top to bottom: background, activity, message, prompt,
         // needs attention, project, branch, model. The title
         // sits on the rule below the panel.
         let content_top = area.y;
@@ -665,72 +665,6 @@ impl View {
             // Tasks showing output come first; each group keeps its order.
             items[start..].sort_by_key(|item| item.height() == 1);
             background = start..items.len();
-        }
-
-        item_links.resize(items.len(), Vec::new());
-
-        let prompt_header = if let Some(start) = session.prompt_at {
-            let end = if session.status == SessionStatus::Working {
-                now
-            } else {
-                session.last_record_at.unwrap_or(start)
-            };
-            let messages = session.turn_messages;
-            let label = if messages == 1 { "message" } else { "messages" };
-            left_right(
-                "Prompt".dim().into(),
-                Line::from(vec![
-                    format!("{messages} {label}").dim(),
-                    " · ".dim(),
-                    format_duration((end - start).num_seconds().max(0)).dim(),
-                ]),
-                width,
-            )
-            .0
-        } else {
-            left_right("Prompt".dim().into(), Line::default(), width).0
-        };
-        separate_section(&mut items);
-        items.push(prompt_header.into());
-        let prompt_text = match session.prompt.trim() {
-            "" => "No prompt available.",
-            prompt => prompt,
-        };
-        let prompt_start = items.len();
-        let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
-        items.extend(prompt_body.into_iter().map(Item::from));
-        bodies.push(prompt_start..items.len());
-        keys.push(body_key("Prompt", &session.prompt));
-        copies.push(
-            Some((session.prompt.as_str(), "Copied prompt"))
-                .filter(|(prompt, _)| !prompt.trim().is_empty()),
-        );
-        body_links.push(super::links::text_links(
-            &session.prompt,
-            &session.cwd,
-            &session.prompt_images,
-        ));
-        item_links.resize(items.len(), Vec::new());
-        for queued in &session.queued {
-            let first = wrap_details(queued, &session.cwd, width, true)
-                .into_iter()
-                .next()
-                .unwrap_or_default();
-            let visible = if first.width() > width {
-                width - 1
-            } else {
-                width
-            } as u16;
-            let mut cells =
-                super::text_selection_layout::map_lines(queued, std::slice::from_ref(&first), true)
-                    .pop()
-                    .unwrap_or_default();
-            cells.retain(|(columns, _)| columns.end <= visible);
-            item_links.push(super::links::row_links(
-                &cells,
-                &super::links::text_links(queued, &session.cwd, &[]),
-            ));
-            items.push(truncate_line_with_ellipsis_if_overflow(first, width).into());
         }
 
         item_links.resize(items.len(), Vec::new());
@@ -799,6 +733,72 @@ impl View {
             copies.push(Some((message.as_str(), "Copied message")));
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
+
+        let prompt_header = if let Some(start) = session.prompt_at {
+            let end = if session.status == SessionStatus::Working {
+                now
+            } else {
+                session.last_record_at.unwrap_or(start)
+            };
+            let messages = session.turn_messages;
+            let label = if messages == 1 { "message" } else { "messages" };
+            left_right(
+                "Prompt".dim().into(),
+                Line::from(vec![
+                    format!("{messages} {label}").dim(),
+                    " · ".dim(),
+                    format_duration((end - start).num_seconds().max(0)).dim(),
+                ]),
+                width,
+            )
+            .0
+        } else {
+            left_right("Prompt".dim().into(), Line::default(), width).0
+        };
+        separate_section(&mut items);
+        items.push(prompt_header.into());
+        let prompt_text = match session.prompt.trim() {
+            "" => "No prompt available.",
+            prompt => prompt,
+        };
+        let prompt_start = items.len();
+        let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
+        items.extend(prompt_body.into_iter().map(Item::from));
+        bodies.push(prompt_start..items.len());
+        keys.push(body_key("Prompt", &session.prompt));
+        copies.push(
+            Some((session.prompt.as_str(), "Copied prompt"))
+                .filter(|(prompt, _)| !prompt.trim().is_empty()),
+        );
+        body_links.push(super::links::text_links(
+            &session.prompt,
+            &session.cwd,
+            &session.prompt_images,
+        ));
+        item_links.resize(items.len(), Vec::new());
+        for queued in &session.queued {
+            let first = wrap_details(queued, &session.cwd, width, true)
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            let visible = if first.width() > width {
+                width - 1
+            } else {
+                width
+            } as u16;
+            let mut cells =
+                super::text_selection_layout::map_lines(queued, std::slice::from_ref(&first), true)
+                    .pop()
+                    .unwrap_or_default();
+            cells.retain(|(columns, _)| columns.end <= visible);
+            item_links.push(super::links::row_links(
+                &cells,
+                &super::links::text_links(queued, &session.cwd, &[]),
+            ));
+            items.push(truncate_line_with_ellipsis_if_overflow(first, width).into());
+        }
+
+        item_links.resize(items.len(), Vec::new());
 
         let needs = session
             .background_job
