@@ -25,6 +25,6 @@
                                                             │
                                                             │
                                                             │
-                                                            │ ───────────────── Working · Check files ─────────────────
+                                                            │ ───────────────── Check files · Working ─────────────────
  Check files · Subagent cannot take input
  ? help  esc back  ↑/↓ move  n new

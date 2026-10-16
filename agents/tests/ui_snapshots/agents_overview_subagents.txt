@@ -25,6 +25,6 @@
                                                             │
                                                             │
                                                             │
-                                                            │ ────────────────── Ready · Parent task ──────────────────
+                                                            │ ────────────────── Parent task · Ready ──────────────────
  Parent task ›
  ? help  esc back  ↑/↓ move  enter open  n new

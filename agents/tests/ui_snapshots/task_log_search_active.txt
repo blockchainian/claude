@@ -12,7 +12,7 @@
                                                   │
                                                   │
  Task log example · Running in a terminal; open it to type
- ──────────────────────────────────────────────────────────── Working · Task log example ──────────
+ ──────────────────────────────────────────────────────────── Task log example · Working ──────────
  run tests                                                                                      35s
  Also inspect the tests                                                                    11:59:00
 

@@ -19,6 +19,6 @@
                                                   │
                                                   │
                                                   │
-                                                  │ ───────────── Ready · Legacy task ─────────────
+                                                  │ ───────────── Legacy task · Ready ─────────────
  Legacy task ›
  ? help  esc back  ↑/↓ move  enter open  n new

@@ -111,6 +111,12 @@ fn terminal_layout_tracks_width() {
             model.contains("claude-opus-5-5 · medium"),
             "model group missing: {capture}"
         );
+        assert!(
+            lines.iter().any(|line| {
+                line.contains('─') && line.contains("Codex") && line.contains(" · Inactive")
+            }),
+            "title must precede status on the middle rule: {capture}"
+        );
         if width >= 150 {
             let column_width = (width as usize - 8) / 4;
             assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
@@ -131,13 +137,13 @@ fn terminal_layout_tracks_width() {
                 .iter()
                 .collect();
             assert!(
-                details.contains("Inactive ·"),
+                details.contains(" · Inactive"),
                 "status missing from middle rule: {capture}"
             );
             for line in &lines[3..29] {
                 let log = line.split('│').next_back().unwrap();
                 assert!(!log.contains("────"), "extra log rule: {capture}");
-                assert!(!line.contains("Inactive ·"), "extra status row: {capture}");
+                assert!(!line.contains(" · Inactive"), "extra status row: {capture}");
             }
             assert!(lines[31].trim().chars().all(|c| c == '─'));
             assert!(

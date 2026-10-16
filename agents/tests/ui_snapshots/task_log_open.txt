@@ -12,7 +12,7 @@
                                                   │
                                                   │
  Task log example · Running in a terminal; open it to type
- ──────────────────────────────────────────────────────────── Working · Task log example ──────────
+ ──────────────────────────────────────────────────────────── Task log example · Working ──────────
  Assistant                                                                                 11:59:20
 
  A long response with bold words whose body must be cut before the right edge of the log

@@ -7,6 +7,6 @@
                     │ Project
                     │ /tmp/project
                     │ …
-                    │ ─ Inactive · U… ─
+                    │ ─ U… · Inactive ─
  Unloaded tas ›
  ? help  esc back  ↑/↓ move  enter ope…

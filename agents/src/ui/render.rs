@@ -512,7 +512,7 @@ impl View {
         block.render(dialog, buf);
         Paragraph::new(lines).render(inner, buf);
     }
-    /// Centers the selected task's status, title and elapsed time on the rule row
+    /// Centers the selected task's title, status and elapsed time on the rule row
     /// `rule`, a space apart from the rule on each side.
     fn render_details_title(
         &self,
@@ -526,14 +526,14 @@ impl View {
         // One rule cell and a space on each side.
         let width = usize::from(rule.width).saturating_sub(4);
         let (status, _) = Self::status(session);
-        let mut header = Line::from(vec![status.into(), " · ".dim()]);
+        let status = Line::from(vec![" · ".dim(), status.into()]);
         let elapsed = session
             .started_at
             .map(|at| format!(" · {}", format_session_duration((now - at).num_seconds())));
         let elapsed_width = elapsed
             .as_deref()
             .map_or(0, unicode_width::UnicodeWidthStr::width);
-        let title_width = width.saturating_sub(header.width() + elapsed_width);
+        let title_width = width.saturating_sub(status.width() + elapsed_width);
         let title_style = self.title_style(&session.id).bold();
         let title = if title_width <= 1 {
             Line::from(Span::styled("…", title_style))
@@ -546,7 +546,8 @@ impl View {
                 title_width,
             )
         };
-        header.spans.extend(title.spans);
+        let mut header = title;
+        header.spans.extend(status.spans);
         if let Some(elapsed) = elapsed {
             header.spans.push(elapsed.dim());
         }

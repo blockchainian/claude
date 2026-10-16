@@ -2493,9 +2493,15 @@ mod details_header {
     use ratatui::style::Modifier;
 
     fn rule(view: &View, now: chrono::DateTime<Utc>) -> (Buffer, Rect) {
-        let area = Rect::new(0, 0, 112, 25);
+        rule_at_width(view, now, 112)
+    }
+
+    fn rule_at_width(view: &View, now: chrono::DateTime<Utc>, width: u16) -> (Buffer, Rect) {
+        let area = Rect::new(0, 0, width, 25);
         let layout = view.center_layout(area);
-        let y = if layout.log.is_empty() {
+        let y = if !layout.log_detail.is_empty() {
+            layout.prompt.y - 1
+        } else if layout.log.is_empty() {
             layout.details.bottom() - 1
         } else {
             layout.log.y
@@ -2552,7 +2558,7 @@ mod details_header {
                         if advance == 0 {
                             assert_eq!(
                                 header.trim_end(),
-                                format!("Working · Fix login bug · {expected}")
+                                format!("Fix login bug · Working · {expected}")
                             );
                         } else {
                             assert!(header.contains("d "), "{header}");
@@ -2564,12 +2570,34 @@ mod details_header {
     }
 
     #[test]
-    fn status_precedes_title() {
+    fn title_precedes_status_in_wide_and_narrow_layouts() {
         let row = session("header", "Header task", SessionStatus::Working, 0);
         let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
-        let (buf, rule) = rule(&view, Utc::now());
-        assert_eq!(label(&buf, rule), "Working · Header task");
+        for width in [112, 200] {
+            let (buf, rule) = rule_at_width(&view, Utc::now(), width);
+            assert_eq!(label(&buf, rule), "Header task · Working");
+        }
+    }
+
+    #[test]
+    fn narrow_and_wide_truncate_only_the_title_before_status_and_elapsed() {
+        let now = "2026-10-13T12:00:00Z".parse().unwrap();
+        let mut row = session(
+            "header",
+            &"升级命令中心".repeat(20),
+            SessionStatus::Working,
+            0,
+        );
+        row.started_at = Some(now - Duration::seconds(11520));
+        let mut view = test_view(Grouping::Project, true);
+        view.set_sessions(vec![row], false);
+        for width in [112, 200] {
+            let (buf, rule) = rule_at_width(&view, now, width);
+            let header = label(&buf, rule);
+            assert!(header.starts_with('升'), "{header}");
+            assert!(header.ends_with("… · Working · 3h 12m"), "{header}");
+        }
     }
 
     #[test]
@@ -2591,18 +2619,18 @@ mod details_header {
             let (buf, rule) = rule(&view, Utc::now());
             let status_label = status.label();
             let header = label(&buf, rule);
-            assert_eq!(header, format!("{status_label} · Header task"));
+            assert_eq!(header, format!("Header task · {status_label}"));
             let start = rule.x + (rule.width - (header.width() as u16 + 2)) / 2 + 1;
-            for x in start..start + status_label.len() as u16 {
+            for x in start + 14..start + 14 + status_label.len() as u16 {
                 let cell = &buf[(x, rule.y)];
                 assert_eq!(cell.fg, ratatui::style::Color::Reset);
                 assert!(!cell.modifier.contains(Modifier::DIM));
             }
-            let title = &buf[(start + status_label.len() as u16 + 3, rule.y)];
+            let title = &buf[(start, rule.y)];
             assert_eq!(title.fg, view.title_color(&session_key("header")));
             assert!(title.modifier.contains(Modifier::BOLD));
             assert!(!title.modifier.contains(Modifier::DIM));
-            for x in start + status_label.len() as u16..start + status_label.len() as u16 + 3 {
+            for x in start + 11..start + 14 {
                 assert!(buf[(x, rule.y)].modifier.contains(Modifier::DIM));
             }
         }
@@ -2623,8 +2651,8 @@ mod details_header {
         view.set_sessions(vec![row.clone()], false);
         let (buf, rule) = rule(&view, now);
         let header = label(&buf, rule);
-        assert!(header.starts_with("Working · A very long"), "{header}");
-        assert!(header.ends_with("… · 3h 12m"), "{header}");
+        assert!(header.starts_with("A very long"), "{header}");
+        assert!(header.ends_with("… · Working · 3h 12m"), "{header}");
         assert_eq!(
             details_at(row, 15, now),
             include_str!("../../tests/ui_snapshots/details_header_elapsed.txt")
@@ -2632,7 +2660,7 @@ mod details_header {
     }
 
     #[test]
-    fn truncates_title_and_preserves_leading_status() {
+    fn truncates_title_and_preserves_trailing_status() {
         let mut row = session(
             "header",
             "A very long session title that exceeds the panel width",
@@ -2645,9 +2673,9 @@ mod details_header {
         let (buf, rule) = rule(&view, Utc::now());
         let header = label(&buf, rule);
         let rendered = queued_details(row, 15);
-        let title = header.strip_prefix("Working · ").expect("visible status");
+        let title = header.strip_suffix(" · Working").expect("visible status");
         assert!(title.ends_with('…'), "{title}");
-        assert_eq!(header, "Working · A very long session title that exceeds…");
+        assert_eq!(header, "A very long session title that exceeds… · Working");
         assert_eq!(
             rendered,
             include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
@@ -2671,7 +2699,7 @@ mod details_header {
                     layout.details.bottom() - 1
                 }
             );
-            let expected = " Working · Task log example ";
+            let expected = " Task log example · Working ";
             let start = rule.x + (rule.width - expected.width() as u16) / 2;
             for (offset, symbol) in expected.chars().enumerate() {
                 assert_eq!(
@@ -5399,7 +5427,7 @@ mod subagent_rows {
             .lines()
             .nth(usize::from(layout.details.bottom() - 1))
             .unwrap();
-        assert!(header.contains("Working · Check files"), "{header}");
+        assert!(header.contains("Check files · Working"), "{header}");
         let rendered = screen(&view, 120, 30);
         assert!(rendered.contains("child-model"));
         assert!(!rendered.contains("Needs attention"));

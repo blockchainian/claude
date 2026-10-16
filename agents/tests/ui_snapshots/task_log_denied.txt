@@ -12,7 +12,7 @@
                                                   │
                                                   │
  Task log example · Running in a terminal; open it to type
- ──────────────────────────────────────────────────────────── Working · Task log example ──────────
+ ──────────────────────────────────────────────────────────── Task log example · Working ──────────
  Edit: Dangerous                                                                                10s
  Bash: Safety Check                                                                             10s
  Bash: Create Unsafe Agents                                                                     15s
