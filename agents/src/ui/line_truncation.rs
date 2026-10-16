@@ -103,212 +103,335 @@ pub(crate) fn truncate_line_with_ellipsis_if_overflow(
     }
 }
 
-pub(super) fn center_truncate_path(path: &str, max_width: usize) -> String {
-    if max_width == 0 {
-        return String::new();
-    }
-    if display_width(path) <= max_width {
-        return path.to_string();
+pub(super) fn abbreviate_path(path: &str, max_width: usize) -> String {
+    let path = abbreviate_directories(path, max_width);
+    if display_width(&path) <= max_width {
+        return path;
     }
 
-    let sep = std::path::MAIN_SEPARATOR;
-    let has_leading_sep = path.starts_with(sep);
-    let has_trailing_sep = path.ends_with(sep);
-    let mut raw_segments: Vec<&str> = path.split(sep).collect();
-    if has_leading_sep && !raw_segments.is_empty() && raw_segments[0].is_empty() {
-        raw_segments.remove(0);
-    }
-    if has_trailing_sep
-        && !raw_segments.is_empty()
-        && raw_segments.last().is_some_and(|last| last.is_empty())
-    {
-        raw_segments.pop();
-    }
-
-    if raw_segments.is_empty() {
-        if has_leading_sep {
-            let root = sep.to_string();
-            if display_width(root.as_str()) <= max_width {
-                return root;
-            }
-        }
-        return "…".to_string();
-    }
-
-    struct Segment<'a> {
-        original: &'a str,
-        text: String,
-        truncatable: bool,
-        is_suffix: bool,
-    }
-
-    let assemble = |leading: bool, segments: &[Segment<'_>]| -> String {
-        let mut result = String::new();
-        if leading {
-            result.push(sep);
-        }
-        for segment in segments {
-            if !result.is_empty() && !result.ends_with(sep) {
-                result.push(sep);
-            }
-            result.push_str(segment.text.as_str());
-        }
-        result
+    let separator = std::path::MAIN_SEPARATOR.to_string();
+    let mut components: Vec<String> = path.split(&separator).map(str::to_owned).collect();
+    let Some(last) = components
+        .iter()
+        .rposition(|component| !component.is_empty())
+    else {
+        return path;
     };
-
-    let front_truncate = |original: &str, allowed_width: usize| -> String {
-        if allowed_width == 0 {
-            return String::new();
-        }
-        if display_width(original) <= allowed_width {
-            return original.to_string();
-        }
-        if allowed_width == 1 {
-            return "…".to_string();
-        }
-
-        let mut kept = Vec::new();
-        let mut used_width = 1; // reserve space for leading ellipsis
-        for grapheme in original.graphemes(/*is_extended*/ true).rev() {
-            let grapheme_width = display_width(grapheme);
-            if used_width + grapheme_width > allowed_width {
-                break;
-            }
-            used_width += grapheme_width;
-            kept.push(grapheme);
-        }
-        kept.reverse();
-        let mut truncated = String::from("…");
-        for grapheme in kept {
-            truncated.push_str(grapheme);
-        }
-        truncated
-    };
-
-    let mut combos: Vec<(usize, usize)> = Vec::new();
-    let segment_count = raw_segments.len();
-    for left in 1..=segment_count {
-        let min_right = if left == segment_count { 0 } else { 1 };
-        for right in min_right..=(segment_count - left) {
-            combos.push((left, right));
-        }
-    }
-    let desired_suffix = if segment_count > 1 {
-        std::cmp::min(2, segment_count - 1)
-    } else {
-        0
-    };
-    let mut prioritized: Vec<(usize, usize)> = Vec::new();
-    let mut fallback: Vec<(usize, usize)> = Vec::new();
-    for combo in combos {
-        if combo.1 >= desired_suffix {
-            prioritized.push(combo);
-        } else {
-            fallback.push(combo);
-        }
-    }
-    let sort_combos = |items: &mut Vec<(usize, usize)>| {
-        items.sort_by(|(left_a, right_a), (left_b, right_b)| {
-            left_b
-                .cmp(left_a)
-                .then_with(|| right_b.cmp(right_a))
-                .then_with(|| (left_b + right_b).cmp(&(left_a + right_a)))
-        });
-    };
-    sort_combos(&mut prioritized);
-    sort_combos(&mut fallback);
-
-    let fit_segments =
-        |segments: &mut Vec<Segment<'_>>, allow_front_truncate: bool| -> Option<String> {
-            loop {
-                let candidate = assemble(has_leading_sep, segments);
-                let width = display_width(candidate.as_str());
-                if width <= max_width {
-                    return Some(candidate);
-                }
-
-                if !allow_front_truncate {
-                    return None;
-                }
-
-                let mut indices: Vec<usize> = Vec::new();
-                for (idx, seg) in segments.iter().enumerate().rev() {
-                    if seg.truncatable && seg.is_suffix {
-                        indices.push(idx);
-                    }
-                }
-                for (idx, seg) in segments.iter().enumerate().rev() {
-                    if seg.truncatable && !seg.is_suffix {
-                        indices.push(idx);
-                    }
-                }
-
-                if indices.is_empty() {
-                    return None;
-                }
-
-                let mut changed = false;
-                for idx in indices {
-                    let original_width = display_width(segments[idx].original);
-                    if original_width <= max_width && segment_count > 2 {
-                        continue;
-                    }
-                    let seg_width = display_width(segments[idx].text.as_str());
-                    let other_width = width.saturating_sub(seg_width);
-                    let allowed_width = max_width.saturating_sub(other_width).max(1);
-                    let new_text = front_truncate(segments[idx].original, allowed_width);
-                    if new_text != segments[idx].text {
-                        segments[idx].text = new_text;
-                        changed = true;
-                        break;
-                    }
-                }
-
-                if !changed {
-                    return None;
-                }
-            }
-        };
-
-    for (left_count, right_count) in prioritized.into_iter().chain(fallback) {
-        let mut segments: Vec<Segment<'_>> = raw_segments[..left_count]
-            .iter()
-            .map(|seg| Segment {
-                original: seg,
-                text: (*seg).to_string(),
-                truncatable: true,
-                is_suffix: false,
-            })
-            .collect();
-
-        let need_ellipsis = left_count + right_count < segment_count;
-        if need_ellipsis {
-            segments.push(Segment {
-                original: "…",
-                text: "…".to_string(),
-                truncatable: false,
-                is_suffix: false,
-            });
-        }
-
-        if right_count > 0 {
-            segments.extend(
-                raw_segments[segment_count - right_count..]
-                    .iter()
-                    .map(|seg| Segment {
-                        original: seg,
-                        text: (*seg).to_string(),
-                        truncatable: true,
-                        is_suffix: true,
-                    }),
-            );
-        }
-
-        let allow_front_truncate = need_ellipsis || segment_count <= 2;
-        if let Some(candidate) = fit_segments(&mut segments, allow_front_truncate) {
+    let tail = components[last].clone();
+    let boundaries: Vec<usize> = tail
+        .grapheme_indices(true)
+        .map(|(index, _)| index)
+        .collect();
+    for &end in boundaries.iter().skip(1).rev() {
+        let abbreviated = format!("{}…", &tail[..end]);
+        components[last] = abbreviated;
+        let candidate = components.join(&separator);
+        if display_width(&candidate) <= max_width {
             return candidate;
         }
     }
+    components.join(&separator)
+}
 
-    front_truncate(path, max_width)
+/// Shrinks a path's directory components from the left until it fits, keeping
+/// the last component whole even when it still does not fit.
+fn abbreviate_directories(path: &str, max_width: usize) -> String {
+    let path = super::formatting::format_directory_display(std::path::Path::new(path));
+    if display_width(&path) <= max_width {
+        return path;
+    }
+
+    let mut components: Vec<String> = path
+        .split(std::path::MAIN_SEPARATOR)
+        .map(str::to_owned)
+        .collect();
+    let Some(last) = components
+        .iter()
+        .rposition(|component| !component.is_empty())
+    else {
+        return path;
+    };
+    let separator = std::path::MAIN_SEPARATOR.to_string();
+    for index in 0..last {
+        let component = &components[index];
+        if component.is_empty() || component == "~" {
+            continue;
+        }
+        let mut graphemes = component.graphemes(true);
+        let first = graphemes.next().expect("nonempty component");
+        let head = if first == "." {
+            format!("{first}{}", graphemes.next().unwrap_or(""))
+        } else {
+            first.to_owned()
+        };
+        let abbreviated = format!("{head}…");
+        if display_width(&abbreviated) < display_width(component) {
+            components[index] = abbreviated;
+            let candidate = components.join(&separator);
+            if display_width(&candidate) <= max_width {
+                return candidate;
+            }
+        }
+    }
+    components.join(&separator)
+}
+
+/// Abbreviates the directories of the paths at `ranges` in prose, left to
+/// right, until the text fits or every path's directories are shrunk.
+pub(super) fn abbreviate_paths_in_text(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+    max_width: usize,
+) -> String {
+    fit_paths(text, ranges, max_width, false)
+}
+
+/// Shrinks the paths at `ranges` in `text`, left to right, until the text
+/// fits: every path's directories first, then the last component of a lone
+/// path, since cutting several file names leaves none readable.
+pub(super) fn abbreviate_paths(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+    max_width: usize,
+) -> String {
+    fit_paths(text, ranges, max_width, ranges.len() == 1)
+}
+
+fn fit_paths(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+    max_width: usize,
+    cut_names: bool,
+) -> String {
+    let mut overflow = display_width(text).saturating_sub(max_width);
+    let mut paths: Vec<String> = ranges
+        .iter()
+        .map(|range| text[range.clone()].to_owned())
+        .collect();
+    let passes: &[fn(&str, usize) -> String] = if cut_names {
+        &[abbreviate_directories, abbreviate_path]
+    } else {
+        &[abbreviate_directories]
+    };
+    for shrink in passes {
+        for path in &mut paths {
+            if overflow == 0 {
+                break;
+            }
+            let width = display_width(path);
+            let shrunk = shrink(path, width.saturating_sub(overflow));
+            overflow = overflow.saturating_sub(width.saturating_sub(display_width(&shrunk)));
+            *path = shrunk;
+        }
+    }
+    let mut fitted = String::new();
+    let mut end = 0;
+    for (range, path) in ranges.iter().zip(&paths) {
+        fitted.push_str(&text[end..range.start]);
+        fitted.push_str(path);
+        end = range.end;
+    }
+    fitted.push_str(&text[end..]);
+    fitted
+}
+
+/// Fits each oversized path at `ranges` to the wrapping width, independently of surrounding text.
+pub(super) fn abbreviate_paths_for_wrap(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+    width: usize,
+) -> String {
+    let mut fitted = String::new();
+    let mut end = 0;
+    for range in ranges {
+        fitted.push_str(&text[end..range.start]);
+        let path = &text[range.clone()];
+        if display_width(path) <= width {
+            fitted.push_str(path);
+        } else {
+            fitted.push_str(&abbreviate_path(path, width));
+        }
+        end = range.end;
+    }
+    fitted.push_str(&text[end..]);
+    fitted
+}
+
+/// Keeps paths together while retaining Unicode line breaks in surrounding prose.
+pub(super) fn prose_wrap_options(width: usize) -> textwrap::Options<'static> {
+    textwrap::Options::new(width)
+        .word_separator(textwrap::WordSeparator::Custom(prose_words))
+        .word_splitter(textwrap::WordSplitter::Custom(|word| {
+            if super::paths::word_path(word).is_some() {
+                Vec::new()
+            } else {
+                textwrap::WordSplitter::HyphenSplitter.split_points(word)
+            }
+        }))
+}
+
+fn prose_words(text: &str) -> Box<dyn Iterator<Item = textwrap::core::Word<'_>> + '_> {
+    let separator = textwrap::WordSeparator::new();
+    Box::new(
+        text.split_inclusive(char::is_whitespace)
+            .flat_map(move |part| {
+                let Some(range) =
+                    super::paths::word_path(part.trim_end_matches(char::is_whitespace))
+                else {
+                    return separator.find_words(part).collect::<Vec<_>>();
+                };
+                let mut words: Vec<_> = separator.find_words(&part[..range.start]).collect();
+                let suffix = &part[range.end..];
+                let spaces = suffix.len() - suffix.trim_start_matches(' ').len();
+                words.push(textwrap::core::Word::from(
+                    &part[range.start..range.end + spaces],
+                ));
+                words.extend(separator.find_words(&part[range.end + spaces..]));
+                words
+            }),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory with no files, so only absolute and home paths are found.
+    const EMPTY: &str = "/nonexistent";
+
+    fn abbreviate_paths_for_wrap(text: &str, width: usize) -> String {
+        let ranges = crate::ui::paths::text_paths(text, std::path::Path::new(EMPTY));
+        super::abbreviate_paths_for_wrap(text, &ranges, width)
+    }
+
+    fn abbreviate_paths_in_text(text: &str, max_width: usize) -> String {
+        let ranges = crate::ui::paths::text_paths(text, std::path::Path::new(EMPTY));
+        super::abbreviate_paths_in_text(text, &ranges, max_width)
+    }
+
+    #[test]
+    fn wrapped_paths_use_each_paths_width_and_preserve_whitespace() {
+        let text = "many words before /tmp/fits.md and /private/workspace/reports/result.md\n报告：/private/workspace/reports/result.md\tend";
+        assert_eq!(
+            abbreviate_paths_for_wrap(text, 30),
+            "many words before /tmp/fits.md and /p…/w…/reports/result.md\n报告：/p…/w…/reports/result.md\tend"
+        );
+        assert_eq!(abbreviate_paths_for_wrap(text, 100), text);
+    }
+
+    #[test]
+    fn wrapped_paths_preserve_cjk_suffix_and_markdown_punctuation() {
+        assert_eq!(
+            abbreviate_paths_for_wrap("报告：`/private/workspace/report.md`，已发送。", 20),
+            "报告：`/p…/w…/report.md`，已发送。"
+        );
+        assert_eq!(
+            abbreviate_paths_for_wrap("a/b/c https://example.com/a/b /report.md", 1),
+            "a/b/c https://example.com/a/b /report.md"
+        );
+    }
+
+    #[test]
+    fn wrapped_paths_use_home_and_last_component_rules_only_on_overflow() {
+        let home = std::env::var_os("HOME").expect("HOME");
+        let path = std::path::Path::new(&home).join("workspace/report.md");
+        let path = path.to_string_lossy();
+        assert_eq!(abbreviate_paths_for_wrap(&path, path.width()), path);
+        assert_eq!(abbreviate_paths_for_wrap(&path, 15), "~/w…/report.md");
+        assert_eq!(
+            abbreviate_paths_for_wrap("/workspace/longfilename.md", 12),
+            "/w…/longfil…"
+        );
+    }
+
+    #[test]
+    fn path_abbreviation_stops_after_each_left_component() {
+        let path = "/Users/visitor/Code/.worktrees/agents-panel";
+        for expected in [
+            "/U…/visitor/Code/.worktrees/agents-panel",
+            "/U…/v…/Code/.worktrees/agents-panel",
+            "/U…/v…/C…/.worktrees/agents-panel",
+            "/U…/v…/C…/.w…/agents-panel",
+        ] {
+            assert_eq!(abbreviate_path(path, display_width(expected)), expected);
+        }
+    }
+
+    #[test]
+    fn path_abbreviation_keeps_dot_and_skips_short_components() {
+        assert_eq!(
+            abbreviate_path("~/.worktrees/a/.x/ab/project", 22),
+            "~/.w…/a/.x/ab/project"
+        );
+        assert_eq!(abbreviate_path("~/a/.x/ab/project", 1), "~/a/.x/ab/p…");
+    }
+
+    #[test]
+    fn path_abbreviation_cuts_only_the_last_component_tail() {
+        for (width, expected) in [
+            (13, "/U…/agents-p…"),
+            (10, "/U…/agent…"),
+            (6, "/U…/a…"),
+            (0, "/U…/a…"),
+        ] {
+            assert_eq!(abbreviate_path("/Users/agents-panel", width), expected);
+        }
+    }
+
+    #[test]
+    fn path_abbreviation_short_circuits_after_home_replacement() {
+        let home = std::env::var_os("HOME").expect("HOME");
+        let path = std::path::Path::new(&home).join("Code/agents-panel");
+        assert_eq!(
+            abbreviate_path(&path.to_string_lossy(), 19),
+            "~/Code/agents-panel"
+        );
+        assert_eq!(abbreviate_path(&home.to_string_lossy(), 1), "~");
+    }
+
+    #[test]
+    fn path_abbreviation_leaves_fitting_paths_unchanged() {
+        for path in ["/tmp/project", "~/Code/project", "a/.x/ab", "/", ""] {
+            assert_eq!(abbreviate_path(path, display_width(path)), path);
+        }
+    }
+
+    #[test]
+    fn path_abbreviation_uses_display_width_and_preserves_graphemes() {
+        assert_eq!(abbreviate_path("/界面/工具", 9), "/界…/工具");
+        assert_eq!(
+            abbreviate_path("e\u{301}cole/project", 10),
+            "e\u{301}…/project"
+        );
+    }
+
+    #[test]
+    fn prose_paths_shrink_directories_only_as_far_as_the_overflow() {
+        let text = "Report: /private/tmp/claude-501/report.md 1. done";
+        assert_eq!(abbreviate_paths_in_text(text, display_width(text)), text);
+        assert_eq!(
+            abbreviate_paths_in_text(text, 44),
+            "Report: /p…/tmp/claude-501/report.md 1. done"
+        );
+        assert_eq!(
+            abbreviate_paths_in_text(text, 10),
+            "Report: /p…/t…/c…/report.md 1. done"
+        );
+    }
+
+    #[test]
+    fn prose_paths_keep_surrounding_punctuation_and_skip_non_paths() {
+        assert_eq!(
+            abbreviate_paths_in_text("see a/b/c and `/tmp/project/x.md`.", 1),
+            "see a/b/c and `/t…/p…/x.md`."
+        );
+        assert_eq!(
+            abbreviate_paths_in_text("报告：/tmp/project/x.md", 1),
+            "报告：/t…/p…/x.md"
+        );
+        assert_eq!(
+            abbreviate_paths_in_text("/report.md and https://example.com/a/b", 1),
+            "/report.md and https://example.com/a/b"
+        );
+    }
 }

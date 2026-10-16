@@ -14,12 +14,24 @@ pub(super) fn hint_line(items: &[(&str, &str)]) -> Line<'static> {
 }
 impl View {
     pub(super) fn center_footer_hints(&self) -> Line<'static> {
-        if self.delete_dialog.is_some() {
+        if self.confirm_dialog.is_some() {
             hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
         } else if self.help {
             hint_line(&[("esc", "back")])
         } else if self.rename_target.is_some() {
             hint_line(&[("esc", "back"), ("enter", "rename")])
+        } else if self.log_search.editing || self.log_detail_search.editing {
+            hint_line(&[("esc", "back"), ("enter", "keep")])
+        } else if self
+            .selected_row()
+            .is_some_and(|session| !session.can_resume())
+        {
+            hint_line(&[
+                ("?", "help"),
+                ("esc", "back"),
+                ("↑/↓", "move"),
+                ("n", "new"),
+            ])
         } else if self.searching {
             hint_line(&[("esc", "back"), ("enter", "open")])
         } else {
@@ -75,6 +87,7 @@ impl View {
                 "View",
                 &[("tab/⇧tab", "Filter"), ("f3", "Search"), ("g", "Group")],
             ),
+            group("Log", &[("⌃r", "Search")]),
         ];
         let mut lines = vec!["Task shortcuts".bold().into(), Line::default()];
         for line in super::shortcut_help::group_lines(groups, width) {

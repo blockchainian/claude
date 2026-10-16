@@ -1,19 +1,23 @@
+use crate::log::question_texts;
 use crate::model::{Activity, BackgroundTask, PullRequest};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 const CHUNK: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Summary {
+    pub started_at: Option<DateTime<Utc>>,
+    pub subagent_records: Vec<Value>,
     pub cwd: Option<PathBuf>,
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
     pub prompt: String,
+    pub prompt_images: Vec<crate::log::Image>,
     pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
@@ -23,13 +27,94 @@ pub(super) struct Summary {
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub pending_questions: Vec<String>,
     pub background: Vec<BackgroundTask>,
+    pub completed_background: HashSet<String>,
+    pub background_ids: HashSet<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
 }
 
+/// Reads only through the first timestamped record, including sidechains.
+pub(super) fn start_time(path: &Path) -> io::Result<Option<DateTime<Utc>>> {
+    for line in BufReader::new(File::open(path)?).lines() {
+        let line = line?;
+        let Ok(record) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let Some(timestamp) = record.get("timestamp") else {
+            continue;
+        };
+        if record.get("forkedFrom").is_some() {
+            return Ok(File::open(path)?.metadata()?.created().ok().map(Into::into));
+        }
+        let timestamp = timestamp.as_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Transcript timestamp must be a string",
+            )
+        })?;
+        return DateTime::parse_from_rfc3339(timestamp)
+            .map(|at| Some(at.with_timezone(&Utc)))
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error));
+    }
+    Ok(None)
+}
+
 impl Summary {
+    fn record_metadata(&mut self, record: &Value) {
+        self.record_pr(record);
+        if let Some(timestamp) = record["timestamp"]
+            .as_str()
+            .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
+        {
+            self.timestamp = Some(timestamp.with_timezone(&Utc));
+        }
+        // A head chunk swallowed by one huge record still leaves these in the tail.
+        if self.cwd.is_none() {
+            self.cwd = record["cwd"]
+                .as_str()
+                .filter(|cwd| !cwd.is_empty())
+                .map(PathBuf::from);
+        }
+        if matches!(record["type"].as_str(), Some("user" | "assistant")) {
+            if self.cwd.is_none() {
+                self.cwd = record["cwd"]
+                    .as_str()
+                    .filter(|cwd| !cwd.is_empty())
+                    .map(PathBuf::from);
+            }
+            if self.git_branch.is_none() {
+                self.git_branch = text(record, "gitBranch");
+            }
+        }
+        match record["type"].as_str() {
+            Some("ai-title") => {
+                if let Some(title) = text(record, "aiTitle") {
+                    self.ai_title = Some(title);
+                }
+            }
+            Some("custom-title") => {
+                if let Some(title) = text(record, "customTitle") {
+                    self.custom_title = Some(title);
+                }
+            }
+            Some("last-prompt") => {
+                if let Some(prompt) = text(record, "lastPrompt") {
+                    self.last_prompt = Some(prompt);
+                }
+            }
+            Some("assistant") => self.record_assistant_metadata(record),
+            _ => {}
+        }
+    }
+
+    fn record_assistant_metadata(&mut self, record: &Value) {
+        self.model = text(record, "requestedModel").or_else(|| text(&record["message"], "model"));
+        self.effort = text(record, "effort");
+    }
+
     fn record_pr(&mut self, record: &Value) {
         if record["type"] == "pr-link"
             && let Some(number) = record["prNumber"].as_u64()
@@ -40,10 +125,9 @@ impl Summary {
     }
 }
 
-pub(super) fn preview(text: &str) -> String {
+pub(super) fn printable(text: &str) -> String {
     text.chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
-        .take(512)
         .collect()
 }
 
@@ -51,11 +135,11 @@ fn text(value: &Value, field: &str) -> Option<String> {
     value
         .get(field)?
         .as_str()
-        .map(preview)
+        .map(printable)
         .filter(|text| !text.trim().is_empty())
 }
 
-fn content_text(record: &Value, last: bool) -> Option<String> {
+pub(super) fn content_text(record: &Value, last: bool) -> Option<String> {
     let content = record.get("message")?.get("content")?;
     if let Some(text) = content.as_str() {
         return Some(text.to_owned());
@@ -73,10 +157,17 @@ fn content_text(record: &Value, last: bool) -> Option<String> {
 }
 
 fn records(bytes: &[u8]) -> impl DoubleEndedIterator<Item = Value> + '_ {
+    records_with_sidechains(bytes, false)
+}
+
+fn records_with_sidechains(
+    bytes: &[u8],
+    sidechains: bool,
+) -> impl DoubleEndedIterator<Item = Value> + '_ {
     bytes
         .split(|byte| *byte == b'\n')
         .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
-        .filter(|record| record["isSidechain"] != true)
+        .filter(move |record| sidechains || record["isSidechain"] != true)
 }
 
 enum QueueOperation {
@@ -104,15 +195,33 @@ impl QueueOperation {
 /// attachment instead of a user record.
 fn prompt_text(record: &Value) -> Option<String> {
     match record["type"].as_str()? {
-        "user" => content_text(record, false),
+        "user" => {
+            if let Some((name, body)) = super::peer::origin_message(record) {
+                return Some(crate::log::participant_text(name, body));
+            }
+            if record["isMeta"] == true {
+                return None;
+            }
+            let text = content_text(record, false)?;
+            Some(match super::peer::wrapped_message(&text) {
+                Some((_, (name, body))) => crate::log::participant_text(name, body),
+                None => typed_text(text),
+            })
+        }
         "attachment" => {
             let attachment = &record["attachment"];
             (attachment["type"] == "queued_command" && attachment["commandMode"] == "prompt")
                 .then(|| attachment["prompt"].as_str().map(str::to_owned))
                 .flatten()
+                .map(typed_text)
         }
         _ => None,
     }
+}
+
+/// Text the user typed, with pasted blocks shown as their content.
+fn typed_text(text: String) -> String {
+    super::log::pasted_content(&text).unwrap_or(text)
 }
 
 fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
@@ -132,9 +241,10 @@ fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
     }
     queue
         .into_iter()
+        .map(typed_text)
         .filter(|content| !content.trim_start().starts_with('<'))
         .map(|content| {
-            preview(&content)
+            printable(&content)
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ")
@@ -142,30 +252,16 @@ fn queued_prompts(operations: Vec<QueueOperation>) -> Vec<String> {
         .collect()
 }
 
-fn background_result(content: &str) -> Option<(String, PathBuf)> {
-    let task = if let Some(rest) = content.strip_prefix("Command running in background with ID: ") {
-        rest.split_once('.')?.0
-    } else {
-        content
-            .strip_prefix("Command was moved to the background (ID: ")?
-            .split_once(')')?
-            .0
-    };
-    let output = content.split_once("Output is being written to: ")?.1;
-    let output = output.split_once(". ").map_or(output, |(path, _)| path);
-    let output = output.strip_suffix('.').unwrap_or(output);
-    (!task.is_empty() && !output.is_empty()).then(|| (task.to_owned(), PathBuf::from(output)))
-}
-
 #[derive(Default)]
 struct Background {
     completed: HashSet<String>,
     pending: HashMap<String, (String, PathBuf)>,
-    tasks: Vec<BackgroundTask>,
+    tasks: Vec<(String, BackgroundTask)>,
+    requested: HashMap<String, PathBuf>,
 }
 
 impl Background {
-    fn record(&mut self, record: &Value, at: Option<DateTime<Utc>>, pairing_only: bool) {
+    fn record(&mut self, record: &Value, at: Option<DateTime<Utc>>) {
         if record["type"] == "attachment" {
             let attachment = &record["attachment"];
             if attachment["type"] == "queued_command"
@@ -175,45 +271,91 @@ impl Background {
                 && let Some((task, _)) = rest.split_once("</task-id>")
             {
                 self.completed.insert(task.to_owned());
+                self.requested.remove(task);
+                self.pending.retain(|_, (id, _)| id != task);
             }
         }
         let Some(blocks) = record["message"]["content"].as_array() else {
             return;
         };
         for block in blocks.iter().rev() {
-            if !pairing_only
-                && record["type"] == "user"
+            if record["type"] == "user"
                 && block["type"] == "tool_result"
                 && let Some(id) = block["tool_use_id"].as_str()
-                && let Some(content) = block["content"].as_str()
-                && let Some((task, output)) = background_result(content)
-                && !self.completed.contains(&task)
+                && let Some(task) = record["toolUseResult"]["backgroundTaskId"].as_str()
+                && !self.completed.contains(task)
+                && let Some(output) = self.requested.remove(task)
             {
-                self.pending.insert(id.to_owned(), (task, output));
+                self.pending
+                    .insert(id.to_owned(), (task.to_owned(), output));
             }
+
             if record["type"] == "assistant"
                 && block["type"] == "tool_use"
                 && block["name"] == "Bash"
                 && let Some(id) = block["id"].as_str()
-                && let Some((_, output)) = self.pending.remove(id)
+                && let Some((task, output)) = self.pending.remove(id)
                 && let Some(started_at) = at
                 && let Some(description) = block["input"]["description"]
                     .as_str()
                     .filter(|description| !description.trim().is_empty())
                     .or_else(|| block["input"]["command"].as_str()?.lines().next())
             {
-                self.tasks.push(BackgroundTask {
-                    description: description.to_owned(),
-                    output,
-                    started_at,
-                });
+                self.tasks.push((
+                    task,
+                    BackgroundTask {
+                        description: description.to_owned(),
+                        output,
+                        started_at,
+                    },
+                ));
             }
         }
     }
+}
 
-    fn finish(mut self) -> Vec<BackgroundTask> {
-        self.tasks.reverse();
-        self.tasks
+/// Resolve only file-confirmed running ids, continuing through queue quiet points.
+pub(super) fn background_tasks(
+    path: &Path,
+    len: u64,
+    requested: &HashMap<String, PathBuf>,
+) -> io::Result<(HashMap<String, BackgroundTask>, u64)> {
+    let mut file = CountingReader {
+        inner: File::open(path)?,
+        bytes: 0,
+    };
+    let start = len.saturating_sub(CHUNK);
+    file.seek(SeekFrom::Start(start))?;
+    let mut tail = Vec::new();
+    (&mut file).take(len - start).read_to_end(&mut tail)?;
+    let background = read_messages(
+        &mut file,
+        start,
+        tail,
+        &mut Summary::default(),
+        false,
+        Background {
+            requested: requested.clone(),
+            ..Background::default()
+        },
+    )?;
+    Ok((background.tasks.into_iter().collect(), file.bytes))
+}
+
+struct CountingReader<R> {
+    inner: R,
+    bytes: u64,
+}
+impl<R: Read> Read for CountingReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let count = self.inner.read(buffer)?;
+        self.bytes += count as u64;
+        Ok(count)
+    }
+}
+impl<R: Seek> Seek for CountingReader<R> {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(position)
     }
 }
 
@@ -223,6 +365,7 @@ pub(super) fn walk_records(
     file: &mut (impl Read + Seek),
     mut start: u64,
     mut bytes: Vec<u8>,
+    sidechains: bool,
     mut visit: impl FnMut(Value) -> bool,
 ) -> io::Result<()> {
     let mut chunk = CHUNK;
@@ -236,7 +379,7 @@ pub(super) fn walk_records(
                 .position(|byte| *byte == b'\n')
                 .map_or(bytes.len(), |index| index + 1)
         };
-        for record in records(&bytes[skip..]).rev() {
+        for record in records_with_sidechains(&bytes[skip..], sidechains).rev() {
             if !visit(record) {
                 return Ok(());
             }
@@ -259,11 +402,14 @@ pub(super) fn walk_records(
 }
 
 fn read_messages(
-    file: &mut File,
+    file: &mut (impl Read + Seek),
     start: u64,
     bytes: Vec<u8>,
     summary: &mut Summary,
-) -> io::Result<()> {
+    sidechains: bool,
+    mut background: Background,
+) -> io::Result<Background> {
+    let descriptions_only = !background.requested.is_empty();
     let mut prompt_found = false;
     let mut turn_messages = 0;
     // An absorbed queued prompt waits for its `remove` record, which carries
@@ -273,9 +419,37 @@ fn read_messages(
     let mut next_user = None;
     let mut dequeued_user = None;
     let mut quiet_point = false;
-    let mut background = Background::default();
-    let mut pairing_only = false;
-    walk_records(file, start, bytes, |record| {
+    let mut questions_found = false;
+    let mut assistant_metadata_found = false;
+    let mut tool_results = HashSet::new();
+    let mut images = super::images::Companions::default();
+    walk_records(file, start, bytes, sidechains, |record| {
+        if !assistant_metadata_found && record["type"] == "assistant" {
+            summary.record_assistant_metadata(&record);
+            assistant_metadata_found = true;
+        }
+        images.record(&record);
+        if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {
+            for block in blocks.iter().rev() {
+                if record["type"] == "user"
+                    && block["type"] == "tool_result"
+                    && let Some(id) = block["tool_use_id"].as_str()
+                {
+                    tool_results.insert(id.to_owned());
+                }
+                if record["type"] == "assistant"
+                    && block["type"] == "tool_use"
+                    && block["name"] == "AskUserQuestion"
+                    && let Some(id) = block["id"].as_str()
+                {
+                    questions_found = true;
+                    if !tool_results.contains(id) {
+                        summary.pending_questions = question_texts(&block["input"]);
+                    }
+                    break;
+                }
+            }
+        }
         if !quiet_point {
             if record["type"] == "user" {
                 next_user = content_text(&record, false);
@@ -296,7 +470,13 @@ fn read_messages(
             .as_str()
             .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
             .map(|value| value.with_timezone(&Utc));
-        background.record(&record, at, pairing_only);
+        background.record(&record, at);
+        if descriptions_only && background.requested.is_empty() && background.pending.is_empty() {
+            return false;
+        }
+        if let Some(id) = record["toolUseResult"]["backgroundTaskId"].as_str() {
+            summary.background_ids.insert(id.to_owned());
+        }
         if !prompt_found && record["type"] == "assistant" {
             turn_messages += 1;
         }
@@ -313,7 +493,8 @@ fn read_messages(
             && !prompt.trim().is_empty()
             && !prompt.trim_start().starts_with('<')
         {
-            summary.prompt = preview(&prompt);
+            summary.prompt = printable(&prompt);
+            summary.prompt_images = images.take(&record, &summary.prompt);
             summary.prompt_at = at;
             summary.turn_messages = turn_messages;
             prompt_found = true;
@@ -323,24 +504,27 @@ fn read_messages(
                     .map(str::to_owned);
             }
         }
-        // The latest tool call, finished or not; the panel shows it while it
+        // The latest visible tool call, finished or not; the panel shows it while it
         // is newer than the last reply.
         if summary.activity.is_none()
             && record["type"] == "assistant"
             && let Some(at) = at
             && let Some(blocks) = record["message"]["content"].as_array()
-            && let Some(label) = blocks
+            && let Some((kind, label)) = blocks
                 .iter()
                 .rev()
                 .filter(|block| block["type"] == "tool_use")
                 .find_map(|block| {
-                    block["input"]["description"]
-                        .as_str()
-                        .filter(|value| !value.trim().is_empty())
-                        .or_else(|| block["name"].as_str())
+                    super::log::tool_activity(block).map(|label| {
+                        (
+                            crate::log::tool_kind(block["name"].as_str().unwrap()),
+                            label,
+                        )
+                    })
                 })
         {
             summary.activity = Some(Activity {
+                kind,
                 label: label.to_owned(),
                 at,
             });
@@ -349,7 +533,7 @@ fn read_messages(
             && record["type"] == "assistant"
             && let Some(message) = content_text(&record, true)
         {
-            summary.last_message = Some(preview(&message));
+            summary.last_message = Some(printable(&message));
             summary.last_message_at = at;
         }
         if prompt_found
@@ -357,19 +541,16 @@ fn read_messages(
             && summary.last_message.is_some()
             && summary.activity.is_some()
             && quiet_point
+            && background.requested.is_empty()
+            && background.pending.is_empty()
         {
-            // Tasks before this existing stopping point are intentionally invisible.
-            // Only an already-seen result may extend the walk to its tool use.
-            pairing_only = true;
-            if background.pending.is_empty() {
-                return false;
-            }
+            return false;
         }
         true
     })?;
-    summary.background = background.finish();
+    summary.completed_background = background.completed.clone();
     summary.queued = queued_prompts(operations);
-    Ok(())
+    Ok(background)
 }
 
 pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
@@ -414,74 +595,181 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
         &tail[tail_skip..]
     };
     for record in records(metadata) {
-        summary.record_pr(&record);
-        if let Some(timestamp) = record["timestamp"]
-            .as_str()
-            .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
-        {
-            summary.timestamp = Some(timestamp.with_timezone(&Utc));
-        }
-        // A head chunk swallowed by one huge record still leaves these in the tail.
-        if summary.cwd.is_none() {
-            summary.cwd = record["cwd"]
-                .as_str()
-                .filter(|cwd| !cwd.is_empty())
-                .map(PathBuf::from);
-        }
-        if matches!(record["type"].as_str(), Some("user" | "assistant")) {
-            if summary.cwd.is_none() {
-                summary.cwd = record["cwd"]
-                    .as_str()
-                    .filter(|cwd| !cwd.is_empty())
-                    .map(PathBuf::from);
-            }
-            if summary.git_branch.is_none() {
-                summary.git_branch = text(&record, "gitBranch");
-            }
-        }
-        match record["type"].as_str() {
-            Some("ai-title") => {
-                if let Some(title) = text(&record, "aiTitle") {
-                    summary.ai_title = Some(title);
-                }
-            }
-            Some("custom-title") => {
-                if let Some(title) = text(&record, "customTitle") {
-                    summary.custom_title = Some(title);
-                }
-            }
-            Some("last-prompt") => {
-                if let Some(prompt) = text(&record, "lastPrompt") {
-                    summary.last_prompt = Some(prompt);
-                }
-            }
-            Some("assistant") => {
-                if let Some(model) =
-                    text(&record, "requestedModel").or_else(|| text(&record["message"], "model"))
-                {
-                    summary.model = Some(model);
-                }
-                if let Some(effort) = text(&record, "effort") {
-                    summary.effort = Some(effort);
-                }
-            }
-            _ => {}
-        }
+        summary.record_metadata(&record);
     }
     if len <= 2 * CHUNK {
-        read_messages(&mut file, 0, head, &mut summary)?;
+        read_messages(
+            &mut file,
+            0,
+            head,
+            &mut summary,
+            false,
+            Background::default(),
+        )?;
     } else {
-        read_messages(&mut file, len - CHUNK - 1, tail, &mut summary)?;
+        read_messages(
+            &mut file,
+            len - CHUNK - 1,
+            tail,
+            &mut summary,
+            false,
+            Background::default(),
+        )?;
     }
     Ok(summary)
 }
 
+/// Reads one tail chunk; subagent files have no queue quiet point to bound a walk.
+pub(super) fn read_subagent(path: &Path, len: u64) -> io::Result<Summary> {
+    read_subagent_tail(&mut File::open(path)?, len)
+}
+
+pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io::Result<Summary> {
+    let start = len.saturating_sub(CHUNK + 1);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(CHUNK + 1).read_to_end(&mut bytes)?;
+    if start > 0 {
+        let skip = bytes
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(bytes.len(), |index| index + 1);
+        bytes.drain(..skip);
+    }
+    let mut summary = Summary::default();
+    for record in records_with_sidechains(&bytes, true) {
+        summary.record_metadata(&record);
+        if summary.subagent_records.len() == 3 {
+            summary.subagent_records.remove(0);
+        }
+        summary.subagent_records.push(record);
+    }
+    // Start zero prevents the message scan from seeking before this bounded tail.
+    read_messages(
+        &mut std::io::Cursor::new(Vec::<u8>::new()),
+        0,
+        bytes,
+        &mut summary,
+        true,
+        Background::default(),
+    )?;
+    Ok(summary)
+}
+
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::io::Write;
 
-    const FIXTURE: &str = include_str!("../../tests/fixtures/transcript.jsonl");
+    const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
+
+    pub(in crate::providers::claude) fn image_fixture() -> (tempfile::TempDir, Vec<Value>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut records: Vec<Value> =
+            include_str!("../../../tests/fixtures/claude-prompt-images.jsonl")
+                .lines()
+                .map(|line| {
+                    let line =
+                        line.replace("/redacted/claude-session", dir.path().to_str().unwrap());
+                    serde_json::from_str(&line).unwrap()
+                })
+                .collect();
+        // Pair by paste id even when companion text blocks arrive in another order.
+        records[7]["message"]["content"]
+            .as_array_mut()
+            .unwrap()
+            .reverse();
+        std::fs::create_dir(dir.path().join("images")).unwrap();
+        for number in [6, 8, 9] {
+            std::fs::write(
+                dir.path().join(format!("images/{number}.png")),
+                b"\x89PNG\r\n\x1a\n",
+            )
+            .unwrap();
+        }
+        (dir, records)
+    }
+
+    #[test]
+    fn details_prompt_images_join_the_selected_prompt() {
+        let (dir, records) = image_fixture();
+        let path = dir.path().join("transcript.jsonl");
+        // Split the two-image companion from its prompt across read chunks.
+        let padding = " ".repeat(CHUNK as usize * 3);
+        let mut bytes = String::new();
+        for (index, record) in records.iter().enumerate() {
+            bytes.push_str(&format!("{record}\n"));
+            if index == 4 {
+                bytes.push_str(&format!("{padding}\n"));
+            }
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        for missing in [false, true] {
+            if missing {
+                std::fs::remove_file(dir.path().join("images/8.png")).unwrap();
+            }
+            let summary = read(&path, bytes.len() as u64).unwrap();
+            let session =
+                super::super::session("test".into(), summary, Some(path.clone()), Utc::now());
+            let numbers = if missing { vec![9] } else { vec![8, 9] };
+            assert_eq!(
+                session.prompt_images,
+                numbers
+                    .into_iter()
+                    .map(|number| crate::log::Image {
+                        label: format!("[Image #{number}]"),
+                        path: dir.path().join(format!("images/{number}.png")),
+                    })
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn image_companion_is_not_the_details_prompt() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(include_bytes!(
+            "../../../tests/fixtures/claude-prompt-images.jsonl"
+        ))
+        .unwrap();
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        let record: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/claude-prompt-images.jsonl")
+                .lines()
+                .nth(4)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(summary.prompt, content_text(&record, false).unwrap());
+        assert_eq!(
+            summary.prompt_at,
+            Some("2026-10-13T19:17:18.224Z".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn peer_prompts_show_sender_and_body() {
+        let expected = [
+            "(translate-pdf) translate-pdf: user approved the pilot; second file (MathJax page) done: ~/Documents/MIT-zh/6.1910-Computation Structures/L01-notes-basics-of-information.pdf. Asking the user now whether to batch the remaining 155.",
+            "(general-purpose) 41 files: 23209 bytes before, 19698 bytes after. All files parse, so none are left unfixed.",
+            "(codex-support-research) {\"type\":\"idle_notification\",\"from\":\"codex-support-research\",\"timestamp\":\"2026-10-13T17:36:33.617Z\",\"idleReason\":\"available\",\"result\":\"done\"}",
+        ];
+        for (line, expected) in include_str!("../../../tests/fixtures/claude-peer-prompts.jsonl")
+            .lines()
+            .zip(expected)
+        {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file, "{line}").unwrap();
+            let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+            assert_eq!(summary.prompt, expected);
+            let mut record: Value = serde_json::from_str(line).unwrap();
+            record["isSidechain"] = true.into();
+            std::fs::write(file.path(), format!("{record}\n")).unwrap();
+            let summary =
+                read_subagent(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+            assert_eq!(summary.prompt, expected);
+        }
+    }
 
     fn assert_summary(summary: &Summary) {
         let records: Vec<Value> = FIXTURE
@@ -491,7 +779,12 @@ mod tests {
         assert_eq!(summary.ai_title.as_deref(), records[2]["aiTitle"].as_str());
         assert_eq!(
             summary.prompt,
-            preview(records[0]["message"]["content"].as_str().unwrap())
+            printable(
+                &super::super::log::pasted_content(
+                    records[0]["message"]["content"].as_str().unwrap()
+                )
+                .unwrap()
+            )
         );
         assert_eq!(summary.cwd, records[0]["cwd"].as_str().map(PathBuf::from));
         assert_eq!(summary.git_branch.as_deref(), Some("main"));
@@ -499,7 +792,7 @@ mod tests {
         assert_eq!(summary.effort.as_deref(), Some("medium"));
         assert_eq!(
             summary.last_message,
-            Some(preview(
+            Some(printable(
                 records[1]["message"]["content"][0]["text"]
                     .as_str()
                     .unwrap()
@@ -515,7 +808,7 @@ mod tests {
         );
     }
 
-    const PR: &str = include_str!("../../tests/fixtures/pr-link.jsonl");
+    const PR: &str = include_str!("../../../tests/fixtures/pr-link.jsonl");
 
     fn write_tool_traffic(file: &mut impl Write, bytes: usize) {
         let tool_use = serde_json::json!({
@@ -561,12 +854,35 @@ mod tests {
     }
 
     fn summary(file: &tempfile::NamedTempFile) -> Summary {
-        read(file.path(), file.as_file().metadata().unwrap().len()).unwrap()
+        let len = file.as_file().metadata().unwrap().len();
+        let mut summary = read(file.path(), len).unwrap();
+        let bytes = std::fs::read(file.path()).unwrap();
+        let requested = records(&bytes)
+            .filter_map(|record| {
+                let id = record["toolUseResult"]["backgroundTaskId"]
+                    .as_str()?
+                    .to_owned();
+                Some((id.clone(), PathBuf::from(format!("/tmp/x/{id}.output"))))
+            })
+            .collect();
+        let (tasks, _) = background_tasks(file.path(), len, &requested).unwrap();
+        summary.background = tasks.into_values().collect();
+        summary.background.sort_by(|a, b| a.output.cmp(&b.output));
+        summary
     }
 
     fn background_start(file: &mut impl Write, task: &str, description: Option<&str>, moved: bool) {
-        let mut input =
-            serde_json::json!({"command": "sleep 5\necho done", "description": description});
+        background_command(file, task, description, moved, "sleep 5\necho done");
+    }
+
+    fn background_command(
+        file: &mut impl Write,
+        task: &str,
+        description: Option<&str>,
+        moved: bool,
+        command: &str,
+    ) {
+        let mut input = serde_json::json!({"command": command, "description": description});
         if !moved {
             input["run_in_background"] = true.into();
         }
@@ -593,7 +909,7 @@ mod tests {
             file,
             "{}",
             serde_json::json!({
-                "type": "user", "message": {"content": [{"type": "tool_result",
+                "type": "user", "toolUseResult": {"backgroundTaskId": task}, "message": {"content": [{"type": "tool_result",
                     "tool_use_id": format!("tool-{task}"), "content": text}]}
             })
         )
@@ -670,11 +986,18 @@ mod tests {
     }
 
     #[test]
-    fn background_tasks_before_existing_quiet_point_are_not_scanned() {
+    fn background_tasks_before_existing_quiet_point_are_found() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         background_start(&mut file, "b1", Some("Earlier task"), false);
         idle_prompt(&mut file);
-        assert!(summary(&file).background.is_empty());
+        let requested = HashMap::from([("b1".to_owned(), PathBuf::from("/tmp/x/b1.output"))]);
+        let (tasks, _) = background_tasks(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            &requested,
+        )
+        .unwrap();
+        assert_eq!(tasks.len(), 1);
     }
 
     #[test]
@@ -687,9 +1010,16 @@ mod tests {
         file.write_all(&task[..newline]).unwrap();
         idle_prompt(&mut file);
         file.write_all(&task[newline..]).unwrap();
-        let tasks = summary(&file).background;
+        let requested =
+            HashMap::from([("pending".to_owned(), PathBuf::from("/tmp/x/pending.output"))]);
+        let (tasks, _) = background_tasks(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            &requested,
+        )
+        .unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].description, "Pair across boundary");
+        assert_eq!(tasks["pending"].description, "Pair across boundary");
     }
 
     #[test]
@@ -711,6 +1041,27 @@ mod tests {
         idle_prompt(&mut file);
         assert_eq!(summary(&file).prompt, "Current prompt");
         assert!(summary(&file).queued.is_empty());
+    }
+
+    #[test]
+    fn pasted_prompts_show_their_content_without_tags() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        idle_prompt(&mut file);
+        user(
+            &mut file,
+            "```\n\n\n<pasted_content id=\"a350\">\n```\n\n\n<\\pasted_content id=\"a832\">\nImplement workstream A.\n\nRules:\n- Do not push.\n<\\/pasted_content id=\"a832\">\n\n```\n\n发现了一个 bug。\n</pasted_content id=\"a350\">\n\n```\n嗯。",
+        );
+        queue(
+            &mut file,
+            "enqueue",
+            "<pasted_content id=\"a350\">\n  queued paste\n</pasted_content id=\"a350\">",
+        );
+        let summary = summary(&file);
+        assert_eq!(
+            summary.prompt,
+            "```\n\n\n```\n\n\nImplement workstream A.\n\nRules:\n- Do not push.\n\n\n```\n\n发现了一个 bug。\n\n\n```\n嗯。"
+        );
+        assert_eq!(summary.queued, ["queued paste"]);
     }
 
     #[test]
@@ -833,14 +1184,14 @@ mod tests {
     }
 
     #[test]
-    fn queue_without_quiet_point_replays_from_start_and_previews_after_matching() {
+    fn queue_without_quiet_point_replays_from_start_and_cleans_after_matching() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         let prefix = "中".repeat(512);
         queue(&mut file, "enqueue", &format!("{prefix}A"));
         queue(&mut file, "enqueue", &format!("{prefix}B"));
         queue(&mut file, "remove", &format!("{prefix}B"));
         queue(&mut file, "enqueue", "A\n\tB\0C");
-        assert_eq!(summary(&file).queued, [prefix, "A BC".into()]);
+        assert_eq!(summary(&file).queued, [format!("{prefix}A"), "A BC".into()]);
     }
 
     #[test]
@@ -944,6 +1295,72 @@ mod tests {
     }
 
     #[test]
+    fn activity_skips_hidden_tools() {
+        for sidechain in [false, true] {
+            for same_record in [false, true] {
+                for name in [
+                    "TaskCreate",
+                    "TaskUpdate",
+                    "TaskList",
+                    "TaskGet",
+                    "ListAgents",
+                    "TaskStop",
+                ] {
+                    for description in [None, Some("Update tasks")] {
+                        let mut file = tempfile::NamedTempFile::new().unwrap();
+                        let mut assistant: Value =
+                            serde_json::from_str(FIXTURE.lines().nth(1).unwrap()).unwrap();
+                        assistant["isSidechain"] = sidechain.into();
+                        assistant["message"]["content"] = serde_json::json!([
+                            {"type": "tool_use", "id": "bash", "name": "Bash", "input": {"description": "Run checks"}}
+                        ]);
+                        let bash_at: DateTime<Utc> =
+                            assistant["timestamp"].as_str().unwrap().parse().unwrap();
+                        let tool = serde_json::json!({"type": "tool_use", "id": "task", "name": name,
+                            "input": {"description": description}});
+                        if same_record {
+                            assistant["message"]["content"]
+                                .as_array_mut()
+                                .unwrap()
+                                .push(tool);
+                        } else {
+                            writeln!(file, "{assistant}").unwrap();
+                            assistant["timestamp"] = "2026-10-12T12:00:00Z".into();
+                            assistant["message"]["content"] = serde_json::json!([tool]);
+                        }
+                        writeln!(file, "{assistant}").unwrap();
+                        let len = file.as_file().metadata().unwrap().len();
+                        let summary = if sidechain {
+                            read_subagent(file.path(), len)
+                        } else {
+                            read(file.path(), len)
+                        }
+                        .unwrap();
+                        let activity = summary.activity.unwrap();
+                        if name == "TaskStop" {
+                            assert_eq!(activity.label, description.unwrap_or(name));
+                            assert_eq!(
+                                activity.at,
+                                assistant["timestamp"]
+                                    .as_str()
+                                    .unwrap()
+                                    .parse::<DateTime<Utc>>()
+                                    .unwrap()
+                            );
+                        } else {
+                            assert_eq!(
+                                activity.label, "Run checks",
+                                "{name}, sidechain={sidechain}, same_record={same_record}"
+                            );
+                            assert_eq!(activity.at, bash_at);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn activity_survives_chunks_and_later_prompts() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(FIXTURE.as_bytes()).unwrap();
@@ -976,6 +1393,51 @@ mod tests {
     }
 
     #[test]
+    fn background_metadata_survives_the_real_prompt_snapshot_attachment() {
+        // Actual Haiku/low records; private attachment strings are redacted byte-for-byte.
+        let fixture = include_bytes!("../../../tests/fixtures/claude-bg-metadata.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(fixture).unwrap();
+        let lines: Vec<_> = fixture
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .collect();
+        assert_eq!(lines.last().unwrap().len(), 73654);
+        let summary = read(file.path(), fixture.len() as u64).unwrap();
+        assert_eq!(
+            summary.last_message.as_deref(),
+            Some("agents-stage5-ux-1792167241")
+        );
+        assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
+        assert_eq!(summary.effort.as_deref(), Some("low"));
+        // The original metadata tail is entirely inside the oversized attachment.
+        assert_eq!(summary.timestamp, None);
+    }
+
+    #[test]
+    fn latest_visited_assistant_does_not_inherit_older_effort() {
+        let fixture = include_str!("../../../tests/fixtures/claude-bg-metadata.jsonl");
+        let mut rows: Vec<Value> = fixture
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let index = rows
+            .iter()
+            .position(|row| row["type"] == "assistant")
+            .unwrap();
+        let older = rows[index].clone();
+        rows[index].as_object_mut().unwrap().remove("effort");
+        rows.insert(index, older);
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for row in rows {
+            writeln!(file, "{row}").unwrap();
+        }
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
+        assert_eq!(summary.effort, None);
+    }
+
+    #[test]
     fn messages_survive_multiple_chunks_of_tool_traffic() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(FIXTURE.as_bytes()).unwrap();
@@ -984,7 +1446,7 @@ mod tests {
         let expected = read_fixture();
         assert_eq!(summary.prompt, expected.prompt);
         assert_eq!(summary.last_message, expected.last_message);
-        // Older replies must not restore metadata outside the original tail.
+        // The latest tool-only assistant has no metadata; do not infer it from the older reply.
         assert_eq!(summary.model, None);
         assert_eq!(summary.effort, None);
         assert_eq!(
@@ -1046,9 +1508,9 @@ mod tests {
             write_tool_traffic(&mut file, CHUNK as usize / 2);
             let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
             if kind == "user" {
-                assert_eq!(summary.prompt, preview(&message));
+                assert_eq!(summary.prompt, printable(&message));
             } else {
-                assert_eq!(summary.last_message, Some(preview(&message)));
+                assert_eq!(summary.last_message, Some(printable(&message)));
             }
         }
     }
@@ -1166,9 +1628,9 @@ mod tests {
     }
 
     #[test]
-    fn previews_preserve_unicode_and_allowed_whitespace() {
-        assert_eq!(preview("a\0b\n\t\u{7}c"), "ab\n\tc");
-        assert_eq!(preview(&"中".repeat(600)).chars().count(), 512);
+    fn printable_preserves_unicode_and_allowed_whitespace() {
+        assert_eq!(printable("a\0b\n\t\u{7}c"), "ab\n\tc");
+        assert_eq!(printable(&"中".repeat(600)), "中".repeat(600));
     }
 
     #[test]
@@ -1199,5 +1661,43 @@ mod tests {
             summary.ai_title.as_deref(),
             Some("Codex manager 停止时线程处理")
         );
+    }
+}
+
+#[cfg(test)]
+mod question_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn ask_user_question_matches_latest_call_by_id() {
+        let pending = include_str!("../../../tests/fixtures/claude-questions-pending.jsonl");
+        let answered = include_str!("../../../tests/fixtures/claude-questions-answered.jsonl");
+        let call: Value = serde_json::from_str(pending).unwrap();
+        let expected = question_texts(&call["message"]["content"][0]["input"]);
+        let answer: Value = serde_json::from_str(answered.lines().last().unwrap()).unwrap();
+        let mut other_answer = answer.clone();
+        other_answer["message"]["content"][0]["tool_use_id"] = "other-call".into();
+        let mut older_call = call.clone();
+        older_call["message"]["content"][0]["id"] = "older-call".into();
+        for (records, questions) in [
+            (vec![call.clone(), other_answer], expected.clone()),
+            (vec![older_call, call.clone(), answer.clone()], vec![]),
+            (
+                vec![call.clone(), answer.clone(), {
+                    let mut later_call = call.clone();
+                    later_call["message"]["content"][0]["id"] = "later-call".into();
+                    later_call
+                }],
+                expected,
+            ),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            for record in records {
+                writeln!(file, "{record}").unwrap();
+            }
+            let len = file.as_file().metadata().unwrap().len();
+            assert_eq!(read(file.path(), len).unwrap().pending_questions, questions);
+        }
     }
 }

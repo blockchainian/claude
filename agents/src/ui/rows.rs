@@ -37,6 +37,14 @@ impl View {
         buf: &mut Buffer,
         reference: chrono::DateTime<chrono::Utc>,
     ) {
+        let dragging =
+            self.selecting_list(text_selection::Panel::Tasks) && self.text_selection_dragging();
+        let mut state = self.viewport.borrow_mut();
+        state.task_text = text_selection::TextRegion::default();
+        state.list_links.clear();
+        state.list = area;
+        state.list_rows = Rect::default();
+        state.first_entry = 0;
         let row_width = area.width;
         let area = Rect {
             width: row_width.saturating_sub(/*rhs*/ 1),
@@ -46,15 +54,22 @@ impl View {
             return;
         }
         let indices = self.selectable_indices();
-        if indices.is_empty() {
+        if indices.is_empty() && (self.status_filter != 0 || self.drafts.is_empty()) {
             return;
         }
-        let mut state = self.viewport.borrow_mut();
         let entries = self.center_rows(&indices, self.grouping);
+        // Hand out accents top to bottom before drawing; the selected row is drawn without its accent
+        // but still takes its turn.
+        for entry in &entries {
+            if let CenterRow::Task(index) | CenterRow::Parent(index) = entry {
+                self.title_color(&self.rows[*index].id);
+            }
+        }
         let selected = entries
             .iter()
             .position(|row| match row {
-                CenterRow::Task(index) => *index == self.selected,
+                CenterRow::Task(index) => self.selected_draft.is_none() && *index == self.selected,
+                CenterRow::Draft(id) => self.selected_draft == Some(*id),
                 CenterRow::ShowMore => self.selected == usize::MAX,
                 _ => false,
             })
@@ -72,7 +87,8 @@ impl View {
         let height = usize::from(viewport.height);
         state.page_height = height;
         let mut start = state.scroll.min(entries.len().saturating_sub(height));
-        if selected < start {
+        state.task_scroll_max = entries.len().saturating_sub(height);
+        if !dragging && selected < start {
             start = if height > 1
                 && selected > 0
                 && matches!(entries[selected - 1], CenterRow::Group(_))
@@ -82,14 +98,48 @@ impl View {
                 selected
             };
         }
-        if selected >= start + height {
+        if !dragging && selected >= start + height {
             start = selected.saturating_add(/*rhs*/ 1).saturating_sub(height);
         }
         state.scroll = start;
+        state.first_entry = start;
+        state.list_rows = Rect {
+            width: row_width,
+            ..viewport
+        };
         for (offset, entry) in entries.iter().skip(start).take(height).enumerate() {
+            if let CenterRow::Draft(id) | CenterRow::DraftGroup(id) = entry {
+                let draft = self
+                    .drafts
+                    .iter()
+                    .find(|draft| draft.id == *id)
+                    .expect("visible draft");
+                let rect = row(viewport, offset as u16, 1);
+                if matches!(entry, CenterRow::DraftGroup(_)) {
+                    line(format!("{}", draft.heading().display()).dim(), rect, buf);
+                } else {
+                    let selected = self.selected_draft == Some(*id);
+                    if selected {
+                        state.marker = Some((rect.x, rect.y));
+                    }
+                    let text = format!("{}   New task", if selected { "›" } else { " " });
+                    line(
+                        Line::from(text).style(if selected {
+                            selection_style()
+                        } else {
+                            Style::default()
+                        }),
+                        rect,
+                        buf,
+                    );
+                }
+                continue;
+            }
             let index = match entry {
-                CenterRow::Group(index) | CenterRow::Task(index) => *index,
-                CenterRow::Gap => continue,
+                CenterRow::Group(index) | CenterRow::Task(index) | CenterRow::Parent(index) => {
+                    *index
+                }
+                CenterRow::Gap | CenterRow::Draft(_) | CenterRow::DraftGroup(_) => continue,
                 CenterRow::ShowMore => {
                     let rect = row(viewport, offset as u16, /*height*/ 1);
                     let selected = self.selected == usize::MAX;
@@ -129,11 +179,13 @@ impl View {
                     "Pinned".to_owned()
                 } else {
                     match self.grouping {
-                        Grouping::Project => {
-                            format_directory_display(&self.project_groups[index].heading)
-                        }
+                        Grouping::Project => format_directory_display(
+                            &self.project_groups[self.group_index(index).unwrap()].heading,
+                        ),
                         Grouping::Status => task.status.label().to_owned(),
-                        Grouping::Model => task.model_name().to_owned(),
+                        Grouping::Model => self.rows[self.group_index(index).unwrap()]
+                            .model_name()
+                            .to_owned(),
                     }
                 };
                 let count = indices
@@ -151,7 +203,7 @@ impl View {
                     format!("{count} of {total}")
                 };
                 let group = if self.grouping == Grouping::Project && !self.is_pinned(index) {
-                    super::line_truncation::center_truncate_path(
+                    super::line_truncation::abbreviate_path(
                         &group,
                         usize::from(rect.width)
                             .saturating_sub(count.width() + 2)
@@ -161,9 +213,24 @@ impl View {
                     group
                 };
                 line(format!("{group}  {count}").dim(), rect, buf);
+                if self.grouping == Grouping::Project && !self.is_pinned(index) {
+                    let link =
+                        Rect::new(rect.x, rect.y, group.width() as u16, 1).intersection(rect);
+                    let links = [(
+                        link,
+                        self.project_groups[self.group_index(index).unwrap()]
+                            .heading
+                            .clone(),
+                    )];
+                    state.list_links.extend(links);
+                }
                 continue;
             }
-            let style = if index == self.selected {
+            let header = matches!(entry, CenterRow::Parent(_));
+            let selected = !header && self.selected_draft.is_none() && index == self.selected;
+            let style = if header {
+                Style::default().dim()
+            } else if selected {
                 selection_style()
             } else {
                 Style::default()
@@ -176,35 +243,56 @@ impl View {
                 style,
             );
             let (status, mut dot) = Self::status(task);
-            if index == self.selected {
+            if selected || header {
                 dot.style = style;
             }
-            if index == self.selected {
+            if selected {
                 state.marker = Some((rect.x, rect.y));
             }
             line(
-                Line::from(if index == self.selected { "›" } else { " " }).style(style),
+                Line::from(if selected { "›" } else { " " }).style(style),
                 rect,
                 buf,
             );
+            let indent = if task.parent.is_some() { 2 } else { 0 };
+            if indent > 0 {
+                line(
+                    Line::from("└ ").style(style),
+                    Rect::new(
+                        rect.x + rect.width.min(2),
+                        rect.y,
+                        rect.width.saturating_sub(2).min(2),
+                        1,
+                    ),
+                    buf,
+                );
+            }
             line(
                 Line::from(dot),
                 Rect::new(
-                    rect.x + rect.width.min(/*other*/ 2),
+                    rect.x + rect.width.min(2 + indent),
                     rect.y,
-                    rect.width.saturating_sub(/*rhs*/ 2).min(/*other*/ 1),
+                    rect.width.saturating_sub(2 + indent).min(/*other*/ 1),
                     /*height*/ 1,
                 ),
                 buf,
             );
-            let (title, status_area, updated) = columns(rect);
-            let title_style = if index == self.selected {
+            let (mut title, status_area, updated) = columns(rect);
+            let indent = title.width.min(indent);
+            title.x += indent;
+            title.width -= indent;
+            let title_style = if selected || header {
                 style
             } else {
                 self.title_style(&task.id)
             };
             line(
-                Line::from(task.display_title().to_owned()).style(title_style),
+                Line::from(if task.background_job.is_some() {
+                    format!("bg {}", task.display_title())
+                } else {
+                    task.display_title().to_owned()
+                })
+                .style(title_style),
                 title,
                 buf,
             );
@@ -212,11 +300,7 @@ impl View {
             if !updated.is_empty() {
                 let age = format_relative_time(reference, Some(task.updated_at));
                 Line::from(age)
-                    .style(if index == self.selected {
-                        style
-                    } else {
-                        style.dim()
-                    })
+                    .style(if selected { style } else { style.dim() })
                     .right_aligned()
                     .render(updated, buf);
             }
@@ -235,5 +319,8 @@ impl View {
                 buf,
             );
         }
+        let text_area = state.list_rows;
+        drop(state);
+        self.capture_list_text(text_selection::Panel::Tasks, text_area, start, buf);
     }
 }

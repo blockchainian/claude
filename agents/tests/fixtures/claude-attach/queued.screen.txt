@@ -1,0 +1,50 @@
+
+ ▐▛███▛█   Claude Code v2.1.299
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   /private/var/folders/l5/39n6lz4x12x58pz0ynsfbpmw0000gn/T/.tmp1L1UQB · /rc
+
+
+❯ Reply exactly READY and stop. Do not use tools or edit files.
+
+⏺ READY
+
+✻ Cooked for 3s · done 8:39 AM
+
+❯ Explain sorting algorithms in at least 6000 words.
+  Include the literal phrase agents-paste-✓ and continue until the explanation is complete. Do not use tools or edit files.
+
+❯ Steer this running explanation: include agents-steer-✓ next, then keep explaining. Do not start another task.
+  ctrl+x ctrl+s to send now
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+● … (14s · ↓ 2.6k tokens)
+                                                                                                                                                Update available! Run: brew upgrade claude-code@latest
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ready-reply-stop ─
+❯ Press up to edit queued messages
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Claude · Context 100% left · 200k · 0s
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

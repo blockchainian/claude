@@ -30,7 +30,7 @@ impl Group {
     }
 }
 
-pub(crate) fn group_lines(groups: [Group; 3], width: u16) -> Vec<Line<'static>> {
+pub(crate) fn group_lines(groups: [Group; 4], width: u16) -> Vec<Line<'static>> {
     let groups = groups.map(|group| group.lines());
     let widths: Vec<usize> = groups
         .iter()
@@ -38,15 +38,17 @@ pub(crate) fn group_lines(groups: [Group; 3], width: u16) -> Vec<Line<'static>> 
         .collect();
     let width = usize::from(width.max(/*other*/ 1));
     let mut result = Vec::new();
-    if widths.iter().sum::<usize>() + COLUMN_GAP * 2 <= width {
+    if widths.iter().sum::<usize>() + COLUMN_GAP * (groups.len() - 1) <= width {
         result.extend(columns(&groups, &widths));
-    } else if widths[0] + COLUMN_GAP + widths[1].max(widths[2]) <= width {
-        let mut right = groups[1].clone();
-        right.push(Line::default());
-        right.extend(groups[2].clone());
+    } else if widths[0].max(widths[2]) + COLUMN_GAP + widths[1].max(widths[3]) <= width {
         result.extend(columns(
-            &[groups[0].clone(), right],
-            &[widths[0], widths[1].max(widths[2])],
+            &groups[..2],
+            &[widths[0].max(widths[2]), widths[1].max(widths[3])],
+        ));
+        result.push(Line::default());
+        result.extend(columns(
+            &groups[2..],
+            &[widths[0].max(widths[2]), widths[1].max(widths[3])],
         ));
     } else {
         for (index, group) in groups.into_iter().enumerate() {

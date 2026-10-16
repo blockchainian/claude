@@ -1,0 +1,13 @@
+{
+  "updatedAt": 1791000010378,
+  "threads": [
+    {
+      "id": "thread-12",
+      "name": "Managed worker",
+      "cwd": "/workspace/project",
+      "turnId": "turn-example",
+      "lastStatus": "completed",
+      "waiting": []
+    }
+  ]
+}

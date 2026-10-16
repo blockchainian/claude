@@ -1,0 +1,951 @@
+fn session_key(id: &str) -> crate::providers::SessionKey {
+    crate::providers::SessionKey {
+        provider: crate::providers::ProviderId::Claude,
+        id: id.into(),
+    }
+}
+use super::*;
+use crate::model::SessionStatus;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+pub(super) fn fixture() -> (tempfile::TempDir, App) {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+        include_str!("../../../tests/fixtures/transcript.jsonl"),
+    )
+    .unwrap();
+    let mut app = App::new(
+        Hub::new(vec![Box::new(
+            crate::providers::claude::ClaudeProvider::new(dir.path().to_owned()),
+        )]),
+        dir.path().to_owned(),
+    );
+    app.refresh();
+    assert_eq!(app.sessions.len(), 1);
+    app.sessions[0].cwd = dir.path().to_owned();
+    app.sessions[0].status = SessionStatus::Ready;
+    app.view.set_sessions(app.sessions.clone(), false);
+    app.refresh_log(8);
+    (dir, app)
+}
+
+pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
+    let quit = app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+    app.refresh_log(8);
+    quit
+}
+
+fn assert_resume(app: &App) {
+    let command = app.launch.as_ref().expect("session should resume");
+    assert_eq!(command.get_program(), "claude");
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["--resume", app.sessions[0].id.id.as_str()]
+    );
+    assert_eq!(
+        command.get_current_dir(),
+        Some(app.sessions[0].cwd.as_path())
+    );
+}
+
+#[test]
+fn terminal_theme_events_update_background_and_accents() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let (_dir, mut app) = fixture();
+    crate::ui::set_light_background(false);
+    crate::theme::use_default_accents(false);
+    let dark = crate::theme::accent(0);
+    assert!(!app.handle_event(Event::ThemeChanged(Theme::Light)));
+    assert!(crate::ui::light_background());
+    let light = crate::theme::accent(0);
+    assert_ne!(light, dark);
+    assert!(!app.handle_event(Event::ThemeChanged(Theme::Dark)));
+    assert!(!crate::ui::light_background());
+    assert_eq!(crate::theme::accent(0), dark);
+
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        file.path(),
+        r##"<?xml version="1.0"?>
+<plist version="1.0"><dict><key>settings</key><array>
+<dict><key>scope</key><string>keyword</string><key>settings</key>
+<dict><key>foreground</key><string>#123456</string></dict></dict>
+</array></dict></plist>"##,
+    )
+    .unwrap();
+    app.preferences.theme = Some(file.path().to_owned());
+    app.apply_background(None, true);
+    assert!(crate::ui::light_background());
+    assert_eq!(
+        crate::theme::accent(0),
+        ratatui::style::Color::Rgb(0x12, 0x34, 0x56)
+    );
+    for theme in [Theme::Light, Theme::Dark] {
+        assert!(!app.handle_event(Event::ThemeChanged(theme)));
+        assert_eq!(crate::ui::light_background(), theme == Theme::Light);
+        assert_eq!(
+            crate::theme::accent(0),
+            ratatui::style::Color::Rgb(0x12, 0x34, 0x56)
+        );
+    }
+    crate::theme::use_default_accents(false);
+}
+
+#[test]
+fn task_log_cache_rereads_when_event_count_changes() {
+    let (_dir, mut app) = fixture();
+    key(&mut app, KeyCode::BackTab);
+    app.refresh();
+    app.refresh_log(8);
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, payload.repeat(20)).unwrap();
+    for (height, count) in [(24, 7), (40, 11), (60, 19), (19, 0), (24, 7)] {
+        app.refresh_log(
+            app.view
+                .log_event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
+        );
+        assert_eq!(app.view.log.len(), count);
+    }
+}
+
+pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) {
+    let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    app.view.render(area, &mut buffer);
+    app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
+        kind,
+        column: 2,
+        row: 14,
+        modifiers: KeyModifiers::NONE,
+    }));
+}
+
+#[test]
+fn queued_wheel_events_apply_before_the_next_draw() {
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, payload.repeat(20)).unwrap();
+    app.refresh_log(8);
+    let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    let wheel = || {
+        Input::Terminal(Ok(Event::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::ScrollDown,
+            column: 2,
+            row: 14,
+            modifiers: KeyModifiers::NONE,
+        })))
+    };
+    for _ in 0..4 {
+        app.sender.send(wheel()).unwrap();
+    }
+    let mut schedule = RefreshSchedule::new(std::time::Instant::now(), POLLING_INTERVAL);
+    assert!(
+        !app.handle_inputs(wheel(), &mut None, &mut schedule)
+            .unwrap()
+    );
+    assert!(app.receiver.try_recv().is_err());
+    assert_eq!(app.view.log_scroll(), 15);
+}
+
+#[test]
+fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
+    use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, payload.repeat(20)).unwrap();
+    app.refresh_log(8);
+    scroll_log(&mut app, ScrollDown);
+    app.refresh_log(8);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 11);
+    assert_eq!(app.view.log.len(), 11);
+    let cached = app.view.log.clone();
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    std::fs::write(&path, payload.replace("Codex", "CODEX").repeat(20)).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    app.refresh_log(8);
+    assert_eq!(app.view.log, cached);
+    scroll_log(&mut app, ScrollUp);
+    app.refresh_log(8);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
+    assert_eq!(app.view.log.len(), 8);
+    assert_ne!(app.view.log, cached[3..]);
+}
+
+#[test]
+fn task_log_growth_keeps_distance_from_end() {
+    use crossterm::event::MouseEventKind::ScrollDown;
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, payload.repeat(20)).unwrap();
+    app.refresh_log(8);
+    scroll_log(&mut app, ScrollDown);
+    app.refresh_log(8);
+    let before = app.view.log.clone();
+    std::fs::write(
+        &path,
+        payload.repeat(20) + &payload.replace("Codex", "CODEX"),
+    )
+    .unwrap();
+    app.refresh_log(8);
+    assert_eq!(app.view.log_scroll(), 3);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 11);
+    assert_ne!(app.view.log, before);
+}
+
+#[test]
+fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
+    use std::io::Write;
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, payload.repeat(20)).unwrap();
+    app.refresh_log(1);
+    app.view.handle_key(crossterm::event::KeyEvent::new(
+        KeyCode::Char('r'),
+        KeyModifiers::CONTROL,
+    ));
+    app.refresh_log(1);
+    for c in "Codex".chars() {
+        key(&mut app, KeyCode::Char(c));
+    }
+    app.refresh_log(1);
+    assert_eq!(app.view.matching_log_count(), 20);
+    for _ in 0..30 {
+        scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollDown);
+    }
+    app.refresh_log(1);
+    assert_eq!(app.view.log_scroll(), 19);
+    let cached = app.view.log.clone();
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    std::fs::write(&path, payload.replace("Codex", "other").repeat(20)).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    key(&mut app, KeyCode::Backspace);
+    app.refresh_log(1);
+    assert_eq!(
+        app.view.log, cached,
+        "query changes reuse cached transcript"
+    );
+    key(&mut app, KeyCode::Char('x'));
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T16:40:00Z", "content":"Codex timeout"})).unwrap();
+    app.refresh_log(1);
+    assert_eq!(app.view.matching_log_count(), 1);
+    assert_eq!(app.view.log.last().unwrap().body, "Codex timeout");
+    key(&mut app, KeyCode::Esc);
+    app.refresh_log(1);
+    assert_eq!(app.view.log.len(), 1);
+}
+
+#[test]
+fn task_log_scroll_clamps_at_transcript_start() {
+    use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
+    let (_dir, mut app) = fixture();
+    assert_eq!(app.view.log.len(), 2);
+    app.refresh_log(1);
+    for _ in 0..5 {
+        scroll_log(&mut app, ScrollDown);
+    }
+    app.refresh_log(1);
+    assert_eq!(app.view.log.len(), 2);
+    scroll_log(&mut app, ScrollUp);
+    app.refresh_log(1);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 1);
+    assert_eq!(app.view.log.len(), 1);
+    // A transcript shorter than the visible window clamps all the way to zero.
+    scroll_log(&mut app, ScrollDown);
+    app.refresh_log(8);
+    app.refresh_log(8);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
+}
+
+#[test]
+fn task_log_cache_uses_selection_length_and_mtime() {
+    use std::io::Write;
+    let (_dir, mut app) = fixture();
+    key(&mut app, KeyCode::BackTab);
+    app.refresh();
+    app.refresh_log(8);
+    assert_eq!(app.view.log.len(), 2);
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let original = std::fs::read_to_string(&path).unwrap();
+    let changed = original.replace("Codex", "CODEX");
+    assert_eq!(original.len(), changed.len());
+    std::fs::write(&path, &changed).unwrap();
+    let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    file.set_modified(modified).unwrap();
+    let cached = app.view.log.clone();
+    app.refresh_log(8);
+    assert_eq!(app.view.log, cached);
+    file.set_modified(modified + Duration::from_secs(1))
+        .unwrap();
+    app.refresh_log(8);
+    assert_ne!(app.view.log, cached);
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T16:40:00Z", "content":"queued"})).unwrap();
+    file.set_modified(modified + Duration::from_secs(1))
+        .unwrap();
+    app.refresh();
+    app.refresh_log(8);
+    assert_eq!(app.sessions.len(), 1);
+    assert!(
+        app.view.selected_id().is_some(),
+        "selected disappeared after refresh"
+    );
+    assert_eq!(app.view.log.last().unwrap().body, "queued");
+}
+
+#[test]
+fn task_log_reloads_on_keyboard_selection_and_clears_without_transcript() {
+    let (dir, mut app) = fixture();
+    let mut second = app.sessions[0].clone();
+    second.id = session_key("second");
+    second.updated_at -= chrono::Duration::seconds(1);
+    let path = dir.path().join("second.jsonl");
+    std::fs::write(&path, serde_json::json!({"type":"user", "timestamp":"2026-10-06T16:40:00Z", "message":{"content":"second prompt"}}).to_string()).unwrap();
+    second.transcript = Some(path);
+    let mut third = second.clone();
+    third.id = session_key("third");
+    third.updated_at -= chrono::Duration::seconds(1);
+    third.transcript = None;
+    app.sessions.extend([second, third]);
+    app.view.set_sessions(app.sessions.clone(), false);
+    app.refresh_log(8);
+    key(&mut app, KeyCode::Down);
+    assert_eq!(app.view.log_session.as_ref(), Some(&session_key("second")));
+    assert_eq!(app.view.log[0].body, "second prompt");
+    key(&mut app, KeyCode::Down);
+    assert!(app.view.log.is_empty());
+    assert!(app.view.log_session.is_none());
+}
+
+#[test]
+fn subagent_selection_loads_own_transcript_and_restores_parent_log() {
+    let (dir, mut app) = fixture();
+    let parent = app.sessions[0].clone();
+    let parent_log = app.view.log.clone();
+    let mut child = parent.clone();
+    child.id = session_key("agent-abf695d5995bd43ab");
+    child.parent = Some(parent.id.clone());
+    child.process = None;
+    child.status = SessionStatus::Working;
+    let path = dir.path().join("agent-abf695d5995bd43ab.jsonl");
+    std::fs::write(
+        &path,
+        include_str!("../../../tests/fixtures/subagent.jsonl"),
+    )
+    .unwrap();
+    child.transcript = Some(path);
+    app.sessions.push(child.clone());
+    app.view.set_sessions(app.sessions.clone(), false);
+    key(&mut app, KeyCode::Down);
+    assert_eq!(app.view.selected_id(), Some(&child.id));
+    assert_eq!(app.view.log_session.as_ref(), Some(&child.id));
+    assert_eq!(app.log_stamp.as_ref().unwrap().session, child.id);
+    assert!(app.view.log[0].body.starts_with("SubagentHandback"));
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('r'),
+        KeyModifiers::CONTROL,
+    )));
+    app.refresh_log(8);
+    assert_eq!(app.full_log_stamp.as_ref().unwrap().session, child.id);
+    assert!(app.view.log[0].body.starts_with("SubagentHandback"));
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Up);
+    assert_eq!(app.view.log_session.as_ref(), Some(&parent.id));
+    assert_eq!(app.log_stamp.as_ref().unwrap().session, parent.id);
+    assert_eq!(app.view.log, parent_log);
+}
+
+#[test]
+fn working_subagent_log_ticks_without_process_and_ready_log_stops() {
+    let (dir, mut app, _child) = subagent_fixture();
+    let path = dir.path().join("running-subagent.jsonl");
+    std::fs::write(
+        &path,
+        format!(
+            "{}{}\n",
+            include_str!("../../../tests/fixtures/transcript.jsonl"),
+            include_str!("../../../tests/fixtures/automode_blocked.jsonl")
+                .lines()
+                .next()
+                .unwrap()
+        ),
+    )
+    .unwrap();
+    let now = chrono::Utc::now();
+    for (status, expected) in [
+        (SessionStatus::Working, Some(Duration::from_secs(1))),
+        (SessionStatus::Ready, None),
+    ] {
+        app.sessions[1].status = status;
+        app.view.set_sessions(app.sessions.clone(), false);
+        app.view.log = crate::providers::claude::log::tail(&path, 8).unwrap();
+        assert_eq!(app.view.log_redraw_in(now), expected);
+    }
+}
+
+#[test]
+fn last_prose_log_row_ticks_each_second_under_a_minute() {
+    let (_dir, mut app) = fixture();
+    let started_at = chrono::Utc::now();
+    app.view.log_session = Some(app.sessions[0].id.clone());
+    app.view.log = vec![crate::log::Event {
+        sender: None,
+        kind: crate::log::Kind::Assistant,
+        body: "done".into(),
+        paths: Vec::new(),
+        started_at,
+        ended_at: None,
+        duration: None,
+        previous_end: None,
+        images: Vec::new(),
+        calls: Vec::new(),
+    }];
+    let at = |seconds| started_at + chrono::Duration::seconds(seconds);
+    assert_eq!(app.view.log_redraw_in(at(12)), Some(Duration::from_secs(1)));
+    assert_eq!(
+        app.view.log_redraw_in(at(125)),
+        Some(Duration::from_secs(55))
+    );
+}
+
+fn subagent_fixture() -> (tempfile::TempDir, App, Session) {
+    let (dir, mut app) = fixture();
+    let mut child = app.sessions[0].clone();
+    child.id = session_key("agent-abf695d5995bd43ab");
+    child.parent = Some(app.sessions[0].id.clone());
+    child.process = None;
+    let path = dir.path().join(format!("{}.jsonl", child.id.id));
+    std::fs::write(
+        &path,
+        include_str!("../../../tests/fixtures/subagent.jsonl"),
+    )
+    .unwrap();
+    child.transcript = Some(path);
+    app.sessions.push(child.clone());
+    app.view.set_sessions(app.sessions.clone(), false);
+    key(&mut app, KeyCode::Down);
+    assert_eq!(app.view.selected_id(), Some(&child.id));
+    (dir, app, child)
+}
+
+fn assert_subagent_action_blocked(make_action: impl FnOnce(&SessionKey) -> Action) {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let (dir, mut app, child) = subagent_fixture();
+    key(&mut app, KeyCode::Up);
+    let selected = app.view.selected_id().unwrap().to_owned();
+    assert_ne!(selected, child.id);
+    let sessions = app.sessions.clone();
+    let preferences = app.preferences.clone();
+    let log = app.view.log.clone();
+    let path = child.transcript.as_ref().unwrap();
+    let transcript = std::fs::read(path).unwrap();
+    let meta = path.with_extension("meta.json");
+    std::fs::write(&meta, r#"{"description":"Check files","name":"worker"}"#).unwrap();
+    let metadata = std::fs::read(&meta).unwrap();
+    let area = ratatui::layout::Rect::new(0, 0, 120, 30);
+    let mut before = ratatui::buffer::Buffer::empty(area);
+    app.view.render_at(area, &mut before, child.updated_at);
+    let action = make_action(&child.id);
+    let resume = matches!(action, Action::Open(_) | Action::Resume(_));
+    assert!(!app.handle_action(Some(action)));
+    let mut after = ratatui::buffer::Buffer::empty(area);
+    app.view.render_at(area, &mut after, child.updated_at);
+    if resume {
+        assert!(
+            after
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .contains("Resume is not supported")
+        );
+        app.view.set_notice(None);
+        after = ratatui::buffer::Buffer::empty(area);
+        app.view.render_at(area, &mut after, child.updated_at);
+    }
+    assert_eq!(after, before);
+    assert_eq!(app.sessions, sessions);
+    assert_eq!(app.preferences, preferences);
+    assert_eq!(app.view.log, log);
+    assert_eq!(app.view.selected_id(), Some(&selected));
+    assert!(app.launch.is_none());
+    assert!(app.last_session.is_none());
+    assert_eq!(std::fs::read(path).unwrap(), transcript);
+    assert!(!path.with_extension("").exists());
+    assert_eq!(std::fs::read(meta).unwrap(), metadata);
+    assert!(!dir.path().join("agents.json").exists());
+}
+
+#[test]
+fn subagent_open_shows_unsupported_notice() {
+    assert_subagent_action_blocked(|id| Action::Open(id.clone()));
+}
+
+#[test]
+fn subagent_resume_shows_unsupported_notice() {
+    assert_subagent_action_blocked(|id| Action::Resume(id.clone()));
+}
+
+#[test]
+fn subagent_fork_is_ignored() {
+    assert_subagent_action_blocked(|id| Action::Fork(id.clone()));
+}
+
+#[test]
+fn subagent_rename_is_ignored() {
+    assert_subagent_action_blocked(|id| Action::Rename {
+        id: id.clone(),
+        name: "Rename".into(),
+    });
+}
+
+#[test]
+fn subagent_delete_is_ignored() {
+    assert_subagent_action_blocked(|id| Action::Delete(id.clone()));
+}
+
+#[test]
+fn subagent_pin_is_ignored() {
+    for pinned in [false, true] {
+        assert_subagent_action_blocked(|id| Action::TogglePin {
+            id: id.clone(),
+            pinned,
+        });
+    }
+}
+
+#[test]
+fn subagent_launch_is_ignored_before_directory_validation() {
+    let (_dir, mut app, mut child) = subagent_fixture();
+    child.cwd = child.cwd.join("missing");
+    assert!(!app.launch_session(Action::Resume(child.id.clone()), child.clone()));
+    assert!(app.launch.is_none());
+    assert!(app.last_session.is_none());
+    let area = ratatui::layout::Rect::new(0, 0, 120, 30);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    app.view.render_at(area, &mut buffer, child.updated_at);
+    assert!(
+        !buffer
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+            .contains("Directory no longer exists")
+    );
+}
+
+#[test]
+fn escape_without_launched_session_opens_new_session() {
+    let (_dir, mut app) = fixture();
+    assert!(key(&mut app, KeyCode::Esc));
+    let command = app.launch.as_ref().expect("new session should launch");
+    assert_eq!(command.get_program(), "claude");
+    assert_eq!(command.get_args().len(), 0);
+    assert_eq!(
+        command.get_current_dir(),
+        Some(std::env::current_dir().unwrap().as_path())
+    );
+    assert!(app.last_session.is_none());
+}
+
+#[test]
+fn escape_resumes_last_opened_session() {
+    let (_dir, mut app) = fixture();
+    assert!(key(&mut app, KeyCode::Enter));
+    app.launch.take().unwrap();
+    // True leaves the dashboard for either quit or launch; the command distinguishes them.
+    assert!(key(&mut app, KeyCode::Esc));
+    assert_resume(&app);
+}
+
+#[test]
+fn escape_after_session_removed_opens_new_session() {
+    let (_dir, mut app) = fixture();
+    assert!(key(&mut app, KeyCode::Enter));
+    app.launch.take().unwrap();
+    let last_session = app.last_session.clone();
+    app.sessions.clear();
+    app.view.set_sessions(Vec::new(), false);
+    assert!(key(&mut app, KeyCode::Esc));
+    let command = app.launch.as_ref().expect("new session should launch");
+    assert_eq!(command.get_program(), "claude");
+    assert_eq!(command.get_args().len(), 0);
+    assert_eq!(
+        command.get_current_dir(),
+        Some(std::env::current_dir().unwrap().as_path())
+    );
+    assert_eq!(app.last_session, last_session);
+}
+
+#[test]
+fn escape_remembers_resume_and_fork_but_not_new() {
+    for code in [KeyCode::Char('o'), KeyCode::Char('f')] {
+        let (_dir, mut app) = fixture();
+        assert!(key(&mut app, code));
+        app.launch.take().unwrap();
+        assert!(app.handle_action(Some(Action::New)));
+        app.launch.take().unwrap();
+        assert!(key(&mut app, KeyCode::Esc));
+        assert_resume(&app);
+    }
+    let (_dir, mut app) = fixture();
+    assert!(app.handle_action(Some(Action::New)));
+    app.launch.take().unwrap();
+    assert!(key(&mut app, KeyCode::Esc));
+    assert!(app.launch.is_some());
+    assert!(app.last_session.is_none());
+}
+
+#[test]
+fn escape_with_missing_directory_stays_in_dashboard() {
+    let (dir, mut app) = fixture();
+    assert!(key(&mut app, KeyCode::Enter));
+    app.launch.take().unwrap();
+    app.sessions[0].cwd = dir.path().join("missing");
+    assert!(!key(&mut app, KeyCode::Esc));
+    assert!(app.launch.is_none());
+}
+
+#[test]
+fn control_c_after_open_quits() {
+    let (_dir, mut app) = fixture();
+    assert!(key(&mut app, KeyCode::Enter));
+    app.launch.take().unwrap();
+    assert!(app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('c'),
+        KeyModifiers::CONTROL
+    ))));
+    assert!(app.launch.is_none());
+}
+
+#[test]
+fn child_resume_actions_reach_the_provider_or_show_the_notice() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    use crate::providers::{Provider, ProviderId, SessionKey, codex::CodexProvider};
+    use ratatui::{buffer::Buffer, layout::Rect};
+    for manager in [false, true] {
+        let (dir, mut app) = fixture();
+        rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+            .unwrap()
+            .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+            .unwrap();
+        let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let mut child = provider
+            .refresh(2)
+            .sessions
+            .into_iter()
+            .find(|session| session.id.id == "thread-13")
+            .unwrap();
+        if manager {
+            child.parent = Some(app.sessions[0].id.clone());
+        }
+        child.cwd = dir.path().into();
+        app.hub = Hub::new(vec![Box::new(provider)]);
+        app.sessions.push(child.clone());
+        for action in [
+            Action::Open(child.id.clone()),
+            Action::Resume(child.id.clone()),
+        ] {
+            assert_eq!(app.handle_action(Some(action)), manager);
+            if manager {
+                let command = app.launch.take().unwrap();
+                assert_eq!(command.get_program(), "codex");
+                assert_eq!(
+                    command.get_args().collect::<Vec<_>>(),
+                    ["resume", "thread-13"]
+                );
+            } else {
+                assert!(app.launch.is_none());
+                let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
+                app.view.render(buffer.area, &mut buffer);
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .map(|cell| cell.symbol())
+                        .collect::<String>()
+                        .contains("Resume is not supported")
+                );
+            }
+        }
+        if !manager {
+            for action in [
+                Action::Fork(child.id.clone()),
+                Action::Delete(child.id.clone()),
+                Action::TogglePin {
+                    id: child.id.clone(),
+                    pinned: true,
+                },
+            ] {
+                assert!(!app.handle_action(Some(action)));
+                assert!(app.launch.is_none());
+                assert!(app.preferences.pinned.is_empty());
+            }
+        }
+        let mut claude_child = app.sessions[0].clone();
+        claude_child.id = SessionKey {
+            provider: ProviderId::Claude,
+            id: "agent-child".into(),
+        };
+        claude_child.parent = Some(app.sessions[0].id.clone());
+        app.sessions.push(claude_child.clone());
+        assert!(!app.handle_action(Some(Action::Open(claude_child.id))));
+        assert!(app.launch.is_none());
+    }
+}
+
+#[test]
+fn child_rename_only_reaches_provider_for_manager_threads() {
+    use crate::providers::{Provider, ProviderId, codex::CodexProvider};
+    use ratatui::{buffer::Buffer, layout::Rect};
+    for (child_provider, parent_provider) in [
+        (ProviderId::Codex, ProviderId::Claude),
+        (ProviderId::Codex, ProviderId::Codex),
+        (ProviderId::Claude, ProviderId::Claude),
+    ] {
+        let (dir, mut app) = fixture();
+        rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+            .unwrap()
+            .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+            .unwrap();
+        let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let mut child = provider
+            .refresh(2)
+            .sessions
+            .into_iter()
+            .find(|session| session.id.id == "thread-13")
+            .unwrap();
+        child.id.provider = child_provider;
+        child.parent = Some(SessionKey {
+            provider: parent_provider,
+            id: app.sessions[0].id.id.clone(),
+        });
+        app.hub = Hub::new(vec![Box::new(provider)]);
+        app.sessions.push(child.clone());
+        assert!(!app.handle_action(Some(Action::Rename {
+            id: child.id.clone(),
+            name: "Rename probe".into()
+        })));
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
+        app.view.render(buffer.area, &mut buffer);
+        let rendered = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert_eq!(
+            rendered.contains("Failed to rename"),
+            child_provider == ProviderId::Codex && parent_provider == ProviderId::Claude
+        );
+        assert!(app.launch.is_none());
+        if !child.can_resume() {
+            for action in [
+                Action::Fork(child.id.clone()),
+                Action::Delete(child.id.clone()),
+                Action::Archive(child.id.clone()),
+                Action::Stop(child.id.clone()),
+                Action::TogglePin {
+                    id: child.id.clone(),
+                    pinned: true,
+                },
+            ] {
+                assert!(!app.handle_action(Some(action)));
+                assert!(app.launch.is_none());
+                assert!(app.preferences.pinned.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn manager_thread_fork_reaches_app_launch() {
+    use crate::providers::{Provider, codex::CodexProvider};
+    let (dir, mut app) = fixture();
+    rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+        .unwrap();
+    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut child = provider
+        .refresh(2)
+        .sessions
+        .into_iter()
+        .find(|session| session.id.id == "thread-13")
+        .unwrap();
+    child.parent = Some(app.sessions[0].id.clone());
+    child.cwd = dir.path().into();
+    app.hub = Hub::new(vec![Box::new(provider)]);
+    app.sessions.push(child.clone());
+    assert!(app.handle_action(Some(Action::Fork(child.id))));
+    let command = app.launch.unwrap();
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["fork", "thread-13"]
+    );
+}
+
+#[test]
+fn manager_thread_mutations_reach_app_provider_paths() {
+    use crate::providers::{Provider, codex::CodexProvider};
+    use ratatui::{buffer::Buffer, layout::Rect};
+    for operation in ["archive", "stop", "delete"] {
+        let (dir, mut app) = fixture();
+        rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+            .unwrap()
+            .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+            .unwrap();
+        let manager = dir.path().join("manager");
+        std::fs::create_dir_all(manager.join("threads")).unwrap();
+        std::fs::create_dir_all(manager.join("claude-parent")).unwrap();
+        std::fs::write(
+            manager.join("threads/thread-12.json"),
+            include_bytes!("../../../tests/fixtures/codex-manager/attached-supervisor.json"),
+        )
+        .unwrap();
+        let state = manager.join("claude-parent/state.json");
+        let bytes = include_bytes!("../../../tests/fixtures/codex-manager/attached-state.json");
+        std::fs::write(&state, bytes).unwrap();
+        let mut provider = CodexProvider::new(dir.path().into(), manager);
+        let child = provider
+            .refresh(2)
+            .sessions
+            .into_iter()
+            .find(|session| session.id.id == "thread-12")
+            .unwrap();
+        assert!(child.parent.is_some() && child.can_resume());
+        app.hub = Hub::new(vec![Box::new(provider)]);
+        app.sessions.push(child.clone());
+        let action = match operation {
+            "archive" => Action::Archive(child.id),
+            "stop" => Action::Stop(child.id),
+            "delete" => Action::Delete(child.id),
+            _ => unreachable!(),
+        };
+        assert!(!app.handle_action(Some(action)));
+        if operation == "stop" {
+            let input = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(matches!(
+                &input,
+                Input::Sent {
+                    input: SessionInput::Interrupt,
+                    result: Err(_),
+                    ..
+                }
+            ));
+            let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+            app.handle_inputs(input, &mut None, &mut schedule).unwrap();
+            assert!(app.pending_inputs.is_empty());
+            assert_eq!(std::fs::read(&state).unwrap(), bytes);
+            continue;
+        }
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
+        app.view.render(buffer.area, &mut buffer);
+        let rendered = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        // Captured data has neither a daemon nor a real transcript.
+        let notice = if operation == "delete" {
+            "Nothing to delete".to_owned()
+        } else {
+            format!("Failed to {operation}")
+        };
+        assert!(rendered.contains(&notice), "{rendered}");
+        assert_eq!(std::fs::read(&state).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn new_key_adds_a_claude_draft_whatever_is_selected() {
+    use crate::providers::{Provider, codex::CodexProvider};
+    let (dir, mut app) = fixture();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec![
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+    rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
+        .unwrap();
+    let mut codex = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut thread = codex.refresh(1).sessions.remove(0);
+    thread.cwd = dir.path().into();
+    app.hub = Hub::new(vec![
+        Box::new(crate::providers::claude::ClaudeProvider::new(
+            dir.path().to_owned(),
+        )),
+        Box::new(codex),
+    ]);
+    let claude = app.sessions[0].clone();
+    for rows in [vec![claude], vec![thread], vec![]] {
+        let has_project = !rows.is_empty();
+        app.view = crate::ui::View::default();
+        app.view.set_capabilities(app.hub.capabilities());
+        app.view.set_input_choices(app.hub.input_choices());
+        app.view.set_sessions(rows, false);
+        assert!(!key(&mut app, KeyCode::Char('n')));
+        assert!(
+            app.launch.is_none(),
+            "a draft must not start an interactive process"
+        );
+        assert!(
+            app.view.selected_id().is_none(),
+            "a draft has no session key"
+        );
+        let mut buffer = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 120, 40));
+        app.view.render(buffer.area, &mut buffer);
+        let rendered = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert_eq!(rendered.contains("New task"), has_project, "{rendered}");
+    }
+}

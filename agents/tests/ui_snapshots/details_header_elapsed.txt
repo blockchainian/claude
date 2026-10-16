@@ -1,0 +1,7 @@
+Prompt
+Current prompt
+
+Project
+/tmp/project
+
+Model: Unknown

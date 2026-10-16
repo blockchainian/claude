@@ -1,0 +1,368 @@
+//! Opt-in checks against an actual background Claude session.
+use super::attach;
+use crate::providers::SessionInput;
+use serde_json::{Value, json};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
+
+struct Live {
+    repo: tempfile::TempDir,
+    home: PathBuf,
+    backups: Vec<(PathBuf, Option<Vec<u8>>)>,
+    jobs: Vec<String>,
+}
+
+fn command(cwd: &Path, program: &str, args: &[&str]) -> io::Result<String> {
+    let output_file = tempfile::tempfile()?;
+    let errors = tempfile::tempfile()?;
+    let mut child = Command::new(program)
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(output_file.try_clone()?)
+        .stderr(errors.try_clone()?)
+        .spawn()?;
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            use std::io::{Read, Seek};
+            let mut output = output_file;
+            output.rewind()?;
+            let mut text = String::new();
+            output.read_to_string(&mut text)?;
+            if !status.success() {
+                let mut errors = errors;
+                errors.rewind()?;
+                errors.read_to_string(&mut text)?;
+                return Err(io::Error::other(format!("{program} failed: {text}")));
+            }
+            return Ok(text);
+        }
+        if Instant::now() >= deadline {
+            child.kill()?;
+            child.wait()?;
+            return Err(io::Error::new(io::ErrorKind::TimedOut, program.to_owned()));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+    std::io::Write::write_all(&mut temporary, bytes)?;
+    temporary.persist(path).map_err(|error| error.error)?;
+    Ok(())
+}
+
+impl Live {
+    fn new() -> io::Result<Self> {
+        let home =
+            PathBuf::from(std::env::var_os("HOME").ok_or_else(|| io::Error::other("HOME unset"))?)
+                .join(".claude");
+        let paths = [home.with_extension("json"), home.join("settings.json")];
+        let mut backups = Vec::new();
+        for path in paths {
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error),
+            };
+            backups.push((path, bytes));
+        }
+        Ok(Self {
+            repo: tempfile::tempdir()?,
+            home,
+            backups,
+            jobs: Vec::new(),
+        })
+    }
+
+    fn prepare(&mut self) -> io::Result<String> {
+        let cwd = self.repo.path();
+        command(cwd, "git", &["init"])?;
+        command(
+            cwd,
+            "git",
+            &[
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "user.name=Agents fixture",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+        )?;
+        let path = &self.backups[0].0;
+        let mut config: Value = match fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => json!({}),
+            Err(error) => return Err(error),
+        };
+        config["projects"][fs::canonicalize(cwd)?.to_str().unwrap()]["hasTrustDialogAccepted"] =
+            json!(true);
+        atomic_write(path, &serde_json::to_vec_pretty(&config)?)?;
+        let output = command(
+            cwd,
+            "claude",
+            &[
+                "--bg",
+                "--model",
+                "haiku",
+                "Reply exactly READY and stop. Do not use tools or edit files.",
+            ],
+        )?;
+        let job = output
+            .lines()
+            .find_map(|line| {
+                line.split_once("backgrounded · ")
+                    .map(|(_, job)| job.trim().to_owned())
+            })
+            .ok_or_else(|| io::Error::other("Claude did not print a background job id"))?;
+        self.jobs.push(job.clone());
+        Ok(job)
+    }
+
+    fn registry(&self, job: &str) -> io::Result<Option<Value>> {
+        for entry in fs::read_dir(self.home.join("sessions"))? {
+            let path = entry?.path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            let value: Value = match fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            {
+                Some(value) => value,
+                None => continue,
+            };
+            if value["jobId"] == job {
+                return Ok(Some(value));
+            }
+        }
+        Ok(None)
+    }
+
+    fn status(&self, job: &str, status: &str) -> io::Result<Value> {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            if let Some(entry) = self.registry(job)?
+                && entry["status"] == status
+            {
+                return Ok(entry);
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::other(format!(
+                    "registry did not become {status}"
+                )));
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    fn transcript(&self, id: &str) -> io::Result<Vec<Value>> {
+        for project in fs::read_dir(self.home.join("projects"))? {
+            let path = project?.path().join(format!("{id}.jsonl"));
+            if !path.is_file() {
+                continue;
+            }
+            let text = fs::read_to_string(path)?;
+            return text
+                .lines()
+                .map(|line| serde_json::from_str(line).map_err(io::Error::other))
+                .collect();
+        }
+        Err(io::Error::other("session transcript not found"))
+    }
+
+    fn wait_prompt(&self, id: &str, prompt: &str) -> io::Result<Vec<Value>> {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            if let Ok(events) = self.transcript(id)
+                && events
+                    .iter()
+                    .any(|event| event["type"] == "user" && event["message"]["content"] == prompt)
+            {
+                return Ok(events);
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::other(
+                    "bracketed paste text did not appear exactly in the session transcript",
+                ));
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    fn wait_queued_command(&self, id: &str, prompt: &str) -> io::Result<Vec<Value>> {
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let mut latest = Vec::new();
+        loop {
+            if let Ok(events) = self.transcript(id) {
+                let delivered = events.iter().any(|event| {
+                    event["type"] == "attachment"
+                        && event["attachment"]["type"] == "queued_command"
+                        && event["attachment"]["prompt"] == prompt
+                        && event["sessionId"] == id
+                });
+                latest = events;
+                if delivered {
+                    return Ok(latest);
+                }
+            }
+            if Instant::now() >= deadline {
+                fs::write(
+                    std::env::temp_dir().join("agents-stage3-live/queued-transcript-timeout.json"),
+                    serde_json::to_vec_pretty(&latest)?,
+                )?;
+                return Err(io::Error::other(
+                    "accepted prompt did not reach a queued_command transcript boundary",
+                ));
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    fn cleanup(&mut self) -> io::Result<()> {
+        let mut errors = Vec::new();
+        for job in self.jobs.drain(..) {
+            if let Err(error) = command(self.repo.path(), "claude", &["rm", &job]) {
+                errors.push(error.to_string());
+            }
+        }
+        for (path, bytes) in &self.backups {
+            let result = match bytes {
+                Some(bytes) => atomic_write(path, bytes),
+                None => match fs::remove_file(path) {
+                    Ok(()) => Ok(()),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(error),
+                },
+            };
+            if let Err(error) = result {
+                errors.push(error.to_string());
+            }
+            let actual = fs::read(path).ok();
+            if actual.as_ref() != bytes.as_ref() {
+                errors.push("global config byte restoration failed".to_owned());
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(io::Error::other(errors.join("; ")))
+        }
+    }
+}
+
+#[test]
+#[ignore = "starts a real billable Claude background session and restores global configuration"]
+fn real_attach_prompt_paste_busy_steer_interrupt_model() {
+    let mut live = Live::new().unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> io::Result<()> {
+        let job = live.prepare()?;
+        let entry = live.status(&job, "idle")?;
+        let id = entry["sessionId"]
+            .as_str()
+            .ok_or_else(|| io::Error::other("registry lacks sessionId"))?
+            .to_owned();
+        let idle_screen = attach::inspect(&job, live.repo.path())?;
+        fs::create_dir_all(std::env::temp_dir().join("agents-stage3-live"))?;
+        fs::write(
+            std::env::temp_dir().join("agents-stage3-live/driver-idle.screen.txt"),
+            idle_screen,
+        )?;
+        let settings = live.home.join("settings.json");
+        fs::create_dir_all(live.repo.path().join(".claude"))?;
+        fs::write(
+            live.repo.path().join(".claude/settings.local.json"),
+            serde_json::to_vec(&json!({"permissions": {"allow": ["Bash(sleep 10)"]}}))?,
+        )?;
+        let pasted = "Use the Bash tool to run exactly `sleep 10` three times, in separate foreground tool calls, one after another.\nAfter all three calls, reply agents-paste-✓. Do not edit files or use any other tools.";
+        attach::send(
+            &job,
+            live.repo.path(),
+            &settings,
+            SessionInput::Prompt(pasted.to_owned()),
+        )?;
+        live.wait_prompt(&id, pasted)?;
+        let busy = live.status(&job, "busy")?;
+        assert_eq!(busy["sessionId"], id);
+        let screen = attach::inspect(&job, live.repo.path())?;
+        let lines: Vec<_> = screen.lines().collect();
+        let row = lines
+            .iter()
+            .rposition(|line| line.trim() == "❯")
+            .ok_or_else(|| io::Error::other("busy screen lacks empty input"))?;
+        assert!(
+            lines[..row]
+                .iter()
+                .any(|line| line.trim_start().starts_with('●')),
+            "busy screen lacks its status line"
+        );
+        fs::create_dir_all(std::env::temp_dir().join("agents-stage3-live"))?;
+        fs::write(
+            std::env::temp_dir().join("agents-stage3-live/driver-busy.screen.txt"),
+            &screen,
+        )?;
+        assert_eq!(live.status(&job, "busy")?["sessionId"], id);
+        let steer = "After the current tool finishes, include agents-steer-✓ in your next reply and continue the remaining sleep calls. Do not start another task.";
+        attach::send(
+            &job,
+            live.repo.path(),
+            &settings,
+            SessionInput::Prompt(steer.to_owned()),
+        )?;
+        eprintln!("busy Enter accepted the queued prompt");
+        let events = live.wait_queued_command(&id, steer)?;
+        assert!(
+            events
+                .iter()
+                .any(|event| event["type"] == "user" && event["message"]["content"] == pasted)
+        );
+        eprintln!("queued_command reached the real transcript boundary");
+        assert_eq!(live.registry(&job)?.unwrap()["sessionId"], id);
+        fs::write(
+            std::env::temp_dir().join("agents-stage3-live/driver-transcript.json"),
+            serde_json::to_vec_pretty(&events)?,
+        )?;
+        attach::send(&job, live.repo.path(), &settings, SessionInput::Interrupt)?;
+        live.status(&job, "idle")?;
+        eprintln!("interrupt returned the registry to idle");
+        let defaults: Value = serde_json::from_slice(&fs::read(&settings)?)?;
+        attach::send(
+            &job,
+            live.repo.path(),
+            &settings,
+            SessionInput::SetModel("sonnet".to_owned()),
+        )?;
+        let restored: Value = serde_json::from_slice(&fs::read(&settings)?)?;
+        for key in ["model", "effortLevel"] {
+            assert_eq!(
+                restored.get(key),
+                defaults.get(key),
+                "global default {key} changed"
+            );
+        }
+        let model_screen = attach::inspect(&job, live.repo.path())?;
+        assert!(
+            model_screen.to_lowercase().contains("sonnet"),
+            "session model did not change"
+        );
+        assert_eq!(live.registry(&job)?.unwrap()["sessionId"], id);
+        eprintln!("same-session model change preserved global defaults");
+        Ok(())
+    }));
+    let cleanup = live.cleanup();
+    assert!(cleanup.is_ok(), "cleanup failed: {cleanup:?}");
+    match result {
+        Ok(result) => result.unwrap(),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}

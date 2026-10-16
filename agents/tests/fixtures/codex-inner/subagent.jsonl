@@ -1,0 +1,1 @@
+{"timestamp":"2026-10-05T20:39:09.181Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"SubAgentActivity","id":"call_6pn4aC9AEdpX2uAtX7PAxvQe","kind":"interacted","agent_thread_id":"01a10da3-df29-7380-abe4-8c64f7ed5f8d","agent_path":"/root"},"started_at_ms":1791232749181,"completed_at_ms":1791232749181}}

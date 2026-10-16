@@ -4,16 +4,56 @@ use ratatui::{
     text::{Line, Span},
 };
 
+/// Recognize supported Markdown structure without treating ordinary line breaks as prose.
+pub(super) fn has_markers(text: &str) -> bool {
+    Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES).any(|event| {
+        matches!(
+            event,
+            Event::Start(
+                Tag::Heading { .. }
+                    | Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Fenced(_))
+                    | Tag::List(_)
+                    | Tag::Strong
+                    | Tag::Link { .. }
+                    | Tag::Table(_)
+            ) | Event::Code(_)
+        )
+    })
+}
+
 pub(crate) fn render(text: &str, width: usize) -> Vec<Line<'static>> {
-    if width == 0 {
+    render_with_options(text, textwrap::Options::new(width))
+}
+
+pub(super) fn render_with_options(
+    text: &str,
+    options: textwrap::Options<'_>,
+) -> Vec<Line<'static>> {
+    if options.width == 0 {
         return Vec::new();
     }
     let mut writer = Writer::default();
-    for event in Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH) {
+    for event in Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES) {
         match event {
             Event::Start(tag) => {
                 let style = writer.style();
                 match tag {
+                    Tag::Table(_) => writer.separate(),
+                    Tag::TableHead => {
+                        writer.flush();
+                        writer.table_cells = 0;
+                        writer.styles.push(style.bold());
+                    }
+                    Tag::TableRow => {
+                        writer.flush();
+                        writer.table_cells = 0;
+                    }
+                    Tag::TableCell => {
+                        if writer.table_cells > 0 {
+                            writer.push(" | ", style);
+                        }
+                        writer.table_cells += 1;
+                    }
                     Tag::Paragraph if writer.indent == 0 => writer.separate(),
                     Tag::Heading { level, .. } => {
                         writer.separate();
@@ -27,7 +67,8 @@ pub(crate) fn render(text: &str, width: usize) -> Vec<Line<'static>> {
                     Tag::Emphasis => writer.styles.push(style.italic()),
                     Tag::Strong => writer.styles.push(style.bold()),
                     Tag::Strikethrough => writer.styles.push(style.crossed_out()),
-                    Tag::Link { .. } => writer.styles.push(style.cyan().underlined()),
+                    // A link reads as its text; the link layer underlines it like a path.
+                    Tag::Link { .. } => writer.styles.push(style),
                     Tag::BlockQuote => {
                         writer.separate();
                         writer.styles.push(style.green());
@@ -62,6 +103,11 @@ pub(crate) fn render(text: &str, width: usize) -> Vec<Line<'static>> {
                 }
             }
             Event::End(tag) => match tag {
+                TagEnd::TableHead => {
+                    writer.flush();
+                    writer.styles.pop();
+                }
+                TagEnd::TableRow | TagEnd::Table => writer.flush(),
                 TagEnd::Paragraph => writer.flush(),
                 TagEnd::Heading(_) | TagEnd::BlockQuote | TagEnd::CodeBlock => {
                     writer.flush();
@@ -93,7 +139,9 @@ pub(crate) fn render(text: &str, width: usize) -> Vec<Line<'static>> {
             Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
                 writer.push(&text, writer.style())
             }
-            Event::Code(text) => writer.push(&text, writer.style().cyan()),
+            Event::Code(text) => {
+                writer.push(&text, writer.style().fg(crate::theme::inline_code_color()))
+            }
             Event::SoftBreak => writer.push(" ", writer.style()),
             Event::HardBreak => writer.flush(),
             Event::Rule => {
@@ -108,7 +156,7 @@ pub(crate) fn render(text: &str, width: usize) -> Vec<Line<'static>> {
     writer
         .lines
         .into_iter()
-        .flat_map(|(line, indent)| wrap(line, indent, width))
+        .flat_map(|(line, indent)| wrap(line, indent, options.clone()))
         .collect()
 }
 
@@ -120,6 +168,7 @@ struct Writer {
     lists: Vec<Option<u64>>,
     indent: usize,
     code: bool,
+    table_cells: usize,
 }
 
 impl Writer {
@@ -161,13 +210,14 @@ impl Writer {
     }
 }
 
-fn wrap(line: Line<'static>, indent: usize, width: usize) -> Vec<Line<'static>> {
+fn wrap(line: Line<'static>, indent: usize, options: textwrap::Options<'_>) -> Vec<Line<'static>> {
+    let width = options.width;
     if line.width() <= width {
         return vec![line];
     }
     let plain = line.to_string();
     let padding = " ".repeat(indent.min(width.saturating_sub(1)));
-    let options = textwrap::Options::new(width)
+    let options = options
         .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit)
         .subsequent_indent(&padding);
     let mut offset = 0;
@@ -214,17 +264,42 @@ mod tests {
     }
 
     #[test]
+    fn tables_render_cells_and_preserve_selection_sources() {
+        let source = "| Name | Value |\n| --- | --- |\n| alpha | **two** |";
+        let lines = render(source, 40);
+        assert_eq!(plain(&lines), ["Name | Value", "alpha | two"]);
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        let maps = super::super::text_selection_layout::map_lines(source, &lines, true);
+        let name = source.find("Name").unwrap();
+        let two = source.find("two").unwrap();
+        assert_eq!(maps[0][0].1, name..name + 1);
+        assert_eq!(maps[1].last().unwrap().1, two + 2..two + 3);
+    }
+
+    #[test]
     fn inline_styles() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        crate::theme::set_background(Some((0xa1, 0xca, 0xdc)), true);
+        crate::theme::use_default_accents(true);
         let lines = render(
             "`code` **bold** *italic* ~~gone~~ [label](https://example.com)",
             80,
         );
         for (text, color, modifier) in [
-            ("code", Some(Color::Cyan), Modifier::empty()),
+            (
+                "code",
+                Some(Color::Rgb(0x40, 0xa0, 0x2b)),
+                Modifier::empty(),
+            ),
             ("bold", None, Modifier::BOLD),
             ("italic", None, Modifier::ITALIC),
             ("gone", None, Modifier::CROSSED_OUT),
-            ("label", Some(Color::Cyan), Modifier::UNDERLINED),
+            ("label", None, Modifier::empty()),
         ] {
             let span = lines[0]
                 .spans
@@ -232,7 +307,7 @@ mod tests {
                 .find(|span| span.content == text)
                 .unwrap();
             assert_eq!(span.style.fg, color);
-            assert!(span.style.add_modifier.contains(modifier));
+            assert_eq!(span.style.add_modifier, modifier);
         }
     }
 
