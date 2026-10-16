@@ -14,6 +14,7 @@ mod log_search;
 mod markdown;
 mod navigation;
 mod paths;
+mod prompt_box;
 mod render;
 mod rows;
 mod selection_tabs;
@@ -95,6 +96,7 @@ struct Viewport {
     list_rows: Rect,
     first_entry: usize,
     log: Rect,
+    prompt: Rect,
     log_scroll: usize,
     /// Events that arrived above the rows on screen since the log left its newest row.
     log_unseen: usize,
@@ -192,6 +194,7 @@ pub struct View {
     log_open: Option<crate::log::Event>,
     log_background_return: Option<BackgroundReturn>,
     log_detail_search: log_search::LogSearch,
+    input_box: prompt_box::PromptBox,
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
@@ -303,6 +306,7 @@ impl View {
             log_background_return: None,
             log_detail_search: log_search::LogSearch::default(),
             log_search: log_search::LogSearch::default(),
+            input_box: prompt_box::PromptBox::default(),
             capabilities: HashMap::new(),
             rows: Vec::new(),
             project_groups: Vec::new(),
@@ -349,6 +353,33 @@ impl View {
 
     pub(crate) fn set_double_click_ms(&mut self, milliseconds: u64) {
         self.double_click_interval = Duration::from_millis(milliseconds);
+    }
+
+    pub(crate) fn handle_paste(&mut self, text: &str) {
+        self.input_box.paste(text);
+    }
+
+    fn input_label(&self) -> String {
+        self.selected_row()
+            .map(|session| session.display_title().to_owned())
+            .unwrap_or_else(|| "No task".into())
+    }
+
+    fn input_disabled(&self) -> Option<&'static str> {
+        match self.selected_row() {
+            Some(session) => session.input_disabled_reason(),
+            None => Some("Select a task to type"),
+        }
+    }
+
+    fn focus_input(&mut self) {
+        if self.input_disabled().is_none() {
+            self.input_box.focused = true;
+        }
+    }
+
+    pub(crate) fn input_failed(&mut self, reason: String) {
+        self.input_box.state = prompt_box::SendState::Failed(reason);
     }
 
     pub fn set_capabilities(&mut self, capabilities: HashMap<ProviderId, Capabilities>) {

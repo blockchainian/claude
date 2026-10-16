@@ -17,6 +17,6 @@
                                                                                                   │
                                                                                                   │
                                                                                                   │
-                                                                                                  │
                                                                                                   │ ────────────────── Ready · Current task ──────────────────
+  Current task ›
   ? help  esc back  ↑/↓ move  enter open  n new

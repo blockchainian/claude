@@ -56,6 +56,7 @@ pub(super) struct CenterLayout {
     pub(super) search: Rect,
     pub(super) footer: Rect,
     pub(super) log: Rect,
+    pub(super) prompt: Rect,
 }
 impl View {
     fn input(&self) -> (&str, &line_edit::LineEdit) {
@@ -84,16 +85,32 @@ impl View {
             0
         };
         let log = row(area, area.height - footer_height - log_height, log_height);
-        let body = row(area, header_height, log.y.saturating_sub(header.bottom()))
-            .inner(Margin::new(2, 0));
-        let [list, gap, details] = if body.width >= 90 {
+        let prompt_height = self
+            .input_box
+            .height(area.width.saturating_sub(4), &self.input_label())
+            .min(log.y.saturating_sub(header.bottom()));
+        let prompt = row(
+            area,
+            log.y.saturating_sub(area.y + prompt_height),
+            prompt_height,
+        );
+        let body = row(
+            area,
+            header_height,
+            prompt.y.saturating_sub(header.bottom()),
+        )
+        .inner(Margin::new(2, 0));
+        let [list, gap, details] = if body.width >= 7 {
             let content = Rect {
                 width: body.width - 3,
                 ..body
             };
-            let [list, mut details] =
-                Layout::horizontal([Constraint::Ratio(618, 1000), Constraint::Ratio(382, 1000)])
-                    .areas(content);
+            let ratio = if area.width >= 90 { 618 } else { 500 };
+            let [list, mut details] = Layout::horizontal([
+                Constraint::Ratio(ratio, 1000),
+                Constraint::Ratio(1000 - ratio, 1000),
+            ])
+            .areas(content);
             let gap = Rect::new(list.right(), body.y, 3, body.height);
             details.x += gap.width;
             [list, gap, details]
@@ -118,6 +135,7 @@ impl View {
             search,
             footer,
             log,
+            prompt,
         }
     }
     pub(crate) fn log_event_count(&self, area: Rect) -> usize {
@@ -131,6 +149,11 @@ impl View {
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout = self.center_layout(area);
+        if self.input_box.focused && !self.help && self.confirm_dialog.is_none() {
+            return self
+                .input_box
+                .cursor(layout.prompt.inner(Margin::new(2, 0)), &self.input_label());
+        }
         if (self.log_search.editing || self.log_detail_search.editing)
             && !self.help
             && self.confirm_dialog.is_none()
@@ -177,6 +200,13 @@ impl View {
             viewport.log_links.clear();
         }
         let layout = self.center_layout(area);
+        self.viewport.borrow_mut().prompt = layout.prompt;
+        self.input_box.render(
+            layout.prompt.inner(Margin::new(2, 0)),
+            buf,
+            &self.input_label(),
+            self.input_disabled(),
+        );
         let inset = |area: Rect| area.inner(Margin::new(2, 0));
         line(
             vec![

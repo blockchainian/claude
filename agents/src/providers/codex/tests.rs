@@ -593,8 +593,10 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     assert_eq!(view.handle_mouse(click), None);
     assert_eq!(view.handle_mouse(release), None);
     assert_eq!(view.handle_mouse(click), None);
+    assert_eq!(view.handle_mouse(release), None);
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert_eq!(
-        view.handle_mouse(release),
+        view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         Some(Action::Open(key("thread-12".into())))
     );
     for (code, expected) in [
@@ -716,10 +718,7 @@ fn spawn_children_cannot_resume_in_the_view() {
     assert_eq!(view.handle_mouse(click), None);
     assert_eq!(view.handle_mouse(release), None);
     assert_eq!(view.handle_mouse(click), None);
-    assert_eq!(
-        view.handle_mouse(release),
-        Some(Action::Unsupported("Resume"))
-    );
+    assert_eq!(view.handle_mouse(release), None);
 }
 
 #[test]

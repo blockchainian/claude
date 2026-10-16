@@ -333,6 +333,10 @@ impl App {
         let action = match event {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
+            Event::Paste(text) => {
+                self.view.handle_paste(&text);
+                return false;
+            }
             Event::ThemeChanged(theme) => {
                 self.apply_background(None, theme == Theme::Light);
                 return false;
@@ -535,6 +539,9 @@ impl App {
         }
         match action {
             Action::Quit => return true,
+            Action::SendPrompt { .. } => self
+                .view
+                .input_failed("Prompt delivery is unavailable".into()),
             Action::Back => {
                 let Some(session) = self.last_session.as_ref().and_then(|id| self.session(id))
                 else {
@@ -741,7 +748,11 @@ impl crossterm::Command for MouseReports {
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
-    crossterm::execute!(stdout, terminal::EnterAlternateScreen)?;
+    crossterm::execute!(
+        stdout,
+        terminal::EnterAlternateScreen,
+        crossterm::event::EnableBracketedPaste
+    )?;
     Terminal::new(CrosstermBackend::new(stdout))
 }
 
@@ -749,6 +760,7 @@ fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::R
     let reports = crossterm::execute!(
         terminal.backend_mut(),
         crossterm::event::DisableThemeChangeReports,
+        crossterm::event::DisableBracketedPaste,
         MouseReports::Disable
     );
     terminal::disable_raw_mode()?;

@@ -10,6 +10,10 @@ pub(super) struct LineEdit {
 }
 
 impl LineEdit {
+    pub(super) fn cursor(&self) -> usize {
+        self.cursor
+    }
+
     pub(super) fn text(&self) -> &str {
         &self.text
     }

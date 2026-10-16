@@ -5,7 +5,10 @@ const WHEEL_ROWS: usize = 3;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
-    Log(crate::log::Event),
+    Log {
+        event: crate::log::Event,
+        expand: bool,
+    },
     Background(crate::model::BackgroundTask),
     Link(PathBuf),
 }
@@ -32,9 +35,11 @@ impl View {
         }
         let click = self.pending_click.take().expect("click is due");
         match click.target {
-            ClickTarget::Log(event) => {
-                self.set_log_open(Some(event));
-                self.viewport.borrow_mut().log_open_scroll = 0;
+            ClickTarget::Log { event, expand } => {
+                if expand {
+                    self.set_log_open(Some(event));
+                    self.viewport.borrow_mut().log_open_scroll = 0;
+                }
                 None
             }
             ClickTarget::Link(path) => Some(Action::OpenPath(path)),
@@ -77,6 +82,10 @@ impl View {
             self.searching = false;
             self.search.clear();
             self.reconcile_selection();
+            return;
+        }
+        if self.input_box.focused {
+            self.input_box.focused = false;
             return;
         }
         if self.log_detail_search.editing {
@@ -211,6 +220,12 @@ impl View {
         }
         let position = (mouse.column, mouse.row).into();
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
+            && self.viewport.borrow().prompt.contains(position)
+        {
+            self.focus_input();
+            return None;
+        }
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && self.viewport.borrow().log_jump.contains(position)
         {
             if self.log_open.is_some() {
@@ -263,6 +278,11 @@ impl View {
                                     text: text.clone(),
                                     label: (*label).into(),
                                 });
+                        }
+                        if viewport.log.contains(position) && self.log_open.is_none() {
+                            drop(viewport);
+                            self.focus_input();
+                            return None;
                         }
                         if viewport.log.contains(position)
                             && let Some(event) = &self.log_open
@@ -348,15 +368,21 @@ impl View {
                     });
                     self.select(task);
                     if double {
-                        return self.activate();
+                        self.focus_input();
+                        return None;
                     }
                     self.last_click = Some((task, now));
                 } else if self.log_open.is_none()
                     && let Some((index, cut)) = log_row
                     && let Some(event) = self.log.get(index)
-                    && (cut || super::log::shows_calls(event))
                 {
-                    self.defer_click(ClickTarget::Log(event.clone()));
+                    let expand = cut || super::log::shows_calls(event);
+                    if self.defer_click(ClickTarget::Log {
+                        event: event.clone(),
+                        expand,
+                    }) {
+                        self.focus_input();
+                    }
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();
                     let double = self.last_copy_click.take().is_some_and(|(last, at)| {
@@ -509,6 +535,16 @@ impl View {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
         if key.kind == KeyEventKind::Release {
             return None;
+        }
+        if self.input_box.focused {
+            return match self.input_box.handle_key(key) {
+                Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
+                Some(prompt_box::PromptAction::Submit(text)) => self
+                    .selected_id()
+                    .cloned()
+                    .map(|id| Action::SendPrompt { id, text }),
+                None => None,
+            };
         }
         let plain = !key
             .modifiers

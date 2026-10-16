@@ -695,7 +695,7 @@ fn details_scroll_tracks_session_identity_across_refreshes() {
 }
 
 #[test]
-fn mouse_list_click_selects_and_double_click_opens_second_task() {
+fn mouse_list_click_selects_and_double_click_focuses_second_task() {
     let mut view = fixture();
     let rendered = screen(&view, 120, 40);
     let second = view.selectable_indices()[1];
@@ -704,10 +704,9 @@ fn mouse_list_click_selects_and_double_click_opens_second_task() {
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
     assert!(click_mouse(&mut view, click).is_none());
     assert_eq!(view.selected, second);
-    assert!(matches!(
-        click_mouse(&mut view, click),
-        Some(Action::Open(opened)) if opened == id
-    ));
+    assert_eq!(click_mouse(&mut view, click), None);
+    assert!(view.input_box.focused);
+    assert_eq!(view.selected_id(), Some(&id));
 }
 
 #[test]
@@ -855,9 +854,9 @@ fn mouse_list_click_uses_last_render_scroll_offset() {
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
     assert!(click_mouse(&mut view, click).is_none());
     assert_eq!(view.selected, target);
-    assert!(
-        matches!(click_mouse(&mut view, click), Some(Action::Open(id)) if id == view.rows[target].id)
-    );
+    assert_eq!(click_mouse(&mut view, click), None);
+    assert!(view.input_box.focused);
+    assert_eq!(view.selected_id(), Some(&view.rows[target].id));
 }
 
 #[test]
@@ -1456,8 +1455,24 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
         .zip(expected.lines().skip(5).take(10))
     {
         assert_eq!(
-            actual.split("Inactive").next(),
-            expected.split("Inactive").next()
+            actual
+                .split('│')
+                .next()
+                .unwrap()
+                .trim_end()
+                .split("Inactive")
+                .next()
+                .unwrap()
+                .trim_end(),
+            expected
+                .split('│')
+                .next()
+                .unwrap()
+                .trim_end()
+                .split("Inactive")
+                .next()
+                .unwrap()
+                .trim_end()
         );
     }
     assert!(rendered.contains("Task 2 "));
@@ -1553,7 +1568,7 @@ fn paging_tracks_headings_and_never_wraps() {
     key(&mut view, KeyCode::PageDown);
     assert_eq!(view.selected_id(), Some(&session_key("10")));
     key(&mut view, KeyCode::PageUp);
-    assert_eq!(view.selected_id(), Some(&session_key("0")));
+    assert_eq!(view.selected_id(), Some(&session_key("1")));
     for _ in 0..40 {
         key(&mut view, KeyCode::PageDown);
         screen(&view, 110, 18);
@@ -1672,7 +1687,15 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
     view.set_notice(Some("Notice".into()));
     let lines = screen(&view, 80, 12);
     let lines = lines.lines().collect::<Vec<_>>();
-    assert_eq!(lines[lines.len() - 2], "  Notice");
+    let notice_row = view.center_layout(Rect::new(0, 0, 80, 12)).list.bottom() - 1;
+    assert_eq!(
+        lines[usize::from(notice_row)]
+            .split('│')
+            .next()
+            .unwrap()
+            .trim_end(),
+        "  Notice"
+    );
     key(&mut view, KeyCode::Left);
     assert!(view.notice.is_none());
     key(&mut view, KeyCode::Char('?'));
@@ -1828,7 +1851,7 @@ fn live_center_rename_active() {
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert_eq!(
-        buf[(80, 3)].style(),
+        buf[(view.center_layout(area).search.right() - 1, 3)].style(),
         Style::default()
             .fg(Color::Reset)
             .bg(Color::Reset)
@@ -1993,7 +2016,7 @@ fn live_center_delete_dialog() {
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     assert!(
-        buf[(6, 6)]
+        buf[(6, 4)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
@@ -2577,7 +2600,11 @@ mod details_header {
                 (start + expected.width() as u16..rule.right())
                     .all(|x| buf[(x, rule.y)].symbol() == "─")
             );
-            assert_eq!(view.viewport.borrow().details.bottom(), rule.y);
+            assert_eq!(
+                view.viewport.borrow().details.bottom()
+                    + if with_log { layout.prompt.height } else { 0 },
+                rule.y
+            );
         }
     }
 }
@@ -3426,25 +3453,25 @@ fn task_log_shows_only_newest_seven_events_and_hides_without_selection() {
 fn center_layout_golden_rects_follow_each_area() {
     let (view, _) = log_fixture();
     for (width, height, top, log_height, list_width, details_width) in [
-        (80, 24, 13, 10, 76, 0),
+        (80, 24, 13, 10, 37, 36),
         (120, 40, 25, 14, 70, 43),
         (200, 60, 37, 22, 119, 74),
-        (80, 24, 13, 10, 76, 0),
+        (80, 24, 13, 10, 37, 36),
     ] {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
         assert_eq!(layout.header, Rect::new(5, 7, width, 3));
-        assert_eq!(layout.list, Rect::new(7, 10, list_width, top - 3));
+        assert_eq!(layout.list, Rect::new(7, 10, list_width, top - 4));
         assert_eq!(layout.log, Rect::new(5, 7 + top, width, log_height));
         assert_eq!(layout.footer, Rect::new(5, 7 + height - 1, width, 1));
         if details_width == 0 {
             assert_eq!(layout.details, Rect::default());
             assert_eq!(layout.gap, Rect::default());
         } else {
-            assert_eq!(layout.gap, Rect::new(7 + list_width, 10, 3, top - 3));
+            assert_eq!(layout.gap, Rect::new(7 + list_width, 10, 3, top - 4));
             assert_eq!(
                 layout.details,
-                Rect::new(10 + list_width, 10, details_width, top - 3)
+                Rect::new(10 + list_width, 10, details_width, top - 4)
             );
         }
     }
@@ -3459,17 +3486,19 @@ fn center_layout_log_and_details_hide_thresholds() {
     }
     let layout = view.center_layout(Rect::new(0, 0, 94, 20));
     assert_eq!(layout.log.height, 10);
-    assert_eq!(layout.list.height, 6);
+    assert_eq!(layout.list.height, 5);
     assert!(layout.details.width > 0);
-    assert_eq!(
-        view.center_layout(Rect::new(0, 0, 93, 20)).details,
-        Rect::default()
+    assert!(
+        !view
+            .center_layout(Rect::new(0, 0, 93, 20))
+            .details
+            .is_empty()
     );
     view.rows[view.selected].transcript = None;
     for height in [24, 40, 60] {
         let layout = view.center_layout(Rect::new(0, 0, 120, height));
         assert_eq!(layout.log.height, 0);
-        assert_eq!(layout.list.height, height - 4);
+        assert_eq!(layout.list.height, height - 5);
     }
 }
 
@@ -4248,10 +4277,16 @@ mod input_row {
             let style = super::super::style::selection_style_for(no_color, colors, light);
             super::super::style::with_selection_style(style, || {
                 for width in [14, 24, 88] {
-                    let (task, task_row, log, log_row, _, _) =
+                    let (task, task_row, mut log, mut log_row, _, log_view) =
                         rendered_inputs(width, "你好 query", false);
+                    log_row.width = task_row.width;
+                    super::super::render::render_input_row(
+                        "Search › ",
+                        &log_view.log_search.query,
+                        log_row,
+                        &mut log,
+                    );
                     assert_eq!(task_row.x, log_row.x);
-                    assert_eq!(task_row.width, log_row.width);
                     for x in 0..task_row.width {
                         let task_cell = &task[(task_row.x + x, task_row.y)];
                         let log_cell = &log[(log_row.x + x, log_row.y)];
@@ -4297,9 +4332,15 @@ mod input_row {
                         task.cursor_pos(area),
                         Some((task_row.x + expected, task_row.y))
                     );
+                    let log_expected = (9 + log
+                        .log_search
+                        .query
+                        .window(usize::from(log_row.width.saturating_sub(9)))
+                        .1)
+                        .min(log_row.width.saturating_sub(1));
                     assert_eq!(
                         log.cursor_pos(area),
-                        Some((log_row.x + expected, log_row.y))
+                        Some((log_row.x + log_expected, log_row.y))
                     );
                 }
             }
@@ -4577,6 +4618,8 @@ mod subagent_rows {
         assert_eq!(
             rendered
                 .lines()
+                .skip(usize::from(view.viewport.borrow().list_rows.y))
+                .take(usize::from(view.viewport.borrow().list_rows.height))
                 .filter(|line| line.split('│').next().unwrap().contains("Parent task"))
                 .count(),
             2
@@ -4863,10 +4906,7 @@ mod subagent_actions {
         let (x, y) = view.marker_pos().unwrap();
         let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
         assert_eq!(click_mouse(&mut view, click), None);
-        assert_eq!(
-            click_mouse(&mut view, click),
-            Some(Action::Unsupported("Resume"))
-        );
+        assert_eq!(click_mouse(&mut view, click), None);
     }
 
     #[test]
@@ -4948,8 +4988,11 @@ fn unsupported_provider_mouse_activation_emits_notice() {
     let (x, y) = rendered_cell(&rendered, view.rows[second].display_title());
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
     click_mouse(&mut view, click);
+    assert_eq!(click_mouse(&mut view, click), None);
+    assert!(view.input_box.focused);
+    key(&mut view, KeyCode::Esc);
     assert_eq!(
-        click_mouse(&mut view, click),
+        key(&mut view, KeyCode::Enter),
         Some(Action::Unsupported("Resume"))
     );
 }
@@ -6744,3 +6787,6 @@ fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_inline_code_color
 
 #[path = "click_log_tests.rs"]
 mod click_log_tests;
+
+#[path = "prompt_view_tests.rs"]
+mod prompt_view_tests;

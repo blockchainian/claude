@@ -1,16 +1,16 @@
   Agent command center  Group: Project  g
    Active 0   Ready 0   Working 0   Needs you 0   Inactive 1           tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                                    Status         Updated
-  /tmp/project  1
-  › ┌──────────────────────────────────────────────────────────────────────────────┐o
-    │ Permanently delete “Unloaded task”?                                          │
-    │ This stops any running work in this task and its child agents, then          │
-    │ permanently deletes their history. This cannot be undone.                    │
-    │                                                                              │
-    │ › 1. Cancel                                                                  │
-    │   2. Permanently delete task and child agents                                │
-    └──────────────────────────────────────────────────────────────────────────────┘
-
-
+  ┌───────────────────────────────────────┐ │ Prompt
+  │ Permanently delete “Unloaded task”?   │ │ Unloaded task
+  │ This stops any running work in this   │ │
+  │ task and its child agents, then       │ │ Project
+  │ permanently deletes their history.    │ │ /tmp/project
+  │ This cannot be undone.                │ │
+  │                                       │ │ Model: Unknown
+  │ › 1. Cancel                           │ │
+  │   2. Permanently delete task and chil │ │
+  └───────────────────────────────────────┘ │
+                                            │ ─────── Inactive · Unloaded task ───────
+  Unloaded task ›
   ↑/↓ move  enter select  esc back

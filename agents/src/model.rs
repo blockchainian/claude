@@ -104,6 +104,21 @@ impl Session {
         })
     }
 
+    pub fn input_disabled_reason(&self) -> Option<&'static str> {
+        if !self.can_resume() {
+            Some("Subagent cannot take input")
+        } else if self.id.provider == ProviderId::Claude
+            && self
+                .process
+                .as_ref()
+                .is_some_and(|process| process.label.as_deref() != Some("bg"))
+        {
+            Some("Running in a terminal; open it to type")
+        } else {
+            None
+        }
+    }
+
     pub fn display_title(&self) -> &str {
         let title = if self.parent.is_some() {
             &self.title
@@ -132,6 +147,10 @@ impl Session {
 pub enum Action {
     /// Enter: jump to a live session's terminal, or resume an inactive one.
     Open(SessionKey),
+    SendPrompt {
+        id: SessionKey,
+        text: String,
+    },
     /// `o`: resume the session in this terminal.
     Resume(SessionKey),
     /// `f`: resume as a new session id.
