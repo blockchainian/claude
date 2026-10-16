@@ -83,8 +83,11 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                 .collect();
             assert_eq!(left, separators[0] + 2);
             if width != 150 {
-                let (updated_x, _) = position(buffer, "Updated");
-                assert_eq!(updated_x + 7, separators[0] - 1);
+                let updated_end = (1..separators[0])
+                    .rfind(|&x| cell_text(buffer, x, 4) != " ")
+                    .unwrap()
+                    + 1;
+                assert_eq!(updated_end, separators[0] - 1);
             }
             let right = if width >= 150 {
                 (left..width)

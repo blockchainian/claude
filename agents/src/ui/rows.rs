@@ -71,15 +71,7 @@ impl View {
             })
             .unwrap_or_default();
         let padding = u16::from(area.height >= 3);
-        let viewport = row(area, padding, area.height - padding * 2);
-        if padding > 0 {
-            let (title, status, updated) = columns(row(area, /*offset*/ 0, /*height*/ 1));
-            line("Tasks".dim(), title, buf);
-            line("Status".dim(), status, buf);
-            Line::from("Updated".dim())
-                .right_aligned()
-                .render(updated, buf);
-        }
+        let viewport = row(area, 0, area.height - padding);
         let height = usize::from(viewport.height);
         state.page_height = height;
         let mut start = state.scroll.min(entries.len().saturating_sub(height));
@@ -302,7 +294,9 @@ impl View {
             }
         }
         if padding > 0 && start > 0 {
-            line("↑".dim(), row(area, /*offset*/ 0, /*height*/ 1), buf);
+            Line::from("↑".dim())
+                .right_aligned()
+                .render(row(area, area.height - 1, 1), buf);
         }
         if padding > 0 && start + height < entries.len() {
             line(

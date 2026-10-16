@@ -2,9 +2,9 @@
   Active 1   Ready 1   Working 0   Needs you 0   Inactive 0
  ──────────────────────────────────────────────────────────────────────────────────────
  Rename › Task to find                      │ Prompt
-     Tasks                                  │ Task to find
- /tmp/project  1                            │
- › ○ Task to find                           │ Project
+ /tmp/project  1                            │ Task to find
+ › ○ Task to find                           │
+                                            │ Project
                                             │ /tmp/project
                                             │
                                             │ Model

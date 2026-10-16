@@ -1,11 +1,11 @@
  Agent command center  Group: Project  g
   Active 0   Ready 0   Working 0   Needs you 0   Inactive 1
  ──────────────────────────────────────────────────────────────────────────────
-     Tasks                              │
  /tmp/project  1                        │
    ○ Recent task                        │
                                         │
  ›   Show more                          │
+                                        │
                                         │
                                         │
  No task · Select a task to type

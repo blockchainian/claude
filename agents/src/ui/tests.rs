@@ -796,8 +796,9 @@ fn mouse_list_group_and_gap_clicks_do_nothing() {
 #[test]
 fn mouse_list_wheel_uses_keyboard_selection() {
     let mut view = fixture();
-    let rendered = screen(&view, 120, 40);
-    let (x, y) = rendered_cell(&rendered, "Tasks");
+    screen(&view, 120, 40);
+    let list = view.center_layout(Rect::new(0, 0, 120, 40)).list;
+    let (x, y) = (list.x, list.y);
     let initial = view.selected;
     key(&mut view, KeyCode::Down);
     let next = view.selected;
@@ -1506,9 +1507,9 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
     // The reference loads ten rows. Twelve rows change only counts and append Task 2 / Task 1.
     for (actual, expected) in rendered
         .lines()
-        .skip(5)
+        .skip(4)
         .take(10)
-        .zip(expected.lines().skip(5).take(10))
+        .zip(expected.lines().skip(4).take(10))
     {
         assert_eq!(
             actual
@@ -1633,7 +1634,7 @@ fn paging_tracks_headings_and_never_wraps() {
     key(&mut view, KeyCode::PageDown);
     assert_eq!(view.selected_id(), Some(&session_key("10")));
     key(&mut view, KeyCode::PageUp);
-    assert_eq!(view.selected_id(), Some(&session_key("1")));
+    assert_eq!(view.selected_id(), Some(&session_key("0")));
     for _ in 0..40 {
         key(&mut view, KeyCode::PageDown);
         screen(&view, 110, 18);
@@ -3142,6 +3143,54 @@ fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
 }
 
 #[test]
+fn dashboard_task_rows_use_the_header_row_and_keep_click_offsets() {
+    for width in [100, 200] {
+        let (mut view, now) = column_padding_fixture();
+        let template = view.rows[0].clone();
+        view.set_sessions(
+            (0..40)
+                .map(|index| {
+                    let mut row = template.clone();
+                    row.id.id = format!("task-{index}");
+                    row.updated_at = now - Duration::seconds(index);
+                    row
+                })
+                .collect(),
+            false,
+        );
+        let area = Rect::new(0, 0, width, 60);
+        key(&mut view, KeyCode::Home);
+        for end in [false, true] {
+            if end {
+                key(&mut view, KeyCode::End);
+            }
+            let mut buf = Buffer::empty(area);
+            view.render_at(area, &mut buf, now);
+            let list = view.center_layout(area).list;
+            let viewport = view.viewport.borrow();
+            assert_eq!(viewport.list_rows.y, list.y);
+            assert_eq!(viewport.list_rows.height, list.height - 1);
+            assert_eq!(viewport.page_height, usize::from(list.height - 1));
+            let entries = view.center_rows(&view.selectable_indices(), view.grouping);
+            let offset = usize::from(!end);
+            let super::navigation::CenterRow::Task(index) = entries[viewport.first_entry + offset]
+            else {
+                panic!("expected task row");
+            };
+            let expected = view.rows[index].id.clone();
+            let y = list.y + offset as u16;
+            assert_ne!(buf[(list.x, list.y)].symbol(), "↑");
+            drop(viewport);
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), list.x + 4, y),
+            );
+            assert_eq!(view.selected_id(), Some(&expected));
+        }
+    }
+}
+
+#[test]
 fn dashboard_log_bodies_start_at_the_left_padding() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = log_fixture();
@@ -3300,7 +3349,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             .collect();
         let left = separators[0];
         let right = separators.get(1).copied().unwrap_or(width);
-        let updated = text(3, 0, left);
+        let updated = text(4, 0, left);
         assert_eq!(updated.trim_end().chars().count() as u16, left - 1);
         for label in ["Background", "Last message", "Prompt", "Project"] {
             let y = (3..35)
