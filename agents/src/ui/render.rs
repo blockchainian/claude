@@ -885,7 +885,7 @@ impl View {
                 line: project,
                 link,
             },
-            cwd.into(),
+            Line::from(Span::styled(cwd, style::time_style())).into(),
         ]);
 
         let effort = match session.effort.as_deref() {

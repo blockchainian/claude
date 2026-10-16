@@ -2189,13 +2189,13 @@ fn details_branch_uses_header_style_and_links_keep_their_styles() {
     for (x, symbol) in path.chars().enumerate() {
         let cell = &buf[(x as u16, path_y)];
         assert_eq!(cell.symbol(), symbol.to_string());
-        assert_eq!(cell.style(), ratatui::buffer::Cell::default().style());
+        assert_eq!(cell.style(), buf[(0, project_y)].style());
     }
     view.underline_links(&mut buf);
     for (x, symbol) in path.chars().enumerate() {
         let cell = &buf[(x as u16, path_y)];
         assert_eq!(cell.symbol(), format!("\x1b[4:4m{symbol}\x1b[24m"));
-        assert_eq!(cell.style(), ratatui::buffer::Cell::default().style());
+        assert_eq!(cell.style(), buf[(0, project_y)].style());
     }
 }
 
