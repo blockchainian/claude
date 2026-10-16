@@ -1,11 +1,11 @@
  Agent command center  Group: Project  g
   Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                                                                                     tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- /tmp/project  1                                               │ Prompt                                 │ view_image /t…/affiliates-page-1791341607.p…       0s
+ /tmp/project  1                                               │ Prompt                                 │ view_image /t…/affiliates-page-1791341607.p…      0ms
  › ● Task log example                   Working            now │ Task log example                       │ web.search site:pond.dflow.net "dev-quote-a…       1s
                                                                │                                        │ claude.ask_claude                                 28s
-                                                               │ Project                                │ apply_patch ~/D…/c…/khaby-lame/drafts/06.md        0s
-                                                               │ /tmp/project                           │ type (exit 1)                                      0s
+                                                               │ Project                                │ apply_patch ~/D…/c…/khaby-lame/drafts/06.md      17ms
+                                                               │ /tmp/project                           │ type (exit 1)                                     0ms
                                                                │                                        │
                                                                │ Model                                  │
                                                                │ Unknown                                │
@@ -13,7 +13,7 @@
  ───────────────────────────────────────────────────────────────────── Working · Task log example ─────────────────────────────────────────────────────────────
  Task log example ›
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ImageView                                                                                                                                                   0s
+ ImageView                                                                                                                                                  0ms
 
  id: exec-c4bea048-8537-4b20-9429-9fc6872f9a04
  path: file:///tmp/affiliates-page-1791341607.png
