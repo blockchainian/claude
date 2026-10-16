@@ -62,15 +62,7 @@ use std::{
 use unicode_width::UnicodeWidthStr;
 
 const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
-    (
-        "All",
-        &[
-            SessionStatus::Working,
-            SessionStatus::Ready,
-            SessionStatus::NeedsInput,
-            SessionStatus::Inactive,
-        ],
-    ),
+    ("Active", &[SessionStatus::Working, SessionStatus::Ready]),
     ("Ready", &[SessionStatus::Ready]),
     ("Working", &[SessionStatus::Working]),
     ("Needs you", &[SessionStatus::NeedsInput]),

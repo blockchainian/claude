@@ -28,6 +28,7 @@ fn fixture() -> (tempfile::TempDir, View) {
     let mut sessions = provider.refresh(1).sessions;
     assert_eq!(sessions.len(), 1);
     sessions[0].cwd = directory.path().into();
+    sessions[0].status = SessionStatus::Ready;
     let mut view = View::default();
     view.set_capabilities(HashMap::from([(
         ProviderId::Claude,
@@ -70,6 +71,37 @@ fn render(view: &View) -> Buffer {
     let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
     view.render_at(buffer.area, &mut buffer, Utc::now());
     buffer
+}
+
+#[test]
+fn draft_shows_under_active_tab() {
+    let (directory, mut view) = fixture();
+    let id = view.add_draft(setup(directory.path()));
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
+    let buffer = render(&view);
+    assert!(
+        buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+            .contains("New task")
+    );
+    let entries = view.center_rows(&view.selectable_indices(), Grouping::Project);
+    assert!(
+        entries
+            .iter()
+            .any(|entry| matches!(entry, navigation::CenterRow::Draft(draft) if *draft == id))
+    );
+    key(&mut view, KeyCode::Esc);
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    let entries = view.center_rows(&view.selectable_indices(), Grouping::Project);
+    assert!(
+        !entries
+            .iter()
+            .any(|entry| matches!(entry, navigation::CenterRow::Draft(_)))
+    );
 }
 
 #[test]

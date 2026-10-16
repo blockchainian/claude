@@ -1,5 +1,5 @@
   Agent command center  Group: Project  g
-   All 1   Ready 0   Working 0   Needs you 0   Inactive 1              tab/⇧tab filter
+   Active 0   Ready 0   Working 0   Needs you 0   Inactive 1           tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────
   ┌───────────────────────────────────────┐ │ Prompt
   │ Permanently delete “Unloaded task”?   │ │ Unloaded task

@@ -1,5 +1,5 @@
   Agent command center  Group: Project  g
-   All 1   Ready 0   Working 1   Needs you 0   Inactive 0                          tab/⇧tab filter
+   Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                       tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                         Status         Updated  │ Prompt
   /tmp/project  1                                           │ Task log example

@@ -1,16 +1,16 @@
   Agent command center  Group: Project  g
-   All 6   Ready 2   Working 1   Needs you 2   Inactive 1                                                                                      tab/⇧tab filter
+   Active 3   Ready 2   Working 1   Needs you 2   Inactive 1                                                                                   tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
       Tasks                                                               Status         Updated  │ Prompt
-  Pinned  2                                                                                       │ Current task
+  Pinned  1 of 2                                                                                  │ Current task
   › ○ Current task                                                        Ready              now  │
-    ● Needs an answer                                                     Needs input     2h ago  │ Project
-                                                                                                  │ /tmp/project
-  /tmp/project  4                                                                                 │
-    ○ A longer task title that uses the available column                  Ready           5m ago  │ Model: Unknown
-    ● Failed task                                                         Needs input     1h ago  │
-    ● Working task                                                        Working         1d ago  │
-    ○ Unloaded task                                                       Inactive        2d ago  │
+                                                                                                  │ Project
+  /tmp/project  2 of 4                                                                            │ /tmp/project
+    ○ A longer task title that uses the available column                  Ready           5m ago  │
+    ● Working task                                                        Working         1d ago  │ Model: Unknown
+                                                                                                  │
+                                                                                                  │
+                                                                                                  │
                                                                                                   │
                                                                                                   │
                                                                                                   │

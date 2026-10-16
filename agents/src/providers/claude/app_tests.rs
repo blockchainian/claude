@@ -929,7 +929,15 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
         app.view = crate::ui::View::default();
         app.view.set_capabilities(app.hub.capabilities());
         app.view.set_input_choices(app.hub.input_choices());
+        let tab = match rows.first().map(|row| row.status) {
+            Some(SessionStatus::NeedsInput) => 3,
+            Some(SessionStatus::Inactive) => 4,
+            _ => 0,
+        };
         app.view.set_sessions(rows, false);
+        for _ in 0..tab {
+            key(&mut app, KeyCode::Tab);
+        }
         assert!(!key(&mut app, KeyCode::Char('n')));
         assert!(
             app.launch.is_none(),
