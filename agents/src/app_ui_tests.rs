@@ -27,7 +27,11 @@ fn key(app: &mut App, code: KeyCode) {
 }
 
 fn draw(app: &mut App, width: u16) -> ratatui::buffer::Buffer {
-    let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+    draw_size(app, width, 40)
+}
+
+fn draw_size(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     app.draw(&mut terminal).unwrap();
     terminal.backend().buffer().clone()
 }
@@ -62,7 +66,7 @@ fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     let (left, rows) = if separators.len() == 2 {
         (separators[1] + 2, 3..prompt - 1)
     } else {
-        (1, prompt + 2..buffer.area.height - 1)
+        (1, prompt + 1..log_list_end(buffer, prompt))
     };
     for y in rows.rev() {
         for x in left..buffer.area.width - 1 {
@@ -75,6 +79,17 @@ fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
         }
     }
     panic!("missing log body {text:?}:\n{}", lines(buffer).join("\n"));
+}
+
+fn log_list_end(buffer: &ratatui::buffer::Buffer, prompt: u16) -> u16 {
+    (prompt + 1..buffer.area.height - 1)
+        .find(|&y| {
+            (1..buffer.area.width - 1)
+                .filter(|&x| buffer[(x, y)].symbol() == "─")
+                .count()
+                > usize::from(buffer.area.width) / 2
+        })
+        .unwrap_or(buffer.area.height - 1)
 }
 
 fn click(app: &mut App, x: u16, y: u16) {
@@ -287,141 +302,255 @@ fn detail(buffer: &ratatui::buffer::Buffer) -> String {
 }
 
 #[test]
-fn wide_preview_follows_real_appends_and_clicked_event_stays_open() {
-    let (_directory, mut app) = fixture();
-    let path = app.sessions[0].transcript.clone().unwrap();
-    let payload = include_str!("../tests/fixtures/transcript.jsonl");
-    let records: Vec<_> = payload.split_inclusive('\n').collect();
-    std::fs::write(&path, records[0]).unwrap();
-    app.refresh();
-    select_archive(&mut app);
-    let buffer = draw(&mut app, 180);
-    assert!(
-        detail(&buffer).contains("run_in_background"),
-        "{}",
-        lines(&buffer).join("\n")
-    );
-    std::fs::write(&path, payload).unwrap();
-    app.refresh();
-    let buffer = draw(&mut app, 180);
-    assert!(
-        detail(&buffer).contains("decision"),
-        "{}",
-        lines(&buffer).join("\n")
-    );
-    // Click the actual User event in the right-hand event list, not the preview.
-    let (x, y) = log_position(&buffer, "⏺");
-    click(&mut app, x, y);
-    wait_for_click(&mut app);
-    let buffer = draw(&mut app, 180);
-    assert!(
-        detail(&buffer).contains("run_in_background"),
-        "{}",
-        lines(&buffer).join("\n")
-    );
-    // Re-read a growing real transcript while the earlier event is pinned.
-    use std::io::Write;
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&path)
-        .unwrap()
-        .write_all(records[1].as_bytes())
-        .unwrap();
-    app.refresh();
-    let buffer = draw(&mut app, 180);
-    assert!(
-        detail(&buffer).contains("run_in_background"),
-        "{}",
-        lines(&buffer).join("\n")
-    );
-    // Another list row replaces the pinned event through the same click deadline.
-    let (x, y) = log_position(&buffer, "对");
-    click(&mut app, x, y);
-    wait_for_click(&mut app);
-    let buffer = draw(&mut app, 180);
-    assert!(
-        detail(&buffer).contains("decision"),
-        "{}",
-        lines(&buffer).join("\n")
-    );
+fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
+    for (width, height) in [(120, 60), (100, 45), (180, 40)] {
+        let (_directory, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let payload = include_str!("../tests/fixtures/transcript.jsonl");
+        let records: Vec<_> = payload.split_inclusive('\n').collect();
+        std::fs::write(&path, records[0]).unwrap();
+        app.refresh();
+        select_archive(&mut app);
+        let buffer = draw_size(&mut app, width, height);
+        assert!(
+            detail(&buffer).contains("run_in_background"),
+            "{}",
+            lines(&buffer).join("\n")
+        );
+        std::fs::write(&path, payload).unwrap();
+        app.refresh();
+        let buffer = draw_size(&mut app, width, height);
+        assert!(
+            detail(&buffer).contains("decision"),
+            "{}",
+            lines(&buffer).join("\n")
+        );
+        // Click the actual User event in the list, not the preview.
+        let (x, y) = log_position(&buffer, "⏺");
+        click(&mut app, x, y);
+        wait_for_click(&mut app);
+        let buffer = draw_size(&mut app, width, height);
+        assert!(
+            detail(&buffer).contains("run_in_background"),
+            "{}",
+            lines(&buffer).join("\n")
+        );
+        // Re-read a growing real transcript while the earlier event is pinned.
+        use std::io::Write;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(records[1].as_bytes())
+            .unwrap();
+        app.refresh();
+        let buffer = draw_size(&mut app, width, height);
+        assert!(
+            detail(&buffer).contains("run_in_background"),
+            "{}",
+            lines(&buffer).join("\n")
+        );
+        // Another list row replaces the pinned event through the same click deadline.
+        let (x, y) = log_position(&buffer, "对");
+        click(&mut app, x, y);
+        wait_for_click(&mut app);
+        let buffer = draw_size(&mut app, width, height);
+        assert!(
+            detail(&buffer).contains("decision"),
+            "{}",
+            lines(&buffer).join("\n")
+        );
+    }
 }
 
 #[test]
-fn wide_log_double_click_focuses_prompt_and_keeps_preview_following() {
-    let (_directory, mut app) = fixture();
-    let path = app.sessions[0].transcript.clone().unwrap();
-    let payload = include_str!("../tests/fixtures/transcript.jsonl");
-    let records: Vec<_> = payload.split_inclusive('\n').collect();
-    std::fs::write(&path, records[0]).unwrap();
-    app.refresh();
-    select_archive(&mut app);
-    let buffer = draw(&mut app, 180);
-    let (x, y) = log_position(&buffer, "⏺");
-    click(&mut app, x, y);
-    click(&mut app, x, y);
-    app.handle_event(Event::Paste("double-click-prompt-proof".into()));
-    let buffer = draw(&mut app, 180);
-    assert!(
-        lines(&buffer)
-            .join("\n")
-            .contains("double-click-prompt-proof")
-    );
-    std::fs::write(&path, payload).unwrap();
-    app.refresh();
-    let buffer = draw(&mut app, 180);
-    assert!(
-        detail(&buffer).contains("decision"),
-        "{}",
-        lines(&buffer).join("\n")
-    );
+fn narrow_and_wide_log_double_click_focuses_prompt_and_keeps_preview_following() {
+    for (width, height) in [(120, 60), (100, 45), (180, 40)] {
+        let (_directory, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let payload = include_str!("../tests/fixtures/transcript.jsonl");
+        let records: Vec<_> = payload.split_inclusive('\n').collect();
+        std::fs::write(&path, records[0]).unwrap();
+        app.refresh();
+        select_archive(&mut app);
+        let buffer = draw_size(&mut app, width, height);
+        let (x, y) = log_position(&buffer, "⏺");
+        click(&mut app, x, y);
+        click(&mut app, x, y);
+        app.handle_event(Event::Paste("double-click-prompt-proof".into()));
+        let buffer = draw_size(&mut app, width, height);
+        assert!(
+            lines(&buffer)
+                .join("\n")
+                .contains("double-click-prompt-proof")
+        );
+        std::fs::write(&path, payload).unwrap();
+        app.refresh();
+        let buffer = draw_size(&mut app, width, height);
+        assert!(
+            detail(&buffer).contains("decision"),
+            "{}",
+            lines(&buffer).join("\n")
+        );
+    }
 }
 
 #[test]
-fn wide_list_and_detail_search_route_paste_without_changing_preview() {
-    let (_directory, mut app) = fixture();
-    select_archive(&mut app);
-    let original = detail(&draw(&mut app, 180));
-    app.handle_event(Event::Key(KeyEvent::new(
-        KeyCode::Char('r'),
-        KeyModifiers::CONTROL,
-    )));
-    app.handle_event(Event::Paste("Stop hook".into()));
-    let buffer = draw(&mut app, 180);
-    assert!(lines(&buffer).join("\n").contains("Search › Stop hook"));
-    assert_eq!(
-        detail(&buffer),
-        original,
-        "filtering the list must preserve newest preview"
-    );
-    key(&mut app, KeyCode::Esc);
-    let buffer = draw(&mut app, 180);
-    let (x, y) = log_position(&buffer, "⏺");
-    click(&mut app, x, y);
-    wait_for_click(&mut app);
-    app.handle_event(Event::Key(KeyEvent::new(
-        KeyCode::Char('r'),
-        KeyModifiers::CONTROL,
-    )));
-    app.handle_event(Event::Paste("await".into()));
-    let buffer = draw(&mut app, 180);
-    assert!(
-        detail(&buffer).contains("Search › await"),
-        "{}",
-        lines(&buffer).join("\n")
-    );
-    key(&mut app, KeyCode::Enter);
-    key(&mut app, KeyCode::Char('?'));
-    app.handle_event(Event::Paste("must-not-enter-help".into()));
-    let buffer = draw(&mut app, 180);
-    assert!(!lines(&buffer).join("\n").contains("must-not-enter-help"));
-    key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Backspace);
-    app.handle_event(Event::Paste("must-not-enter-confirmation".into()));
-    let buffer = draw(&mut app, 180);
-    let rendered = lines(&buffer).join("\n");
-    assert!(rendered.contains("Permanently delete"), "{rendered}");
-    assert!(!rendered.contains("must-not-enter-confirmation"));
-    key(&mut app, KeyCode::Esc);
+fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview() {
+    for (width, height) in [(120, 60), (100, 45), (180, 40)] {
+        let (_directory, mut app) = fixture();
+        select_archive(&mut app);
+        let original = detail(&draw_size(&mut app, width, height));
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('r'),
+            KeyModifiers::CONTROL,
+        )));
+        app.handle_event(Event::Paste("Stop hook".into()));
+        let buffer = draw_size(&mut app, width, height);
+        assert!(lines(&buffer).join("\n").contains("Search › Stop hook"));
+        assert_eq!(
+            detail(&buffer),
+            original,
+            "filtering the list must preserve newest preview"
+        );
+        key(&mut app, KeyCode::Esc);
+        let buffer = draw_size(&mut app, width, height);
+        let (x, y) = log_position(&buffer, "⏺");
+        click(&mut app, x, y);
+        wait_for_click(&mut app);
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('r'),
+            KeyModifiers::CONTROL,
+        )));
+        app.handle_event(Event::Paste("await".into()));
+        let buffer = draw_size(&mut app, width, height);
+        assert!(
+            detail(&buffer).contains("Search › await"),
+            "{}",
+            lines(&buffer).join("\n")
+        );
+        key(&mut app, KeyCode::Enter);
+        key(&mut app, KeyCode::Char('?'));
+        app.handle_event(Event::Paste("must-not-enter-help".into()));
+        let buffer = draw_size(&mut app, width, height);
+        assert!(!lines(&buffer).join("\n").contains("must-not-enter-help"));
+        key(&mut app, KeyCode::Esc);
+        key(&mut app, KeyCode::Backspace);
+        app.handle_event(Event::Paste("must-not-enter-confirmation".into()));
+        let buffer = draw_size(&mut app, width, height);
+        let rendered = lines(&buffer).join("\n");
+        assert!(rendered.contains("Permanently delete"), "{rendered}");
+        assert!(!rendered.contains("must-not-enter-confirmation"));
+        key(&mut app, KeyCode::Esc);
+    }
+}
+
+#[test]
+fn narrow_real_transcript_keeps_three_panels_and_click_opens_detail() {
+    for (width, height, expected) in [(120, 60, [18, 18, 17]), (100, 45, [13, 13, 12])] {
+        let (_directory, mut app) = fixture();
+        select_archive(&mut app);
+        let buffer = draw_size(&mut app, width, height);
+        let prompt = position(&buffer, "›").1;
+        let middle = prompt - 1;
+        let list_end = log_list_end(&buffer, prompt);
+        let heights = [
+            middle - 3,
+            list_end.saturating_sub(prompt + 1),
+            height.saturating_sub(2 + list_end),
+        ];
+        assert_eq!(
+            heights,
+            expected,
+            "{width}x{height}:\n{}",
+            lines(&buffer).join("\n")
+        );
+        assert!(detail(&buffer).contains("decision"));
+        let (x, y) = log_position(&buffer, "⏺");
+        click(&mut app, x, y);
+        wait_for_click(&mut app);
+        let opened = draw_size(&mut app, width, height);
+        assert!(detail(&opened).contains("run_in_background"));
+        assert_eq!(
+            lines(&opened)[usize::from(prompt + 1)..usize::from(list_end)],
+            lines(&buffer)[usize::from(prompt + 1)..usize::from(list_end)],
+            "opening an event must preserve the visible event list"
+        );
+        let (x, y) = log_position(&opened, "对");
+        click(&mut app, x, y);
+        wait_for_click(&mut app);
+        let changed = draw_size(&mut app, width, height);
+        assert!(detail(&changed).contains("decision"));
+        assert!(log_position(&changed, "⏺").1 < list_end);
+    }
+}
+
+#[test]
+fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
+    for (width, height) in [(120, 30), (100, 30), (180, 24)] {
+        let (_directory, mut app) = border_fixture();
+        let buffer = draw_size(&mut app, width, height);
+        let (x, y) = log_position(&buffer, "⏺");
+        click(&mut app, x, y);
+        wait_for_click(&mut app);
+        let buffer = draw_size(&mut app, width, height);
+        let (text_x, text_y) = position(&buffer, "Stop hook error");
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+        ] {
+            let column = text_x
+                + if matches!(kind, MouseEventKind::Drag(_)) {
+                    9
+                } else {
+                    0
+                };
+            app.view.handle_mouse(MouseEvent {
+                kind,
+                column,
+                row: text_y,
+                modifiers: KeyModifiers::NONE,
+            });
+        }
+        assert_eq!(
+            app.view.handle_mouse(MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: text_x + 9,
+                row: text_y,
+                modifiers: KeyModifiers::NONE,
+            }),
+            Some(Action::Copy {
+                text: "Stop hook".into(),
+                label: "Copied user message".into()
+            }),
+            "copy the real event body at {width}x{height}"
+        );
+        let before = detail(&buffer);
+        for (column, row) in [(x, y), (text_x, text_y)] {
+            app.handle_event(Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            }));
+            draw_size(&mut app, width, height);
+        }
+        let scrolled = draw_size(&mut app, width, height);
+        assert_ne!(detail(&scrolled), before);
+        assert!(lines(&scrolled).join("\n").contains("↑ Latest"));
+        assert!(lines(&scrolled).join("\n").contains("↑ Top"));
+        let (jump_x, jump_y) = position(&scrolled, "↑ Top");
+        click(&mut app, jump_x, jump_y);
+        let top = draw_size(&mut app, width, height);
+        assert!(!lines(&top).join("\n").contains("↑ Top"));
+        assert!(lines(&top).join("\n").contains("↑ Latest"));
+        assert_eq!(detail(&top), before);
+        let (jump_x, jump_y) = position(&top, "↑ Latest");
+        click(&mut app, jump_x, jump_y);
+        let latest = draw_size(&mut app, width, height);
+        assert!(!lines(&latest).join("\n").contains("↑ Latest"));
+        assert_eq!(detail(&latest), before);
+    }
 }
 
 #[test]

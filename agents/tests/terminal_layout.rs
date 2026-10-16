@@ -67,7 +67,15 @@ fn terminal_layout_tracks_width() {
     // Let provider discovery finish, then select the real archived transcript.
     std::thread::sleep(Duration::from_secs(2));
     tmux.run(&["send-keys", "-t", "probe", "Tab", "Tab", "Tab", "Tab"]);
-    for width in [200, 100, 149, 150, 151, 200] {
+    for (width, height) in [
+        (200, 50),
+        (120, 60),
+        (100, 45),
+        (149, 50),
+        (150, 50),
+        (151, 50),
+        (200, 50),
+    ] {
         tmux.run(&[
             "resize-window",
             "-t",
@@ -75,7 +83,7 @@ fn terminal_layout_tracks_width() {
             "-x",
             &width.to_string(),
             "-y",
-            "50",
+            &height.to_string(),
         ]);
         std::thread::sleep(Duration::from_secs(1));
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
@@ -115,13 +123,35 @@ fn terminal_layout_tracks_width() {
             .iter()
             .take_while(|line| line.matches('│').count() == separators.len())
             .count();
-        let log_rule = top_end + if width >= 150 { 2 } else { 1 };
+        let prompt = top_end + 1;
+        assert!(lines[prompt].contains('›'), "prompt missing: {capture}");
+        let log_rule = if width >= 150 {
+            top_end + 2
+        } else {
+            (prompt + 1..lines.len() - 1)
+                .find(|&row| lines[row].matches('─').count() > width as usize / 2)
+                .expect("separate list/detail border")
+        };
         let top_height = top_end - 3;
         let bottom_height = lines.len() - log_rule - 2;
-        assert!(
-            top_height == bottom_height || top_height == bottom_height + 1,
-            "content heights differ: top {top_height}, bottom {bottom_height}: {capture}"
-        );
+        if width >= 150 {
+            assert!(
+                top_height == bottom_height || top_height == bottom_height + 1,
+                "content heights differ: top {top_height}, bottom {bottom_height}: {capture}"
+            );
+        } else {
+            let list_height = log_rule - prompt - 1;
+            let content = height as usize - 7;
+            let expected = [content.div_ceil(3), (content + 1) / 3, content / 3];
+            assert_eq!(
+                [top_height, list_height, bottom_height],
+                expected,
+                "{capture}"
+            );
+            println!(
+                "{width}x{height} content heights: top={top_height}, list={list_height}, detail={bottom_height}"
+            );
+        }
         assert!(
             !lines[log_rule + 1].trim().is_empty(),
             "blank row below log rule: {capture}"
@@ -154,7 +184,10 @@ fn terminal_layout_tracks_width() {
                     );
                 }
             }
-            assert!(lines[top_end + 1].contains('›'), "prompt missing: {capture}");
+            assert!(
+                lines[top_end + 1].contains('›'),
+                "prompt missing: {capture}"
+            );
             let middle: Vec<_> = lines[top_end].chars().collect();
             let details: String = middle[separators[0] + 2..separators[1] - 1]
                 .iter()
@@ -170,7 +203,7 @@ fn terminal_layout_tracks_width() {
             }
             assert!(lines[log_rule].trim().chars().all(|c| c == '─'));
             assert!(
-                lines[log_rule + 4..48]
+                lines[log_rule + 4..lines.len() - 1]
                     .iter()
                     .any(|line| line.width() > width as usize * 2 / 3),
                 "detail does not span the terminal: {capture}"
@@ -184,10 +217,69 @@ fn terminal_layout_tracks_width() {
                 "event list missing from top row: {capture}"
             );
         } else {
+            let list = lines[prompt + 1..log_rule].join("\n");
             assert!(
-                lines[log_rule + 1..48].iter().any(|line| line.contains("Stop hook")),
+                list.contains("Stop hook"),
                 "event list missing below prompt: {capture}"
             );
+            assert!(
+                lines[log_rule + 1..lines.len() - 1]
+                    .join("\n")
+                    .contains("decision"),
+                "newest event detail missing below list: {capture}"
+            );
+            let user_row = (prompt + 1..log_rule)
+                .find(|&row| lines[row].contains("⏺"))
+                .expect("real user event row");
+            // Feed the same SGR mouse press/release received by the terminal loop.
+            tmux.run(&[
+                "send-keys",
+                "-t",
+                "probe",
+                "-l",
+                &format!("\x1b[<0;2;{}M\x1b[<0;2;{}m", user_row + 1, user_row + 1),
+            ]);
+            std::thread::sleep(Duration::from_secs(1));
+            let opened = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            let opened_lines: Vec<_> = opened.lines().collect();
+            assert_eq!(
+                opened_lines[prompt + 1..log_rule].join("\n"),
+                list,
+                "event list hidden after click: {opened}"
+            );
+            assert!(
+                opened_lines[log_rule + 1..opened_lines.len() - 1]
+                    .join("\n")
+                    .contains("run_in_background"),
+                "clicked user event missing from detail: {opened}"
+            );
+            tmux.run(&["send-keys", "-t", "probe", "C-r"]);
+            tmux.run(&["send-keys", "-t", "probe", "-l", "await"]);
+            std::thread::sleep(Duration::from_millis(200));
+            let searched = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            assert!(
+                searched
+                    .lines()
+                    .skip(log_rule + 1)
+                    .any(|line| line.contains("Search › await")),
+                "detail search missing: {searched}"
+            );
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+            // Select the real newest event so each resize starts with the same detail.
+            std::thread::sleep(Duration::from_millis(200));
+            let assistant_row = prompt + 1;
+            tmux.run(&[
+                "send-keys",
+                "-t",
+                "probe",
+                "-l",
+                &format!(
+                    "\x1b[<0;2;{}M\x1b[<0;2;{}m",
+                    assistant_row + 1,
+                    assistant_row + 1
+                ),
+            ]);
+            std::thread::sleep(Duration::from_secs(1));
         }
     }
 }

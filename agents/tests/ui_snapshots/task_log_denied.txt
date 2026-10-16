@@ -6,20 +6,20 @@
                                                   │
                                                   │ Project
                                                   │ /tmp/project
-                                                  │
-                                                  │ Model                                   Unknown
-                                                  │
-                                                  │
-                                                  │
- Task log example · Running in a terminal; open it to type
+                                                  │ …
  ──────────────────────────────────────────────────────────── Task log example · Working ──────────
+ Task log example · Running in a terminal; open it to type
  Edit: Dangerous                                                                                10s
  Bash: Safety Check                                                                             10s
  Bash: Create Unsafe Agents                                                                     15s
  Please inspect the task                                                                   11:58:00
 
 
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ Denied Edit                                                                                    10s
 
 
-
+ ↓
+ Reason: The server-side auto mode classifier judged this action dangerous (it gave no
+ explanation). If you have other tasks…
  ? help  esc back  ↑/↓ move  enter open  n new

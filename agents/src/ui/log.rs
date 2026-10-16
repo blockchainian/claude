@@ -7,7 +7,7 @@ use chrono::{DateTime, Local, Utc};
 const CLOCK_FORMAT: &str = "%H:%M:%S";
 const CLOCK_WIDTH: usize = 8;
 
-/// Rows above the first event: the top rule.
+/// Rows above the detail header: the top rule.
 pub(super) const LOG_TOP: u16 = 1;
 
 pub(super) fn search_input_rect(area: Rect) -> Rect {
@@ -15,14 +15,6 @@ pub(super) fn search_input_rect(area: Rect) -> Rect {
 }
 
 impl View {
-    pub(super) fn log_rows_top(&self) -> u16 {
-        if self.viewport.borrow().log_detail.is_empty() {
-            LOG_TOP
-        } else {
-            0
-        }
-    }
-
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
         self.viewport.borrow_mut().log_text = text_selection::TextRegion::default();
         if !self.selecting_list(text_selection::Panel::LogList) {
@@ -40,19 +32,7 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
-        let wide = !self.viewport.borrow().log_detail.is_empty();
-        let top = self.log_rows_top();
-        if !wide {
-            super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
-        }
         if self.log_session.as_ref() != Some(&session.id) {
-            return;
-        }
-        if self.viewport.borrow().log_detail.is_empty()
-            && let Some(event) = &self.log_open
-        {
-            let time = event_time(event, session, self.is_newest_shown(event), now);
-            self.render_open_event(event, &time, area, buf, &session.cwd);
             return;
         }
         if self.log_search.active() && area.height > 1 {
@@ -67,36 +47,30 @@ impl View {
             }
         }
         let scroll = self.log_scroll();
-        let rule = if wide {
-            Rect::new(area.x, area.bottom(), area.width, 1)
-        } else {
-            area
-        };
-        self.render_log_jump(rule, scroll, buf);
         let matching: Vec<_> = self.shown_log_events().collect();
         let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(
             area.height
-                .saturating_sub(top + u16::from(self.log_search.active())),
+                .saturating_sub(u16::from(self.log_search.active())),
         ));
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
         for (index, &(log_index, event)) in matching[start..end].iter().rev().enumerate() {
             let last = scroll == 0 && index == 0;
             let time = event_time(event, session, last, now);
-            let (cut, links) = render_event(
+            let links = render_event(
                 event,
                 &time,
                 last,
-                super::render::row(area, index as u16 + top, 1),
+                super::render::row(area, index as u16, 1),
                 buf,
                 Some(&self.log_search),
                 &session.cwd,
             );
-            rows.push((log_index, cut));
+            rows.push(log_index);
             drawn_links.extend(links);
         }
-        let text_area = super::render::row(area, top, rows.len() as u16);
+        let text_area = super::render::row(area, 0, rows.len() as u16);
         {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_rows = rows;
@@ -114,13 +88,13 @@ impl View {
     }
 
     pub(super) fn render_log_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
+        super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
         let Some(session) = self.selected_row() else {
             return;
         };
         if self.log_session.as_ref() != Some(&session.id) {
             return;
         }
-        super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
         let Some(event) = self.visible_log_event() else {
             return;
         };
@@ -132,7 +106,7 @@ impl View {
 
     /// Draws the button that jumps back to the newest row on the rule, its arrow above the
     /// rows' bodies, while the log is scrolled off its newest row.
-    fn render_log_jump(&self, area: Rect, scroll: usize, buf: &mut Buffer) {
+    pub(super) fn render_log_jump(&self, area: Rect, scroll: usize, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
         if scroll == 0 {
             viewport.log_unseen = 0;
@@ -291,12 +265,7 @@ impl View {
             return;
         }
         let viewport = self.viewport.borrow();
-        let width = if viewport.log_detail.is_empty() {
-            viewport.log.width
-        } else {
-            viewport.log_detail.width
-        }
-        .max(1);
+        let width = viewport.log_detail.width.max(1);
         let cwd = self
             .selected_row()
             .map(|session| session.cwd.as_path())
@@ -491,7 +460,7 @@ fn log_row_areas(area: Rect) -> (Rect, Rect) {
     )
 }
 
-/// Draws one log row and returns whether its body was cut, with the links drawn on it.
+/// Draws one log row and returns its visible links.
 fn render_event(
     event: &Event,
     time: &str,
@@ -500,9 +469,9 @@ fn render_event(
     buf: &mut Buffer,
     search: Option<&super::log_search::LogSearch>,
     cwd: &std::path::Path,
-) -> (bool, Vec<super::links::DrawnLink>) {
+) -> Vec<super::links::DrawnLink> {
     if area.is_empty() {
-        return (false, Vec::new());
+        return Vec::new();
     }
     let (content_area, time_area) = log_row_areas(area);
     let time_style = super::style::log_time_style(&event.kind, last);
@@ -511,13 +480,12 @@ fn render_event(
         .render(time_area, buf);
     let content_width = usize::from(content_area.width);
     if content_width == 0 {
-        return (true, Vec::new());
+        return Vec::new();
     }
     let content_x = content_area.x;
     let body_width = content_width;
     let fitted = fitted_body_line(event, body_width, cwd);
     let mut body = fitted.line;
-    let cut = fitted.shortened || body.width() > body_width;
     let body_x = content_x;
     let links = {
         let links = if is_prose(&event.kind) {
@@ -552,7 +520,7 @@ fn render_event(
     }
     truncate_line_with_ellipsis_if_overflow(body, body_width)
         .render(Rect::new(body_x, area.y, body_width as u16, 1), buf);
-    (cut, links)
+    links
 }
 
 /// The screen cells of one drawn line, each with the source bytes it shows.
@@ -680,8 +648,6 @@ pub(super) fn body_line(event: &Event, body_width: usize, cwd: &std::path::Path)
 /// An event's body as one log row, with paths shortened to fit the row.
 struct FittedBody {
     line: Line<'static>,
-    /// Whether any path was shortened.
-    shortened: bool,
     /// The text the row was drawn from, before any shortening: the event's prose with
     /// its whitespace collapsed, or its tool text with home paths shown as `~`.
     source: String,
@@ -742,7 +708,6 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
         }
         FittedBody {
             line: Line::from(spans),
-            shortened: shortened != body,
             source: body,
             paths: Vec::new(),
         }
@@ -750,7 +715,6 @@ fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> 
         let (text, paths) = display_paths(event, cwd);
         let shortened = super::line_truncation::abbreviate_paths(&text, &paths, body_width);
         FittedBody {
-            shortened: shortened != collapse_whitespace(event.body.trim()),
             line: Line::from(Span::styled(shortened, body_style)),
             source: text,
             paths,
@@ -1137,7 +1101,7 @@ mod log_markdown {
     }
 
     /// A row merging an Edit and a Read call, fitted to `width`.
-    fn merged_tool_row(width: usize) -> (String, bool) {
+    fn merged_tool_row(width: usize) -> String {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         for (id, name, path) in [
             ("a", "Edit", "/opt/work/agents/src/ui/tests.rs"),
@@ -1153,30 +1117,26 @@ mod log_markdown {
         }
         let events = crate::providers::claude::log::tail(file.path(), 1).unwrap();
         let fitted = fitted_body_line(&events[0], width, std::path::Path::new("/"));
-        let (line, cut) = (fitted.line, fitted.shortened);
-        let text = line
+        fitted
+            .line
             .spans
             .iter()
             .map(|span| span.content.as_ref())
-            .collect();
-        (text, cut)
+            .collect()
     }
 
     #[test]
     fn merged_tool_row_abbreviates_every_path() {
         assert_eq!(
             merged_tool_row(70),
-            (
-                "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/codex/tests.rs".into(),
-                true
-            )
+            "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/codex/tests.rs"
         );
     }
 
     #[test]
     fn merged_tool_row_keeps_every_file_name_whole() {
         assert_eq!(
-            merged_tool_row(40).0,
+            merged_tool_row(40),
             "Edit /o…/w…/a…/s…/ui/tests.rs，Read /o…/w…/a…/s…/p…/c…/tests.rs"
         );
     }

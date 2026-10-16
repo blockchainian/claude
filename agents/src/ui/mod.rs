@@ -104,8 +104,9 @@ struct Viewport {
     log_unseen: usize,
     /// Where the last render drew the button that jumps back to the newest log row.
     log_jump: Rect,
-    /// Index into the task log of each drawn log row, top down, and whether its body was cut.
-    log_rows: Vec<(usize, bool)>,
+    log_detail_jump: Rect,
+    /// Index into the task log of each drawn log row, top down.
+    log_rows: Vec<usize>,
     /// Lines of the open log event scrolled off the top.
     log_open_scroll: usize,
     log_open_max: usize,

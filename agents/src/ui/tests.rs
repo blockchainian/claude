@@ -187,7 +187,7 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
     let mut older = view.log[0].clone();
     older.body = "Older event".into();
     view.log.insert(0, older);
-    let before = log_screen(&view, 100, 32, now);
+    let before = log_list_screen(&view, 100, 32, now);
     let rect = view.center_layout(Rect::new(0, 0, 100, 32)).log;
     assert!(
         before
@@ -196,7 +196,7 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
         "{before}"
     );
     view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
-    let after = log_screen(&view, 100, 32, now);
+    let after = log_list_screen(&view, 100, 32, now);
     assert!(after.contains("Older event"), "{after}");
     assert!(!after.contains("run tests"));
     for y in rect.y + super::log::LOG_TOP..rect.bottom() - 3 {
@@ -208,7 +208,7 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
     // A tool at the visible edge must use its recorded duration, even if unfinished.
     view.log[7] = view.log[8].clone();
     view.log[7].body = "Earlier unfinished tool".into();
-    let after = log_screen(&view, 100, 32, now);
+    let after = log_list_screen(&view, 100, 32, now);
     assert!(
         after
             .lines()
@@ -244,7 +244,7 @@ fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
         })
         .collect();
     view.log.last_mut().unwrap().previous_end = None;
-    let before = log_screen(&view, 100, 25, now);
+    let before = log_list_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
     assert!(
         before
@@ -260,7 +260,7 @@ fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
     );
     let (before_x, before_y) = rendered_cell(&before, "Event 10");
     view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
-    let after = log_screen(&view, 100, 25, now);
+    let after = log_list_screen(&view, 100, 25, now);
     assert!(!after.contains("Event 11"), "{after}");
     let (after_x, after_y) = rendered_cell(&after, "Event 10");
     assert_eq!(after_y + 1, before_y);
@@ -313,7 +313,7 @@ fn log_with_newer_event(view: &View, now: chrono::DateTime<Utc>) -> Vec<crate::l
 #[test]
 fn new_log_events_keep_rows_still_while_mouse_is_held() {
     let (mut view, now) = log_fixture();
-    let before = log_screen(&view, 100, 25, now);
+    let before = log_list_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
     view.handle_mouse(mouse(
         MouseEventKind::Down(MouseButton::Left),
@@ -321,7 +321,7 @@ fn new_log_events_keep_rows_still_while_mouse_is_held() {
         rect.y + 2,
     ));
     view.set_log(log_with_newer_event(&view, now));
-    let after = log_screen(&view, 100, 25, now);
+    let after = log_list_screen(&view, 100, 25, now);
     assert!(!after.contains("brand new event"), "{after}");
     for body in ["run tests", "run a background job"] {
         assert_eq!(rendered_cell(&after, body), rendered_cell(&before, body));
@@ -363,15 +363,15 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     log_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
     view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
-    let before = log_screen(&view, 100, 25, now);
+    let before = log_list_screen(&view, 100, 25, now);
     assert!(before.contains("↑ Latest"), "{before}");
     view.set_log(log_with_newer_event(&view, now));
-    let after = log_screen(&view, 100, 25, now);
+    let after = log_list_screen(&view, 100, 25, now);
     assert!(!after.contains("brand new event"), "{after}");
     let body = rendered_cell(&after, "run a background job");
     assert_eq!(body, rendered_cell(&before, "run a background job"));
     let jump = rendered_cell(&after, "↑ 1 New");
-    assert_eq!((jump.0, jump.1), (body.0 + 1, rect.y));
+    assert_eq!((jump.0, jump.1), (body.0 + 1, rect.bottom()));
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
     assert_eq!(buf[jump].fg, Color::Reset);
@@ -2899,7 +2899,7 @@ mod details_header {
             assert_eq!(
                 rule.y,
                 if with_log {
-                    layout.log.y
+                    layout.prompt.y - 1
                 } else {
                     layout.details.bottom() - 1
                 }
@@ -2917,11 +2917,7 @@ mod details_header {
                 (start + expected.width() as u16..rule.right())
                     .all(|x| buf[(x, rule.y)].symbol() == "─")
             );
-            assert_eq!(
-                view.viewport.borrow().details.bottom()
-                    + if with_log { layout.prompt.height } else { 0 },
-                rule.y
-            );
+            assert_eq!(view.viewport.borrow().details.bottom(), rule.y);
         }
     }
 }
@@ -3360,6 +3356,26 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
         + "\n"
 }
 
+fn log_list_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) -> String {
+    let rendered = log_screen(view, width, height, now);
+    let detail = view
+        .center_layout(Rect::new(0, 0, width, height))
+        .log_detail;
+    rendered
+        .lines()
+        .enumerate()
+        .map(|(y, line)| {
+            if (detail.y + 1..detail.bottom()).contains(&(y as u16)) {
+                ""
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
 fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
     let (mut view, now) = log_fixture();
     let path =
@@ -3599,9 +3615,10 @@ fn dashboard_log_bodies_start_at_the_left_padding() {
             let mut buf = Buffer::empty(area);
             view.render_at(area, &mut buf, now);
             let log = view.viewport.borrow().log;
-            let y = log.y + view.log_rows_top();
-            let body = super::log::body_line(&event, usize::from(log.width - 10), &view.rows[0].cwd)
-                .to_string();
+            let y = log.y;
+            let body =
+                super::log::body_line(&event, usize::from(log.width - 10), &view.rows[0].cwd)
+                    .to_string();
             for (offset, ch) in body.chars().take(12).enumerate() {
                 let cell = &buf[(log.x + offset as u16, y)];
                 assert_eq!(
@@ -3651,7 +3668,7 @@ fn dashboard_log_list_fills_rows_next_to_rules() {
             view.render_at(area, &mut buf, now);
             let layout = view.center_layout(area);
             let log = view.viewport.borrow().log;
-            let first = log.y + u16::from(width < 150);
+            let first = log.y;
             let last = log.bottom() - 1 - u16::from(search);
             assert_eq!(
                 buf[(log.x, first)].symbol(),
@@ -3688,11 +3705,7 @@ fn dashboard_log_detail_starts_directly_below_rule() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let layout = view.center_layout(area);
-        let detail = if width >= 150 {
-            layout.log_detail
-        } else {
-            layout.log
-        };
+        let detail = layout.log_detail;
         assert_ne!(
             buf[(1, detail.y + 1)].symbol(),
             " ",
@@ -3815,7 +3828,7 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             let y = if wide {
                 4
             } else {
-                view.center_layout(area).log.y + 2
+                view.center_layout(area).log.y + 1
             };
             let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
             let log: String = (left..width).map(|x| buf[(x, y)].symbol()).collect();
@@ -3830,7 +3843,7 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             }
             let selected = {
                 let viewport = view.viewport.borrow();
-                let index = viewport.log_rows[1].0;
+                let index = viewport.log_rows[1];
                 assert_eq!(viewport.log_list_text.area.x, left);
                 assert_eq!(viewport.log_list_text.area.right(), width - 1);
                 view.log[index].clone()
@@ -3909,7 +3922,7 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
         let mut buffer = Buffer::empty(area);
         view.render_at(area, &mut buffer, now);
         let log = view.viewport.borrow().log;
-        let top = log.y + view.log_rows_top();
+        let top = log.y;
         for (offset, time) in ["11:59:50", "9m 50s", "2s"].into_iter().enumerate() {
             let y = top + offset as u16;
             let text = |start, end| {
@@ -3934,8 +3947,14 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
 fn task_log_body_starts_at_the_left_padding() {
     let (mut view, now) = log_fixture();
     view.log.pop();
-    let rendered = log_screen(&view, 100, 25, now);
-    assert!(rendered.lines().nth(21).unwrap().starts_with(" Please"));
+    let rendered = log_screen(&view, 100, 32, now);
+    assert!(
+        rendered
+            .lines()
+            .nth(view.viewport.borrow().log.y as usize + 6)
+            .unwrap()
+            .starts_with(" Please")
+    );
 }
 
 #[test]
@@ -4051,11 +4070,12 @@ fn task_log_short_terminal_splits_content_equally() {
     view.log = log.log;
     view.log_session = view.selected_id().cloned();
     let layout = view.center_layout(Rect::new(0, 0, 140, 22));
-    assert_eq!(layout.log.height, 9);
-    assert_eq!(layout.list.height, 8);
+    assert_eq!(layout.log.height, 5);
+    assert_eq!(layout.log_detail.height, 6);
+    assert_eq!(layout.list.height, 5);
     let rendered = screen(&view, 140, 22);
-    assert!(rendered.contains("I will check the files"));
-    assert!(rendered.contains("Please inspect"));
+    assert!(rendered.contains("Also inspect the tests"));
+    assert!(!rendered.contains("Please inspect"));
 }
 
 #[test]
@@ -4068,7 +4088,7 @@ fn task_log_requires_room_for_header_and_six_body_rows() {
 }
 
 #[test]
-fn task_log_top_rule_matches_header_and_footer_gap_is_empty() {
+fn task_log_rules_match_header_and_footer_gap_is_empty() {
     use ratatui::style::Modifier;
     let (mut view, now) = log_fixture();
     for loaded in [true, false] {
@@ -4078,20 +4098,29 @@ fn task_log_top_rule_matches_header_and_footer_gap_is_empty() {
         let area = Rect::new(0, 0, 100, 25);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let details = view.center_layout(area).details;
+        let layout = view.center_layout(area);
+        let middle = layout.prompt.y - 1;
         for x in 0..100 {
-            if x < details.x || x >= details.right() {
-                assert_eq!(buf[(x, 14)].symbol(), buf[(x, 2)].symbol());
-                assert_eq!(buf[(x, 14)].modifier, buf[(x, 2)].modifier);
+            for y in [middle, layout.log_detail.y] {
+                if y != middle || x < layout.details.x || x >= layout.details.right() {
+                    assert_eq!(buf[(x, y)].symbol(), buf[(x, 2)].symbol());
+                    assert_eq!(buf[(x, y)].modifier, buf[(x, 2)].modifier);
+                }
             }
             if !loaded {
-                assert_eq!(buf[(x, 15)].symbol(), " ");
-                assert_eq!(buf[(x, 15)].modifier, Modifier::empty());
+                for y in layout.log.y..layout.log.bottom() {
+                    assert_eq!(buf[(x, y)].symbol(), " ");
+                    assert_eq!(buf[(x, y)].modifier, Modifier::empty());
+                }
+                for y in layout.log_detail.y + 1..layout.footer.y {
+                    assert_eq!(buf[(x, y)].symbol(), " ");
+                    assert_eq!(buf[(x, y)].modifier, Modifier::empty());
+                }
             }
             assert_eq!(buf[(x, 23)].symbol(), " ");
             assert_eq!(buf[(x, 23)].modifier, Modifier::empty());
         }
-        assert!(buf[(2, 14)].modifier.contains(Modifier::DIM));
+        assert!(buf[(2, middle)].modifier.contains(Modifier::DIM));
     }
 }
 
@@ -4101,14 +4130,14 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
     assert!(
         log_screen(&view, 100, 25, now)
             .lines()
-            .nth(15)
+            .nth(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
             .unwrap()
             .ends_with("35s")
     );
     assert!(
         log_screen(&view, 100, 25, now + Duration::seconds(1))
             .lines()
-            .nth(15)
+            .nth(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
             .unwrap()
             .ends_with("36s")
     );
@@ -4116,7 +4145,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
     assert!(
         log_screen(&view, 100, 25, now)
             .lines()
-            .nth(15)
+            .nth(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
             .unwrap()
             .ends_with("25s")
     );
@@ -4124,7 +4153,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
     assert!(
         log_screen(&view, 100, 25, now)
             .lines()
-            .nth(15)
+            .nth(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
             .unwrap()
             .ends_with("5s")
     );
@@ -4137,7 +4166,7 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
     assert!(
         log_screen(&view, 100, 25, now)
             .lines()
-            .nth(15)
+            .nth(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
             .unwrap()
             .ends_with("40s ago")
     );
@@ -4176,8 +4205,9 @@ fn non_current_log_time_matches_unselected_task_and_details_times() {
 
     let mut log = Buffer::empty(area);
     view.render_at(area, &mut log, now);
-    assert_ne!(log[(98, 19)].symbol(), " ");
-    assert_eq!(log[(98, 19)].style(), task_time.style());
+    let y = view.center_layout(area).log.y + 4;
+    assert_ne!(log[(98, y)].symbol(), " ");
+    assert_eq!(log[(98, y)].style(), task_time.style());
 
     view.rows[view.selected].last_message = Some("Reply".into());
     view.rows[view.selected].last_message_at = Some(now - Duration::minutes(1));
@@ -4204,13 +4234,15 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    for (y, colour) in [
-        (19, Color::Reset),
-        (18, Color::Yellow),
-        (17, Color::Blue),
-        (16, Color::Red),
-        (15, Color::Reset),
+    let top = view.center_layout(area).log.y;
+    for (offset, colour) in [
+        (4, Color::Reset),
+        (3, Color::Yellow),
+        (2, Color::Blue),
+        (1, Color::Red),
+        (0, Color::Reset),
     ] {
+        let y = top + offset;
         let label = &buf[(1, y)];
         let body = &buf[(1, y)];
         assert_eq!(label.fg, colour, "label row {y}");
@@ -4222,7 +4254,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
             "body row {y}"
         );
     }
-    for y in 16..20 {
+    for y in top + 1..top + 5 {
         assert_eq!(buf[(98, y)].fg, Color::Reset, "time row {y}");
         assert_eq!(buf[(98, y)].modifier, Modifier::DIM, "time row {y}");
     }
@@ -4245,7 +4277,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         view.log.first_mut().unwrap().previous_end = None;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let time = &buf[(98, 19)];
+        let time = &buf[(98, top + 4)];
         let time_style = super::style::log_time_style(&kind, false);
         assert_eq!(time_style, super::style::time_style());
         assert_eq!(time.fg, Color::Reset);
@@ -4254,12 +4286,12 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         for x in [1, 11] {
-            let cell = &buf[(x, 15)];
+            let cell = &buf[(x, top)];
             assert_eq!(cell.fg, colour);
             assert!(!cell.modifier.contains(Modifier::BOLD));
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
-        let time = &buf[(98, 15)];
+        let time = &buf[(98, top)];
         assert_ne!(time.symbol(), " ");
         assert_eq!(time.fg, colour);
         assert!(time.modifier.contains(Modifier::BOLD));
@@ -4275,9 +4307,10 @@ fn task_log_preserves_time_when_truncated() {
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    assert_eq!(buf[(88, 16)].symbol(), "…");
-    assert_eq!(buf[(98, 16)].fg, Color::Reset);
-    assert_eq!(buf[(98, 16)].modifier, Modifier::DIM);
+    let y = view.center_layout(area).log.y + 1;
+    assert_eq!(buf[(88, y)].symbol(), "…");
+    assert_eq!(buf[(98, y)].fg, Color::Reset);
+    assert_eq!(buf[(98, y)].modifier, Modifier::DIM);
     for kind in [
         Kind::User,
         Kind::Assistant,
@@ -4292,7 +4325,7 @@ fn task_log_preserves_time_when_truncated() {
         assert!(
             log_screen(&view, 100, 25, now)
                 .lines()
-                .nth(15)
+                .nth(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
                 .unwrap()
                 .ends_with("30s ago")
         );
@@ -4315,17 +4348,22 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
     assert_eq!(
         rendered
             .lines()
-            .skip(15)
+            .skip(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
             .take(3)
             .map(|line| line.chars().skip(1).take(9).collect::<String>())
             .collect::<Vec<_>>(),
         ["Read src/", "I will ch", "Please in"]
     );
-    for (line, (time, label)) in rendered.lines().skip(15).take(3).zip([
-        ("44m ago", "Read src/"),
-        ("12:03:45", "I will ch"),
-        ("3s", "Please in"),
-    ]) {
+    for (line, (time, label)) in rendered
+        .lines()
+        .skip(view.center_layout(Rect::new(0, 0, 100, 25)).log.y as usize)
+        .take(3)
+        .zip([
+            ("44m ago", "Read src/"),
+            ("12:03:45", "I will ch"),
+            ("3s", "Please in"),
+        ])
+    {
         assert_eq!(
             line[..line.find(time).unwrap()].chars().count() + time.len(),
             99,
@@ -4336,7 +4374,7 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
 }
 
 #[test]
-fn task_log_shows_only_newest_nine_events_and_hides_without_selection() {
+fn task_log_shows_only_visible_events_and_hides_without_selection() {
     let (mut view, now) = log_fixture();
     let first = crate::log::Event {
         sender: None,
@@ -4368,7 +4406,7 @@ fn center_layout_narrow_buffer_ranges_at_120_columns() {
     let layout = view.center_layout(area);
     assert_eq!(
         [layout.list, layout.details, layout.log].map(|rect| rect.x..rect.right()),
-        [1..59, 62..119, 0..120],
+        [1..59, 62..119, 1..119],
     );
     for y in layout.list.y..layout.list.bottom() {
         let separators: Vec<_> = (0..120).filter(|&x| buf[(x, y)].symbol() == "│").collect();
@@ -4403,8 +4441,8 @@ fn center_layout_narrow_equal_content_buffer_at_120x60() {
 }
 
 #[test]
-fn center_layout_narrow_equal_content_buffer_at_120x45() {
-    assert_equal_content_buffer(120, 45, "");
+fn center_layout_narrow_equal_content_buffer_at_100x45() {
+    assert_equal_content_buffer(100, 45, "");
 }
 
 fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
@@ -4418,26 +4456,37 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
         .filter(|&y| buf[(layout.gap.x + 1, y)].symbol() == "│")
         .count() as u16;
     let wide = width >= super::render::WIDE_LAYOUT_COLUMNS;
-    let log = if wide { layout.log_detail } else { layout.log };
-    let bottom = layout.footer.y - log.y - 1;
-    let available = height
-        - layout.header.height
-        - layout.footer.height
-        - layout.prompt.height
-        - 1
-        - u16::from(wide);
+    let available = height - layout.header.height - layout.footer.height - layout.prompt.height - 2;
+    let detail = layout.log_detail.height.saturating_sub(1);
+    let expected = if wide {
+        (available.div_ceil(2), available.div_ceil(2), available / 2)
+    } else {
+        (
+            available.div_ceil(3),
+            (available + 1) / 3,
+            available / 3,
+        )
+    };
     println!(
-        "{width}x{height}, input {} rows: top {top}, bottom {bottom}",
-        layout.prompt.height
+        "{width}x{height}, input {} rows: top {top}, log {}, detail {detail}",
+        layout.prompt.height, layout.log.height
     );
-    assert_eq!((top, bottom), (available.div_ceil(2), available / 2));
+    assert_eq!((top, layout.log.height, detail), expected);
     assert_eq!(layout.details.height, top);
+    assert_eq!(layout.prompt.y, layout.details.bottom() + 1);
+    assert_eq!(
+        buf[(layout.details.x, layout.details.bottom())].symbol(),
+        "─"
+    );
+    assert_eq!(buf[(layout.details.x, layout.log_detail.y)].symbol(), "─");
     if wide {
-        assert_eq!(layout.log.height, top);
+        assert_eq!(layout.prompt.bottom(), layout.log_detail.y);
+    } else {
+        assert_eq!(layout.prompt.bottom(), layout.log.y);
+        assert_eq!(layout.log.bottom(), layout.log_detail.y);
+        assert_eq!(layout.log_detail.bottom(), layout.footer.y);
+        assert!(buf[(0, layout.log.y)].symbol() != "│");
     }
-    assert_eq!(layout.prompt.y, layout.details.bottom() + u16::from(wide));
-    assert_eq!(layout.prompt.bottom(), log.y);
-    assert_eq!(buf[(layout.details.x, log.y)].symbol(), "─");
 }
 
 #[test]
@@ -4472,10 +4521,10 @@ fn assert_wide_buffer_ranges(width: u16, expected: [std::ops::Range<u16>; 3]) {
 fn center_layout_golden_rects_follow_each_area() {
     let (view, _) = log_fixture();
     for (width, height, top, log_height, list_width, details_width, body_height) in [
-        (80, 24, 13, 10, 38, 37, 9),
-        (120, 40, 21, 18, 58, 57, 17),
+        (80, 24, 17, 6, 38, 37, 6),
+        (120, 40, 27, 12, 58, 57, 11),
         (200, 60, 32, 27, 48, 48, 27),
-        (80, 24, 13, 10, 38, 37, 9),
+        (80, 24, 17, 6, 38, 37, 6),
     ] {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
@@ -4486,7 +4535,11 @@ fn center_layout_golden_rects_follow_each_area() {
             assert_eq!(layout.log.width, width - 8 - 2 * list_width);
             layout.log_detail
         } else {
-            layout.log
+            assert_eq!(
+                layout.log,
+                Rect::new(6, 10 + body_height + 2, width - 2, body_height)
+            );
+            layout.log_detail
         };
         assert_eq!(bottom, Rect::new(5, 7 + top, width, log_height));
         assert_eq!(layout.footer, Rect::new(5, 7 + height - 1, width, 1));
@@ -4511,8 +4564,9 @@ fn center_layout_log_and_details_hide_thresholds() {
         assert_eq!(layout.log.height, 0, "height {height}");
     }
     let layout = view.center_layout(Rect::new(0, 0, 94, 20));
-    assert_eq!(layout.log.height, 8);
-    assert_eq!(layout.list.height, 7);
+    assert_eq!(layout.log.height, 4);
+    assert_eq!(layout.list.height, 5);
+    assert_eq!(layout.log_detail.height, 5);
     assert!(layout.details.width > 0);
     assert!(
         !view
@@ -4539,8 +4593,8 @@ fn task_log_event_count_follows_height() {
             event
         })
         .collect();
-    for (height, count) in [(24, 9), (40, 17), (60, 27), (19, 0), (24, 9)] {
-        let rendered = log_screen(&view, 120, height, now);
+    for (height, count) in [(24, 6), (40, 11), (60, 18), (19, 0), (24, 6)] {
+        let rendered = log_list_screen(&view, 120, height, now);
         let events: Vec<_> = rendered
             .lines()
             .filter(|line| line.contains("event-"))
@@ -4557,7 +4611,12 @@ fn task_log_event_count_follows_height() {
             assert!(
                 rendered
                     .lines()
-                    .nth(usize::from(height - 2))
+                    .nth(usize::from(
+                        view.center_layout(Rect::new(0, 0, 120, height))
+                            .log
+                            .bottom()
+                            - 1
+                    ))
                     .unwrap()
                     .contains("event-")
             );
@@ -5009,7 +5068,7 @@ mod log_path_abbrev {
         let row = buf
             .content
             .chunks(43)
-            .nth(1)
+            .next()
             .unwrap()
             .iter()
             .map(|cell| cell.symbol())
@@ -5088,8 +5147,8 @@ mod log_search {
         assert!(!text(&buf).contains("unrelated"));
         assert!(!text(&buf).contains("t........"));
         for x in 6..13 {
-            assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buf[(x, 1)].fg, crate::theme::inline_code_color());
+            assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
         }
         key(&mut view, KeyCode::Enter);
         let buf = panel(&view, now);
@@ -5158,11 +5217,11 @@ mod log_search {
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain café link"));
         for x in 6..10 {
-            assert_eq!(buf[(x, 1)].fg, crate::theme::inline_code_color());
-            assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
+            assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
         }
-        assert!(!buf[(11, 1)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buf[(11, 1)].modifier.contains(Modifier::BOLD));
+        assert!(!buf[(11, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buf[(11, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -5296,7 +5355,7 @@ mod input_row {
         let mut log_buf = Buffer::empty(area);
         log.render_at(area, &mut log_buf, now);
         let task_row = task.center_layout(area).search;
-        let log_row = super::super::log::search_input_rect(log.center_layout(area).log_content());
+        let log_row = super::super::log::search_input_rect(log.center_layout(area).log);
         (task_buf, task_row, log_buf, log_row, task, log)
     }
 
@@ -6200,7 +6259,7 @@ fn pending_question_log_uses_model_color() {
         view.render_at(area, &mut buf, now);
         let viewport = view.viewport.borrow();
         let log = viewport.log;
-        let y = log.y + view.log_rows_top();
+        let y = log.y;
         assert_eq!(buf[(log.x, y)].fg, Color::Yellow);
     }
 }
@@ -6237,10 +6296,10 @@ fn click_log_text(view: &mut View, screen: &str, text: &str, button: MouseButton
 }
 
 #[test]
-fn task_log_click_opens_cut_event_and_right_click_closes_it() {
+fn task_log_click_keeps_list_and_right_click_restores_preview() {
     let (mut view, now) = log_fixture();
     view.log[6].body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph".into();
-    let list = log_screen(&view, 100, 25, now);
+    let list = log_screen(&view, 100, 45, now);
     let log = view.viewport.borrow().log;
     click_mouse(
         &mut view,
@@ -6251,16 +6310,16 @@ fn task_log_click_opens_cut_event_and_right_click_closes_it() {
         ),
     );
     assert!(view.log_open.is_none());
-    assert_eq!(log_screen(&view, 100, 25, now), list);
+    assert_eq!(log_screen(&view, 100, 45, now), list);
     click_log_text(&mut view, &list, "A long response", MouseButton::Right);
-    assert_eq!(log_screen(&view, 100, 25, now), list);
+    assert_eq!(log_screen(&view, 100, 45, now), list);
     click_log_text(&mut view, &list, "A long response", MouseButton::Left);
-    let open = log_screen(&view, 100, 25, now);
+    let open = log_screen(&view, 100, 45, now);
     assert_eq!(
         open,
         include_str!("../../tests/ui_snapshots/task_log_open.txt")
     );
-    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
+    let mut buf = Buffer::empty(Rect::new(0, 0, 100, 45));
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "bold");
     assert!(
@@ -6270,19 +6329,9 @@ fn task_log_click_opens_cut_event_and_right_click_closes_it() {
     );
     assert_eq!(view.log_redraw_in(now), None);
     click_log_text(&mut view, &open, "A second paragraph", MouseButton::Left);
-    assert_eq!(log_screen(&view, 100, 25, now), open);
+    assert_eq!(log_screen(&view, 100, 45, now), open);
     click_log_text(&mut view, &open, "A second paragraph", MouseButton::Right);
-    assert_eq!(log_screen(&view, 100, 25, now), list);
-}
-
-#[test]
-fn task_log_click_on_whole_row_keeps_list() {
-    let (mut view, now) = log_fixture();
-    let list = log_screen(&view, 100, 25, now);
-    click_log_text(&mut view, &list, "run tests", MouseButton::Left);
-    assert_eq!(log_screen(&view, 100, 25, now), list);
-    click_log_text(&mut view, &list, "run tests", MouseButton::Right);
-    assert_eq!(log_screen(&view, 100, 25, now), list);
+    assert_eq!(log_screen(&view, 100, 45, now), list);
 }
 
 /// The calls of a merged Bash + Read row, the Read still running.
@@ -6563,7 +6612,7 @@ fn task_log_click_opens_row_with_shortened_path() {
         .paths
         .push(event.body.len() + 1..event.body.len() + 1 + path.len());
     event.body = format!("{} {path}", event.body);
-    let list = log_screen(&view, 100, 25, now);
+    let list = log_list_screen(&view, 100, 25, now);
     assert!(!list.contains(path), "{list}");
     click_log_text(&mut view, &list, "run tests", MouseButton::Left);
     let open = log_screen(&view, 100, 25, now);
@@ -6639,7 +6688,7 @@ fn task_log_click_on_a_shortened_tool_path_opens_the_full_path() {
         .paths
         .push(event.body.len() + 1..event.body.len() + 1 + path.len());
     event.body = format!("{} {path}", event.body);
-    let list = log_screen(&view, 100, 25, now);
+    let list = log_list_screen(&view, 100, 25, now);
     assert!(!list.contains(path), "{list}");
     assert_eq!(
         click_text(&mut view, &list, "report.md"),
@@ -6670,7 +6719,7 @@ fn task_log_click_on_a_path_in_free_tool_text_opens_the_full_path() {
     let (_dir, target) = temp_log_path("plan.md");
     let path = target.to_str().unwrap();
     view.log[7].body = format!("start Implement workstream A of {path} (Claude provider)");
-    let list = log_screen(&view, 100, 25, now);
+    let list = log_list_screen(&view, 100, 25, now);
     assert!(!list.contains(path), "{list}");
     assert_eq!(
         click_text(&mut view, &list, "plan.md"),
@@ -7149,9 +7198,9 @@ fn open_view_top_button_and_scrollbar() {
     let bottom = log_screen(&view, 100, 25, now);
     assert!(bottom.contains(" ↑ Top "), "{bottom}");
     let layout = view.center_layout(Rect::new(0, 0, 100, 25));
-    let jump = view.viewport.borrow().log_jump;
+    let jump = view.viewport.borrow().log_detail_jump;
     assert_eq!(jump.x, layout.list.x + (layout.list.width - jump.width) / 2);
-    assert_eq!(jump.y, layout.log.y);
+    assert_eq!(jump.y, layout.log_detail.y);
     view.render_at(buf.area, &mut buf, now);
     assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), "│");
     click_text(&mut view, &bottom, " ↑ Top ");
@@ -7633,16 +7682,9 @@ fn open_top_button_uses_task_rect_for_every_kind_and_width() {
             view.viewport.borrow_mut().log_open_scroll = 1;
             let screen = log_screen(&view, width, 25, now);
             let layout = view.center_layout(Rect::new(0, 0, width, 25));
-            let jump = view.viewport.borrow().log_jump;
+            let jump = view.viewport.borrow().log_detail_jump;
             assert_eq!(jump.x, layout.list.x + (layout.list.width - jump.width) / 2);
-            assert_eq!(
-                jump.y,
-                if layout.log_detail.is_empty() {
-                    layout.log.y
-                } else {
-                    layout.log_detail.y
-                }
-            );
+            assert_eq!(jump.y, layout.log_detail.y);
             click_text(&mut view, &screen, " ↑ Top ");
             assert_eq!(view.viewport.borrow().log_open_scroll, 0);
         }
@@ -7730,7 +7772,7 @@ fn wrapped_messages_keep_list_text_and_open_paragraphs() {
         view.set_log_open(Some(event.clone()));
         let area = Rect::new(0, 0, 2000, 25);
         let mut buffer = Buffer::empty(area);
-        view.render_log(area, &mut buffer, now);
+        view.render_log_detail(area, &mut buffer, now);
         let lines: Vec<String> = buffer
             .content
             .chunks(2000)
@@ -7852,7 +7894,7 @@ fn usage_chart_and_activity_strip_share_the_same_style() {
         let layout = view.center_layout(area);
         let x = layout.list.right() - 1;
         let chart = &buf[(x, layout.list.bottom() - 1)];
-        let strip = &buf[(x, layout.log.y)];
+        let strip = &buf[(x, layout.prompt.y - 1)];
         for cell in [chart, strip] {
             assert!(
                 cell.symbol()
@@ -7871,7 +7913,7 @@ fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_inline_code_color
     view.use_colors = true;
     let area = Rect::new(0, 0, 100, 25);
     let layout = view.center_layout(area);
-    let (y, right) = (layout.log.y, layout.list.right() - 1);
+    let (y, right) = (layout.prompt.y - 1, layout.list.right() - 1);
     let [left_bin, right_bin] = super::timeline::cell_bins(layout.list, right, now);
     // The newest cell's both bins, then a gap, then a cell's left bin only.
     view.set_activity([left_bin, right_bin, left_bin - 4].into());

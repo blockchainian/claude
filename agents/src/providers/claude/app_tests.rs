@@ -103,7 +103,7 @@ fn task_log_cache_rereads_when_event_count_changes() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, payload.repeat(20)).unwrap();
-    for (height, count) in [(24, 9), (40, 17), (60, 27), (19, 0), (24, 9)] {
+    for (height, count) in [(24, 6), (40, 11), (60, 18), (19, 0), (24, 6)] {
         app.refresh_log(
             app.view
                 .log_event_count(ratatui::layout::Rect::new(0, 0, 120, height)),

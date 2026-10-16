@@ -64,33 +64,42 @@ fn right_click_leaves_input_before_closing_log_detail() {
 }
 
 #[test]
-fn whole_log_row_double_click_focuses_input_without_opening_detail() {
-    let (mut view, now) = log_fixture();
-    view.rows[view.selected].process = None;
-    log_screen(&view, 140, 40, now);
-    let (x, y) = {
+fn whole_log_row_double_click_focuses_input_and_keeps_the_detail() {
+    for width in [120, 200] {
+        let (mut view, now) = log_fixture();
+        view.rows[view.selected].process = None;
+        log_screen(&view, width, 60, now);
+        let (x, y, expected) = {
+            let viewport = view.viewport.borrow();
+            let row = view
+                .log
+                .iter()
+                .rev()
+                .position(|event| !log::shows_calls(event))
+                .unwrap();
+            assert!(row < viewport.log_rows.len());
+            (
+                viewport.log.x + 11,
+                viewport.log.y + row as u16,
+                view.log.iter().rev().nth(row).unwrap().clone(),
+            )
+        };
+        let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert_eq!(
+            view.flush_pending_click(Instant::now() + view.double_click_interval),
+            None
+        );
+        assert_eq!(view.log_open.as_ref(), Some(&expected));
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert!(view.input_box.focused);
+        assert_eq!(view.log_open.as_ref(), Some(&expected));
+        log_screen(&view, width, 60, now);
         let viewport = view.viewport.borrow();
-        let row = viewport
-            .log_rows
-            .iter()
-            .position(|(index, cut)| !cut && !log::shows_calls(&view.log[*index]))
-            .unwrap();
-        (
-            viewport.log.x + 11,
-            viewport.log.y + log::LOG_TOP + row as u16,
-        )
-    };
-    let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-    assert_eq!(click_mouse(&mut view, click), None);
-    assert_eq!(
-        view.flush_pending_click(Instant::now() + view.double_click_interval),
-        None
-    );
-    assert!(view.log_open.is_none());
-    assert_eq!(click_mouse(&mut view, click), None);
-    assert_eq!(click_mouse(&mut view, click), None);
-    assert!(view.input_box.focused);
-    assert!(view.log_open.is_none());
+        assert!(!viewport.log_rows.is_empty());
+        assert!(!viewport.log_text.rows.is_empty());
+    }
 }
 
 #[test]

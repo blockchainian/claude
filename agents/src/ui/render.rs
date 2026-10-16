@@ -74,16 +74,6 @@ pub(super) struct CenterLayout {
     pub(super) prompt: Rect,
     pub(super) log_detail: Rect,
 }
-impl CenterLayout {
-    pub(super) fn log_content(&self) -> Rect {
-        if self.log_detail.is_empty() {
-            self.log.inner(Margin::new(HORIZONTAL_PADDING, 0))
-        } else {
-            // The body reserves the screen padding and the separator's one-cell gap.
-            self.log
-        }
-    }
-}
 
 impl View {
     fn input(&self) -> (&str, &line_edit::LineEdit) {
@@ -109,38 +99,52 @@ impl View {
             .min(area.height.saturating_sub(header_height + footer_height));
         let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
         let log_height = bottom_height.saturating_sub(footer_height).max(10);
-        let log_height = if area.height.saturating_sub(footer_height + log_height)
-            >= header_height + 6
+        let show_log = area.height.saturating_sub(footer_height + log_height) >= header_height + 6
             && (wide
                 || self
                     .selected_row()
-                    .is_some_and(|session| session.transcript.is_some()))
-        {
-            // Both panels are measured in content rows. The log owns its top
-            // rule; wide columns also reserve a rule above the input box.
-            let content_height = area.height.saturating_sub(
-                header_height + footer_height + prompt_height + u16::from(wide) + log::LOG_TOP,
-            );
-            content_height / 2 + log::LOG_TOP
+                    .is_some_and(|session| session.transcript.is_some()));
+        let content_height = area
+            .height
+            .saturating_sub(header_height + footer_height + prompt_height + 2);
+        let (top_height, list_height, detail_height) = if !show_log {
+            (
+                area.height
+                    .saturating_sub(header_height + footer_height + prompt_height),
+                0,
+                0,
+            )
+        } else if wide {
+            (content_height.div_ceil(2), 0, content_height / 2)
         } else {
-            0
+            (
+                content_height.div_ceil(3),
+                (content_height + 1) / 3,
+                content_height / 3,
+            )
         };
-        let log = row(area, area.height - footer_height - log_height, log_height);
+        let body = row(area, header_height, top_height).inner(Margin::new(HORIZONTAL_PADDING, 0));
         let prompt = row(
             area,
-            log.y.saturating_sub(area.y + prompt_height),
+            header_height + top_height + u16::from(show_log),
             prompt_height,
         );
-        let mut body = row(
-            area,
-            header_height,
-            prompt.y.saturating_sub(header.bottom()),
-        )
-        .inner(Margin::new(HORIZONTAL_PADDING, 0));
-        if wide && !log.is_empty() {
-            body.height = body.height.saturating_sub(1);
-        }
-        let (body, log_list) = if wide && !log.is_empty() {
+        let log = if show_log && !wide {
+            row(area, prompt.bottom() - area.y, list_height)
+                .inner(Margin::new(HORIZONTAL_PADDING, 0))
+        } else {
+            Rect::default()
+        };
+        let log_detail = if show_log {
+            row(
+                area,
+                header_height + top_height + 1 + prompt_height + list_height,
+                detail_height + 1,
+            )
+        } else {
+            Rect::default()
+        };
+        let (body, log_list) = if wide && show_log {
             let column_width = (body.width - 6) / 4;
             let log_width = body.width - 6 - 2 * column_width;
             (
@@ -184,24 +188,18 @@ impl View {
             details,
             search,
             footer,
-            log: if wide && !log.is_empty() {
-                log_list
-            } else {
-                log
-            },
+            log: if wide && show_log { log_list } else { log },
             prompt,
-            log_detail: if wide { log } else { Rect::default() },
+            log_detail,
         }
     }
     pub(crate) fn log_event_count(&self, area: Rect) -> usize {
-        usize::from(self.center_layout(area).log.height.saturating_sub(
-            u16::from(self.log_search.active())
-                + if area.width >= WIDE_LAYOUT_COLUMNS {
-                    0
-                } else {
-                    super::log::LOG_TOP
-                },
-        ))
+        usize::from(
+            self.center_layout(area)
+                .log
+                .height
+                .saturating_sub(u16::from(self.log_search.active())),
+        )
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
@@ -231,7 +229,7 @@ impl View {
             let search_area = if self.log_detail_search.editing && !layout.log_detail.is_empty() {
                 layout.log_detail.inner(Margin::new(HORIZONTAL_PADDING, 0))
             } else {
-                layout.log_content()
+                layout.log
             };
             let input = log::search_input_rect(search_area);
             let search = if self.log_detail_search.editing {
@@ -272,6 +270,7 @@ impl View {
             viewport.details = Rect::default();
             viewport.log = Rect::default();
             viewport.log_detail = Rect::default();
+            viewport.log_detail_jump = Rect::default();
             viewport.details_links.clear();
             viewport.log_links.clear();
         }
@@ -369,7 +368,7 @@ impl View {
                     .set_style(Style::default().dim());
             }
         }
-        if !layout.log_detail.is_empty() {
+        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.log.is_empty() {
             for y in layout.log.y..layout.log.bottom() {
                 buf[(layout.log.x.saturating_sub(2), y)]
                     .set_symbol("│")
@@ -385,8 +384,7 @@ impl View {
             Clear.render(bottom, buf);
             line(notice.clone().dim(), bottom, buf);
         }
-        // The three wide columns share the rule immediately above the prompt.
-        // Narrow details use the log rule, or their own rule when the log is hidden.
+        // Panel labels share the horizontal rule immediately above the prompt.
         let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
         if !layout.log_detail.is_empty() {
             line(
@@ -400,31 +398,29 @@ impl View {
             None
         } else if !layout.log_detail.is_empty() {
             Some(Rect::new(details.x, middle.y, details.width, 1))
-        } else if layout.log.is_empty() {
+        } else {
             details.height = details.height.saturating_sub(1);
             Some(row(layout.details, details.height, 1))
-        } else {
-            Some(Rect::new(details.x, layout.log.y, details.width, 1))
         };
         if !details.is_empty() {
             self.render_details(details, buf, now);
         }
         {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.log = layout.log_content();
+            viewport.log = layout.log;
             viewport.log_detail = inset(layout.log_detail);
         }
-        self.render_log(layout.log_content(), buf, now);
+        self.render_log(layout.log, buf, now);
         if !layout.log_detail.is_empty() {
             self.render_log_detail(inset(layout.log_detail), buf, now);
         }
         if !layout.log.is_empty() {
-            let rule = if layout.log_detail.is_empty() {
-                Rect::new(layout.list.x, layout.log.y, layout.list.width, 1)
-                    .intersection(layout.log_content())
-            } else {
-                Rect::new(layout.list.x, middle.y, layout.list.width, 1)
-            };
+            self.render_log_jump(
+                Rect::new(layout.log.x, layout.log.bottom(), layout.log.width, 1),
+                self.log_scroll(),
+                buf,
+            );
+            let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
         if let Some(rule) = details_rule {
@@ -433,11 +429,7 @@ impl View {
         if self.log_open.is_some() && self.viewport.borrow().log_open_scroll > 0 {
             let label = " ↑ Top ";
             let width = (label.width() as u16).min(layout.list.width);
-            let panel = if layout.log_detail.is_empty() {
-                layout.log
-            } else {
-                layout.log_detail
-            };
+            let panel = layout.log_detail;
             let jump = Rect::new(
                 layout.list.x + layout.list.width.saturating_sub(width) / 2,
                 panel.y,
@@ -446,7 +438,7 @@ impl View {
             )
             .intersection(inset(panel));
             Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
-            self.viewport.borrow_mut().log_jump = jump;
+            self.viewport.borrow_mut().log_detail_jump = jump;
         }
         self.render_controls(details, buf);
         if let Some(dialog) = &self.confirm_dialog {
@@ -715,11 +707,7 @@ impl View {
                     Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
-            items.push(
-                left_right("Message".dim().into(), header, width)
-                    .0
-                    .into(),
-            );
+            items.push(left_right("Message".dim().into(), header, width).0.into());
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(

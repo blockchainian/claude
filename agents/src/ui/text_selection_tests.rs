@@ -154,7 +154,7 @@ fn full_dashboard_highlights_dragged_fenced_prompt() {
     view.rows[0].prompt = record["message"]["content"].as_str().unwrap()[..512].to_owned();
     view.rows[0].transcript =
         Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl"));
-    let area = Rect::new(0, 0, 120, 60);
+    let area = Rect::new(0, 0, 120, 120);
     let render = |view: &View| {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, view.rows[0].updated_at);
@@ -240,10 +240,10 @@ fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
     view.log_session = Some(view.rows[0].id.clone());
     view.log_open = Some(event);
     let area = Rect::new(2, 1, 30, 10);
-    view.viewport.borrow_mut().log = area;
+    view.viewport.borrow_mut().log_detail = area;
     let render = |view: &View| {
         let mut buf = Buffer::empty(Rect::new(0, 0, 40, 20));
-        view.render_log(area, &mut buf, Utc::now());
+        view.render_log_detail(area, &mut buf, Utc::now());
         buf
     };
     let first = render(&view);
@@ -459,7 +459,7 @@ fn log_list_drag_copies_abbreviated_path_as_drawn() {
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
     let log = view.viewport.borrow().log;
-    let y = log.y + super::log::LOG_TOP;
+    let y = log.y;
     let expected = drawn_cells(&initial, y, log.x, log.right());
     assert!(expected.contains('…'), "{expected}");
     for range in &view.log[0].paths {
@@ -483,7 +483,7 @@ fn log_list_drag_copies_abbreviated_path_as_drawn() {
     dashboard(&view, area);
     assert!(
         view.log_open.is_none(),
-        "drag returns to the list pressed originally"
+        "dragging list text does not open its event"
     );
     assert_eq!(
         copied_text(view.handle_mouse(mouse(
@@ -600,7 +600,7 @@ fn log_list_click_opens_cut_row_and_stationary_double_click_copies_nothing() {
     let area = Rect::new(0, 0, 100, 30);
     dashboard(&view, area);
     let log = view.viewport.borrow().log;
-    let at = (log.x, log.y + super::log::LOG_TOP);
+    let at = (log.x, log.y);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
@@ -659,21 +659,12 @@ fn log_list_edge_drag_caches_rows_beyond_first_screen() {
             for offset in 0..viewport.log_rows.len() {
                 rows.insert(
                     viewport.log_scroll + offset,
-                    drawn_cells(
-                        buf,
-                        log.y + super::log::LOG_TOP + offset as u16,
-                        log.x,
-                        log.right(),
-                    ),
+                    drawn_cells(buf, log.y + offset as u16, log.x, log.right()),
                 );
             }
         };
     remember(&view, &initial, &mut rows);
-    view.handle_mouse(mouse(
-        MouseEventKind::Down(MouseButton::Left),
-        log.x,
-        log.y + super::log::LOG_TOP,
-    ));
+    view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), log.x, log.y));
     dashboard(&view, area);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
@@ -839,7 +830,7 @@ fn dragging_across_cut_log_rows_never_opens_an_event() {
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
     let log = view.viewport.borrow().log;
-    let y = log.y + super::log::LOG_TOP;
+    let y = log.y;
     let expected = (y..=y + 1)
         .map(|row| drawn_cells(&initial, row, log.x, log.right()))
         .collect::<Vec<_>>()
