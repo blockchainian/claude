@@ -510,7 +510,7 @@ impl View {
     /// `rule`, a space apart from the rule on each side.
     fn render_details_title(
         &self,
-        mut rule: Rect,
+        rule: Rect,
         buf: &mut Buffer,
         now: chrono::DateTime<chrono::Utc>,
     ) {
@@ -518,18 +518,20 @@ impl View {
             return;
         };
         line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
+        // The title stays centered on the whole rule, so the time's width is kept clear on both sides.
+        let mut reserved = 0;
         if let Some(at) = session.started_at {
             let elapsed = format_session_duration((now - at).num_seconds());
             let label = Line::from(vec![" ".into(), elapsed.dim()]);
             let width = label.width() as u16;
             // Keep a title cell, its spaces and the surrounding rule cells.
-            if rule.width >= width + 5 {
+            if rule.width >= 2 * width + 5 {
                 label.render(Rect::new(rule.right() - width, rule.y, width, 1), buf);
-                rule.width -= width;
+                reserved = 2 * usize::from(width);
             }
         }
         // One rule cell and a space on each side.
-        let width = usize::from(rule.width).saturating_sub(4);
+        let width = usize::from(rule.width).saturating_sub(4 + reserved);
         let title_style = self.title_style(&session.id).bold();
         let title = if width <= 1 {
             Line::from(Span::styled("…", title_style))

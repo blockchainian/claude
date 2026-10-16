@@ -2933,8 +2933,8 @@ mod details_header {
                 let layout = view.center_layout(buf.area);
                 let bottom = view.viewport.borrow().details.bottom();
                 let expected = " Task log example ";
-                let title_right = top.right() - " 3h 12m".len() as u16;
-                let start = top.x + (title_right - top.x - expected.width() as u16) / 2;
+                // The title centers on the whole segment, not the space left of the time.
+                let start = top.x + (top.width - expected.width() as u16) / 2;
                 for (offset, symbol) in expected.chars().enumerate() {
                     assert_eq!(
                         buf[(start + offset as u16, top.y)].symbol(),
@@ -2943,7 +2943,7 @@ mod details_header {
                 }
                 assert!((top.x..start).all(|x| buf[(x, top.y)].symbol() == "─"));
                 assert!(
-                    (start + expected.width() as u16..title_right)
+                    (start + expected.width() as u16..top.right() - " 3h 12m".len() as u16)
                         .all(|x| buf[(x, top.y)].symbol() == "─")
                 );
                 let bottom_text = (top.x..top.right())
@@ -2985,7 +2985,7 @@ mod details_header {
     }
 
     #[test]
-    fn title_truncates_before_elapsed_is_dropped() {
+    fn centered_title_truncates_before_elapsed_is_dropped() {
         let (mut view, now) = log_fixture();
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
         for columns in 10..=100 {
@@ -2999,17 +2999,19 @@ mod details_header {
             let top_text = (top.x..top.right())
                 .map(|x| buf[(x, top.y)].symbol())
                 .collect::<String>();
-            // A title cell, two spaces and two rule cells precede elapsed.
+            // The centered title keeps elapsed's width clear on both sides, plus a
+            // title cell, two spaces and two rule cells.
             let elapsed_width = " 3h 12m".len() as u16;
-            let title_width = if width >= elapsed_width + 5 {
+            let reserved = if width >= 2 * elapsed_width + 5 {
                 assert!(top_text.ends_with(" 3h 12m"), "width {width}: {top_text}");
-                width - elapsed_width
+                2 * elapsed_width
             } else {
                 assert!(!top_text.contains("3h 12m"), "width {width}: {top_text}");
-                width
+                0
             };
-            if title_width >= 5 {
-                let available = usize::from(title_width - 4);
+            let title_width = width;
+            if title_width >= reserved + 5 {
+                let available = usize::from(title_width - reserved - 4);
                 let title = "Task log example";
                 let expected = if title.len() > available {
                     format!("{}…", &title[..available - 1])
