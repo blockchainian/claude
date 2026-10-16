@@ -81,3 +81,47 @@ fn stop_uses_input_job_and_reports_completion_through_event_channel() {
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
     assert!(!app.pending_inputs.contains(&id));
 }
+
+#[test]
+fn codex_stop_refreshes_after_failure_and_reports_in_footer() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("state_5.sqlite");
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute_batch(include_str!("../tests/fixtures/codex-state.sql"))
+        .unwrap();
+    let provider = crate::providers::codex::CodexProvider::new(
+        directory.path().to_owned(),
+        directory.path().join("manager"),
+    );
+    let mut app = App::new(
+        Hub::new(vec![Box::new(provider)]),
+        directory.path().to_owned(),
+    );
+    app.refresh();
+    let id = app.sessions[0].id.clone();
+    assert!(!app.handle_action(Some(Action::Stop(id.clone()))));
+    assert!(app.pending_inputs.contains(&id));
+    let event = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(&event, Input::Sent { result: Err(error), .. }
+        if error.to_string().contains("daemon isn't running")));
+    db.execute(
+        "UPDATE threads SET title='Refreshed after stop' WHERE id=?1",
+        [&id.id],
+    )
+    .unwrap();
+    let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+    app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    assert!(!app.pending_inputs.contains(&id));
+    let area = ratatui::layout::Rect::new(0, 0, 120, 30);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    app.view.render(area, &mut buffer);
+    let screen = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(screen.contains("Failed to stop"), "{screen}");
+    assert!(!screen.contains(" · failed:"), "{screen}");
+    assert!(!screen.contains(" · sending"), "{screen}");
+    assert_eq!(app.session(&id).unwrap().title, "Refreshed after stop");
+}

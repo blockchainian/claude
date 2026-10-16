@@ -334,7 +334,14 @@ impl App {
                 }
                 Input::Sent { id, input, result } => {
                     self.pending_inputs.remove(&id);
-                    self.view.input_complete(&id, &input, result);
+                    if matches!(input, SessionInput::Interrupt) {
+                        self.refresh();
+                        if let Err(error) = result {
+                            self.input_error(&input, error.to_string());
+                        }
+                    } else {
+                        self.view.input_complete(&id, &input, result);
+                    }
                 }
             }
         }
@@ -554,15 +561,23 @@ impl App {
     /// Returns true when the dashboard should close.
     fn send_input(&mut self, id: SessionKey, input: SessionInput) {
         let Some(session) = self.session(&id) else {
-            self.view.input_failed("Task is no longer available".into());
+            self.input_error(&input, "Task is no longer available".into());
             return;
         };
         let Some(job) = self.hub.provider(id.provider).send(&session, input.clone()) else {
-            self.view
-                .input_failed("This task cannot receive that input".into());
+            self.input_error(&input, "This task cannot receive that input".into());
             return;
         };
         self.start_input_job(id, input, job);
+    }
+
+    fn input_error(&mut self, input: &SessionInput, error: String) {
+        if matches!(input, SessionInput::Interrupt) {
+            self.view
+                .set_notice(Some(format!("Failed to stop: {error}")));
+        } else {
+            self.view.input_failed(error);
+        }
     }
 
     fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: Job) -> bool {
@@ -571,7 +586,10 @@ impl App {
                 .set_notice(Some("Input is still being sent".into()));
             return false;
         }
-        self.view.input_sending(&id);
+        let interrupt = matches!(input, SessionInput::Interrupt);
+        if !interrupt {
+            self.view.input_sending(&id);
+        }
         let sender = self.sender.clone();
         let target = id.clone();
         match thread::Builder::new()
@@ -588,7 +606,12 @@ impl App {
             Ok(_) => true,
             Err(error) => {
                 self.pending_inputs.remove(&id);
-                self.view.input_failed(error.to_string());
+                if interrupt {
+                    self.view
+                        .set_notice(Some(format!("Failed to stop: {error}")));
+                } else {
+                    self.view.input_failed(error.to_string());
+                }
                 false
             }
         }
