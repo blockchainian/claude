@@ -182,9 +182,7 @@ impl View {
             MouseEventKind::Up(MouseButton::Right) => self.set_log_open(None),
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let forward = mouse.kind == MouseEventKind::ScrollDown;
-                if self.viewport.borrow().usage_chart.contains(position) {
-                    self.scroll_usage_chart(forward);
-                } else if over_tabs {
+                if over_tabs {
                     let idx = if forward {
                         (self.status_filter + 1).min(TASK_FILTERS.len() - 1)
                     } else {

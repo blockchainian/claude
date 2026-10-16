@@ -1,41 +1,26 @@
-//! The selected task's token usage, drawn in block elements on the task log's top rule: output
-//! rises above the rule, input hangs below it, and each column's color tells its total.
+//! The selected task's token usage, drawn in braille behind the task list: each dot column is one
+//! bin, rising from the list's bottom as high as the bin's tokens, and the list's rows cover it.
 
 use super::View;
 use crate::providers::SessionKey;
-use crate::usage::{BIN_SECONDS, Bin, bin_of};
-use chrono::{DateTime, Local, TimeZone, Utc};
+use crate::usage::{Bin, bin_of};
+use chrono::{DateTime, Utc};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::style::{Color, Style};
 use std::collections::BTreeMap;
 
-/// Heights each side of the rule has: its half of the rule's row, then four eighths of the
-/// neighboring row.
-const LEVELS: u64 = 5;
+/// Dot rows one cell holds.
+const CELL_DOTS: u16 = 4;
 
-/// Bins one column sums.
+/// Bins one cell holds, one per dot column.
 const CELL_BINS: i64 = 2;
 
-/// Output above the rule, by height past the rule's half: bottom-anchored eighths.
-const RISING: [char; 4] = ['▁', '▂', '▃', '▄'];
-
-/// Input below the rule, by height past the rule's half: the unfilled bottom part, drawn
-/// reversed so the filled top part takes the column's color.
-const HANGING: [char; 4] = ['▇', '▆', '▅', '▄'];
-
-/// Rule cells left plain at each end of the chart.
-const RULE_ENDS: u16 = 2;
-
-/// Cells one wheel report moves the chart.
-const WHEEL_CELLS: i64 = 3;
+/// The braille bits of a cell's left and right dot columns, bottom to top.
+const DOT_BITS: [[u8; 4]; 2] = [[0x40, 0x04, 0x02, 0x01], [0x80, 0x20, 0x10, 0x08]];
 
 impl View {
-    /// Hands the view `id`'s usage bins; a different task starts at the newest bins.
     pub(crate) fn set_usage(&mut self, id: &SessionKey, bins: BTreeMap<i64, Bin>) {
-        if self.usage.as_ref().is_none_or(|(shown, _)| shown != id) {
-            self.usage_anchor = None;
-        }
         self.usage = Some((id.clone(), bins));
     }
 
@@ -43,176 +28,94 @@ impl View {
         self.usage.as_ref().map(|(id, _)| id)
     }
 
-    /// The three rows centered on `rule` the chart may draw on, inside the rule's plain ends.
-    pub(super) fn usage_chart_area(rule: Rect) -> Rect {
-        Rect::new(
-            rule.x + RULE_ENDS,
-            rule.y.saturating_sub(1),
-            rule.width.saturating_sub(2 * RULE_ENDS),
-            3,
-        )
+    /// The selected task's usage bins, when the view holds them.
+    fn selected_usage(&self) -> Option<&BTreeMap<i64, Bin>> {
+        let session = self.selected_row()?;
+        let (id, bins) = self.usage.as_ref()?;
+        (*id == session.id).then_some(bins)
     }
 
-    /// Draws the selected task's usage over `area`, whose middle row is the rule.
+    /// Draws the selected task's usage into the blank rows below the list's content in `area`,
+    /// ending at now for a live task and at its last usage otherwise.
     pub(super) fn render_usage_chart(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
-        let mut viewport = self.viewport.borrow_mut();
-        viewport.usage_chart = Rect::default();
-        let Some(session) = self.selected_row() else {
+        let (Some(session), Some(bins)) = (self.selected_row(), self.selected_usage()) else {
             return;
         };
-        let Some((id, bins)) = &self.usage else {
+        let Some(&last) = bins.keys().next_back() else {
             return;
         };
-        if *id != session.id || area.width == 0 || area.height < 3 {
-            return;
-        }
-        let live = session.status != crate::model::SessionStatus::Inactive;
-        let live_end = cell_right(if live {
-            bin_of(now)
+        let end = cell_right(if session.status == crate::model::SessionStatus::Inactive {
+            last
         } else {
-            bins.keys()
-                .next_back()
-                .copied()
-                .unwrap_or_else(|| bin_of(now))
+            bin_of(now)
         });
-        let span = i64::from(area.width) * CELL_BINS;
-        let min_end = bins.keys().next().map_or(live_end, |first| {
-            (cell_right(*first) + span - CELL_BINS).min(live_end)
-        });
-        let end = self.usage_anchor.map_or(live_end, |anchor| {
-            cell_right(anchor).clamp(min_end, live_end)
-        });
-        viewport.usage_chart = area;
-        viewport.usage_live_end = live_end;
-        viewport.usage_min_end = min_end;
-        viewport.usage_end = end;
-        drop(viewport);
-
-        let mut columns: BTreeMap<i64, Bin> = BTreeMap::new();
-        for (bin, usage) in bins {
-            let column = columns.entry(cell_right(*bin)).or_default();
-            column.input += usage.input;
-            column.output += usage.output;
-        }
-        let side_max = columns
-            .values()
-            .map(|column| column.input.max(column.output))
-            .max()
-            .unwrap_or(0);
-        let total_max = columns
-            .values()
-            .map(|column| column.input + column.output)
-            .max()
-            .unwrap_or(0);
-        let shades = crate::theme::accent_count();
-        for x in 0..area.width {
-            let right = end - i64::from(area.width - 1 - x) * CELL_BINS;
-            let Some(column) = columns.get(&right) else {
-                continue;
-            };
-            let style = if self.use_colors {
-                let shade = shade(column.input + column.output, total_max, shades);
-                // Slot 0 contrasts most with the background, so the busiest columns take it.
-                Style::default().fg(crate::theme::accent(shades - shade))
-            } else {
-                Style::default()
-            };
-            let output = level(column.output, side_max);
-            let input = level(column.input, side_max);
-            let mut draw = |row: u16, symbol: char, style: Style| {
-                // A fresh cell, so the rule's dim style does not carry into the column.
-                let cell = &mut buf[(area.x + x, area.y + row)];
-                cell.reset();
-                cell.set_char(symbol).set_style(style);
-            };
-            match (output > 0, input > 0) {
-                (true, true) => draw(1, '█', style),
-                (true, false) => draw(1, '▀', style),
-                (false, true) => draw(1, '▄', style),
-                (false, false) => {}
-            }
-            if output > 1 {
-                draw(0, RISING[output as usize - 2], style);
-            }
-            if input > 1 {
-                draw(
-                    2,
-                    HANGING[input as usize - 2],
-                    style.add_modifier(Modifier::REVERSED),
-                );
-            }
-        }
-        if self.usage_anchor.is_some() && end < live_end {
-            let label = format!(" {} ", clock((end + 1) * BIN_SECONDS));
-            let width = (label.len() as u16).min(area.width);
-            super::render::line(
-                label.dim(),
-                Rect::new(area.right() - width, area.y + 1, width, 1),
-                buf,
-            );
-        }
-    }
-
-    /// Moves the chart one wheel report toward the past or, when `forward`, toward now.
-    pub(super) fn scroll_usage_chart(&mut self, forward: bool) {
-        let (end, live_end, min_end) = {
-            let viewport = self.viewport.borrow();
-            (
-                viewport.usage_end,
-                viewport.usage_live_end,
-                viewport.usage_min_end,
-            )
+        let max = bins.values().map(total).max().unwrap_or(0);
+        let height = area.height * CELL_DOTS;
+        let dots = |bin: i64| {
+            bins.get(&bin)
+                .map_or(0, |usage| dot_height(total(usage), max, height))
         };
-        let step = WHEEL_CELLS * CELL_BINS;
-        let end = if forward { end + step } else { end - step };
-        self.usage_anchor = (end < live_end).then(|| end.max(min_end));
+        let content_bottom = (area.top()..area.bottom())
+            .rev()
+            .find(|&y| (area.left()..area.right()).any(|x| !is_blank(&buf[(x, y)])))
+            .map_or(area.top(), |y| y + 1);
+        for y in content_bottom..area.bottom() {
+            let floor = (area.bottom() - 1 - y) * CELL_DOTS;
+            for x in area.left()..area.right() {
+                let right = end - i64::from(area.right() - 1 - x) * CELL_BINS;
+                let bits = [right - 1, right]
+                    .iter()
+                    .zip(DOT_BITS)
+                    .map(|(&bin, column)| {
+                        let filled = usize::from(dots(bin).saturating_sub(floor).min(CELL_DOTS));
+                        column[..filled].iter().fold(0, |bits, bit| bits | bit)
+                    })
+                    .fold(0, |bits, column| bits | column);
+                if bits != 0 {
+                    let symbol = char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' ');
+                    buf[(x, y)]
+                        .set_char(symbol)
+                        .set_style(Style::default().dim());
+                }
+            }
+        }
     }
 
     /// Time until the live chart moves to its next bin.
     pub(crate) fn usage_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
-        if self.viewport.borrow().usage_chart.is_empty() || self.usage_anchor.is_some() {
+        self.selected_usage()?;
+        if self.selected_row()?.status == crate::model::SessionStatus::Inactive {
             return None;
         }
-        let session = self.selected_row()?;
-        if session.status == crate::model::SessionStatus::Inactive {
-            return None;
-        }
-        let next = (bin_of(now) + 1) * BIN_SECONDS * 1000;
+        let next = (bin_of(now) + 1) * crate::usage::BIN_SECONDS * 1000;
         u64::try_from(next - now.timestamp_millis())
             .ok()
             .map(std::time::Duration::from_millis)
     }
 }
 
-/// The right bin of the column holding `bin`; columns cover fixed bin pairs, so a column keeps
-/// its bins as time passes.
+fn total(usage: &Bin) -> u64 {
+    usage.input + usage.output
+}
+
+/// A cell nothing has drawn on since the frame was cleared.
+fn is_blank(cell: &ratatui::buffer::Cell) -> bool {
+    cell.symbol() == " " && cell.bg == Color::Reset
+}
+
+/// The right bin of the cell holding `bin`; cells cover fixed bin pairs, so a cell keeps its
+/// bins as time passes.
 fn cell_right(bin: i64) -> i64 {
     bin - bin.rem_euclid(CELL_BINS) + CELL_BINS - 1
 }
 
-/// Height of `tokens` on a log scale up to `max`; any usage shows at least the rule's half.
-fn level(tokens: u64, max: u64) -> u64 {
-    scaled(tokens, max, LEVELS)
-}
-
-/// The shade of a cell totaling `tokens`, from 1 for the quietest to `shades` for the busiest.
-fn shade(tokens: u64, max: u64, shades: usize) -> usize {
-    (scaled(tokens, max, shades as u64) as usize).clamp(1, shades)
-}
-
-fn scaled(tokens: u64, max: u64, steps: u64) -> u64 {
+/// Dots `tokens` rises to in a chart `height` dots tall whose top is `max`; any usage shows one.
+fn dot_height(tokens: u64, max: u64, height: u16) -> u16 {
     if tokens == 0 || max == 0 {
         return 0;
     }
-    let ratio = (tokens as f64).ln_1p() / (max as f64).ln_1p();
-    ((ratio * steps as f64).ceil() as u64).clamp(1, steps)
-}
-
-fn clock(seconds: i64) -> String {
-    Local
-        .timestamp_opt(seconds, 0)
-        .single()
-        .map_or_else(String::new, |at| at.format("%H:%M").to_string())
+    let dots = (u128::from(tokens) * u128::from(height)).div_ceil(u128::from(max));
+    u16::try_from(dots).unwrap_or(height).min(height)
 }
 
 #[cfg(test)]
@@ -220,16 +123,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn levels_follow_a_log_scale_and_never_hide_usage() {
-        assert_eq!(level(0, 100_000), 0);
-        assert_eq!(level(1, 100_000), 1);
-        assert_eq!(level(100_000, 100_000), 5);
-        // 300 tokens is half the doublings to 100k, so three of five heights.
-        assert_eq!(level(300, 100_000), 3);
+    fn heights_scale_linearly_and_never_hide_usage() {
+        assert_eq!(dot_height(0, 100, 40), 0);
+        assert_eq!(dot_height(1, 100, 40), 1);
+        assert_eq!(dot_height(50, 100, 40), 20);
+        assert_eq!(dot_height(100, 100, 40), 40);
     }
 
     #[test]
-    fn columns_pair_fixed_bins() {
+    fn cells_pair_fixed_bins() {
         assert_eq!(cell_right(10), 11);
         assert_eq!(cell_right(11), 11);
         assert_eq!(cell_right(-1), -1);

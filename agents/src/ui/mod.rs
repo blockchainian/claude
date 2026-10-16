@@ -118,12 +118,6 @@ struct Viewport {
     log_links: Vec<links::DrawnLink>,
     /// Screen cell of the selection marker drawn by the last render.
     marker: Option<(u16, u16)>,
-    /// Where the last render drew the usage chart, and the right bins it could show: the
-    /// one it showed, the newest and the oldest.
-    usage_chart: Rect,
-    usage_end: i64,
-    usage_live_end: i64,
-    usage_min_end: i64,
 }
 
 #[derive(Default)]
@@ -230,8 +224,6 @@ pub struct View {
         SessionKey,
         std::collections::BTreeMap<i64, crate::usage::Bin>,
     )>,
-    /// The right bin the user scrolled the usage chart to; `None` follows the newest.
-    usage_anchor: Option<i64>,
 }
 
 impl Default for View {
@@ -304,7 +296,6 @@ impl View {
             task_panels: HashMap::new(),
             left_log_newest: None,
             usage: None,
-            usage_anchor: None,
         }
     }
 
