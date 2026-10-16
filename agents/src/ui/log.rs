@@ -209,7 +209,6 @@ impl View {
         viewport.log_open_layout = Some(layout);
         drop(viewport);
         Paragraph::new(visible).render(body_area, buf);
-        super::links::underline(buf, &self.viewport.borrow().log_links);
         self.highlight_text_selection(text_selection::Panel::Log, buf);
     }
 
@@ -462,7 +461,6 @@ fn render_event(
     }
     truncate_line_with_ellipsis_if_overflow(body, body_width)
         .render(Rect::new(body_x, area.y, body_width as u16, 1), buf);
-    super::links::underline(buf, &links);
     (cut, links)
 }
 

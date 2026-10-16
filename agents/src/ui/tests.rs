@@ -5519,7 +5519,7 @@ fn task_log_click_on_a_shortened_tool_path_opens_the_full_path() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
     assert!(
-        buf[(x, y)]
+        !buf[(x, y)]
             .modifier
             .contains(ratatui::style::Modifier::UNDERLINED)
     );
@@ -5727,7 +5727,7 @@ fn project_group_header_opens_its_directory() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 120, 40));
     view.render_at(buf.area, &mut buf, Utc::now());
     assert!(
-        buf[(x, y)]
+        !buf[(x, y)]
             .modifier
             .contains(ratatui::style::Modifier::UNDERLINED)
     );
@@ -6312,7 +6312,7 @@ fn commit_sha_links_open_vscode_from_log_and_details() {
         view.render_at(buf.area, &mut buf, now);
         for column in x..x + sha.len() as u16 {
             assert!(
-                buf[(column, y)]
+                !buf[(column, y)]
                     .modifier
                     .contains(ratatui::style::Modifier::UNDERLINED)
             );

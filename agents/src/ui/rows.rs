@@ -194,7 +194,6 @@ impl View {
                             .heading
                             .clone(),
                     )];
-                    super::links::underline(buf, &links);
                     state.list_links.extend(links);
                 }
                 continue;

@@ -1,6 +1,6 @@
 //! Clickable paths and image placeholders: where they sit in a text, and where they were drawn.
 use super::text_selection::DrawnRow;
-use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
+use ratatui::layout::Rect;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -124,16 +124,6 @@ pub(super) fn row_links(
         .into_iter()
         .map(|(rect, target)| (rect.x..rect.right(), target))
         .collect()
-}
-
-/// Underlines the cells of each drawn link.
-pub(super) fn underline(buf: &mut Buffer, links: &[DrawnLink]) {
-    for (rect, _) in links {
-        let rect = rect.intersection(buf.area);
-        for x in rect.left()..rect.right() {
-            buf[(x, rect.y)].modifier.insert(Modifier::UNDERLINED);
-        }
-    }
 }
 
 #[cfg(test)]

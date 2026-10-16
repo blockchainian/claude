@@ -886,7 +886,6 @@ impl View {
                 .retain(|row| row.y != last.y);
             drawn_links.retain(|(rect, _)| rect.y != last.y);
         }
-        super::links::underline(buf, &drawn_links);
         self.viewport.borrow_mut().details_links = drawn_links;
         self.highlight_text_selection(text_selection::Panel::Details, buf);
     }
