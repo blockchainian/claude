@@ -1038,3 +1038,55 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
         assert!(rendered.contains("New task"), "{rendered}");
     }
 }
+
+#[test]
+fn delete_confirmation_removes_real_transcript_through_provider() {
+    let (_dir, mut app) = fixture();
+    let target = app.sessions[0].clone();
+    let path = target.transcript.as_ref().unwrap();
+    let original = std::fs::read(path).unwrap();
+    let keep_id = "00000000-0000-0000-0000-000000000002";
+    let keep = path.parent().unwrap().join(format!("{keep_id}.jsonl"));
+    std::fs::write(&keep, &original).unwrap();
+    let children = path.with_extension("");
+    std::fs::create_dir_all(children.join("subagents")).unwrap();
+    std::fs::write(
+        children.join("subagents/agent-child.jsonl"),
+        include_bytes!("../../../tests/fixtures/subagent.jsonl"),
+    )
+    .unwrap();
+    app.hub
+        .provider(target.id.provider)
+        .rename(&target, "Delete fixture session")
+        .unwrap();
+    assert!(children.join("custom-title.json").is_file());
+    app.refresh();
+    key(&mut app, KeyCode::BackTab);
+    key(&mut app, KeyCode::Home);
+    for _ in 0..app.sessions.len() {
+        if app.view.selected_id() == Some(&target.id) {
+            break;
+        }
+        key(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.view.selected_id(), Some(&target.id));
+
+    let renamed = std::fs::read(path).unwrap();
+    assert!(!key(&mut app, KeyCode::Backspace));
+    assert!(!key(&mut app, KeyCode::Enter));
+    assert_eq!(std::fs::read(path).unwrap(), renamed);
+    assert!(children.is_dir());
+    assert!(app.session(&target.id).is_some());
+
+    assert!(!key(&mut app, KeyCode::Backspace));
+    assert!(!key(&mut app, KeyCode::Down));
+    assert!(!key(&mut app, KeyCode::Enter));
+    assert!(!path.exists());
+    assert!(!children.exists());
+    assert!(app.session(&target.id).is_none());
+    assert_eq!(std::fs::read(&keep).unwrap(), original);
+    assert!(app.session(&session_key(keep_id)).is_some());
+    app.refresh();
+    assert!(app.session(&target.id).is_none());
+    assert_eq!(std::fs::read(keep).unwrap(), original);
+}
