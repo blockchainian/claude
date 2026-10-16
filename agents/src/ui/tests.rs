@@ -3140,6 +3140,74 @@ fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
 }
 
 #[test]
+fn dashboard_log_list_fills_rows_next_to_rules() {
+    for width in [100, 149, 150, 200] {
+        for search in [false, true] {
+            let (mut view, now) = column_padding_fixture();
+            let event = view
+                .log
+                .iter()
+                .find(|event| event.kind == crate::log::Kind::Tool)
+                .unwrap()
+                .clone();
+            view.log_search.editing = search;
+            view.set_log(vec![event; 100]);
+            let area = Rect::new(0, 0, width, 60);
+            let mut buf = Buffer::empty(area);
+            view.render_at(area, &mut buf, now);
+            let layout = view.center_layout(area);
+            let log = view.viewport.borrow().log;
+            let first = log.y + u16::from(width < 150);
+            let last = log.bottom() - 1 - u16::from(search);
+            assert_eq!(
+                buf[(log.x, first)].symbol(),
+                "T",
+                "first row at {width}, search={search}"
+            );
+            assert_eq!(
+                buf[(log.x, last)].symbol(),
+                "T",
+                "last row at {width}, search={search}"
+            );
+            assert_eq!(
+                view.viewport.borrow().log_rows.len(),
+                usize::from(last - first + 1)
+            );
+            assert_eq!(view.log_event_count(area), usize::from(last - first + 1));
+            if width >= 150 {
+                let rule_y = layout.prompt.y - 1;
+                assert_eq!(layout.list.bottom(), rule_y);
+                assert_eq!(layout.details.bottom(), rule_y);
+                assert_eq!(log.bottom(), rule_y);
+                assert_eq!(buf[(log.x, rule_y)].symbol(), "─");
+            }
+        }
+    }
+}
+
+#[test]
+fn dashboard_log_detail_starts_directly_below_rule() {
+    for width in [100, 149, 150, 200] {
+        let (mut view, now) = column_padding_fixture();
+        view.set_log_open(Some(view.log.last().unwrap().clone()));
+        let area = Rect::new(0, 0, width, 60);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let layout = view.center_layout(area);
+        let detail = if width >= 150 {
+            layout.log_detail
+        } else {
+            layout.log
+        };
+        assert_ne!(
+            buf[(1, detail.y + 1)].symbol(),
+            " ",
+            "detail header at {width}"
+        );
+    }
+}
+
+#[test]
 fn dashboard_screen_padding_is_one_cell() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = column_padding_fixture();
@@ -3249,7 +3317,7 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             let y = if wide {
                 4
             } else {
-                view.center_layout(area).log.y + 3
+                view.center_layout(area).log.y + 2
             };
             let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
             let log: String = (left..width).map(|x| buf[(x, y)].symbol()).collect();
@@ -3372,7 +3440,7 @@ fn task_log_labels_are_left_aligned_in_nine_columns() {
     assert!(
         rendered
             .lines()
-            .nth(22)
+            .nth(21)
             .unwrap()
             .starts_with(" User      Please")
     );
@@ -3494,7 +3562,7 @@ fn task_log_short_terminal_keeps_ten_log_rows() {
     assert_eq!(layout.log.height, 10);
     let rendered = screen(&view, 140, 22);
     assert!(rendered.contains("I will check the files"));
-    assert!(!rendered.contains("Please inspect"));
+    assert!(rendered.contains("Please inspect"));
 }
 
 #[test]
@@ -3523,8 +3591,10 @@ fn task_log_top_rule_matches_header_and_footer_gap_is_empty() {
                 assert_eq!(buf[(x, 14)].symbol(), buf[(x, 2)].symbol());
                 assert_eq!(buf[(x, 14)].modifier, buf[(x, 2)].modifier);
             }
-            assert_eq!(buf[(x, 15)].symbol(), " ");
-            assert_eq!(buf[(x, 15)].modifier, Modifier::empty());
+            if !loaded {
+                assert_eq!(buf[(x, 15)].symbol(), " ");
+                assert_eq!(buf[(x, 15)].modifier, Modifier::empty());
+            }
             assert_eq!(buf[(x, 23)].symbol(), " ");
             assert_eq!(buf[(x, 23)].modifier, Modifier::empty());
         }
@@ -3538,14 +3608,14 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
     assert!(
         log_screen(&view, 100, 25, now)
             .lines()
-            .nth(16)
+            .nth(15)
             .unwrap()
             .ends_with("35s")
     );
     assert!(
         log_screen(&view, 100, 25, now + Duration::seconds(1))
             .lines()
-            .nth(16)
+            .nth(15)
             .unwrap()
             .ends_with("36s")
     );
@@ -3553,7 +3623,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
     assert!(
         log_screen(&view, 100, 25, now)
             .lines()
-            .nth(16)
+            .nth(15)
             .unwrap()
             .ends_with("25s")
     );
@@ -3561,7 +3631,7 @@ fn task_log_last_tool_clock_freezes_for_inactive_and_background_sessions() {
     assert!(
         log_screen(&view, 100, 25, now)
             .lines()
-            .nth(16)
+            .nth(15)
             .unwrap()
             .ends_with("5s")
     );
@@ -3574,7 +3644,7 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
     assert!(
         log_screen(&view, 100, 25, now)
             .lines()
-            .nth(16)
+            .nth(15)
             .unwrap()
             .ends_with("40s ago")
     );
@@ -3595,11 +3665,11 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     for (y, colour, bold) in [
-        (20, Color::Reset, true),
-        (19, Color::Yellow, true),
-        (18, Color::Blue, true),
-        (17, Color::Red, true),
-        (16, Color::Reset, true),
+        (19, Color::Reset, true),
+        (18, Color::Yellow, true),
+        (17, Color::Blue, true),
+        (16, Color::Red, true),
+        (15, Color::Reset, true),
     ] {
         let label = &buf[(1, y)];
         let body = &buf[(11, y)];
@@ -3612,7 +3682,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
             "body row {y}"
         );
     }
-    for y in 17..21 {
+    for y in 16..20 {
         assert_eq!(buf[(98, y)].fg, Color::Reset, "time row {y}");
         assert!(buf[(98, y)].modifier.is_empty(), "time row {y}");
     }
@@ -3635,7 +3705,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         view.log.first_mut().unwrap().previous_end = None;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let time = &buf[(98, 20)];
+        let time = &buf[(98, 19)];
         let time_style = super::style::log_time_style(&kind, false);
         assert_eq!(time_style, Style::default());
         assert_eq!(time.fg, Color::Reset);
@@ -3650,7 +3720,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
             assert!(
                 log_screen(&view, 100, 25, now)
                     .lines()
-                    .nth(16)
+                    .nth(15)
                     .unwrap()
                     .starts_with(&format!(" {expected_label:<9} Also"))
             );
@@ -3658,12 +3728,12 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         for x in [1, 11] {
-            let cell = &buf[(x, 16)];
+            let cell = &buf[(x, 15)];
             assert_eq!(cell.fg, colour);
             assert_eq!(cell.modifier.contains(Modifier::BOLD), x == 1);
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
-        let time = &buf[(98, 16)];
+        let time = &buf[(98, 15)];
         assert_ne!(time.symbol(), " ");
         assert_eq!(time.fg, colour);
         assert!(time.modifier.contains(Modifier::BOLD));
@@ -3679,10 +3749,10 @@ fn task_log_preserves_time_when_truncated() {
     let area = Rect::new(0, 0, 100, 25);
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    assert_eq!(buf[(89, 17)].symbol(), "…");
-    assert_eq!(buf[(98, 17)].fg, Color::Reset);
+    assert_eq!(buf[(89, 16)].symbol(), "…");
+    assert_eq!(buf[(98, 16)].fg, Color::Reset);
     assert!(
-        !buf[(98, 17)]
+        !buf[(98, 16)]
             .modifier
             .intersects(Modifier::DIM | Modifier::BOLD)
     );
@@ -3700,7 +3770,7 @@ fn task_log_preserves_time_when_truncated() {
         assert!(
             log_screen(&view, 100, 25, now)
                 .lines()
-                .nth(16)
+                .nth(15)
                 .unwrap()
                 .ends_with("30s ago")
         );
@@ -3723,13 +3793,13 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
     assert_eq!(
         rendered
             .lines()
-            .skip(16)
+            .skip(15)
             .take(3)
             .map(|line| line.chars().skip(1).take(9).collect::<String>())
             .collect::<Vec<_>>(),
         ["Assistant", "Assistant", "Tool     "]
     );
-    for (line, (time, label)) in rendered.lines().skip(16).take(3).zip([
+    for (line, (time, label)) in rendered.lines().skip(15).take(3).zip([
         ("44m ago", "Assistant"),
         ("12:03:45", "Assistant"),
         ("3s", "Tool"),
@@ -3744,7 +3814,7 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
 }
 
 #[test]
-fn task_log_shows_only_newest_seven_events_and_hides_without_selection() {
+fn task_log_shows_only_newest_nine_events_and_hides_without_selection() {
     let (mut view, now) = log_fixture();
     let first = crate::log::Event {
         sender: None,
@@ -3759,6 +3829,7 @@ fn task_log_shows_only_newest_seven_events_and_hides_without_selection() {
         calls: Vec::new(),
     };
     view.log.insert(0, first);
+    view.log.extend(vec![view.log.last().unwrap().clone(); 2]);
     assert!(!log_screen(&view, 100, 25, now).contains("Discarded event"));
     view.selected = usize::MAX;
     let rendered = log_screen(&view, 100, 25, now);
@@ -3837,7 +3908,7 @@ fn task_log_event_count_follows_height() {
             event
         })
         .collect();
-    for (height, count) in [(24, 7), (40, 11), (60, 19), (19, 0), (24, 7)] {
+    for (height, count) in [(24, 9), (40, 13), (60, 21), (19, 0), (24, 9)] {
         let rendered = log_screen(&view, 120, height, now);
         let events: Vec<_> = rendered
             .lines()
@@ -3857,7 +3928,7 @@ fn task_log_event_count_follows_height() {
                     .lines()
                     .nth(usize::from(height - 2))
                     .unwrap()
-                    .is_empty()
+                    .contains("event-")
             );
         }
     }
@@ -4301,7 +4372,7 @@ mod log_path_abbrev {
         let row = buf
             .content
             .chunks(43)
-            .nth(2)
+            .nth(1)
             .unwrap()
             .iter()
             .map(|cell| cell.symbol())
@@ -4380,8 +4451,8 @@ mod log_search {
         assert!(!text(&buf).contains("unrelated"));
         assert!(!text(&buf).contains("t........"));
         for x in 16..23 {
-            assert!(buf[(x, 2)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buf[(x, 2)].fg, crate::theme::inline_code_color());
+            assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buf[(x, 1)].fg, crate::theme::inline_code_color());
         }
         key(&mut view, KeyCode::Enter);
         let buf = panel(&view, now);
@@ -4450,11 +4521,11 @@ mod log_search {
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain café link"));
         for x in 16..20 {
-            assert_eq!(buf[(x, 2)].fg, crate::theme::inline_code_color());
-            assert!(buf[(x, 2)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buf[(x, 1)].fg, crate::theme::inline_code_color());
+            assert!(buf[(x, 1)].modifier.contains(Modifier::BOLD));
         }
-        assert!(!buf[(21, 2)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buf[(21, 2)].modifier.contains(Modifier::BOLD));
+        assert!(!buf[(21, 1)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buf[(21, 1)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]

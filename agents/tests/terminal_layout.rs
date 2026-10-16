@@ -99,6 +99,10 @@ fn terminal_layout_tracks_width() {
             .match_indices('│')
             .map(|(index, _)| top[..index].width())
             .collect();
+        assert!(
+            !lines[32].trim().is_empty(),
+            "blank row below log rule: {capture}"
+        );
         if width >= 150 {
             assert_eq!(separators[1], width as usize - width as usize / 3 - 3);
             for line in &lines[3..29] {

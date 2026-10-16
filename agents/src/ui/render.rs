@@ -181,11 +181,12 @@ impl View {
     }
     pub(crate) fn log_event_count(&self, area: Rect) -> usize {
         usize::from(self.center_layout(area).log.height.saturating_sub(
-            if area.width >= WIDE_LAYOUT_COLUMNS {
-                1
-            } else {
-                super::log::LOG_TOP + 1
-            },
+            u16::from(self.log_search.active())
+                + if area.width >= WIDE_LAYOUT_COLUMNS {
+                    0
+                } else {
+                    super::log::LOG_TOP
+                },
         ))
     }
 

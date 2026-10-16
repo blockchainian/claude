@@ -8,8 +8,8 @@ const CLOCK_FORMAT: &str = "%H:%M:%S";
 const CLOCK_WIDTH: usize = 8;
 const KIND_WIDTH: usize = 9;
 
-/// Rows above the first event: the top rule and a blank row.
-pub(super) const LOG_TOP: u16 = 2;
+/// Rows above the first event: the top rule.
+pub(super) const LOG_TOP: u16 = 1;
 
 pub(super) fn search_input_rect(area: Rect) -> Rect {
     super::render::row(area, area.height.saturating_sub(1), 1)
@@ -76,7 +76,10 @@ impl View {
         self.render_log_jump(rule, scroll, buf);
         let matching: Vec<_> = self.shown_log_events().collect();
         let end = matching.len().saturating_sub(scroll);
-        let start = end.saturating_sub(usize::from(area.height.saturating_sub(top + 1)));
+        let start = end.saturating_sub(usize::from(
+            area.height
+                .saturating_sub(top + u16::from(self.log_search.active())),
+        ));
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
         for (index, &(log_index, event)) in matching[start..end].iter().rev().enumerate() {

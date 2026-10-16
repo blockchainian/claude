@@ -13,9 +13,9 @@
                                                              │
  Task log example · Running in a terminal; open it to type
  ────────────────────────────────────────────────────────────────── Working · Task log example ────
-
  Tool      run tests                                                                            35s
  Queue     Also inspect the tests                                                          11:59:00
+
 
 
 
