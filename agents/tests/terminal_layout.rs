@@ -76,7 +76,7 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     ]);
     // Let provider discovery finish, then select the real archived transcript.
     std::thread::sleep(Duration::from_secs(2));
-    tmux.run(&["send-keys", "-t", "probe", "Tab", "Tab", "Tab", "Tab"]);
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
     (directory, tmux, transcript)
 }
 

@@ -1,5 +1,5 @@
  Agent command center  Group: Project  g
-  Active 1   Ready 1   Working 0   Needs you 1   Inactive 1                         tab/⇧tab filter
+  Active 2   Inactive 1                                                             tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────
  Task shortcuts
 

@@ -1,5 +1,5 @@
  Agent command center  Group: Project  g
-  Active 0   Ready 0   Working 0   Needs you 0   Inactive 10
+  Active 0   Inactive 10
  ────────────────────────────────────────────────────────────────────────────
  /
  › ○ Task 12                                          Inactive [age]

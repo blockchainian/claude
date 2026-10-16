@@ -19,6 +19,12 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - src/ui/ -- rendering, prompt input, drafts and the task log panel
 - tests/ -- real payload fixtures and rendered UI snapshots
 
+## Task tabs
+
+- `Active` lists every non-inactive status; `Inactive` lists inactive tasks. Tab and Shift-Tab cycle the two tabs.
+- Each provider initially loads its ten most recently updated inactive tasks; `Show more` loads another page per provider. Tab counts include tasks not loaded yet.
+- Tabs start on Active; saved fields for removed status tabs are ignored.
+
 ## Details panel
 
 - The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.

@@ -1,5 +1,5 @@
  Agent command center  Group: Project …
- ‹  Needs you 1   Inactive 1
+  Active 2   Inactive 1
  ──────────────────────────────────────
  /tmp/project       │ Prompt
  › ○ Unloaded task  │ Unloaded task

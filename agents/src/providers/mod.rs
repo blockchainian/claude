@@ -71,6 +71,8 @@ pub struct Capabilities {
 pub struct Snapshot {
     pub sessions: Vec<Session>,
     pub has_more: bool,
+    /// Total inactive tasks, including unloaded pages.
+    pub inactive_total: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

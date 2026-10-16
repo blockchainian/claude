@@ -95,7 +95,7 @@ fn draft_shows_under_active_tab() {
     );
     key(&mut view, KeyCode::Esc);
     key(&mut view, KeyCode::Tab);
-    assert_eq!(TASK_FILTERS[view.status_filter].0, "Ready");
+    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
     let entries = view.center_rows(&view.selectable_indices(), Grouping::Project);
     assert!(
         !entries

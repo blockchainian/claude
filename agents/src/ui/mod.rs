@@ -62,10 +62,14 @@ use std::{
 use unicode_width::UnicodeWidthStr;
 
 const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
-    ("Active", &[SessionStatus::Working, SessionStatus::Ready]),
-    ("Ready", &[SessionStatus::Ready]),
-    ("Working", &[SessionStatus::Working]),
-    ("Needs you", &[SessionStatus::NeedsInput]),
+    (
+        "Active",
+        &[
+            SessionStatus::Working,
+            SessionStatus::Ready,
+            SessionStatus::NeedsInput,
+        ],
+    ),
     ("Inactive", &[SessionStatus::Inactive]),
 ];
 
@@ -78,9 +82,7 @@ const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(300);
 fn tab_for_status(status: Option<SessionStatus>, current_tab: usize) -> usize {
     match status {
         Some(status) if TASK_FILTERS[current_tab].1.contains(&status) => current_tab,
-        Some(SessionStatus::Ready) => 1,
-        Some(SessionStatus::Working) => 2,
-        Some(SessionStatus::NeedsInput) => 3,
+        Some(SessionStatus::Ready | SessionStatus::Working | SessionStatus::NeedsInput) => 0,
         Some(SessionStatus::Inactive) | None => 0,
     }
 }
@@ -223,6 +225,7 @@ pub struct View {
     help: bool,
     loading: bool,
     has_more: bool,
+    inactive_total: Option<usize>,
     /// A notice at the task list's bottom-left, shown until it expires.
     notice: Option<(String, Instant)>,
     viewport: RefCell<Viewport>,
@@ -339,6 +342,7 @@ impl View {
             help: false,
             loading: false,
             has_more: false,
+            inactive_total: None,
             notice: None,
             viewport: RefCell::new(Viewport::default()),
             last_click: None,
@@ -503,6 +507,10 @@ impl View {
         }
         self.reconcile_drafts();
         self.show_selected_panels();
+    }
+
+    pub(crate) fn set_inactive_total(&mut self, count: usize) {
+        self.inactive_total = Some(count);
     }
 
     pub fn set_loading(&mut self, loading: bool) {

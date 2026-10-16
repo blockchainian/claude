@@ -1,5 +1,5 @@
  Agent command center  Group: Project  g
-  Active 1   Ready 1   Working 0   Needs you 0   Inactive 0
+  Active 1   Inactive 0
  ──────────────────────────────────────────────────────────────────────────────────────
  Search › find                              │ Prompt
  /tmp/project                               │ Task to find

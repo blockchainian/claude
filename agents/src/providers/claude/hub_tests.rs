@@ -93,10 +93,12 @@ fn merge_orders_live_then_inactive_then_children_and_drops_orphans() {
             Snapshot {
                 sessions: vec![child, orphan, live],
                 has_more: false,
+                inactive_total: 0,
             },
             Snapshot {
                 sessions: vec![descendant, inactive, earlier_child, later_live],
                 has_more: true,
+                inactive_total: 1,
             },
         ]
         .into_iter(),

@@ -169,7 +169,11 @@ fn settled_zero_duration_leaves_the_time_column_empty_through_app() {
         assert_eq!(buffer[(right - 11, prompt_y)].symbol(), "…");
         assert!(segment(&buffer, right - 8..right, prompt_y).contains(':'));
         let (_, latest_y) = log_position(&buffer, "Following message");
-        assert!(!segment(&buffer, right - 8..right, latest_y).trim().is_empty());
+        assert!(
+            !segment(&buffer, right - 8..right, latest_y)
+                .trim()
+                .is_empty()
+        );
     }
 }
 
@@ -351,9 +355,7 @@ fn log_selection_switching_tasks_resets_following_through_app() {
 fn selected_real_transcript_draws_log_and_prompt_at_narrow_and_wide_sizes() {
     let (_directory, mut app) = fixture();
     assert!(app.view.selected_id().is_none());
-    for _ in 0..4 {
-        key(&mut app, KeyCode::Tab);
-    }
+    key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Home);
     assert!(app.view.selected_id().is_some());
     for width in [80, 120, 150, 200] {
@@ -401,9 +403,7 @@ fn draft_without_transcript_draws_and_accepts_paste_in_wide_layout() {
 #[test]
 fn paste_reaches_search_and_rename_only_after_their_keyboard_actions() {
     let (_directory, mut app) = fixture();
-    for _ in 0..4 {
-        key(&mut app, KeyCode::Tab);
-    }
+    key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Home);
     key(&mut app, KeyCode::Char('/'));
     app.handle_event(Event::Paste("search-route-proof".into()));
@@ -948,9 +948,7 @@ fn narrow_render_survives_wide_resize_unchanged() {
 fn log_rows_keep_fixed_content_and_right_aligned_times() {
     use chrono::TimeZone;
     let (_directory, mut app) = fixture();
-    for _ in 0..4 {
-        key(&mut app, KeyCode::Tab);
-    }
+    key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Home);
     draw(&mut app, 100);
     let source = crate::providers::claude::log::tail_session(
@@ -1048,5 +1046,110 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
                     .contains("⏺ Ran 4 stop hooks")
             );
         }
+    }
+}
+
+fn tab_fixture(count: usize) -> (tempfile::TempDir, App) {
+    let directory = tempfile::tempdir().unwrap();
+    let project = directory.path().join("projects/probe");
+    std::fs::create_dir_all(&project).unwrap();
+    for index in 0..count {
+        let path = project.join(format!("00000000-0000-0000-0000-{index:012}.jsonl"));
+        std::fs::write(&path, include_bytes!("../tests/fixtures/transcript.jsonl")).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(index as u64))
+            .unwrap();
+    }
+    let mut app = App::new(
+        Hub::new(vec![Box::new(
+            crate::providers::claude::ClaudeProvider::new(directory.path().into()),
+        )]),
+        directory.path().into(),
+    );
+    app.refresh();
+    (directory, app)
+}
+
+#[test]
+fn task_tabs_only_active_and_inactive_with_real_totals() {
+    let (_directory, mut app) = tab_fixture(23);
+    let rendered = lines(&draw(&mut app, 160)).join("\n");
+    assert!(rendered.contains("Active 0"));
+    assert!(rendered.contains("Inactive 23"), "{rendered}");
+    for removed in ["Ready 0", "Working 0", "Needs you 0"] {
+        assert!(!rendered.contains(removed), "{rendered}");
+    }
+}
+
+#[test]
+fn task_tabs_cycle_both_directions() {
+    let (_directory, mut app) = tab_fixture(1);
+    for (event, inactive) in [
+        (KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), true),
+        (KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE), false),
+        (KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT), true),
+        (KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), false),
+    ] {
+        app.handle_event(Event::Key(event));
+        assert_eq!(app.view.selected_id().is_some(), inactive);
+    }
+}
+
+#[test]
+fn task_tabs_inactive_starts_with_ten_then_reveals_next_page() {
+    let (_directory, mut app) = tab_fixture(23);
+    key(&mut app, KeyCode::Tab);
+    assert_eq!(app.sessions.len(), 10);
+    assert!(
+        app.sessions
+            .iter()
+            .all(|session| session.updated_at.timestamp() >= 13)
+    );
+    let rendered = lines(&draw(&mut app, 160)).join("\n");
+    assert!(rendered.contains("Show more"), "{rendered}");
+    key(&mut app, KeyCode::End);
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.sessions.len(), 20);
+    assert!(
+        lines(&draw(&mut app, 160))
+            .join("\n")
+            .contains("Inactive 23")
+    );
+    key(&mut app, KeyCode::End);
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.sessions.len(), 23);
+    assert!(!lines(&draw(&mut app, 160)).join("\n").contains("Show more"));
+}
+
+#[test]
+fn task_tabs_ignore_saved_removed_filter() {
+    for filter in ["Ready", "Working", "Needs you"] {
+        let (directory, _) = tab_fixture(1);
+        std::fs::write(
+            directory.path().join("agents.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "grouping": "project", "pinned": [], "status_filter": filter,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut app = App::new(
+            Hub::new(vec![Box::new(
+                crate::providers::claude::ClaudeProvider::new(directory.path().into()),
+            )]),
+            directory.path().into(),
+        );
+        app.refresh();
+        assert!(app.view.selected_id().is_none());
+        key(&mut app, KeyCode::Tab);
+        assert!(app.view.selected_id().is_some());
+        app.save_preferences();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(directory.path().join("agents.json")).unwrap())
+                .unwrap();
+        assert!(saved.get("status_filter").is_none());
     }
 }

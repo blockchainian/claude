@@ -306,6 +306,11 @@ impl View {
                             })
                     })
                     .count();
+                let count = if *group == [SessionStatus::Inactive] {
+                    self.inactive_total.unwrap_or(count)
+                } else {
+                    count
+                };
                 format!("{label} {count}")
             })
             .collect::<Vec<_>>();

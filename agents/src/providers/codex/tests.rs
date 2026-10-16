@@ -555,10 +555,8 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     let mut view = View::new(Grouping::Project, false);
     view.set_capabilities(hub.capabilities());
     view.set_sessions(snapshot.sessions, snapshot.has_more);
-    // Needs you shows the inactive parent as context above its waiting child.
-    for _ in 0..3 {
-        view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    }
+    // Active shows the inactive parent as context above its waiting child.
+    // The Active tab includes the waiting child.
     assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
     let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
     view.render(buffer.area, &mut buffer);
