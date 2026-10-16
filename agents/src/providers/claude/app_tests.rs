@@ -142,16 +142,15 @@ fn queued_wheel_events_apply_before_the_next_draw() {
             modifiers: KeyModifiers::NONE,
         })))
     };
-    let (sender, receiver) = mpsc::channel();
     for _ in 0..4 {
-        sender.send(wheel()).unwrap();
+        app.sender.send(wheel()).unwrap();
     }
     let mut schedule = RefreshSchedule::new(std::time::Instant::now(), POLLING_INTERVAL);
     assert!(
-        !app.handle_inputs(wheel(), &receiver, &mut None, &mut schedule)
+        !app.handle_inputs(wheel(), &mut None, &mut schedule)
             .unwrap()
     );
-    assert!(receiver.try_recv().is_err());
+    assert!(app.receiver.try_recv().is_err());
     assert_eq!(app.view.log_scroll(), 15);
 }
 

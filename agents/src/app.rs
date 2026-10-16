@@ -3,7 +3,7 @@
 use crate::model::Action;
 use crate::model::Session;
 use crate::providers::Snapshot;
-use crate::providers::{ProviderId, SessionKey};
+use crate::providers::{Job, ProviderId, SessionInput, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
 use crate::sessions::Hub;
 use crate::state::Preferences;
@@ -33,6 +33,11 @@ const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(100);
 enum Input {
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<()>),
+    Sent {
+        id: SessionKey,
+        input: SessionInput,
+        result: io::Result<()>,
+    },
 }
 
 struct InputReader {
@@ -78,6 +83,9 @@ impl Drop for InputReader {
 }
 
 pub struct App {
+    sender: mpsc::Sender<Input>,
+    receiver: mpsc::Receiver<Input>,
+    pending_inputs: std::collections::HashSet<SessionKey>,
     config_dir: PathBuf,
     hub: Hub,
     preferences: Preferences,
@@ -113,7 +121,11 @@ impl App {
         view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
         view.set_capabilities(hub.capabilities());
+        let (sender, receiver) = mpsc::channel();
         Self {
+            sender,
+            receiver,
+            pending_inputs: std::collections::HashSet::new(),
             hub,
             config_dir,
             preferences,
@@ -166,8 +178,7 @@ impl App {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     ) -> io::Result<()> {
-        let (sender, receiver) = mpsc::channel();
-        let filesystem = sender.clone();
+        let filesystem = self.sender.clone();
         let watch = self
             .hub
             .watch_roots()
@@ -185,7 +196,7 @@ impl App {
                 None
             }
         };
-        let _reader = InputReader::start(sender)?;
+        let _reader = InputReader::start(self.sender.clone())?;
         let mut schedule = RefreshSchedule::new(
             Instant::now(),
             if watcher.is_some() {
@@ -258,9 +269,9 @@ impl App {
             } else {
                 timeout
             };
-            match receiver.recv_timeout(timeout) {
+            match self.receiver.recv_timeout(timeout) {
                 Ok(input) => {
-                    if self.handle_inputs(input, &receiver, &mut watcher, &mut schedule)? {
+                    if self.handle_inputs(input, &mut watcher, &mut schedule)? {
                         return Ok(());
                     }
                 }
@@ -277,11 +288,11 @@ impl App {
     fn handle_inputs(
         &mut self,
         first: Input,
-        receiver: &mpsc::Receiver<Input>,
         watcher: &mut Option<notify::RecommendedWatcher>,
         schedule: &mut RefreshSchedule,
     ) -> io::Result<bool> {
-        for input in std::iter::once(first).chain(std::iter::from_fn(|| receiver.try_recv().ok())) {
+        let mut next = Some(first);
+        while let Some(input) = next.take().or_else(|| self.receiver.try_recv().ok()) {
             match input {
                 Input::Terminal(event) => {
                     if self.handle_event(event?) {
@@ -298,6 +309,10 @@ impl App {
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
+                Input::Sent { id, input, result } => {
+                    self.pending_inputs.remove(&id);
+                    self.view.input_complete(&id, &input, result);
+                }
             }
         }
         Ok(false)
@@ -514,6 +529,48 @@ impl App {
     }
 
     /// Returns true when the dashboard should close.
+    fn send_input(&mut self, id: SessionKey, input: SessionInput) {
+        let Some(session) = self.session(&id) else {
+            self.view.input_failed("Task is no longer available".into());
+            return;
+        };
+        let Some(job) = self.hub.provider(id.provider).send(&session, input.clone()) else {
+            self.view
+                .input_failed("This task cannot receive that input".into());
+            return;
+        };
+        self.start_input_job(id, input, job);
+    }
+
+    fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: Job) -> bool {
+        if !self.pending_inputs.insert(id.clone()) {
+            self.view
+                .set_notice(Some("Input is still being sent".into()));
+            return false;
+        }
+        self.view.input_sending(&id);
+        let sender = self.sender.clone();
+        let target = id.clone();
+        match thread::Builder::new()
+            .name("agents-send".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                    .unwrap_or_else(|_| Err(io::Error::other("Input job panicked")));
+                let _ = sender.send(Input::Sent {
+                    id: target,
+                    input,
+                    result,
+                });
+            }) {
+            Ok(_) => true,
+            Err(error) => {
+                self.pending_inputs.remove(&id);
+                self.view.input_failed(error.to_string());
+                false
+            }
+        }
+    }
+
     fn handle_action(&mut self, action: Option<Action>) -> bool {
         let Some(action) = action else {
             return false;
@@ -539,9 +596,9 @@ impl App {
         }
         match action {
             Action::Quit => return true,
-            Action::SendPrompt { .. } => self
-                .view
-                .input_failed("Prompt delivery is unavailable".into()),
+            Action::SendPrompt { id, text } => {
+                self.send_input(id, SessionInput::Prompt(text));
+            }
             Action::Back => {
                 let Some(session) = self.last_session.as_ref().and_then(|id| self.session(id))
                 else {
@@ -701,6 +758,12 @@ impl App {
 
     /// Hands the terminal to the selected session's provider process.
     fn launch_session(&mut self, action: Action, session: Session) -> bool {
+        if self.pending_inputs.contains(&session.id) {
+            self.view
+                .set_notice(Some("Input is still being sent".into()));
+            return false;
+        }
+
         if !session.can_resume() {
             return false;
         }
@@ -783,3 +846,7 @@ fn cell_aspect() -> Option<f64> {
     let cell_width = f64::from(size.width) / f64::from(size.columns);
     Some(cell_height / cell_width)
 }
+
+#[cfg(test)]
+#[path = "app_input_tests.rs"]
+mod input_tests;

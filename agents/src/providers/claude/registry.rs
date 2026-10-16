@@ -16,6 +16,7 @@ pub(super) struct Entry {
     #[serde(rename = "version")]
     _version: Option<String>,
     pub kind: Option<String>,
+    pub job_id: Option<String>,
     pub name: Option<String>,
     pub name_source: Option<String>,
     pub updated_at: Option<i64>,

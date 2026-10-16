@@ -68,11 +68,24 @@ pub struct Snapshot {
     pub has_more: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SessionInput {
+    Prompt(String),
+    Interrupt,
+    SetModel(String),
+    SetEffort(String),
+}
+
+pub type Job = Box<dyn FnOnce() -> io::Result<()> + Send>;
+
 pub trait Provider {
     fn id(&self) -> ProviderId;
     /// Directories watched for changes; missing directories are skipped.
     fn watch_roots(&self) -> io::Result<Vec<PathBuf>>;
     fn capabilities(&self) -> Capabilities;
+    fn send(&self, _session: &Session, _input: SessionInput) -> Option<Job> {
+        None
+    }
     /// Returns this provider's sessions, including children with provider-qualified parents.
     fn refresh(&mut self, pages: usize) -> Snapshot;
     fn log(&self, session: &Session, count: usize, sidechains: bool)

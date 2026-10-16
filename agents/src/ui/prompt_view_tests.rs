@@ -143,3 +143,60 @@ fn offset_layout_keeps_prompt_above_log() {
     assert_eq!(layout.prompt.bottom(), layout.log.y);
     assert!(layout.list.bottom() <= layout.prompt.y);
 }
+
+#[test]
+fn completed_input_updates_its_task_while_another_task_is_selected() {
+    let mut view = fixture();
+    let first = view.selected;
+    let first_id = view.selected_id().unwrap().clone();
+    let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+    view.input_box.editor.set_text(text);
+    view.input_sending(&first_id);
+    let second = view
+        .selectable_indices()
+        .into_iter()
+        .find(|index| *index != first)
+        .unwrap();
+    view.select(second);
+    view.input_box.editor.set_text("another task");
+    view.input_complete(
+        &first_id,
+        &crate::providers::SessionInput::Prompt(text.into()),
+        Ok(()),
+    );
+    assert_eq!(view.input_box.editor.text(), "another task");
+    assert_eq!(view.input_box.state, prompt_box::SendState::Ready);
+    view.select(first);
+    assert_eq!(view.input_box.state, prompt_box::SendState::Sent);
+    assert!(view.input_box.editor.is_empty());
+}
+
+#[test]
+fn input_completion_keeps_text_edited_during_the_send() {
+    let mut view = fixture();
+    let id = view.selected_id().unwrap().clone();
+    let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
+    view.input_box.editor.set_text(text);
+    view.input_sending(&id);
+    view.input_box.editor.insert("next");
+    let edited = view.input_box.editor.text().to_owned();
+    view.input_complete(
+        &id,
+        &crate::providers::SessionInput::Prompt(text.into()),
+        Ok(()),
+    );
+    assert_eq!(view.input_box.editor.text(), edited);
+    view.input_complete(
+        &id,
+        &crate::providers::SessionInput::Interrupt,
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "attach timed out",
+        )),
+    );
+    assert_eq!(view.input_box.editor.text(), edited);
+    assert_eq!(
+        view.input_box.state,
+        prompt_box::SendState::Failed("attach timed out".into())
+    );
+}

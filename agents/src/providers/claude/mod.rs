@@ -1,15 +1,21 @@
 //! Session sources: the live registry and transcripts.
 
+mod attach;
+#[cfg(test)]
+mod attach_live_tests;
 mod background;
 mod images;
 pub(crate) mod log;
 mod peer;
 mod registry;
+mod settings;
 mod subagents;
 mod transcript;
 
 use crate::model::{Action, Process, Session, SessionStatus};
-use crate::providers::{Capabilities, Provider, ProviderId, SessionKey, Snapshot};
+use crate::providers::{
+    Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot,
+};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -553,6 +559,55 @@ impl Provider for ClaudeProvider {
         log::tail_session(path, count, sidechains)
     }
 
+    fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
+        if !session.can_resume() {
+            return None;
+        }
+        let session = session.clone();
+        let config = self.config_dir.clone();
+        Some(Box::new(move || match &session.process {
+            Some(process) if process.label.as_deref() == Some("bg") => {
+                let entry: registry::Entry = serde_json::from_slice(&fs::read(
+                    config
+                        .join("sessions")
+                        .join(format!("{}.json", process.pid)),
+                )?)
+                .map_err(io::Error::other)?;
+                if entry.session_id.as_deref() != Some(&session.id.id)
+                    || entry.kind.as_deref() != Some("bg")
+                {
+                    return Err(io::Error::other(
+                        "Claude background session identity changed",
+                    ));
+                }
+                let job_id = entry
+                    .job_id
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| io::Error::other("Claude background session has no job id"))?;
+                attach::send(&job_id, &session.cwd, &config.join("settings.json"), input)
+            }
+            Some(_) => Err(io::Error::other(
+                "Running in another terminal; open it to type",
+            )),
+            None => match input {
+                SessionInput::Prompt(text) => {
+                    let output = resume_prompt(&session, &text).output()?;
+                    if output.status.success() {
+                        Ok(())
+                    } else {
+                        Err(io::Error::other(format!(
+                            "Claude resume failed: {}",
+                            String::from_utf8_lossy(&output.stderr).trim()
+                        )))
+                    }
+                }
+                _ => Err(io::Error::other(
+                    "This input requires a live background session",
+                )),
+            },
+        }))
+    }
+
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command> {
         let mut command = Command::new("claude");
         match action {
@@ -593,6 +648,14 @@ impl Provider for ClaudeProvider {
     fn stop(&self, _: &Session) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }
+}
+
+fn resume_prompt(session: &Session, text: &str) -> Command {
+    let mut command = Command::new("claude");
+    command
+        .args(["--bg", "--resume", &session.id.id, text])
+        .current_dir(&session.cwd);
+    command
 }
 
 fn is_uuid(id: &str) -> bool {
@@ -671,6 +734,24 @@ mod tests {
     use std::time::Duration;
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
+
+    #[test]
+    fn resumed_prompt_has_no_flags_that_fork_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "00000000-0000-0000-0000-000000000001";
+        transcript(dir.path(), id, 0);
+        let mut provider = ClaudeProvider::new(dir.path().into());
+        let mut session = provider.refresh(1).sessions.remove(0);
+        session.cwd = dir.path().into();
+        let text = include_str!("../../../tests/fixtures/claude-peer-message.txt");
+        let command = resume_prompt(&session, text);
+        assert_eq!(command.get_program(), "claude");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["--bg", "--resume", id, text]
+        );
+        assert_eq!(command.get_current_dir(), Some(dir.path()));
+    }
 
     #[test]
     fn ask_user_question_pending_questions_refresh_with_answers() {

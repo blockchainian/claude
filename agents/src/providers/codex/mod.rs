@@ -4,9 +4,11 @@ mod inner_tests;
 mod manager;
 mod rollout;
 #[cfg(test)]
+mod send_tests;
+#[cfg(test)]
 mod tests;
 
-use super::{Capabilities, Provider, ProviderId, SessionKey, Snapshot};
+use super::{Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot};
 use crate::{
     log,
     model::{Action, Process, Session, SessionStatus},
@@ -444,6 +446,33 @@ impl Provider for CodexProvider {
             _ => return None,
         }
         Some(command)
+    }
+    fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
+        if !session.can_resume()
+            || matches!(
+                input,
+                SessionInput::SetModel(_) | SessionInput::SetEffort(_)
+            )
+        {
+            return None;
+        }
+        let home = self.home.clone();
+        let id = session.id.id.clone();
+        Some(Box::new(move || {
+            let mut client = app_server::Client::connect(&home)?;
+            match input {
+                SessionInput::Prompt(text) => app_server::thread::prompt(&mut client, &id, &text),
+                SessionInput::Interrupt => {
+                    match app_server::thread::running_turn(&mut client, &id)? {
+                        Some(turn) => app_server::thread::interrupt(&mut client, &id, &turn),
+                        None => Ok(()),
+                    }
+                }
+                SessionInput::SetModel(_) | SessionInput::SetEffort(_) => {
+                    Err(io::ErrorKind::Unsupported.into())
+                }
+            }
+        }))
     }
     fn rename(&self, session: &Session, name: &str) -> io::Result<()> {
         if !session.can_resume() {

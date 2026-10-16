@@ -151,6 +151,7 @@ struct BackgroundReturn {
 /// What a task's details and log panels showed when the user last left it.
 #[derive(Default)]
 struct TaskPanels {
+    input_box: prompt_box::PromptBox,
     details_scroll: DetailsScroll,
     log_search: log_search::LogSearch,
     log_open: Option<crate::log::Event>,
@@ -376,6 +377,38 @@ impl View {
         if self.input_disabled().is_none() {
             self.input_box.focused = true;
         }
+    }
+
+    fn task_input(&mut self, id: &SessionKey) -> &mut prompt_box::PromptBox {
+        if self.selected_id() == Some(id) {
+            &mut self.input_box
+        } else {
+            &mut self.task_panels.entry(id.clone()).or_default().input_box
+        }
+    }
+
+    pub(crate) fn input_sending(&mut self, id: &SessionKey) {
+        self.task_input(id).state = prompt_box::SendState::Sending;
+    }
+
+    pub(crate) fn input_complete(
+        &mut self,
+        id: &SessionKey,
+        input: &crate::providers::SessionInput,
+        result: std::io::Result<()>,
+    ) {
+        let target = self.task_input(id);
+        target.state = match result {
+            Ok(()) => {
+                if let crate::providers::SessionInput::Prompt(text) = input
+                    && target.editor.text() == text
+                {
+                    target.editor.clear();
+                }
+                prompt_box::SendState::Sent
+            }
+            Err(error) => prompt_box::SendState::Failed(error.to_string()),
+        };
     }
 
     pub(crate) fn input_failed(&mut self, reason: String) {
@@ -647,7 +680,9 @@ impl View {
             self.left_log_newest
         };
         let viewport = self.viewport.get_mut();
+        self.input_box.focused = false;
         let left = TaskPanels {
+            input_box: std::mem::take(&mut self.input_box),
             details_scroll: std::mem::take(&mut viewport.details_scroll),
             log_search: std::mem::take(&mut self.log_search),
             log_open: self.log_open.take(),
@@ -673,6 +708,7 @@ impl View {
         viewport.log_unseen = shown.log_unseen;
         viewport.log_open_scroll = shown.log_open_scroll;
         viewport.log_open_layout = None;
+        self.input_box = shown.input_box;
         self.log_search = shown.log_search;
         self.log_open = shown.log_open;
         self.log_background_return = shown.log_background_return;
