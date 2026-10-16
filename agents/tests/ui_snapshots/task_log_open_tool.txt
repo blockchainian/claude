@@ -22,11 +22,6 @@
                                                   │
                                                   │
                                                   │
-                                                  │
-                                                  │
-                                                  │
-                                                  │
-                                                  │
  Task log example · Running in a terminal; open it to type
  ──────────────────────────────────────────────────────────── Task log example · Working ──────────
  run tests                                                                                      35s
@@ -40,6 +35,11 @@
  ─ Read ───────────────────────────────────────────────────────────────────────────────────────────
  agents/src/log.rs:1-40
  running…
+
+
+
+
+
 
 
 

@@ -6,11 +6,11 @@
                                         │                                        │
  /tmp/project                           │ Project                                │
    ○ A longer task title that uses the… │ /tmp/project                           │
- ↓                                      │ …                                      │
+   ● Working task                       │                                        │
+                                        │ Model                          Unknown │
+                                        │                                        │
  ───────────────────────────────────────────────── Current task · Ready ───────────────────────────────────────────────────────────────────────────────────────
  Current task ›
-
-
 
 
 

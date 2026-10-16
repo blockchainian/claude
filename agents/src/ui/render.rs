@@ -99,27 +99,33 @@ impl View {
         let header_height = if area.height >= 6 { 3 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
-        let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
-        let log_height = bottom_height.saturating_sub(footer_height).max(10);
-        let log_height = if area.height.saturating_sub(footer_height + log_height)
-            >= header_height + 6
-            && (area.width >= WIDE_LAYOUT_COLUMNS
-                || self
-                    .selected_row()
-                    .is_some_and(|session| session.transcript.is_some()))
-        {
-            log_height
-        } else {
-            0
-        };
-        let log = row(area, area.height - footer_height - log_height, log_height);
+        let wide = area.width >= WIDE_LAYOUT_COLUMNS;
         let prompt_height = self
             .input_box
             .height(
                 area.width.saturating_sub(2 * HORIZONTAL_PADDING),
                 &self.input_label(),
             )
-            .min(log.y.saturating_sub(header.bottom()));
+            .min(area.height.saturating_sub(header_height + footer_height));
+        let bottom_height = ((u32::from(area.height) * 382 + 500) / 1000) as u16;
+        let log_height = bottom_height.saturating_sub(footer_height).max(10);
+        let log_height = if area.height.saturating_sub(footer_height + log_height)
+            >= header_height + 6
+            && (wide
+                || self
+                    .selected_row()
+                    .is_some_and(|session| session.transcript.is_some()))
+        {
+            // Both panels are measured in content rows. The log owns its top
+            // rule; wide columns also reserve a rule above the input box.
+            let content_height = area.height.saturating_sub(
+                header_height + footer_height + prompt_height + u16::from(wide) + log::LOG_TOP,
+            );
+            content_height / 2 + log::LOG_TOP
+        } else {
+            0
+        };
+        let log = row(area, area.height - footer_height - log_height, log_height);
         let prompt = row(
             area,
             log.y.saturating_sub(area.y + prompt_height),
@@ -131,7 +137,6 @@ impl View {
             prompt.y.saturating_sub(header.bottom()),
         )
         .inner(Margin::new(HORIZONTAL_PADDING, 0));
-        let wide = area.width >= WIDE_LAYOUT_COLUMNS;
         if wide && !log.is_empty() {
             body.height = body.height.saturating_sub(1);
         }

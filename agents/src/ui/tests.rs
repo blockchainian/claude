@@ -3904,14 +3904,15 @@ fn task_log_tall_finished_snapshot() {
 }
 
 #[test]
-fn task_log_short_terminal_keeps_ten_log_rows() {
+fn task_log_short_terminal_splits_content_equally() {
     let mut view = fixture();
     view.rows[view.selected].transcript = Some("/tmp/task-log.jsonl".into());
     let (log, _) = log_fixture();
     view.log = log.log;
     view.log_session = view.selected_id().cloned();
     let layout = view.center_layout(Rect::new(0, 0, 140, 22));
-    assert_eq!(layout.log.height, 10);
+    assert_eq!(layout.log.height, 9);
+    assert_eq!(layout.list.height, 8);
     let rendered = screen(&view, 140, 22);
     assert!(rendered.contains("I will check the files"));
     assert!(rendered.contains("Please inspect"));
@@ -4237,6 +4238,69 @@ fn center_layout_narrow_buffer_ranges_at_120_columns() {
 }
 
 #[test]
+fn center_layout_wide_equal_content_buffer_at_200x60() {
+    assert_equal_content_buffer(200, 60, "");
+}
+
+#[test]
+fn center_layout_wide_equal_content_buffer_at_200x45() {
+    assert_equal_content_buffer(200, 45, "");
+}
+
+#[test]
+fn center_layout_equal_content_buffer_with_growing_input() {
+    for (width, height) in [(200, 60), (200, 45), (120, 60), (120, 45)] {
+        for lines in 2..=7 {
+            assert_equal_content_buffer(width, height, &vec!["input"; lines].join("\n"));
+        }
+        assert_equal_content_buffer(width, height, &"wrapped input ".repeat(100));
+    }
+}
+
+#[test]
+fn center_layout_narrow_equal_content_buffer_at_120x60() {
+    assert_equal_content_buffer(120, 60, "");
+}
+
+#[test]
+fn center_layout_narrow_equal_content_buffer_at_120x45() {
+    assert_equal_content_buffer(120, 45, "");
+}
+
+fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
+    let (mut view, now) = log_fixture();
+    view.input_box.editor.set_text(input);
+    let area = Rect::new(0, 0, width, height);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    let layout = view.center_layout(area);
+    let top = (0..height)
+        .filter(|&y| buf[(layout.gap.x + 1, y)].symbol() == "│")
+        .count() as u16;
+    let wide = width >= super::render::WIDE_LAYOUT_COLUMNS;
+    let log = if wide { layout.log_detail } else { layout.log };
+    let bottom = layout.footer.y - log.y - 1;
+    let available = height
+        - layout.header.height
+        - layout.footer.height
+        - layout.prompt.height
+        - 1
+        - u16::from(wide);
+    println!(
+        "{width}x{height}, input {} rows: top {top}, bottom {bottom}",
+        layout.prompt.height
+    );
+    assert_eq!((top, bottom), (available.div_ceil(2), available / 2));
+    assert_eq!(layout.details.height, top);
+    if wide {
+        assert_eq!(layout.log.height, top);
+    }
+    assert_eq!(layout.prompt.y, layout.details.bottom() + u16::from(wide));
+    assert_eq!(layout.prompt.bottom(), log.y);
+    assert_eq!(buf[(layout.details.x, log.y)].symbol(), "─");
+}
+
+#[test]
 fn center_layout_wide_buffer_ranges_at_200_columns() {
     assert_wide_buffer_ranges(200, [1..49, 52..100, 103..199]);
 }
@@ -4269,8 +4333,8 @@ fn center_layout_golden_rects_follow_each_area() {
     let (view, _) = log_fixture();
     for (width, height, top, log_height, list_width, details_width, body_height) in [
         (80, 24, 13, 10, 38, 37, 9),
-        (120, 40, 25, 14, 58, 57, 21),
-        (200, 60, 37, 22, 48, 48, 32),
+        (120, 40, 21, 18, 58, 57, 17),
+        (200, 60, 32, 27, 48, 48, 27),
         (80, 24, 13, 10, 38, 37, 9),
     ] {
         let area = Rect::new(5, 7, width, height);
@@ -4307,8 +4371,8 @@ fn center_layout_log_and_details_hide_thresholds() {
         assert_eq!(layout.log.height, 0, "height {height}");
     }
     let layout = view.center_layout(Rect::new(0, 0, 94, 20));
-    assert_eq!(layout.log.height, 10);
-    assert_eq!(layout.list.height, 5);
+    assert_eq!(layout.log.height, 8);
+    assert_eq!(layout.list.height, 7);
     assert!(layout.details.width > 0);
     assert!(
         !view
@@ -4335,7 +4399,7 @@ fn task_log_event_count_follows_height() {
             event
         })
         .collect();
-    for (height, count) in [(24, 9), (40, 13), (60, 21), (19, 0), (24, 9)] {
+    for (height, count) in [(24, 9), (40, 17), (60, 27), (19, 0), (24, 9)] {
         let rendered = log_screen(&view, 120, height, now);
         let events: Vec<_> = rendered
             .lines()

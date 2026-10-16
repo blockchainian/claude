@@ -111,8 +111,19 @@ fn terminal_layout_tracks_width() {
             .match_indices('│')
             .map(|(index, _)| top[..index].width())
             .collect();
+        let top_end = 3 + lines[3..]
+            .iter()
+            .take_while(|line| line.matches('│').count() == separators.len())
+            .count();
+        let log_rule = top_end + if width >= 150 { 2 } else { 1 };
+        let top_height = top_end - 3;
+        let bottom_height = lines.len() - log_rule - 2;
         assert!(
-            !lines[32].trim().is_empty(),
+            top_height == bottom_height || top_height == bottom_height + 1,
+            "content heights differ: top {top_height}, bottom {bottom_height}: {capture}"
+        );
+        assert!(
+            !lines[log_rule + 1].trim().is_empty(),
             "blank row below log rule: {capture}"
         );
         let model = lines
@@ -132,7 +143,7 @@ fn terminal_layout_tracks_width() {
         if width >= 150 {
             let column_width = (width as usize - 8) / 4;
             assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
-            for line in &lines[3..29] {
+            for line in &lines[3..top_end] {
                 let log = line.split('│').next_back().unwrap();
                 if !log.trim().is_empty() {
                     assert_eq!(log.len() - log.trim_start().len(), 1, "log left: {line}");
@@ -143,8 +154,8 @@ fn terminal_layout_tracks_width() {
                     );
                 }
             }
-            assert!(lines[30].contains('›'), "prompt missing: {capture}");
-            let middle: Vec<_> = lines[29].chars().collect();
+            assert!(lines[top_end + 1].contains('›'), "prompt missing: {capture}");
+            let middle: Vec<_> = lines[top_end].chars().collect();
             let details: String = middle[separators[0] + 2..separators[1] - 1]
                 .iter()
                 .collect();
@@ -152,20 +163,20 @@ fn terminal_layout_tracks_width() {
                 details.contains(" · Inactive"),
                 "status missing from middle rule: {capture}"
             );
-            for line in &lines[3..29] {
+            for line in &lines[3..top_end] {
                 let log = line.split('│').next_back().unwrap();
                 assert!(!log.contains("────"), "extra log rule: {capture}");
                 assert!(!line.contains(" · Inactive"), "extra status row: {capture}");
             }
-            assert!(lines[31].trim().chars().all(|c| c == '─'));
+            assert!(lines[log_rule].trim().chars().all(|c| c == '─'));
             assert!(
-                lines[35..48]
+                lines[log_rule + 4..48]
                     .iter()
                     .any(|line| line.width() > width as usize * 2 / 3),
                 "detail does not span the terminal: {capture}"
             );
             assert!(
-                lines[3..29].iter().any(|line| {
+                lines[3..top_end].iter().any(|line| {
                     line.split('│')
                         .next_back()
                         .is_some_and(|log| log.contains("Stop hook"))
@@ -174,7 +185,7 @@ fn terminal_layout_tracks_width() {
             );
         } else {
             assert!(
-                lines[32..48].iter().any(|line| line.contains("Stop hook")),
+                lines[log_rule + 1..48].iter().any(|line| line.contains("Stop hook")),
                 "event list missing below prompt: {capture}"
             );
         }

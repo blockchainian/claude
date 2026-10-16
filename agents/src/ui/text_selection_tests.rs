@@ -154,7 +154,7 @@ fn full_dashboard_highlights_dragged_fenced_prompt() {
     view.rows[0].prompt = record["message"]["content"].as_str().unwrap()[..512].to_owned();
     view.rows[0].transcript =
         Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl"));
-    let area = Rect::new(0, 0, 120, 42);
+    let area = Rect::new(0, 0, 120, 60);
     let render = |view: &View| {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, view.rows[0].updated_at);
