@@ -1,5 +1,5 @@
 //! Whether any task worked, dotted on the task log's top rule below the task list: each dot column
-//! of the shared timeline is one bin, dotted in the jump button's style when a task worked in it.
+//! of the shared timeline is one bin, raised in the jump button's style when a task worked in it.
 
 use super::View;
 use super::timeline::cell_bins;
@@ -8,9 +8,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use std::collections::BTreeSet;
 
-/// The braille bits of a cell's left and right dot columns: their top two dots, so a column meets
-/// the usage chart's column right above the rule.
-const DOT_BITS: [u8; 2] = [0x01 | 0x02, 0x08 | 0x10];
+/// The braille bits of a cell's left and right dot columns: one dot each, the second from the top,
+/// nearest the rule's height.
+const DOT_BITS: [u8; 2] = [0x02, 0x10];
 
 impl View {
     /// Takes the bins some task worked in.
