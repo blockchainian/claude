@@ -50,6 +50,17 @@ pub(super) fn render_input_row(
 
 const HORIZONTAL_PADDING: u16 = 1;
 
+/// Fills a list row through both padding cells, stopping before column separators.
+pub(super) fn fill_list_row(area: Rect, buf: &mut Buffer, style: Style) {
+    if area.is_empty() {
+        return;
+    }
+    let left = area.x.saturating_sub(HORIZONTAL_PADDING);
+    let right = area.right().saturating_add(HORIZONTAL_PADDING);
+    let padded = Rect::new(left, area.y, right - left, area.height).intersection(buf.area);
+    buf.set_style(padded, style);
+}
+
 pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
 
 pub(super) struct CenterLayout {

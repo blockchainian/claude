@@ -1,8 +1,8 @@
 use super::formatting::format_directory_display;
 use super::formatting::format_relative_time;
 use super::navigation::CenterRow;
-use super::render::line;
 use super::render::row;
+use super::render::{fill_list_row, line};
 use super::style::selection_style;
 use super::*;
 
@@ -108,6 +108,7 @@ impl View {
                 } else {
                     let selected = self.selected_draft == Some(*id);
                     if selected {
+                        fill_list_row(rect, buf, selection_style());
                         state.marker = Some((rect.x, rect.y));
                     }
                     let text = format!("{}   New task", if selected { "›" } else { " " });
@@ -136,13 +137,7 @@ impl View {
                     } else {
                         Style::default()
                     };
-                    buf.set_style(
-                        Rect {
-                            width: row_width,
-                            ..rect
-                        },
-                        style,
-                    );
+                    fill_list_row(rect, buf, style);
                     let label = if self.loading {
                         "Loading more…"
                     } else {
@@ -223,13 +218,7 @@ impl View {
             } else {
                 Style::default()
             };
-            buf.set_style(
-                Rect {
-                    width: row_width,
-                    ..rect
-                },
-                style,
-            );
+            fill_list_row(rect, buf, style);
             let (status, mut dot) = Self::status(task);
             if selected || header {
                 dot.style = style;

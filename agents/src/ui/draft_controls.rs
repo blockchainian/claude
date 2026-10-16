@@ -150,6 +150,9 @@ impl View {
             Clear.render(rect, buf);
             for (index, value) in picker.values.iter().take(usize::from(height)).enumerate() {
                 let row = render::row(rect, index as u16, 1);
+                if index == picker.selected {
+                    render::fill_list_row(row, buf, style::selection_style());
+                }
                 render::line(
                     Line::from(format!(
                         "{} {value}",

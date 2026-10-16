@@ -3143,6 +3143,82 @@ fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
 }
 
 #[test]
+fn list_row_highlights_include_column_padding() {
+    for width in [100, 149, 150, 200] {
+        for kind in ["task", "draft", "more", "picker"] {
+            let (mut view, now) = column_padding_fixture();
+            match kind {
+                "draft" => {
+                    view.add_draft(DraftSetup {
+                        provider: ProviderId::Claude,
+                        cwd: view.rows[0].cwd.clone(),
+                        model: None,
+                        effort: None,
+                        branch: "main".into(),
+                        trunk: "main".into(),
+                    });
+                }
+                "more" => {
+                    view.status_filter = TASK_FILTERS
+                        .iter()
+                        .position(|(_, statuses)| *statuses == [SessionStatus::Inactive])
+                        .unwrap();
+                    view.has_more = true;
+                    view.selected = usize::MAX;
+                }
+                "picker" => {
+                    view.picker = Some(super::draft_controls::Picker {
+                        field: Field::Model,
+                        target: super::draft_controls::ControlTarget::Session(
+                            view.rows[0].id.clone(),
+                        ),
+                        values: vec!["sonnet".into(), "haiku".into()],
+                        selected: 0,
+                    });
+                }
+                _ => {}
+            }
+            let area = Rect::new(0, 0, width, 60);
+            let mut buf = Buffer::empty(area);
+            view.render_at(area, &mut buf, now);
+            let layout = view.center_layout(area);
+            let viewport = view.viewport.borrow();
+            let (content, y) = if kind == "picker" {
+                let row = viewport.picker_rows[0].0;
+                (layout.details, row.y)
+            } else {
+                (layout.list, viewport.marker.expect("selected row").1)
+            };
+            let marker_x = content.x;
+            assert_eq!(buf[(marker_x, y)].symbol(), "›", "{kind} at {width}");
+            if kind == "task" {
+                assert_eq!(buf[(marker_x + 2, y)].symbol(), "●");
+                assert_eq!(
+                    buf[(marker_x + 4, y)].symbol(),
+                    &view.rows[0].display_title()[..1]
+                );
+            }
+            let bg = super::style::selection_style().bg.unwrap();
+            for x in content.x - 1..=content.right() {
+                assert_eq!(
+                    buf[(x, y)].bg,
+                    bg,
+                    "{kind} padding at ({x}, {y}), width {width}"
+                );
+            }
+            for x in [content.x - 1, content.right()] {
+                assert_eq!(buf[(x, y)].symbol(), " ");
+            }
+            for x in 0..width {
+                if buf[(x, y)].symbol() == "│" {
+                    assert_eq!(buf[(x, y)].bg, Color::Reset, "separator at {width}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn dashboard_task_rows_use_the_header_row_and_keep_click_offsets() {
     for width in [100, 200] {
         let (mut view, now) = column_padding_fixture();
