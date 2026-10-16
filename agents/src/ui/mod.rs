@@ -95,6 +95,7 @@ struct Viewport {
     list_rows: Rect,
     first_entry: usize,
     log: Rect,
+    log_detail: Rect,
     prompt: Rect,
     field_targets: Vec<(Rect, Field)>,
     picker_rows: Vec<(Rect, usize)>,
@@ -390,7 +391,11 @@ impl View {
             self.show_newest_log();
         } else if self.searching {
             self.search.insert(text);
-            let selected = self.selectable_indices().first().copied().unwrap_or(usize::MAX);
+            let selected = self
+                .selectable_indices()
+                .first()
+                .copied()
+                .unwrap_or(usize::MAX);
             self.select(selected);
         }
     }

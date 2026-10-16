@@ -48,6 +48,8 @@ pub(super) fn render_input_row(
     buf.set_style(area, Style { fg: None, ..style });
 }
 
+pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
+
 pub(super) struct CenterLayout {
     pub(super) header: Rect,
     pub(super) list: Rect,
@@ -57,6 +59,7 @@ pub(super) struct CenterLayout {
     pub(super) footer: Rect,
     pub(super) log: Rect,
     pub(super) prompt: Rect,
+    pub(super) log_detail: Rect,
 }
 impl View {
     fn input(&self) -> (&str, &line_edit::LineEdit) {
@@ -76,9 +79,10 @@ impl View {
         let log_height = bottom_height.saturating_sub(footer_height).max(10);
         let log_height = if area.height.saturating_sub(footer_height + log_height)
             >= header_height + 6
-            && self
-                .selected_row()
-                .is_some_and(|session| session.transcript.is_some())
+            && (area.width >= WIDE_LAYOUT_COLUMNS
+                || self
+                    .selected_row()
+                    .is_some_and(|session| session.transcript.is_some()))
         {
             log_height
         } else {
@@ -100,6 +104,19 @@ impl View {
             prompt.y.saturating_sub(header.bottom()),
         )
         .inner(Margin::new(2, 0));
+        let wide = area.width >= WIDE_LAYOUT_COLUMNS;
+        let (body, log_list) = if wide && !log.is_empty() {
+            let log_width = area.width / 3;
+            (
+                Rect {
+                    width: body.width - log_width - 3,
+                    ..body
+                },
+                Rect::new(body.right() - log_width, body.y, log_width, body.height),
+            )
+        } else {
+            (body, Rect::default())
+        };
         let [list, gap, details] = if body.width >= 7 {
             let content = Rect {
                 width: body.width - 3,
@@ -134,8 +151,13 @@ impl View {
             details,
             search,
             footer,
-            log,
+            log: if wide && !log.is_empty() {
+                log_list
+            } else {
+                log
+            },
             prompt,
+            log_detail: if wide { log } else { Rect::default() },
         }
     }
     pub(crate) fn log_event_count(&self, area: Rect) -> usize {
@@ -170,8 +192,13 @@ impl View {
             && self.confirm_dialog.is_none()
             && !layout.log.is_empty()
         {
-            let input = log::search_input_rect(layout.log.inner(Margin::new(2, 0)));
-            let search = if self.log_open.is_some() {
+            let search_area = if self.log_detail_search.editing && !layout.log_detail.is_empty() {
+                layout.log_detail
+            } else {
+                layout.log
+            };
+            let input = log::search_input_rect(search_area.inner(Margin::new(2, 0)));
+            let search = if self.log_detail_search.editing {
                 &self.log_detail_search
             } else {
                 &self.log_search
@@ -208,6 +235,7 @@ impl View {
             viewport.field_targets.clear();
             viewport.details = Rect::default();
             viewport.log = Rect::default();
+            viewport.log_detail = Rect::default();
             viewport.details_links.clear();
             viewport.log_links.clear();
         }
@@ -305,6 +333,13 @@ impl View {
                     .set_style(Style::default().dim());
             }
         }
+        if !layout.log_detail.is_empty() {
+            for y in layout.log.y..layout.log.bottom() {
+                buf[(layout.log.x.saturating_sub(2), y)]
+                    .set_symbol("│")
+                    .set_style(Style::default().dim());
+            }
+        }
         self.render_center_rows(layout.list, buf, now);
         self.render_usage_chart(layout.list, buf, now);
         if let Some((notice, _)) = &self.notice
@@ -319,7 +354,7 @@ impl View {
         let mut details = layout.details;
         let details_rule = if details.is_empty() {
             None
-        } else if layout.log.is_empty() {
+        } else if layout.log.is_empty() || !layout.log_detail.is_empty() {
             details.height = details.height.saturating_sub(1);
             Some(row(layout.details, details.height, 1))
         } else {
@@ -328,9 +363,16 @@ impl View {
         if !details.is_empty() {
             self.render_details(details, buf, now);
         }
-        self.viewport.borrow_mut().log = layout.log;
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log = layout.log;
+            viewport.log_detail = layout.log_detail;
+        }
         self.render_log(inset(layout.log), buf, now);
-        if !layout.log.is_empty() {
+        if !layout.log_detail.is_empty() {
+            self.render_log_detail(inset(layout.log_detail), buf, now);
+        }
+        if !layout.log.is_empty() && layout.log_detail.is_empty() {
             let rule = Rect::new(layout.list.x, layout.log.y, layout.list.width, 1)
                 .intersection(inset(layout.log));
             self.render_activity_strip(rule, buf, now);
@@ -341,13 +383,18 @@ impl View {
         if self.log_open.is_some() && self.viewport.borrow().log_open_scroll > 0 {
             let label = " ↑ Top ";
             let width = (label.width() as u16).min(layout.list.width);
+            let panel = if layout.log_detail.is_empty() {
+                layout.log
+            } else {
+                layout.log_detail
+            };
             let jump = Rect::new(
                 layout.list.x + layout.list.width.saturating_sub(width) / 2,
-                layout.log.y,
+                panel.y,
                 width,
                 1,
             )
-            .intersection(inset(layout.log));
+            .intersection(inset(panel));
             Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
             self.viewport.borrow_mut().log_jump = jump;
         }

@@ -1,22 +1,22 @@
   Agent command center  Group: Project  g
    Active 3   Ready 2   Working 1   Needs you 2   Inactive 1                                                                                   tab/⇧tab filter
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-      Tasks                                                               Status         Updated  │ Prompt
-  Pinned  1 of 2                                                                                  │ Current task
-  › ○ Current task                                                        Ready              now  │
-                                                                                                  │ Project
-  /tmp/project  2 of 4                                                                            │ /tmp/project
-    ○ A longer task title that uses the available column                  Ready           5m ago  │
-    ● Working task                                                        Working         1d ago  │ Model: Unknown
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │
-                                                                                                  │ ────────────────── Ready · Current task ──────────────────
+      Tasks                            Status         Updated  │ Prompt                                │   ─────────────────────────────────────────────────
+  Pinned  1 of 2                                               │ Current task                          │
+  › ○ Current task                     Ready              now  │                                       │
+                                                               │ Project                               │
+  /tmp/project  2 of 4                                         │ /tmp/project                          │
+    ○ A longer task title that uses …  Ready           5m ago  │ …                                     │
+  ↓                                                            │ ─────── Ready · Current task ──────── │
   Current task ›
+
+
+
+
+
+
+
+
+
+
   ? help  esc back  ↑/↓ move  enter open  n new

@@ -21,6 +21,12 @@ impl View {
         if !self.selecting_list(text_selection::Panel::LogList) {
             self.viewport.borrow_mut().log_list_text = text_selection::TextRegion::default();
         }
+        {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_rows.clear();
+            viewport.log_jump = Rect::default();
+            viewport.log_links.clear();
+        }
         if area.is_empty() {
             return;
         }
@@ -28,16 +34,12 @@ impl View {
             return;
         };
         super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
-        {
-            let mut viewport = self.viewport.borrow_mut();
-            viewport.log_rows.clear();
-            viewport.log_jump = Rect::default();
-            viewport.log_links.clear();
-        }
         if self.log_session.as_ref() != Some(&session.id) {
             return;
         }
-        if let Some(event) = &self.log_open {
+        if self.viewport.borrow().log_detail.is_empty()
+            && let Some(event) = &self.log_open
+        {
             let time = event_time(event, session, self.is_newest_shown(event), now);
             self.render_open_event(event, &time, area, buf, &session.cwd);
             return;
@@ -82,6 +84,31 @@ impl View {
             viewport.log_links = drawn_links;
         }
         self.capture_list_text(text_selection::Panel::LogList, text_area, scroll, buf);
+    }
+
+    pub(super) fn visible_log_event(&self) -> Option<&Event> {
+        self.log_open.as_ref().or_else(|| {
+            (!self.viewport.borrow().log_detail.is_empty())
+                .then(|| self.log.last())
+                .flatten()
+        })
+    }
+
+    pub(super) fn render_log_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
+        let Some(session) = self.selected_row() else {
+            return;
+        };
+        if self.log_session.as_ref() != Some(&session.id) {
+            return;
+        }
+        super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
+        let Some(event) = self.visible_log_event() else {
+            return;
+        };
+        let time = event_time(event, session, self.is_newest_shown(event), now);
+        let list_links = self.viewport.borrow().log_links.clone();
+        self.render_open_event(event, &time, area, buf, &session.cwd);
+        self.viewport.borrow_mut().log_links.extend(list_links);
     }
 
     /// Draws the button that jumps back to the newest row on the rule, its arrow above the
@@ -278,6 +305,10 @@ impl View {
                 .map(|(_, event)| event.started_at)
         });
         self.log = events;
+        if self.log_open.is_none() {
+            self.viewport.borrow_mut().log_open_layout = None;
+            self.viewport.borrow_mut().log_open_scroll = 0;
+        }
         self.prepare_log_search();
         if self.log_background_return.is_none()
             && let Some(open) = &self.log_open

@@ -700,7 +700,14 @@ fn mouse_list_click_selects_and_double_click_focuses_second_task() {
     let rendered = screen(&view, 160, 40);
     let second = view.selectable_indices()[1];
     let id = view.rows[second].id.clone();
-    let (x, y) = rendered_cell(&rendered, view.rows[second].display_title());
+    let (x, y) = rendered_cell(
+        &rendered,
+        &view.rows[second]
+            .display_title()
+            .chars()
+            .take(12)
+            .collect::<String>(),
+    );
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
     assert!(click_mouse(&mut view, click).is_none());
     assert_eq!(view.selected, second);
@@ -715,7 +722,14 @@ fn mouse_list_slow_or_split_clicks_only_select() {
     let rendered = screen(&view, 160, 40);
     let [first, second] = [0, 1].map(|i| view.selectable_indices()[i]);
     let [first_click, second_click] = [first, second].map(|row| {
-        let (x, y) = rendered_cell(&rendered, view.rows[row].display_title());
+        let (x, y) = rendered_cell(
+            &rendered,
+            &view.rows[row]
+                .display_title()
+                .chars()
+                .take(12)
+                .collect::<String>(),
+        );
         mouse(MouseEventKind::Down(MouseButton::Left), x, y)
     });
     assert!(click_mouse(&mut view, first_click).is_none());
@@ -848,7 +862,14 @@ fn mouse_list_click_uses_last_render_scroll_offset() {
     key(&mut view, KeyCode::End);
     let rendered = screen(&view, 120, 40);
     let target = view.selectable_indices()[48];
-    let (x, y) = rendered_cell(&rendered, view.rows[target].display_title());
+    let (x, y) = rendered_cell(
+        &rendered,
+        &view.rows[target]
+            .display_title()
+            .chars()
+            .take(12)
+            .collect::<String>(),
+    );
     assert!(view.viewport.borrow().scroll > 0);
     view.viewport.borrow_mut().scroll = 0;
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
@@ -870,7 +891,14 @@ fn mouse_list_ignores_overlays() {
         let mut view = fixture();
         let rendered = screen(&view, 160, 40);
         let second = view.selectable_indices()[1];
-        let (x, y) = rendered_cell(&rendered, view.rows[second].display_title());
+        let (x, y) = rendered_cell(
+            &rendered,
+            &view.rows[second]
+                .display_title()
+                .chars()
+                .take(12)
+                .collect::<String>(),
+        );
         key(&mut view, overlay);
         let selected = view.selected;
         for kind in [
@@ -1662,11 +1690,13 @@ fn details_include_attention_and_clip_messages() {
         assert!(rendered.contains(label), "{label}");
     }
     let position = |label: &str| rendered.lines().position(|line| line.contains(label));
-    // "Project" names the grouping in the header and the path heads the task
-    // list, so find the details line that ends with the path.
-    let project = rendered
-        .lines()
-        .position(|line| line.trim_end().ends_with("/tmp/project"));
+    // The path appears in both the task list and the details.
+    let project = rendered.lines().position(|line| {
+        line.chars()
+            .skip(usize::from(view.viewport.borrow().details.x))
+            .collect::<String>()
+            .contains("/tmp/project")
+    });
     assert!(position("Needs attention") < position("Last message"));
     assert!(position("Last message") < position("Prompt"));
     assert!(position("Prompt") < position("Project ·"));
@@ -3179,9 +3209,9 @@ fn task_log_short_terminal_keeps_ten_log_rows() {
     let (log, _) = log_fixture();
     view.log = log.log;
     view.log_session = view.selected_id().cloned();
-    let layout = view.center_layout(Rect::new(0, 0, 160, 22));
+    let layout = view.center_layout(Rect::new(0, 0, 140, 22));
     assert_eq!(layout.log.height, 10);
-    let rendered = screen(&view, 160, 22);
+    let rendered = screen(&view, 140, 22);
     assert!(rendered.contains("I will check the files"));
     assert!(!rendered.contains("Please inspect"));
 }
@@ -3469,14 +3499,21 @@ fn center_layout_golden_rects_follow_each_area() {
     for (width, height, top, log_height, list_width, details_width) in [
         (80, 24, 13, 10, 37, 36),
         (120, 40, 25, 14, 70, 43),
-        (200, 60, 37, 22, 119, 74),
+        (200, 60, 37, 22, 77, 47),
         (80, 24, 13, 10, 37, 36),
     ] {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
         assert_eq!(layout.header, Rect::new(5, 7, width, 3));
         assert_eq!(layout.list, Rect::new(7, 10, list_width, top - 4));
-        assert_eq!(layout.log, Rect::new(5, 7 + top, width, log_height));
+        let bottom = if width >= super::render::WIDE_LAYOUT_COLUMNS {
+            assert_eq!(layout.log.y, layout.list.y);
+            assert_eq!(layout.log.width, width / 3);
+            layout.log_detail
+        } else {
+            layout.log
+        };
+        assert_eq!(bottom, Rect::new(5, 7 + top, width, log_height));
         assert_eq!(layout.footer, Rect::new(5, 7 + height - 1, width, 1));
         if details_width == 0 {
             assert_eq!(layout.details, Rect::default());
@@ -5003,7 +5040,14 @@ fn unsupported_provider_mouse_activation_emits_notice() {
     )]));
     let rendered = screen(&view, 160, 40);
     let second = view.selectable_indices()[1];
-    let (x, y) = rendered_cell(&rendered, view.rows[second].display_title());
+    let (x, y) = rendered_cell(
+        &rendered,
+        &view.rows[second]
+            .display_title()
+            .chars()
+            .take(12)
+            .collect::<String>(),
+    );
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
     click_mouse(&mut view, click);
     assert_eq!(click_mouse(&mut view, click), None);
@@ -5170,14 +5214,18 @@ fn pending_question_log_uses_model_color() {
             .content
             .chunks(160)
             .find(|cells| {
-                cells[11..20]
+                cells[usize::from(view.viewport.borrow().log.x) + 11
+                    ..usize::from(view.viewport.borrow().log.x) + 20]
                     .iter()
                     .map(|cell| cell.symbol())
                     .collect::<String>()
                     .contains("Assistant")
             })
             .expect("question log row");
-        assert_eq!(question_row[21].fg, Color::Yellow);
+        assert_eq!(
+            question_row[usize::from(view.viewport.borrow().log.x) + 21].fg,
+            Color::Yellow
+        );
     }
 }
 
@@ -6605,7 +6653,14 @@ fn open_top_button_uses_task_rect_for_every_kind_and_width() {
             let layout = view.center_layout(Rect::new(0, 0, width, 25));
             let jump = view.viewport.borrow().log_jump;
             assert_eq!(jump.x, layout.list.x + (layout.list.width - jump.width) / 2);
-            assert_eq!(jump.y, layout.log.y);
+            assert_eq!(
+                jump.y,
+                if layout.log_detail.is_empty() {
+                    layout.log.y
+                } else {
+                    layout.log_detail.y
+                }
+            );
             click_text(&mut view, &screen, " ↑ Top ");
             assert_eq!(view.viewport.borrow().log_open_scroll, 0);
         }
@@ -6894,7 +6949,10 @@ fn background_delete_confirmation_explains_agents_worktree_retention() {
     key(&mut view, KeyCode::Backspace);
     let shown = screen(&view, 160, 40);
     assert!(
-        shown.contains("Worktrees and") && shown.contains("branches created by agents remain."),
+        shown.contains("Worktrees and branches created by") && shown.contains("agents remain."),
         "{shown}"
     );
 }
+
+#[path = "wide_layout_tests.rs"]
+mod wide_layout_tests;

@@ -206,6 +206,19 @@ impl View {
         }
     }
 
+    fn log_list_visible(&self) -> bool {
+        !self.viewport.borrow().log_detail.is_empty() || self.log_open.is_none()
+    }
+
+    fn log_detail_area(&self) -> Rect {
+        let viewport = self.viewport.borrow();
+        if viewport.log_detail.is_empty() {
+            viewport.log
+        } else {
+            viewport.log_detail
+        }
+    }
+
     fn click_target_at(&self, position: ratatui::layout::Position) -> Option<ClickTarget> {
         let viewport = self.viewport.borrow();
         if let Some((_, field)) = viewport
@@ -230,14 +243,14 @@ impl View {
             return Some(ClickTarget::Link(path));
         }
         if viewport.log.contains(position)
-            && self.log_open.is_none()
+            && self.log_list_visible()
             && let Some(row) = (position.y - viewport.log.y).checked_sub(super::log::LOG_TOP)
             && let Some(&(index, cut)) = viewport.log_rows.get(usize::from(row))
             && let Some(event) = self.log.get(index)
         {
             return Some(ClickTarget::Log {
                 event: event.clone(),
-                expand: cut || super::log::shows_calls(event),
+                expand: !viewport.log_detail.is_empty() || cut || super::log::shows_calls(event),
             });
         }
         None
@@ -357,7 +370,7 @@ impl View {
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && self.viewport.borrow().log_jump.contains(position)
         {
-            if self.log_open.is_some() {
+            if self.viewport.borrow().log_detail.is_empty() && self.log_open.is_some() {
                 self.viewport.borrow_mut().log_open_scroll = 0;
             } else {
                 self.show_newest_log();
@@ -386,16 +399,19 @@ impl View {
                 return None;
             }
             if let Some(target) = self.link_at(position) {
+                let detail = self.log_detail_area();
                 let has_double = {
                     let viewport = self.viewport.borrow();
-                    (viewport.log.contains(position)
-                        && (self.log_open.is_none()
-                            || mouse.row >= viewport.log.y + super::log::LOG_TOP + 2))
+                    (viewport.log.contains(position) && self.log_list_visible())
+                        || (detail.contains(position)
+                            && self.visible_log_event().is_some()
+                            && mouse.row >= detail.y + super::log::LOG_TOP + 2)
                         || viewport.list.contains(position)
-                        || viewport
-                            .details_copy
-                            .iter()
-                            .any(|(rows, _, _)| rows.contains(&mouse.row))
+                        || (viewport.details.contains(position)
+                            && viewport
+                                .details_copy
+                                .iter()
+                                .any(|(rows, _, _)| rows.contains(&mouse.row)))
                 };
                 if has_double {
                     if self.defer_click(ClickTarget::Link(target)) {
@@ -410,13 +426,13 @@ impl View {
                                     label: (*label).into(),
                                 });
                         }
-                        if viewport.log.contains(position) && self.log_open.is_none() {
+                        if viewport.log.contains(position) && self.log_list_visible() {
                             drop(viewport);
                             self.focus_input();
                             return None;
                         }
-                        if viewport.log.contains(position)
-                            && let Some(event) = &self.log_open
+                        if detail.contains(position)
+                            && let Some(event) = self.visible_log_event()
                         {
                             return Some(Action::Copy {
                                 text: super::log::open_text(event),
@@ -456,10 +472,10 @@ impl View {
                     .iter()
                     .find(|(rows, _, _)| rows.contains(&mouse.row))
                     .map(|(_, text, label)| (text.clone(), (*label).to_owned()))
-            } else if viewport.log.contains(position)
-                && mouse.row >= viewport.log.y + super::log::LOG_TOP + 2
+            } else if self.log_detail_area().contains(position)
+                && mouse.row >= self.log_detail_area().y + super::log::LOG_TOP + 2
             {
-                self.log_open.as_ref().map(|event| {
+                self.visible_log_event().map(|event| {
                     (
                         super::log::open_text(event),
                         super::log::copied_label(event),
@@ -473,7 +489,7 @@ impl View {
                 viewport.tab_bar.contains(position),
                 viewport.list.contains(position),
                 viewport.details.contains(position),
-                viewport.log.contains(position),
+                viewport.log.contains(position) || viewport.log_detail.contains(position),
                 entry,
                 log_row,
                 copy_text,
@@ -507,11 +523,13 @@ impl View {
                         return None;
                     }
                     self.last_click = Some((task, now));
-                } else if self.log_open.is_none()
+                } else if self.log_list_visible()
                     && let Some((index, cut)) = log_row
                     && let Some(event) = self.log.get(index)
                 {
-                    let expand = cut || super::log::shows_calls(event);
+                    let expand = !self.viewport.borrow().log_detail.is_empty()
+                        || cut
+                        || super::log::shows_calls(event);
                     if self.defer_click(ClickTarget::Log {
                         event: event.clone(),
                         expand,
@@ -568,7 +586,14 @@ impl View {
 
     /// Scrolls the log panel, or the details panel when `over_log` is false, by one row.
     pub(super) fn scroll_content_row(&mut self, forward: bool, over_log: bool, row: u16) {
-        if over_log && self.log_open.is_some() {
+        let viewport = self.viewport.borrow();
+        let over_log_detail = if viewport.log_detail.is_empty() {
+            self.log_open.is_some()
+        } else {
+            (viewport.log_detail.y..viewport.log_detail.bottom()).contains(&row)
+        };
+        drop(viewport);
+        if over_log && over_log_detail {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_open_scroll = if forward {
                 viewport.log_open_scroll.saturating_add(1)

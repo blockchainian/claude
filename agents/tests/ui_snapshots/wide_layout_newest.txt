@@ -1,0 +1,40 @@
+  Agent command center  Group: Project  g
+   Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                                                                         tab/⇧tab filter
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+      Tasks                                                │ Prompt                             │   ──────────────────────────────────────────────
+  /tmp/project  1                                          │ Task log example                   │
+  › ● Task log example                                     │                                    │     6d ago Assistant 对 ， 必 须 让  Stop 被 拦 下 来 ， …
+                                                           │ Project                            │   09:39:12 User      ⏺ Ran 4 stop hooks ⎿ Stop …
+                                                           │ /tmp/project                       │
+                                                           │                                    │
+                                                           │ Model: Unknown                     │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │                                    │
+                                                           │ ─── Working · Task log example ─── │
+  Task log example · Running in a terminal; open it to type
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  6d ago Assistant
+
+  对 ， 必 须 让  Stop 被 拦 下 来 ， session 才 会 接 着 处 理 。 不 过 这 个  hook 其 实 没 有 按 “错 误 ”返 回 ： plugins/codex/codex-manager/manager.mjs:125 输 出 的 是
+  {"decision":"block","reason":...}， 退 出 码 是  0。 这 是 官 方 文 档 里 拦 住  Stop、 把  reason 交 给  Claude 的 标 准 写 法 。
+
+  界 面 上 显 示 成  “Stop hook error”， 是  Claude Code 给 所 有 被 拦 下 的  Stop 统 一 贴 的 标 签 ， 我 们 这 边 改 不 了 。 想 让  session 继 续 干 活 ， 只 有 拦 住  Stop 这 一 种 办 法 ；
+  不 拦 的 话 ， 这 些 提 示 根 本 到 不 了 模 型 那 边 。
+
+  这 次 被 拦 ， 是 因 为 那 两 个  thread 启 动 以 后 ， session 没 有 在 后 台 跑  await。 正 常 的 流 程 是  start 之 后 马 上 在 后 台 跑  await， 这 样  hook 就 不 会 拦 。 现 在 这 个 提 示 是
+  兜 底 用 的 ， 不 是  bug。
+
+
+  ? help  esc back  ↑/↓ move  enter open  n new

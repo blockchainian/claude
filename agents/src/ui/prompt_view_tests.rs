@@ -110,7 +110,7 @@ fn terminal_session_disables_input_with_open_hint() {
 fn whole_log_row_double_click_focuses_input_without_opening_detail() {
     let (mut view, now) = log_fixture();
     view.rows[view.selected].process = None;
-    log_screen(&view, 160, 40, now);
+    log_screen(&view, 140, 40, now);
     let (x, y) = {
         let viewport = view.viewport.borrow();
         let row = viewport
