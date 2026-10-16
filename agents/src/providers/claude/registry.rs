@@ -1,9 +1,9 @@
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+use crate::model::SessionStatus;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,47 +13,66 @@ pub(super) struct Entry {
     pub cwd: Option<String>,
     pub started_at: Option<i64>,
     pub proc_start: Option<String>,
-    pub version: Option<String>,
+    #[serde(rename = "version")]
+    _version: Option<String>,
     pub kind: Option<String>,
+    pub job_id: Option<String>,
     pub name: Option<String>,
     pub name_source: Option<String>,
     pub updated_at: Option<i64>,
     pub status: Option<String>,
 }
 
-pub(super) fn process_starts(pids: &[u32]) -> HashMap<u32, Vec<DateTime<Utc>>> {
-    if pids.is_empty() {
-        return HashMap::new();
+pub(super) fn background_jobs(config: &Path) -> HashMap<String, crate::model::BackgroundJob> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct State {
+        session_id: String,
+        template: String,
+        needs: Option<String>,
     }
-    let Ok(output) = Command::new("ps")
-        .args(["-o", "pid=,lstart=", "-p"])
-        .arg(
-            pids.iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(","),
-        )
-        .env("LC_ALL", "C")
-        .output()
-    else {
-        return HashMap::new();
-    };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let (pid, start) = line.split_once(char::is_whitespace)?;
-            let pid = pid.parse().ok()?;
-            let local = NaiveDateTime::parse_from_str(start.trim(), "%a %b %e %H:%M:%S %Y").ok()?;
-            let starts = match Local.from_local_datetime(&local) {
-                chrono::LocalResult::Single(time) => vec![time.with_timezone(&Utc)],
-                chrono::LocalResult::Ambiguous(a, b) => {
-                    vec![a.with_timezone(&Utc), b.with_timezone(&Utc)]
-                }
-                chrono::LocalResult::None => return None,
-            };
-            Some((pid, starts))
-        })
+    let mut jobs = HashMap::new();
+    for entry in fs::read_dir(config.join("jobs"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+    {
+        let Ok(bytes) = fs::read(entry.path().join("state.json")) else {
+            continue;
+        };
+        let Ok(state) = serde_json::from_slice::<State>(&bytes) else {
+            continue;
+        };
+        if state.template != "bg" || state.session_id.is_empty() {
+            continue;
+        }
+        let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        jobs.insert(
+            state.session_id,
+            crate::model::BackgroundJob {
+                id,
+                needs: state.needs,
+            },
+        );
+    }
+    jobs
+}
+
+/// Maps the status strings written by Claude Code's session registry.
+pub(super) fn from_registry(status: &str) -> Option<SessionStatus> {
+    match status {
+        "waiting" => Some(SessionStatus::NeedsInput),
+        "busy" | "shell" => Some(SessionStatus::Working),
+        "idle" => Some(SessionStatus::Ready),
+        _ => None,
+    }
+}
+
+pub(super) fn process_starts(pids: &[u32]) -> HashMap<u32, Vec<DateTime<Utc>>> {
+    pids.iter()
+        .filter_map(|&pid| crate::processes::start_time(pid).map(|start| (pid, vec![start])))
         .collect()
 }
 
@@ -120,13 +139,44 @@ pub(super) mod tests {
         let starts = process_starts(&[pid]);
         let start = starts
             .get(&pid)
-            .expect("ps must be available for the liveness test")[0];
+            .expect("libproc must read the process start time for the liveness test")[0];
         let mut value: serde_json::Value =
-            serde_json::from_str(include_str!("../../tests/fixtures/registry.json")).unwrap();
+            serde_json::from_str(include_str!("../../../tests/fixtures/registry.json")).unwrap();
         value["pid"] = pid.into();
         value["procStart"] = start.format("%a %b %e %H:%M:%S %Y").to_string().into();
         fs::create_dir_all(dir.join("sessions")).unwrap();
         value
+    }
+
+    #[test]
+    fn stopped_background_job_matches_exact_state_session_id() {
+        let directory = tempfile::tempdir().unwrap();
+        let jobs = directory.path().join("jobs/job-distinct-from-session");
+        fs::create_dir_all(&jobs).unwrap();
+        // Safe fields copied from the real Claude Code 2.1.299 e772d00b state payload.
+        let state = r#"{"state":"done","template":"bg","sessionId":"e772d00b-c424-4632-a8df-74bc9c7b1629","respawnFlags":[],"backend":"daemon"}"#;
+        fs::write(jobs.join("state.json"), state).unwrap();
+        let found = background_jobs(directory.path());
+        let job = found.get("e772d00b-c424-4632-a8df-74bc9c7b1629").unwrap();
+        assert_eq!(job.id, "job-distinct-from-session");
+        assert_eq!(job.needs, None);
+    }
+
+    #[test]
+    fn background_job_reads_needs_from_updated_real_state_payload() {
+        let directory = tempfile::tempdir().unwrap();
+        let jobs = directory.path().join("jobs/e772d00b");
+        fs::create_dir_all(&jobs).unwrap();
+        let mut state: serde_json::Value = serde_json::from_str(r#"{"state":"done","template":"bg","sessionId":"e772d00b-c424-4632-a8df-74bc9c7b1629","respawnFlags":[],"backend":"daemon"}"#).unwrap();
+        state["needs"] = "send a prompt to start".into();
+        fs::write(jobs.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+        let found = background_jobs(directory.path());
+        assert_eq!(
+            found["e772d00b-c424-4632-a8df-74bc9c7b1629"]
+                .needs
+                .as_deref(),
+            Some("send a prompt to start")
+        );
     }
 
     #[test]

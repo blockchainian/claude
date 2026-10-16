@@ -1,0 +1,30 @@
+  Agent command center  Group: Project  g
+   All 3   Ready 2   Working 1   Needs you 0   Inactive 0                                              tab/⇧tab filter
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+      Tasks                                      Status         Updated  │ Prompt
+  /tmp/project  1 of 3                                                   │ Check files
+    ○ Parent task                                Ready           2m ago  │
+  › └ ● Check files                              Working         1m ago  │ Project
+                                                                         │ /tmp/child-project
+                                                                         │
+                                                                         │ Model: child-model
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │
+                                                                         │ ────────── Working · Check files ──────────
+  Check files · Subagent cannot take input
+  ? help  esc back  ↑/↓ move  n new

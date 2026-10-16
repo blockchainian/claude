@@ -1,16 +1,13 @@
-Task details · ○ Ready · Background task
-
-Prompt
-Background task
+Background
+─ Run checks · 0s ─────────────────────╴
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+─ Waiting for output · 0s ─────────────╴
 
 Last message
 Checking the project
 
-Background
-╭ Run checks · 0s ─────────────────────╮
-│ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx │
-╰──────────────────────────────────────╯
-╶ Waiting for output · 0s ─────────────╴
+Prompt
+Background task
 
 Project
 /tmp/project

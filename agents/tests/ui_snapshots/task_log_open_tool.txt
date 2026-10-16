@@ -1,0 +1,48 @@
+  Agent command center  Group: Project  g
+   All 1   Ready 0   Working 1   Needs you 0   Inactive 0                          tab/⇧tab filter
+  ────────────────────────────────────────────────────────────────────────────────────────────────
+      Tasks                         Status         Updated  │ Prompt
+  /tmp/project  1                                           │ Task log example
+  › ● Task log example              Working            now  │
+                                                            │ Project
+                                                            │ /tmp/project
+                                                            │
+                                                            │ Model: Unknown
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+  Task log example · Running in a terminal; open it to type
+  ──────────────────────────────────────────────────────────────── Working · Task log example ────
+
+  35s run tests
+
+  ─ Bash ─────────────────────────────────────────────────────────────────────────────────────────
+  cargo test
+    ↓
+  running 3 tests
+  ...
+
+  ─ Read ─────────────────────────────────────────────────────────────────────────────────────────
+  agents/src/log.rs:1-40
+  running…
+
+
+
+
+  ? help  esc back  ↑/↓ move  enter open  n new

@@ -1,5 +1,6 @@
 //! Sessions as the command center sees them, independent of where they were read from.
 
+use crate::providers::{ProviderId, SessionKey};
 use chrono::DateTime;
 use chrono::Utc;
 use std::path::PathBuf;
@@ -26,27 +27,13 @@ impl SessionStatus {
             Self::Inactive => "Inactive",
         }
     }
-
-    /// Maps a registry status string (`busy`, `shell`, `idle`, `waiting`).
-    pub fn from_registry(status: &str) -> Option<Self> {
-        match status {
-            "waiting" => Some(Self::NeedsInput),
-            "busy" | "shell" => Some(Self::Working),
-            "idle" => Some(Self::Ready),
-            _ => None,
-        }
-    }
 }
 
-/// A live process behind a session, read from `~/.claude/sessions/<pid>.json`.
+/// A live process behind a session.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Process {
     pub pid: u32,
-    /// Registry status string as written by Claude Code.
-    pub status: String,
-    /// `interactive`, `bg`, `daemon` or `daemon-worker`.
-    pub kind: Option<String>,
-    pub version: Option<String>,
+    pub label: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
 }
 
@@ -58,6 +45,7 @@ pub struct PullRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Activity {
+    pub kind: crate::log::Kind,
     pub label: String,
     pub at: DateTime<Utc>,
 }
@@ -70,9 +58,17 @@ pub struct BackgroundTask {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Session {
-    /// Claude Code session id (the transcript file stem).
+pub struct BackgroundJob {
     pub id: String,
+    pub needs: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Session {
+    /// Provider-qualified session identity.
+    pub id: SessionKey,
+    /// Display parent for nesting, including codex-manager ownership links.
+    pub parent: Option<SessionKey>,
     pub cwd: PathBuf,
     /// Name the user gave the session (`/rename` or `--name`).
     pub name: Option<String>,
@@ -80,6 +76,8 @@ pub struct Session {
     pub title: String,
     /// Latest real user prompt, up to 512 chars, for the details panel.
     pub prompt: String,
+    /// Images attached to `prompt` whose files still exist.
+    pub prompt_images: Vec<crate::log::Image>,
     pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
@@ -90,11 +88,15 @@ pub struct Session {
     pub pr: Option<PullRequest>,
     pub status: SessionStatus,
     pub process: Option<Process>,
+    pub background_job: Option<BackgroundJob>,
     pub updated_at: DateTime<Utc>,
+    /// Start of the session or thread, independent of its process and activity.
+    pub started_at: Option<DateTime<Utc>>,
     /// Latest assistant text, up to 512 chars.
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
+    pub pending_questions: Vec<String>,
     pub background: Vec<BackgroundTask>,
     /// Latest user prompt, up to 512 chars.
     pub last_prompt: Option<String>,
@@ -102,9 +104,50 @@ pub struct Session {
 }
 
 impl Session {
+    /// Whether provider session operations apply; display nesting does not make a thread a subagent.
+    pub fn can_resume(&self) -> bool {
+        self.parent.as_ref().is_none_or(|parent| {
+            self.id.provider == ProviderId::Codex && parent.provider == ProviderId::Claude
+        })
+    }
+
+    pub fn is_live_background(&self) -> bool {
+        self.id.provider == ProviderId::Claude
+            && self.background_job.is_some()
+            && self
+                .process
+                .as_ref()
+                .is_some_and(|process| process.label.as_deref() == Some("bg"))
+    }
+
+    pub fn input_disabled_reason(&self) -> Option<&'static str> {
+        if !self.can_resume() {
+            Some("Subagent cannot take input")
+        } else if self.id.provider == ProviderId::Claude
+            && self
+                .process
+                .as_ref()
+                .is_some_and(|process| process.label.as_deref() != Some("bg"))
+        {
+            Some("Running in a terminal; open it to type")
+        } else {
+            None
+        }
+    }
+
     pub fn display_title(&self) -> &str {
-        let title = self.name.as_deref().unwrap_or(&self.title);
+        let title = if self.parent.is_some() {
+            &self.title
+        } else {
+            self.name.as_deref().unwrap_or(&self.title)
+        };
         title.trim().lines().next().unwrap_or("Untitled session")
+    }
+
+    pub fn latest_activity(&self) -> Option<&Activity> {
+        self.activity
+            .as_ref()
+            .filter(|activity| self.last_message_at.is_none_or(|at| activity.at > at))
     }
 
     pub fn model_name(&self) -> &str {
@@ -115,28 +158,60 @@ impl Session {
     }
 }
 
+pub type DraftId = u64;
+
 /// What the view asks the app to do; the view never touches processes or files itself.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {
     /// Enter: jump to a live session's terminal, or resume an inactive one.
-    Open(String),
-    /// `o`: resume the session in this terminal (`claude --resume <id>`).
-    Resume(String),
-    /// `f`: resume as a new session id (`claude --resume <id> --fork-session`).
-    Fork(String),
-    /// `n`: start a new session in the given directory.
-    New(Option<PathBuf>),
+    Open(SessionKey),
+    SendPrompt {
+        id: SessionKey,
+        text: String,
+    },
+    /// `n` or a project heading double click: add a draft in that project.
+    NewDraft {
+        cwd: PathBuf,
+    },
+    CreateTask {
+        draft_id: DraftId,
+        provider: ProviderId,
+        request: crate::tasks::NewTask,
+    },
+    CreateWorktree {
+        draft_id: DraftId,
+        cwd: PathBuf,
+        branch: String,
+    },
+    SetModel {
+        id: SessionKey,
+        model: String,
+    },
+    SetEffort {
+        id: SessionKey,
+        effort: String,
+    },
+    /// `o`: resume the session in this terminal.
+    Resume(SessionKey),
+    /// `f`: resume as a new session id.
+    Fork(SessionKey),
+    /// Start a session when there is no previous task to return to.
+    New,
     /// `h`: hide the session until the next launch.
-    Hide(String),
+    Hide(SessionKey),
     /// `p`: pin or unpin the session.
-    TogglePin { id: String, pinned: bool },
+    TogglePin { id: SessionKey, pinned: bool },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
     /// `r`: set the session display name.
-    Rename { id: String, name: String },
+    Rename { id: SessionKey, name: String },
     /// Backspace, then confirmation: permanently delete the session transcript.
-    Delete(String),
-    /// `w`, `a`: no Claude Code equivalent yet; show the notice.
+    Delete(SessionKey),
+    /// `a`, then confirmation: archive the session and its child agents.
+    Archive(SessionKey),
+    /// `x`: interrupt the session's running turn.
+    Stop(SessionKey),
+    /// Unsupported provider operations show a notice.
     Unsupported(&'static str),
     /// "Show more" was activated: load the next page of inactive sessions.
     ShowMore,
@@ -144,6 +219,12 @@ pub enum Action {
     Back,
     /// Ctrl-c.
     Quit,
+    /// Double click on an open log event or a details body: copy its text to the
+    /// clipboard and confirm with `label`.
+    Copy { text: String, label: String },
+    /// Click on a drawn path, image placeholder or pull request link: open the
+    /// file, directory or URL with macOS `open`.
+    OpenPath(PathBuf),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

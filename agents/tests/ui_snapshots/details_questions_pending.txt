@@ -1,0 +1,11 @@
+Needs attention
+怎么判断命令后面那个词是子命令？比如 `rg -n 'background' src` 里的 background 是搜索词、`cat README.md` 的是文件，光看形状分不出来。
+cd 要不要显示？
+
+Prompt
+Question task
+
+Project
+/tmp/project
+
+Model: Unknown

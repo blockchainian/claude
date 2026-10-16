@@ -1,20 +1,21 @@
 //! Terminal loop: reacts to session changes and keyboard input, renders the view and executes actions.
 
 use crate::model::Action;
-use crate::model::Session;
+use crate::model::{DraftId, Session};
+use crate::providers::Snapshot;
+use crate::providers::{Job, ProviderId, SessionInput, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
-use crate::sessions::Snapshot;
-use crate::sessions::Store;
+use crate::sessions::Hub;
 use crate::state::Preferences;
 use crate::terminal_background;
 use crate::ui::View;
 use crossterm::event::Event;
-use crossterm::event::KeyEvent;
+use crossterm::event::Theme;
 use crossterm::terminal;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use std::ffi::OsStr;
 use std::io;
-use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{
@@ -26,12 +27,26 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-// Bounds reader shutdown before handing the terminal to Claude.
-const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(250);
+// Bounds reader shutdown before handing the terminal to a provider process.
+const INPUT_STOP_INTERVAL: Duration = Duration::from_millis(100);
 
 enum Input {
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<()>),
+    Created {
+        draft_id: DraftId,
+        provider: ProviderId,
+        result: io::Result<std::process::Output>,
+    },
+    WorktreeCreated {
+        draft_id: DraftId,
+        result: io::Result<(PathBuf, String)>,
+    },
+    Sent {
+        id: SessionKey,
+        input: SessionInput,
+        result: io::Result<()>,
+    },
 }
 
 struct InputReader {
@@ -77,41 +92,62 @@ impl Drop for InputReader {
 }
 
 pub struct App {
+    sender: mpsc::Sender<Input>,
+    receiver: mpsc::Receiver<Input>,
+    pending_inputs: std::collections::HashSet<SessionKey>,
     config_dir: PathBuf,
-    store: Store,
+    hub: Hub,
     preferences: Preferences,
     view: View,
+    clipboard: crate::clipboard::Clipboard,
     sessions: Vec<Session>,
-    /// Set when the user chose to hand the terminal to a `claude` process; the dashboard
+    /// Set when the user chose to hand the terminal to a provider process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
-    last_session: Option<String>,
+    last_session: Option<SessionKey>,
     log_stamp: Option<LogStamp>,
+    full_log_stamp: Option<LogStamp>,
+    /// Token usage of each transcript the user has selected, kept up to date while selected.
+    usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
+    /// When each recently active transcript's turns ran.
+    activity: std::collections::HashMap<PathBuf, crate::activity::Turns>,
 }
 
 #[derive(PartialEq, Eq)]
 struct LogStamp {
-    session: String,
+    session: SessionKey,
     path: PathBuf,
     modified: std::time::SystemTime,
     length: u64,
+    count: usize,
 }
 
 impl App {
-    pub fn new(config_dir: PathBuf) -> Self {
+    pub fn new(hub: Hub, config_dir: PathBuf) -> Self {
         let preferences = Preferences::load(&config_dir);
         let mut view = View::new(preferences.grouping, true);
         view.set_pinned(&preferences.pinned);
+        view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
+        view.set_capabilities(hub.capabilities());
+        view.set_input_choices(hub.input_choices());
+        let (sender, receiver) = mpsc::channel();
         Self {
-            store: Store::new(config_dir.clone()),
+            sender,
+            receiver,
+            pending_inputs: std::collections::HashSet::new(),
+            hub,
             config_dir,
             preferences,
             view,
+            clipboard: crate::clipboard::Clipboard::new(),
             sessions: Vec::new(),
             launch: None,
             last_session: None,
             log_stamp: None,
+            full_log_stamp: None,
+            usage: std::collections::HashMap::new(),
+            activity: std::collections::HashMap::new(),
         }
     }
 
@@ -119,28 +155,26 @@ impl App {
         loop {
             let mut terminal = enter_terminal()?;
             // Raw mode is on, so the terminal's reply reaches us instead of the screen.
-            let light = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
+            let background = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
                 .ok()
-                .flatten()
-                .is_some_and(terminal_background::is_light);
-            crate::ui::set_light_background(light);
-            crate::theme::use_default_accents(light);
-            if let Some(path) = self.preferences.theme.clone()
-                && let Err(error) = crate::theme::use_theme_file(&path)
-            {
-                self.view
-                    .set_notice(Some(format!("Theme not loaded: {error}")));
-            }
+                .flatten();
+            self.apply_background(
+                background,
+                background.is_some_and(terminal_background::is_light),
+            );
             let result = self.event_loop(&mut terminal);
             leave_terminal(terminal)?;
             result?;
             let Some(mut command) = self.launch.take() else {
                 return Ok(());
             };
-            // The dashboard comes back when claude exits, so Ctrl+D in claude returns here.
+            // The dashboard comes back when the launched process exits.
             let notice = match command.status() {
                 Ok(status) if status.success() => None,
-                Ok(status) => Some(format!("claude exited with {status}")),
+                Ok(status) => Some(format!(
+                    "{} exited with {status}",
+                    command.get_program().to_string_lossy()
+                )),
                 Err(error) => Some(format!(
                     "Failed to start {:?}: {error}",
                     command.get_program()
@@ -154,11 +188,17 @@ impl App {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     ) -> io::Result<()> {
-        let (sender, receiver) = mpsc::channel();
-        let filesystem = sender.clone();
-        let mut watcher = match crate::sessions::watch(&self.config_dir, move |event| {
-            let _ = filesystem.send(Input::Filesystem(event.map(|_| ())));
-        }) {
+        let filesystem = self.sender.clone();
+        let watch = self
+            .hub
+            .watch_roots()
+            .map_err(notify::Error::io)
+            .and_then(|roots| {
+                crate::sessions::watch(&roots, move |event| {
+                    let _ = filesystem.send(Input::Filesystem(event.map(|_| ())));
+                })
+            });
+        let mut watcher = match watch {
             Ok(watcher) => Some(watcher),
             Err(error) => {
                 self.view
@@ -166,7 +206,7 @@ impl App {
                 None
             }
         };
-        let _reader = InputReader::start(sender)?;
+        let _reader = InputReader::start(self.sender.clone())?;
         let mut schedule = RefreshSchedule::new(
             Instant::now(),
             if watcher.is_some() {
@@ -175,15 +215,35 @@ impl App {
                 POLLING_INTERVAL
             },
         );
+        crossterm::execute!(
+            terminal.backend_mut(),
+            crossterm::event::EnableThemeChangeReports,
+            MouseReports::Enable
+        )?;
         self.refresh();
+        let mut selection_tick = Instant::now();
         loop {
+            if selection_tick.elapsed() >= Duration::from_millis(50) {
+                self.view.tick_text_selection();
+                selection_tick = Instant::now();
+            }
+            let action = self.view.flush_pending_click(Instant::now());
+            if self.handle_action(action) {
+                return Ok(());
+            }
+            self.view.expire_messages(Instant::now());
             if schedule.due(Instant::now()) {
                 self.refresh();
                 schedule.refreshed(Instant::now());
             }
+            self.view.set_cell_aspect(cell_aspect());
             terminal.draw(|frame| {
                 let area = frame.area();
+                self.refresh_log(self.view.log_event_count(area));
+                self.refresh_usage();
+                self.refresh_activity(area.width);
                 self.view.render(area, frame.buffer_mut());
+                self.view.underline_links(frame.buffer_mut());
                 if let Some((x, y)) = self.view.cursor_pos(area) {
                     frame.set_cursor_position((x, y));
                 }
@@ -195,24 +255,37 @@ impl App {
             {
                 terminal.set_cursor_position((x, y))?;
             }
-            match receiver.recv_timeout(schedule.redraw_timeout(
-                Instant::now(),
-                self.view.has_background() || self.log_ticks(),
-            )) {
-                Ok(Input::Terminal(event)) => match event? {
-                    Event::Key(key) if self.handle_key(key) => return Ok(()),
-                    _ => {}
-                },
-                Ok(Input::Filesystem(Ok(()))) if watcher.is_some() => {
-                    schedule.changed(Instant::now());
+            let timeout = schedule.redraw_timeout(Instant::now(), self.view.has_background());
+            let timeout = self
+                .view
+                .log_redraw_in(chrono::Utc::now())
+                .map_or(timeout, |log| timeout.min(log));
+            let timeout = self
+                .view
+                .expire_messages(Instant::now())
+                .map_or(timeout, |message| timeout.min(message));
+            let timeout = self
+                .view
+                .pending_click_in(Instant::now())
+                .map_or(timeout, |click| timeout.min(click));
+            let timeout = self
+                .view
+                .timeline_redraw_in(chrono::Utc::now())
+                .map_or(timeout, |usage| timeout.min(usage));
+            let timeout =
+                crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
+            let timeout = if self.view.text_selection_dragging() {
+                timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
+            } else {
+                timeout
+            };
+            match self.receiver.recv_timeout(timeout) {
+                Ok(input) => {
+                    if self.handle_inputs(input, &mut watcher, &mut schedule)? {
+                        return Ok(());
+                    }
                 }
-                Ok(Input::Filesystem(Err(error))) if watcher.is_some() => {
-                    self.view
-                        .set_notice(Some(format!("Falling back to polling: {error}")));
-                    watcher = None;
-                    schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
-                }
-                Ok(Input::Filesystem(_)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     return Err(io::Error::other("event readers disconnected"));
                 }
@@ -220,52 +293,195 @@ impl App {
         }
     }
 
-    fn log_ticks(&self) -> bool {
-        self.view.log.last().is_some_and(|event| {
-            matches!(
-                event.kind,
-                crate::sessions::log::Kind::Tool | crate::sessions::log::Kind::Error
-            ) && event.ended_at.is_none()
-                && !event.body.ends_with(" *")
-        }) && self
-            .view
-            .selected_id()
-            .and_then(|id| self.sessions.iter().find(|s| s.id == id))
-            .is_some_and(|session| {
-                session.process.is_some() && session.status != crate::model::SessionStatus::Inactive
-            })
+    /// Handles `first` and every input already queued behind it, so a burst of wheel reports
+    /// costs one draw instead of one per report. Returns true when the dashboard should exit.
+    fn handle_inputs(
+        &mut self,
+        first: Input,
+        watcher: &mut Option<notify::RecommendedWatcher>,
+        schedule: &mut RefreshSchedule,
+    ) -> io::Result<bool> {
+        let mut next = Some(first);
+        while let Some(input) = next.take().or_else(|| self.receiver.try_recv().ok()) {
+            match input {
+                Input::Terminal(event) => {
+                    if self.handle_event(event?) {
+                        return Ok(true);
+                    }
+                }
+                Input::Filesystem(Ok(())) if watcher.is_some() => {
+                    schedule.changed(Instant::now());
+                }
+                Input::Filesystem(Err(error)) if watcher.is_some() => {
+                    self.view
+                        .set_notice(Some(format!("Falling back to polling: {error}")));
+                    *watcher = None;
+                    *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+                }
+                Input::Filesystem(_) => {}
+                Input::Created {
+                    draft_id,
+                    provider,
+                    result,
+                } => {
+                    let result =
+                        result.and_then(|output| self.hub.provider(provider).created_job(&output));
+                    self.view.draft_created(draft_id, result);
+                    schedule.changed(Instant::now());
+                }
+                Input::WorktreeCreated { draft_id, result } => {
+                    self.view.draft_worktree_complete(draft_id, result);
+                }
+                Input::Sent { id, input, result } => {
+                    self.pending_inputs.remove(&id);
+                    self.view.input_complete(&id, &input, result);
+                }
+            }
+        }
+        Ok(false)
     }
 
-    fn refresh_log(&mut self) {
+    /// `background` is the terminal's reported color, when known.
+    fn apply_background(&mut self, background: Option<(u8, u8, u8)>, light: bool) {
+        crate::ui::set_light_background(light);
+        crate::theme::set_background(background, light);
+        crate::theme::use_default_accents(light);
+        if let Some(path) = &self.preferences.theme
+            && let Err(error) = crate::theme::use_theme_file(path, light)
+        {
+            self.view
+                .set_notice(Some(format!("Theme not loaded: {error}")));
+        }
+        if let Err(error) = crate::ui::use_highlight_theme(light, self.highlight_theme(light)) {
+            self.view
+                .set_notice(Some(format!("Theme not loaded: {error}")));
+        }
+    }
+
+    /// The preference `.tmTheme` that highlights code on the given background, if any.
+    fn highlight_theme(&self, light: bool) -> Option<&std::path::Path> {
+        if light {
+            self.preferences.light_theme.as_deref()
+        } else {
+            self.preferences.dark_theme.as_deref()
+        }
+    }
+
+    fn handle_event(&mut self, event: Event) -> bool {
+        let action = match event {
+            Event::Key(key) => self.view.handle_key(key),
+            Event::Mouse(mouse) => self.view.handle_mouse(mouse),
+            Event::Paste(text) => {
+                self.view.handle_paste(&text);
+                return false;
+            }
+            Event::ThemeChanged(theme) => {
+                self.apply_background(None, theme == Theme::Light);
+                return false;
+            }
+            _ => return false,
+        };
+        self.handle_action(action)
+    }
+
+    fn refresh_log(&mut self, visible: usize) {
+        let count = visible.saturating_add(self.view.log_scroll());
         let selected = self
             .view
             .selected_id()
-            .and_then(|id| self.sessions.iter().find(|session| session.id == id))
-            .and_then(|session| Some((session.id.clone(), session.transcript.clone()?)));
-        let Some((session, path)) = selected else {
+            .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
+            .and_then(|session| {
+                Some((
+                    session.id.clone(),
+                    session.transcript.clone()?,
+                    session.clone(),
+                ))
+            });
+        let Some((session, path, selected_session)) = selected else {
             self.log_stamp = None;
+            self.full_log_stamp = None;
             self.view.log.clear();
             self.view.log_session = None;
             return;
         };
-        let load = || -> io::Result<Option<(LogStamp, Vec<crate::sessions::log::Event>)>> {
+        if self.view.log_search.active() {
+            let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
+                let metadata = std::fs::metadata(&path)?;
+                let stamp = LogStamp {
+                    session: session.clone(),
+                    path: path.clone(),
+                    modified: metadata.modified()?,
+                    length: metadata.len(),
+                    count: usize::MAX,
+                };
+                if self.full_log_stamp.as_ref() == Some(&stamp) {
+                    return Ok(None);
+                }
+                let events = self.hub.provider(session.provider).log(
+                    &selected_session,
+                    usize::MAX,
+                    selected_session.parent.is_some(),
+                )?;
+                Ok(Some((stamp, events)))
+            };
+            match load() {
+                Ok(loaded) => {
+                    if let Some((stamp, events)) = loaded {
+                        self.full_log_stamp = Some(stamp);
+                        self.view.set_log(events);
+                    }
+                    self.log_stamp = None;
+                    self.view.log_session = Some(session);
+                    self.view
+                        .clamp_log_scroll(self.view.matching_log_count().saturating_sub(visible));
+                }
+                Err(error) => {
+                    self.full_log_stamp = None;
+                    self.log_stamp = None;
+                    self.view.log.clear();
+                    self.view.prepare_log_search();
+                    self.view.log_session = None;
+                    self.view
+                        .set_notice(Some(format!("Failed to read task log: {error}")));
+                }
+            }
+            return;
+        }
+        self.full_log_stamp = None;
+        let load = || -> io::Result<Option<(LogStamp, Vec<crate::log::Event>)>> {
             let metadata = std::fs::metadata(&path)?;
             let stamp = LogStamp {
                 session: session.clone(),
                 path: path.clone(),
                 modified: metadata.modified()?,
                 length: metadata.len(),
+                count,
             };
             if self.log_stamp.as_ref() == Some(&stamp) {
                 return Ok(None);
             }
-            Ok(Some((stamp, crate::sessions::log::tail(&path, 8)?)))
+            let events = self.hub.provider(session.provider).log(
+                &selected_session,
+                count,
+                selected_session.parent.is_some(),
+            )?;
+            Ok(Some((stamp, events)))
         };
         match load() {
-            Ok(Some((stamp, events))) => {
+            Ok(Some((mut stamp, events))) => {
+                if events.len() < count {
+                    self.view
+                        .clamp_log_scroll(events.len().saturating_sub(visible));
+                    stamp.count = visible.saturating_add(self.view.log_scroll());
+                }
                 self.log_stamp = Some(stamp);
-                self.view.log = events;
+                let scroll = self.view.log_scroll();
+                self.view.set_log(events);
                 self.view.log_session = Some(session);
+                // Keeping the rows still scrolled further back than the loaded window reaches.
+                if self.view.log_scroll() > scroll {
+                    self.refresh_log(visible);
+                }
             }
             Ok(None) => {}
             Err(error) => {
@@ -278,53 +494,269 @@ impl App {
         }
     }
 
+    /// Reads when each task worked within a timeline `width` cells wide and hands the view the
+    /// bins any of them worked in; a task idle since before the timeline is not read.
+    fn refresh_activity(&mut self, width: u16) {
+        let now = chrono::Utc::now();
+        let since = now - chrono::Duration::seconds(crate::ui::timeline_seconds(width));
+        let mut bins = std::collections::BTreeSet::new();
+        for session in &self.sessions {
+            let Some(path) = &session.transcript else {
+                continue;
+            };
+            let works = session.status == crate::model::SessionStatus::Working;
+            let recent = std::fs::metadata(path)
+                .and_then(|metadata| metadata.modified())
+                .is_ok_and(|at| chrono::DateTime::<chrono::Utc>::from(at) >= since);
+            if !works && !recent {
+                self.activity.remove(path);
+                continue;
+            }
+            let turns = self.activity.entry(path.clone()).or_default();
+            if turns.update(path, session.id.provider, since).is_err() {
+                continue;
+            }
+            for (start, end) in turns.spans(now, works) {
+                bins.extend(crate::usage::bin_of(start.max(since))..=crate::usage::bin_of(end));
+            }
+        }
+        self.view.set_activity(bins);
+    }
+
+    /// Reads what the selected task's transcript gained and hands its usage to the view.
+    fn refresh_usage(&mut self) {
+        let Some(session) = self
+            .view
+            .selected_id()
+            .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
+        else {
+            return;
+        };
+        let Some(path) = &session.transcript else {
+            return;
+        };
+        let series = self.usage.entry(path.clone()).or_default();
+        let Ok(changed) = series.update(path, session.id.provider) else {
+            return;
+        };
+        if changed || self.view.usage_session() != Some(&session.id) {
+            self.view.set_usage(&session.id, series.bins.clone());
+        }
+    }
+
     fn refresh(&mut self) {
-        let Snapshot { sessions, has_more } = self.store.refresh();
+        let Snapshot { sessions, has_more } = self.hub.refresh();
         self.sessions = sessions.clone();
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
-        self.refresh_log();
     }
 
     /// Returns true when the dashboard should close.
-    fn handle_key(&mut self, key: KeyEvent) -> bool {
-        let action = self.view.handle_key(key);
-        self.refresh_log();
+    fn send_input(&mut self, id: SessionKey, input: SessionInput) {
+        let Some(session) = self.session(&id) else {
+            self.view.input_failed("Task is no longer available".into());
+            return;
+        };
+        let Some(job) = self.hub.provider(id.provider).send(&session, input.clone()) else {
+            self.view
+                .input_failed("This task cannot receive that input".into());
+            return;
+        };
+        self.start_input_job(id, input, job);
+    }
+
+    fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: Job) -> bool {
+        if !self.pending_inputs.insert(id.clone()) {
+            self.view
+                .set_notice(Some("Input is still being sent".into()));
+            return false;
+        }
+        self.view.input_sending(&id);
+        let sender = self.sender.clone();
+        let target = id.clone();
+        match thread::Builder::new()
+            .name("agents-send".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                    .unwrap_or_else(|_| Err(io::Error::other("Input job panicked")));
+                let _ = sender.send(Input::Sent {
+                    id: target,
+                    input,
+                    result,
+                });
+            }) {
+            Ok(_) => true,
+            Err(error) => {
+                self.pending_inputs.remove(&id);
+                self.view.input_failed(error.to_string());
+                false
+            }
+        }
+    }
+
+    fn new_draft(&mut self, cwd: PathBuf) {
+        let result: io::Result<crate::ui::DraftSetup> = (|| {
+            let (provider, defaults) = self
+                .hub
+                .task_defaults()
+                .ok_or_else(|| io::Error::other("No provider supports new tasks"))?;
+            let defaults = defaults?;
+            let repository = crate::tasks::repository(&cwd)?;
+            Ok(crate::ui::DraftSetup {
+                provider,
+                cwd: repository.directory,
+                model: defaults.model,
+                effort: defaults.effort,
+                branch: repository.branch,
+                trunk: repository.trunk,
+            })
+        })();
+        match result {
+            Ok(setup) => {
+                self.view.add_draft(setup);
+            }
+            Err(error) => self
+                .view
+                .set_notice(Some(format!("Cannot create draft: {error}"))),
+        }
+    }
+
+    fn create_task(
+        &mut self,
+        draft_id: DraftId,
+        provider: ProviderId,
+        request: crate::tasks::NewTask,
+    ) {
+        let command = self
+            .hub
+            .provider(provider)
+            .create(&request)
+            .unwrap_or_else(|| Err(io::Error::other("Provider cannot create tasks")));
+        let mut command = match command {
+            Ok(command) => command,
+            Err(error) => {
+                self.view.draft_created(draft_id, Err(error));
+                return;
+            }
+        };
+        let sender = self.sender.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("agents-create".into())
+            .spawn(move || {
+                let result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| command.output()))
+                        .unwrap_or_else(|_| Err(io::Error::other("Task creation job panicked")));
+                let _ = sender.send(Input::Created {
+                    draft_id,
+                    provider,
+                    result,
+                });
+            })
+        {
+            self.view.draft_created(draft_id, Err(error));
+        }
+    }
+
+    fn create_worktree(&mut self, draft_id: DraftId, cwd: PathBuf, branch: String) {
+        let Some(root) = self.preferences.worktree_root.clone() else {
+            self.view.draft_worktree_complete(
+                draft_id,
+                Err(io::Error::other(
+                    "Set worktree_root, WORKTREES, or WORKSPACE",
+                )),
+            );
+            return;
+        };
+        let config = crate::providers::claude::trust_config_path();
+        let sender = self.sender.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("agents-worktree".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::tasks::create_worktree(&cwd, &root, &branch, &config)
+                        .map(|cwd| (cwd, branch))
+                }))
+                .unwrap_or_else(|_| Err(io::Error::other("Worktree job panicked")));
+                let _ = sender.send(Input::WorktreeCreated { draft_id, result });
+            })
+        {
+            self.view.draft_worktree_complete(draft_id, Err(error));
+        }
+    }
+
+    fn handle_action(&mut self, action: Option<Action>) -> bool {
         let Some(action) = action else {
             return false;
         };
+        let target = match &action {
+            Action::Open(id)
+            | Action::Resume(id)
+            | Action::Fork(id)
+            | Action::Rename { id, .. }
+            | Action::Delete(id)
+            | Action::Archive(id)
+            | Action::Stop(id)
+            | Action::TogglePin { id, .. } => Some(id),
+            _ => None,
+        };
+        if let Some(session) = target.and_then(|id| self.session(id))
+            && !session.can_resume()
+        {
+            if matches!(action, Action::Open(_) | Action::Resume(_)) {
+                return self.handle_action(Some(Action::Unsupported("Resume")));
+            }
+            return false;
+        }
         match action {
             Action::Quit => return true,
+            Action::NewDraft { cwd } => self.new_draft(cwd),
+            Action::CreateTask {
+                draft_id,
+                provider,
+                request,
+            } => self.create_task(draft_id, provider, request),
+            Action::CreateWorktree {
+                draft_id,
+                cwd,
+                branch,
+            } => self.create_worktree(draft_id, cwd, branch),
+            Action::SetModel { id, model } => self.send_input(id, SessionInput::SetModel(model)),
+            Action::SetEffort { id, effort } => {
+                self.send_input(id, SessionInput::SetEffort(effort))
+            }
+            Action::SendPrompt { id, text } => {
+                self.send_input(id, SessionInput::Prompt(text));
+            }
             Action::Back => {
-                let Some(session) = self.last_session.as_deref().and_then(|id| self.session(id))
+                let Some(session) = self.last_session.as_ref().and_then(|id| self.session(id))
                 else {
-                    return self.launch_new(None);
+                    return self.launch_new();
                 };
                 let id = session.id.clone();
-                return self.launch_claude(session, &["--resume", &id]);
+                return self.launch_session(Action::Resume(id), session);
             }
             Action::ShowMore => {
-                self.store.show_more();
+                self.hub.show_more();
                 self.view.set_loading(true);
                 self.refresh();
             }
             Action::Open(id) | Action::Resume(id) => {
                 if let Some(session) = self.session(&id) {
-                    return self.launch_claude(session, &["--resume", &id]);
+                    return self.launch_session(Action::Resume(id), session);
                 }
             }
             Action::Fork(id) => {
                 if let Some(session) = self.session(&id) {
-                    return self.launch_claude(session, &["--resume", &id, "--fork-session"]);
+                    return self.launch_session(Action::Fork(id), session);
                 }
             }
-            Action::New(cwd) => {
-                return self.launch_new(cwd);
+            Action::New => {
+                return self.launch_new();
             }
             Action::Rename { id, name } => {
                 if let Some(session) = self.session(&id) {
-                    if let Some(path) = session.transcript {
-                        match crate::sessions::rename(&path, &id, &name) {
+                    if session.transcript.is_some() {
+                        match self.hub.provider(id.provider).rename(&session, &name) {
                             Ok(()) => self.refresh(),
                             Err(error) => self
                                 .view
@@ -339,10 +771,13 @@ impl App {
             Action::Delete(id) => {
                 self.refresh();
                 if let Some(session) = self.session(&id) {
+                    if !session.can_resume() {
+                        return false;
+                    }
                     if session.transcript.is_none() {
                         self.view.set_notice(Some("Nothing to delete".into()));
                     } else {
-                        match crate::sessions::delete_session(&self.config_dir, &session) {
+                        match self.hub.provider(id.provider).delete(&session) {
                             Ok(()) => {
                                 self.view.hide(&id);
                                 self.refresh();
@@ -358,6 +793,22 @@ impl App {
                     self.view.set_notice(Some("Nothing to delete".into()));
                 }
             }
+            Action::Archive(id) => {
+                if let Some(session) = self.session(&id) {
+                    match self.hub.provider(id.provider).archive(&session) {
+                        Ok(()) => {
+                            self.view.hide(&id);
+                            self.refresh();
+                        }
+                        Err(error) => self
+                            .view
+                            .set_notice(Some(format!("Failed to archive: {error}"))),
+                    }
+                }
+            }
+            Action::Stop(id) => {
+                self.send_input(id, SessionInput::Interrupt);
+            }
             Action::Hide(_) => {}
             Action::TogglePin { id, pinned } => {
                 self.preferences.pinned.retain(|pinned_id| pinned_id != &id);
@@ -371,30 +822,51 @@ impl App {
                 self.preferences.grouping = grouping;
                 self.save_preferences();
             }
+            Action::Copy { text, label } => match self.clipboard.copy(&text) {
+                Ok(()) => self.view.show_copied(label, Instant::now()),
+                Err(error) => self
+                    .view
+                    .set_notice(Some(format!("Failed to copy: {error}"))),
+            },
             Action::Unsupported(what) => {
                 self.view
                     .set_notice(Some(format!("{what} is not supported")));
             }
+            Action::OpenPath(target) => {
+                let link = crate::ui::vscode::open_target(&target);
+                let opened = Command::new("open")
+                    .arg(link.as_deref().map_or(target.as_os_str(), OsStr::new))
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                match opened {
+                    // Reaping off the loop keeps `open` from lingering as a zombie.
+                    Ok(mut child) => {
+                        thread::spawn(move || child.wait());
+                    }
+                    Err(error) => self.view.set_notice(Some(format!(
+                        "Failed to open {}: {error}",
+                        target.display()
+                    ))),
+                }
+            }
         }
-        self.refresh_log();
         false
     }
 
-    fn launch_new(&mut self, cwd: Option<PathBuf>) -> bool {
-        let cwd = cwd
-            .filter(|cwd| cwd.is_dir())
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("/"));
-        let mut command = Command::new("claude");
-        command.current_dir(cwd);
-        self.launch = Some(command);
-        true
+    fn launch_new(&mut self) -> bool {
+        self.launch = self
+            .hub
+            .provider(ProviderId::Claude)
+            .launch(&Action::New, None);
+        self.launch.is_some()
     }
 
-    fn session(&self, id: &str) -> Option<Session> {
+    fn session(&self, id: &SessionKey) -> Option<Session> {
         self.sessions
             .iter()
-            .find(|session| session.id == id)
+            .find(|session| &session.id == id)
             .cloned()
     }
 
@@ -405,223 +877,97 @@ impl App {
         }
     }
 
-    /// Hands the terminal to `claude <args>` in the session's directory until it exits.
-    fn launch_claude(&mut self, session: Session, args: &[&str]) -> bool {
-        let cwd = if session.cwd.is_dir() {
-            session.cwd.clone()
-        } else {
+    /// Hands the terminal to the selected session's provider process.
+    fn launch_session(&mut self, action: Action, session: Session) -> bool {
+        if self.pending_inputs.contains(&session.id) {
+            self.view
+                .set_notice(Some("Input is still being sent".into()));
+            return false;
+        }
+
+        if !session.can_resume() {
+            return false;
+        }
+        if !session.cwd.is_dir() {
             self.view.set_notice(Some(format!(
                 "Directory no longer exists: {}",
                 session.cwd.display()
             )));
             return false;
-        };
-        let mut command = Command::new("claude");
-        command.args(args).current_dir(cwd);
-        self.last_session = Some(session.id);
-        self.launch = Some(command);
-        true
+        }
+        self.launch = self
+            .hub
+            .provider(session.id.provider)
+            .launch(&action, Some(&session));
+        if self.launch.is_some() {
+            self.last_session = Some(session.id);
+            return true;
+        }
+        false
+    }
+}
+
+enum MouseReports {
+    Enable,
+    Disable,
+}
+
+impl crossterm::Command for MouseReports {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Enable => "\x1b[?1000h\x1b[?1002h\x1b[?1006h",
+            Self::Disable => "\x1b[?1006l\x1b[?1002l\x1b[?1000l",
+        })
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Mouse reporting requires ANSI support",
+        ))
     }
 }
 
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
-    crossterm::execute!(stdout, terminal::EnterAlternateScreen)?;
+    crossterm::execute!(
+        stdout,
+        terminal::EnterAlternateScreen,
+        crossterm::event::EnableBracketedPaste
+    )?;
     Terminal::new(CrosstermBackend::new(stdout))
 }
 
 fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+    let reports = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::event::DisableThemeChangeReports,
+        crossterm::event::DisableBracketedPaste,
+        MouseReports::Disable
+    );
     terminal::disable_raw_mode()?;
     crossterm::execute!(terminal.backend_mut(), terminal::LeaveAlternateScreen)?;
-    terminal.show_cursor()
-}
-
-pub fn config_dir_exists(config_dir: &Path) -> bool {
-    config_dir.is_dir()
+    terminal.show_cursor()?;
+    reports
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::SessionStatus;
-    use crossterm::event::{KeyCode, KeyModifiers};
+#[path = "providers/claude/app_tests.rs"]
+mod tests;
 
-    fn fixture() -> (tempfile::TempDir, App) {
-        let dir = tempfile::tempdir().unwrap();
-        let project = dir.path().join("projects/project");
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::write(
-            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
-            include_str!("../tests/fixtures/transcript.jsonl"),
-        )
-        .unwrap();
-        let mut app = App::new(dir.path().to_owned());
-        app.refresh();
-        assert_eq!(app.sessions.len(), 1);
-        app.sessions[0].cwd = dir.path().to_owned();
-        app.sessions[0].status = SessionStatus::Ready;
-        app.view.set_sessions(app.sessions.clone(), false);
-        (dir, app)
+/// How many times taller than wide one terminal cell is, when the terminal reports its pixels.
+fn cell_aspect() -> Option<f64> {
+    let size = crossterm::terminal::window_size().ok()?;
+    if size.width == 0 || size.height == 0 || size.columns == 0 || size.rows == 0 {
+        return None;
     }
-
-    fn key(app: &mut App, code: KeyCode) -> bool {
-        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
-    }
-
-    fn assert_resume(app: &App) {
-        let command = app.launch.as_ref().expect("session should resume");
-        assert_eq!(command.get_program(), "claude");
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            ["--resume", app.sessions[0].id.as_str()]
-        );
-        assert_eq!(
-            command.get_current_dir(),
-            Some(app.sessions[0].cwd.as_path())
-        );
-    }
-
-    #[test]
-    fn task_log_cache_uses_selection_length_and_mtime() {
-        use std::io::Write;
-        let (_dir, mut app) = fixture();
-        key(&mut app, KeyCode::BackTab);
-        app.refresh();
-        assert_eq!(app.view.log.len(), 2);
-        let path = app.sessions[0].transcript.clone().unwrap();
-        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-        let original = std::fs::read_to_string(&path).unwrap();
-        let changed = original.replace("Codex", "CODEX");
-        assert_eq!(original.len(), changed.len());
-        std::fs::write(&path, &changed).unwrap();
-        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-        file.set_modified(modified).unwrap();
-        let cached = app.view.log.clone();
-        app.refresh_log();
-        assert_eq!(app.view.log, cached);
-        file.set_modified(modified + Duration::from_secs(1))
-            .unwrap();
-        app.refresh_log();
-        assert_ne!(app.view.log, cached);
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
-        writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T16:40:00Z", "content":"queued"})).unwrap();
-        file.set_modified(modified + Duration::from_secs(1))
-            .unwrap();
-        app.refresh();
-        assert_eq!(app.sessions.len(), 1);
-        assert!(
-            app.view.selected_id().is_some(),
-            "selected disappeared after refresh"
-        );
-        assert_eq!(app.view.log.last().unwrap().body, "queued");
-    }
-
-    #[test]
-    fn task_log_reloads_on_keyboard_selection_and_clears_without_transcript() {
-        let (dir, mut app) = fixture();
-        let mut second = app.sessions[0].clone();
-        second.id = "second".into();
-        second.updated_at -= chrono::Duration::seconds(1);
-        let path = dir.path().join("second.jsonl");
-        std::fs::write(&path, serde_json::json!({"type":"user", "timestamp":"2026-10-06T16:40:00Z", "message":{"content":"second prompt"}}).to_string()).unwrap();
-        second.transcript = Some(path);
-        let mut third = second.clone();
-        third.id = "third".into();
-        third.updated_at -= chrono::Duration::seconds(1);
-        third.transcript = None;
-        app.sessions.extend([second, third]);
-        app.view.set_sessions(app.sessions.clone(), false);
-        app.refresh_log();
-        key(&mut app, KeyCode::Down);
-        assert_eq!(app.view.log_session.as_deref(), Some("second"));
-        assert_eq!(app.view.log[0].body, "second prompt");
-        key(&mut app, KeyCode::Down);
-        assert!(app.view.log.is_empty());
-        assert!(app.view.log_session.is_none());
-    }
-
-    #[test]
-    fn escape_without_launched_session_opens_new_session() {
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Esc));
-        let command = app.launch.as_ref().expect("new session should launch");
-        assert_eq!(command.get_program(), "claude");
-        assert_eq!(command.get_args().len(), 0);
-        assert_eq!(
-            command.get_current_dir(),
-            Some(std::env::current_dir().unwrap().as_path())
-        );
-        assert!(app.last_session.is_none());
-    }
-
-    #[test]
-    fn escape_resumes_last_opened_session() {
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Enter));
-        app.launch.take().unwrap();
-        // True leaves the dashboard for either quit or launch; the command distinguishes them.
-        assert!(key(&mut app, KeyCode::Esc));
-        assert_resume(&app);
-    }
-
-    #[test]
-    fn escape_after_session_removed_opens_new_session() {
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Enter));
-        app.launch.take().unwrap();
-        let last_session = app.last_session.clone();
-        app.sessions.clear();
-        app.view.set_sessions(Vec::new(), false);
-        assert!(key(&mut app, KeyCode::Esc));
-        let command = app.launch.as_ref().expect("new session should launch");
-        assert_eq!(command.get_program(), "claude");
-        assert_eq!(command.get_args().len(), 0);
-        assert_eq!(
-            command.get_current_dir(),
-            Some(std::env::current_dir().unwrap().as_path())
-        );
-        assert_eq!(app.last_session, last_session);
-    }
-
-    #[test]
-    fn escape_remembers_resume_and_fork_but_not_new() {
-        for code in [KeyCode::Char('o'), KeyCode::Char('f')] {
-            let (_dir, mut app) = fixture();
-            assert!(key(&mut app, code));
-            app.launch.take().unwrap();
-            assert!(key(&mut app, KeyCode::Char('n')));
-            app.launch.take().unwrap();
-            assert!(key(&mut app, KeyCode::Esc));
-            assert_resume(&app);
-        }
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Char('n')));
-        app.launch.take().unwrap();
-        assert!(key(&mut app, KeyCode::Esc));
-        assert!(app.launch.is_some());
-        assert!(app.last_session.is_none());
-    }
-
-    #[test]
-    fn escape_with_missing_directory_stays_in_dashboard() {
-        let (dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Enter));
-        app.launch.take().unwrap();
-        app.sessions[0].cwd = dir.path().join("missing");
-        assert!(!key(&mut app, KeyCode::Esc));
-        assert!(app.launch.is_none());
-    }
-
-    #[test]
-    fn control_c_after_open_quits() {
-        let (_dir, mut app) = fixture();
-        assert!(key(&mut app, KeyCode::Enter));
-        app.launch.take().unwrap();
-        assert!(app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
-        assert!(app.launch.is_none());
-    }
+    let cell_height = f64::from(size.height) / f64::from(size.rows);
+    let cell_width = f64::from(size.width) / f64::from(size.columns);
+    Some(cell_height / cell_width)
 }
+
+#[cfg(test)]
+#[path = "app_input_tests.rs"]
+mod input_tests;

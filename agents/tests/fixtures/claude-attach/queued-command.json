@@ -1,0 +1,33 @@
+{
+  "attachment": {
+    "commandMode": "prompt",
+    "delivery_id": "3f7707ee-9831-4d9e-959b-b5664fae7934",
+    "humanTurn": true,
+    "origin": {
+      "kind": "human"
+    },
+    "prompt": "After the current tool finishes, include agents-steer-✓ in your next reply and continue the remaining sleep calls. Do not start another task.",
+    "source_uuid": "b29c1505-6d1e-4aa7-a783-f606162be786",
+    "timestamp": "2026-10-16T15:43:13.038Z",
+    "type": "queued_command"
+  },
+  "cwd": "/private/var/folders/l5/39n6lz4x12x58pz0ynsfbpmw0000gn/T/.tmpiFteLw",
+  "entrypoint": "cli",
+  "gitBranch": "main",
+  "isSidechain": false,
+  "parentUuid": "b5daadd4-9c61-4181-9640-dfeeb9688e95",
+  "rendered": [
+    {
+      "content": "<system-reminder>\nThe user sent a new message while you were working:\nAfter the current tool finishes, include agents-steer-✓ in your next reply and continue the remaining sleep calls. Do not start another task.\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.\n</system-reminder>"
+    }
+  ],
+  "renderedRole": "system",
+  "sessionId": "20e7408f-55b2-4858-b186-4b9f7f55b7bd",
+  "sessionKind": "bg",
+  "session_id": "20e7408f-55b2-4858-b186-4b9f7f55b7bd",
+  "timestamp": "2026-10-16T15:43:13.038Z",
+  "type": "attachment",
+  "userType": "external",
+  "uuid": "129dfb58-fb17-441a-8fcc-56b0dd3955b4",
+  "version": "2.1.299"
+}

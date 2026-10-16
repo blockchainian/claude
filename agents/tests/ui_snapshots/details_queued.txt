@@ -1,5 +1,3 @@
-Task details · ● Working · Queue task
-
 Prompt
 Current prompt
 First queued prompt
