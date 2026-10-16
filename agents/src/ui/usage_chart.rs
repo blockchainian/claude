@@ -7,7 +7,7 @@ use crate::usage::{Bin, bin_of};
 use chrono::{DateTime, Utc};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Color;
 use std::collections::BTreeMap;
 
 /// Dot rows one cell holds.
@@ -73,9 +73,7 @@ impl View {
                     .fold(0, |bits, column| bits | column);
                 if bits != 0 {
                     let symbol = char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' ');
-                    buf[(x, y)]
-                        .set_char(symbol)
-                        .set_style(Style::default().dim());
+                    buf[(x, y)].set_char(symbol);
                 }
             }
         }
