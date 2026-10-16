@@ -19,4 +19,4 @@ Background task
                 Project
 /tmp/project
 
-Model           Unknown
+Unknown

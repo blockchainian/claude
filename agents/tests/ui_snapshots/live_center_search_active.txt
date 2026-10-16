@@ -10,7 +10,7 @@
                                             │                  Project
                                             │ /tmp/project
                                             │
-                                            │ Model            Unknown
+                                            │ Unknown
                                             │ ───────────────── Ready ─────────────────
  Task to find ›
  esc back  enter open

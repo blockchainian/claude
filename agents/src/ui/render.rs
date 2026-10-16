@@ -974,35 +974,22 @@ impl View {
             }
             None => None,
         };
-        // Reserve equal space on both sides so the name stays at the panel's center.
-        let name_space = |effort: Option<&str>| {
-            let left = width.saturating_sub(12);
-            // Centering rounds left; the right margin can have one extra cell.
-            effort.map_or(left, |value| {
-                left.min(width.saturating_sub(2 * (value.width() + 1) - 1))
-            })
-        };
-        let effort = effort.filter(|_| name_space(effort) > 0);
-        let mut name = truncate_line_with_ellipsis_if_overflow(
+        let effort = effort.filter(|value| width >= value.width() + 2);
+        let name_space = width.saturating_sub(effort.map_or(0, |value| value.width() + 1));
+        let mut model = truncate_line_with_ellipsis_if_overflow(
             Line::from(Span::styled(
                 session.model_name().to_owned(),
                 style::time_style(),
             )),
-            name_space(effort),
+            name_space,
         );
-        for span in &mut name.spans {
+        for span in &mut model.spans {
             span.style = style::time_style();
         }
-        let name_width = name.width();
-        let model_start = (width - name_width) / 2;
-        let mut model = truncate_line_with_ellipsis_if_overflow("Model".dim().into(), width);
+        let name_width = model.width();
         let mut model_fields = Vec::new();
         if name_width > 0 {
-            model
-                .spans
-                .push(" ".repeat(model_start - model.width()).dim());
-            model.spans.extend(name.spans);
-            model_fields.push((model_start, name_width, Field::Model));
+            model_fields.push((0, name_width, Field::Model));
         }
         if let Some(effort) = effort {
             let start = width - effort.width();

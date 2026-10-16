@@ -15,5 +15,5 @@ PR task
                 Project
 /tmp/project · main
 
-Model           Unknown
+Unknown
 

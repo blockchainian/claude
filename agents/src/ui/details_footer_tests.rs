@@ -16,7 +16,7 @@ fn details_footer_pins_project_and_model_below_spare_rows() {
                 .map(|x| buf[(x, y)].symbol())
                 .collect::<String>()
         };
-        assert!(text(area.bottom() - 1).starts_with("Model"));
+        assert!(text(area.bottom() - 1).starts_with("Unknown"));
         assert!(text(area.bottom() - 2).trim().is_empty());
         assert_eq!(text(area.bottom() - 3).trim(), "/tmp/project");
         assert!(text(area.bottom() - 4).trim() == "Project");
@@ -91,7 +91,7 @@ fn details_footer_keeps_filled_and_overflowing_rows_unchanged() {
                 "Project",
                 "/tmp/project",
                 "",
-                "Model",
+                "Unknown",
             ],
         ),
         (
@@ -104,7 +104,7 @@ fn details_footer_keeps_filled_and_overflowing_rows_unchanged() {
                 "Project",
                 "/tmp/project",
                 "",
-                "Model",
+                "Unknown",
             ],
         ),
         (
@@ -116,7 +116,7 @@ fn details_footer_keeps_filled_and_overflowing_rows_unchanged() {
                 "Project",
                 "/tmp/project",
                 "",
-                "Model",
+                "Unknown",
             ],
         ),
     ] {
@@ -128,7 +128,7 @@ fn details_footer_keeps_filled_and_overflowing_rows_unchanged() {
             let text = (area.x..area.right())
                 .map(|x| buf[(x, y)].symbol())
                 .collect::<String>();
-            if expected == "Model" {
+            if expected == "Unknown" {
                 assert!(text.starts_with(expected), "{text}");
             } else {
                 assert_eq!(text.trim(), expected);

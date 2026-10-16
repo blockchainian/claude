@@ -18,7 +18,7 @@
                                                   │                     Project
                                                   │ /tmp/project
                                                   │
-                                                  │ Model               Unknown
+                                                  │ Unknown
                                                   │ ──────────────────── Ready ────────────────────
  Legacy task ›
  ? help  esc back  ↑/↓ move  enter open  n new

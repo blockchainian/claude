@@ -21,4 +21,4 @@ Waiting for your response.
                 Project
 /tmp/project
 
-Model           Unknown
+Unknown

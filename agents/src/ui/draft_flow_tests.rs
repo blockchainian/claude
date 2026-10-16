@@ -348,16 +348,8 @@ fn details_model_section_keeps_controls_on_the_header_row() {
             .collect::<String>()
     };
     let details = view.viewport.borrow().details;
-    assert_eq!(text(details.x, model.y, 5), "Model");
-    for x in details.x..details.x + 5 {
-        assert!(
-            buffer[(x, model.y)]
-                .modifier
-                .contains(ratatui::style::Modifier::DIM)
-        );
-    }
     assert_eq!(text(model.x, model.y, model.width), model_name);
-    assert_eq!(model.x, details.x + (details.width - model.width) / 2);
+    assert_eq!(model.x, details.x);
     assert_eq!(effort.y, model.y);
     assert_eq!(effort.right(), details.right());
     assert!(model.right() < effort.x);
@@ -449,19 +441,25 @@ fn details_model_targets_cover_only_visible_value_cells() {
             let mut buffer = Buffer::empty(Rect::new(0, 0, 50, 310));
             view.viewport.borrow_mut().field_targets.clear();
             view.render_details(area, &mut buffer, Utc::now());
-            let available = width.saturating_sub(if effort.is_some() && width >= 14 {
-                13
-            } else {
-                12
-            });
+            let show_effort = effort.is_some() && width >= 8;
+            let available = width.saturating_sub(if show_effort { 7 } else { 0 });
             let name_width = available.min("claude-opus-5-5".len() as u16);
-            let start = area.x + (width - name_width) / 2;
+            let start = area.x;
+            let expected_name = if name_width < "claude-opus-5-5".len() as u16 {
+                format!("{}…", &"claude-opus-5-5"[..usize::from(name_width - 1)])
+            } else {
+                "claude-opus-5-5".into()
+            };
+            let drawn = (start..start + name_width)
+                .map(|x| buffer[(x, area.bottom() - 1)].symbol())
+                .collect::<String>();
+            assert_eq!(drawn, expected_name, "width={width}");
             let targets = view.viewport.borrow().field_targets.clone();
             let y = area.bottom() - 1;
             for x in area.x..area.right() {
                 let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
                     Some(Field::Model)
-                } else if effort.is_some() && width >= 14 && x >= area.right() - 6 {
+                } else if show_effort && x >= area.right() - 6 {
                     Some(Field::Effort)
                 } else {
                     None

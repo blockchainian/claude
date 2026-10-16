@@ -21,4 +21,4 @@ Activity task
                 Project
 /tmp/project
 
-Model           Unknown
+Unknown

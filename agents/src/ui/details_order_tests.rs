@@ -37,7 +37,7 @@ fn details_section_order_preserves_clicks_and_copies() {
             sections.push("Latest activity");
         }
         sections.push("Background");
-        sections.extend(["Update", "Prompt", "Queued prompt", "Project", "Model"]);
+        sections.extend(["Update", "Prompt", "Queued prompt", "Project", "Unknown"]);
         let positions: Vec<_> = sections
             .iter()
             .map(|text| rendered.find(text).unwrap())

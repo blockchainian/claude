@@ -1819,7 +1819,7 @@ fn details_include_attention_and_clip_messages() {
     let area = Rect::new(0, 0, 38, 22);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
-    assert_eq!(buf[(0, 21)].symbol(), "M");
+    assert_eq!(buf[(0, 21)].symbol(), "c");
     assert_eq!(buf[(34, 21)].symbol(), "h");
     assert_eq!(buf[(0, 20)].symbol(), " ");
 }
@@ -2322,7 +2322,7 @@ fn details_model_and_effort_use_header_style() {
                     .contains("claude-opus-5-5")
             })
             .expect("Model header");
-        let group = "Model       claude-opus-5-5       medium";
+        let group = format!("{:<34}medium", "claude-opus-5-5");
         let start = 0;
         let title_style = view.title_style(&session_key("model"));
         for (offset, symbol) in group.chars().enumerate() {
@@ -3117,7 +3117,7 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     buf.reset();
     view.render_details(area, &mut buf, now);
     assert_eq!(line(&buf, 3), "/tmp/project");
-    assert_eq!(line(&buf, 5), "Model           Unknown");
+    assert_eq!(line(&buf, 5), "Unknown");
     assert_eq!(line(&buf, 4), "");
 }
 
@@ -3224,7 +3224,7 @@ fn details_background_boxes_tail_and_clip_output() {
     );
     assert!(clipped.contains("Update"));
     assert!(clipped.contains("Project"));
-    assert!(clipped.ends_with("Model           Unknown"));
+    assert!(clipped.ends_with("Unknown"));
     assert!(!clipped.contains("xxxxxxxx"));
 }
 

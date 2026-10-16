@@ -15,5 +15,5 @@ PR task
                 Project
 /tmp/project · main · #833
 
-Model           Unknown
+Unknown
 

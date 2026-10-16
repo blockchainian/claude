@@ -13,7 +13,7 @@
                                                   │                     Project
                                                   │ /tmp/project
                                                   │
-                                                  │ Model               Unknown
+                                                  │ Unknown
  ────────────────────────────────────────────────────────────────────── Working ───────────────────
  Task log example · Running in a terminal; open it to type
  ──────────────────────────────────────────── ↑ Latest ────────────────────────────────────────────
