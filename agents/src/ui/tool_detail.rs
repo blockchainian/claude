@@ -7,6 +7,24 @@ use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+#[cfg(test)]
+thread_local! {
+    static JSON_SCAN_BUDGET: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn record_json_scan(bytes: usize) {
+    JSON_SCAN_BUDGET.with(|budget| {
+        if let Some(remaining) = budget.get() {
+            budget.set(Some(
+                remaining
+                    .checked_sub(bytes)
+                    .expect("JSON detection exceeded its linear scan budget"),
+            ));
+        }
+    });
+}
+
 /// One part of the open view: the text it is drawn from, which the selection copies, and
 /// how that text turns into lines.
 pub(super) struct Part {
@@ -54,6 +72,8 @@ impl Part {
         let mut cursor = 0;
         let mut text_start = 0;
         while cursor < source.len() {
+            #[cfg(test)]
+            record_json_scan(1);
             let byte = source.as_bytes()[cursor];
             let (end, value) = if matches!(byte, b'{' | b'[') {
                 embedded_json(&source, cursor)
@@ -628,6 +648,8 @@ fn embedded_json(source: &str, start: usize) -> (usize, Option<serde_json::Value
     let mut quoted = false;
     let mut escaped = false;
     for (offset, &byte) in source.as_bytes()[start..].iter().enumerate() {
+        #[cfg(test)]
+        record_json_scan(1);
         if quoted {
             if escaped {
                 escaped = false;
@@ -647,6 +669,8 @@ fn embedded_json(source: &str, start: usize) -> (usize, Option<serde_json::Value
                     return (end, None);
                 }
                 if brackets.is_empty() {
+                    #[cfg(test)]
+                    record_json_scan(end - start);
                     return (end, serde_json::from_str(&source[start..end]).ok());
                 }
             }
@@ -861,18 +885,23 @@ mod tests {
 
     #[test]
     fn unterminated_json_detection_is_bounded() {
+        struct ScanBudget;
+        impl Drop for ScanBudget {
+            fn drop(&mut self) {
+                JSON_SCAN_BUDGET.set(None);
+            }
+        }
+
         // Each failed parse used to revisit the remainder of this output.
         for repetitions in [100_000, 4_000_000] {
             let source = "[{".repeat(repetitions);
-            let started = std::time::Instant::now();
+            JSON_SCAN_BUDGET.set(Some(2 * source.len()));
+            let _budget = ScanBudget;
             let parts = Part::text_parts(source.clone(), false);
+            let scanned = 2 * source.len() - JSON_SCAN_BUDGET.get().unwrap();
+            assert!(scanned >= source.len(), "the whole candidate must be scanned");
             assert_eq!(parts.len(), 1);
             assert_eq!(parts[0].source, source);
-            assert!(
-                started.elapsed() < std::time::Duration::from_secs(2),
-                "{:?}",
-                started.elapsed()
-            );
         }
     }
 
