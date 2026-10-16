@@ -660,8 +660,14 @@ impl View {
             .partition(|i| self.is_pinned(*i));
         pinned.sort_by_key(|i| self.pinned.iter().position(|id| *id == self.rows[*i].id));
         match self.grouping {
-            Grouping::Project => visible
-                .sort_by_key(|i| (&self.project_groups[*i].key, session_order(&self.rows[*i]))),
+            Grouping::Project => visible.sort_by_key(|i| {
+                let group = &self.project_groups[*i];
+                (
+                    group.heading.as_os_str().is_empty(),
+                    &group.key,
+                    session_order(&self.rows[*i]),
+                )
+            }),
             Grouping::Status => {}
             Grouping::Model => {
                 visible.sort_by_key(|i| (self.rows[*i].model_name(), session_order(&self.rows[*i])))

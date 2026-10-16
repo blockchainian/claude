@@ -1034,3 +1034,7 @@ pub(crate) mod live_tests;
 #[cfg(test)]
 #[path = "app_loop_tests.rs"]
 mod loop_tests;
+
+#[cfg(test)]
+#[path = "app_project_tests.rs"]
+mod project_tests;
