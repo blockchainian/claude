@@ -122,6 +122,96 @@ fn terminal_task_cursor_keeps_cell_colors() {
     println!("{{\"task_cursor\":\"pass\",\"widths\":[120,200]}}");
 }
 
+fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
+    let lines: Vec<_> = capture.lines().collect();
+    let separators: Vec<_> = lines[3]
+        .match_indices('│')
+        .map(|(index, _)| lines[3][..index].width())
+        .collect();
+    let top_end = 3 + lines[3..]
+        .iter()
+        .take_while(|line| line.matches('│').count() == separators.len())
+        .count();
+    let details_start = separators[0] + 2;
+    let details_end = if width >= 150 {
+        separators[1] - 1
+    } else {
+        width as usize - 1
+    };
+    let middle: Vec<_> = lines[top_end].chars().collect();
+    let details: String = middle[details_start..details_end].iter().collect();
+    let status = " Inactive ";
+    let start = (details_end - details_start - status.len()) / 2;
+    assert_eq!(
+        details
+            .chars()
+            .skip(start)
+            .take(status.len())
+            .collect::<String>(),
+        status,
+        "{capture}"
+    );
+    assert!(details.chars().take(start).all(|c| c == '─'), "{capture}");
+    assert!(
+        details.chars().skip(start + status.len()).all(|c| c == '─'),
+        "{capture}"
+    );
+    let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let mut parser = vt100::Parser::new(height, width, 0);
+    parser.process(
+        colored
+            .trim_end_matches('\n')
+            .replace('\n', "\r\n")
+            .as_bytes(),
+    );
+    let cell = parser
+        .screen()
+        .cell(top_end as u16, (details_start + start + 1) as u16)
+        .unwrap();
+    assert!(cell.bold(), "{colored}");
+    assert!(!cell.dim(), "{colored}");
+    assert_eq!(cell.fgcolor(), vt100::Color::Default);
+
+    let top: String = (details_start..details_end)
+        .map(|x| parser.screen().cell(2, x as u16).unwrap().contents())
+        .collect();
+    let elapsed = top.rsplit('─').next().unwrap();
+    assert!(elapsed.starts_with(' '), "{capture}");
+    assert!(!elapsed.trim().is_empty(), "{capture}");
+    let elapsed_start = details_end - elapsed.width();
+    for x in elapsed_start + 1..details_end {
+        let cell = parser.screen().cell(2, x as u16).unwrap();
+        assert!(cell.dim(), "{colored}");
+        assert!(!cell.bold(), "{colored}");
+    }
+    let title = top.trim_end_matches(elapsed).trim_matches('─');
+    assert!(title.starts_with(' ') && title.ends_with(' '), "{capture}");
+    let start = (elapsed_start - details_start - title.width()) / 2;
+    assert_eq!(top.find(title), Some(start * "─".len()), "{capture}");
+    println!("{{\"details_borders\":\"pass\",\"width\":{width}}}");
+}
+
+#[test]
+#[ignore = "requires tmux and NO_COLOR unset; run with --ignored --nocapture"]
+fn terminal_details_borders_keep_status_and_elapsed_separate() {
+    let (_directory, tmux, _transcript) = start_probe("details-borders");
+    for width in [112, 200] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        std::thread::sleep(Duration::from_millis(300));
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        println!("{width} columns:\n{capture}");
+        assert_details_borders(&tmux, width, 50, &capture);
+    }
+}
+
 // Runs the executable's terminal loop, provider discovery and log loading, rather
 // than constructing a View. AGENTS_PROBE_BIN also checks the installed artifact.
 #[test]
@@ -171,8 +261,8 @@ fn terminal_layout_tracks_width() {
             "fixture not selected: {capture}"
         );
         assert!(
-            lines[2].trim().chars().all(|c| c == '─'),
-            "top rule is not clean: {capture}"
+            !lines[2].contains("Inactive"),
+            "status must stay on the bottom rule: {capture}"
         );
         let top = lines[3];
         assert_eq!(
@@ -229,12 +319,7 @@ fn terminal_layout_tracks_width() {
             model.contains("claude-opus-5-5 · medium"),
             "model group missing: {capture}"
         );
-        assert!(
-            lines.iter().any(|line| {
-                line.contains('─') && line.contains("Codex") && line.contains(" · Inactive")
-            }),
-            "title must precede status on the middle rule: {capture}"
-        );
+        assert_details_borders(&tmux, width, height, &capture);
         if width >= 150 {
             let column_width = (width as usize - 8) / 4;
             assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
@@ -258,7 +343,7 @@ fn terminal_layout_tracks_width() {
                 .iter()
                 .collect();
             assert!(
-                details.contains(" · Inactive"),
+                details.contains(" Inactive "),
                 "status missing from middle rule: {capture}"
             );
             for line in &lines[3..top_end] {

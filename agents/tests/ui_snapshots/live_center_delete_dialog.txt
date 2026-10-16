@@ -11,6 +11,6 @@
  │ › 1. Cancel                            │ │ /tmp/project
  │   2. Permanently delete task and child │ │
  └────────────────────────────────────────┘ │ Model                             Unknown
-                                            │ Inactive ────────────────────────────────
+                                            │ ─────────────── Inactive ────────────────
  Unloaded task ›
  ↑/↓ move  enter select  esc back

@@ -2794,8 +2794,9 @@ mod details_header {
                             rule.width,
                             1,
                         );
-                        let header = label(&buf, bottom);
-                        assert_eq!(label(&buf, rule), "Fix login bug");
+                        let header = label(&buf, rule);
+                        assert_eq!(label(&buf, bottom), "Working");
+                        assert!(header.contains("Fix login bug"));
                         assert!(bottom.y > layout.header.bottom());
                         if advance == 0 {
                             assert!(header.ends_with(expected), "{header}");
@@ -2835,7 +2836,7 @@ mod details_header {
             let (buf, rule) = rule_at_width(&view, now, width);
             let header = label(&buf, rule);
             assert!(header.starts_with('升'), "{header}");
-            assert!(header.ends_with("…"), "{header}");
+            assert!(header.contains("…"), "{header}");
         }
     }
 
@@ -2864,9 +2865,12 @@ mod details_header {
             assert!(title.modifier.contains(Modifier::BOLD));
             assert!(!title.modifier.contains(Modifier::DIM));
             let bottom = view.viewport.borrow().details.bottom();
-            for x in rule.x..rule.x + status.label().len() as u16 {
-                let cell = &buf[(x, bottom)];
+            let start = rule.x + (rule.width - (status.label().len() as u16 + 2)) / 2 + 1;
+            for (offset, symbol) in status.label().chars().enumerate() {
+                let cell = &buf[(start + offset as u16, bottom)];
+                assert_eq!(cell.symbol(), symbol.to_string());
                 assert_eq!(cell.fg, ratatui::style::Color::Reset);
+                assert!(cell.modifier.contains(Modifier::BOLD));
                 assert!(!cell.modifier.contains(Modifier::DIM));
             }
         }
@@ -2888,7 +2892,7 @@ mod details_header {
         let (buf, rule) = rule(&view, now);
         let header = label(&buf, rule);
         assert!(header.starts_with("A very long"), "{header}");
-        assert!(header.ends_with("…"), "{header}");
+        assert!(header.contains("…"), "{header}");
         assert_eq!(
             details_at(row, 15, now),
             include_str!("../../tests/ui_snapshots/details_header_elapsed.txt")
@@ -2929,7 +2933,8 @@ mod details_header {
                 let layout = view.center_layout(buf.area);
                 let bottom = view.viewport.borrow().details.bottom();
                 let expected = " Task log example ";
-                let start = top.x + (top.width - expected.width() as u16) / 2;
+                let title_right = top.right() - " 3h 12m".len() as u16;
+                let start = top.x + (title_right - top.x - expected.width() as u16) / 2;
                 for (offset, symbol) in expected.chars().enumerate() {
                     assert_eq!(
                         buf[(start + offset as u16, top.y)].symbol(),
@@ -2938,17 +2943,30 @@ mod details_header {
                 }
                 assert!((top.x..start).all(|x| buf[(x, top.y)].symbol() == "─"));
                 assert!(
-                    (start + expected.width() as u16..top.right())
+                    (start + expected.width() as u16..title_right)
                         .all(|x| buf[(x, top.y)].symbol() == "─")
                 );
                 let bottom_text = (top.x..top.right())
                     .map(|x| buf[(x, bottom)].symbol())
                     .collect::<String>();
-                assert!(bottom_text.starts_with("Working "), "{bottom_text}");
-                assert!(bottom_text.ends_with(" 3h 12m"), "{bottom_text}");
+                let status_start = (usize::from(top.width) - " Working ".len()) / 2;
+                assert_eq!(
+                    bottom_text,
+                    format!(
+                        "{} Working {}",
+                        "─".repeat(status_start),
+                        "─".repeat(usize::from(top.width) - status_start - " Working ".len())
+                    )
+                );
+                for x in top.right() - 6..top.right() {
+                    let cell = &buf[(x, top.y)];
+                    assert!(cell.modifier.contains(Modifier::DIM));
+                    assert!(!cell.modifier.contains(Modifier::BOLD));
+                }
+                assert!(label(&buf, top).ends_with(" 3h 12m"));
+                assert!(!bottom_text.contains("3h 12m"));
                 assert!(!bottom_text.contains("Task log example"));
                 assert!(!label(&buf, top).contains("Working"));
-                assert!(!label(&buf, top).contains("3h 12m"));
                 if !layout.log.is_empty() {
                     let strip = &buf[(layout.list.right() - 1, bottom)];
                     assert!(
@@ -2967,10 +2985,56 @@ mod details_header {
     }
 
     #[test]
-    fn tight_bottom_border_drops_elapsed_before_status() {
+    fn title_truncates_before_elapsed_is_dropped() {
         let (mut view, now) = log_fixture();
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
-        let area = Rect::new(0, 0, 26, 25);
+        for columns in 10..=100 {
+            let (buf, top) = rule_at_width(&view, now, columns);
+            let rule = Rect::new(top.x, view.viewport.borrow().details.bottom(), top.width, 1);
+            let width = rule.width;
+            let text = (rule.x..rule.right())
+                .map(|x| buf[(x, rule.y)].symbol())
+                .collect::<String>();
+            assert!(!text.contains("3h 12m"));
+            let top_text = (top.x..top.right())
+                .map(|x| buf[(x, top.y)].symbol())
+                .collect::<String>();
+            // A title cell, two spaces and two rule cells precede elapsed.
+            let elapsed_width = " 3h 12m".len() as u16;
+            let title_width = if width >= elapsed_width + 5 {
+                assert!(top_text.ends_with(" 3h 12m"), "width {width}: {top_text}");
+                width - elapsed_width
+            } else {
+                assert!(!top_text.contains("3h 12m"), "width {width}: {top_text}");
+                width
+            };
+            if title_width >= 5 {
+                let available = usize::from(title_width - 4);
+                let title = "Task log example";
+                let expected = if title.len() > available {
+                    format!("{}…", &title[..available - 1])
+                } else {
+                    title.to_owned()
+                };
+                let expected = format!(" {expected} ");
+                let start = (usize::from(title_width) - expected.chars().count()) / 2;
+                let chars: Vec<_> = top_text.chars().collect();
+                assert_eq!(
+                    chars[start..start + expected.chars().count()]
+                        .iter()
+                        .collect::<String>(),
+                    expected,
+                    "width {width}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tight_bottom_border_keeps_centered_status() {
+        let (mut view, now) = log_fixture();
+        view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
+        let area = Rect::new(0, 0, 28, 25);
         let layout = view.center_layout(area);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
@@ -4657,7 +4721,11 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
     assert_eq!(layout.details.height, top);
     assert_eq!(layout.prompt.y, layout.details.bottom() + 1);
     assert_eq!(
-        buf[(layout.details.x, layout.details.bottom())].symbol(),
+        buf[(
+            layout.details.x + (layout.details.width - 9) / 2 + 1,
+            layout.details.bottom(),
+        )]
+            .symbol(),
         "W"
     );
     assert_eq!(buf[(layout.details.x, layout.log_detail.y)].symbol(), "─");

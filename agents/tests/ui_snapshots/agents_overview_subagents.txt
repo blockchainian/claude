@@ -25,6 +25,6 @@
                                                             │ /tmp/project
                                                             │
                                                             │ Model                                        parent-model
-                                                            │ Ready ───────────────────────────────────────────────────
+                                                            │ ───────────────────────── Ready ─────────────────────────
  Parent task ›
  ? help  esc back  ↑/↓ move  enter open  n new

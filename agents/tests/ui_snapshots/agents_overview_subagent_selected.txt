@@ -25,6 +25,6 @@
                                                             │ /tmp/child-project
                                                             │
                                                             │ Model                                         child-model
-                                                            │ Working ─────────────────────────────────────────────────
+                                                            │ ──────────────────────── Working ────────────────────────
  Check files · Subagent cannot take input
  ? help  esc back  ↑/↓ move  n new

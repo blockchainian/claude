@@ -417,9 +417,10 @@ impl View {
                 self.render_details_title(
                     Rect::new(rule.x, layout.header.y + 2, rule.width, 1),
                     buf,
+                    now,
                 );
             }
-            self.render_details_status(rule, buf, now);
+            self.render_details_status(rule, buf);
         }
         if self.log_selected.is_some() && self.viewport.borrow().log_detail_scroll > 0 {
             let label = " ↑ Top ";
@@ -507,10 +508,26 @@ impl View {
     }
     /// Centers the selected task's title on the rule row
     /// `rule`, a space apart from the rule on each side.
-    fn render_details_title(&self, rule: Rect, buf: &mut Buffer) {
+    fn render_details_title(
+        &self,
+        mut rule: Rect,
+        buf: &mut Buffer,
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
         let Some(session) = self.selected_row() else {
             return;
         };
+        line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
+        if let Some(at) = session.started_at {
+            let elapsed = format_session_duration((now - at).num_seconds());
+            let label = Line::from(vec![" ".into(), elapsed.dim()]);
+            let width = label.width() as u16;
+            // Keep a title cell, its spaces and the surrounding rule cells.
+            if rule.width >= width + 5 {
+                label.render(Rect::new(rule.right() - width, rule.y, width, 1), buf);
+                rule.width -= width;
+            }
+        }
         // One rule cell and a space on each side.
         let width = usize::from(rule.width).saturating_sub(4);
         let title_style = self.title_style(&session.id).bold();
@@ -529,42 +546,31 @@ impl View {
         header.spans.insert(0, " ".into());
         header.spans.push(" ".into());
         let label_width = header.width() as u16;
-        line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
         let x = rule.x + rule.width.saturating_sub(label_width) / 2;
         let label = Rect::new(x, rule.y, label_width.min(rule.width), 1).intersection(rule);
         Clear.render(label, buf);
         line(header, label, buf);
     }
-    /// Aligns status and elapsed time with the details panel's content edges.
-    fn render_details_status(
-        &self,
-        rule: Rect,
-        buf: &mut Buffer,
-        now: chrono::DateTime<chrono::Utc>,
-    ) {
+    /// Centers the bold status on the rule, a space apart on each side.
+    fn render_details_status(&self, rule: Rect, buf: &mut Buffer) {
         let Some(session) = self.selected_row() else {
             return;
         };
         line("─".repeat(usize::from(rule.width)).dim(), rule, buf);
         let (status, _) = Self::status(session);
-        let status = Line::from(vec![status.into(), " ".into()]);
-        let status_width = status.width();
-        Clear.render(
-            Rect::new(rule.x, rule.y, (status_width as u16).min(rule.width), 1),
-            buf,
+        let width = usize::from(rule.width).saturating_sub(4);
+        let mut status = truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width);
+        status.spans.insert(0, " ".into());
+        status.spans.push(" ".into());
+        let status_width = (status.width() as u16).min(rule.width);
+        let status_area = Rect::new(
+            rule.x + rule.width.saturating_sub(status_width) / 2,
+            rule.y,
+            status_width,
+            1,
         );
-        line(status, rule, buf);
-        if let Some(at) = session.started_at {
-            let elapsed = format_session_duration((now - at).num_seconds());
-            let label = Line::from(vec![" ".into(), elapsed.dim()]);
-            let width = label.width();
-            if status_width + width <= usize::from(rule.width) {
-                label.render(
-                    Rect::new(rule.right() - width as u16, rule.y, width as u16, 1),
-                    buf,
-                );
-            }
-        }
+        Clear.render(status_area, buf);
+        line(status, status_area, buf);
     }
     pub(super) fn render_details(
         &self,

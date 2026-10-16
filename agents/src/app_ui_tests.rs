@@ -887,8 +887,12 @@ fn wide_border_labels_stay_in_their_columns() {
             "activity missing on middle border:\n{}",
             rendered.join("\n")
         );
-        assert!(segment(&buffer, details.clone(), middle).starts_with("Working "));
-        assert!(segment(&buffer, details.clone(), middle).ends_with(" 2m 0s"));
+        let bottom = segment(&buffer, details.clone(), middle);
+        let start = (details.len() - " Working ".len()) / 2;
+        assert_eq!(bottom.find(" Working "), Some(start * "─".len()));
+        assert!(bottom.chars().take(start).all(|c| c == '─'));
+        assert!(!bottom.contains("2m 0s"));
+        assert!(segment(&buffer, details.clone(), 2).ends_with(" 2m 0s"));
         let title_prefix: String = app.sessions[0].display_title().chars().take(8).collect();
         assert!(segment(&buffer, details.clone(), 2).contains(&title_prefix));
         assert!(segment(&buffer, tasks.clone(), 2).chars().all(|c| c == '─'));

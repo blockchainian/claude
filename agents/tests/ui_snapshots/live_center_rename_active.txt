@@ -11,6 +11,6 @@
                                             │ /tmp/project
                                             │
                                             │ Model                             Unknown
-                                            │ Ready ───────────────────────────────────
+                                            │ ───────────────── Ready ─────────────────
  Task to find ›
  esc back  enter rename
