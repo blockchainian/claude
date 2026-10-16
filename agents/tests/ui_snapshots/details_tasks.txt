@@ -1,12 +1,12 @@
                  Update
 Task update
 
-                 Prompt
-Session title
-
                  Tasks               1/2
 ● Working first
 ○ Pending first
+
+                 Prompt
+Session title
 
             Needs attention
 Open task to review.

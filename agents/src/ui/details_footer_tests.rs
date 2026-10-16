@@ -87,11 +87,11 @@ fn details_footer_keeps_filled_and_overflowing_rows_unchanged() {
                 "Prompt",
                 "Short prompt",
                 "",
+                "",
                 "Project",
                 "/tmp/project",
                 "",
                 "Model",
-                "",
             ],
         ),
         (
@@ -104,11 +104,11 @@ fn details_footer_keeps_filled_and_overflowing_rows_unchanged() {
                 "Project",
                 "/tmp/project",
                 "",
-                "…",
+                "Model",
             ],
         ),
         (
-            7,
+            6,
             1,
             vec![
                 "Short prompt",
@@ -117,7 +117,6 @@ fn details_footer_keeps_filled_and_overflowing_rows_unchanged() {
                 "/tmp/project",
                 "",
                 "Model",
-                "",
             ],
         ),
     ] {
@@ -145,7 +144,7 @@ fn hidden_model_row_has_no_field_targets() {
     selected.prompt = "Short prompt".into();
     selected.last_message = None;
     selected.activity = None;
-    let area = Rect::new(7, 4, 40, 7);
+    let area = Rect::new(7, 4, 40, 6);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
     assert!(view.viewport.borrow().field_targets.is_empty());

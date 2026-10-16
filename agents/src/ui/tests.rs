@@ -1819,9 +1819,9 @@ fn details_include_attention_and_clip_messages() {
     let area = Rect::new(0, 0, 38, 22);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
-    assert_eq!(buf[(0, 20)].symbol(), "M");
-    assert_eq!(buf[(34, 20)].symbol(), "h");
-    assert_eq!(buf[(0, 21)].symbol(), " ");
+    assert_eq!(buf[(0, 21)].symbol(), "M");
+    assert_eq!(buf[(34, 21)].symbol(), "h");
+    assert_eq!(buf[(0, 20)].symbol(), " ");
 }
 
 #[test]
@@ -3116,9 +3116,9 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     }
     buf.reset();
     view.render_details(area, &mut buf, now);
-    assert_eq!(line(&buf, 3), "");
-    assert_eq!(line(&buf, 4), "Model           Unknown");
-    assert_eq!(line(&buf, 5), "");
+    assert_eq!(line(&buf, 3), "/tmp/project");
+    assert_eq!(line(&buf, 5), "Model           Unknown");
+    assert_eq!(line(&buf, 4), "");
 }
 
 #[test]
@@ -3158,7 +3158,7 @@ fn details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> String {
 }
 
 #[test]
-fn details_sections_run_activity_background_update_prompt() {
+fn details_sections_run_activity_background_update_tasks_prompt() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
         kind: crate::log::Kind::Tool,
@@ -3171,8 +3171,13 @@ fn details_sections_run_activity_background_update_prompt() {
         output: std::path::PathBuf::from("/nonexistent/output"),
         started_at: Utc::now(),
     }];
+    row.tasks = vec![crate::model::SessionTask {
+        id: "1".into(),
+        subject: "Move the prompt".into(),
+        status: crate::model::TaskStatus::InProgress,
+    }];
     let rendered = queued_details(row, 40);
-    let positions = ["Latest activity", "Background\n", "Update", "Prompt\n"]
+    let positions = ["Latest activity", "Background\n", "Update", "Tasks", "Prompt\n"]
         .map(|label| rendered.find(label).expect(label));
     assert!(positions.is_sorted(), "{rendered}");
 }
@@ -3207,7 +3212,7 @@ fn details_background_boxes_tail_and_clip_output() {
         queued_details(row.clone(), 22),
         include_str!("../../tests/ui_snapshots/details_background_long_title.txt")
     );
-    let clipped = queued_details(row, 15);
+    let clipped = queued_details(row, 14);
     assert!(
         clipped
             .lines()
@@ -5029,14 +5034,21 @@ mod details_budget {
         assert!(rows.iter().any(|line| line == "Queued work"));
         assert!(
             rows.iter()
-                .any(|line| line.starts_with("─") && line.contains("Check 3")),
+                .any(|line| line.starts_with("─") && line.contains("Check 4")),
             "{rows:?}"
         );
         assert!(!rows.iter().any(|line| line.contains("Check 5")));
-        assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
-        assert!(rows.iter().any(|line| line == "Prompt text…"));
-        assert!(rows[22] == format!("Model{}Unknown", " ".repeat(51)));
-        assert!(rows[23].is_empty());
+        let prompt = rows
+            .iter()
+            .position(|line| line.trim() == "Prompt")
+            .unwrap();
+        assert_eq!(rows[..prompt].iter().filter(|line| *line == "…").count(), 1);
+        assert_eq!(
+            &rows[prompt + 1..prompt + 4],
+            ["Prompt text", "…", "Queued work"]
+        );
+        assert!(rows[22].is_empty());
+        assert!(rows[23].ends_with("Unknown"));
     }
 
     #[test]
@@ -5097,8 +5109,8 @@ mod details_budget {
                 "{header}: {rest:?}"
             );
         }
-        assert!(rest[22] == format!("Model{}Unknown", " ".repeat(51)));
-        assert!(rest[23].is_empty());
+        assert!(rest[22].is_empty());
+        assert!(rest[23].ends_with("Unknown"));
         let prompt = rest
             .iter()
             .position(|line| line.trim() == "Prompt")
@@ -5311,7 +5323,8 @@ mod details_curtain {
             .collect::<Vec<_>>()
             .join("  \n");
         panel(&view);
-        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 3, 0]);
+        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 2, 0]);
+        assert_eq!(view.viewport.borrow().details_scroll.hidden[1], 2);
         view.rows[view.selected].last_message = None;
         panel(&view);
         assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 0]);

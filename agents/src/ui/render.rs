@@ -639,7 +639,7 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: activity, background, message, prompt, tasks,
+        // Sections top to bottom: activity, background, message, tasks, prompt,
         // needs attention, project, model. The title
         // sits on the rule above the panel.
         let content_top = area.y;
@@ -746,6 +746,60 @@ impl View {
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
+        let tasks = [
+            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
+            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
+        ]
+        .into_iter()
+        .flat_map(|(status, indicator)| {
+            session
+                .tasks
+                .iter()
+                .filter(move |task| task.status == status)
+                .map(move |task| (task, indicator))
+        })
+        .collect::<Vec<_>>();
+        let tasks_text = tasks
+            .iter()
+            .map(|(task, status)| {
+                format!("{} {}", Self::status_indicator(*status).content, task.subject)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !tasks.is_empty() {
+            separate_section(&mut items);
+            let in_progress = tasks
+                .iter()
+                .filter(|(_, status)| *status == SessionStatus::Working)
+                .count();
+            items.push(
+                centered_header(
+                    "Tasks".dim().into(),
+                    format!("{in_progress}/{}", tasks.len()).dim().into(),
+                    width,
+                )
+                .into(),
+            );
+            let start = items.len();
+            for (task, status) in tasks {
+                items.push(
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(vec![
+                            Self::status_indicator(status),
+                            Span::raw(format!(" {}", task.subject)),
+                        ]),
+                        width,
+                    )
+                    .into(),
+                );
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key("Tasks", &tasks_text));
+            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
+            body_links.push(Vec::new());
+            item_links.resize(items.len(), Vec::new());
+        }
+
         let prompt_header = if let Some(start) = session.prompt_at {
             let end = if session.status == SessionStatus::Working {
                 now
@@ -806,60 +860,6 @@ impl View {
         }
 
         item_links.resize(items.len(), Vec::new());
-
-        let tasks = [
-            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
-            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
-        ]
-        .into_iter()
-        .flat_map(|(status, indicator)| {
-            session
-                .tasks
-                .iter()
-                .filter(move |task| task.status == status)
-                .map(move |task| (task, indicator))
-        })
-        .collect::<Vec<_>>();
-        let tasks_text = tasks
-            .iter()
-            .map(|(task, status)| {
-                format!("{} {}", Self::status_indicator(*status).content, task.subject)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !tasks.is_empty() {
-            separate_section(&mut items);
-            let in_progress = tasks
-                .iter()
-                .filter(|(_, status)| *status == SessionStatus::Working)
-                .count();
-            items.push(
-                centered_header(
-                    "Tasks".dim().into(),
-                    format!("{in_progress}/{}", tasks.len()).dim().into(),
-                    width,
-                )
-                .into(),
-            );
-            let start = items.len();
-            for (task, status) in tasks {
-                items.push(
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(vec![
-                            Self::status_indicator(status),
-                            Span::raw(format!(" {}", task.subject)),
-                        ]),
-                        width,
-                    )
-                    .into(),
-                );
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key("Tasks", &tasks_text));
-            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
-            body_links.push(Vec::new());
-            item_links.resize(items.len(), Vec::new());
-        }
 
         let needs = session
             .background_job
@@ -1014,17 +1014,15 @@ impl View {
         }
 
         let mut model_item = items.len() + 1;
-        // A blank row keeps the model off the bottom rule.
-        items.extend([Line::default().into(), model.into(), Line::default().into()]);
+        // The model sits on the panel's last row, right above the bottom rule.
+        items.extend([Line::default().into(), model.into()]);
         item_links.resize(items.len(), Vec::new());
 
         let total = items.iter().map(Item::height).sum::<usize>();
         if total < usize::from(area.height) {
-            // Move the bottom padding and unused rows above Project. All body
-            // ranges stay above the gap; links and Model move with their items.
-            items.pop();
-            item_links.pop();
-            let gap = usize::from(area.height) - total + 1;
+            // Move the unused rows above Project. All body ranges stay above
+            // the gap; links and Model move with their items.
+            let gap = usize::from(area.height) - total;
             items.splice(
                 project_item..project_item,
                 (0..gap).map(|_| Line::default().into()),
