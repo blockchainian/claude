@@ -132,8 +132,8 @@ fn assert_log_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
     let mut x = start;
     while x < buffer.area.width {
         assert_eq!(
-            buffer[(x, row)].style(),
-            cursor,
+            buffer[(x, row)].bg,
+            cursor.bg.unwrap(),
             "cursor fill at ({x}, {row})"
         );
         x += unicode_width::UnicodeWidthStr::width(buffer[(x, row)].symbol()).max(1) as u16;

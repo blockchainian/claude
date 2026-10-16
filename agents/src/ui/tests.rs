@@ -3647,7 +3647,10 @@ fn dashboard_log_bodies_start_at_the_left_padding() {
                 );
                 assert_eq!(
                     cell.fg,
-                    super::style::selection_style().fg.unwrap_or(Color::Reset)
+                    super::style::log_styles(&event.kind)
+                        .1
+                        .fg
+                        .unwrap_or(Color::Reset)
                 );
             }
             if width >= 150 && event.kind == crate::log::Kind::Assistant {
@@ -4241,6 +4244,84 @@ fn non_current_log_time_matches_unselected_task_and_details_times() {
         .expect("message header");
     assert_ne!(details[(99, details_y)].symbol(), " ");
     assert_eq!(details[(99, details_y)].style(), task_time.style());
+}
+
+#[test]
+fn selected_log_row_changes_only_background() {
+    use crate::log::Kind;
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let source =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+    let event = crate::providers::claude::log::tail_session(&source, 200, true)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.kind == Kind::Tool)
+        .unwrap();
+    for light in [false, true] {
+        let cursor = super::style::selection_style_for(false, true, light);
+        super::style::with_selection_style(cursor, || {
+            for width in [100, 149, 150, 200] {
+                for kind in [
+                    Kind::User,
+                    Kind::Assistant,
+                    Kind::Agent,
+                    Kind::Session,
+                    Kind::Tool,
+                    Kind::Error,
+                    Kind::Denied,
+                    Kind::QueuedUser,
+                    Kind::QueuedSystem,
+                ] {
+                    for search in [false, true] {
+                        let (mut view, now) = log_fixture();
+                        let mut event = event.clone();
+                        event.kind = kind.clone();
+                        // Include a visible link and a search match alongside plain body text.
+                        event.body = "Read `code` **bold** [link](https://example.com) and results".into();
+                        event.calls.clear();
+                        event.paths.clear();
+                        let mut older = event.clone();
+                        older.started_at -= Duration::seconds(1);
+                        view.set_log(vec![older, event]);
+                        if search {
+                            view.log_search.query.set_text("Read");
+                            view.rematch_log();
+                        }
+                        let area = Rect::new(0, 0, width, 60);
+                        view.log_selected = None;
+                        for index in 0..2 {
+                            let mut baseline = Buffer::empty(area);
+                            view.log_selected = None;
+                            view.render_at(area, &mut baseline, now);
+                            let log = view.viewport.borrow().log;
+                            view.log_selected = Some(view.log[index].clone());
+                            let mut selected = Buffer::empty(area);
+                            view.render_at(area, &mut selected, now);
+                            let y = log.y + (1 - index) as u16;
+                            for x in log.x - 1..=log.right() {
+                                let before = &baseline[(x, y)];
+                                let after = &selected[(x, y)];
+                                assert_eq!(after.symbol(), before.symbol());
+                                assert_eq!(
+                                    after.fg, before.fg,
+                                    "{kind:?}, width {width}, ({x}, {y})"
+                                );
+                                assert_eq!(
+                                    after.modifier, before.modifier,
+                                    "{kind:?}, width {width}, ({x}, {y})"
+                                );
+                                assert_eq!(
+                                    after.bg,
+                                    cursor.bg.unwrap(),
+                                    "padding included at ({x}, {y})"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 #[test]
@@ -5163,7 +5244,7 @@ mod log_search {
         assert!(!text(&buf).contains("t........"));
         for x in 6..13 {
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buf[(x, 0)].fg, super::style::selection_style().fg.unwrap());
+            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
         }
         key(&mut view, KeyCode::Enter);
         let buf = panel(&view, now);
@@ -5232,11 +5313,11 @@ mod log_search {
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain café link"));
         for x in 6..10 {
-            assert_eq!(buf[(x, 0)].fg, super::style::selection_style().fg.unwrap());
+            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
         }
         assert!(!buf[(11, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(buf[(11, 0)].modifier.contains(Modifier::BOLD));
+        assert!(!buf[(11, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
