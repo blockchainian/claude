@@ -67,9 +67,8 @@ pub(super) fn render_with_options(
                     Tag::Emphasis => writer.styles.push(style.italic()),
                     Tag::Strong => writer.styles.push(style.bold()),
                     Tag::Strikethrough => writer.styles.push(style.crossed_out()),
-                    Tag::Link { .. } => writer
-                        .styles
-                        .push(style.fg(crate::theme::link_color()).underlined()),
+                    // A link reads as its text; the link layer underlines it like a path.
+                    Tag::Link { .. } => writer.styles.push(style),
                     Tag::BlockQuote => {
                         writer.separate();
                         writer.styles.push(style.green());
@@ -300,11 +299,7 @@ mod tests {
             ("bold", None, Modifier::BOLD),
             ("italic", None, Modifier::ITALIC),
             ("gone", None, Modifier::CROSSED_OUT),
-            (
-                "label",
-                Some(Color::Rgb(0x16, 0x4f, 0x9f)),
-                Modifier::UNDERLINED,
-            ),
+            ("label", None, Modifier::empty()),
         ] {
             let span = lines[0]
                 .spans
@@ -312,7 +307,7 @@ mod tests {
                 .find(|span| span.content == text)
                 .unwrap();
             assert_eq!(span.style.fg, color);
-            assert!(span.style.add_modifier.contains(modifier));
+            assert_eq!(span.style.add_modifier, modifier);
         }
     }
 

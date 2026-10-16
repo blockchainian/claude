@@ -16,7 +16,15 @@ pub(super) type DrawnLink = (Rect, PathBuf);
 
 /// The existing paths in `text`, and the label of each of `images`.
 pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::log::Image]) -> Vec<Link> {
-    let mut links = path_links(text, &super::paths::text_paths(text, cwd), cwd);
+    let mut links = markdown_links(text, cwd);
+    for link in path_links(text, &super::paths::text_paths(text, cwd), cwd) {
+        if !links
+            .iter()
+            .any(|other| other.range.start < link.range.end && link.range.start < other.range.end)
+        {
+            links.push(link);
+        }
+    }
     for image in images {
         links.extend(text.match_indices(&image.label).map(|(at, label)| Link {
             range: at..at + label.len(),
@@ -24,6 +32,38 @@ pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::log::Image]) -
         }));
     }
     links.sort_by_key(|link| link.range.start);
+    links
+}
+
+/// Markdown links whose destination resolves, covering their label.
+fn markdown_links(text: &str, cwd: &Path) -> Vec<Link> {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+    let mut links = Vec::new();
+    let mut open: Option<(String, Option<Range<usize>>)> = None;
+    let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES;
+    for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Link { dest_url, .. }) => open = Some((dest_url.into_string(), None)),
+            Event::End(TagEnd::Link) => {
+                if let Some((url, Some(label))) = open.take()
+                    && let Some(target) = resolve(&url, cwd)
+                {
+                    links.push(Link {
+                        range: label,
+                        target,
+                    });
+                }
+            }
+            Event::Text(_) | Event::Code(_) => {
+                if let Some((_, label)) = &mut open {
+                    let start = label.as_ref().map_or(range.start, |label| label.start);
+                    *label = Some(start..range.end);
+                }
+            }
+            _ => {}
+        }
+    }
     links
 }
 
@@ -155,6 +195,18 @@ pub(super) fn underline(buf: &mut Buffer, links: &[DrawnLink]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_links_open_their_destination_from_their_label() {
+        let text = "see [the docs](https://example.com/a) and [/tmp](/no/such/path)";
+        assert_eq!(
+            text_links(text, Path::new("/"), &[]),
+            [Link {
+                range: 5..13,
+                target: "https://example.com/a".into(),
+            }]
+        );
+    }
 
     #[test]
     fn links_get_a_dotted_underline_that_keeps_cell_widths() {

@@ -2939,7 +2939,7 @@ fn details_markdown_snapshot() {
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, 3)].fg, crate::theme::link_color());
+    assert_eq!(buffer[(6, 3)].fg, Color::Yellow);
     assert_eq!(buffer[(0, 5)].fg, Color::Cyan);
 }
 
@@ -4096,7 +4096,7 @@ mod log_search {
             assert_eq!(buf[(x, 2)].fg, crate::theme::inline_code_color());
             assert!(buf[(x, 2)].modifier.contains(Modifier::BOLD));
         }
-        assert!(buf[(30, 2)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buf[(30, 2)].modifier.contains(Modifier::UNDERLINED));
         assert!(!buf[(30, 2)].modifier.contains(Modifier::BOLD));
     }
 

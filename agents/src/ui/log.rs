@@ -863,8 +863,8 @@ mod log_markdown {
             assert_eq!(buffer[(25, 0)].fg, crate::theme::inline_code_color());
             assert_eq!(buffer[(30, 0)].fg, base.fg.unwrap_or(Color::Reset));
             assert!(buffer[(30, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buffer[(35, 0)].fg, crate::theme::link_color());
-            assert!(buffer[(35, 0)].modifier.contains(Modifier::UNDERLINED));
+            assert_eq!(buffer[(35, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(35, 0)].modifier.contains(Modifier::UNDERLINED));
         }
     }
 
