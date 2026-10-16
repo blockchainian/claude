@@ -222,10 +222,6 @@ impl View {
             }
             _ => {
                 let mut layout = detail_layout(event, area.width, cwd, now);
-                if layout.lines.len() > height && area.width > 1 {
-                    layout = detail_layout(event, area.width - 1, cwd, now);
-                    layout.width = area.width;
-                }
                 layout.height = height;
                 layout
             }
@@ -237,10 +233,9 @@ impl View {
                 .expect("running span exists")
                 .content = super::tool_detail::running_frame(now).into();
         }
-        let overflow = layout.lines.len() > height && area.width > 1;
-        if overflow {
-            body_area.width -= 1;
-        }
+        // The scrollbar sits in the panel's right padding, outside the body.
+        let scrollbar_x = area.right();
+        let overflow = layout.lines.len() > height && scrollbar_x < buf.area.right();
         for (source, links) in layout.sources.iter().zip(&mut layout.links) {
             super::links::add_commits(&source.text, cwd, links);
         }
@@ -254,7 +249,7 @@ impl View {
                 .min(height);
             let top = scroll * (height - thumb) / viewport.log_detail_max.max(1);
             for row in 0..height {
-                buf[(body_area.right(), body_area.y + row as u16)].set_symbol(
+                buf[(scrollbar_x, body_area.y + row as u16)].set_symbol(
                     if (top..top + thumb).contains(&row) {
                         "│"
                     } else {

@@ -6800,6 +6800,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             }]),
             exit_code: None,
             is_error: false,
+            duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
             id: "Read-fixture".into(),
@@ -6812,6 +6813,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             output: None,
             exit_code: None,
             is_error: false,
+            duration: None,
         },
     ]
 }
@@ -6876,7 +6878,9 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
                 assert_eq!(buf[(body.x, row.y)].symbol(), "─");
             }
             if end < body.width - 1 {
-                assert_eq!(buf[(body.right() - 1, row.y)].symbol(), "─");
+                // The Bash call ran 12s; its time ends the rule in the header's time column.
+                let last = if title == "Read" { "─" } else { "s" };
+                assert_eq!(buf[(body.right() - 1, row.y)].symbol(), last);
             }
             if title != "Read" {
                 let viewport = view.viewport.borrow();
@@ -6972,7 +6976,7 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
         assert_eq!(fields_row.cells.first().unwrap().0.start, offset);
         for row in &rows {
             for x in region.area.x..region.area.right() {
-                if matches!(buf[(x, row.y)].symbol(), "┐" | "┘" | "┤") {
+                if matches!(buf[(x, row.y)].symbol(), "⎤" | "⎥" | "⎦") {
                     assert!(
                         !row.cells
                             .iter()
@@ -7822,11 +7826,16 @@ fn open_view_top_button_and_scrollbar() {
     let top = log_screen(&view, 100, 25, now);
     assert!(!top.contains(" ↑ Top "));
     let area = view.viewport.borrow().log_text.area;
+    let layout = view.center_layout(Rect::new(0, 0, 100, 25));
+    assert_eq!(area.right() + 1, layout.log_detail.right());
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
     assert_eq!(buf[(area.right(), area.top())].symbol(), "│");
     assert_eq!(buf[(area.right(), area.top())].fg, Color::Reset);
     assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), " ");
+    for y in area.top()..area.bottom() {
+        assert_ne!(buf[(area.right() - 1, y)].symbol(), "│");
+    }
     view.viewport.borrow_mut().log_detail_scroll = usize::MAX;
     let bottom = log_screen(&view, 100, 25, now);
     assert!(bottom.contains(" ↑ Top "), "{bottom}");

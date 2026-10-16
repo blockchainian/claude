@@ -35,8 +35,8 @@ pub(super) struct Part {
 }
 
 enum Body {
-    /// A merged call's title after a leading rule cell and space.
-    TitleRule,
+    /// A merged call's title after a leading rule cell and space, with the call's duration.
+    TitleRule(Option<String>),
     /// A section label, in the given style.
     Label(Style),
     /// An input/output arrow without selectable source bytes.
@@ -148,7 +148,7 @@ impl Part {
         if let Body::Shell(commands) = &self.body {
             return shell_maps(&self.source, commands, lines);
         }
-        if !matches!(self.body, Body::TitleRule) {
+        if !matches!(self.body, Body::TitleRule(_)) {
             return super::text_selection_layout::map_lines(&self.source, lines, self.markdown());
         }
         lines
@@ -195,7 +195,11 @@ impl Part {
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let lines = match &self.body {
-            Body::TitleRule => vec![super::title_rule::centered_title_rule(source, width)],
+            Body::TitleRule(time) => vec![super::title_rule::centered_title_rule(
+                source,
+                width,
+                time.as_deref(),
+            )],
             Body::Label(style) => split_wide(
                 vec![Line::from(Span::styled(source.to_owned(), *style))],
                 width,
@@ -246,7 +250,7 @@ impl Part {
                 .map(|line| Line::from(line.into_owned()))
                 .collect(),
         };
-        if matches!(self.body, Body::TitleRule | Body::Arrow) {
+        if matches!(self.body, Body::TitleRule(_) | Body::Arrow) {
             return lines;
         }
         lines
@@ -298,21 +302,32 @@ fn shell_lines(
         rows.push(start..lines.len());
     }
     let mut connectors = vec![std::collections::BTreeMap::new(); lines.len()];
+    // Each run of `&&`-chained commands gets one bracket from its first row's top to its
+    // last row's bottom.
+    let mut first = 0;
     for (index, command) in commands.iter().enumerate() {
-        if !command.and_next || index + 1 == commands.len() {
+        if command.and_next && index + 1 < commands.len() {
             continue;
         }
-        let upper = rows[index].end - 1;
-        let lower = rows[index + 1].start;
-        let column = lines[upper].width().max(lines[lower].width()) + 1;
+        let run = rows[first].start..rows[index].end;
+        let chained = index > first;
+        first = index + 1;
+        if !chained {
+            continue;
+        }
+        let column = lines[run.clone()].iter().map(Line::width).max().unwrap_or(0) + 1;
         if width > 0 && column >= width {
             continue;
         }
-        for (row, glyph) in [(upper, '┐'), (lower, '┘')] {
-            connectors[row]
-                .entry(column)
-                .and_modify(|ch| *ch = '┤')
-                .or_insert(glyph);
+        for row in run.clone() {
+            let glyph = if row == run.start {
+                '⎤'
+            } else if row + 1 == run.end {
+                '⎦'
+            } else {
+                '⎥'
+            };
+            connectors[row].insert(column, glyph);
         }
     }
     for (line, connectors) in lines.iter_mut().zip(connectors) {
@@ -503,7 +518,8 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
             parts.push(Part::new("", Body::Text));
         }
         if event.calls.len() > 1 {
-            parts.push(Part::new(call.title.clone(), Body::TitleRule));
+            let time = call.duration.map(super::formatting::format_log_duration);
+            parts.push(Part::new(call.title.clone(), Body::TitleRule(time)));
         }
         let input_start = parts.len();
         for section in &call.input {
@@ -804,6 +820,7 @@ mod tests {
             output: None,
             exit_code: None,
             is_error: false,
+            duration: None,
         }]));
         let part = parts.last().unwrap();
         let lines = part.lines(80, Style::default(), chrono::DateTime::UNIX_EPOCH);
@@ -1075,25 +1092,23 @@ mod tests {
             assert!(lines[row].to_string().starts_with(command));
             assert_eq!(maps[row].last().unwrap().0.end as usize, command.width());
         }
-        for (upper, lower) in [(0, 1), (1, 2), (3, 4)] {
-            let column = commands[upper].width().max(commands[lower].width()) + 1;
-            let upper_glyph = if upper == 1 { '┤' } else { '┐' };
-            let lower_glyph = if lower == 1 { '┤' } else { '┘' };
-            assert_eq!(
-                lines[upper].to_string().chars().nth(column),
-                Some(upper_glyph)
-            );
-            assert_eq!(
-                lines[lower].to_string().chars().nth(column),
-                Some(lower_glyph)
-            );
+        for (run, glyphs) in [(0..3, &['⎤', '⎥', '⎦'][..]), (3..5, &['⎤', '⎦'][..])] {
+            let column = commands[run.clone()]
+                .iter()
+                .map(|command| command.width())
+                .max()
+                .unwrap()
+                + 1;
+            for (row, glyph) in run.zip(glyphs) {
+                assert_eq!(lines[row].to_string().chars().nth(column), Some(*glyph));
+            }
         }
         assert_eq!(part.source, SHELL_SAMPLE);
         assert!(
             lines
                 .iter()
                 .flat_map(|line| &line.spans)
-                .filter(|span| span.content.contains(['┐', '┘', '┤']))
+                .filter(|span| span.content.contains(['⎤', '⎥', '⎦']))
                 .all(|span| span
                     .style
                     .add_modifier
@@ -1105,7 +1120,7 @@ mod tests {
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
-            ["a  ┐", "bb ┘ ┐", "cccc ┘"]
+            ["a    ⎤", "bb   ⎥", "cccc ⎦"]
         );
         assert_eq!(command_part("a && b\n").source, "a && b\n");
     }
@@ -1165,7 +1180,7 @@ mod tests {
         );
         assert_eq!(
             texts(&parts, 80),
-            ["command: a ┐", "bb         ┘", "timeout: 1000"]
+            ["command: a ⎤", "bb         ⎦", "timeout: 1000"]
         );
         assert_eq!(
             command_part("echo 'broken && next").lines(
@@ -1260,6 +1275,7 @@ mod tests {
                 }]),
                 exit_code: None,
                 is_error: false,
+                duration: None,
             },
             ToolCall {
                 id: "Read-fixture".into(),
@@ -1272,6 +1288,7 @@ mod tests {
                 output: None,
                 exit_code: None,
                 is_error: false,
+                duration: None,
             },
         ]));
         assert_eq!(
@@ -1326,6 +1343,7 @@ mod tests {
                     output: Some(vec![]),
                     exit_code: None,
                     is_error: false,
+                    duration: None,
                 };
                 2
             ];
@@ -1387,6 +1405,7 @@ mod tests {
                     output: Some(vec![]),
                     exit_code: None,
                     is_error: false,
+                    duration: None,
                 };
                 count
             ];
@@ -1394,7 +1413,7 @@ mod tests {
             assert_eq!(
                 parts
                     .iter()
-                    .filter(|part| matches!(part.body, Body::TitleRule))
+                    .filter(|part| matches!(part.body, Body::TitleRule(_)))
                     .count(),
                 if count == 1 { 0 } else { 2 }
             );
@@ -1428,6 +1447,7 @@ mod tests {
             }]),
             exit_code: None,
             is_error: false,
+            duration: None,
         }]));
         assert_eq!(
             texts(&parts, 9),
@@ -1460,6 +1480,7 @@ mod tests {
             }]),
             exit_code: None,
             is_error: true,
+            duration: None,
         }]));
         let lines = parts[1].lines(80, Style::default(), chrono::DateTime::UNIX_EPOCH);
         assert_eq!(

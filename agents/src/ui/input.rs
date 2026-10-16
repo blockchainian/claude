@@ -175,6 +175,7 @@ impl View {
                 }]),
                 exit_code: None,
                 is_error: false,
+                duration: None,
             }],
         }));
         self.viewport.borrow_mut().log_detail_scroll = 0;

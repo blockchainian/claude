@@ -494,6 +494,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         output: output.map(|text| vec![text_section("output", text)]),
         exit_code: None,
         is_error: false,
+        duration: None,
     }
 }
 
@@ -600,6 +601,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
             .as_i64()
             .filter(|code| item_type == "CommandExecution" && *code != 0),
         is_error: item["status"] == "failed" || item["result"]["isError"] == true,
+        duration: None,
     }
 }
 

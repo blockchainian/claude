@@ -19,7 +19,7 @@
  ──────────────────────────────────────────────────────────────────────────────────────────────────
                                             Denied Edit                                         10s
 
-                                                                                                  │
-                                                 ↓                                                │
-       Reason: The server-side auto mode classifier judged this action dangerous (it gave no      │
+                                                                                                   │
+                                                 ↓                                                 │
+       Reason: The server-side auto mode classifier judged this action dangerous (it gave no       │
  ? help  esc back  ↑/↓ move  enter open  n new

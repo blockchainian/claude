@@ -397,6 +397,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         output,
         exit_code: None,
         is_error: result.is_some_and(|result| result.error),
+        duration: None,
     }
 }
 
@@ -598,6 +599,7 @@ impl Log {
                 output: Some(output.into_iter().collect()),
                 exit_code: None,
                 is_error: false,
+                duration: None,
             });
         }
         true
@@ -707,6 +709,7 @@ impl Log {
         entry.event.body = format!("{call}{body}");
         let mut detail = tool_call(name, input, result);
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
+        detail.duration = result.map(|result| result.at - at);
         entry.event.calls.insert(0, detail);
         entry.background |= input["run_in_background"] == true;
         if entry.background {
@@ -846,6 +849,20 @@ pub(crate) mod tests {
             super::tool_call("SendMessage", &send["input"], None).title,
             format!("To {}", send["input"]["to"].as_str().unwrap())
         );
+    }
+
+    #[test]
+    fn calls_time_from_their_request_to_their_result() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-tool-calls.jsonl");
+        let events = super::tail(&path, 100).unwrap();
+        let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
+        let call = |id: &str| calls.iter().find(|call| call.id == id).unwrap();
+        assert_eq!(
+            call("toolu_01XU5dCe5eBxX8ccqC2DwN2G").duration,
+            Some(chrono::Duration::milliseconds(46_490))
+        );
+        assert_eq!(call("toolu_01Jj8h2kKJBp4jXGRdtZu6Ys").duration, None);
     }
 
     #[test]

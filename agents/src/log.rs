@@ -120,6 +120,8 @@ pub struct ToolCall {
     /// `None` while the call is running.
     pub output: Option<Vec<Section>>,
     pub is_error: bool,
+    /// How long a completed call in a merged event ran, from its request to its result.
+    pub duration: Option<chrono::Duration>,
 }
 
 /// One labelled part of a tool call's input or output, as the open log event draws it.
