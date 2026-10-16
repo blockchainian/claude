@@ -17,6 +17,173 @@ fn release_click(view: &mut View, button: MouseButton, x: u16, y: u16) -> Option
     view.handle_mouse(mouse(MouseEventKind::Up(button), x, y))
 }
 
+// Short sections cut from one recorded Bash call, preserving its line lengths and indentation.
+fn multiline_tool_view() -> (View, chrono::DateTime<Utc>, String, String) {
+    use crate::log::Section;
+    let (mut view, now) = real_log_view();
+    let mut event = view
+        .log
+        .iter()
+        .find(|event| {
+            event
+                .calls
+                .iter()
+                .any(|call| call.id == "toolu_01GnWk7yiKqPJ1tzHjouKcCx")
+        })
+        .unwrap()
+        .clone();
+    event
+        .calls
+        .retain(|call| call.id == "toolu_01GnWk7yiKqPJ1tzHjouKcCx");
+    let call = &mut event.calls[0];
+    let Section::Code { text, .. } = &mut call.input[0] else {
+        panic!("Bash command")
+    };
+    *text = text.lines().skip(1).take(2).collect::<Vec<_>>().join("\n");
+    let input = text.clone();
+    let Section::Text { text, .. } = &mut call.output.as_mut().unwrap()[0] else {
+        panic!("Bash output")
+    };
+    *text = text
+        .lines()
+        .skip_while(|line| !line.starts_with("Traceback"))
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let output = text.clone();
+    assert_eq!(input, "import json,sys\nlast=None");
+    assert!(output.starts_with("Traceback"));
+    view.select_log_event(Some(event));
+    (view, now, input, output)
+}
+
+fn detail_buffer(view: &View, width: u16, now: chrono::DateTime<Utc>) -> Buffer {
+    let area = Rect::new(2, 1, width, 40);
+    view.viewport.borrow_mut().log_detail = area;
+    let mut buf = Buffer::empty(Rect::new(0, 0, width + 4, 42));
+    view.render_log_detail(area, &mut buf, now);
+    buf
+}
+
+#[test]
+fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
+    for width in [80, 81, 120] {
+        let (view, now, input, output) = multiline_tool_view();
+        let buf = detail_buffer(&view, width, now);
+        let viewport = view.viewport.borrow();
+        let region = &viewport.log_text;
+        for text in [&input, &output] {
+            let source = region
+                .sources
+                .iter()
+                .find(|source| &*source.text == text)
+                .unwrap();
+            let rows: Vec<_> = region
+                .rows
+                .iter()
+                .filter(|row| row.segment == source.id)
+                .collect();
+            let block_width = text.lines().map(UnicodeWidthStr::width).max().unwrap() as u16;
+            let offset = (region.area.width - block_width) / 2;
+            assert!(offset > 0);
+            for (row, line) in rows.iter().zip(text.lines()) {
+                let drawn: String = (0..block_width)
+                    .map(|x| buf[(region.area.x + offset + x, row.y)].symbol())
+                    .collect();
+                assert_eq!(
+                    drawn.trim_end(),
+                    line,
+                    "each line shares the block's offset"
+                );
+                assert_eq!(row.cells.first().unwrap().0.start, offset);
+            }
+            assert_eq!(rows.len(), 2);
+        }
+        assert_eq!(
+            buf[(region.area.x + (width - 1) / 2, region.area.y + 2)].symbol(),
+            "↓"
+        );
+    }
+}
+
+#[test]
+fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
+    let (mut view, now, _, _) = multiline_tool_view();
+    let directory = tempfile::tempdir().unwrap();
+    // This filename is an actual output line from the recorded Bash call.
+    let path = directory.path().join("output/decks.txt");
+    std::fs::create_dir(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "").unwrap();
+    let mut event = view.log_selected.clone().unwrap();
+    let recorded = view
+        .log
+        .iter()
+        .flat_map(|event| &event.calls)
+        .find(|call| call.id == "toolu_01XU5dCe5eBxX8ccqC2DwN2G")
+        .unwrap();
+    event.calls[0].output = recorded.output.clone();
+    let crate::log::Section::Text { text, .. } = &mut event.calls[0].output.as_mut().unwrap()[0]
+    else {
+        panic!("Bash output")
+    };
+    *text = text.replacen("decks.txt", "output/decks.txt", 1);
+    view.rows[view.selected].cwd = directory.path().into();
+    view.select_log_event(Some(event));
+    view.log_detail_search.query.set_text("decks.txt");
+    let mut buf = detail_buffer(&view, 120, now);
+    let (rect, target) = view
+        .viewport
+        .borrow()
+        .log_links
+        .iter()
+        .find(|(_, target)| target == &path)
+        .unwrap()
+        .clone();
+    assert_eq!(target, path);
+    assert!(rect.x > view.viewport.borrow().log_text.area.x);
+    assert_eq!(buf[(rect.x, rect.y)].symbol(), "o");
+    assert!(
+        buf[(rect.x + 7, rect.y)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    view.underline_links(&mut buf);
+    assert!(buf[(rect.x, rect.y)].symbol().starts_with("\x1b[4:4m"));
+    assert!(!buf[(rect.x - 1, rect.y)].symbol().contains("\x1b["));
+    release_click(&mut view, MouseButton::Left, rect.x + 2, rect.y);
+    assert_eq!(
+        view.flush_pending_click(Instant::now() + std::time::Duration::from_secs(1)),
+        Some(Action::OpenPath(path))
+    );
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        rect.x + 8,
+        rect.y,
+    ));
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        rect.x + 12,
+        rect.y,
+    ));
+    let buf = detail_buffer(&view, 120, now);
+    assert!(
+        buf[(rect.x + 8, rect.y)]
+            .modifier
+            .contains(ratatui::style::Modifier::REVERSED)
+    );
+    assert_eq!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            rect.x + 12,
+            rect.y
+        )),
+        Some(Action::Copy {
+            text: "ecks".into(),
+            label: "Copied error message".into()
+        })
+    );
+}
+
 fn with_background() -> (View, chrono::DateTime<Utc>, tempfile::NamedTempFile) {
     use std::io::Write;
     let (mut view, now) = real_log_view();

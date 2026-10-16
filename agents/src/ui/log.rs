@@ -704,8 +704,20 @@ fn detail_layout(event: &Event, width: u16, cwd: &std::path::Path) -> DetailLayo
         .into_iter()
         .map(|part| {
             let markdown = part.markdown();
-            let lines = part.lines(usize::from(width), body_style);
-            let maps = part.maps(&lines);
+            let mut lines = part.lines(usize::from(width), body_style);
+            let mut maps = part.maps(&lines);
+            let block_width = lines.iter().map(Line::width).max().unwrap_or(0);
+            let padding = usize::from(width).saturating_sub(block_width) / 2;
+            if padding > 0 {
+                // Every row keeps its position within the part, including its source cell map.
+                for (line, cells) in lines.iter_mut().zip(&mut maps) {
+                    line.spans.insert(0, Span::raw(" ".repeat(padding)));
+                    for (range, _) in cells {
+                        range.start += padding as u16;
+                        range.end += padding as u16;
+                    }
+                }
+            }
             let links = if markdown || (!shows_calls(event) && is_prose(&event.kind)) {
                 let images = if shows_calls(event) {
                     &[][..]

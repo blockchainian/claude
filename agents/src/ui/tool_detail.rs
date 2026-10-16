@@ -19,7 +19,7 @@ enum Body {
     TitleRule,
     /// A section label, in the given style.
     Label(Style),
-    /// An input/output arrow at the first content column.
+    /// An input/output arrow without selectable source bytes.
     Arrow,
     /// The dim note that a call has no output yet.
     Running,
@@ -149,10 +149,7 @@ impl Part {
                 width,
             ),
             Body::Arrow => {
-                let mut row = " ".repeat(width);
-                if width > 0 {
-                    row.replace_range(0..1, "↓");
-                }
+                let row = if width > 0 { "↓" } else { "" };
                 vec![Line::styled(row, super::style::log_jump_style())]
             }
             Body::Running => vec![Line::from(Span::styled(
@@ -624,7 +621,7 @@ mod tests {
             [
                 &format!("{} Bash {}", "─".repeat(37), "─".repeat(37)),
                 "cargo test",
-                &format!("↓{}", " ".repeat(79)),
+                "↓",
                 "running 3 tests",
                 "...",
                 "",
@@ -722,7 +719,7 @@ mod tests {
             for part in parts.iter().filter(|part| matches!(part.body, Body::Arrow)) {
                 for width in 0..=40 {
                     let lines = part.lines(width, Style::default().dim());
-                    assert_eq!(lines[0].width(), width);
+                    assert_eq!(lines[0].width(), usize::from(width > 0));
                     assert_eq!(lines[0].to_string().find('↓'), (width > 0).then_some(0));
                     assert_eq!(lines[0].style, super::super::style::log_jump_style());
                     assert!(part.maps(&lines)[0].is_empty());
@@ -755,7 +752,7 @@ mod tests {
                 "+中文字符",
                 "串很长",
                 "-short",
-                "↓        ",
+                "↓",
                 "let value",
                 " = \"abcde",
                 "fghij\";",

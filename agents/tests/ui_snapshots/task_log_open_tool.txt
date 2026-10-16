@@ -35,14 +35,14 @@
                                              run tests                                          35s
 
  ────────────────────────────────────────────── Bash ──────────────────────────────────────────────
- cargo test
- ↓
- running 3 tests
- ...
+                                             cargo test
+                                                 ↓
+                                          running 3 tests
+                                          ...
 
  ────────────────────────────────────────────── Read ──────────────────────────────────────────────
- agents/src/log.rs:1-40
- running…
+                                       agents/src/log.rs:1-40
+                                              running…
 
 
  ? help  esc back  ↑/↓ move  enter open  n new
