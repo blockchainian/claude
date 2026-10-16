@@ -103,6 +103,14 @@ fn terminal_color(color: syntect::highlighting::Color) -> Option<Color> {
     }
 }
 
+/// Extensions the bundled syntaxes don't list, with one of the same language that they do.
+const EXTENSION_ALIASES: [(&str, &str); 4] = [
+    ("mjs", "js"),
+    ("cjs", "js"),
+    ("jsx", "tsx"),
+    ("jsonc", "json"),
+];
+
 /// The syntax for a language token such as "bash" or a file extension such as "rs".
 fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
     let set = syntax_set();
@@ -110,6 +118,10 @@ fn find_syntax(lang: &str) -> Option<&'static SyntaxReference> {
     if lang.is_empty() {
         return None;
     }
+    let lang = EXTENSION_ALIASES
+        .iter()
+        .find(|(alias, _)| alias.eq_ignore_ascii_case(lang))
+        .map_or(lang, |(_, extension)| extension);
     set.find_syntax_by_token(lang)
         .or_else(|| set.find_syntax_by_extension(lang))
         .or_else(|| {
@@ -212,6 +224,14 @@ mod tests {
         assert!(lines[0].spans.len() > 1);
         assert!(lines[0].spans.iter().all(|span| span.style.fg.is_some()));
         assert_eq!(text(&code_lines("echo hi", "bash")), ["echo hi"]);
+    }
+
+    #[test]
+    fn extension_aliases_find_their_language() {
+        for lang in ["mjs", "cjs", "jsx", "jsonc"] {
+            let lines = code_lines("const x = { \"a\": 1 };", lang);
+            assert!(lines[0].spans.len() > 1, "{lang} is not highlighted");
+        }
     }
 
     #[test]
