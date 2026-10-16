@@ -13,6 +13,9 @@ use std::collections::BTreeMap;
 /// Dot rows one cell holds.
 const CELL_DOTS: u16 = 4;
 
+/// The percentile of bin totals that fills the chart.
+const TOP_PERCENTILE: usize = 95;
+
 /// Bins one cell holds, one per dot column.
 const CELL_BINS: i64 = 2;
 
@@ -49,7 +52,7 @@ impl View {
         } else {
             bin_of(now)
         });
-        let max = bins.values().map(total).max().unwrap_or(0);
+        let max = chart_top(bins.values().map(total).collect());
         let height = area.height * CELL_DOTS;
         let dots = |bin: i64| {
             bins.get(&bin)
@@ -107,13 +110,23 @@ fn cell_right(bin: i64) -> i64 {
     bin - bin.rem_euclid(CELL_BINS) + CELL_BINS - 1
 }
 
+/// The tokens that fill the chart: the 95th percentile of the bins' totals, so a few outsized bins
+/// fill it and cut off rather than flatten the rest.
+fn chart_top(mut totals: Vec<u64>) -> u64 {
+    if totals.is_empty() {
+        return 0;
+    }
+    let rank = (totals.len() * TOP_PERCENTILE).div_ceil(100) - 1;
+    *totals.select_nth_unstable(rank).1
+}
+
 /// Dots `tokens` rises to in a chart `height` dots tall whose top is `max`; any usage shows one.
 fn dot_height(tokens: u64, max: u64, height: u16) -> u16 {
     if tokens == 0 || max == 0 {
         return 0;
     }
     let dots = (u128::from(tokens) * u128::from(height)).div_ceil(u128::from(max));
-    u16::try_from(dots).unwrap_or(height).min(height)
+    u16::try_from(dots).unwrap_or(height).clamp(1, height)
 }
 
 #[cfg(test)]
@@ -121,11 +134,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn heights_scale_linearly_and_never_hide_usage() {
+    fn heights_scale_linearly_cut_off_at_the_top_and_never_hide_usage() {
         assert_eq!(dot_height(0, 100, 40), 0);
         assert_eq!(dot_height(1, 100, 40), 1);
         assert_eq!(dot_height(50, 100, 40), 20);
         assert_eq!(dot_height(100, 100, 40), 40);
+        assert_eq!(dot_height(1_000, 100, 40), 40);
+    }
+
+    #[test]
+    fn the_top_leaves_out_the_busiest_five_percent() {
+        let mut totals: Vec<u64> = (1..=100).collect();
+        totals[99] = 1_000_000;
+        assert_eq!(chart_top(totals), 95);
+        assert_eq!(chart_top(vec![7]), 7);
+        assert_eq!(chart_top(Vec::new()), 0);
     }
 
     #[test]
