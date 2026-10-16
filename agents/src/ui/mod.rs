@@ -372,7 +372,27 @@ impl View {
     }
 
     pub(crate) fn handle_paste(&mut self, text: &str) {
-        self.input_box.paste(text);
+        if self.confirm_dialog.is_some() || self.help || self.picker.is_some() {
+            return;
+        }
+        if let Some(editor) = &mut self.branch_editor {
+            editor.editor.insert(text);
+        } else if self.input_box.focused {
+            self.input_box.paste(text);
+        } else if self.rename_target.is_some() {
+            self.rename.insert(text);
+        } else if self.log_detail_search.editing {
+            self.log_detail_search.query.insert(text);
+            self.jump_detail_match();
+        } else if self.log_search.editing {
+            self.log_search.query.insert(text);
+            self.rematch_log();
+            self.show_newest_log();
+        } else if self.searching {
+            self.search.insert(text);
+            let selected = self.selectable_indices().first().copied().unwrap_or(usize::MAX);
+            self.select(selected);
+        }
     }
 
     fn input_label(&self) -> String {

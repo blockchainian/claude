@@ -200,3 +200,44 @@ fn input_completion_keeps_text_edited_during_the_send() {
         prompt_box::SendState::Failed("attach timed out".into())
     );
 }
+
+#[test]
+fn paste_routes_to_focused_text_field() {
+    let pasted = include_str!("../../tests/fixtures/claude-peer-message.txt");
+    for field in 0..6 {
+        let (mut view, _) = log_fixture();
+        match field {
+            0 => view.input_box.focused = true,
+            1 => {
+                view.searching = true;
+            }
+            2 => view.rename_target = view.selected_id().cloned(),
+            3 => {
+                view.prepare_log_search();
+                view.log_search.editing = true;
+            }
+            4 => {
+                view.set_log_open(Some(view.log[0].clone()));
+                view.log_detail_search.editing = true;
+            }
+            5 => {
+                view.branch_editor = Some(BranchEditor {
+                    draft: 1,
+                    editor: crate::ui::line_edit::LineEdit::default(),
+                })
+            }
+            _ => unreachable!(),
+        }
+        view.handle_paste(pasted);
+        let actual = match field {
+            0 => view.input_box.editor.text(),
+            1 => view.search.text(),
+            2 => view.rename.text(),
+            3 => view.log_search.query.text(),
+            4 => view.log_detail_search.query.text(),
+            5 => view.branch_editor.as_ref().unwrap().editor.text(),
+            _ => unreachable!(),
+        };
+        assert_eq!(actual, pasted, "focused field {field}");
+    }
+}
