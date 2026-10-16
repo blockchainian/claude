@@ -8,7 +8,6 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Highlighter, Theme, ThemeSet};
 use syntect::parsing::{Scope, SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
-use two_face::theme::EmbeddedThemeName;
 
 /// Texts larger than this, or with more lines or a longer line than the limits below, are
 /// drawn plain: highlighting them would stall the frame.
@@ -32,13 +31,15 @@ fn syntax_set() -> &'static SyntaxSet {
     SYNTAX_SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
+/// The `light` and `dark` themes in `themes/`, built from GitHub's themes by `themes/build.py`.
 fn bundled_theme(light_background: bool) -> Theme {
-    let name = if light_background {
-        EmbeddedThemeName::InspiredGithub
+    let source: &[u8] = if light_background {
+        include_bytes!("../../themes/light.tmTheme")
     } else {
-        EmbeddedThemeName::Base16OceanDark
+        include_bytes!("../../themes/dark.tmTheme")
     };
-    two_face::theme::extra().get(name).clone()
+    ThemeSet::load_from_reader(&mut std::io::Cursor::new(source))
+        .expect("bundled theme is a valid .tmTheme")
 }
 
 /// Highlights with the `.tmTheme` at `path` when given, else with the bundled theme for the
@@ -229,15 +230,9 @@ mod tests {
     fn theme_follows_the_background_unless_a_file_is_given() {
         let background = |theme: &Theme| theme.settings.background.map(|c| (c.r, c.g, c.b));
         let (light, result) = theme_for(true, None);
-        assert_eq!(
-            (background(&light), result),
-            (Some((0xff, 0xff, 0xff)), Ok(()))
-        );
+        assert_eq!((light.name.as_deref(), result), (Some("light"), Ok(())));
         let (dark, result) = theme_for(false, None);
-        assert_eq!(
-            (background(&dark), result),
-            (Some((0x2b, 0x30, 0x3b)), Ok(()))
-        );
+        assert_eq!((dark.name.as_deref(), result), (Some("dark"), Ok(())));
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("custom.tmTheme");
@@ -258,7 +253,7 @@ mod tests {
         }
         let missing = dir.path().join("missing.tmTheme");
         let (theme, result) = theme_for(true, Some(&missing));
-        assert_eq!(background(&theme), Some((0xff, 0xff, 0xff)));
+        assert_eq!(theme.name.as_deref(), Some("light"));
         assert!(result.is_err());
     }
 

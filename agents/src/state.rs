@@ -14,9 +14,9 @@ pub struct Preferences {
     pub pinned: Vec<SessionKey>,
     /// A `.tmTheme` file whose accents color the session titles.
     pub theme: Option<PathBuf>,
-    /// A `.tmTheme` file that highlights code on a light background instead of `theme`.
+    /// A `.tmTheme` file that highlights code on a light background instead of the bundled `light`.
     pub light_theme: Option<PathBuf>,
-    /// A `.tmTheme` file that highlights code on a dark background instead of `theme`.
+    /// A `.tmTheme` file that highlights code on a dark background instead of the bundled `dark`.
     pub dark_theme: Option<PathBuf>,
 }
 

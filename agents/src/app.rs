@@ -307,15 +307,13 @@ impl App {
         }
     }
 
-    /// The preference `.tmTheme` that highlights code on the given background.
+    /// The preference `.tmTheme` that highlights code on the given background, if any.
     fn highlight_theme(&self, light: bool) -> Option<&std::path::Path> {
-        let preferences = &self.preferences;
-        let themed = if light {
-            &preferences.light_theme
+        if light {
+            self.preferences.light_theme.as_deref()
         } else {
-            &preferences.dark_theme
-        };
-        themed.as_deref().or(preferences.theme.as_deref())
+            self.preferences.dark_theme.as_deref()
+        }
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
