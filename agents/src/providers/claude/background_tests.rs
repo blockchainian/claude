@@ -1,32 +1,75 @@
 use super::*;
 use chrono::Utc;
-use std::cell::Cell;
 use std::os::unix::fs::symlink;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 const RECORDS: &str = include_str!("../../../tests/fixtures/background/records.jsonl");
 
-struct Observed {
-    held: HashSet<PathBuf>,
-    alive: HashSet<u32>,
-    scans: Cell<usize>,
+struct HoldingProcess {
+    child: std::process::Child,
+    outputs: [PathBuf; 2],
 }
-impl Liveness for Observed {
-    fn held_outputs(&self) -> io::Result<HashSet<PathBuf>> {
-        self.scans.set(self.scans.get() + 1);
-        Ok(self.held.clone())
+
+impl HoldingProcess {
+    fn start(stdout: &Path, stderr: &Path) -> Self {
+        let outputs = [
+            stdout.canonicalize().unwrap(),
+            stderr.canonicalize().unwrap(),
+        ];
+        let process = Self {
+            child: Command::new("sleep")
+                .arg("300")
+                .stdout(fs::OpenOptions::new().append(true).open(stdout).unwrap())
+                .stderr(fs::OpenOptions::new().append(true).open(stderr).unwrap())
+                .spawn()
+                .unwrap(),
+            outputs,
+        };
+        wait_for("child process to hold its output descriptors", || {
+            let held = Processes.held_outputs().unwrap();
+            Processes.alive(process.child.id()).unwrap()
+                && process.outputs.iter().all(|path| held.contains(path))
+        });
+        process
     }
-    fn alive(&self, pid: u32) -> io::Result<bool> {
-        Ok(self.alive.contains(&pid))
+
+    fn stop(&mut self) {
+        self.child.kill().unwrap();
+        self.child.wait().unwrap();
+        wait_for("reaped child to release its output descriptors", || {
+            let held = Processes.held_outputs().unwrap();
+            !Processes.alive(self.child.id()).unwrap()
+                && self.outputs.iter().all(|path| !held.contains(path))
+        });
+    }
+}
+
+impl Drop for HoldingProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn wait_for(description: &str, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {description}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
 #[test]
 fn files_control_liveness_and_descriptions_survive_transcript_changes() {
     let dir = tempfile::tempdir().unwrap();
-    let mut tasks = Tasks::new(dir.path().join("tasks-root"));
-    let config = dir.path().join("config");
-    let transcript = dir.path().join("session.jsonl");
+    let root = dir.path().canonicalize().unwrap();
+    let mut tasks = Tasks::new(root.join("tasks-root"));
+    let config = root.join("config");
+    let transcript = root.join("session.jsonl");
     let records: Vec<serde_json::Value> = RECORDS
         .lines()
         .map(|s| serde_json::from_str(s).unwrap())
@@ -79,20 +122,15 @@ fn files_control_liveness_and_descriptions_survive_transcript_changes() {
         ),
     )
     .unwrap();
-    let mut observed = Observed {
-        held: [running.clone(), foreground].into(),
-        alive: HashSet::new(),
-        scans: Cell::new(0),
-    };
-    let held = std::mem::take(&mut observed.held);
-    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    assert!(!Processes.held_outputs().unwrap().contains(&running));
+    tasks.refresh(&config, &mut sessions, &Processes).unwrap();
     assert!(
         sessions[0].background.is_empty(),
         "unheld real background output is an orphan"
     );
     assert_eq!(tasks.transcript_bytes, 0);
-    observed.held = held;
-    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    let mut writer = HoldingProcess::start(&running, &foreground);
+    tasks.refresh(&config, &mut sessions, &Processes).unwrap();
     assert_eq!(sessions[0].background.len(), 1);
     assert_eq!(sessions[0].background[0].output, running);
     let first = sessions[0].background[0].clone();
@@ -100,48 +138,47 @@ fn files_control_liveness_and_descriptions_survive_transcript_changes() {
     assert!(cost > 0);
     // Even a stamp change must not re-read the description of a matched task.
     fs::write(&transcript, format!("{RECORDS}{quiet}{quiet}")).unwrap();
-    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    tasks.refresh(&config, &mut sessions, &Processes).unwrap();
     assert_eq!(sessions[0].background, [first]);
     // Neither matched tasks nor foreground outputs are scanned again on a stamp change.
     let after_change = tasks.transcript_bytes;
     assert_eq!(after_change, cost);
-    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    tasks.refresh(&config, &mut sessions, &Processes).unwrap();
     assert_eq!(tasks.transcript_bytes, after_change);
-    assert_eq!(observed.scans.get(), 4);
     let tails = tasks.output_bytes;
-    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    tasks.refresh(&config, &mut sessions, &Processes).unwrap();
     assert_eq!(tasks.output_bytes, tails);
     fs::write(
         &running,
         include_bytes!("../../../tests/fixtures/background/exited.output"),
     )
     .unwrap();
-    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    tasks.refresh(&config, &mut sessions, &Processes).unwrap();
     assert!(sessions[0].background.is_empty());
     // A finished file never becomes a candidate again, even after replacement.
     fs::write(&running, b"").unwrap();
-    tasks.refresh(&config, &mut sessions, &observed).unwrap();
+    tasks.refresh(&config, &mut sessions, &Processes).unwrap();
     assert!(sessions[0].background.is_empty());
+    writer.stop();
 }
 
 #[test]
 fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
     let dir = tempfile::tempdir().unwrap();
-    let mut tasks = Tasks::new(dir.path().join("tasks"));
+    let root = dir.path().canonicalize().unwrap();
+    let mut tasks = Tasks::new(root.join("tasks"));
     let mut adopt: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/background/adopt.json"
     ))
     .unwrap();
-    let pid = adopt["shells"][0]["pid"].as_u64().unwrap() as u32;
-    let output = dir.path().join("adopted.output");
+    let output = root.join("adopted.output");
     fs::write(&output, b"").unwrap();
+    let mut writer = HoldingProcess::start(&output, &output);
+    adopt["shells"][0]["pid"] = writer.child.id().into();
     adopt["shells"][0]["outputPath"] = output.to_str().unwrap().into();
-    fs::create_dir_all(dir.path().join("jobs/50517e58")).unwrap();
-    fs::write(
-        dir.path().join("jobs/50517e58/adopt.json"),
-        adopt.to_string(),
-    )
-    .unwrap();
+    fs::create_dir_all(root.join("jobs/50517e58")).unwrap();
+    let adoption = root.join("jobs/50517e58/adopt.json");
+    fs::write(&adoption, adopt.to_string()).unwrap();
     let mut session = super::super::session(
         "50517e58-041e-49c8-95e0-a41879199991".into(),
         transcript::Summary::default(),
@@ -149,7 +186,7 @@ fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
         Utc::now(),
     );
     session.process = Some(crate::model::Process {
-        pid: 1,
+        pid: std::process::id(),
         label: Some("bg".into()),
         started_at: None,
     });
@@ -158,39 +195,24 @@ fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
         needs: None,
     });
     let mut sessions = [session];
-    let observed = Observed {
-        held: HashSet::new(),
-        alive: [pid].into(),
-        scans: Cell::new(0),
-    };
-    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
     assert_eq!(sessions[0].background.len(), 1);
     assert_eq!(
         sessions[0].background[0].description,
         adopt["shells"][0]["description"]
     );
-    assert_eq!(observed.scans.get(), 0);
-    let dead = Observed {
-        alive: HashSet::new(),
-        ..observed
-    };
-    tasks.refresh(dir.path(), &mut sessions, &dead).unwrap();
+    writer.stop();
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
     assert!(sessions[0].background.is_empty());
+    let writer = HoldingProcess::start(&output, &output);
+    adopt["shells"][0]["pid"] = writer.child.id().into();
+    fs::write(&adoption, adopt.to_string()).unwrap();
     fs::write(
-        output,
+        &output,
         include_bytes!("../../../tests/fixtures/background/detached.output"),
     )
     .unwrap();
-    tasks
-        .refresh(
-            dir.path(),
-            &mut sessions,
-            &Observed {
-                alive: [pid].into(),
-                ..dead
-            },
-        )
-        .unwrap();
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
     assert!(sessions[0].background.is_empty());
 }
 
@@ -204,8 +226,9 @@ fn slug_matches_claudes_utf16_replacement_and_long_path_hash() {
 #[test]
 fn notifications_hide_cached_tasks_and_background_results_retry_foreground_files() {
     let dir = tempfile::tempdir().unwrap();
-    let mut tasks = Tasks::new(dir.path().join("root"));
-    let path = dir.path().join("session.jsonl");
+    let root = dir.path().canonicalize().unwrap();
+    let mut tasks = Tasks::new(root.join("root"));
+    let path = root.join("session.jsonl");
     let mut sessions = [super::super::session(
         "session".into(),
         transcript::Summary::default(),
@@ -225,29 +248,26 @@ fn notifications_hide_cached_tasks_and_background_results_retry_foreground_files
     fs::write(&output, b"").unwrap();
     // Before the background tool result arrives, this is a foreground shell.
     fs::write(&path, format!("{}\n", records[0])).unwrap();
-    let observed = Observed {
-        held: [output].into(),
-        alive: HashSet::new(),
-        scans: Cell::new(0),
-    };
-    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    let _writer = HoldingProcess::start(&output, &output);
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
     assert!(sessions[0].background.is_empty());
     fs::write(&path, RECORDS).unwrap();
     let summary = transcript::read(&path, fs::metadata(&path).unwrap().len()).unwrap();
     tasks.observe("session", &summary);
-    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
     assert_eq!(sessions[0].background.len(), 1);
     let mut completed = transcript::Summary::default();
     completed.completed_background.insert(id.to_owned());
     tasks.observe("session", &completed);
-    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
     assert!(sessions[0].background.is_empty());
 }
 
 #[test]
 fn symlink_task_outputs_are_not_candidates() {
     let dir = tempfile::tempdir().unwrap();
-    let mut tasks = Tasks::new(dir.path().join("root"));
+    let root = dir.path().canonicalize().unwrap();
+    let mut tasks = Tasks::new(root.join("root"));
     let mut sessions = [super::super::session(
         "session".into(),
         transcript::Summary::default(),
@@ -256,23 +276,23 @@ fn symlink_task_outputs_are_not_candidates() {
     )];
     let directory = tasks.directory(&sessions[0]);
     fs::create_dir_all(&directory).unwrap();
-    let target = dir.path().join("subagent.jsonl");
-    fs::write(&target, b"").unwrap();
+    let target = root.join("subagent.jsonl");
+    fs::write(
+        &target,
+        include_bytes!("../../../tests/fixtures/subagent.jsonl"),
+    )
+    .unwrap();
     let link = directory.join("agent.output");
-    symlink(target, &link).unwrap();
-    let observed = Observed {
-        held: [link].into(),
-        alive: HashSet::new(),
-        scans: Cell::new(0),
-    };
-    tasks.refresh(dir.path(), &mut sessions, &observed).unwrap();
+    symlink(&target, &link).unwrap();
+    let _writer = HoldingProcess::start(&link, &link);
+    tasks.refresh(&root, &mut sessions, &Processes).unwrap();
     assert!(sessions[0].background.is_empty());
-    assert_eq!(observed.scans.get(), 0);
+    assert_eq!(tasks.output_bytes, 0);
 }
 
-/// Explicit integration probe; ordinary unit tests use injected observations.
+/// Explicit integration probe of descriptor liveness and refresh cost.
 #[test]
-#[ignore = "starts a real sleep and invokes lsof/kill; run explicitly"]
+#[ignore = "starts a real sleep and reports refresh timings; run explicitly"]
 fn real_sleep_output_liveness_and_refresh_cost() {
     let dir = tempfile::tempdir().unwrap();
     let mut tasks = Tasks::new(fs::canonicalize(dir.path()).unwrap().join("root"));
