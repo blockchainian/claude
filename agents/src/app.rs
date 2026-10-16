@@ -227,70 +227,86 @@ impl App {
                 self.view.tick_text_selection();
                 selection_tick = Instant::now();
             }
-            let action = self.view.flush_pending_click(Instant::now());
-            if self.handle_action(action) {
-                return Ok(());
-            }
             self.view.expire_messages(Instant::now());
             if schedule.due(Instant::now()) {
                 self.refresh();
                 schedule.refreshed(Instant::now());
             }
             self.view.set_cell_aspect(cell_aspect());
-            terminal.draw(|frame| {
-                let area = frame.area();
-                self.refresh_log(self.view.log_event_count(area));
-                self.refresh_usage();
-                self.refresh_activity(area.width);
-                self.view.render(area, frame.buffer_mut());
-                self.view.underline_links(frame.buffer_mut());
-                if let Some((x, y)) = self.view.cursor_pos(area) {
-                    frame.set_cursor_position((x, y));
-                }
-            })?;
-            // The hidden cursor otherwise rests wherever the last repainted cell was, and a
-            // terminal's cursor-line guide follows it there; park it on the selected row's marker.
-            if self.view.cursor_pos(terminal.get_frame().area()).is_none()
-                && let Some((x, y)) = self.view.marker_pos()
-            {
-                terminal.set_cursor_position((x, y))?;
-            }
-            let timeout = schedule.redraw_timeout(Instant::now(), self.view.has_background());
-            let timeout = self
-                .view
-                .log_redraw_in(chrono::Utc::now())
-                .map_or(timeout, |log| timeout.min(log));
-            let timeout = self
-                .view
-                .expire_messages(Instant::now())
-                .map_or(timeout, |message| timeout.min(message));
-            let timeout = self
-                .view
-                .pending_click_in(Instant::now())
-                .map_or(timeout, |click| timeout.min(click));
-            let timeout = self
-                .view
-                .timeline_redraw_in(chrono::Utc::now())
-                .map_or(timeout, |usage| timeout.min(usage));
-            let timeout =
-                crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
-            let timeout = if self.view.text_selection_dragging() {
-                timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
-            } else {
-                timeout
-            };
-            match self.receiver.recv_timeout(timeout) {
-                Ok(input) => {
-                    if self.handle_inputs(input, &mut watcher, &mut schedule)? {
-                        return Ok(());
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(io::Error::other("event readers disconnected"));
-                }
+            self.draw(terminal)?;
+            if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
+                return Ok(());
             }
         }
+    }
+
+    fn draw<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> Result<(), B::Error> {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            self.refresh_log(self.view.log_event_count(area));
+            self.refresh_usage();
+            self.refresh_activity(area.width);
+            self.view.render(area, frame.buffer_mut());
+            self.view.underline_links(frame.buffer_mut());
+            if let Some((x, y)) = self.view.cursor_pos(area) {
+                frame.set_cursor_position((x, y));
+            }
+        })?;
+        // The hidden cursor otherwise rests wherever the last repainted cell was, and a
+        // terminal's cursor-line guide follows it there; park it on the selected row's marker.
+        if self.view.cursor_pos(terminal.get_frame().area()).is_none()
+            && let Some((x, y)) = self.view.marker_pos()
+        {
+            terminal.set_cursor_position((x, y))?;
+        }
+        Ok(())
+    }
+
+    fn wait_for_input(
+        &mut self,
+        watcher: &mut Option<notify::RecommendedWatcher>,
+        schedule: &mut RefreshSchedule,
+        selection_tick: Instant,
+    ) -> io::Result<bool> {
+        let timeout = schedule.redraw_timeout(Instant::now(), self.view.has_background());
+        let timeout = self
+            .view
+            .log_redraw_in(chrono::Utc::now())
+            .map_or(timeout, |log| timeout.min(log));
+        let timeout = self
+            .view
+            .expire_messages(Instant::now())
+            .map_or(timeout, |message| timeout.min(message));
+        let timeout = self
+            .view
+            .pending_click_in(Instant::now())
+            .map_or(timeout, |click| timeout.min(click));
+        let timeout = self
+            .view
+            .timeline_redraw_in(chrono::Utc::now())
+            .map_or(timeout, |usage| timeout.min(usage));
+        let timeout = crate::ui::commits::redraw_in().map_or(timeout, |links| timeout.min(links));
+        let timeout = if self.view.text_selection_dragging() {
+            timeout.min(Duration::from_millis(50).saturating_sub(selection_tick.elapsed()))
+        } else {
+            timeout
+        };
+        match self.receiver.recv_timeout(timeout) {
+            Ok(input) => {
+                if self.handle_inputs(input, watcher, schedule)? {
+                    return Ok(true);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(io::Error::other("event readers disconnected"));
+            }
+        }
+        let action = self.view.flush_pending_click(Instant::now());
+        Ok(self.handle_action(action))
     }
 
     /// Handles `first` and every input already queued behind it, so a burst of wheel reports
@@ -1008,36 +1024,13 @@ fn cell_aspect() -> Option<f64> {
 mod input_tests;
 
 #[cfg(test)]
-mod draft_tests {
-    use super::*;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+#[path = "app_ui_tests.rs"]
+mod ui_tests;
 
-    #[test]
-    fn plain_directory_draft_keeps_cwd_and_accepts_prompt() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            Hub::new(vec![Box::new(
-                crate::providers::claude::ClaudeProvider::new(directory.path().to_owned()),
-            )]),
-            directory.path().to_owned(),
-        );
-        app.new_draft(directory.path().to_owned());
-        let area = ratatui::layout::Rect::new(0, 0, 120, 24);
-        let mut buffer = ratatui::buffer::Buffer::empty(area);
-        app.view.render(area, &mut buffer);
-        let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
-        assert!(text.contains("New task"), "{text}");
-        app.view.handle_paste("plain-directory prompt");
-        let action = app
-            .view
-            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let Some(Action::CreateTask { request, .. }) = action else {
-            panic!("draft did not submit: {action:?}");
-        };
-        assert_eq!(
-            request.cwd,
-            std::fs::canonicalize(directory.path()).unwrap()
-        );
-        assert_eq!(request.prompt, "plain-directory prompt");
-    }
-}
+#[cfg(test)]
+#[path = "app_live_tests.rs"]
+pub(crate) mod live_tests;
+
+#[cfg(test)]
+#[path = "app_loop_tests.rs"]
+mod loop_tests;

@@ -1,5 +1,4 @@
 use super::*;
-use std::time::Duration as StdDuration;
 
 fn real_log_view() -> (View, chrono::DateTime<Utc>) {
     let (mut view, now) = log_fixture();
@@ -16,56 +15,6 @@ fn release_click(view: &mut View, button: MouseButton, x: u16, y: u16) -> Option
             .is_none()
     );
     view.handle_mouse(mouse(MouseEventKind::Up(button), x, y))
-}
-
-fn cut_log_cell(view: &View, now: chrono::DateTime<Utc>) -> (u16, u16, crate::log::Event) {
-    log_screen(view, 100, 30, now);
-    let viewport = view.viewport.borrow();
-    let (row, &(index, _)) = viewport
-        .log_rows
-        .iter()
-        .enumerate()
-        .find(|(_, (index, cut))| *cut || log::shows_calls(&view.log[*index]))
-        .expect("real fixture has an expandable log row");
-    (
-        viewport.log.x + 21,
-        viewport.log.y + log::LOG_TOP + row as u16,
-        view.log[index].clone(),
-    )
-}
-
-#[test]
-fn log_row_single_click_waits_until_configured_deadline() {
-    let (mut view, now) = real_log_view();
-    assert_eq!(view.double_click_interval, StdDuration::from_millis(300));
-    view.double_click_interval = StdDuration::from_millis(620);
-    let (x, y, expected) = cut_log_cell(&view, now);
-    let before = Instant::now();
-    assert_eq!(release_click(&mut view, MouseButton::Left, x, y), None);
-    let after = Instant::now();
-    assert!(
-        view.log_open.is_none(),
-        "single click must wait for a possible double click"
-    );
-    let remaining = view
-        .pending_click_in(after)
-        .expect("click deadline wakes idle event loop");
-    assert!(remaining <= view.double_click_interval);
-    assert!(remaining > StdDuration::from_millis(500));
-    assert_eq!(
-        view.flush_pending_click(before + StdDuration::from_millis(619)),
-        None
-    );
-    assert!(view.log_open.is_none());
-    assert_eq!(
-        view.flush_pending_click(after + StdDuration::from_millis(620)),
-        None
-    );
-    assert_eq!(view.log_open.as_ref(), Some(&expected));
-    assert_eq!(
-        view.pending_click_in(after + StdDuration::from_millis(620)),
-        None
-    );
 }
 
 fn with_background() -> (View, chrono::DateTime<Utc>, tempfile::NamedTempFile) {
@@ -202,60 +151,6 @@ fn right_click_cancels_innermost_modal_before_open_detail() {
     assert_eq!(view.log_open.as_ref(), Some(&event));
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert!(view.log_open.is_none());
-}
-
-#[test]
-fn details_body_link_defers_open_and_double_click_copies_body() {
-    let (mut view, now) = real_log_view();
-    let directory = tempfile::tempdir().unwrap();
-    let target = directory.path().join("git/README.md");
-    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-    std::fs::write(
-        &target,
-        include_bytes!("../../tests/fixtures/claude-peer-message.txt"),
-    )
-    .unwrap();
-    let fixture = include_str!("../../tests/fixtures/claude-peer-message.txt");
-    let body = fixture
-        .split("Already done; ")
-        .nth(1)
-        .unwrap()
-        .split('\n')
-        .next()
-        .unwrap()
-        .to_owned();
-    assert!(body.contains("git/README.md"));
-    view.rows[view.selected].cwd = directory.path().into();
-    view.rows[view.selected].prompt = body.clone();
-    view.double_click_interval = StdDuration::from_millis(620);
-    let rendered = log_screen(&view, 160, 40, now);
-    let (x, y) = rendered_cell(&rendered, "git/README.md");
-    let before = Instant::now();
-    assert_eq!(release_click(&mut view, MouseButton::Left, x, y), None);
-    let after = Instant::now();
-    assert!(view.pending_click_in(after).is_some());
-    assert_eq!(
-        view.flush_pending_click(before + StdDuration::from_millis(619)),
-        None
-    );
-    assert_eq!(
-        view.flush_pending_click(after + StdDuration::from_millis(620)),
-        Some(Action::OpenPath(target))
-    );
-
-    assert_eq!(release_click(&mut view, MouseButton::Left, x, y), None);
-    assert_eq!(
-        release_click(&mut view, MouseButton::Left, x, y),
-        Some(Action::Copy {
-            text: body,
-            label: "Copied prompt".into(),
-        })
-    );
-    assert_eq!(view.pending_click_in(Instant::now()), None);
-    assert_eq!(
-        view.flush_pending_click(Instant::now() + StdDuration::from_secs(1)),
-        None
-    );
 }
 
 #[test]

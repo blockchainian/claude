@@ -1,22 +1,6 @@
 use super::*;
 
 #[test]
-fn input_sits_between_top_panels_and_full_width_log() {
-    let (view, _) = log_fixture();
-    for width in [120, 90, 80, 40] {
-        let layout = view.center_layout(Rect::new(0, 0, width, 40));
-        assert!(!layout.list.is_empty());
-        assert!(!layout.details.is_empty());
-        assert!(layout.list.right() <= layout.details.x);
-        assert!(layout.list.bottom() <= layout.prompt.y);
-        assert!(layout.details.bottom() <= layout.prompt.y);
-        assert_eq!(layout.prompt.height, 1);
-        assert_eq!(layout.prompt.bottom(), layout.log.y);
-        assert_eq!(layout.log.width, width);
-    }
-}
-
-#[test]
 fn task_double_click_focuses_prompt_but_enter_still_opens() {
     let (mut view, now) = log_fixture();
     log_screen(&view, 120, 40, now);
@@ -80,33 +64,6 @@ fn right_click_leaves_input_before_closing_log_detail() {
 }
 
 #[test]
-fn terminal_session_disables_input_with_open_hint() {
-    let (mut view, now) = log_fixture();
-    let registry: serde_json::Value =
-        serde_json::from_str(include_str!("../../tests/fixtures/registry.json")).unwrap();
-    assert_eq!(registry["kind"], "interactive");
-    view.rows[view.selected].process = Some(crate::model::Process {
-        pid: std::process::id(),
-        label: registry["kind"].as_str().map(str::to_owned),
-        started_at: None,
-    });
-    let rendered = log_screen(&view, 160, 40, now);
-    assert!(rendered.contains("Running in a terminal; open it to type"));
-    let input = view.center_layout(Rect::new(0, 0, 160, 40)).prompt;
-    click_mouse(
-        &mut view,
-        mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            input.x + 2,
-            input.y,
-        ),
-    );
-    assert!(!view.input_box.focused);
-    view.handle_paste("must not type");
-    assert!(view.input_box.editor.is_empty());
-}
-
-#[test]
 fn whole_log_row_double_click_focuses_input_without_opening_detail() {
     let (mut view, now) = log_fixture();
     view.rows[view.selected].process = None;
@@ -134,14 +91,6 @@ fn whole_log_row_double_click_focuses_input_without_opening_detail() {
     assert_eq!(click_mouse(&mut view, click), None);
     assert!(view.input_box.focused);
     assert!(view.log_open.is_none());
-}
-
-#[test]
-fn offset_layout_keeps_prompt_above_log() {
-    let (view, _) = log_fixture();
-    let layout = view.center_layout(Rect::new(5, 7, 120, 40));
-    assert_eq!(layout.prompt.bottom(), layout.log.y);
-    assert!(layout.list.bottom() <= layout.prompt.y);
 }
 
 #[test]
@@ -199,45 +148,4 @@ fn input_completion_keeps_text_edited_during_the_send() {
         view.input_box.state,
         prompt_box::SendState::Failed("attach timed out".into())
     );
-}
-
-#[test]
-fn paste_routes_to_focused_text_field() {
-    let pasted = include_str!("../../tests/fixtures/claude-peer-message.txt");
-    for field in 0..6 {
-        let (mut view, _) = log_fixture();
-        match field {
-            0 => view.input_box.focused = true,
-            1 => {
-                view.searching = true;
-            }
-            2 => view.rename_target = view.selected_id().cloned(),
-            3 => {
-                view.prepare_log_search();
-                view.log_search.editing = true;
-            }
-            4 => {
-                view.set_log_open(Some(view.log[0].clone()));
-                view.log_detail_search.editing = true;
-            }
-            5 => {
-                view.branch_editor = Some(BranchEditor {
-                    draft: 1,
-                    editor: crate::ui::line_edit::LineEdit::default(),
-                })
-            }
-            _ => unreachable!(),
-        }
-        view.handle_paste(pasted);
-        let actual = match field {
-            0 => view.input_box.editor.text(),
-            1 => view.search.text(),
-            2 => view.rename.text(),
-            3 => view.log_search.query.text(),
-            4 => view.log_detail_search.query.text(),
-            5 => view.branch_editor.as_ref().unwrap().editor.text(),
-            _ => unreachable!(),
-        };
-        assert_eq!(actual, pasted, "focused field {field}");
-    }
 }

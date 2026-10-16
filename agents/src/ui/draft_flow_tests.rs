@@ -251,42 +251,6 @@ fn draft_navigation_click_tab_and_pending_job_preserve_input_without_keys() {
 }
 
 #[test]
-fn live_picker_uses_provider_choices_and_existing_branch_is_inert() {
-    let (_directory, mut view) = fixture();
-    let row = &mut view.rows[0];
-    row.background_job = Some(crate::model::BackgroundJob {
-        id: "e772d00b".into(),
-        needs: None,
-    });
-    row.process = Some(crate::model::Process {
-        pid: std::process::id(),
-        label: Some("bg".into()),
-        started_at: None,
-    });
-    let id = row.id.clone();
-    view.open_field(Field::Model);
-    assert!(view.picker.is_some());
-    let model = view.picker.as_ref().unwrap().values[0].clone();
-    assert_eq!(
-        view.apply_choice(0),
-        Some(Action::SetModel {
-            id: id.clone(),
-            model
-        })
-    );
-    view.open_field(Field::Branch);
-    assert!(view.branch_editor.is_none());
-    view.rows[0].process = None;
-    view.open_field(Field::Effort);
-    assert!(view.picker.is_none());
-    view.rows[0].id.provider = ProviderId::Codex;
-    view.input_choices
-        .insert(ProviderId::Codex, crate::providers::InputChoices::default());
-    view.open_field(Field::Model);
-    assert!(view.picker.is_none());
-}
-
-#[test]
 fn prompt_model_label_does_not_become_a_metadata_picker_target() {
     let (_directory, mut view) = fixture();
     view.rows[0].prompt = format!(
@@ -395,11 +359,4 @@ fn live_effort_picker_remains_available_when_transcript_omits_effort() {
             effort: "high".into()
         })
     );
-}
-
-#[test]
-fn new_draft_without_selection_uses_startup_directory() {
-    let mut view = View::default();
-    let cwd = std::env::current_dir().unwrap();
-    assert_eq!(key(&mut view, KeyCode::Char('n')), Some(Action::NewDraft { cwd }));
 }

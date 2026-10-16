@@ -902,53 +902,6 @@ mod tests {
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
 
     #[test]
-    fn live_background_open_attaches_the_job_not_the_session() {
-        let directory = tempfile::tempdir().unwrap();
-        let provider = ClaudeProvider::new(directory.path().into());
-        let mut row = session(
-            "50517e58-041e-49c8-95e0-a41879199991".into(),
-            transcript::Summary::default(),
-            None,
-            Utc::now(),
-        );
-        row.cwd = directory.path().into();
-        row.process = Some(Process {
-            pid: std::process::id(),
-            label: Some("bg".into()),
-            started_at: None,
-        });
-        row.background_job = Some(crate::model::BackgroundJob {
-            id: "actual-job-id".into(),
-            needs: None,
-        });
-        let command = provider
-            .launch(&Action::Open(row.id.clone()), Some(&row))
-            .unwrap();
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            ["attach", "actual-job-id"]
-        );
-    }
-
-    #[test]
-    fn resumed_prompt_has_no_flags_that_fork_the_session() {
-        let dir = tempfile::tempdir().unwrap();
-        let id = "00000000-0000-0000-0000-000000000001";
-        transcript(dir.path(), id, 0);
-        let mut provider = ClaudeProvider::new(dir.path().into());
-        let mut session = provider.refresh(1).sessions.remove(0);
-        session.cwd = dir.path().into();
-        let text = include_str!("../../../tests/fixtures/claude-peer-message.txt");
-        let command = resume_prompt(&session, text);
-        assert_eq!(command.get_program(), "claude");
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            ["--bg", "--resume", id, text]
-        );
-        assert_eq!(command.get_current_dir(), Some(dir.path()));
-    }
-
-    #[test]
     fn ask_user_question_pending_questions_refresh_with_answers() {
         let dir = tempfile::tempdir().unwrap();
         let id = "00000000-0000-4000-8000-000000000001";

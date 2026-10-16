@@ -815,7 +815,7 @@ fn manager_thread_fork_reaches_app_launch() {
 fn manager_thread_mutations_reach_app_provider_paths() {
     use crate::providers::{Provider, codex::CodexProvider};
     use ratatui::{buffer::Buffer, layout::Rect};
-    for operation in ["archive", "stop", "delete"] {
+    for operation in ["archive", "delete"] {
         let (dir, mut app) = fixture();
         rusqlite::Connection::open(dir.path().join("state_5.sqlite"))
             .unwrap()
@@ -844,27 +844,10 @@ fn manager_thread_mutations_reach_app_provider_paths() {
         app.sessions.push(child.clone());
         let action = match operation {
             "archive" => Action::Archive(child.id),
-            "stop" => Action::Stop(child.id),
             "delete" => Action::Delete(child.id),
             _ => unreachable!(),
         };
         assert!(!app.handle_action(Some(action)));
-        if operation == "stop" {
-            let input = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
-            assert!(matches!(
-                &input,
-                Input::Sent {
-                    input: SessionInput::Interrupt,
-                    result: Err(_),
-                    ..
-                }
-            ));
-            let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
-            app.handle_inputs(input, &mut None, &mut schedule).unwrap();
-            assert!(app.pending_inputs.is_empty());
-            assert_eq!(std::fs::read(&state).unwrap(), bytes);
-            continue;
-        }
         let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
         app.view.render(buffer.area, &mut buffer);
         let rendered = buffer

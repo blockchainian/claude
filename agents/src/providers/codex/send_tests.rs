@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::live_tests as dashboard;
 use crate::providers::SessionInput;
 use serde_json::{Value, json};
 use std::{
@@ -75,33 +76,16 @@ fn send_real_codex_thread() {
         active: true,
     };
     assert!(output.status.success(), "codex exec failed");
-    let db = Connection::open_with_flags(
-        provider.home.join("state_5.sqlite"),
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
-    let session = db
-        .query_row("SELECT * FROM threads WHERE id=?1", [&id], |row| {
-            super::session(row, &HashMap::new())
-        })
-        .unwrap()
-        .unwrap();
-    for input in [
-        SessionInput::SetModel("haiku".into()),
-        SessionInput::SetEffort("high".into()),
-    ] {
-        assert!(provider.send(&session, input).is_none());
-    }
+    let preferences = tempfile::tempdir().unwrap();
+    let mut app = dashboard::app(Box::new(provider), preferences.path().to_owned());
+    let session = dashboard::session(&app, &id);
     let prompt =
         "agents-send-idle-中文\nDo not use tools. Write a detailed 10000-word essay about rivers.";
-    std::thread::spawn(
-        provider
-            .send(&session, SessionInput::Prompt(prompt.into()))
-            .expect("supports prompt"),
-    )
-    .join()
-    .unwrap()
-    .unwrap();
+    dashboard::send(
+        &mut app,
+        session.id.clone(),
+        SessionInput::Prompt(prompt.into()),
+    );
     let deadline = Instant::now() + Duration::from_secs(10);
     let turn = loop {
         if let Some(turn) = app_server::thread::running_turn(&mut owner, &id).unwrap() {
@@ -111,14 +95,11 @@ fn send_real_codex_thread() {
         std::thread::sleep(Duration::from_millis(100));
     };
     let steer = "agents-send-steer-中文\nContinue the essay; do not use tools.";
-    std::thread::spawn(
-        provider
-            .send(&session, SessionInput::Prompt(steer.into()))
-            .unwrap(),
-    )
-    .join()
-    .unwrap()
-    .unwrap();
+    dashboard::send(
+        &mut app,
+        session.id.clone(),
+        SessionInput::Prompt(steer.into()),
+    );
     assert_eq!(
         app_server::thread::running_turn(&mut owner, &id).unwrap(),
         Some(turn.clone())
@@ -160,10 +141,7 @@ fn send_real_codex_thread() {
         app_server::thread::running_turn(&mut owner, &id).unwrap(),
         Some(turn)
     );
-    std::thread::spawn(provider.send(&session, SessionInput::Interrupt).unwrap())
-        .join()
-        .unwrap()
-        .unwrap();
+    dashboard::send(&mut app, session.id.clone(), SessionInput::Interrupt);
     let deadline = Instant::now() + Duration::from_secs(15);
     while app_server::thread::running_turn(&mut owner, &id)
         .unwrap()
