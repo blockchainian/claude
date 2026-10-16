@@ -13,7 +13,9 @@ struct Tmux(String);
 
 impl Tmux {
     fn run(&self, args: &[&str]) -> String {
+        // These probes assert ANSI colors and intensity in a controlled terminal.
         let output = Command::new("tmux")
+            .env_remove("NO_COLOR")
             .args(["-L", &self.0])
             .args(args)
             .output()
@@ -120,7 +122,7 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
 }
 
 #[test]
-#[ignore = "requires tmux and NO_COLOR unset; run with --ignored --nocapture"]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_cursor_keeps_cell_colors() {
     let (_directory, tmux, _transcript) = start_probe("task-cursor");
     for width in [120, 200] {
@@ -260,7 +262,7 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
 }
 
 #[test]
-#[ignore = "requires tmux and NO_COLOR unset; run with --ignored --nocapture"]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_details_borders_keep_status_and_elapsed_separate() {
     let (_directory, tmux, _transcript) = start_probe("details-borders");
     for width in [112, 200] {
@@ -695,7 +697,8 @@ fn terminal_task_notification_shows_summary_and_fields() {
         "{record}"
     )
     .unwrap();
-    std::thread::sleep(Duration::from_secs(1));
+    let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
+    tmux.wait_for(|capture| capture.contains(summary));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     println!("{capture}");
     let rows: Vec<_> = capture.lines().collect();
@@ -704,7 +707,6 @@ fn terminal_task_notification_shows_summary_and_fields() {
         .rposition(|line| line.matches('─').count() > 100)
         .expect("log detail rule");
     let detail = rows[rule + 1..rows.len() - 1].join("\n");
-    let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
     assert_eq!(detail.matches(summary).count(), 1, "{capture}");
     for field in [
         "task-id: b9wi31ww0",
@@ -718,7 +720,7 @@ fn terminal_task_notification_shows_summary_and_fields() {
 }
 
 #[test]
-#[ignore = "requires tmux and NO_COLOR unset; run with --ignored --nocapture"]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_json_strings_keep_multiline_alignment_and_colors() {
     use std::io::Write;
 
@@ -811,7 +813,7 @@ fn terminal_json_strings_keep_multiline_alignment_and_colors() {
 }
 
 #[test]
-#[ignore = "requires tmux and NO_COLOR unset; run with --ignored --nocapture"]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_running_tool_animates_without_input() {
     use std::io::Write;
 
