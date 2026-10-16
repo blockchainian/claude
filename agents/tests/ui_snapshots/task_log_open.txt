@@ -4,16 +4,16 @@
  /tmp/project                                     │ Prompt
  › ● Task log example      Working            now │ Task log example
                                                   │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
                                                   │ Project
                                                   │ /tmp/project
                                                   │
                                                   │ Model                                   Unknown
-                                                  │
-                                                  │
-                                                  │
-                                                  │
-                                                  │
-                                                  │
  ──────────────────────────────────────────────────────────── Task log example · Working ──────────
  Task log example · Running in a terminal; open it to type
  ──────────────────────────────────────────── ↑ Latest ────────────────────────────────────────────

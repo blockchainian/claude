@@ -3,6 +3,12 @@ Current prompt
 First queued prompt
 Second queued prompt
 
+
+
+
+
+
+
 Project
 /tmp/project
 

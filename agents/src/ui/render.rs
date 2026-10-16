@@ -843,6 +843,7 @@ impl View {
         }
         item_links.resize(items.len(), Vec::new());
 
+        let project_item = items.len();
         let project_label = Line::from("Project".dim());
         let branch = session
             .git_branch
@@ -926,6 +927,21 @@ impl View {
         // A blank row keeps the model off the bottom rule.
         items.extend([Line::default().into(), model.into(), Line::default().into()]);
         item_links.resize(items.len(), Vec::new());
+
+        let total = items.iter().map(Item::height).sum::<usize>();
+        if total < usize::from(area.height) {
+            // Move the bottom padding and unused rows above Project. All body
+            // ranges stay above the gap; links and Model move with their items.
+            items.pop();
+            item_links.pop();
+            let gap = usize::from(area.height) - total + 1;
+            items.splice(
+                project_item..project_item,
+                (0..gap).map(|_| Line::default().into()),
+            );
+            item_links.splice(project_item..project_item, (0..gap).map(|_| Vec::new()));
+            model_item += gap;
+        }
 
         let mut text_rows = vec![None; items.len()];
         let mut sources = Vec::new();

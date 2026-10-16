@@ -7,6 +7,17 @@ Checking the project
 Prompt              42 messages · 10m 5s
 Activity task
 
+
+
+
+
+
+
+
+
+
+
+
 Project
 /tmp/project
 

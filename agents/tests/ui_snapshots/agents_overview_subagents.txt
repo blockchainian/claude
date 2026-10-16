@@ -7,24 +7,24 @@
    └ ● Check files                   Working         1m ago │ Prompt
                                                             │ Parent task
                                                             │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
                                                             │ Project
                                                             │ /tmp/project
                                                             │
                                                             │ Model                                        parent-model
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
                                                             │ ────────────────── Parent task · Ready ──────────────────
  Parent task ›
  ? help  esc back  ↑/↓ move  enter open  n new

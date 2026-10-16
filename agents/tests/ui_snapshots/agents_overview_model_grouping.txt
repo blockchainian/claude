@@ -4,10 +4,10 @@
  Unknown                                          │ Prompt
  › ○ Legacy task           Ready           1s ago │ Legacy task
                                                   │
- model-a                                          │ Project
-   ○ Recent task           Ready           2s ago │ /tmp/project
+ model-a                                          │
+   ○ Recent task           Ready           2s ago │
    ○ Older task            Ready           4s ago │
-                                                  │ Model                                   Unknown
+                                                  │
  model-b                                          │
    ○ Other model           Ready           3s ago │
                                                   │
@@ -15,10 +15,10 @@
                                                   │
                                                   │
                                                   │
+                                                  │ Project
+                                                  │ /tmp/project
                                                   │
-                                                  │
-                                                  │
-                                                  │
+                                                  │ Model                                   Unknown
                                                   │ ───────────── Legacy task · Ready ─────────────
  Legacy task ›
  ? help  esc back  ↑/↓ move  enter open  n new

@@ -5,6 +5,9 @@ fn session_key(id: &str) -> SessionKey {
     }
 }
 
+#[path = "details_footer_tests.rs"]
+mod details_footer;
+
 use super::*;
 use chrono::{Duration, Utc};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};

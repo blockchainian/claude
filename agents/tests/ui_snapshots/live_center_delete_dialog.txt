@@ -4,13 +4,13 @@
  ┌────────────────────────────────────────┐ │ Prompt
  │ Permanently delete “Unloaded task”?    │ │ Unloaded task
  │ This stops any running work in this    │ │
- │ task and its child agents, then        │ │ Project
- │ permanently deletes their history.     │ │ /tmp/project
+ │ task and its child agents, then        │ │
+ │ permanently deletes their history.     │ │
  │ This cannot be undone.                 │ │
- │                                        │ │ Model                             Unknown
- │ › 1. Cancel                            │ │
+ │                                        │ │ Project
+ │ › 1. Cancel                            │ │ /tmp/project
  │   2. Permanently delete task and child │ │
- └────────────────────────────────────────┘ │
+ └────────────────────────────────────────┘ │ Model                             Unknown
                                             │ ─────── Unloaded task · Inactive ────────
  Unloaded task ›
  ↑/↓ move  enter select  esc back

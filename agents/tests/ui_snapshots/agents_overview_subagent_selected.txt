@@ -4,27 +4,27 @@
  /tmp/project                                               │ Prompt
    ○ Parent task                     Ready           2m ago │ Check files
    └ ○ Review results                Ready              now │
- › └ ● Check files                   Working         1m ago │ Project
+ › └ ● Check files                   Working         1m ago │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │ Project
                                                             │ /tmp/child-project
                                                             │
                                                             │ Model                                         child-model
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
-                                                            │
                                                             │ ───────────────── Check files · Working ─────────────────
  Check files · Subagent cannot take input
  ? help  esc back  ↑/↓ move  n new

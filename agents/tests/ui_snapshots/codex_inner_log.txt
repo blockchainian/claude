@@ -4,12 +4,12 @@
  /tmp/project                           │ Prompt                                 │ view_image /tmp/affiliates-page-1791341607.png
  › ● Task log example       Working     │ Task log example                       │ web.search site:pond.dflow.net "dev-quote-api.dflow.net"                  1s
                                         │                                        │ claude.ask_claude                                                        28s
-                                        │ Project                                │ apply_patch ~/Documents/case-studies/khaby-lame/drafts/06.md            17ms
-                                        │ /tmp/project                           │ type (exit 1)
+                                        │                                        │ apply_patch ~/Documents/case-studies/khaby-lame/drafts/06.md            17ms
+                                        │                                        │ type (exit 1)
+                                        │ Project                                │
+                                        │ /tmp/project                           │
                                         │                                        │
                                         │ Model                          Unknown │
-                                        │                                        │
-                                        │                                        │
  ────────────────────────────────────────────── Task log example · Working ────────────────────────────────────────────────────────────────────────────────────
  Task log example ›
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
