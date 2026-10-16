@@ -163,6 +163,7 @@ pub type DraftId = u64;
 /// What the view asks the app to do; the view never touches processes or files itself.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {
+    Batch(Vec<Action>),
     /// Enter: jump to a live session's terminal, or resume an inactive one.
     Open(SessionKey),
     SendPrompt {

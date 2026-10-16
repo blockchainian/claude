@@ -18,6 +18,7 @@ pub(super) enum ClickTarget {
 pub(super) struct PendingClick {
     target: ClickTarget,
     deadline: Instant,
+    open_heading: bool,
 }
 
 impl View {
@@ -44,7 +45,8 @@ impl View {
                 }
                 None
             }
-            ClickTarget::Link(path) | ClickTarget::Heading(path) => Some(Action::OpenPath(path)),
+            ClickTarget::Link(path) => Some(Action::OpenPath(path)),
+            ClickTarget::Heading(path) => click.open_heading.then_some(Action::OpenPath(path)),
             ClickTarget::Field(_) => None,
             ClickTarget::Background(_) => None,
         }
@@ -63,6 +65,7 @@ impl View {
         self.pending_click = Some(PendingClick {
             target,
             deadline: now + self.double_click_interval,
+            open_heading: false,
         });
         false
     }
@@ -163,7 +166,84 @@ impl View {
         self.reconcile_selection();
     }
 
-    pub fn handle_mouse(&mut self, mut mouse: MouseEvent) -> Option<Action> {
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+        let previous = if mouse.kind == MouseEventKind::Up(MouseButton::Left)
+            && let Some((MouseButton::Left, x, y, false)) = self.mouse_press
+            && self.pending_click.as_ref().is_some_and(|pending| {
+                Instant::now() >= pending.deadline
+                    || self.click_target_at((x, y).into()).as_ref() != Some(&pending.target)
+            }) {
+            self.flush_pending_click(Instant::now() + self.double_click_interval)
+        } else {
+            None
+        };
+        let next = self.handle_mouse_event(mouse);
+        match (previous, next) {
+            (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
+            (action, None) | (None, action) => action,
+        }
+    }
+
+    fn heading_at(&self, position: ratatui::layout::Position) -> Option<PathBuf> {
+        let viewport = self.viewport.borrow();
+        if self.grouping != Grouping::Project || !viewport.list_rows.contains(position) {
+            return None;
+        }
+        let entry = viewport.first_entry + usize::from(position.y - viewport.list_rows.y);
+        match self
+            .center_rows(&self.selectable_indices(), self.grouping)
+            .get(entry)
+        {
+            Some(super::navigation::CenterRow::Group(index)) => {
+                Some(self.project_groups[*index].heading.clone())
+            }
+            Some(super::navigation::CenterRow::DraftGroup(id)) => self
+                .drafts
+                .iter()
+                .find(|draft| draft.id == *id)
+                .map(|draft| draft.setup.cwd.clone()),
+            _ => None,
+        }
+    }
+
+    fn click_target_at(&self, position: ratatui::layout::Position) -> Option<ClickTarget> {
+        let viewport = self.viewport.borrow();
+        if let Some((_, field)) = viewport
+            .field_targets
+            .iter()
+            .find(|(rect, _)| rect.contains(position))
+        {
+            return Some(ClickTarget::Field(*field));
+        }
+        if let Some(cwd) = self.heading_at(position) {
+            return Some(ClickTarget::Heading(cwd));
+        }
+        if viewport.details.contains(position)
+            && let Some((_, task)) = viewport
+                .details_background
+                .iter()
+                .find(|(rows, _)| rows.contains(&position.y))
+        {
+            return Some(ClickTarget::Background(task.clone()));
+        }
+        if let Some(path) = self.link_at(position) {
+            return Some(ClickTarget::Link(path));
+        }
+        if viewport.log.contains(position)
+            && self.log_open.is_none()
+            && let Some(row) = (position.y - viewport.log.y).checked_sub(super::log::LOG_TOP)
+            && let Some(&(index, cut)) = viewport.log_rows.get(usize::from(row))
+            && let Some(event) = self.log.get(index)
+        {
+            return Some(ClickTarget::Log {
+                event: event.clone(),
+                expand: cut || super::log::shows_calls(event),
+            });
+        }
+        None
+    }
+
+    fn handle_mouse_event(&mut self, mut mouse: MouseEvent) -> Option<Action> {
         if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
             self.mouse_press = Some((MouseButton::Right, mouse.column, mouse.row, false));
             return None;
@@ -256,35 +336,15 @@ impl View {
                 }
                 return None;
             }
-            let heading = {
-                let viewport = self.viewport.borrow();
-                if viewport.list_rows.contains(position) {
-                    let entry =
-                        viewport.first_entry + usize::from(mouse.row - viewport.list_rows.y);
-                    match self
-                        .center_rows(&self.selectable_indices(), self.grouping)
-                        .get(entry)
-                    {
-                        Some(super::navigation::CenterRow::Group(index)) => {
-                            Some(self.project_groups[*index].heading.clone())
-                        }
-                        Some(super::navigation::CenterRow::DraftGroup(id)) => self
-                            .drafts
-                            .iter()
-                            .find(|draft| draft.id == *id)
-                            .map(|draft| draft.setup.cwd.clone()),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            };
-            if let Some(cwd) = heading
-                && self.grouping == Grouping::Project
-            {
+            if let Some(cwd) = self.heading_at(position) {
                 if self.defer_click(ClickTarget::Heading(cwd.clone())) {
                     return Some(Action::NewDraft { cwd });
                 }
+                let open_heading = self.link_at(position).is_some();
+                self.pending_click
+                    .as_mut()
+                    .expect("heading click is pending")
+                    .open_heading = open_heading;
                 return None;
             }
         }
@@ -328,7 +388,9 @@ impl View {
             if let Some(target) = self.link_at(position) {
                 let has_double = {
                     let viewport = self.viewport.borrow();
-                    viewport.log.contains(position)
+                    (viewport.log.contains(position)
+                        && (self.log_open.is_none()
+                            || mouse.row >= viewport.log.y + super::log::LOG_TOP + 2))
                         || viewport.list.contains(position)
                         || viewport
                             .details_copy
@@ -1111,3 +1173,7 @@ pub(super) fn curtain_target(
             }
         })
 }
+
+#[cfg(test)]
+#[path = "input_tests.rs"]
+mod input_tests;

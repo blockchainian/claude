@@ -708,6 +708,13 @@ impl App {
             return false;
         }
         match action {
+            Action::Batch(actions) => {
+                for action in actions {
+                    if self.handle_action(Some(action)) {
+                        return true;
+                    }
+                }
+            }
             Action::Quit => return true,
             Action::NewDraft { cwd } => self.new_draft(cwd),
             Action::CreateTask {
