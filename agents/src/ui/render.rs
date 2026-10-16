@@ -503,6 +503,7 @@ impl View {
             height,
         );
         Clear.render(dialog, buf);
+        super::links::cover(&mut self.viewport.borrow_mut().list_links, dialog);
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(dialog).inner(Margin::new(1, 0));
         block.render(dialog, buf);

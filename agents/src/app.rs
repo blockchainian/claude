@@ -1008,6 +1008,10 @@ fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 #[path = "providers/claude/app_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "app_overlay_tests.rs"]
+mod overlay_tests;
+
 /// How many times taller than wide one terminal cell is, when the terminal reports its pixels.
 fn cell_aspect() -> Option<f64> {
     let size = crossterm::terminal::window_size().ok()?;
