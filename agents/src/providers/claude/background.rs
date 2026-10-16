@@ -255,10 +255,9 @@ impl Tasks {
         session: &mut Session,
         liveness: &impl Liveness,
     ) -> io::Result<()> {
-        let job = session
-            .background_job
-            .as_ref()
-            .ok_or_else(|| io::Error::other("Background session has no job id"))?;
+        let Some(job) = session.background_job.as_ref() else {
+            return Ok(());
+        };
         let bytes = match fs::read(config.join("jobs").join(&job.id).join("adopt.json")) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),

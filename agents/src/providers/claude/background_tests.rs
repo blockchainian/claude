@@ -348,7 +348,7 @@ fn real_sleep_output_liveness_and_refresh_cost() {
 }
 
 #[test]
-fn adoption_uses_registered_job_id_with_a_real_live_process() {
+fn adoption_skips_unregistered_sessions_and_refreshes_registered_jobs_with_a_real_process() {
     let directory = tempfile::tempdir().unwrap();
     let output = directory.path().join("adopted.output");
     fs::write(
@@ -398,10 +398,13 @@ fn adoption_uses_registered_job_id_with_a_real_live_process() {
         id: "distinct-job-id".into(),
         needs: None,
     });
-    let mut rows = [row];
+    let mut unregistered = row.clone();
+    unregistered.background_job = None;
+    let mut rows = [unregistered, row];
     Tasks::new(directory.path().join("tasks"))
         .refresh(directory.path(), &mut rows, &Processes)
         .unwrap();
-    assert_eq!(rows[0].background.len(), 1);
-    assert_eq!(rows[0].background[0].output, output);
+    assert!(rows[0].background.is_empty());
+    assert_eq!(rows[1].background.len(), 1);
+    assert_eq!(rows[1].background[0].output, output);
 }
