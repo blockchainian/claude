@@ -6713,7 +6713,7 @@ fn usage_chart_rises_in_braille_below_the_task_rows_and_keeps_its_bins_as_time_p
 }
 
 #[test]
-fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_inline_code_color() {
+fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_assistant_color() {
     let (mut view, now) = log_fixture();
     view.use_colors = true;
     let area = Rect::new(0, 0, 100, 25);
@@ -6726,7 +6726,10 @@ fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_inline_code_color
     view.render_at(area, &mut buf, now);
     let cell = |x: u16| &buf[(x, y)];
     assert_eq!(cell(right).symbol(), "⠒");
-    assert_eq!(cell(right).fg, crate::theme::inline_code_color());
+    assert_eq!(
+        Some(cell(right).fg),
+        super::style::log_styles(&crate::log::Kind::Assistant).1.fg
+    );
     assert!(!cell(right).modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(cell(right - 1).symbol(), "─");
     assert_eq!(cell(right - 2).symbol(), "⠂");
