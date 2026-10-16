@@ -78,6 +78,14 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
             app.draw(&mut terminal).unwrap();
             let buffer = terminal.backend().buffer();
             let (left, project_y) = position(buffer, "Project");
+            let separators: Vec<_> = (0..width)
+                .filter(|&x| cell_text(buffer, x, 3) == "│")
+                .collect();
+            assert_eq!(left, separators[0] + 3);
+            if width != 150 {
+                let (updated_x, _) = position(buffer, "Updated");
+                assert_eq!(updated_x + 7, separators[0] - 2);
+            }
             let right = if width >= 150 {
                 (left..width)
                     .find(|&x| cell_text(buffer, x, project_y) == "│")

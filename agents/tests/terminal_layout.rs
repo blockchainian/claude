@@ -101,6 +101,20 @@ fn terminal_layout_tracks_width() {
             .collect();
         if width >= 150 {
             assert_eq!(separators[1], width as usize - width as usize / 3 - 4);
+            for line in &lines[3..29] {
+                let log = line.split('│').next_back().unwrap();
+                if ["Tool", "User", "Assistant"]
+                    .iter()
+                    .any(|label| log.trim_start().starts_with(label))
+                {
+                    assert_eq!(log.len() - log.trim_start().len(), 2, "log left: {line}");
+                    assert_eq!(
+                        line.trim_end().width(),
+                        width as usize - 2,
+                        "log time right: {line}"
+                    );
+                }
+            }
             assert!(lines[30].contains('›'), "prompt missing: {capture}");
             let middle: Vec<_> = lines[29].chars().collect();
             let details: String = middle[separators[0] + 2..separators[1] - 1]

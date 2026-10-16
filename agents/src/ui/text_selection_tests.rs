@@ -458,7 +458,7 @@ fn log_list_drag_copies_abbreviated_path_as_drawn() {
     let mut view = path_log_fixture();
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
-    let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+    let log = view.viewport.borrow().log;
     let y = log.y + super::log::LOG_TOP;
     let expected = drawn_cells(&initial, y, log.x, log.right());
     assert!(expected.contains('…'), "{expected}");
@@ -599,7 +599,7 @@ fn log_list_click_opens_cut_row_and_stationary_double_click_copies_nothing() {
     let mut view = path_log_fixture();
     let area = Rect::new(0, 0, 100, 30);
     dashboard(&view, area);
-    let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+    let log = view.viewport.borrow().log;
     let at = (log.x, log.y + super::log::LOG_TOP);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
@@ -650,7 +650,7 @@ fn log_list_edge_drag_caches_rows_beyond_first_screen() {
         .collect();
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
-    let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+    let log = view.viewport.borrow().log;
     let height = view.viewport.borrow().log_rows.len();
     let mut rows = std::collections::BTreeMap::new();
     let remember =
@@ -833,7 +833,7 @@ fn dragging_across_cut_log_rows_never_opens_an_event() {
     view.log.push(view.log[0].clone());
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
-    let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+    let log = view.viewport.borrow().log;
     let y = log.y + super::log::LOG_TOP;
     let expected = (y..=y + 1)
         .map(|row| drawn_cells(&initial, row, log.x, log.right()))

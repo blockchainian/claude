@@ -1724,8 +1724,8 @@ fn details_include_attention_and_clip_messages() {
     });
     assert!(position("Needs attention") < position("Last message"));
     assert!(position("Last message") < position("Prompt"));
-    assert!(position("Prompt") < position("│ Project"));
-    assert!(position("│ Project") < project);
+    assert!(position("Prompt") < position("│  Project"));
+    assert!(position("│  Project") < project);
     assert!(project < position("Model: claude-opus"));
     assert!(
         rendered
@@ -3115,6 +3115,161 @@ fn log_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) 
         + "\n"
 }
 
+fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
+    let (mut view, now) = log_fixture();
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+    view.log = crate::providers::claude::log::tail_session(&path, 200, true).unwrap();
+    let row = &mut view.rows[0];
+    row.last_message = Some("A message that wraps across the details column. ".repeat(4));
+    row.last_message_at = Some(now - Duration::minutes(2));
+    row.prompt = "Inspect the files".into();
+    row.prompt_at = Some(now - Duration::seconds(45));
+    row.turn_messages = 3;
+    row.git_branch = Some("agents-panel".into());
+    row.pr = Some(crate::model::PullRequest {
+        number: 13,
+        url: "https://github.com/blockchainian/claude/pull/13".into(),
+    });
+    row.background.push(crate::model::BackgroundTask {
+        description: "Run checks".into(),
+        output: path,
+        started_at: now - Duration::seconds(25),
+    });
+    (view, now)
+}
+
+#[test]
+fn dashboard_column_padding_matches_separators_in_buffer() {
+    for width in [149, 200] {
+        let (view, now) = column_padding_fixture();
+        let area = Rect::new(0, 0, width, 60);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let text = |y, start, end| {
+            (start..end)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        };
+        let separators: Vec<_> = (0..width)
+            .filter(|&x| buf[(x, 3)].symbol() == "│")
+            .collect();
+        let left = separators[0];
+        let right = separators.get(1).copied().unwrap_or(width);
+        let updated = text(3, 0, left);
+        assert_eq!(updated.trim_end().chars().count() as u16, left - 2);
+        for label in ["Background", "Last message", "Prompt", "Project"] {
+            let y = (3..35)
+                .find(|&y| text(y, left + 1, right).contains(label))
+                .unwrap_or_else(|| panic!("missing {label} at width {width}"));
+            let cells = text(y, left + 1, right);
+            assert_eq!(cells.find(label), Some(2), "{label} left at {width}");
+            if label != "Background" {
+                assert_eq!(
+                    (left + 1..right).rfind(|&x| buf[(x, y)].symbol() != " "),
+                    Some(right - 3),
+                    "{label} right at {width}"
+                );
+            }
+        }
+        let y = (3..35)
+            .find(|&y| text(y, left + 1, right).contains("Run checks"))
+            .unwrap();
+        assert!(text(y, left + 1, right).trim_end().ends_with("25s"));
+        assert_eq!(
+            text(y, left + 1, right).trim_end().chars().count() as u16,
+            right - left - 3,
+            "background time at {width}"
+        );
+        // Wrapped bodies, selections and links stay inside the same content bounds.
+        for y in 3..view.center_layout(area).details.bottom() {
+            for x in [left + 1, left + 2, right - 2, right - 1] {
+                assert_eq!(buf[(x, y)].symbol(), " ", "padding ({x}, {y}) at {width}");
+            }
+        }
+        let viewport = view.viewport.borrow();
+        assert_eq!(viewport.details_text.area.x, left + 3);
+        assert_eq!(viewport.details_text.area.right(), right - 2);
+    }
+}
+
+#[test]
+fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
+    for width in [149, 200] {
+        for edge in [false, true] {
+            let (mut view, now) = column_padding_fixture();
+            let area = Rect::new(0, 0, width, 60);
+            let mut buf = Buffer::empty(area);
+            view.render_at(area, &mut buf, now);
+            let wide = width == 200;
+            let separators: Vec<_> = (0..width)
+                .filter(|&x| buf[(x, 3)].symbol() == "│")
+                .collect();
+            let left = if wide { separators[1] + 3 } else { 2 };
+            let y = if wide {
+                4
+            } else {
+                view.center_layout(area).log.y + 3
+            };
+            let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
+            let log: String = (left..width).map(|x| buf[(x, y)].symbol()).collect();
+            assert_eq!(
+                log.trim_end().chars().count() as u16 + left,
+                width - 2,
+                "log time right at {width}: {row}"
+            );
+            assert_ne!(buf[(left, y)].symbol(), " ", "log left at {width}");
+            if wide {
+                assert_eq!(buf[(left - 1, y)].symbol(), " ");
+                assert_eq!(buf[(left - 2, y)].symbol(), " ");
+            }
+            let selected = {
+                let viewport = view.viewport.borrow();
+                let index = viewport.log_rows[1].0;
+                assert_eq!(viewport.log_list_text.area.x, left);
+                assert_eq!(viewport.log_list_text.area.right(), width - 2);
+                view.log[index].clone()
+            };
+            let x = if edge { width - 3 } else { left };
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+            );
+            view.flush_pending_click(Instant::now() + view.double_click_interval);
+            assert_eq!(view.log_open, Some(selected), "edge click at {width}");
+            if wide {
+                let detail = view.viewport.borrow().log_text.area;
+                assert_eq!(detail.x, 2);
+                assert_eq!(detail.right(), width - 2);
+            }
+        }
+    }
+}
+
+#[test]
+fn dashboard_log_search_uses_the_row_padding() {
+    for width in [149, 200] {
+        let (mut view, now) = column_padding_fixture();
+        view.log_search.editing = true;
+        view.log_search.query.set_text("Tool");
+        let area = Rect::new(0, 0, width, 60);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let left = if width == 200 { 133 } else { 2 };
+        let y = view.viewport.borrow().log.bottom() - 1;
+        let input: String = (left..left + 13).map(|x| buf[(x, y)].symbol()).collect();
+        assert_eq!(input, "Search › Tool");
+        assert_eq!(view.cursor_pos(area), Some((left + 13, y)));
+        view.log_search.editing = false;
+        view.render_at(area, &mut buf, now);
+        let query: String = (width - 6..width - 2)
+            .map(|x| buf[(x, y)].symbol())
+            .collect();
+        assert_eq!(query, "Tool");
+        assert_eq!(buf[(width - 2, y)].symbol(), " ");
+    }
+}
+
 #[test]
 fn task_log_time_column_and_ellipses_align_in_both_layouts() {
     use crate::log::Kind;
@@ -3144,7 +3299,7 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
         let area = Rect::new(0, 0, width, 40);
         let mut buffer = Buffer::empty(area);
         view.render_at(area, &mut buffer, now);
-        let log = view.viewport.borrow().log.inner(Margin::new(2, 0));
+        let log = view.viewport.borrow().log;
         let top = log.y + view.log_rows_top();
         for (offset, time) in ["11:59:50", "9m 50s", "2s"].into_iter().enumerate() {
             let y = top + offset as u16;
@@ -4390,9 +4545,7 @@ mod input_row {
         let mut log_buf = Buffer::empty(area);
         log.render_at(area, &mut log_buf, now);
         let task_row = task.center_layout(area).search;
-        let log_row = super::super::log::search_input_rect(
-            log.center_layout(area).log.inner(Margin::new(2, 0)),
-        );
+        let log_row = super::super::log::search_input_rect(log.center_layout(area).log_content());
         (task_buf, task_row, log_buf, log_row, task, log)
     }
 
@@ -5289,8 +5442,8 @@ fn pending_question_log_uses_model_color() {
             .content
             .chunks(160)
             .find(|cells| {
-                cells[usize::from(view.viewport.borrow().log.x) + 2
-                    ..usize::from(view.viewport.borrow().log.x) + 11]
+                cells[usize::from(view.viewport.borrow().log.x)
+                    ..usize::from(view.viewport.borrow().log.x) + 9]
                     .iter()
                     .map(|cell| cell.symbol())
                     .collect::<String>()
@@ -5298,7 +5451,7 @@ fn pending_question_log_uses_model_color() {
             })
             .expect("question log row");
         assert_eq!(
-            question_row[usize::from(view.viewport.borrow().log.x) + 12].fg,
+            question_row[usize::from(view.viewport.borrow().log.x) + 10].fg,
             Color::Yellow
         );
     }
@@ -5897,7 +6050,8 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
     );
     assert_eq!(click_text(&mut view, &rendered, "main"), None);
     // The directory sits under the project line; the task list shows the same path as a group.
-    let (x, y) = rendered_cell(&rendered, "Project                         ");
+    let (x, y) = rendered_cell(&rendered, "│  Project");
+    let x = x + 3;
     assert_eq!(
         click_mouse(
             &mut view,
@@ -5921,7 +6075,8 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
         url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
     });
     let rendered = screen(&view, 120, 40);
-    let (x, y) = rendered_cell(&rendered, "Project                         ");
+    let (x, y) = rendered_cell(&rendered, "│  Project");
+    let x = x + 3;
     let cwd_cell = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1);
     assert_eq!(
         click_mouse(&mut view, cwd_cell),

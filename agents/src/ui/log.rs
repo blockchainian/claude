@@ -289,7 +289,12 @@ impl View {
             return;
         }
         let viewport = self.viewport.borrow();
-        let width = viewport.log.inner(Margin::new(2, 0)).width.max(1);
+        let width = if viewport.log_detail.is_empty() {
+            viewport.log.width
+        } else {
+            viewport.log_detail.width
+        }
+        .max(1);
         let cwd = self
             .selected_row()
             .map(|session| session.cwd.as_path())

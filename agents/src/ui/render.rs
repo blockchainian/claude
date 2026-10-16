@@ -61,6 +61,22 @@ pub(super) struct CenterLayout {
     pub(super) prompt: Rect,
     pub(super) log_detail: Rect,
 }
+impl CenterLayout {
+    pub(super) fn log_content(&self) -> Rect {
+        if self.log_detail.is_empty() {
+            self.log.inner(Margin::new(2, 0))
+        } else {
+            // The body already reserves the terminal's outer padding.
+            Rect::new(
+                self.log.x + 1,
+                self.log.y,
+                self.log.width.saturating_sub(1),
+                self.log.height,
+            )
+        }
+    }
+}
+
 impl View {
     fn input(&self) -> (&str, &line_edit::LineEdit) {
         if self.rename_target.is_some() {
@@ -197,11 +213,11 @@ impl View {
             && !layout.log.is_empty()
         {
             let search_area = if self.log_detail_search.editing && !layout.log_detail.is_empty() {
-                layout.log_detail
+                layout.log_detail.inner(Margin::new(2, 0))
             } else {
-                layout.log
+                layout.log_content()
             };
-            let input = log::search_input_rect(search_area.inner(Margin::new(2, 0)));
+            let input = log::search_input_rect(search_area);
             let search = if self.log_detail_search.editing {
                 &self.log_detail_search
             } else {
@@ -375,6 +391,8 @@ impl View {
             Some(Rect::new(details.x, layout.log.y, details.width, 1))
         };
         if !details.is_empty() {
+            details.x += 1;
+            details.width = details.width.saturating_sub(1);
             if !layout.log_detail.is_empty() {
                 details.width = details.width.saturating_sub(1);
             }
@@ -382,17 +400,17 @@ impl View {
         }
         {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.log = layout.log;
-            viewport.log_detail = layout.log_detail;
+            viewport.log = layout.log_content();
+            viewport.log_detail = inset(layout.log_detail);
         }
-        self.render_log(inset(layout.log), buf, now);
+        self.render_log(layout.log_content(), buf, now);
         if !layout.log_detail.is_empty() {
             self.render_log_detail(inset(layout.log_detail), buf, now);
         }
         if !layout.log.is_empty() {
             let rule = if layout.log_detail.is_empty() {
                 Rect::new(layout.list.x, layout.log.y, layout.list.width, 1)
-                    .intersection(inset(layout.log))
+                    .intersection(layout.log_content())
             } else {
                 Rect::new(layout.list.x, middle.y, layout.list.width, 1)
             };

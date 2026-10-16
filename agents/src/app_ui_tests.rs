@@ -512,7 +512,7 @@ fn wide_border_labels_stay_in_their_columns() {
         let middle = prompt - 1;
         let tasks = 2..separators[0] - 1;
         let details = separators[0] + 2..separators[1] - 1;
-        let log = separators[1] + 2..width - 2;
+        let log = separators[1] + 3..width - 2;
         assert!(
             segment(&buffer, tasks.clone(), middle)
                 .chars()
@@ -607,8 +607,15 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
         app.view.set_log(events.clone());
         let buffer = draw(&mut app, width);
         let (x, top) = position(&buffer, "Tool      long");
-        let right = width - if width < 150 { 2 } else { 4 };
-        assert_eq!(x, if width < 150 { 2 } else { width - width / 3 });
+        let right = width - 2;
+        assert_eq!(
+            x,
+            if width < 150 {
+                2
+            } else {
+                width - width / 3 - 1
+            }
+        );
         for (offset, time) in ["2s", "9m 50s", "10:06:26"].into_iter().enumerate() {
             let y = top - offset as u16;
             let clock: String = (right - 8..right)
@@ -624,3 +631,44 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
 
 #[path = "app_details_tests.rs"]
 mod details_alignment;
+
+#[test]
+fn app_log_padding_and_clicks_follow_real_transcript_rows() {
+    for width in [149, 200] {
+        for edge in [false, true] {
+            let (_directory, mut app) = fixture();
+            select_archive(&mut app);
+            let buffer = draw(&mut app, width);
+            let separators: Vec<_> = (0..width)
+                .filter(|&x| buffer[(x, 3)].symbol() == "│")
+                .collect();
+            let left = if width == 200 { separators[1] + 3 } else { 2 };
+            let (x, y) = position(&buffer, "User      ");
+            assert_eq!(x, left);
+            assert_eq!(
+                (left..width).rfind(|&x| buffer[(x, y)].symbol() != " "),
+                Some(width - 3)
+            );
+            click(&mut app, if edge { width - 3 } else { left }, y);
+            app.view
+                .flush_pending_click(Instant::now() + Duration::from_secs(1));
+            let buffer = draw(&mut app, width);
+            let (detail_x, detail_y) = position(&buffer, "User      ");
+            let (_, prompt_y) = position(&buffer, "›");
+            assert!(
+                detail_y > prompt_y,
+                "clicked event must open below the prompt"
+            );
+            assert_eq!(detail_x, 2);
+            assert_eq!(
+                (2..width).rfind(|&x| buffer[(x, detail_y)].symbol() != " "),
+                Some(width - 3)
+            );
+            assert!(
+                lines(&buffer)[usize::from(detail_y)..]
+                    .join("\n")
+                    .contains("⏺ Ran 4 stop hooks")
+            );
+        }
+    }
+}
