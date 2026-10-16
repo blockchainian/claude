@@ -2,7 +2,7 @@
   Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                         tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────
  /tmp/project                                     │ Prompt
- › ● Task log example                             │ Task log example
+ › ● Task log example      Working            now │ Task log example
                                                   │
                                                   │ Project
                                                   │ /tmp/project

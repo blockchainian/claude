@@ -7,24 +7,33 @@ use super::style::selection_style;
 use super::*;
 
 fn columns(area: Rect) -> (Rect, Rect, Rect) {
-    let metadata = if area.width >= 56 { 24 } else { 0 };
-    let gutter = area.width.min(/*other*/ 4);
-    let title = Rect::new(
-        area.x + gutter,
-        area.y,
-        area.width - gutter - metadata,
-        area.height,
-    );
+    const MIN_TITLE_WIDTH: u16 = 20;
+    const STATUS_WIDTH: u16 = 11;
+    const UPDATED_WIDTH: u16 = 9;
+    const GAP: u16 = 2;
+
+    let gutter = area.width.min(4);
+    let available = area.width - gutter;
+    let status_metadata = GAP + STATUS_WIDTH;
+    let all_metadata = status_metadata + GAP + UPDATED_WIDTH;
+    let (metadata, status_width, updated_width) = if available >= MIN_TITLE_WIDTH + all_metadata {
+        (all_metadata, STATUS_WIDTH, UPDATED_WIDTH)
+    } else if available >= MIN_TITLE_WIDTH + status_metadata {
+        (status_metadata, STATUS_WIDTH, 0)
+    } else {
+        (0, 0, 0)
+    };
+    let title = Rect::new(area.x + gutter, area.y, available - metadata, area.height);
     let updated = Rect::new(
-        area.right() - metadata.min(/*other*/ 9),
+        area.right() - updated_width,
         area.y,
-        metadata.min(/*other*/ 9),
+        updated_width,
         area.height,
     );
     let status = Rect::new(
-        title.right() + metadata.min(/*other*/ 2),
+        title.right() + metadata.min(GAP),
         area.y,
-        if metadata == 24 { 11 } else { 0 },
+        status_width,
         area.height,
     );
     (title, status, updated)

@@ -3325,6 +3325,87 @@ fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
     (view, now)
 }
 
+fn assert_task_metadata(width: u16, show_status: bool, show_updated: bool) {
+    let (mut view, now) = column_padding_fixture();
+    view.rows[0].title = "A task title that is deliberately longer than the column".into();
+    view.rows[0].updated_at = now - Duration::minutes(2);
+    let area = Rect::new(0, 0, width, 60);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    let list = view.center_layout(area).list;
+    let y = view.viewport.borrow().marker.unwrap().1;
+    let text: String = (list.x..list.right())
+        .map(|x| buf[(x, y)].symbol())
+        .collect();
+    let status = View::status(&view.rows[0]).0;
+    assert_eq!(
+        text.contains(status),
+        show_status,
+        "status at {width}, list width {}: {text}",
+        list.width
+    );
+    assert_eq!(
+        text.contains("2m ago"),
+        show_updated,
+        "updated at {width}, list width {}: {text}",
+        list.width
+    );
+    println!("{width} cols: list={}, {text}", list.width);
+}
+
+#[test]
+fn task_metadata_narrow_100_columns() {
+    assert_task_metadata(100, true, true);
+}
+
+#[test]
+fn task_metadata_wide_150_columns() {
+    assert_task_metadata(150, false, false);
+}
+
+#[test]
+fn task_metadata_wide_200_columns() {
+    assert_task_metadata(200, true, true);
+}
+
+#[test]
+fn task_metadata_drops_rightmost_columns_at_title_limit() {
+    for (width, title_width, show_status, show_updated) in [
+        (34, 30, false, false),
+        (36, 32, false, false),
+        (37, 20, true, false),
+        (47, 30, true, false),
+        (48, 20, true, true),
+        (49, 21, true, true),
+    ] {
+        let (mut view, now) = column_padding_fixture();
+        view.rows[0].title = "T".repeat(80);
+        view.rows[0].updated_at = now - Duration::minutes(2);
+        let area = Rect::new(1, 1, width, 4);
+        let mut buf = Buffer::empty(Rect::new(0, 0, width + 2, 6));
+        view.render_center_rows(area, &mut buf, now);
+        let y = view.viewport.borrow().marker.unwrap().1;
+        let text: String = (area.x..area.right())
+            .map(|x| buf[(x, y)].symbol())
+            .collect();
+        assert_eq!(
+            text.contains(View::status(&view.rows[0]).0),
+            show_status,
+            "status at {width}: {text}"
+        );
+        assert_eq!(
+            text.contains("2m ago"),
+            show_updated,
+            "updated at {width}: {text}"
+        );
+        assert_eq!(
+            buf[(area.x + 4 + title_width - 1, y)].symbol(),
+            "…",
+            "title at {width}: {text}"
+        );
+    }
+}
+
 #[test]
 fn list_row_highlights_include_column_padding() {
     for width in [100, 149, 150, 200] {
@@ -3609,7 +3690,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         let left = separators[0];
         let right = separators.get(1).copied().unwrap_or(width);
         let updated = text(4, 0, left);
-        if view.center_layout(area).list.width >= 56 {
+        if view.center_layout(area).list.width >= 4 + 20 + 24 {
             assert_eq!(updated.trim_end().chars().count() as u16, left - 1);
         } else {
             assert!(!updated.contains("ago"));

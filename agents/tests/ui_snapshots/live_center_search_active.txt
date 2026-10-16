@@ -3,7 +3,7 @@
  ──────────────────────────────────────────────────────────────────────────────────────
  Search › find                              │ Prompt
  /tmp/project                               │ Task to find
- › ○ Task to find                           │
+ › ○ Task to find               Ready       │
                                             │ Project
                                             │ /tmp/project
                                             │

@@ -2,11 +2,11 @@
   Active 3   Ready 2   Working 1   Needs you 2   Inactive 1                                                                                     tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Pinned                                 │ Prompt                                 │
- › ○ Current task                       │ Current task                           │
+ › ○ Current task           Ready       │ Current task                           │
                                         │                                        │
  /tmp/project                           │ Project                                │
-   ○ A longer task title that uses the… │ /tmp/project                           │
-   ● Working task                       │                                        │
+   ○ A longer task title …  Ready       │ /tmp/project                           │
+   ● Working task           Working     │                                        │
                                         │ Model                          Unknown │
                                         │                                        │
  ───────────────────────────────────────────────── Current task · Ready ───────────────────────────────────────────────────────────────────────────────────────

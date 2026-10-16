@@ -2,14 +2,14 @@
   Active 4   Ready 4   Working 0   Needs you 0   Inactive 0                         tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────
  Unknown                                          │ Prompt
- › ○ Legacy task                                  │ Legacy task
+ › ○ Legacy task           Ready           1s ago │ Legacy task
                                                   │
  model-a                                          │ Project
-   ○ Recent task                                  │ /tmp/project
-   ○ Older task                                   │
+   ○ Recent task           Ready           2s ago │ /tmp/project
+   ○ Older task            Ready           4s ago │
                                                   │ Model                                   Unknown
  model-b                                          │
-   ○ Other model                                  │
+   ○ Other model           Ready           3s ago │
                                                   │
                                                   │
                                                   │
