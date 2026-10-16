@@ -9,7 +9,7 @@ mod create_tests;
 mod images;
 pub(crate) mod log;
 mod peer;
-mod registry;
+pub(super) mod registry;
 mod settings;
 mod subagents;
 mod transcript;
@@ -223,7 +223,7 @@ fn stop_process(entry: &registry::Entry) -> io::Result<()> {
     ))
 }
 
-fn config_dir() -> PathBuf {
+pub(super) fn config_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("CLAUDE_CONFIG_DIR") {
         return PathBuf::from(path);
     }

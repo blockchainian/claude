@@ -78,7 +78,7 @@ impl CodexProvider {
         }
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(io::Error::other)?;
-        let manager = manager::links(&self.manager_home)?;
+        let manager = manager::links(&self.manager_home, &super::claude::config_dir())?;
         let names = indexed_names(&self.home)?;
         let parents = parents(&db).map_err(io::Error::other)?;
         let live = live_writers(&self.home.join("thread-writer-locks"))?;
