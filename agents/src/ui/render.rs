@@ -759,7 +759,8 @@ impl View {
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
-        let mut header = Vec::new();
+        let mut prompt_header = vec!["Prompt".dim()];
+        let mut prompt_duration = Line::default();
         if let Some(start) = session.prompt_at {
             let end = if session.status == SessionStatus::Working {
                 now
@@ -768,15 +769,14 @@ impl View {
             };
             let messages = session.turn_messages;
             let label = if messages == 1 { "message" } else { "messages" };
-            header.extend([
-                format!("{messages} {label}").dim(),
-                " · ".dim(),
-                format_duration((end - start).num_seconds().max(0)).dim(),
-            ]);
+            prompt_header.extend([" · ".dim(), format!("{messages} {label}").dim()]);
+            prompt_duration = format_duration((end - start).num_seconds().max(0))
+                .dim()
+                .into();
         }
         separate_section(&mut items);
         items.push(
-            left_right("Prompt".dim().into(), Line::from(header), width)
+            left_right(Line::from(prompt_header), prompt_duration, width)
                 .0
                 .into(),
         );
@@ -823,27 +823,29 @@ impl View {
 
         item_links.resize(items.len(), Vec::new());
 
-        let mut project = Vec::new();
+        let mut project = vec!["Project".dim()];
         if let Some(branch) = &session.git_branch {
-            project.push(Span::styled(branch.clone(), self.title_style(&session.id)));
+            project.extend([
+                " · ".dim(),
+                Span::styled(branch.clone(), self.title_style(&session.id)),
+            ]);
         }
+        let mut pull_request = Line::default();
         let link = session.pr.as_ref().and_then(|pr| {
             let label = format!("#{}", pr.number);
-            if !project.is_empty() {
-                project.push(" · ".dim());
-            }
-            let prefix_width = Line::from(project.clone()).width();
-            let link = line_width_fits("Project".width() + 1 + prefix_width + label.len(), width)
-                .then(|| {
-                    let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
-                        .unwrap_or_else(|| pr.url.clone());
-                    (prefix_width as u16, label.len() as u16, url)
-                });
-            project.push(Span::styled(label, self.title_style(&session.id)));
+            let link =
+                line_width_fits(Line::from(project.clone()).width() + 1 + label.len(), width).then(
+                    || {
+                        let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
+                            .unwrap_or_else(|| pr.url.clone());
+                        (label.len() as u16, url)
+                    },
+                );
+            pull_request = Span::styled(label, self.title_style(&session.id)).into();
             link
         });
-        let (project, right_start) = left_right("Project".dim().into(), Line::from(project), width);
-        let link = link.map(|(x, width, url)| (x + right_start as u16, width, url));
+        let (project, right_start) = left_right(Line::from(project), pull_request, width);
+        let link = link.map(|(width, url)| (right_start as u16, width, url));
         let cwd = super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), width);
         item_links.extend([
             Vec::new(),

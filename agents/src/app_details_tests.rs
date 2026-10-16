@@ -103,8 +103,8 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                     },
                     if activity { "1m ago" } else { "2m ago" },
                 ),
-                ("Prompt", "3 messages · 1m 5s"),
-                ("Project", "main · #13"),
+                ("Prompt · 3 messages", "1m 5s"),
+                ("Project · main", "#13"),
             ] {
                 let (x, y) = position(buffer, label);
                 assert_eq!(x, left);
@@ -118,15 +118,11 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                         .chars()
                         .all(|c| c == ' ')
                 );
-                for offset in group
+                for offset in label
                     .match_indices('·')
-                    .map(|(i, _)| group[..i].chars().count() as u16)
+                    .map(|(i, _)| label[..i].chars().count() as u16)
                 {
-                    assert!(
-                        buffer[(group_start + offset, y)]
-                            .modifier
-                            .contains(Modifier::DIM)
-                    );
+                    assert!(buffer[(left + offset, y)].modifier.contains(Modifier::DIM));
                 }
             }
             let (_, background_y) = position(buffer, "Check files");

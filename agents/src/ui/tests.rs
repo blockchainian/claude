@@ -2177,7 +2177,7 @@ fn details_branch_and_pull_request_use_session_title_color() {
         })
         .expect("Project header");
     for (offset, symbol) in "main".chars().enumerate() {
-        let cell = &buf[(29 + offset as u16, project_y)];
+        let cell = &buf[(10 + offset as u16, project_y)];
         assert_eq!(cell.symbol(), symbol.to_string());
         assert_eq!(cell.fg, color);
     }
@@ -2429,21 +2429,21 @@ fn prompt_header_counts_singular_zero_and_clamps_elapsed_time() {
             Some(now - Duration::seconds(45)),
             None,
             1,
-            "Prompt                   1 message · 45s",
+            "Prompt · 1 message                   45s",
         ),
         (
             SessionStatus::Ready,
             Some(now),
             Some(now - Duration::seconds(1)),
             0,
-            "Prompt                   0 messages · 0s",
+            "Prompt · 0 messages                   0s",
         ),
         (
             SessionStatus::Working,
             Some(now + Duration::seconds(1)),
             None,
             0,
-            "Prompt                   0 messages · 0s",
+            "Prompt · 0 messages                   0s",
         ),
         (SessionStatus::Ready, None, Some(now), 0, "Prompt"),
     ] {
@@ -6076,12 +6076,13 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
     });
     selected.queued = vec![format!("Then read {}", todo.display())];
     let rendered = screen(&view, 120, 40);
-    // The OSC 8 escapes around "#833" hide it from a text search; its cells follow the branch.
-    let (x, y) = rendered_cell(&rendered, "main · ");
+    // The PR occupies the right edge; its OSC 8 escapes hide it from a text search.
+    let (_, y) = rendered_cell(&rendered, "Project · main");
+    let x = view.center_layout(Rect::new(0, 0, 120, 40)).details.right() - 4;
     assert_eq!(
         click_mouse(
             &mut view,
-            mouse(MouseEventKind::Down(MouseButton::Left), x + 8, y)
+            mouse(MouseEventKind::Down(MouseButton::Left), x, y)
         ),
         Some(Action::OpenPath(
             super::vscode::pull_request_link(
