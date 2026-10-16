@@ -8,9 +8,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use std::collections::BTreeSet;
 
-/// The braille bits of a cell's left and right dot columns: their middle two dots, level with the
-/// rule.
-const DOT_BITS: [u8; 2] = [0x02 | 0x04, 0x10 | 0x20];
+/// The braille bits of a cell's left and right dot columns: one dot each, the second from the top,
+/// nearest the rule's height.
+const DOT_BITS: [u8; 2] = [0x02, 0x10];
 
 impl View {
     /// Takes the bins some task worked in.
