@@ -273,6 +273,14 @@ struct ProjectGroup {
 }
 
 impl ProjectGroup {
+    fn directory(&self) -> Option<&Path> {
+        (!self.heading.as_os_str().is_empty()).then_some(self.heading.as_path())
+    }
+
+    fn key(&self) -> (bool, &(PathBuf, PathBuf)) {
+        (self.directory().is_none(), &self.key)
+    }
+
     fn for_session(session: &Session) -> Self {
         match crate::repository::repository_identity(&session.cwd) {
             Some(identity) => Self {
@@ -611,7 +619,7 @@ impl View {
             return self.is_pinned(left) && self.is_pinned(right);
         }
         match grouping {
-            Grouping::Project => self.project_groups[left].key == self.project_groups[right].key,
+            Grouping::Project => self.project_groups[left].key() == self.project_groups[right].key(),
             Grouping::Status => true,
             Grouping::Model => self.rows[left].model_name() == self.rows[right].model_name(),
         }
@@ -663,12 +671,7 @@ impl View {
         pinned.sort_by_key(|i| self.pinned.iter().position(|id| *id == self.rows[*i].id));
         match self.grouping {
             Grouping::Project => visible.sort_by_key(|i| {
-                let group = &self.project_groups[*i];
-                (
-                    group.heading.as_os_str().is_empty(),
-                    &group.key,
-                    session_order(&self.rows[*i]),
-                )
+                (self.project_groups[*i].key(), session_order(&self.rows[*i]))
             }),
             Grouping::Status => {}
             Grouping::Model => {

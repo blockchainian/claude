@@ -84,7 +84,7 @@ impl View {
         state.page_height = height;
         let mut start = state.scroll.min(entries.len().saturating_sub(height));
         state.task_scroll_max = entries.len().saturating_sub(height);
-        if !dragging && selected < start {
+        if !dragging && selected <= start {
             start = if height > 1
                 && selected > 0
                 && matches!(entries[selected - 1], CenterRow::Group(_))
@@ -169,9 +169,9 @@ impl View {
                     "Pinned".to_owned()
                 } else {
                     match self.grouping {
-                        Grouping::Project => format_directory_display(
-                            &self.project_groups[self.group_index(index).unwrap()].heading,
-                        ),
+                        Grouping::Project => self.project_groups[self.group_index(index).unwrap()]
+                            .directory()
+                            .map_or_else(|| "No directory".to_owned(), format_directory_display),
                         Grouping::Status => task.status.label().to_owned(),
                         Grouping::Model => self.rows[self.group_index(index).unwrap()]
                             .model_name()
@@ -187,15 +187,14 @@ impl View {
                     group
                 };
                 line(group.clone().dim(), rect, buf);
-                if self.grouping == Grouping::Project && !self.is_pinned(index) {
+                if self.grouping == Grouping::Project
+                    && !self.is_pinned(index)
+                    && let Some(directory) =
+                        self.project_groups[self.group_index(index).unwrap()].directory()
+                {
                     let link =
                         Rect::new(rect.x, rect.y, group.width() as u16, 1).intersection(rect);
-                    let links = [(
-                        link,
-                        self.project_groups[self.group_index(index).unwrap()]
-                            .heading
-                            .clone(),
-                    )];
+                    let links = [(link, directory.to_path_buf())];
                     state.list_links.extend(links);
                 }
                 continue;
