@@ -3,7 +3,129 @@ use super::*;
 /// Rows one wheel report scrolls the log and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
 const WHEEL_ROWS: usize = 3;
 
+#[derive(PartialEq, Eq)]
+pub(super) enum ClickTarget {
+    Log(crate::log::Event),
+    Background(crate::model::BackgroundTask),
+    Link(PathBuf),
+}
+
+pub(super) struct PendingClick {
+    target: ClickTarget,
+    deadline: Instant,
+}
+
 impl View {
+    pub(crate) fn pending_click_in(&self, now: Instant) -> Option<Duration> {
+        self.pending_click
+            .as_ref()
+            .map(|click| click.deadline.saturating_duration_since(now))
+    }
+
+    pub(crate) fn flush_pending_click(&mut self, now: Instant) -> Option<Action> {
+        if self
+            .pending_click
+            .as_ref()
+            .is_none_or(|click| now < click.deadline)
+        {
+            return None;
+        }
+        let click = self.pending_click.take().expect("click is due");
+        match click.target {
+            ClickTarget::Log(event) => {
+                self.set_log_open(Some(event));
+                self.viewport.borrow_mut().log_open_scroll = 0;
+                None
+            }
+            ClickTarget::Link(path) => Some(Action::OpenPath(path)),
+            ClickTarget::Background(_) => None,
+        }
+    }
+
+    fn defer_click(&mut self, target: ClickTarget) -> bool {
+        let now = Instant::now();
+        if self
+            .pending_click
+            .as_ref()
+            .is_some_and(|click| click.target == target && now < click.deadline)
+        {
+            self.pending_click = None;
+            return true;
+        }
+        self.pending_click = Some(PendingClick {
+            target,
+            deadline: now + self.double_click_interval,
+        });
+        false
+    }
+
+    fn right_click(&mut self) {
+        self.pending_click = None;
+        if self.confirm_dialog.take().is_some() {
+            return;
+        }
+        if self.rename_target.take().is_some() {
+            self.rename.clear();
+            self.reconcile_selection();
+            return;
+        }
+        if self.help {
+            self.help = false;
+            return;
+        }
+        if self.searching {
+            self.searching = false;
+            self.search.clear();
+            self.reconcile_selection();
+            return;
+        }
+        if self.log_detail_search.editing {
+            self.log_detail_search.editing = false;
+            return;
+        }
+        if self.log_search.editing {
+            self.log_search.editing = false;
+            return;
+        }
+        if let Some(previous) = self.log_background_return.take() {
+            self.set_log_open(previous.event);
+            self.log_detail_search = previous.search;
+            self.viewport.borrow_mut().log_open_scroll = previous.scroll;
+        } else {
+            self.set_log_open(None);
+        }
+    }
+
+    fn open_background(&mut self, task: crate::model::BackgroundTask) {
+        let body = match std::fs::read_to_string(&task.output) {
+            Ok(body) => body,
+            Err(error) => {
+                self.set_notice(Some(format!("Cannot read background log: {error}")));
+                return;
+            }
+        };
+        if self.log_background_return.is_none() {
+            self.log_background_return = Some(BackgroundReturn {
+                event: self.log_open.take(),
+                scroll: self.viewport.borrow().log_open_scroll,
+                search: std::mem::take(&mut self.log_detail_search),
+            });
+        }
+        self.set_log_open(Some(crate::log::Event {
+            kind: crate::log::Kind::Tool,
+            sender: None,
+            body,
+            paths: Vec::new(),
+            started_at: task.started_at,
+            ended_at: None,
+            duration: None,
+            previous_end: None,
+            images: Vec::new(),
+            calls: Vec::new(),
+        }));
+        self.viewport.borrow_mut().log_open_scroll = 0;
+    }
+
     fn set_filter(&mut self, idx: usize) {
         // A chosen task may have changed status since; remember it in the tabs that list it now.
         if self.selected_id() == self.chosen.as_ref() {
@@ -23,6 +145,20 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mut mouse: MouseEvent) -> Option<Action> {
+        if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
+            self.mouse_press = Some((MouseButton::Right, mouse.column, mouse.row, false));
+            return None;
+        }
+        if mouse.kind == MouseEventKind::Up(MouseButton::Right) {
+            if self
+                .mouse_press
+                .take()
+                .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
+            {
+                self.right_click();
+            }
+            return None;
+        }
         if self.confirm_dialog.is_some()
             || self.help
             || self.rename_target.is_some()
@@ -48,6 +184,7 @@ impl View {
                     if button == MouseButton::Left {
                         self.extend_text_selection(mouse.column, mouse.row);
                         self.last_click = None;
+                        self.pending_click = None;
                         self.last_copy_click = None;
                     }
                 }
@@ -83,10 +220,63 @@ impl View {
             }
             return None;
         }
-        if mouse.kind == MouseEventKind::Up(MouseButton::Left)
-            && let Some(target) = self.link_at(position)
-        {
-            return Some(Action::OpenPath(target));
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+            let background = {
+                let viewport = self.viewport.borrow();
+                viewport
+                    .details
+                    .contains(position)
+                    .then(|| {
+                        viewport
+                            .details_background
+                            .iter()
+                            .find(|(rows, _)| rows.contains(&mouse.row))
+                            .map(|(_, task)| task.clone())
+                    })
+                    .flatten()
+            };
+            if let Some(task) = background {
+                if self.defer_click(ClickTarget::Background(task.clone())) {
+                    self.open_background(task);
+                }
+                return None;
+            }
+            if let Some(target) = self.link_at(position) {
+                let has_double = {
+                    let viewport = self.viewport.borrow();
+                    viewport.log.contains(position)
+                        || viewport.list.contains(position)
+                        || viewport
+                            .details_copy
+                            .iter()
+                            .any(|(rows, _, _)| rows.contains(&mouse.row))
+                };
+                if has_double {
+                    if self.defer_click(ClickTarget::Link(target)) {
+                        let viewport = self.viewport.borrow();
+                        if viewport.details.contains(position) {
+                            return viewport
+                                .details_copy
+                                .iter()
+                                .find(|(rows, _, _)| rows.contains(&mouse.row))
+                                .map(|(_, text, label)| Action::Copy {
+                                    text: text.clone(),
+                                    label: (*label).into(),
+                                });
+                        }
+                        if viewport.log.contains(position)
+                            && let Some(event) = &self.log_open
+                        {
+                            return Some(Action::Copy {
+                                text: super::log::open_text(event),
+                                label: super::log::copied_label(event),
+                            });
+                        }
+                    }
+                    return None;
+                }
+                return Some(Action::OpenPath(target));
+            }
         }
         let (tab, over_tabs, over_list, over_details, over_log, entry, log_row, copy_text) = {
             let viewport = self.viewport.borrow();
@@ -154,7 +344,7 @@ impl View {
                     };
                     let now = Instant::now();
                     let double = self.last_click.take().is_some_and(|(last, at)| {
-                        last == task && now.duration_since(at) < DOUBLE_CLICK_INTERVAL
+                        last == task && now.duration_since(at) < self.double_click_interval
                     });
                     self.select(task);
                     if double {
@@ -166,12 +356,11 @@ impl View {
                     && let Some(event) = self.log.get(index)
                     && (cut || super::log::shows_calls(event))
                 {
-                    self.set_log_open(Some(event.clone()));
-                    self.viewport.borrow_mut().log_open_scroll = 0;
+                    self.defer_click(ClickTarget::Log(event.clone()));
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();
                     let double = self.last_copy_click.take().is_some_and(|(last, at)| {
-                        last == text && now.duration_since(at) < DOUBLE_CLICK_INTERVAL
+                        last == text && now.duration_since(at) < self.double_click_interval
                     });
                     if double {
                         return Some(Action::Copy { text, label });
@@ -328,6 +517,7 @@ impl View {
             && !self.help
             && self.rename_target.is_none()
             && !self.log_search.editing
+            && !self.log_detail_search.editing
             && !self.searching
             && self
                 .selected_row()
@@ -427,6 +617,17 @@ impl View {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Some(Action::Quit);
         }
+        if self.log_detail_search.editing {
+            match key.code {
+                KeyCode::Esc => self.log_detail_search.clear(),
+                KeyCode::Enter => self.log_detail_search.editing = false,
+                _ => {
+                    self.log_detail_search.query.handle(key);
+                }
+            }
+            self.jump_detail_match();
+            return None;
+        }
         if self.log_search.editing {
             match key.code {
                 KeyCode::Esc => self.log_search.clear(),
@@ -447,9 +648,14 @@ impl View {
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && key.code == KeyCode::Char('r')
         {
-            self.log_search.editing = true;
-            self.prepare_log_search();
-            self.show_newest_log();
+            if self.log_open.is_some() {
+                self.log_detail_search.editing = true;
+                self.jump_detail_match();
+            } else {
+                self.log_search.editing = true;
+                self.prepare_log_search();
+                self.show_newest_log();
+            }
             return None;
         }
         if self.searching {

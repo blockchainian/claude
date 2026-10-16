@@ -110,6 +110,7 @@ impl App {
         let preferences = Preferences::load(&config_dir);
         let mut view = View::new(preferences.grouping, true);
         view.set_pinned(&preferences.pinned);
+        view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
         view.set_capabilities(hub.capabilities());
         Self {
@@ -205,6 +206,10 @@ impl App {
                 self.view.tick_text_selection();
                 selection_tick = Instant::now();
             }
+            let action = self.view.flush_pending_click(Instant::now());
+            if self.handle_action(action) {
+                return Ok(());
+            }
             self.view.expire_messages(Instant::now());
             if schedule.due(Instant::now()) {
                 self.refresh();
@@ -238,6 +243,10 @@ impl App {
                 .view
                 .expire_messages(Instant::now())
                 .map_or(timeout, |message| timeout.min(message));
+            let timeout = self
+                .view
+                .pending_click_in(Instant::now())
+                .map_or(timeout, |click| timeout.min(click));
             let timeout = self
                 .view
                 .timeline_redraw_in(chrono::Utc::now())

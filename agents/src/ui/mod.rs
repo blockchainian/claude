@@ -73,7 +73,7 @@ const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
 const MESSAGE_LIFETIME: Duration = Duration::from_secs(1);
 
 /// Longest gap between two clicks on one task that still opens it.
-const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
+const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(300);
 
 fn tab_for_status(status: Option<SessionStatus>, current_tab: usize) -> usize {
     match status {
@@ -116,6 +116,7 @@ struct Viewport {
     details_scroll: DetailsScroll,
     /// Screen rows of each copyable details body drawn by the last render, with its full text.
     details_copy: Vec<(std::ops::Range<u16>, String, &'static str)>,
+    details_background: Vec<(std::ops::Range<u16>, crate::model::BackgroundTask)>,
     /// Links drawn by the last render of each panel: the task list, the details and the log.
     list_links: Vec<links::DrawnLink>,
     details_links: Vec<links::DrawnLink>,
@@ -139,12 +140,20 @@ struct DetailsScroll {
     left_keys: Option<Vec<u64>>,
 }
 
+struct BackgroundReturn {
+    event: Option<crate::log::Event>,
+    scroll: usize,
+    search: log_search::LogSearch,
+}
+
 /// What a task's details and log panels showed when the user last left it.
 #[derive(Default)]
 struct TaskPanels {
     details_scroll: DetailsScroll,
     log_search: log_search::LogSearch,
     log_open: Option<crate::log::Event>,
+    log_background_return: Option<BackgroundReturn>,
+    log_detail_search: log_search::LogSearch,
     log_scroll: usize,
     log_unseen: usize,
     log_open_scroll: usize,
@@ -181,6 +190,8 @@ pub struct View {
     pub(crate) log_search: log_search::LogSearch,
     /// The log event shown whole in the log panel, opened by clicking its cut row.
     log_open: Option<crate::log::Event>,
+    log_background_return: Option<BackgroundReturn>,
+    log_detail_search: log_search::LogSearch,
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
@@ -207,6 +218,8 @@ pub struct View {
     viewport: RefCell<Viewport>,
     /// Task row and time of the last left click in the list.
     last_click: Option<(usize, Instant)>,
+    double_click_interval: Duration,
+    pending_click: Option<input::PendingClick>,
     /// Button, origin and drag state of the held mouse press.
     mouse_press: Option<(MouseButton, u16, u16, bool)>,
     /// Text under the last left click on a copyable body, and when it happened.
@@ -287,6 +300,8 @@ impl View {
             log: Vec::new(),
             log_session: None,
             log_open: None,
+            log_background_return: None,
+            log_detail_search: log_search::LogSearch::default(),
             log_search: log_search::LogSearch::default(),
             capabilities: HashMap::new(),
             rows: Vec::new(),
@@ -310,6 +325,8 @@ impl View {
             notice: None,
             viewport: RefCell::new(Viewport::default()),
             last_click: None,
+            double_click_interval: DOUBLE_CLICK_INTERVAL,
+            pending_click: None,
             mouse_press: None,
             last_copy_click: None,
             copied: None,
@@ -328,6 +345,10 @@ impl View {
     /// no pixels.
     pub(crate) fn set_cell_aspect(&mut self, aspect: Option<f64>) {
         self.cell_aspect = aspect.unwrap_or(DEFAULT_CELL_ASPECT);
+    }
+
+    pub(crate) fn set_double_click_ms(&mut self, milliseconds: u64) {
+        self.double_click_interval = Duration::from_millis(milliseconds);
     }
 
     pub fn set_capabilities(&mut self, capabilities: HashMap<ProviderId, Capabilities>) {
@@ -599,6 +620,8 @@ impl View {
             details_scroll: std::mem::take(&mut viewport.details_scroll),
             log_search: std::mem::take(&mut self.log_search),
             log_open: self.log_open.take(),
+            log_background_return: self.log_background_return.take(),
+            log_detail_search: std::mem::take(&mut self.log_detail_search),
             log_scroll: viewport.log_scroll,
             log_unseen: viewport.log_unseen,
             log_open_scroll: viewport.log_open_scroll,
@@ -621,6 +644,9 @@ impl View {
         viewport.log_open_layout = None;
         self.log_search = shown.log_search;
         self.log_open = shown.log_open;
+        self.log_background_return = shown.log_background_return;
+        self.log_detail_search = shown.log_detail_search;
+        self.pending_click = None;
         self.left_log_newest = shown.log_newest.filter(|_| self.log_session != selected);
         self.panels_task = selected;
     }

@@ -138,6 +138,23 @@ impl View {
         );
         let mut body_area =
             super::render::row(area, LOG_TOP + 2, area.height.saturating_sub(LOG_TOP + 2));
+        if self.log_detail_search.active() {
+            body_area.height = body_area.height.saturating_sub(1);
+            let input = search_input_rect(area);
+            if self.log_detail_search.editing {
+                super::render::render_input_row(
+                    "Search › ",
+                    &self.log_detail_search.query,
+                    input,
+                    buf,
+                );
+            } else {
+                Line::from(self.log_detail_search.query.text().to_owned())
+                    .dim()
+                    .right_aligned()
+                    .render(input, buf);
+            }
+        }
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
         let mut layout = match viewport.log_open_layout.take() {
@@ -208,19 +225,47 @@ impl View {
             sources: layout.sources.clone(),
             rows,
         };
-        let visible = layout.lines
+        let mut visible = layout.lines
             [scroll.min(layout.lines.len())..(scroll + height).min(layout.lines.len())]
             .to_vec();
         viewport.log_open_layout = Some(layout);
         drop(viewport);
+        for line in &mut visible {
+            highlight_matches(line, &self.log_detail_search);
+        }
         Paragraph::new(visible).render(body_area, buf);
         self.highlight_text_selection(text_selection::Panel::Log, buf);
+    }
+
+    pub(super) fn jump_detail_match(&mut self) {
+        let Some(event) = &self.log_open else {
+            return;
+        };
+        if self.log_detail_search.query.is_empty() {
+            return;
+        }
+        let viewport = self.viewport.borrow();
+        let width = viewport.log.inner(Margin::new(2, 0)).width.max(1);
+        let cwd = self
+            .selected_row()
+            .map(|session| session.cwd.as_path())
+            .unwrap_or(Path::new("."));
+        let layout = open_layout(event, width, cwd);
+        let found = layout
+            .lines
+            .iter()
+            .position(|line| !self.log_detail_search.indices(&line.to_string()).is_empty());
+        drop(viewport);
+        if let Some(line) = found {
+            self.viewport.borrow_mut().log_open_scroll = line;
+        }
     }
 
     /// Opens `event` in the log panel, or closes the open event, dropping its cached layout.
     pub(super) fn set_log_open(&mut self, event: Option<Event>) {
         self.cancel_open_selection();
         self.log_open = event;
+        self.log_detail_search.clear();
         self.viewport.borrow_mut().log_open_layout = None;
     }
 
@@ -234,7 +279,8 @@ impl View {
         });
         self.log = events;
         self.prepare_log_search();
-        if let Some(open) = &self.log_open
+        if self.log_background_return.is_none()
+            && let Some(open) = &self.log_open
             && let Some(current) = self.log.iter().find(|event| {
                 if shows_calls(open) {
                     event
@@ -247,7 +293,10 @@ impl View {
             })
             && current != open
         {
-            self.set_log_open(Some(current.clone()));
+            let current = current.clone();
+            self.cancel_open_selection();
+            self.log_open = Some(current);
+            self.viewport.borrow_mut().log_open_layout = None;
         }
         let following = self.log_scroll() == 0 && self.mouse_press.is_none();
         let Some(newest) = newest.filter(|_| !following) else {
@@ -440,29 +489,8 @@ fn render_event(
             &links,
         )
     };
-    if let Some(search) = search.filter(|search| !search.query.is_empty()) {
-        let indices = search.indices(&body.to_string());
-        let mut offset = 0u32;
-        body.spans = body
-            .spans
-            .into_iter()
-            .flat_map(|span| {
-                let mut spans = Vec::new();
-                for grapheme in unicode_segmentation::UnicodeSegmentation::graphemes(
-                    span.content.as_ref(),
-                    true,
-                ) {
-                    let style = if indices.binary_search(&offset).is_ok() {
-                        span.style.bold()
-                    } else {
-                        span.style
-                    };
-                    spans.push(Span::styled(grapheme.to_owned(), style));
-                    offset += 1;
-                }
-                spans
-            })
-            .collect();
+    if let Some(search) = search {
+        highlight_matches(&mut body, search);
     }
     truncate_line_with_ellipsis_if_overflow(body, body_width)
         .render(Rect::new(body_x, area.y, body_width as u16, 1), buf);
@@ -720,6 +748,32 @@ fn collapse_whitespace(text: &str) -> String {
         }
     }
     collapsed
+}
+
+fn highlight_matches(line: &mut Line<'static>, search: &super::log_search::LogSearch) {
+    if !search.query.is_empty() {
+        let indices = search.indices(&line.to_string());
+        let mut offset = 0u32;
+        line.spans = std::mem::take(&mut line.spans)
+            .into_iter()
+            .flat_map(|span| {
+                let mut spans = Vec::new();
+                for grapheme in unicode_segmentation::UnicodeSegmentation::graphemes(
+                    span.content.as_ref(),
+                    true,
+                ) {
+                    let style = if indices.binary_search(&offset).is_ok() {
+                        span.style.bold()
+                    } else {
+                        span.style
+                    };
+                    spans.push(Span::styled(grapheme.to_owned(), style));
+                    offset += 1;
+                }
+                spans
+            })
+            .collect();
+    }
 }
 
 #[cfg(test)]

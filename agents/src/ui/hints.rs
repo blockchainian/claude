@@ -20,7 +20,7 @@ impl View {
             hint_line(&[("esc", "back")])
         } else if self.rename_target.is_some() {
             hint_line(&[("esc", "back"), ("enter", "rename")])
-        } else if self.log_search.editing {
+        } else if self.log_search.editing || self.log_detail_search.editing {
             hint_line(&[("esc", "back"), ("enter", "keep")])
         } else if self
             .selected_row()

@@ -608,6 +608,8 @@ fn log_list_click_opens_cut_row_and_stationary_double_click_copies_nothing() {
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
             .is_none()
     );
+    assert!(view.log_open.is_none());
+    view.flush_pending_click(Instant::now() + view.double_click_interval);
     assert_eq!(view.log_open, Some(view.log[0].clone()));
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))

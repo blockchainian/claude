@@ -131,13 +131,18 @@ impl View {
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout = self.center_layout(area);
-        if self.log_search.editing
+        if (self.log_search.editing || self.log_detail_search.editing)
             && !self.help
             && self.confirm_dialog.is_none()
             && !layout.log.is_empty()
         {
             let input = log::search_input_rect(layout.log.inner(Margin::new(2, 0)));
-            let (_, caret) = input_row("Search › ", &self.log_search.query, input);
+            let search = if self.log_open.is_some() {
+                &self.log_detail_search
+            } else {
+                &self.log_search
+            };
+            let (_, caret) = input_row("Search › ", &search.query, input);
             return Some((input.x + caret, input.y));
         }
         if !(self.searching || self.rename_target.is_some())
@@ -420,6 +425,7 @@ impl View {
             let mut viewport = self.viewport.borrow_mut();
             viewport.details = Rect::default();
             viewport.details_copy.clear();
+            viewport.details_background.clear();
             viewport.details_links.clear();
             viewport.details_text = text_selection::TextRegion::default();
         }
@@ -851,6 +857,15 @@ impl View {
                     }
                 }
                 Item::Background { task, output } => {
+                    let start = offset.max(scroll);
+                    let end = (offset + height).min(scroll + available);
+                    if start < end {
+                        self.viewport.borrow_mut().details_background.push((
+                            content_top + (start - scroll) as u16
+                                ..content_top + (end - scroll) as u16,
+                            task.clone(),
+                        ));
+                    }
                     render_background(task, output, now, item_area, &mut content);
                 }
                 Item::Subagent(child) => {

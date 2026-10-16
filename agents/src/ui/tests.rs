@@ -5139,6 +5139,7 @@ fn click_log_text(view: &mut View, screen: &str, text: &str, button: MouseButton
     let (x, y) = rendered_cell(screen, text);
     if button == MouseButton::Left {
         click_mouse(view, mouse(MouseEventKind::Down(button), x, y));
+        view.flush_pending_click(Instant::now() + view.double_click_interval);
     } else {
         assert!(
             view.handle_mouse(mouse(MouseEventKind::Down(button), x, y))
@@ -5484,7 +5485,8 @@ fn task_log_click_opens_row_with_shortened_path() {
 
 fn click_text(view: &mut View, screen: &str, text: &str) -> Option<Action> {
     let (x, y) = rendered_cell(screen, text);
-    click_mouse(view, mouse(MouseEventKind::Down(MouseButton::Left), x, y))
+    let action = click_mouse(view, mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    action.or_else(|| view.flush_pending_click(Instant::now() + view.double_click_interval))
 }
 
 #[test]
@@ -5754,6 +5756,10 @@ fn project_group_header_opens_its_directory() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), x + 2, y)
         ),
+        None
+    );
+    assert_eq!(
+        view.flush_pending_click(Instant::now() + view.double_click_interval),
         Some(Action::OpenPath("/tmp/project".into()))
     );
     let selected = view.selected;
@@ -6409,7 +6415,10 @@ fn commit_sha_links_open_vscode_from_log_and_details() {
                 rect.y,
             ));
             assert_eq!(
-                view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), rect.x, rect.y)),
+                view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), rect.x, rect.y))
+                    .or_else(
+                        || view.flush_pending_click(Instant::now() + view.double_click_interval)
+                    ),
                 Some(Action::OpenPath(target))
             );
             break;
@@ -6732,3 +6741,6 @@ fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_inline_code_color
     assert_eq!(cell(right - 2).symbol(), "⠂");
     assert!(view.timeline_redraw_in(now).is_some());
 }
+
+#[path = "click_log_tests.rs"]
+mod click_log_tests;

@@ -8,8 +8,9 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Preferences {
+    pub double_click_ms: u64,
     pub grouping: Grouping,
     pub pinned: Vec<SessionKey>,
     /// A `.tmTheme` file whose accents color the session titles.
@@ -22,6 +23,8 @@ pub struct Preferences {
 
 #[derive(Deserialize, Serialize)]
 struct StoredPreferences {
+    #[serde(default = "default_double_click_ms")]
+    double_click_ms: u64,
     grouping: String,
     pinned: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -30,6 +33,23 @@ struct StoredPreferences {
     light_theme: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dark_theme: Option<PathBuf>,
+}
+
+fn default_double_click_ms() -> u64 {
+    300
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            double_click_ms: default_double_click_ms(),
+            grouping: Grouping::default(),
+            pinned: Vec::new(),
+            theme: None,
+            light_theme: None,
+            dark_theme: None,
+        }
+    }
 }
 
 impl Preferences {
@@ -44,6 +64,7 @@ impl Preferences {
             return Self::default();
         };
         Self {
+            double_click_ms: stored.double_click_ms,
             grouping,
             pinned: stored
                 .pinned
@@ -68,6 +89,7 @@ impl Preferences {
             serde_json::to_writer(
                 &mut file,
                 &StoredPreferences {
+                    double_click_ms: self.double_click_ms,
                     grouping: self.grouping.as_str().into(),
                     pinned: self.pinned.iter().map(ToString::to_string).collect(),
                     theme: self.theme.clone(),
@@ -89,6 +111,21 @@ impl Preferences {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn double_click_interval_defaults_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(Preferences::load(dir.path()).double_click_ms, 300);
+        fs::write(
+            dir.path().join("agents.json"),
+            r#"{"grouping":"project","pinned":[],"double_click_ms":450}"#,
+        )
+        .unwrap();
+        let preferences = Preferences::load(dir.path());
+        assert_eq!(preferences.double_click_ms, 450);
+        preferences.save(dir.path()).unwrap();
+        assert_eq!(Preferences::load(dir.path()), preferences);
+    }
 
     #[test]
     fn unprefixed_pins_are_dropped() {
@@ -122,6 +159,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(Preferences::load(dir.path()), Preferences::default());
         let preferences = Preferences {
+            double_click_ms: 300,
             grouping: Grouping::Model,
             pinned: vec![
                 "claude:second".parse().unwrap(),
