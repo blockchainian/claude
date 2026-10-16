@@ -736,3 +736,84 @@ fn terminal_json_strings_keep_multiline_alignment_and_colors() {
     assert_eq!(string.fgcolor(), continuation.fgcolor());
     println!("{{\"json_multiline\":\"pass\",\"alignment\":\"pass\",\"colors\":\"pass\"}}");
 }
+
+#[test]
+#[ignore = "requires tmux and NO_COLOR unset; run with --ignored --nocapture"]
+fn terminal_running_tool_animates_without_input() {
+    use std::io::Write;
+
+    let (_directory, tmux, transcript) = start_probe("running-tool");
+    // Retain the upstream tool-call envelope while running this probe's actual command.
+    let mut call: serde_json::Value = serde_json::from_str(
+        include_str!("fixtures/claude-tool-details.jsonl")
+            .lines()
+            .nth(7)
+            .unwrap(),
+    )
+    .unwrap();
+    call["isSidechain"] = false.into();
+    call["timestamp"] = chrono::Utc::now().to_rfc3339().into();
+    call["message"]["content"][0]["input"] = serde_json::json!({"command": "sleep 5"});
+    let mut tool = Command::new("sleep").arg("5").spawn().unwrap();
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(transcript)
+            .unwrap(),
+        "{call}"
+    )
+    .unwrap();
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    std::thread::sleep(Duration::from_secs(1));
+    let frames = ["•··", "·•·", "··•"];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut position = None;
+    for _ in 0..10 {
+        assert!(
+            tool.try_wait().unwrap().is_none(),
+            "tool must still be running"
+        );
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+        let (y, raw) = capture
+            .lines()
+            .enumerate()
+            .find(|(_, line)| frames.iter().any(|frame| line.contains(frame)))
+            .unwrap_or_else(|| panic!("running output animation is visible: {capture}"));
+        // Parse this row alone so unrelated wide task-title glyphs cannot shift rows.
+        let mut parser = vt100::Parser::new(1, 200, 0);
+        parser.process(raw.as_bytes());
+        let screen = parser.screen();
+        let contents = screen.contents();
+        let (x, frame) = frames
+            .iter()
+            .find_map(|frame| {
+                contents
+                    .find(frame)
+                    .map(|byte| (contents[..byte].width(), *frame))
+            })
+            .unwrap();
+        if let Some(previous) = position {
+            assert_eq!((x, y), previous, "animation must stay centered");
+        }
+        position = Some((x, y));
+        assert_eq!(x, 1 + (198 - 3) / 2);
+        for offset in 0..3 {
+            let cell = screen.cell(0, (x + offset) as u16).unwrap();
+            assert!(cell.dim(), "running output stays dim: x={x}, raw={raw:?}");
+            assert!(!cell.is_wide(), "each dot occupies one terminal cell");
+            assert_eq!(
+                cell.contents(),
+                frame.chars().nth(offset).unwrap().to_string()
+            );
+        }
+        seen.insert(frame);
+        println!("frame: {contents}");
+        // No key, resize or transcript write occurs during frame sampling.
+        std::thread::sleep(Duration::from_millis(130));
+    }
+    assert_eq!(seen.len(), 3);
+    assert!(tool.wait().unwrap().success());
+    println!(
+        "{{\"running_animation\":\"pass\",\"frames\":3,\"single_width\":true,\"dim\":true,\"centered\":true}}"
+    );
+}

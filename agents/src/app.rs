@@ -278,6 +278,10 @@ impl App {
             .map_or(timeout, |log| timeout.min(log));
         let timeout = self
             .view
+            .tool_redraw_in(chrono::Utc::now())
+            .map_or(timeout, |tool| timeout.min(tool));
+        let timeout = self
+            .view
             .expire_messages(Instant::now())
             .map_or(timeout, |message| timeout.min(message));
         let timeout = self

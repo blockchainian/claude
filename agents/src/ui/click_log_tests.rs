@@ -129,7 +129,9 @@ fn detail_centers_all_output_fragments_with_one_offset() {
         assert!(output_parts.len() >= 4);
         let widest = output_parts
             .iter()
-            .flat_map(|part| part.lines(width.into(), Style::default()))
+            .flat_map(|part| {
+                part.lines(width.into(), Style::default(), chrono::DateTime::UNIX_EPOCH)
+            })
             .map(|line| line.width())
             .max()
             .unwrap() as u16;
@@ -147,7 +149,9 @@ fn detail_centers_all_output_fragments_with_one_offset() {
                 .count(),
             output_parts
                 .iter()
-                .map(|part| part.lines(width.into(), Style::default()).len())
+                .map(|part| part
+                    .lines(width.into(), Style::default(), chrono::DateTime::UNIX_EPOCH)
+                    .len())
                 .sum::<usize>(),
         );
         for row in region.rows.iter().filter(|row| row.segment >= output_start) {
@@ -158,7 +162,9 @@ fn detail_centers_all_output_fragments_with_one_offset() {
                 .filter(|other| other.segment == row.segment)
                 .collect();
             let index = rows.iter().position(|other| other.y == row.y).unwrap();
-            let line = part.lines(width.into(), Style::default())[index].to_string();
+            let line = part.lines(width.into(), Style::default(), chrono::DateTime::UNIX_EPOCH)
+                [index]
+                .to_string();
             let mut column = region.area.x + offset;
             for grapheme in
                 unicode_segmentation::UnicodeSegmentation::graphemes(line.as_str(), true)
@@ -202,7 +208,7 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
                 .join("\n"),
             include_str!("../../tests/ui_snapshots/manager_await_json.txt").trim_end_matches('\n')
         );
-        let lines = part.lines(width.into(), Style::default());
+        let lines = part.lines(width.into(), Style::default(), chrono::DateTime::UNIX_EPOCH);
         let offset = (width as usize - lines.iter().map(Line::width).max().unwrap()) / 2;
         assert!(offset > 0);
         let copy = super::super::log::open_text(&event);

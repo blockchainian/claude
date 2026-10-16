@@ -109,7 +109,7 @@ impl View {
         };
         let time = event_time(event, session, self.is_newest_shown(event), now);
         let list_links = self.viewport.borrow().log_links.clone();
-        self.render_event_detail(event, &time, area, buf, &session.cwd);
+        self.render_event_detail(event, &time, area, buf, &session.cwd, now);
         self.viewport.borrow_mut().log_links.extend(list_links);
     }
 
@@ -140,6 +140,7 @@ impl View {
         area: Rect,
         buf: &mut Buffer,
         cwd: &std::path::Path,
+        now: DateTime<Utc>,
     ) {
         let (label_style, _) = super::style::log_styles(&event.kind);
         let time_style = super::style::log_time_style(&event.kind, self.is_newest_shown(event));
@@ -209,15 +210,22 @@ impl View {
                 layout
             }
             _ => {
-                let mut layout = detail_layout(event, area.width, cwd);
+                let mut layout = detail_layout(event, area.width, cwd, now);
                 if layout.lines.len() > height && area.width > 1 {
-                    layout = detail_layout(event, area.width - 1, cwd);
+                    layout = detail_layout(event, area.width - 1, cwd, now);
                     layout.width = area.width;
                 }
                 layout.height = height;
                 layout
             }
         };
+        for &row in &layout.running {
+            layout.lines[row]
+                .spans
+                .last_mut()
+                .expect("running span exists")
+                .content = super::tool_detail::running_frame(now).into();
+        }
         let overflow = layout.lines.len() > height && area.width > 1;
         if overflow {
             body_area.width -= 1;
@@ -293,7 +301,7 @@ impl View {
             .selected_row()
             .map(|session| session.cwd.as_path())
             .unwrap_or(Path::new("."));
-        let layout = detail_layout(event, width, cwd);
+        let layout = detail_layout(event, width, cwd, DateTime::UNIX_EPOCH);
         let found = layout
             .lines
             .iter()
@@ -477,6 +485,19 @@ impl View {
                 self.select_log_event(Some(event));
             }
         }
+    }
+
+    /// Wake only when an animated tool output is in the visible detail viewport.
+    pub(crate) fn tool_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
+        let viewport = self.viewport.borrow();
+        let layout = viewport.log_detail_layout.as_ref()?;
+        let visible = viewport.log_detail_scroll
+            ..viewport.log_detail_scroll + usize::from(viewport.log_text.area.height);
+        layout
+            .running
+            .iter()
+            .any(|row| visible.contains(row))
+            .then(|| super::tool_detail::running_redraw_in(now))
     }
 
     /// How long until the top log row's time reads differently, or `None` if it never does.
@@ -687,6 +708,8 @@ pub(super) struct DetailLayout {
     height: usize,
     theme_generation: u64,
     lines: Vec<Line<'static>>,
+    /// Animated output rows, updated without repeating syntax highlighting.
+    running: Vec<usize>,
     /// Each line's text part and the cells mapping it back to that part's bytes.
     rows: Vec<(usize, Cells)>,
     sources: Vec<text_selection::Source>,
@@ -694,13 +717,18 @@ pub(super) struct DetailLayout {
     links: Vec<Vec<super::links::Link>>,
 }
 
-fn detail_layout(event: &Event, width: u16, cwd: &std::path::Path) -> DetailLayout {
+fn detail_layout(
+    event: &Event,
+    width: u16,
+    cwd: &std::path::Path,
+    now: DateTime<Utc>,
+) -> DetailLayout {
     let theme_generation = super::highlight::theme_generation();
     let body_style = super::style::log_styles(&event.kind).1;
     let rendered: Vec<_> = open_parts(event)
         .into_iter()
         .map(|part| {
-            let lines = part.lines(usize::from(width), body_style);
+            let lines = part.lines(usize::from(width), body_style, now);
             (part, lines)
         })
         .collect();
@@ -746,7 +774,7 @@ fn detail_layout(event: &Event, width: u16, cwd: &std::path::Path) -> DetailLayo
                 };
                 super::links::path_links(&part.source, &paths, cwd)
             };
-            (part.source, lines, maps, links)
+            (part.running(), part.source, lines, maps, links)
         })
         .collect();
     let mut layout = DetailLayout {
@@ -754,11 +782,15 @@ fn detail_layout(event: &Event, width: u16, cwd: &std::path::Path) -> DetailLayo
         height: 0,
         theme_generation,
         lines: Vec::new(),
+        running: Vec::new(),
         rows: Vec::new(),
         sources: Vec::new(),
         links: Vec::new(),
     };
-    for (id, (source, lines, mut maps, links)) in parts.into_iter().enumerate() {
+    for (id, (running, source, lines, mut maps, links)) in parts.into_iter().enumerate() {
+        if running {
+            layout.running.push(layout.lines.len());
+        }
         for cells in &mut maps {
             cells.retain(|(range, _)| range.end <= width);
         }
@@ -1025,7 +1057,7 @@ mod log_markdown {
                     .unwrap()
                     .1 = output.display().to_string();
             }
-            let layout = detail_layout(&linked, 120, dir.path());
+            let layout = detail_layout(&linked, 120, dir.path(), DateTime::UNIX_EPOCH);
             assert!(
                 layout
                     .links
@@ -1055,7 +1087,7 @@ mod log_markdown {
         assert!(open_parts(event).is_empty());
         assert!(open_text(event).is_empty());
         assert_eq!(
-            detail_layout(event, 100, std::path::Path::new("/")).height,
+            detail_layout(event, 100, std::path::Path::new("/"), DateTime::UNIX_EPOCH).height,
             0
         );
     }

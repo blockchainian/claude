@@ -23,7 +23,7 @@ enum Body {
     Label(Style),
     /// An input/output arrow without selectable source bytes.
     Arrow,
-    /// The dim note that a call has no output yet.
+    /// The dim animation that a call has no output yet.
     Running,
     /// `key: value` lines.
     Fields(Vec<std::ops::Range<usize>>),
@@ -116,8 +116,15 @@ impl Part {
         matches!(self.body, Body::Markdown)
     }
 
+    pub fn running(&self) -> bool {
+        matches!(self.body, Body::Running)
+    }
+
     /// Generated rules and title padding have no source bytes to select.
     pub fn maps(&self, lines: &[Line<'_>]) -> Vec<Vec<super::text_selection_layout::CellMap>> {
+        if self.running() {
+            return vec![Vec::new(); lines.len()];
+        }
         if let Body::Shell(commands) = &self.body {
             return shell_maps(&self.source, commands, lines);
         }
@@ -158,7 +165,12 @@ impl Part {
     }
 
     /// The part drawn `width` columns wide; every line fits so each cell maps to its source.
-    pub fn lines(&self, width: usize, body_style: Style) -> Vec<Line<'static>> {
+    pub fn lines(
+        &self,
+        width: usize,
+        body_style: Style,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Vec<Line<'static>> {
         let drawn = self.source.replace('\t', "    ");
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
@@ -173,7 +185,7 @@ impl Part {
                 vec![Line::styled(row, super::style::log_jump_style())]
             }
             Body::Running => vec![Line::from(Span::styled(
-                source.to_owned(),
+                running_frame(now),
                 Style::new().dim(),
             ))],
             Body::Fields(keys) => {
@@ -499,7 +511,7 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
                     part.group = Some(output_start);
                 }
             }
-            None => parts.push(Part::new("running…", Body::Running)),
+            None => parts.push(Part::new("", Body::Running)),
         }
     }
     parts
@@ -673,6 +685,14 @@ fn split_wide(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
     split
 }
 
+pub(super) fn running_frame(now: chrono::DateTime<chrono::Utc>) -> &'static str {
+    ["•··", "·•·", "··•"][now.timestamp_millis().div_euclid(300).rem_euclid(3) as usize]
+}
+
+pub(super) fn running_redraw_in(now: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
+    std::time::Duration::from_millis((300 - now.timestamp_millis().rem_euclid(300)) as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -697,9 +717,59 @@ mod tests {
     fn texts(parts: &[Part], width: usize) -> Vec<String> {
         parts
             .iter()
-            .flat_map(|part| part.lines(width, Style::default()))
+            .flat_map(|part| part.lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH))
             .map(|line| line.to_string())
             .collect()
+    }
+
+    #[test]
+    fn running_frames_follow_wall_time_and_cycle() {
+        let start = chrono::DateTime::UNIX_EPOCH;
+        for (millis, frame) in [
+            (0, "•··"),
+            (299, "•··"),
+            (300, "·•·"),
+            (600, "··•"),
+            (900, "•··"),
+        ] {
+            assert_eq!(
+                running_frame(start + chrono::Duration::milliseconds(millis)),
+                frame
+            );
+            assert_eq!(frame.width(), 3);
+        }
+        assert_eq!("•".width(), 1);
+        assert_eq!("·".width(), 1);
+    }
+
+    #[test]
+    fn running_part_draws_the_supplied_time_in_dim_style() {
+        let part = Part::new("", Body::Running);
+        let now = chrono::DateTime::UNIX_EPOCH + chrono::Duration::milliseconds(600);
+        let lines = part.lines(80, Style::default(), now);
+        assert_eq!(lines[0].to_string(), "··•");
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::DIM)
+        );
+    }
+
+    #[test]
+    fn running_part_has_no_copy_source_or_selectable_cells() {
+        let parts = parts(&event(vec![ToolCall {
+            id: "running-copy".into(),
+            title: "Bash".into(),
+            name: "Bash".into(),
+            input: vec![],
+            output: None,
+            is_error: false,
+        }]));
+        let part = parts.last().unwrap();
+        let lines = part.lines(80, Style::default(), chrono::DateTime::UNIX_EPOCH);
+        assert!(part.source.is_empty());
+        assert!(part.maps(&lines)[0].is_empty());
     }
 
     #[test]
@@ -708,7 +778,7 @@ mod tests {
         let parts = Part::text_parts(source.into(), false);
         assert_eq!(parts.len(), 1);
         let part = &parts[0];
-        let lines = part.lines(200, Style::default());
+        let lines = part.lines(200, Style::default(), chrono::DateTime::UNIX_EPOCH);
         let text: Vec<_> = lines.iter().map(ToString::to_string).collect();
         let first = text
             .iter()
@@ -740,7 +810,7 @@ mod tests {
             string_style.fg
         );
         for width in [20, 80, 200] {
-            let lines = part.lines(width, Style::default());
+            let lines = part.lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH);
             let maps = part.maps(&lines);
             for (line, map) in lines.iter().zip(maps) {
                 let copied: String = map
@@ -815,7 +885,7 @@ mod tests {
         assert_eq!(parts[3].source, "[\n  3,\n  4\n]");
         assert_eq!(parts[4].source, " end");
         for part in &parts {
-            let lines = part.lines(80, Style::default());
+            let lines = part.lines(80, Style::default(), chrono::DateTime::UNIX_EPOCH);
             let maps = super::super::text_selection_layout::map_lines(
                 &part.source,
                 &lines,
@@ -944,7 +1014,7 @@ mod tests {
     #[test]
     fn shell_sample_connectors_and_original_copy() {
         let part = command_part(SHELL_SAMPLE);
-        let lines = part.lines(500, Style::default());
+        let lines = part.lines(500, Style::default(), chrono::DateTime::UNIX_EPOCH);
         assert_eq!(lines.len(), 5);
         let commands = [
             "cd ~/Code/blockchainian/dot",
@@ -984,7 +1054,7 @@ mod tests {
         );
         assert_eq!(
             command_part("a && bb && cccc")
-                .lines(100, Style::default())
+                .lines(100, Style::default(), chrono::DateTime::UNIX_EPOCH)
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
@@ -1004,7 +1074,7 @@ mod tests {
         ] {
             let part = command_part(command);
             for width in [3, 12, 80] {
-                let lines = part.lines(width, Style::default());
+                let lines = part.lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH);
                 let maps = part.maps(&lines);
                 assert_eq!(maps.len(), lines.len());
                 assert!(lines.iter().all(|line| line.width() <= width));
@@ -1051,7 +1121,12 @@ mod tests {
             ["command: a ┐", "bb         ┘", "timeout: 1000"]
         );
         assert_eq!(
-            command_part("echo 'broken && next").lines(80, Style::default())[0].to_string(),
+            command_part("echo 'broken && next").lines(
+                80,
+                Style::default(),
+                chrono::DateTime::UNIX_EPOCH
+            )[0]
+            .to_string(),
             "echo 'broken && next"
         );
     }
@@ -1074,7 +1149,7 @@ mod tests {
             .unwrap();
         assert!(key.style.fg.is_some());
         let body_style = Style::default().fg(ratatui::style::Color::Gray);
-        let lines = parts[0].lines(80, body_style);
+        let lines = parts[0].lines(80, body_style, chrono::DateTime::UNIX_EPOCH);
         assert_eq!(lines[0].spans[0].content, "path");
         assert_eq!(lines[0].spans[0].style.fg, key.style.fg);
         assert_eq!(lines[0].spans[1].content, ": first");
@@ -1098,7 +1173,7 @@ mod tests {
             Body::Label(Style::default()),
         );
         assert!(
-            part.lines(8, Style::default())
+            part.lines(8, Style::default(), chrono::DateTime::UNIX_EPOCH)
                 .iter()
                 .all(|line| line.width() <= 8)
         );
@@ -1163,7 +1238,7 @@ mod tests {
                 "",
                 "Read",
                 "agents/src/log.rs:1-40",
-                "running…",
+                "",
             ]
         );
         assert_eq!(
@@ -1177,7 +1252,7 @@ mod tests {
                 "",
                 &format!("{} Read {}", "─".repeat(37), "─".repeat(37)),
                 "agents/src/log.rs:1-40",
-                "running…",
+                "•··",
             ]
         );
     }
@@ -1204,7 +1279,11 @@ mod tests {
             ];
             let parts = parts(&event(calls));
             for width in 0..=40 {
-                let lines = parts[0].lines(width, Style::default().fg(ratatui::style::Color::Red));
+                let lines = parts[0].lines(
+                    width,
+                    Style::default().fg(ratatui::style::Color::Red),
+                    chrono::DateTime::UNIX_EPOCH,
+                );
                 assert_eq!(lines.len(), 1);
                 assert_eq!(lines[0].width(), width);
                 if width < 5 {
@@ -1217,7 +1296,7 @@ mod tests {
                 let left = text.chars().take_while(|ch| *ch == '─').count() + 1;
                 assert_eq!(left, (width - drawn.width() - 2) / 2 + 1);
                 assert_eq!(
-                    parts[1].lines(width, Style::default())[0]
+                    parts[1].lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH)[0]
                         .to_string()
                         .find('↓'),
                     Some(0)
@@ -1268,7 +1347,8 @@ mod tests {
             );
             for part in parts.iter().filter(|part| matches!(part.body, Body::Arrow)) {
                 for width in 0..=40 {
-                    let lines = part.lines(width, Style::default().dim());
+                    let lines =
+                        part.lines(width, Style::default().dim(), chrono::DateTime::UNIX_EPOCH);
                     assert_eq!(lines[0].width(), usize::from(width > 0));
                     assert_eq!(lines[0].to_string().find('↓'), (width > 0).then_some(0));
                     assert_eq!(lines[0].style, super::super::style::log_jump_style());
@@ -1308,7 +1388,7 @@ mod tests {
                 "fghij\";",
             ]
         );
-        let lines = parts[3].lines(9, Style::default());
+        let lines = parts[3].lines(9, Style::default(), chrono::DateTime::UNIX_EPOCH);
         assert!(lines.iter().all(|line| line.width() <= 9));
         assert!(lines[0].spans.len() > 1);
     }
@@ -1326,7 +1406,7 @@ mod tests {
             }]),
             is_error: true,
         }]));
-        let lines = parts[1].lines(80, Style::default());
+        let lines = parts[1].lines(80, Style::default(), chrono::DateTime::UNIX_EPOCH);
         assert_eq!(
             lines[0].spans[0].style,
             super::super::style::log_styles(&Kind::Error).0

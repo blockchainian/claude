@@ -3339,7 +3339,8 @@ fn background_box_dims_border_but_not_title_or_output() {
     event.calls[0].title = "Run checks".into();
     let parts = super::tool_detail::parts(&event);
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
-    (&parts[0].lines(40, Style::default())[0]).render(title_buf.area, &mut title_buf);
+    (&parts[0].lines(40, Style::default(), chrono::DateTime::UNIX_EPOCH)[0])
+        .render(title_buf.area, &mut title_buf);
     let title_x = (0..40)
         .find(|x| title_buf[(*x, 0)].symbol() == "R")
         .unwrap();
@@ -6930,6 +6931,48 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
 }
 
 #[test]
+fn running_tool_redraws_cached_detail_only_while_visible() {
+    let (view, _) = open_tool_fixture();
+    let start = chrono::DateTime::UNIX_EPOCH;
+    for (millis, frame) in [(0, "•··"), (300, "·•·"), (600, "··•"), (900, "•··")] {
+        let now = start + Duration::milliseconds(millis);
+        let screen = log_screen(&view, 100, 48, now);
+        assert!(screen.lines().any(|line| line.trim() == frame));
+        let viewport = view.viewport.borrow();
+        let region = &viewport.log_text;
+        let row = region.rows.last().unwrap();
+        assert!(row.cells.is_empty());
+        let text = screen.lines().nth(usize::from(row.y)).unwrap();
+        assert_eq!(
+            text.find(frame),
+            Some(usize::from(region.area.x) + usize::from(region.area.width.saturating_sub(3)) / 2)
+        );
+        drop(viewport);
+        assert_eq!(
+            view.tool_redraw_in(now),
+            Some(std::time::Duration::from_millis(300))
+        );
+    }
+    assert_eq!(
+        view.tool_redraw_in(start + Duration::milliseconds(299)),
+        Some(std::time::Duration::from_millis(1))
+    );
+    log_screen(&view, 100, 25, start);
+    assert_eq!(
+        view.tool_redraw_in(start),
+        None,
+        "running row is below the viewport"
+    );
+    let (view, _) = log_fixture();
+    log_screen(&view, 100, 48, start);
+    assert_eq!(
+        view.tool_redraw_in(start),
+        None,
+        "plain tool rows do not animate"
+    );
+}
+
+#[test]
 fn task_log_selected_tool_snapshot() {
     let (view, now) = open_tool_fixture();
     let open = log_screen(&view, 100, 48, now);
@@ -6944,11 +6987,11 @@ fn task_log_selected_tool_snapshot() {
         buf[(x, y)].fg,
         Color::Rgb(..) | Color::Indexed(..)
     ));
-    let (x, y) = rendered_cell(&open, "running…");
+    let (x, y) = rendered_cell(&open, super::tool_detail::running_frame(now));
     assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(
         super::log::open_text(&view.log[7]),
-        "Bash\ncargo test\n\nrunning 3 tests\n...\n\nRead\nagents/src/log.rs:1-40\nrunning…"
+        "Bash\ncargo test\n\nrunning 3 tests\n...\n\nRead\nagents/src/log.rs:1-40\n"
     );
 }
 
@@ -7019,7 +7062,7 @@ fn task_log_selected_tool_gains_its_output_when_the_log_refreshes() {
     let refreshed = log_screen(&view, 100, 48, now);
     assert_ne!(refreshed, open);
     assert!(refreshed.contains("use chrono::{DateTime, Utc};"));
-    assert!(!refreshed.contains("running…"));
+    assert!(!refreshed.contains(super::tool_detail::running_frame(now)));
     view.set_log(view.log[..7].to_vec());
     assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
