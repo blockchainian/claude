@@ -14,6 +14,10 @@ pub struct Preferences {
     pub pinned: Vec<SessionKey>,
     /// A `.tmTheme` file whose accents color the session titles.
     pub theme: Option<PathBuf>,
+    /// A `.tmTheme` file that highlights code on a light background instead of `theme`.
+    pub light_theme: Option<PathBuf>,
+    /// A `.tmTheme` file that highlights code on a dark background instead of `theme`.
+    pub dark_theme: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -22,6 +26,10 @@ struct StoredPreferences {
     pinned: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     theme: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    light_theme: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dark_theme: Option<PathBuf>,
 }
 
 impl Preferences {
@@ -43,6 +51,8 @@ impl Preferences {
                 .filter_map(|value| value.parse().ok())
                 .collect(),
             theme: stored.theme,
+            light_theme: stored.light_theme,
+            dark_theme: stored.dark_theme,
         }
     }
 
@@ -61,6 +71,8 @@ impl Preferences {
                     grouping: self.grouping.as_str().into(),
                     pinned: self.pinned.iter().map(ToString::to_string).collect(),
                     theme: self.theme.clone(),
+                    light_theme: self.light_theme.clone(),
+                    dark_theme: self.dark_theme.clone(),
                 },
             )?;
             file.write_all(b"\n")?;
@@ -116,6 +128,8 @@ mod tests {
                 "claude:first".parse().unwrap(),
             ],
             theme: Some(PathBuf::from("custom.tmTheme")),
+            light_theme: Some(PathBuf::from("light.tmTheme")),
+            dark_theme: Some(PathBuf::from("dark.tmTheme")),
         };
         preferences.save(dir.path()).unwrap();
         assert_eq!(Preferences::load(dir.path()), preferences);

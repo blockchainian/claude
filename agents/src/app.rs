@@ -301,11 +301,21 @@ impl App {
             self.view
                 .set_notice(Some(format!("Theme not loaded: {error}")));
         }
-        if let Err(error) = crate::ui::use_highlight_theme(light, self.preferences.theme.as_deref())
-        {
+        if let Err(error) = crate::ui::use_highlight_theme(light, self.highlight_theme(light)) {
             self.view
                 .set_notice(Some(format!("Theme not loaded: {error}")));
         }
+    }
+
+    /// The preference `.tmTheme` that highlights code on the given background.
+    fn highlight_theme(&self, light: bool) -> Option<&std::path::Path> {
+        let preferences = &self.preferences;
+        let themed = if light {
+            &preferences.light_theme
+        } else {
+            &preferences.dark_theme
+        };
+        themed.as_deref().or(preferences.theme.as_deref())
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
