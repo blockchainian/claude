@@ -118,15 +118,11 @@ pub(super) fn log_styles(kind: &crate::log::Kind) -> (Style, Style) {
     (body.bold(), body)
 }
 
-pub(super) fn time_style() -> Style {
-    Style::default().dim()
-}
-
 pub(super) fn log_time_style(kind: &crate::log::Kind, last: bool) -> Style {
     if last {
         log_styles(kind).1.bold()
     } else {
-        time_style()
+        Style::default()
     }
 }
 
