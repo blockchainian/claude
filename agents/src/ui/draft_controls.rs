@@ -94,9 +94,15 @@ impl View {
         }
     }
     pub(super) fn control_key(&mut self, key: KeyEvent) -> Option<Option<Action>> {
+        let cancel = key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL));
+        if cancel && (self.picker.is_some() || self.branch_editor.is_some()) {
+            self.picker = None;
+            self.branch_editor = None;
+            return Some(None);
+        }
         if let Some(picker) = self.picker.as_mut() {
             match key.code {
-                KeyCode::Esc => self.picker = None,
                 KeyCode::Up => picker.selected = picker.selected.saturating_sub(1),
                 KeyCode::Down => {
                     picker.selected = (picker.selected + 1).min(picker.values.len() - 1)
@@ -110,10 +116,6 @@ impl View {
             return Some(None);
         }
         if self.branch_editor.is_some() {
-            if key.code == KeyCode::Esc {
-                self.branch_editor = None;
-                return Some(None);
-            }
             if key.code == KeyCode::Enter {
                 let editor = self.branch_editor.take().expect("branch editor");
                 let draft = self
@@ -199,6 +201,25 @@ mod tests {
             trunk: "main".into(),
         });
         view
+    }
+    #[test]
+    fn ctrl_c_closes_draft_controls_without_changing_fields() {
+        for field in [Field::Model, Field::Effort, Field::Branch] {
+            let mut view = draft_view();
+            view.open_field(field);
+            assert!(view.picker.is_some() || view.branch_editor.is_some());
+            assert_eq!(
+                view.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+                None
+            );
+            assert!(view.picker.is_none(), "{field:?} picker stayed open");
+            assert!(view.branch_editor.is_none(), "branch editor stayed open");
+            let draft = view.selected_draft().unwrap();
+            assert!(draft.setup.model.is_none());
+            assert!(draft.setup.effort.is_none());
+            assert_eq!(draft.setup.branch, "main");
+            assert!(!draft.working);
+        }
     }
     #[test]
     fn picker_changes_only_selected_draft_field_and_can_cancel() {
