@@ -260,6 +260,18 @@ fn session_order(session: &Session) -> (std::cmp::Reverse<DateTime<Utc>>, &Sessi
 }
 
 impl View {
+    /// Underlines every link the last frame drew in `buf`.
+    pub fn underline_links(&self, buf: &mut Buffer) {
+        let viewport = self.viewport.borrow();
+        for links in [
+            &viewport.list_links,
+            &viewport.details_links,
+            &viewport.log_links,
+        ] {
+            links::underline(buf, links);
+        }
+    }
+
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
             log: Vec::new(),

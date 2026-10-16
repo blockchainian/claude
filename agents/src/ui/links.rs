@@ -1,6 +1,6 @@
 //! Clickable paths and image placeholders: where they sit in a text, and where they were drawn.
 use super::text_selection::DrawnRow;
-use ratatui::layout::Rect;
+use ratatui::{buffer::Buffer, layout::Rect};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -126,9 +126,63 @@ pub(super) fn row_links(
         .collect()
 }
 
+/// Underlines the cells of each drawn link with dots. Ratatui has no dotted underline, so
+/// each cell carries its own escape codes; call it last, after the frame's text is read.
+pub(super) fn underline(buf: &mut Buffer, links: &[DrawnLink]) {
+    use ratatui::buffer::CellDiffOption;
+    use std::num::NonZeroU16;
+    use unicode_width::UnicodeWidthStr;
+
+    for (rect, _) in links {
+        let rect = rect.intersection(buf.area);
+        let mut x = rect.left();
+        while x < rect.right() {
+            let cell = &mut buf[(x, rect.y)];
+            // A cell that already carries escape codes keeps its forced width.
+            let width = match cell.diff_option {
+                CellDiffOption::ForcedWidth(width) => usize::from(width.get()),
+                _ => cell.symbol().width().max(1),
+            };
+            cell.set_symbol(&format!("\x1b[4:4m{}\x1b[24m", cell.symbol()));
+            cell.set_diff_option(CellDiffOption::ForcedWidth(
+                NonZeroU16::new(width as u16).expect("width is at least one"),
+            ));
+            x += width as u16;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_get_a_dotted_underline_that_keeps_cell_widths() {
+        let area = Rect::new(0, 0, 8, 1);
+        let mut buf = Buffer::empty(area);
+        buf.set_string(0, 0, "a界b c", ratatui::style::Style::default());
+        let before = buf.clone();
+        let links = [(Rect::new(0, 0, 4, 1), PathBuf::from("/a"))];
+        underline(&mut buf, &links);
+        let symbols: Vec<_> = (0..5).map(|x| buf[(x, 0)].symbol().to_owned()).collect();
+        assert_eq!(
+            symbols,
+            [
+                "\x1b[4:4ma\x1b[24m",
+                "\x1b[4:4m界\x1b[24m",
+                " ",
+                "\x1b[4:4mb\x1b[24m",
+                " "
+            ]
+        );
+        assert_eq!(before.diff(&buf).len(), 3);
+        assert!(
+            before
+                .diff(&buf)
+                .iter()
+                .all(|(x, _, cell)| *x != 2 && cell.symbol().contains("\x1b[4:4m"))
+        );
+    }
 
     #[test]
     fn a_line_range_after_a_text_file_opens_its_first_line_in_vs_code() {

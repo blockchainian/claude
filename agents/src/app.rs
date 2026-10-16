@@ -212,6 +212,7 @@ impl App {
                 self.refresh_log(self.view.log_event_count(area));
                 self.refresh_usage();
                 self.view.render(area, frame.buffer_mut());
+                self.view.underline_links(frame.buffer_mut());
                 if let Some((x, y)) = self.view.cursor_pos(area) {
                     frame.set_cursor_position((x, y));
                 }
