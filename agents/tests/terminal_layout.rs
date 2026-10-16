@@ -109,8 +109,8 @@ fn terminal_layout_tracks_width() {
         println!("{width} columns:\n{capture}");
         let lines: Vec<_> = capture.lines().collect();
         assert!(
-            capture.contains("Message"),
-            "message header missing: {capture}"
+            capture.contains("Latest update"),
+            "latest update header missing: {capture}"
         );
         assert!(
             !capture.contains("Latest activity"),

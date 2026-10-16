@@ -3,7 +3,7 @@ Background
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ─ Waiting for output                  0s
 
-Update
+Latest update
 Checking the project
 
 Prompt
