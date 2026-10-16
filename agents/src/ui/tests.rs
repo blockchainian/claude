@@ -1805,14 +1805,14 @@ fn details_include_attention_and_clip_messages() {
     assert!(
         rendered
             .lines()
-            .any(|line| line.contains("claude-opus · high"))
+            .any(|line| line.contains("high · claude-opus"))
     );
     assert!(!rendered.contains("Reasoning"));
     let area = Rect::new(0, 0, 38, 22);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, Utc::now());
     assert_eq!(buf[(0, 20)].symbol(), "M");
-    assert_eq!(buf[(20, 20)].symbol(), "c");
+    assert_eq!(buf[(20, 20)].symbol(), "h");
     assert_eq!(buf[(0, 21)].symbol(), " ");
 }
 
@@ -2310,10 +2310,10 @@ fn details_model_and_effort_use_header_style() {
                 (0..area.width)
                     .map(|x| buf[(x, *y)].symbol())
                     .collect::<String>()
-                    .ends_with("medium")
+                    .ends_with("claude-opus-5-5")
             })
             .expect("Model header");
-        let group = "claude-opus-5-5 · medium";
+        let group = "medium · claude-opus-5-5";
         let start = area.width - group.chars().count() as u16;
         let title_style = view.title_style(&session_key("model"));
         for (offset, symbol) in group.chars().enumerate() {

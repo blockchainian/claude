@@ -357,12 +357,12 @@ fn details_model_section_keeps_controls_on_the_header_row() {
         );
     }
     assert_eq!(text(model.x, model.y, model.width), model_name);
-    assert_eq!(effort.right(), details.right());
+    assert_eq!(model.right(), details.right());
     assert_eq!(effort.y, model.y);
-    assert_eq!(effort.x, model.right() + 3);
-    assert_eq!(text(model.right(), model.y, 3), " · ");
+    assert_eq!(model.x, effort.right() + 3);
+    assert_eq!(text(effort.right(), model.y, 3), " · ");
     assert!(
-        buffer[(model.right() + 1, model.y)]
+        buffer[(effort.right() + 1, model.y)]
             .modifier
             .contains(ratatui::style::Modifier::DIM)
     );
@@ -418,4 +418,81 @@ fn live_effort_picker_remains_available_when_transcript_omits_effort() {
             effort: "high".into()
         })
     );
+}
+
+#[test]
+fn details_model_targets_cover_only_visible_value_cells() {
+    let (_directory, mut view) = fixture();
+    let row = &mut view.rows[view.selected];
+    row.background_job = Some(crate::model::BackgroundJob {
+        id: "e772d00b".into(),
+        needs: None,
+    });
+    row.process = Some(crate::model::Process {
+        pid: std::process::id(),
+        label: Some("bg".into()),
+        started_at: None,
+    });
+    row.model = Some("claude-opus-5-5".into());
+    for effort in [Some("medium"), None] {
+        view.rows[view.selected].effort = effort.map(str::to_owned);
+        // Providers without effort choices show only the model.
+        if effort.is_none() {
+            view.input_choices
+                .get_mut(&ProviderId::Claude)
+                .unwrap()
+                .efforts
+                .clear();
+        }
+        for width in 1..=40 {
+            let area = Rect::new(5, 3, width, 300);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 50, 310));
+            view.viewport.borrow_mut().field_targets.clear();
+            view.render_details(area, &mut buffer, Utc::now());
+            let group = if effort.is_some() {
+                "medium · claude-opus-5-5"
+            } else {
+                "claude-opus-5-5"
+            };
+            let group_width = group.chars().count();
+            let available = usize::from(width.saturating_sub(6));
+            let visible = if group_width > available {
+                available.saturating_sub(1)
+            } else {
+                group_width
+            };
+            let start = area.right() - group_width.min(available) as u16;
+            let targets = view.viewport.borrow().field_targets.clone();
+            let y = area.bottom() - 1;
+            for x in area.x..area.right() {
+                let offset = usize::from(x.saturating_sub(start));
+                let expected = if x < start || offset >= visible {
+                    None
+                } else if effort.is_none() || offset >= 9 {
+                    Some(Field::Model)
+                } else if offset < 6 {
+                    Some(Field::Effort)
+                } else {
+                    None
+                };
+                let actual = targets
+                    .iter()
+                    .find(|(rect, _)| rect.contains((x, y).into()));
+                assert_eq!(
+                    actual.map(|(_, field)| *field),
+                    expected,
+                    "width={width}, x={x}, effort={effort:?}"
+                );
+                if let Some(field) = expected {
+                    let symbol = group.chars().nth(offset).unwrap().to_string();
+                    assert_eq!(buffer[(x, y)].symbol(), symbol);
+                    assert_eq!(click(&mut view, x, y), None);
+                    assert_eq!(click(&mut view, x, y), None);
+                    assert_eq!(view.picker.as_ref().unwrap().field, field);
+                    key(&mut view, KeyCode::Esc);
+                }
+            }
+            assert!(targets.iter().all(|(rect, _)| !rect.is_empty()));
+        }
+    }
 }

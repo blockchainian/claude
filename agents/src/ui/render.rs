@@ -911,16 +911,17 @@ impl View {
             }
             None => None,
         };
-        let mut model = vec![Span::styled(
-            session.model_name().to_owned(),
-            style::time_style(),
-        )];
+        let mut model = Vec::new();
         if let Some(effort) = effort {
             model.extend([
-                " · ".dim(),
                 Span::styled(effort.to_owned(), style::time_style()),
+                " · ".dim(),
             ]);
         }
+        model.push(Span::styled(
+            session.model_name().to_owned(),
+            style::time_style(),
+        ));
         let group = Line::from(model);
         let available = width.saturating_sub("Model".len() + 1);
         let truncated = group.width() > available;
@@ -1110,25 +1111,20 @@ impl View {
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
                 if item_index == model_item {
-                    let model_width = session.model_name().width().min(model_visible) as u16;
-                    self.viewport.borrow_mut().field_targets.push((
-                        Rect::new(area.x + model_start as u16, y, model_width, 1),
-                        Field::Model,
-                    ));
-                    if let Some(effort) = effort {
-                        let offset = session.model_name().width() + " · ".width();
-                        let visible = effort.width().min(model_visible.saturating_sub(offset));
-                        let rect = Rect::new(
-                            area.x + (model_start + offset.min(model_visible)) as u16,
-                            y,
-                            visible as u16,
-                            1,
-                        );
-                        if !rect.is_empty() {
-                            self.viewport
-                                .borrow_mut()
-                                .field_targets
-                                .push((rect, Field::Effort));
+                    let model_offset = effort.map_or(0, |effort| effort.width() + " · ".width());
+                    for (offset, width, field) in [
+                        (0, effort.map_or(0, str::width), Field::Effort),
+                        (model_offset, session.model_name().width(), Field::Model),
+                    ] {
+                        let visible = width.min(model_visible.saturating_sub(offset));
+                        if visible > 0 {
+                            let rect = Rect::new(
+                                area.x + (model_start + offset) as u16,
+                                y,
+                                visible as u16,
+                                1,
+                            );
+                            self.viewport.borrow_mut().field_targets.push((rect, field));
                         }
                     }
                 }

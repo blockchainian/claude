@@ -31,7 +31,7 @@ fn details_groups_are_right_aligned() {
         for parts in [
             ["Project", "agents-panel", "#13"],
             ["Prompt", "10 messages", "1m 4s"],
-            ["Model", "Unknown", "high"],
+            ["Model", "high", "Unknown"],
         ] {
             let y = (area.y..area.bottom())
                 .find(|&y| {
@@ -122,7 +122,7 @@ fn narrow_details_groups_preserve_labels() {
             for (label, group) in [
                 ("Project", "agents-panel · #13"),
                 ("Prompt", "10 messages · 1m 4s"),
-                ("Model", "Unknown · high"),
+                ("Model", "high · Unknown"),
             ] {
                 let available = usize::from(width).saturating_sub(label.len() + 1);
                 let group = if available == 0 {
