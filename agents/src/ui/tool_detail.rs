@@ -11,6 +11,8 @@ use unicode_width::UnicodeWidthStr;
 /// how that text turns into lines.
 pub(super) struct Part {
     pub source: String,
+    /// Parts sharing a section use the same horizontal offset.
+    pub group: Option<usize>,
     body: Body,
 }
 
@@ -37,6 +39,7 @@ impl Part {
     fn new(source: impl Into<String>, body: Body) -> Self {
         Part {
             source: source.into(),
+            group: None,
             body,
         }
     }
@@ -73,6 +76,9 @@ impl Part {
             && let Some(text) = text_boundary(&source[text_start..], text_start > 0, false)
         {
             parts.push(Self::text_fragment(text.into(), markdown));
+        }
+        for part in &mut parts {
+            part.group = Some(0);
         }
         parts
     }
@@ -220,12 +226,17 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
         if event.calls.len() > 1 {
             parts.push(Part::new(call.title.clone(), Body::TitleRule));
         }
+        let input_start = parts.len();
         for section in &call.input {
             push_section(&mut parts, section, label_style, false);
+        }
+        for part in &mut parts[input_start..] {
+            part.group = Some(input_start);
         }
         match &call.output {
             Some(output) => {
                 parts.push(Part::new("", Body::Arrow));
+                let output_start = parts.len();
                 if output.is_empty() {
                     parts.push(Part::new("(no output)", Body::Text));
                 }
@@ -236,6 +247,9 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
                 };
                 for section in output {
                     push_section(&mut parts, section, style, true);
+                }
+                for part in &mut parts[output_start..] {
+                    part.group = Some(output_start);
                 }
             }
             None => parts.push(Part::new("running…", Body::Running)),
@@ -306,6 +320,14 @@ fn text_boundary(mut source: &str, after_json: bool, before_json: bool) -> Optio
 
 /// Parse one complete balanced JSON value without scanning the trailing output.
 fn embedded_json(source: &str, start: usize) -> Option<(usize, serde_json::Value)> {
+    if source.as_bytes()[start] == b'['
+        && source[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|ch| ch.is_alphanumeric() || matches!(ch, '_' | ']' | ')' | '"'))
+    {
+        return None;
+    }
     let mut values =
         serde_json::Deserializer::from_str(&source[start..]).into_iter::<serde_json::Value>();
     let value = values.next()?.ok()?;
@@ -381,6 +403,16 @@ mod tests {
             .flat_map(|part| part.lines(width, Style::default()))
             .map(|line| line.to_string())
             .collect()
+    }
+
+    #[test]
+    fn embedded_json_preserves_source_indexing() {
+        let source = include_str!("../../tests/fixtures/claude-indexing-output.txt");
+        assert!(source.contains("record[\"message\"][\"content\"] = content.into();"));
+        assert!(source.contains("record[\"toolUseResult\"][\"backgroundTaskId\"]"));
+        let parts = Part::text_parts(source.into(), false);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].source, source);
     }
 
     #[test]

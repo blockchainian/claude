@@ -107,6 +107,80 @@ fn detail_centers_multiline_sections_as_blocks_and_arrow_on_panel() {
 }
 
 #[test]
+fn detail_centers_all_output_fragments_with_one_offset() {
+    for width in [80, 81, 120] {
+        let (mut view, now, _, _) = multiline_tool_view();
+        let mut event = view.log_selected.clone().unwrap();
+        let json = include_str!("../../tests/fixtures/transcript.jsonl")
+            .lines()
+            .nth(2)
+            .unwrap();
+        let output = format!("before\n{json}\nafter");
+        event.calls[0].output = Some(vec![crate::log::Section::Text {
+            label: "stderr".into(),
+            text: output,
+        }]);
+        let parts = super::super::tool_detail::parts(&event);
+        let output_start = parts
+            .iter()
+            .position(|part| part.source == "stderr")
+            .unwrap();
+        let output_parts = &parts[output_start..];
+        assert!(output_parts.len() >= 4);
+        let widest = output_parts
+            .iter()
+            .flat_map(|part| part.lines(width.into(), Style::default()))
+            .map(|line| line.width())
+            .max()
+            .unwrap() as u16;
+        let offset = (width - widest) / 2;
+        assert!(offset > 0);
+        view.select_log_event(Some(event));
+        let buf = detail_buffer(&view, width, now);
+        let viewport = view.viewport.borrow();
+        let region = &viewport.log_text;
+        assert_eq!(
+            region
+                .rows
+                .iter()
+                .filter(|row| row.segment >= output_start)
+                .count(),
+            output_parts
+                .iter()
+                .map(|part| part.lines(width.into(), Style::default()).len())
+                .sum::<usize>(),
+        );
+        for row in region.rows.iter().filter(|row| row.segment >= output_start) {
+            let part = &parts[row.segment];
+            let rows: Vec<_> = region
+                .rows
+                .iter()
+                .filter(|other| other.segment == row.segment)
+                .collect();
+            let index = rows.iter().position(|other| other.y == row.y).unwrap();
+            let line = part.lines(width.into(), Style::default())[index].to_string();
+            let mut column = region.area.x + offset;
+            for grapheme in
+                unicode_segmentation::UnicodeSegmentation::graphemes(line.as_str(), true)
+            {
+                assert_eq!(
+                    buf[(column, row.y)].symbol(),
+                    grapheme,
+                    "all output rows share the section offset"
+                );
+                column += grapheme.width() as u16;
+            }
+            for (cells, bytes) in &row.cells {
+                assert_eq!(
+                    buf[(region.area.x + cells.start, row.y)].symbol(),
+                    &part.source[bytes.clone()]
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     let (mut view, now, _, _) = multiline_tool_view();
     let directory = tempfile::tempdir().unwrap();

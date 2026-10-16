@@ -695,16 +695,32 @@ pub(super) struct DetailLayout {
 fn detail_layout(event: &Event, width: u16, cwd: &std::path::Path) -> DetailLayout {
     let theme_generation = super::highlight::theme_generation();
     let body_style = super::style::log_styles(&event.kind).1;
-    let parts: Vec<_> = open_parts(event)
+    let rendered: Vec<_> = open_parts(event)
         .into_iter()
         .map(|part| {
+            let lines = part.lines(usize::from(width), body_style);
+            (part, lines)
+        })
+        .collect();
+    let mut group_widths = vec![0; rendered.len()];
+    for (part, lines) in &rendered {
+        if let Some(group) = part.group {
+            let widest = lines.iter().map(Line::width).max().unwrap_or(0);
+            group_widths[group] = group_widths[group].max(widest);
+        }
+    }
+    let parts: Vec<_> = rendered
+        .into_iter()
+        .map(|(part, mut lines)| {
             let markdown = part.markdown();
-            let mut lines = part.lines(usize::from(width), body_style);
             let mut maps = part.maps(&lines);
-            let block_width = lines.iter().map(Line::width).max().unwrap_or(0);
+            let block_width = part.group.map_or_else(
+                || lines.iter().map(Line::width).max().unwrap_or(0),
+                |group| group_widths[group],
+            );
             let padding = usize::from(width).saturating_sub(block_width) / 2;
             if padding > 0 {
-                // Every row keeps its position within the part, including its source cell map.
+                // Every row keeps its position within the section, including its source cell map.
                 for (line, cells) in lines.iter_mut().zip(&mut maps) {
                     line.spans.insert(0, Span::raw(" ".repeat(padding)));
                     for (range, _) in cells {
