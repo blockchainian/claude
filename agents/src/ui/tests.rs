@@ -2254,6 +2254,65 @@ fn details_branch_and_pull_request_use_session_title_color() {
 }
 
 #[test]
+fn details_model_and_effort_use_session_title_style() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    for use_colors in [true, false] {
+        let mut row = session("model", "Model task", SessionStatus::Inactive, 120);
+        row.model = Some("claude-opus-5-5".into());
+        row.effort = Some("medium".into());
+        let mut view = test_view(Grouping::Project, use_colors);
+        view.status_filter = 4;
+        view.set_sessions(vec![row], false);
+        let area = Rect::new(0, 0, 40, 18);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, Utc::now());
+        let y = (0..area.height)
+            .find(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, *y)].symbol())
+                    .collect::<String>()
+                    .ends_with("medium")
+            })
+            .expect("Model header");
+        let group = "claude-opus-5-5 · medium";
+        let start = area.width - group.chars().count() as u16;
+        let title_style = view.title_style(&session_key("model"));
+        for (offset, symbol) in group.chars().enumerate() {
+            let cell = &buf[(start + offset as u16, y)];
+            assert_eq!(cell.symbol(), symbol.to_string());
+            let expected = if (15..18).contains(&offset) {
+                Style::default().dim()
+            } else {
+                title_style
+            };
+            assert_eq!(
+                cell.style(),
+                ratatui::buffer::Cell::default().style().patch(expected),
+                "cell {offset}, colors={use_colors}"
+            );
+        }
+        if use_colors {
+            let text: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+            let styles: String = (0..area.width)
+                .map(|x| {
+                    if buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM) {
+                        'd'
+                    } else if buf[(x, y)].fg == title_style.fg.unwrap() {
+                        't'
+                    } else {
+                        '.'
+                    }
+                })
+                .collect();
+            assert_eq!(
+                format!("{text}\n{styles}\n"),
+                include_str!("../../tests/ui_snapshots/details_model_style.txt")
+            );
+        }
+    }
+}
+
+#[test]
 fn details_branch_pull_request_snapshot() {
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
     row.git_branch = Some("main".into());

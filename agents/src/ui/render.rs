@@ -908,9 +908,10 @@ impl View {
             }
             None => None,
         };
-        let mut model = vec![session.model_name().to_owned().into()];
+        let title_style = self.title_style(&session.id);
+        let mut model = vec![Span::styled(session.model_name().to_owned(), title_style)];
         if let Some(effort) = effort {
-            model.extend([" · ".dim(), effort.to_owned().into()]);
+            model.extend([" · ".dim(), Span::styled(effort.to_owned(), title_style)]);
         }
         let group = Line::from(model);
         let available = width.saturating_sub("Model".len() + 1);
