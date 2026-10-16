@@ -7045,7 +7045,7 @@ fn task_log_selected_tool_snapshot() {
     assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     assert_eq!(
         super::log::open_text(&view.log[7]),
-        "Bash\ncargo test\n\nrunning 3 tests\n...\n\nRead\nagents/src/log.rs:1-40\n"
+        "Bash\ncargo test\n\nrunning 3 tests\n...\n\nRead\nagents/src/log.rs:1-40\n\n"
     );
 }
 
@@ -7886,7 +7886,9 @@ fn real_tabs_survive_copy_and_expanded_cell_selection() {
     view.select_log_event(Some(event.clone()));
     let open = log_screen(&view, 100, 48, now);
     assert!(super::log::open_text(&event).contains(source));
-    assert!(!open.lines().any(|line| line.trim() == "↓"));
+    let (_, arrow_y) = rendered_cell(&open, "↓");
+    let (_, running_y) = rendered_cell(&open, super::tool_detail::running_frame(now));
+    assert_eq!(running_y, arrow_y + 1);
     let (x, y) = rendered_cell(&open, "45    # terminal");
     view.begin_text_selection(x, y);
     view.extend_text_selection(x + source.replace('\t', "    ").len() as u16, y);

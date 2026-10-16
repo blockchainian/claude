@@ -18,8 +18,8 @@
                                                         id: exec-c4bea048-8537-4b20-9429-9fc6872f9a04
                                                         path: file:///tmp/affiliates-page-1791341607.png
                                                         type: ImageView
+                                                                               ↓
                                                                               •··
-
 
 
  ? help  esc back  ↑/↓ move  enter open  n new

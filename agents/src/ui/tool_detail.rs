@@ -505,9 +505,10 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
                 part.group = Some(status_start);
             }
         }
+        // The arrow leads to the output, or to the running animation that the output replaces.
+        parts.push(Part::new("", Body::Arrow));
         match &call.output {
             Some(output) => {
-                parts.push(Part::new("", Body::Arrow));
                 let output_start = parts.len();
                 if output.is_empty() {
                     parts.push(Part::new("(no output)", Body::Text));
@@ -1255,6 +1256,7 @@ mod tests {
                 "Read",
                 "agents/src/log.rs:1-40",
                 "",
+                "",
             ]
         );
         assert_eq!(
@@ -1268,6 +1270,7 @@ mod tests {
                 "",
                 &format!("{} Read {}", "─".repeat(37), "─".repeat(37)),
                 "agents/src/log.rs:1-40",
+                "↓",
                 "•··",
             ]
         );
