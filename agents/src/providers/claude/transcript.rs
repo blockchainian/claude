@@ -111,8 +111,12 @@ impl Summary {
     }
 
     fn record_assistant_metadata(&mut self, record: &Value) {
-        self.model = text(record, "requestedModel").or_else(|| text(&record["message"], "model"));
-        self.effort = text(record, "effort");
+        if let Some(model) = assistant_model(record) {
+            self.model = Some(model);
+        }
+        if let Some(effort) = text(record, "effort") {
+            self.effort = Some(effort);
+        }
     }
 
     fn record_pr(&mut self, record: &Value) {
@@ -129,6 +133,10 @@ pub(super) fn printable(text: &str) -> String {
     text.chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
         .collect()
+}
+
+fn assistant_model(record: &Value) -> Option<String> {
+    text(record, "requestedModel").or_else(|| text(&record["message"], "model"))
 }
 
 fn text(value: &Value, field: &str) -> Option<String> {
@@ -420,13 +428,20 @@ fn read_messages(
     let mut dequeued_user = None;
     let mut quiet_point = false;
     let mut questions_found = false;
-    let mut assistant_metadata_found = false;
+    let mut model_found = false;
+    let mut effort_found = false;
     let mut tool_results = HashSet::new();
     let mut images = super::images::Companions::default();
     walk_records(file, start, bytes, sidechains, |record| {
-        if !assistant_metadata_found && record["type"] == "assistant" {
-            summary.record_assistant_metadata(&record);
-            assistant_metadata_found = true;
+        if record["type"] == "assistant" {
+            if !model_found && let Some(model) = assistant_model(&record) {
+                summary.model = Some(model);
+                model_found = true;
+            }
+            if !effort_found && let Some(effort) = text(&record, "effort") {
+                summary.effort = Some(effort);
+                effort_found = true;
+            }
         }
         images.record(&record);
         if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {
@@ -537,6 +552,8 @@ fn read_messages(
             summary.last_message_at = at;
         }
         if prompt_found
+            && model_found
+            && effort_found
             && absorbed.is_none()
             && summary.last_message.is_some()
             && summary.activity.is_some()
@@ -1415,7 +1432,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn latest_visited_assistant_does_not_inherit_older_effort() {
+    fn background_metadata_keeps_last_known_values_per_field() {
         let fixture = include_str!("../../../tests/fixtures/claude-bg-metadata.jsonl");
         let mut rows: Vec<Value> = fixture
             .lines()
@@ -1425,16 +1442,36 @@ pub(super) mod tests {
             .iter()
             .position(|row| row["type"] == "assistant")
             .unwrap();
-        let older = rows[index].clone();
-        rows[index].as_object_mut().unwrap().remove("effort");
-        rows.insert(index, older);
-        let mut file = tempfile::NamedTempFile::new().unwrap();
-        for row in rows {
-            writeln!(file, "{row}").unwrap();
+        let known = rows[index].clone();
+        let mut model_only = known.clone();
+        model_only.as_object_mut().unwrap().remove("effort");
+        let mut without_metadata = known.clone();
+        without_metadata.as_object_mut().unwrap().remove("effort");
+        without_metadata
+            .as_object_mut()
+            .unwrap()
+            .remove("requestedModel");
+        without_metadata["message"]
+            .as_object_mut()
+            .unwrap()
+            .remove("model");
+        rows.splice(index..=index, [known, model_only, without_metadata]);
+        for oversized_attachment in [false, true] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let end = rows.len() - usize::from(!oversized_attachment);
+            for row in &rows[..end] {
+                writeln!(file, "{row}").unwrap();
+            }
+            let len = file.as_file().metadata().unwrap().len();
+            let summary = read(file.path(), len).unwrap();
+            assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
+            assert_eq!(summary.effort.as_deref(), Some("low"));
+            if !oversized_attachment {
+                let summary = read_subagent(file.path(), len).unwrap();
+                assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
+                assert_eq!(summary.effort.as_deref(), Some("low"));
+            }
         }
-        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
-        assert_eq!(summary.model.as_deref(), Some("claude-haiku-5-5"));
-        assert_eq!(summary.effort, None);
     }
 
     #[test]
@@ -1446,9 +1483,8 @@ pub(super) mod tests {
         let expected = read_fixture();
         assert_eq!(summary.prompt, expected.prompt);
         assert_eq!(summary.last_message, expected.last_message);
-        // The latest tool-only assistant has no metadata; do not infer it from the older reply.
-        assert_eq!(summary.model, None);
-        assert_eq!(summary.effort, None);
+        assert_eq!(summary.model, expected.model);
+        assert_eq!(summary.effort, expected.effort);
         assert_eq!(
             summary.timestamp.unwrap().to_rfc3339(),
             "2026-10-12T11:00:00+00:00"
