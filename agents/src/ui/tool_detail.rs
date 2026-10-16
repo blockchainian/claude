@@ -29,6 +29,8 @@ enum Body {
     Fields(Vec<std::ops::Range<usize>>),
     /// Code highlighted as the given language.
     Code(String),
+    /// Parsed JSON with multiline string values.
+    Json(serde_json::Value),
     Diff,
     Markdown,
     /// Prose wrapped at the panel width.
@@ -51,25 +53,26 @@ impl Part {
         let mut text_start = 0;
         while cursor < source.len() {
             let byte = source.as_bytes()[cursor];
-            if matches!(byte, b'{' | b'[')
-                && let Some((end, value)) = embedded_json(&source, cursor)
-                && (value.as_object().is_some_and(|object| !object.is_empty())
-                    || value.as_array().is_some_and(|array| !array.is_empty()))
-            {
+            let (end, value) = if matches!(byte, b'{' | b'[') {
+                embedded_json(&source, cursor)
+            } else {
+                (cursor + 1, None)
+            };
+            if let Some(value) = value.filter(|value| {
+                value.as_object().is_some_and(|object| !object.is_empty())
+                    || value.as_array().is_some_and(|array| !array.is_empty())
+            }) {
                 if text_start < cursor
                     && let Some(text) =
                         text_boundary(&source[text_start..cursor], text_start > 0, true)
                 {
                     parts.push(Self::text_fragment(text.into(), markdown));
                 }
-                parts.push(Self::new(
-                    serde_json::to_string_pretty(&value).expect("JSON value serializes"),
-                    Body::Code("json".into()),
-                ));
+                parts.push(Self::json(value));
                 cursor = end;
                 text_start = end;
             } else {
-                cursor += 1;
+                cursor = end;
             }
         }
         if (text_start < source.len() || parts.is_empty())
@@ -83,6 +86,15 @@ impl Part {
         parts
     }
 
+    fn json(value: serde_json::Value) -> Self {
+        let source = json_lines(&value)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        Self::new(source, Body::Json(value))
+    }
+
     fn text_fragment(source: String, markdown: bool) -> Self {
         let markdown = markdown || super::markdown::has_markers(&source);
         Self::new(source, if markdown { Body::Markdown } else { Body::Text })
@@ -92,10 +104,7 @@ impl Part {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&source)
             && (value.is_object() || value.is_array())
         {
-            return Self::new(
-                serde_json::to_string_pretty(&value).expect("JSON value serializes"),
-                Body::Code("json".into()),
-            );
+            return Self::json(value);
         }
         Self::new(source, if markdown { Body::Markdown } else { Body::Text })
     }
@@ -191,6 +200,7 @@ impl Part {
                 split_wide(lines.collect(), width)
             }
             Body::Code(lang) => split_wide(highlight::code_lines(source, lang), width),
+            Body::Json(value) => split_wide(json_lines(value), width),
             Body::Diff => split_wide(highlight::diff_lines(source), width),
             Body::Markdown => super::markdown::render_with_options(source, options),
             Body::Text => textwrap::wrap(source, options)
@@ -211,6 +221,127 @@ impl Part {
             })
             .collect()
     }
+}
+
+/// Pretty JSON with string line breaks aligned to the opening content column.
+fn json_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
+    use highlight::JsonToken;
+
+    struct Printer {
+        lines: Vec<Line<'static>>,
+        styles: [Style; 7],
+    }
+
+    impl Printer {
+        fn push(&mut self, text: impl Into<String>, token: JsonToken) {
+            self.lines
+                .last_mut()
+                .expect("JSON line exists")
+                .spans
+                .push(Span::styled(text.into(), self.styles[token as usize]));
+        }
+
+        fn newline(&mut self, indent: usize) {
+            self.lines.push(Line::from(" ".repeat(indent)));
+        }
+
+        fn string(&mut self, text: &str, token: JsonToken, multiline: bool) {
+            let quote = if multiline {
+                JsonToken::StringQuote
+            } else {
+                token
+            };
+            self.push("\"", quote);
+            let column = self.lines.last().expect("JSON line exists").width();
+            // Serialize each logical line so all other JSON escapes retain their spelling.
+            let normalized = if multiline {
+                text.replace("\r\n", "\n")
+            } else {
+                text.into()
+            };
+            for (index, line) in normalized.split_inclusive('\n').enumerate() {
+                if index > 0 && multiline {
+                    self.newline(column);
+                }
+                let line = if multiline {
+                    line.strip_suffix('\n').unwrap_or(line)
+                } else {
+                    line
+                };
+                let encoded = serde_json::to_string(line).expect("JSON string serializes");
+                let content = &encoded[1..encoded.len() - 1];
+                let mut start = 0;
+                let mut cursor = 0;
+                while cursor < content.len() {
+                    if content.as_bytes()[cursor] != b'\\' {
+                        cursor += 1;
+                        continue;
+                    }
+                    self.push(&content[start..cursor], token);
+                    let end = cursor
+                        + if content.as_bytes()[cursor + 1] == b'u' {
+                            6
+                        } else {
+                            2
+                        };
+                    self.push(&content[cursor..end], JsonToken::Escape);
+                    cursor = end;
+                    start = end;
+                }
+                self.push(&content[start..], token);
+            }
+            if multiline && normalized.ends_with('\n') {
+                self.newline(column);
+            }
+            self.push("\"", quote);
+        }
+
+        fn value(&mut self, value: &serde_json::Value, indent: usize) {
+            use serde_json::Value;
+            match value {
+                Value::Object(values) => {
+                    self.push("{", JsonToken::Punctuation);
+                    for (index, (key, value)) in values.iter().enumerate() {
+                        self.newline(indent + 2);
+                        self.string(key, JsonToken::Key, false);
+                        self.push(": ", JsonToken::Punctuation);
+                        self.value(value, indent + 2);
+                        if index + 1 < values.len() {
+                            self.push(",", JsonToken::Punctuation);
+                        }
+                    }
+                    if !values.is_empty() {
+                        self.newline(indent);
+                    }
+                    self.push("}", JsonToken::Punctuation);
+                }
+                Value::Array(values) => {
+                    self.push("[", JsonToken::Punctuation);
+                    for (index, value) in values.iter().enumerate() {
+                        self.newline(indent + 2);
+                        self.value(value, indent + 2);
+                        if index + 1 < values.len() {
+                            self.push(",", JsonToken::Punctuation);
+                        }
+                    }
+                    if !values.is_empty() {
+                        self.newline(indent);
+                    }
+                    self.push("]", JsonToken::Punctuation);
+                }
+                Value::String(text) => self.string(text, JsonToken::String, true),
+                Value::Number(number) => self.push(number.to_string(), JsonToken::Number),
+                Value::Bool(_) | Value::Null => self.push(value.to_string(), JsonToken::Literal),
+            }
+        }
+    }
+
+    let mut printer = Printer {
+        lines: vec![Line::default()],
+        styles: highlight::json_styles(),
+    };
+    printer.value(value, 0);
+    printer.lines
 }
 
 /// Per-call inputs and outputs, with titles for merged calls and display-only rules.
@@ -318,20 +449,46 @@ fn text_boundary(mut source: &str, after_json: bool, before_json: bool) -> Optio
     Some(source)
 }
 
-/// Parse one complete balanced JSON value without scanning the trailing output.
-fn embedded_json(source: &str, start: usize) -> Option<(usize, serde_json::Value)> {
+/// Scan each candidate once, then parse only its balanced span. Failed spans stay prose.
+fn embedded_json(source: &str, start: usize) -> (usize, Option<serde_json::Value>) {
     if source.as_bytes()[start] == b'['
         && source[..start]
             .chars()
             .next_back()
             .is_some_and(|ch| ch.is_alphanumeric() || matches!(ch, '_' | ']' | ')' | '"'))
     {
-        return None;
+        return (start + 1, None);
     }
-    let mut values =
-        serde_json::Deserializer::from_str(&source[start..]).into_iter::<serde_json::Value>();
-    let value = values.next()?.ok()?;
-    Some((start + values.byte_offset(), value))
+    let mut brackets = Vec::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for (offset, &byte) in source.as_bytes()[start..].iter().enumerate() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => quoted = true,
+            b'{' | b'[' => brackets.push(byte),
+            b'}' | b']' => {
+                let end = start + offset + 1;
+                if brackets.pop() != Some(if byte == b'}' { b'{' } else { b'[' }) {
+                    return (end, None);
+                }
+                if brackets.is_empty() {
+                    return (end, serde_json::from_str(&source[start..end]).ok());
+                }
+            }
+            _ => {}
+        }
+    }
+    (source.len(), None)
 }
 
 /// Copy sources preserve tabs and omit trailing line breaks.
@@ -407,6 +564,95 @@ mod tests {
     }
 
     #[test]
+    fn manager_await_json_displays_multiline_strings_and_copies_drawn_text() {
+        let source = include_str!("../../tests/fixtures/codex-manager-await.jsonl").trim_end();
+        let parts = Part::text_parts(source.into(), false);
+        assert_eq!(parts.len(), 1);
+        let part = &parts[0];
+        let lines = part.lines(200, Style::default());
+        let text: Vec<_> = lines.iter().map(ToString::to_string).collect();
+        let first = text
+            .iter()
+            .position(|line| line.contains("已提交推送"))
+            .unwrap();
+        let column = text[first].find("已提交推送").unwrap();
+        assert_eq!(text[first + 1], " ".repeat(column));
+        assert_eq!(
+            text[first + 2],
+            format!("{}三个区块单击定位、双击复制已实现。", " ".repeat(column))
+        );
+        assert_eq!(text[first + 3], format!("{}\",", " ".repeat(column)));
+        assert_eq!(part.source, text.join("\n"));
+        let key = lines[first]
+            .spans
+            .iter()
+            .find(|span| span.content.contains("lastMessage"))
+            .unwrap();
+        assert_eq!(key.style.fg, Some(highlight::json_key_foreground()));
+        let reference = highlight::code_lines(r#"["已提交推送"]"#, "json");
+        let string_style = reference[0]
+            .spans
+            .iter()
+            .find(|span| span.content.contains("已提交推送"))
+            .unwrap()
+            .style;
+        assert_eq!(
+            lines[first + 2].spans.last().unwrap().style.fg,
+            string_style.fg
+        );
+        for width in [20, 80, 200] {
+            let lines = part.lines(width, Style::default());
+            let maps = part.maps(&lines);
+            for (line, map) in lines.iter().zip(maps) {
+                let copied: String = map
+                    .iter()
+                    .map(|(_, bytes)| &part.source[bytes.clone()])
+                    .collect();
+                assert_eq!(copied, line.to_string());
+            }
+        }
+    }
+
+    #[test]
+    fn json_preserves_escapes_order_and_empty_containers() {
+        let value = serde_json::json!({
+            "中": "first\r\nsecond\r\n",
+            "escape": "quote\" tab\t slash\\n return\r 中文",
+            "key\nline": [null, true, false, -1, 1.5, {}, [], ""],
+        });
+        let part = Part::text(serde_json::to_string(&value).unwrap(), false);
+        let pretty = serde_json::to_string_pretty(&value).unwrap();
+        let prefix = "  \"中\": \"";
+        let expected = pretty.replace(
+            "first\\r\\nsecond\\r\\n",
+            &format!(
+                "first\n{}second\n{}",
+                " ".repeat(prefix.width()),
+                " ".repeat(prefix.width())
+            ),
+        );
+        assert_eq!(part.source, expected);
+        assert_eq!(texts(&[part], 200).join("\n"), expected);
+    }
+
+    #[test]
+    fn unterminated_json_detection_is_bounded() {
+        // Each failed parse used to revisit the remainder of this output.
+        for repetitions in [100_000, 4_000_000] {
+            let source = "[{".repeat(repetitions);
+            let started = std::time::Instant::now();
+            let parts = Part::text_parts(source.clone(), false);
+            assert_eq!(parts.len(), 1);
+            assert_eq!(parts[0].source, source);
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "{:?}",
+                started.elapsed()
+            );
+        }
+    }
+
+    #[test]
     fn embedded_json_preserves_source_indexing() {
         let source = include_str!("../../tests/fixtures/claude-indexing-output.txt");
         assert!(source.contains("record[\"message\"][\"content\"] = content.into();"));
@@ -424,7 +670,7 @@ mod tests {
         );
         assert_eq!(parts.len(), 5);
         assert_eq!(parts[0].source, "before ");
-        assert!(matches!(parts[1].body, Body::Code(ref lang) if lang == "json"));
+        assert!(matches!(parts[1].body, Body::Json(_)));
         assert!(parts[1].source.contains("\n  \"items\": ["));
         assert_eq!(parts[2].source, " after ");
         assert_eq!(parts[3].source, "[\n  3,\n  4\n]");
@@ -437,7 +683,7 @@ mod tests {
                 part.markdown(),
             );
             for (line, map) in lines.iter().zip(maps) {
-                if matches!(part.body, Body::Code(_)) {
+                if matches!(part.body, Body::Json(_)) {
                     assert_eq!(
                         map.iter()
                             .map(|(cells, _)| (cells.end - cells.start) as usize)
@@ -496,13 +742,13 @@ mod tests {
     }
 
     #[test]
-    fn invalid_outer_json_does_not_hide_valid_inner_or_trivial_text() {
-        let parts = Part::text_parts("{broken: {\"ok\":true}} {} [] [bad]".into(), false);
-        assert_eq!(parts.len(), 3);
-        assert_eq!(parts[0].source, "{broken: ");
+    fn invalid_json_spans_stay_prose_and_do_not_hide_following_json() {
+        let source = "{broken: {\"ok\":true}} {} [] [bad]";
+        assert_eq!(Part::text_parts(source.into(), false)[0].source, source);
+        let parts = Part::text_parts(format!("{source} {{\"ok\":true}}"), false);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].source, format!("{source} "));
         assert_eq!(parts[1].source, "{\n  \"ok\": true\n}");
-        assert_eq!(parts[2].source, "} {} [] [bad]");
-        assert_eq!(Part::text_parts("{} []".into(), false)[0].source, "{} []");
     }
 
     #[test]

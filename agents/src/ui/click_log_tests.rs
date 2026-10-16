@@ -181,6 +181,77 @@ fn detail_centers_all_output_fragments_with_one_offset() {
 }
 
 #[test]
+fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
+    for width in [120, 121, 160] {
+        let (mut view, now, _, _) = multiline_tool_view();
+        let mut event = view.log_selected.clone().unwrap();
+        event.calls[0].output = Some(vec![crate::log::Section::Text {
+            label: String::new(),
+            text: include_str!("../../tests/fixtures/codex-manager-await.jsonl").into(),
+        }]);
+        let parts = super::super::tool_detail::parts(&event);
+        let part = parts
+            .iter()
+            .find(|part| part.source.contains("lastMessage"))
+            .unwrap();
+        assert_eq!(
+            part.source
+                .lines()
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            include_str!("../../tests/ui_snapshots/manager_await_json.txt").trim_end_matches('\n')
+        );
+        let lines = part.lines(width.into(), Style::default());
+        let offset = (width as usize - lines.iter().map(Line::width).max().unwrap()) / 2;
+        assert!(offset > 0);
+        let copy = super::super::log::open_text(&event);
+        assert!(copy.ends_with(&part.source));
+        view.select_log_event(Some(event));
+        let buf = detail_buffer(&view, width, now);
+        let (x, y, expected) = {
+            let viewport = view.viewport.borrow();
+            let region = &viewport.log_text;
+            let source = region
+                .sources
+                .iter()
+                .find(|source| source.text.contains("lastMessage"))
+                .unwrap();
+            let rows: Vec<_> = region
+                .rows
+                .iter()
+                .filter(|row| row.segment == source.id)
+                .collect();
+            assert_eq!(rows.len(), lines.len());
+            for (row, line) in rows.iter().zip(&lines) {
+                let mut x = region.area.x + offset as u16;
+                for grapheme in unicode_segmentation::UnicodeSegmentation::graphemes(
+                    line.to_string().as_str(),
+                    true,
+                ) {
+                    assert_eq!(buf[(x, row.y)].symbol(), grapheme);
+                    x += grapheme.width() as u16;
+                }
+                assert_eq!(row.cells.first().unwrap().0.start, offset as u16);
+            }
+            (
+                region.area.x + offset as u16,
+                rows[0].y,
+                Action::Copy {
+                    text: copy,
+                    label: source.label.clone(),
+                },
+            )
+        };
+        release_click(&mut view, MouseButton::Left, x, y);
+        assert_eq!(
+            release_click(&mut view, MouseButton::Left, x, y),
+            Some(expected)
+        );
+    }
+}
+
+#[test]
 fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     let (mut view, now, _, _) = multiline_tool_view();
     let directory = tempfile::tempdir().unwrap();

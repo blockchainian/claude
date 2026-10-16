@@ -80,17 +80,78 @@ fn with_theme<T>(f: impl FnOnce(&Theme) -> T) -> T {
     f(theme.theme.get_or_insert_with(|| bundled_theme(false)))
 }
 
+/// Token kinds emitted by the JSON pretty-printer, in the order returned by `json_styles`.
+#[derive(Clone, Copy)]
+pub(super) enum JsonToken {
+    Key,
+    String,
+    Number,
+    Literal,
+    Punctuation,
+    Escape,
+    StringQuote,
+}
+
+/// JSON token styles from the same theme and grammar scopes as syntax-highlighted code.
+pub(super) fn json_styles() -> [Style; 7] {
+    with_theme(json_styles_for)
+}
+
+fn json_styles_for(theme: &Theme) -> [Style; 7] {
+    let highlighter = Highlighter::new(theme);
+    let scopes: [&[&str]; 7] = [
+        &[
+            "source.json",
+            "meta.mapping.key.json",
+            "string.quoted.double.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "string.quoted.double.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "constant.numeric.integer.decimal.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "constant.language.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.json",
+            "punctuation.section.mapping.begin.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "string.quoted.double.json",
+            "constant.character.escape.json",
+        ],
+        &[
+            "source.json",
+            "meta.mapping.value.json",
+            "string.quoted.double.json",
+            "punctuation.definition.string.begin.json",
+        ],
+    ];
+    scopes.map(|names| {
+        let stack: Vec<_> = names
+            .iter()
+            .map(|name| Scope::new(name).expect("JSON grammar scope is valid"))
+            .collect();
+        convert(highlighter.style_for_stack(&stack))
+    })
+}
+
 /// The bundled JSON grammar scopes object keys as quoted strings inside mapping keys.
 pub(super) fn json_key_foreground() -> Color {
-    let scopes = [
-        "source.json",
-        "meta.mapping.key.json",
-        "string.quoted.double.json",
-    ]
-    .map(|scope| Scope::new(scope).expect("JSON key scope is valid"));
-    let foreground =
-        with_theme(|theme| Highlighter::new(theme).style_for_stack(&scopes).foreground);
-    terminal_color(foreground).unwrap_or(Color::Reset)
+    json_styles()[JsonToken::Key as usize]
+        .fg
+        .unwrap_or(Color::Reset)
 }
 
 /// A theme color as bat encodes it: alpha 0 holds an ANSI palette index in `r`, alpha 1 means the
@@ -215,6 +276,48 @@ mod tests {
 
     fn text(lines: &[Line<'_>]) -> Vec<String> {
         lines.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn json_token_styles_match_both_bundled_themes() {
+        let source = r#"{"key": "value\t", "number": 42, "truth": true, "nothing": null, "array": [-12.5e2, false]}"#;
+        for light in [false, true] {
+            let theme = bundled_theme(light);
+            let styles = json_styles_for(&theme);
+            let mut highlighted = HighlightLines::new(find_syntax("json").unwrap(), &theme);
+            let ranges = highlighted.highlight_line(source, syntax_set()).unwrap();
+            for (needle, token) in [
+                ("key", JsonToken::Key),
+                ("\"key\"", JsonToken::Key),
+                ("\"value", JsonToken::StringQuote),
+                ("\", \"number", JsonToken::StringQuote),
+                ("value", JsonToken::String),
+                ("42", JsonToken::Number),
+                ("-12.5e2", JsonToken::Number),
+                ("true", JsonToken::Literal),
+                ("false", JsonToken::Literal),
+                ("null", JsonToken::Literal),
+                ("{", JsonToken::Punctuation),
+                ("[", JsonToken::Punctuation),
+                ("]", JsonToken::Punctuation),
+                (":", JsonToken::Punctuation),
+                (",", JsonToken::Punctuation),
+                ("}", JsonToken::Punctuation),
+                ("\\t", JsonToken::Escape),
+            ] {
+                let offset = source.find(needle).unwrap();
+                let mut cursor = 0;
+                let (style, _) = ranges
+                    .iter()
+                    .find(|(_, part)| {
+                        let contains = cursor <= offset && offset < cursor + part.len();
+                        cursor += part.len();
+                        contains
+                    })
+                    .unwrap();
+                assert_eq!(styles[token as usize], convert(*style), "{light}: {needle}");
+            }
+        }
     }
 
     #[test]

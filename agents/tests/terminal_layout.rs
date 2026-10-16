@@ -557,3 +557,97 @@ fn terminal_task_notification_shows_summary_and_fields() {
     assert!(!detail.contains("tool-use-id"), "{capture}");
     println!("{{\"task_notification\":\"pass\",\"summary_once\":true,\"fields\":true}}");
 }
+
+#[test]
+#[ignore = "requires tmux and NO_COLOR unset; run with --ignored --nocapture"]
+fn terminal_json_strings_keep_multiline_alignment_and_colors() {
+    use std::io::Write;
+
+    let (_directory, tmux, transcript) = start_probe("json-strings");
+    // This await output was supplied from a real Codex manager completion.
+    let output = include_str!("fixtures/codex-manager-await.jsonl").trim_end();
+    let completed: serde_json::Value = serde_json::from_str(output).unwrap();
+    let message = completed["lastMessage"].as_str().unwrap();
+    let paragraphs: Vec<_> = message.split('\n').collect();
+    assert_eq!(paragraphs.len(), 4);
+    let tool = serde_json::json!({
+        "type": "assistant", "uuid": "json-await-call",
+        "timestamp": "2026-10-16T21:12:48Z",
+        "message": {"id": "json-await-call", "role": "assistant", "content": [{
+            "type": "tool_use", "id": "json-await", "name": "Bash",
+            "input": {"command": "codex-manager await", "description": "Read completed turn"}
+        }]}
+    });
+    let result = serde_json::json!({
+        "type": "user", "uuid": "json-await-result",
+        "timestamp": "2026-10-16T21:12:49Z",
+        "message": {"role": "user", "content": [{
+            "type": "tool_result", "tool_use_id": "json-await", "content": output
+        }]}
+    });
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(transcript)
+        .unwrap();
+    writeln!(file, "{tool}\n{result}").unwrap();
+    // Wake the terminal loop after the fixture arrives, including on hosts whose
+    // filesystem watcher does not notify for the temporary transcript directory.
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    std::thread::sleep(Duration::from_secs(1));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    println!("{capture}");
+    let rows: Vec<_> = capture.lines().collect();
+    let (first_row, first_column) = rows
+        .iter()
+        .enumerate()
+        .find_map(|(row, text)| {
+            text.find(paragraphs[0])
+                .map(|byte| (row, text[..byte].width()))
+        })
+        .expect("await lastMessage first line");
+    let key = "\"lastMessage\": \"";
+    let key_byte = rows[first_row].find(key).expect("lastMessage JSON key");
+    assert_eq!(
+        rows[first_row][..key_byte].width() + key.width(),
+        first_column,
+        "string must start immediately after its opening quote: {capture}"
+    );
+    assert!(rows[first_row + 1].trim().is_empty(), "{capture}");
+    let second_byte = rows[first_row + 2]
+        .find(paragraphs[2])
+        .expect("await lastMessage continuation line");
+    assert_eq!(
+        rows[first_row + 2][..second_byte].width(),
+        first_column,
+        "continuation must align under the first string character: {capture}"
+    );
+    assert_eq!(
+        rows[first_row + 3].trim().trim_end_matches(','),
+        "\"",
+        "{capture}"
+    );
+    assert_eq!(
+        rows[first_row + 3].find('"').unwrap(),
+        first_column,
+        "the trailing newline must precede the closing quote: {capture}"
+    );
+    let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let colored_rows: Vec<_> = colored.lines().collect();
+    // Parse just the JSON rows: wide glyphs in the task list must not shift the
+    // parser's screen rows before the output under test.
+    let mut first = vt100::Parser::new(1, 200, 0);
+    first.process(colored_rows[first_row].as_bytes());
+    let mut next = vt100::Parser::new(1, 200, 0);
+    next.process(colored_rows[first_row + 2].as_bytes());
+    let string = first.screen().cell(0, first_column as u16).unwrap();
+    let continuation = next.screen().cell(0, first_column as u16).unwrap();
+    let key = first
+        .screen()
+        .cell(0, rows[first_row][..key_byte].width() as u16 + 1)
+        .unwrap();
+    assert_ne!(key.fgcolor(), vt100::Color::Default);
+    assert_ne!(string.fgcolor(), vt100::Color::Default);
+    assert_ne!(key.fgcolor(), string.fgcolor());
+    assert_eq!(string.fgcolor(), continuation.fgcolor());
+    println!("{{\"json_multiline\":\"pass\",\"alignment\":\"pass\",\"colors\":\"pass\"}}");
+}
