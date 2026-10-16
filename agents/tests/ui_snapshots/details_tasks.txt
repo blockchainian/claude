@@ -1,0 +1,24 @@
+                 Update
+Task update
+
+                 Prompt
+Session title
+
+                 Tasks               1/2
+● Working first
+○ Pending first
+
+            Needs attention
+Open task to review.
+Waiting for your response.
+
+
+
+
+
+
+
+                Project
+/tmp/project
+
+Model           Unknown

@@ -1,5 +1,5 @@
 use crate::log::{Event, Image, Kind, Section, ToolCall, participant_text, question_texts};
-use crate::model::Activity;
+use crate::model::{Activity, SessionTask, TaskStatus};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -18,6 +18,87 @@ pub(super) struct Summary {
     pub updated_at: Option<DateTime<Utc>>,
     pub turn_ended: bool,
     pub pending_questions: Vec<String>,
+    pub tasks: Vec<SessionTask>,
+}
+
+/// Retains the last complete plan while reading only appended transcript lines.
+#[derive(Default)]
+pub(super) struct Tasks {
+    offset: u64,
+    identity: Option<(u64, u64)>,
+    tasks: Vec<SessionTask>,
+}
+
+impl Tasks {
+    pub(super) fn summary(&mut self, path: &Path) -> io::Result<Summary> {
+        let mut result = summary(path)?;
+        result.tasks = self.read(path)?;
+        Ok(result)
+    }
+
+    fn read(&mut self, path: &Path) -> io::Result<Vec<SessionTask>> {
+        use std::os::unix::fs::MetadataExt;
+        let mut file = File::open(path)?;
+        let metadata = file.metadata()?;
+        let identity = (metadata.dev(), metadata.ino());
+        if self.identity != Some(identity) || metadata.len() < self.offset {
+            self.offset = 0;
+            self.tasks.clear();
+        }
+        self.identity = Some(identity);
+        let mut error = None;
+        let offset = crate::jsonl::read_lines(&mut file, self.offset, |line| {
+            if error.is_some() {
+                return;
+            }
+            let Ok(record) = serde_json::from_slice::<Value>(line) else {
+                return;
+            };
+            let payload = &record["payload"];
+            if record["type"] != "response_item"
+                || payload["type"] != "function_call"
+                || payload["name"]
+                    .as_str()
+                    .and_then(|name| name.rsplit('.').next())
+                    != Some("update_plan")
+            {
+                return;
+            }
+            match plan_tasks(payload) {
+                Ok(tasks) => self.tasks = tasks,
+                Err(invalid) => error = Some(invalid),
+            }
+        })?;
+        if let Some(error) = error {
+            return Err(error);
+        }
+        self.offset = offset;
+        Ok(self.tasks.clone())
+    }
+}
+
+fn plan_tasks(payload: &Value) -> io::Result<Vec<SessionTask>> {
+    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "Invalid Codex update_plan");
+    let arguments = tool_arguments(payload).ok_or_else(invalid)?;
+    arguments["plan"]
+        .as_array()
+        .ok_or_else(invalid)?
+        .iter()
+        .enumerate()
+        .map(|(index, task)| {
+            let status = match task["status"].as_str() {
+                Some("pending") => TaskStatus::Pending,
+                Some("in_progress") => TaskStatus::InProgress,
+                Some("completed") => TaskStatus::Completed,
+                _ => return Err(invalid()),
+            };
+            Ok(SessionTask {
+                id: index.to_string(),
+                subject: task["step"].as_str().ok_or_else(invalid)?.to_owned(),
+                status,
+            })
+        })
+        .collect()
 }
 
 /// Walk complete JSON records newest first, retaining records spanning chunks.
@@ -983,6 +1064,49 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn plans_replace_previous_tasks_incrementally() {
+        let records: Vec<_> = include_str!("../../../tests/fixtures/codex-todos.jsonl")
+            .lines()
+            .collect();
+        assert!(records.len() >= 2);
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut tasks = Tasks::default();
+        writeln!(file, "{}", records[0]).unwrap();
+        let first = tasks.read(file.path()).unwrap();
+        assert_eq!(first.len(), 3);
+        assert_eq!(first[0].subject, "Inspect input");
+        assert_eq!(first[0].status, TaskStatus::InProgress);
+        assert_eq!(first[1].status, TaskStatus::Pending);
+        assert_eq!(first[2].status, TaskStatus::Pending);
+        let offset = tasks.offset;
+        assert_eq!(tasks.read(file.path()).unwrap(), first);
+        assert_eq!(tasks.offset, offset);
+        for record in &records[1..] {
+            writeln!(file, "{record}").unwrap();
+        }
+        let last = tasks.read(file.path()).unwrap();
+        assert_eq!(last.len(), 3);
+        assert!(last.iter().all(|task| task.status == TaskStatus::Completed));
+        assert_eq!(tasks.summary(file.path()).unwrap().tasks, last);
+    }
+
+    #[test]
+    fn plans_wait_for_complete_lines_and_reset_on_truncation() {
+        let record = include_str!("../../../tests/fixtures/codex-todos.jsonl")
+            .lines()
+            .next()
+            .unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut tasks = Tasks::default();
+        write!(file, "{record}").unwrap();
+        assert!(tasks.read(file.path()).unwrap().is_empty());
+        writeln!(file).unwrap();
+        assert_eq!(tasks.read(file.path()).unwrap().len(), 3);
+        file.as_file_mut().set_len(0).unwrap();
+        assert!(tasks.read(file.path()).unwrap().is_empty());
     }
 
     #[test]

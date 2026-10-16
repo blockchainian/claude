@@ -1069,6 +1069,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         pending_questions: Vec::new(),
         background_job: None,
         background: Vec::new(),
+        tasks: Vec::new(),
         last_prompt: None,
         transcript: None,
     }
@@ -8705,3 +8706,6 @@ fn task_notification_detail_keeps_summary_only_in_header() {
 
 #[path = "codex_exit_tests.rs"]
 mod codex_exit_tests;
+
+#[path = "details_tasks_tests.rs"]
+mod details_tasks;

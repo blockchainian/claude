@@ -21,6 +21,7 @@ use std::{
     io::{self, BufRead},
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
 };
 
 const PAGE_SIZE: usize = 10;
@@ -28,11 +29,16 @@ const PAGE_SIZE: usize = 10;
 pub struct CodexProvider {
     home: PathBuf,
     manager_home: PathBuf,
+    tasks: Mutex<HashMap<PathBuf, rollout::Tasks>>,
 }
 
 impl CodexProvider {
     pub fn new(home: PathBuf, manager_home: PathBuf) -> Self {
-        Self { manager_home, home }
+        Self {
+            manager_home,
+            home,
+            tasks: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn from_config() -> io::Result<Self> {
@@ -154,11 +160,15 @@ impl CodexProvider {
             }
         }
         sessions.retain(|s| selected.contains(&s.id));
+        let mut tasks = self
+            .tasks
+            .lock()
+            .map_err(|_| io::Error::other("Codex task cache lock poisoned"))?;
         for session in &mut sessions {
             let summary = match session
                 .transcript
                 .as_deref()
-                .map(rollout::summary)
+                .map(|path| tasks.entry(path.to_owned()).or_default().summary(path))
                 .transpose()
             {
                 Ok(summary) => summary,
@@ -198,6 +208,7 @@ fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
         session.updated_at = session.updated_at.max(at);
     }
     session.status = status(session.process.is_some(), summary.turn_ended);
+    session.tasks = summary.tasks;
     session.pending_questions = summary.pending_questions;
     if session.process.is_some() && !session.pending_questions.is_empty() {
         session.status = SessionStatus::NeedsInput;
@@ -282,6 +293,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         last_message_at: None,
         activity: None,
         pending_questions: vec![],
+        tasks: vec![],
         background: vec![],
         last_prompt: None,
         transcript: column::<String>(row, "rollout_path")?

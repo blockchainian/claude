@@ -269,15 +269,16 @@ impl View {
                 .find(|(rows, _, _)| rows.contains(&position.y))
             && let Some(session) = self.selected_row()
         {
-            let index = match *label {
-                "Copied latest activity" => 0,
-                "Copied update" => 1,
-                "Copied prompt" => 2,
+            let source = match *label {
+                "Copied latest activity" => session.detail_sources[0].clone(),
+                "Copied update" => session.detail_sources[1].clone(),
+                "Copied prompt" => session.detail_sources[2].clone(),
+                "Copied tasks" => None,
                 _ => return None,
             };
             return Some(ClickTarget::Details {
                 session: session.id.clone(),
-                source: session.detail_sources[index].clone(),
+                source,
                 text: text.clone(),
                 label,
             });

@@ -480,9 +480,9 @@ impl ClaudeProvider {
         if changed {
             // Files may disappear while Claude Code moves or removes a project.
             let read = if subagent {
-                transcript::read_subagent
+                transcript::read_subagent_cached
             } else {
-                transcript::read
+                transcript::read_cached
             };
             let start = match self.starts.get(&file.path).copied() {
                 Some(start) => start,
@@ -497,7 +497,12 @@ impl ClaudeProvider {
                     }
                 },
             };
-            match read(&file.path, file.len) {
+            let previous = self
+                .summaries
+                .get(&file.path)
+                .filter(|cached| cached.len < file.len)
+                .map(|cached| &cached.summary);
+            match read(&file.path, file.len, previous) {
                 Ok(mut summary) => {
                     summary.started_at = start;
                     self.summaries.insert(
@@ -887,6 +892,7 @@ fn session(
         last_message: summary.last_message,
         last_message_at: summary.last_message_at,
         activity: summary.activity,
+        tasks: summary.tasks,
         pending_questions: summary.pending_questions,
         background: summary.background,
         last_prompt: summary.last_prompt,

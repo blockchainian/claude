@@ -844,13 +844,18 @@ impl View {
         }
     }
     fn status(session: &Session) -> (&'static str, Span<'static>) {
-        let dot = match session.status {
+        (
+            session.status.label(),
+            Self::status_indicator(session.status),
+        )
+    }
+    fn status_indicator(status: SessionStatus) -> Span<'static> {
+        match status {
             SessionStatus::NeedsInput => "●".red(),
             SessionStatus::Working => "●".green(),
             SessionStatus::Ready => "○".cyan(),
             SessionStatus::Inactive => "○".dim(),
-        };
-        (session.status.label(), dot)
+        }
     }
 }
 

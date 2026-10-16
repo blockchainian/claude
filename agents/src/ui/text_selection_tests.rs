@@ -47,6 +47,7 @@ fn fixture() -> View {
         pending_questions: Vec::new(),
         background_job: None,
         background: Vec::new(),
+        tasks: Vec::new(),
         last_prompt: None,
         transcript: None,
     };

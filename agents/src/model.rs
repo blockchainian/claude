@@ -63,6 +63,21 @@ pub struct BackgroundJob {
     pub needs: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Deleted,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionTask {
+    pub id: String,
+    pub subject: String,
+    pub status: TaskStatus,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Session {
     /// Provider-qualified session identity.
@@ -100,6 +115,8 @@ pub struct Session {
     pub activity: Option<Activity>,
     pub pending_questions: Vec<String>,
     pub background: Vec<BackgroundTask>,
+    /// The session's own to-do list, replayed from its transcript.
+    pub tasks: Vec<SessionTask>,
     /// Latest user prompt, up to 512 chars.
     pub last_prompt: Option<String>,
     pub transcript: Option<PathBuf>,

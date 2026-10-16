@@ -1,5 +1,5 @@
 use crate::log::question_texts;
-use crate::model::{Activity, BackgroundTask, PullRequest};
+use crate::model::{Activity, BackgroundTask, PullRequest, SessionTask, TaskStatus};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -11,6 +11,8 @@ const CHUNK: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Summary {
+    pub tasks: Vec<SessionTask>,
+    task_replay: TaskReplay,
     pub detail_sources: [Option<String>; 3],
     pub started_at: Option<DateTime<Utc>>,
     pub subagent_records: Vec<Value>,
@@ -35,6 +37,104 @@ pub(super) struct Summary {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct TaskReplay {
+    offset: u64,
+    creates: HashSet<String>,
+}
+
+impl TaskReplay {
+    fn record(&mut self, record: &Value, tasks: &mut Vec<SessionTask>) {
+        let Some(blocks) = record["message"]["content"].as_array() else {
+            return;
+        };
+        for block in blocks {
+            if record["type"] == "assistant" && block["type"] == "tool_use" {
+                let input = &block["input"];
+                match block["name"].as_str() {
+                    Some("TaskCreate") => {
+                        if let Some(id) = block["id"].as_str() {
+                            self.creates.insert(id.to_owned());
+                        }
+                    }
+                    Some("TaskUpdate") => {
+                        if let Some(id) = input["taskId"].as_str()
+                            && let Some(task) = tasks.iter_mut().find(|task| task.id == id)
+                        {
+                            if let Some(subject) = text(input, "subject") {
+                                task.subject = subject;
+                            }
+                            if let Some(status) = input["status"].as_str().and_then(task_status) {
+                                task.status = status;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if record["type"] == "user"
+                && block["type"] == "tool_result"
+                && block["is_error"] != true
+                && let Some(tool) = block["tool_use_id"].as_str()
+                && self.creates.remove(tool)
+                && let Some(id) = text(&record["toolUseResult"]["task"], "id")
+                && let Some(subject) = text(&record["toolUseResult"]["task"], "subject")
+            {
+                // A fresh successful create can restart numbering within a transcript.
+                if tasks.iter().any(|task| task.id == id) {
+                    tasks.clear();
+                }
+                tasks.push(SessionTask {
+                    id,
+                    subject,
+                    status: TaskStatus::Pending,
+                });
+            }
+        }
+    }
+}
+
+fn task_status(status: &str) -> Option<TaskStatus> {
+    match status {
+        "pending" => Some(TaskStatus::Pending),
+        "in_progress" => Some(TaskStatus::InProgress),
+        "completed" => Some(TaskStatus::Completed),
+        "deleted" => Some(TaskStatus::Deleted),
+        _ => None,
+    }
+}
+
+fn read_tasks(
+    path: &Path,
+    len: u64,
+    previous: Option<&Summary>,
+    sidechains: bool,
+    summary: &mut Summary,
+) -> io::Result<()> {
+    if let Some(previous) = previous.filter(|previous| previous.task_replay.offset <= len) {
+        summary.tasks = previous.tasks.clone();
+        summary.task_replay = previous.task_replay.clone();
+    }
+    let mut file = File::open(path)?;
+    file.seek(SeekFrom::Start(summary.task_replay.offset))?;
+    let mut reader = BufReader::new(file.take(len - summary.task_replay.offset));
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let count = reader.read_until(b'\n', &mut line)?;
+        if count == 0 || line.last() != Some(&b'\n') {
+            break;
+        }
+        summary.task_replay.offset += count as u64;
+        if let Ok(record) = serde_json::from_slice::<Value>(&line)
+            && (sidechains || record["isSidechain"] != true)
+        {
+            summary.task_replay.record(&record, &mut summary.tasks);
+        }
+    }
+    Ok(())
 }
 
 /// Reads only through the first timestamped record, including sidechains.
@@ -583,7 +683,22 @@ fn read_messages(
     Ok(background)
 }
 
+#[cfg(test)]
 pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
+    read_cached(path, len, None)
+}
+
+pub(super) fn read_cached(
+    path: &Path,
+    len: u64,
+    previous: Option<&Summary>,
+) -> io::Result<Summary> {
+    let mut summary = read_summary(path, len)?;
+    read_tasks(path, len, previous, false, &mut summary)?;
+    Ok(summary)
+}
+
+fn read_summary(path: &Path, len: u64) -> io::Result<Summary> {
     let mut file = File::open(path)?;
     let mut head = Vec::new();
     let mut tail = Vec::new();
@@ -650,8 +765,19 @@ pub(super) fn read(path: &Path, len: u64) -> io::Result<Summary> {
 }
 
 /// Reads one tail chunk; subagent files have no queue quiet point to bound a walk.
+#[cfg(test)]
 pub(super) fn read_subagent(path: &Path, len: u64) -> io::Result<Summary> {
-    read_subagent_tail(&mut File::open(path)?, len)
+    read_subagent_cached(path, len, None)
+}
+
+pub(super) fn read_subagent_cached(
+    path: &Path,
+    len: u64,
+    previous: Option<&Summary>,
+) -> io::Result<Summary> {
+    let mut summary = read_subagent_tail(&mut File::open(path)?, len)?;
+    read_tasks(path, len, previous, true, &mut summary)?;
+    Ok(summary)
 }
 
 pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io::Result<Summary> {
@@ -690,6 +816,79 @@ pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io:
 pub(super) mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn task_replay_uses_result_ids_and_keeps_creation_order() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(include_bytes!("../../../tests/fixtures/claude-todos.jsonl"))
+            .unwrap();
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(summary.tasks.len(), 3);
+        assert_eq!(summary.tasks[0].subject, "Task 1");
+        assert_eq!(
+            summary.tasks[0].status,
+            crate::model::TaskStatus::InProgress
+        );
+        assert_eq!(summary.tasks[1].status, crate::model::TaskStatus::Completed);
+        assert_eq!(summary.tasks[2].status, crate::model::TaskStatus::Pending);
+    }
+
+    #[test]
+    fn task_replay_reads_middle_records_and_preserves_compacted_tasks() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type":"padding", "text":"x".repeat(CHUNK as usize * 3)})
+        )
+        .unwrap();
+        file.write_all(include_bytes!("../../../tests/fixtures/claude-todos.jsonl"))
+            .unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type":"padding", "text":"x".repeat(CHUNK as usize * 3)})
+        )
+        .unwrap();
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"type":"system", "subtype":"compact_boundary"})
+        )
+        .unwrap();
+        let first = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        assert_eq!(first.tasks.len(), 3);
+        let update = serde_json::json!({"type":"assistant", "message":{"content":[{"type":"tool_use", "id":"rename", "name":"TaskUpdate", "input":{"taskId":"3", "subject":"Renamed", "status":"deleted"}}]}}).to_string();
+        let split = update.len() / 2;
+        file.write_all(&update.as_bytes()[..split]).unwrap();
+        let partial = read_cached(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            Some(&first),
+        )
+        .unwrap();
+        assert_eq!(partial.task_replay.offset, first.task_replay.offset);
+        file.write_all(&update.as_bytes()[split..]).unwrap();
+        file.write_all(b"\n").unwrap();
+        let appended = read_cached(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            Some(&partial),
+        )
+        .unwrap();
+        assert_eq!(appended.tasks[2].subject, "Renamed");
+        assert_eq!(appended.tasks[2].status, crate::model::TaskStatus::Deleted);
+        file.write_all(include_bytes!("../../../tests/fixtures/claude-todos.jsonl"))
+            .unwrap();
+        let restarted = read_cached(
+            file.path(),
+            file.as_file().metadata().unwrap().len(),
+            Some(&appended),
+        )
+        .unwrap();
+        assert_eq!(restarted.tasks.len(), 3);
+        assert_eq!(restarted.tasks[2].subject, "Task 3");
+    }
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/transcript.jsonl");
 
