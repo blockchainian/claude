@@ -3,7 +3,7 @@ use super::formatting::format_relative_time;
 use super::navigation::CenterRow;
 use super::render::row;
 use super::render::{fill_list_row, line};
-use super::style::selection_style;
+use super::style::cursor_style;
 use super::*;
 
 fn columns(area: Rect) -> (Rect, Rect, Rect) {
@@ -63,8 +63,7 @@ impl View {
             return;
         }
         let entries = self.center_rows(&indices, self.grouping);
-        // Hand out accents top to bottom before drawing; the selected row is drawn without its accent
-        // but still takes its turn.
+        // Hand out accents top to bottom before drawing.
         for entry in &entries {
             if let CenterRow::Task(index) | CenterRow::Parent(index) = entry {
                 self.title_color(&self.rows[*index].id);
@@ -117,13 +116,13 @@ impl View {
                 } else {
                     let selected = self.selected_draft == Some(*id);
                     if selected {
-                        fill_list_row(rect, buf, selection_style());
+                        fill_list_row(rect, buf, cursor_style());
                         state.marker = Some((rect.x, rect.y));
                     }
                     let text = format!("{}   New task", if selected { "›" } else { " " });
                     line(
                         Line::from(text).style(if selected {
-                            selection_style()
+                            cursor_style()
                         } else {
                             Style::default()
                         }),
@@ -142,7 +141,7 @@ impl View {
                     let rect = row(viewport, offset as u16, /*height*/ 1);
                     let selected = self.selected == usize::MAX;
                     let style = if selected {
-                        selection_style()
+                        cursor_style()
                     } else {
                         Style::default()
                     };
@@ -206,14 +205,12 @@ impl View {
             let selected = !header && self.selected_draft.is_none() && index == self.selected;
             let style = if header {
                 Style::default().dim()
-            } else if selected {
-                selection_style()
             } else {
                 Style::default()
             };
             fill_list_row(rect, buf, style);
             let (status, mut dot) = Self::status(task);
-            if selected || header {
+            if header {
                 dot.style = style;
             }
             if selected {
@@ -251,7 +248,7 @@ impl View {
             let indent = title.width.min(indent);
             title.x += indent;
             title.width -= indent;
-            let title_style = if selected || header {
+            let title_style = if header {
                 style
             } else {
                 self.title_style(&task.id)
@@ -270,13 +267,12 @@ impl View {
             if !updated.is_empty() {
                 let age = format_relative_time(reference, Some(task.updated_at));
                 Line::from(age)
-                    .style(if selected {
-                        style
-                    } else {
-                        super::style::time_style()
-                    })
+                    .style(super::style::time_style())
                     .right_aligned()
                     .render(updated, buf);
+            }
+            if selected {
+                fill_list_row(rect, buf, cursor_style());
             }
         }
         if padding > 0 && start > 0 {

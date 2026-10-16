@@ -80,6 +80,48 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     (directory, tmux, transcript)
 }
 
+#[test]
+#[ignore = "requires tmux and NO_COLOR unset; run with --ignored --nocapture"]
+fn terminal_task_cursor_keeps_cell_colors() {
+    let (_directory, tmux, _transcript) = start_probe("task-cursor");
+    for width in [120, 200] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        std::thread::sleep(Duration::from_millis(300));
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+        let mut parser = vt100::Parser::new(50, width, 0);
+        parser.process(capture.replace('\n', "\r\n").as_bytes());
+        let screen = parser.screen();
+        let (x, y) = (0..50)
+            .find_map(|y| {
+                (0..width / 3)
+                    .find_map(|x| (screen.cell(y, x).unwrap().contents() == "›").then_some((x, y)))
+            })
+            .expect("selected task marker");
+        let marker = screen.cell(y, x).unwrap();
+        let status = screen.cell(y, x + 2).unwrap();
+        let title = screen.cell(y, x + 4).unwrap();
+        assert!(marker.bold());
+        // vt100 models bold and dim as mutually exclusive intensity levels.
+        assert!(status.dim());
+        assert!(title.bold());
+        assert_eq!(marker.fgcolor(), vt100::Color::Default);
+        assert_ne!(title.fgcolor(), marker.fgcolor());
+        assert_eq!(status.fgcolor(), vt100::Color::Default);
+        assert_eq!(title.bgcolor(), marker.bgcolor());
+        assert_eq!(status.bgcolor(), marker.bgcolor());
+        assert_ne!(marker.bgcolor(), vt100::Color::Default);
+    }
+    println!("{{\"task_cursor\":\"pass\",\"widths\":[120,200]}}");
+}
+
 // Runs the executable's terminal loop, provider discovery and log loading, rather
 // than constructing a View. AGENTS_PROBE_BIN also checks the installed artifact.
 #[test]

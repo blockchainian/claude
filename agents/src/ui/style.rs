@@ -93,6 +93,14 @@ pub(super) fn selection_style_for(no_color: bool, colors: bool, light: bool) -> 
 pub(super) fn active_tab_style() -> Style {
     selection_style()
 }
+
+/// Highlights a cursor row without replacing its cells' foreground colors.
+pub(super) fn cursor_style() -> Style {
+    Style {
+        fg: None,
+        ..selection_style()
+    }
+}
 pub(super) fn inactive_tab_style() -> Style {
     Style {
         fg: selection_style().fg,

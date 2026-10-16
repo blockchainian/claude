@@ -1,3 +1,6 @@
+#[path = "task_cursor_tests.rs"]
+mod task_cursor;
+
 fn session_key(id: &str) -> SessionKey {
     SessionKey {
         provider: crate::providers::ProviderId::Claude,
