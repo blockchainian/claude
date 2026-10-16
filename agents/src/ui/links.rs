@@ -32,9 +32,19 @@ pub(super) fn path_links(text: &str, paths: &[Range<usize>], cwd: &Path) -> Vec<
     let mut links: Vec<_> = paths
         .iter()
         .filter_map(|range| {
+            let target = resolve(&text[range.clone()], cwd)?;
+            // A line range after a text file opens that line in VS Code.
+            if let Some((len, line)) = super::paths::line_range(&text[range.end..])
+                && let Some(link) = super::vscode::file_line_link(&target, line)
+            {
+                return Some(Link {
+                    range: range.start..range.end + len,
+                    target: link.into(),
+                });
+            }
             Some(Link {
                 range: range.clone(),
-                target: resolve(&text[range.clone()], cwd)?,
+                target,
             })
         })
         .collect();
@@ -129,6 +139,21 @@ pub(super) fn underline(buf: &mut Buffer, links: &[DrawnLink]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_line_range_after_a_text_file_opens_its_first_line_in_vs_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("log.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let text = format!("{}:10-40", file.display());
+        assert_eq!(
+            text_links(&text, dir.path(), &[]),
+            [Link {
+                range: 0..text.len(),
+                target: format!("{}:10", super::super::vscode::open_target(&file).unwrap()).into(),
+            }]
+        );
+    }
 
     #[test]
     fn rooted_paths_link_only_when_the_target_exists() {

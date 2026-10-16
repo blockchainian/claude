@@ -37,9 +37,9 @@
     ↓
   running 3 tests
   ...
+
   ─ Read ─────────────────────────────────────────────────────────────────────────────────────────
-  path: agents/src/log.rs
-  range: lines 1–40
+  agents/src/log.rs:1-40
   running…
 
 

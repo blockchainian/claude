@@ -27,6 +27,13 @@ pub(crate) fn open_target(target: &Path) -> Option<String> {
     })
 }
 
+/// The VS Code link that opens text file `target` at `line`.
+pub(super) fn file_line_link(target: &Path, line: u64) -> Option<String> {
+    open_target(target)
+        .filter(|link| link.starts_with("vscode://file"))
+        .map(|link| format!("{link}:{line}"))
+}
+
 /// The link that opens a GitHub pull request URL in the window of `cwd`'s repository.
 pub(super) fn pull_request_link(url: &str, cwd: &Path) -> Option<String> {
     let parts: Vec<_> = url

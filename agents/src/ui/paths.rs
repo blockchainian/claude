@@ -94,7 +94,27 @@ fn word_bounds(word: &str, start: usize) -> Range<usize> {
             break;
         }
     }
+    // A `:10` or `:10-40` line range follows the path rather than being part of it.
+    if let Some(colon) = word[start..end].rfind(':')
+        && line_range(&word[start + colon..end]).is_some_and(|(len, _)| colon + len == end - start)
+    {
+        end = start + colon;
+    }
     start..end
+}
+
+/// The length and first line of the `:10`, `:10-` or `:10-40` line range that `text` starts with.
+pub(super) fn line_range(text: &str) -> Option<(usize, u64)> {
+    let digits =
+        |text: &str| text.len() - text.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    let rest = text.strip_prefix(':')?;
+    let first = digits(rest);
+    let line = rest[..first].parse().ok()?;
+    let mut len = 1 + first;
+    if rest[first..].starts_with('-') {
+        len += 1 + digits(&rest[first + 1..]);
+    }
+    Some((len, line))
 }
 
 /// Whether `path` is absolute or under the home directory, so it needs no `cwd`.
@@ -156,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn paths_end_before_cjk_punctuation_and_markdown_markers() {
+    fn paths_end_before_cjk_punctuation_markdown_markers_and_line_ranges() {
         let cwd = Path::new("/");
         assert_eq!(
             found("报告：`/private/workspace/report.md`，已发送。", cwd),
@@ -168,6 +188,10 @@ mod tests {
         );
         assert_eq!(found("**/tmp/a/b.md**", cwd), ["/tmp/a/b.md"]);
         assert_eq!(found("(/tmp/a/b.md).", cwd), ["/tmp/a/b.md"]);
+        assert_eq!(
+            found("/tmp/a/b.rs:10-40 /tmp/a/c.rs:7 /tmp/a/d.rs:7-", cwd),
+            ["/tmp/a/b.rs", "/tmp/a/c.rs", "/tmp/a/d.rs"]
+        );
     }
 
     #[test]

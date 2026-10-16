@@ -215,7 +215,11 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
     let label_style = super::style::log_styles(&event.kind).0;
     let error_style = super::style::log_styles(&Kind::Error).0;
     let mut parts = Vec::new();
-    for call in &event.calls {
+    for (index, call) in event.calls.iter().enumerate() {
+        if index > 0 {
+            // A blank row ends the previous call's output.
+            parts.push(Part::new("", Body::Text));
+        }
         if event.calls.len() > 1 {
             parts.push(Part::new(call.title.clone(), Body::TitleRule));
         }
@@ -590,10 +594,10 @@ mod tests {
                 id: "Read-fixture".into(),
                 title: "Read".into(),
                 name: "Read".into(),
-                input: vec![Section::Fields(vec![
-                    ("path".into(), "agents/src/log.rs".into()),
-                    ("range".into(), "lines 1–40".into()),
-                ])],
+                input: vec![Section::Text {
+                    label: "path".into(),
+                    text: "agents/src/log.rs:1-40".into(),
+                }],
                 output: None,
                 is_error: false,
             },
@@ -608,8 +612,9 @@ mod tests {
                 "cargo test",
                 "",
                 "running 3 tests\n...",
+                "",
                 "Read",
-                "path: agents/src/log.rs\nrange: lines 1–40",
+                "agents/src/log.rs:1-40",
                 "running…",
             ]
         );
@@ -621,9 +626,9 @@ mod tests {
                 &format!("  ↓{}", " ".repeat(77)),
                 "running 3 tests",
                 "...",
+                "",
                 &format!("─ Read {}", "─".repeat(73)),
-                "path: agents/src/log.rs",
-                "range: lines 1–40",
+                "agents/src/log.rs:1-40",
                 "running…",
             ]
         );

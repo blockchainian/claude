@@ -222,9 +222,16 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             "bash",
             input["command"].as_str().unwrap_or(""),
         )],
-        "Read" | "Edit" | "Write" => {
-            vec![Section::Fields(vec![("path".to_owned(), path.to_owned())])]
+        "Read" if input.get("offset").is_some() || input.get("limit").is_some() => {
+            let start = input["offset"].as_u64().unwrap_or(1);
+            let end = input["limit"].as_u64().map_or_else(String::new, |count| {
+                start.saturating_add(count.saturating_sub(1)).to_string()
+            });
+            vec![text_section("path", &format!("{path}:{start}-{end}"))]
         }
+        "Read" | "Write" => vec![text_section("path", path)],
+        // The diff's label shows the path.
+        "Edit" => Vec::new(),
         "WebFetch" => vec![fields(input, &["url", "prompt"])],
         "Agent" | "Task" => vec![Section::Markdown {
             label: "prompt".to_owned(),
@@ -238,17 +245,6 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         _ => vec![all_fields(input)],
     };
     match name {
-        "Read" if input.get("offset").is_some() || input.get("limit").is_some() => {
-            if let Section::Fields(fields) = &mut sections[0] {
-                fields.push((
-                    "range".to_owned(),
-                    line_range(
-                        input["offset"].as_u64().unwrap_or(1),
-                        input["limit"].as_u64(),
-                    ),
-                ));
-            }
-        }
         "Edit" => {
             let patch = value.and_then(|value| value["structuredPatch"].as_array());
             let diff = if let Some(hunks) = patch {
@@ -851,13 +847,28 @@ pub(crate) mod tests {
                 raw_file["content"].as_str().unwrap()
             )
         );
-        assert!(
-            matches!(&read.input[0], Section::Fields(fields) if fields.iter().any(|(key, _)| key == "range"))
+        let read_input = &records
+            .iter()
+            .map(|record| &record["message"]["content"][0])
+            .find(|block| block["name"] == "Read")
+            .unwrap()["input"];
+        let offset = read_input["offset"].as_u64().unwrap();
+        assert_eq!(
+            read.input,
+            [text_section(
+                "path",
+                &format!(
+                    "{}:{offset}-{}",
+                    read_input["file_path"].as_str().unwrap(),
+                    offset + read_input["limit"].as_u64().unwrap() - 1
+                )
+            )]
         );
         let edit = calls.iter().find(|call| call.name == "Edit").unwrap();
-        assert!(matches!(&edit.input[1], Section::Diff { text, .. } if text.starts_with("@@ -")));
+        assert_eq!(edit.input.len(), 1);
+        assert!(matches!(&edit.input[0], Section::Diff { text, .. } if text.starts_with("@@ -")));
         let patch = &records[5]["toolUseResult"]["structuredPatch"][0];
-        if let Section::Diff { text, .. } = &edit.input[1] {
+        if let Section::Diff { text, .. } = &edit.input[0] {
             assert!(text.starts_with(&format!(
                 "@@ -{},{} +{},{} @@\n",
                 patch["oldStart"], patch["oldLines"], patch["newStart"], patch["newLines"]
@@ -988,7 +999,7 @@ pub(crate) mod tests {
             Some(&result),
         );
         assert!(
-            matches!(&edit.input[1], Section::Diff { text, .. } if text.contains("\n+") && text.starts_with('-'))
+            matches!(&edit.input[0], Section::Diff { text, .. } if text.contains("\n+") && text.starts_with('-'))
         );
         assert_eq!(
             tool_call(
