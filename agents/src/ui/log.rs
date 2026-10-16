@@ -3,6 +3,7 @@ use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
 use crate::log::{Event, Kind};
 use chrono::{DateTime, Local, Utc};
+use ratatui::style::Modifier;
 
 const CLOCK_FORMAT: &str = "%H:%M:%S";
 const CLOCK_WIDTH: usize = 8;
@@ -79,6 +80,7 @@ impl View {
                     buf,
                     Style {
                         bg: super::style::selection_style().bg,
+                        add_modifier: Modifier::BOLD,
                         ..Style::default()
                     },
                 );

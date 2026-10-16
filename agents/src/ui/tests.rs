@@ -4247,8 +4247,9 @@ fn non_current_log_time_matches_unselected_task_and_details_times() {
 }
 
 #[test]
-fn selected_log_row_changes_only_background() {
+fn selected_log_row_preserves_foreground_and_adds_bold() {
     use crate::log::Kind;
+    use ratatui::style::Modifier;
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let source =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
@@ -4307,7 +4308,8 @@ fn selected_log_row_changes_only_background() {
                                     "{kind:?}, width {width}, ({x}, {y})"
                                 );
                                 assert_eq!(
-                                    after.modifier, before.modifier,
+                                    after.modifier,
+                                    before.modifier | Modifier::BOLD,
                                     "{kind:?}, width {width}, ({x}, {y})"
                                 );
                                 assert_eq!(
@@ -5317,7 +5319,7 @@ mod log_search {
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
         }
         assert!(!buf[(11, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buf[(11, 0)].modifier.contains(Modifier::BOLD));
+        assert!(buf[(11, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
