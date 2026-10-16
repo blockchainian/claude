@@ -1,6 +1,7 @@
 Background
 ─ A very long description A very… · 0s ╴
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
 ─ Waiting for output · 0s ─────────────╴
 
 Last message
