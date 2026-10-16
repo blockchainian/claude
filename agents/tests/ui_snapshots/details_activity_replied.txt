@@ -1,7 +1,7 @@
-Activity                          7s ago
+Latest activity                   7s ago
 Run checks
 
-Message                           3s ago
+Update                            3s ago
 Checking the project
 
 Prompt              42 messages · 1h 10m

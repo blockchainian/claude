@@ -679,7 +679,7 @@ impl View {
             let start = items.len() + 1;
             items.extend([
                 left_right(
-                    "Activity".dim().into(),
+                    "Latest activity".dim().into(),
                     Span::styled(
                         format_relative_time(now, Some(activity.at)),
                         style::time_style(),
@@ -696,8 +696,8 @@ impl View {
                 .into(),
             ]);
             bodies.push(start..items.len());
-            keys.push(body_key("Activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied activity")));
+            keys.push(body_key("Latest activity", &activity.label));
+            copies.push(Some((activity.label.as_str(), "Copied latest activity")));
             body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }
         if let Some(message) = session.last_message.as_ref() {
@@ -707,7 +707,7 @@ impl View {
                     Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
-            items.push(left_right("Message".dim().into(), header, width).0.into());
+            items.push(left_right("Update".dim().into(), header, width).0.into());
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(
@@ -722,8 +722,8 @@ impl View {
                     .map(Item::from),
             );
             bodies.push(start..items.len());
-            keys.push(body_key("Message", message));
-            copies.push(Some((message.as_str(), "Copied message")));
+            keys.push(body_key("Update", message));
+            copies.push(Some((message.as_str(), "Copied update")));
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
@@ -926,7 +926,7 @@ impl View {
                     _ => unreachable!("copyable bodies contain text rows"),
                 })
                 .collect::<Vec<_>>();
-            let markdown = *label != "Copied activity";
+            let markdown = *label != "Copied latest activity";
             let maps = super::text_selection_layout::map_lines(source, &lines, markdown);
             for (index, cells) in body.clone().zip(maps) {
                 item_links[index] = super::links::row_links(&cells, &body_links[id]);
@@ -1507,7 +1507,7 @@ mod wrapped_path_tests {
                 .count(),
             2
         );
-        assert!(rows.iter().any(|row| row.contains("Message")));
+        assert!(rows.iter().any(|row| row.contains("Update")));
         assert!(!rows.iter().any(|row| row.contains("/private/")));
     }
 

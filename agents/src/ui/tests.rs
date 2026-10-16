@@ -1770,7 +1770,7 @@ fn details_include_attention_and_clip_messages() {
         "Needs attention",
         "Open task to review.",
         "Waiting for your response.",
-        "Message",
+        "Update",
     ] {
         assert!(rendered.contains(label), "{label}");
     }
@@ -1782,7 +1782,7 @@ fn details_include_attention_and_clip_messages() {
             .collect::<String>()
             .contains("/tmp/project")
     });
-    assert!(position("Message") < position("Prompt"));
+    assert!(position("Update") < position("Prompt"));
     assert!(position("Prompt") < position("Needs attention"));
     assert!(position("Needs attention") < position("│ Project"));
     assert!(position("│ Project") < project);
@@ -2424,9 +2424,9 @@ fn details_activity_and_message_are_independent() {
             .to_owned()
     };
     let rendered = render(&view);
-    assert!(rendered.contains("Activity                          7s ago"));
-    assert!(rendered.contains("Message                           1h ago"));
-    assert!(rendered.find("Run checks").unwrap() < rendered.find("Message").unwrap());
+    assert!(rendered.contains("Latest activity                   7s ago"));
+    assert!(rendered.contains("Update                            1h ago"));
+    assert!(rendered.find("Run checks").unwrap() < rendered.find("Update").unwrap());
     assert!(rendered.contains("Checking the project"));
     assert_eq!(
         rendered,
@@ -2442,7 +2442,7 @@ fn details_activity_and_message_are_independent() {
     row.activity.as_mut().unwrap().label = "Run checks".into();
     row.status = SessionStatus::Ready;
     view.set_sessions(vec![row.clone()], false);
-    assert!(render(&view).contains("Activity                          7s ago"));
+    assert!(render(&view).contains("Latest activity                   7s ago"));
     assert_eq!(
         render(&view),
         include_str!("../../tests/ui_snapshots/details_activity_ready.txt")
@@ -2451,8 +2451,8 @@ fn details_activity_and_message_are_independent() {
     row.last_message_at = Some(now - Duration::seconds(3));
     view.set_sessions(vec![row.clone()], false);
     let replied = render(&view);
-    assert!(replied.contains("Activity                          7s ago"));
-    assert!(replied.contains("Message                           3s ago"));
+    assert!(replied.contains("Latest activity                   7s ago"));
+    assert!(replied.contains("Update                            3s ago"));
     assert_eq!(
         replied,
         include_str!("../../tests/ui_snapshots/details_activity_replied.txt")
@@ -2489,8 +2489,8 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
     view.set_sessions(vec![row], false);
     let rendered = log_screen(&view, 120, 40, now);
     for (body, label, path) in [
-        (activity, "Copied activity", "reports/activity.md"),
-        (message, "Copied message", "reports/reply.md"),
+        (activity, "Copied latest activity", "reports/activity.md"),
+        (message, "Copied update", "reports/reply.md"),
         (
             "Request reports/prompt.md",
             "Copied prompt",
@@ -2551,7 +2551,7 @@ fn details_activity_uses_tool_color() {
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, now);
-    let header = "Activity                                              2m ago";
+    let header = "Latest activity                                       2m ago";
     let y = (0..area.height)
         .find(|y| {
             header
@@ -2592,7 +2592,7 @@ fn details_message_uses_model_color_under_markdown() {
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, now);
-    let header = "Message                                               2m ago";
+    let header = "Update                                                2m ago";
     let y = (0..area.height)
         .find(|y| {
             header
@@ -3055,10 +3055,10 @@ fn details_background_boxes_tail_and_clip_output() {
     );
     let clipped = queued_details(row, 15);
     assert!(
-        clipped.starts_with("Background\n…\n\nMessage\nChecking the project\n"),
+        clipped.starts_with("Background\n…\n\nUpdate\nChecking the project\n"),
         "{clipped}"
     );
-    assert!(clipped.contains("Message"));
+    assert!(clipped.contains("Update"));
     assert!(clipped.contains("Project"));
     assert!(clipped.ends_with("Model                            Unknown"));
     assert!(!clipped.contains("xxxxxxxx"));
@@ -3767,7 +3767,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         } else {
             assert!(!updated.contains("ago"));
         }
-        for label in ["Background", "Message", "Prompt", "Project"] {
+        for label in ["Background", "Update", "Prompt", "Project"] {
             let y = (3..35)
                 .find(|&y| text(y, left + 1, right).contains(label))
                 .unwrap_or_else(|| panic!("missing {label} at width {width}"));
@@ -4218,7 +4218,7 @@ fn non_current_log_time_matches_unselected_task_and_details_times() {
             (0..area.width)
                 .map(|x| details[(x, y)].symbol())
                 .collect::<String>()
-                .contains("Message")
+                .contains("Update")
         })
         .expect("message header");
     assert_ne!(details[(99, details_y)].symbol(), " ");
@@ -4743,7 +4743,7 @@ mod details_budget {
         view.status_filter = 3;
         view.set_sessions(vec![row], false);
         let rest = panel(&view);
-        for header in ["Prompt", "Message", "Needs attention"] {
+        for header in ["Prompt", "Update", "Needs attention"] {
             assert!(rest.iter().any(|line| line == header), "{header}: {rest:?}");
         }
         assert!(rest[22] == format!("Model{}Unknown", " ".repeat(108)));
@@ -6982,7 +6982,7 @@ fn double_click_on_details_prompt_or_last_message_copies_it() {
         double_click_text(&mut view, &screen, "First reply row"),
         Some(Action::Copy {
             text: message.into(),
-            label: "Copied message".into()
+            label: "Copied update".into()
         })
     );
     assert_eq!(
@@ -6992,7 +6992,7 @@ fn double_click_on_details_prompt_or_last_message_copies_it() {
             label: "Copied prompt".into()
         })
     );
-    assert_eq!(double_click_text(&mut view, &screen, "Message"), None);
+    assert_eq!(double_click_text(&mut view, &screen, "Update"), None);
 }
 
 #[test]
