@@ -7430,6 +7430,47 @@ fn usage_chart_rises_in_braille_below_the_task_rows_and_keeps_its_bins_as_time_p
 }
 
 #[test]
+fn usage_chart_and_activity_strip_share_the_same_style() {
+    use crate::usage::{Bin, bin_of};
+
+    let (mut view, now) = log_fixture();
+    let id = view.rows[view.selected].id.clone();
+    let bin = bin_of(now);
+    view.set_usage(
+        &id,
+        [(
+            bin,
+            Bin {
+                input: 100,
+                output: 0,
+            },
+        )]
+        .into(),
+    );
+    view.set_activity([bin].into());
+    let area = Rect::new(0, 0, 100, 25);
+
+    for use_colors in [true, false] {
+        view.use_colors = use_colors;
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let layout = view.center_layout(area);
+        let x = layout.list.right() - 1;
+        let chart = &buf[(x, layout.list.bottom() - 1)];
+        let strip = &buf[(x, layout.log.y)];
+        for cell in [chart, strip] {
+            assert!(
+                cell.symbol()
+                    .chars()
+                    .all(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+            );
+        }
+        assert_eq!(chart.fg, strip.fg, "use_colors={use_colors}");
+        assert_eq!(chart.style(), strip.style(), "use_colors={use_colors}");
+    }
+}
+
+#[test]
 fn activity_strip_dots_the_log_rule_where_a_task_worked_in_the_inline_code_color() {
     let (mut view, now) = log_fixture();
     view.use_colors = true;

@@ -36,9 +36,7 @@ impl View {
                 let cell = &mut buf[(x, area.y)];
                 cell.reset();
                 cell.set_char(char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '));
-                if self.use_colors {
-                    cell.set_fg(crate::theme::inline_code_color());
-                }
+                cell.set_style(super::style::timeline_style(self.use_colors));
             }
         }
     }

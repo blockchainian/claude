@@ -122,6 +122,15 @@ pub(super) fn time_style() -> Style {
     Style::default().dim()
 }
 
+/// The braille dots in the usage chart and activity strip.
+pub(super) fn timeline_style(use_colors: bool) -> Style {
+    if use_colors {
+        Style::default().fg(crate::theme::inline_code_color())
+    } else {
+        Style::default()
+    }
+}
+
 pub(super) fn log_time_style(kind: &crate::log::Kind, last: bool) -> Style {
     if last {
         log_styles(kind).1.bold()
