@@ -2,7 +2,7 @@
   Active 2                  Inactive 1
  ────────────────────── Unloaded task ─
  /tmp/project       │ Prompt
- › ○ Unloaded task  │ Unloaded task
+ ○ Unloaded task    │ Unloaded task
                     │
                     │ Project
                     │ /tmp/project

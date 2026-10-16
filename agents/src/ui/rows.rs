@@ -12,7 +12,7 @@ fn columns(area: Rect) -> (Rect, Rect, Rect) {
     const UPDATED_WIDTH: u16 = 9;
     const GAP: u16 = 2;
 
-    let gutter = area.width.min(4);
+    let gutter = area.width.min(2);
     let available = area.width - gutter;
     let status_metadata = GAP + STATUS_WIDTH;
     let all_metadata = status_metadata + GAP + UPDATED_WIDTH;
@@ -119,7 +119,7 @@ impl View {
                         fill_list_row(rect, buf, cursor_style());
                         state.marker = Some((rect.x, rect.y));
                     }
-                    let text = format!("{}   New task", if selected { "›" } else { " " });
+                    let text = "  New task";
                     line(
                         Line::from(text).style(if selected {
                             cursor_style()
@@ -151,12 +151,11 @@ impl View {
                     } else {
                         "Show more"
                     };
-                    let marker = if selected { "›" } else { " " };
                     if selected {
                         state.marker = Some((rect.x, rect.y));
                     }
                     line(
-                        Line::from(format!("{marker}   {label}")).style(style),
+                        Line::from(format!("  {label}")).style(style),
                         rect,
                         buf,
                     );
@@ -216,19 +215,14 @@ impl View {
             if selected {
                 state.marker = Some((rect.x, rect.y));
             }
-            line(
-                Line::from(if selected { "›" } else { " " }).style(style),
-                rect,
-                buf,
-            );
             let indent = if task.parent.is_some() { 2 } else { 0 };
             if indent > 0 {
                 line(
                     Line::from("└ ").style(style),
                     Rect::new(
-                        rect.x + rect.width.min(2),
+                        rect.x,
                         rect.y,
-                        rect.width.saturating_sub(2).min(2),
+                        rect.width.min(2),
                         1,
                     ),
                     buf,
@@ -237,9 +231,9 @@ impl View {
             line(
                 Line::from(dot),
                 Rect::new(
-                    rect.x + rect.width.min(2 + indent),
+                    rect.x + rect.width.min(indent),
                     rect.y,
-                    rect.width.saturating_sub(2 + indent).min(/*other*/ 1),
+                    rect.width.saturating_sub(indent).min(/*other*/ 1),
                     /*height*/ 1,
                 ),
                 buf,

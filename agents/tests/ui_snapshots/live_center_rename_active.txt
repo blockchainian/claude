@@ -3,7 +3,7 @@
  ────────────────────────────────────────────────────────── Task to find ──────────────
  Rename › Task to find                      │ Prompt
  /tmp/project                               │ Task to find
- › ○ Task to find               Ready       │
+ ○ Task to find                 Ready       │
                                             │
                                             │
                                             │

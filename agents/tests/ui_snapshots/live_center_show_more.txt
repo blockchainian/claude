@@ -2,9 +2,9 @@
   Active 0                                                          Inactive 1
  ──────────────────────────────────────────────────────────────────────────────
  /tmp/project                           │
-   ○ Recent task            Inactive    │
+ ○ Recent task              Inactive    │
                                         │
- ›   Show more                          │
+   Show more                            │
                                         │
                                         │
                                         │

@@ -102,13 +102,13 @@ fn terminal_task_cursor_keeps_cell_colors() {
         let (x, y) = (0..50)
             .find_map(|y| {
                 (0..width / 3)
-                    .find_map(|x| (screen.cell(y, x).unwrap().contents() == "›").then_some((x, y)))
+                    .find_map(|x| (screen.cell(y, x).unwrap().contents() == "○" && x > 0 && screen.cell(y, x - 1).unwrap().bold()).then_some((x, y)))
             })
             .expect("selected task marker");
         let marker = screen.cell(y, x).unwrap();
-        let status = screen.cell(y, x + 2).unwrap();
-        let title = screen.cell(y, x + 4).unwrap();
-        assert!(marker.bold());
+        let status = screen.cell(y, x).unwrap();
+        let title = screen.cell(y, x + 2).unwrap();
+        assert!(screen.cell(y, x - 1).unwrap().bold());
         // vt100 models bold and dim as mutually exclusive intensity levels.
         assert!(status.dim());
         assert!(title.bold());

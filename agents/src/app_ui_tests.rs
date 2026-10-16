@@ -120,7 +120,7 @@ fn assert_log_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
         .filter(|&x| buffer[(x, 3)].symbol() == "│")
         .collect();
     let task_row = (3..position(buffer, "›").1)
-        .find(|&y| (0..separators[0].min(5)).any(|x| buffer[(x, y)].symbol() == "›"))
+        .find(|&y| buffer[(0, y)].modifier.contains(ratatui::style::Modifier::BOLD))
         .expect("selected task cursor");
     let cursor = buffer[(0, task_row)].style();
     let start = if separators.len() == 2 {

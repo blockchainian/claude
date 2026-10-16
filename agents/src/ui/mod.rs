@@ -128,7 +128,7 @@ struct Viewport {
     list_links: Vec<links::DrawnLink>,
     details_links: Vec<links::DrawnLink>,
     log_links: Vec<links::DrawnLink>,
-    /// Screen cell of the selection marker drawn by the last render.
+    /// Screen cell at the start of the selected row in the last render.
     marker: Option<(u16, u16)>,
 }
 
@@ -549,7 +549,7 @@ impl View {
         let notice = expire(&mut self.notice, now);
         copied.into_iter().chain(notice).min()
     }
-    /// Where the `›` of the selected row was drawn last, so the terminal cursor can rest on it.
+    /// Where the selected row starts, so the terminal cursor can rest on it.
     pub fn marker_pos(&self) -> Option<(u16, u16)> {
         self.viewport.borrow().marker
     }

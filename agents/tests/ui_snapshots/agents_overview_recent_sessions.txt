@@ -2,18 +2,18 @@
   Active 0                                                         Inactive 10
  ────────────────────────────────────────────────────────────────────────────
  /
- › ○ Task 12                                          Inactive [age]
-   ○ Task 11                                          Inactive [age]
-   ○ Task 10                                          Inactive [age]
-   ○ Task 9                                           Inactive [age]
-   ○ Task 8                                           Inactive [age]
-   ○ Task 7                                           Inactive [age]
-   ○ Task 6                                           Inactive [age]
-   ○ Task 5                                           Inactive [age]
-   ○ Task 4                                           Inactive [age]
-   ○ Task 3                                           Inactive [age]
+ ○ Task 12                                          Inactive [age]
+ ○ Task 11                                          Inactive [age]
+ ○ Task 10                                          Inactive [age]
+ ○ Task 9                                           Inactive [age]
+ ○ Task 8                                           Inactive [age]
+ ○ Task 7                                           Inactive [age]
+ ○ Task 6                                           Inactive [age]
+ ○ Task 5                                           Inactive [age]
+ ○ Task 4                                           Inactive [age]
+ ○ Task 3                                           Inactive [age]
 
-     Show more
+   Show more
 
 
 

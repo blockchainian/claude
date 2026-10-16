@@ -1867,12 +1867,12 @@ fn marker_pos_follows_the_selected_row_and_clears_on_help() {
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     let (x, y) = view.marker_pos().unwrap();
-    assert_eq!(buf[(x, y)].symbol(), "›");
+    assert_eq!(buf[(x, y)].symbol(), "○");
     view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     view.render(area, &mut buf);
     let (x2, y2) = view.marker_pos().unwrap();
     assert_eq!((x2, y2), (x, y + 1));
-    assert_eq!(buf[(x2, y2)].symbol(), "›");
+    assert_eq!(buf[(x2, y2)].symbol(), "○");
     view.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
     view.render(area, &mut buf);
     assert_eq!(view.marker_pos(), None);
@@ -3580,13 +3580,44 @@ fn assert_task_metadata(width: u16, show_status: bool, show_updated: bool) {
 }
 
 #[test]
+fn task_rows_start_at_left_padding_without_marker_and_click_correctly() {
+    for width in [100, 150, 200] {
+        super::style::with_selection_style(
+            super::style::selection_style_for(true, false, false),
+            || {
+                let mut view = fixture();
+                let area = Rect::new(0, 0, width, 40);
+                let mut buf = Buffer::empty(area);
+                view.render(area, &mut buf);
+                let list = view.center_layout(area).list;
+                let second = view.selectable_indices()[1];
+                let title = view.rows[second].display_title().chars().take(12).collect::<String>();
+                let rendered = screen(&view, width, 40);
+                let (_, y) = rendered_cell(&rendered, &title);
+                click_mouse(&mut view, mouse(MouseEventKind::Down(MouseButton::Left), list.x, y));
+                assert_eq!(view.selected, second);
+                view.render(area, &mut buf);
+                assert_eq!(view.marker_pos(), Some((list.x, y)));
+                assert_eq!(buf[(list.x, y)].symbol(), View::status(&view.rows[second]).1.content);
+                assert_eq!(buf[(list.x + 2, y)].symbol(), &title[..1]);
+                for x in list.x..list.right() {
+                    assert_ne!(buf[(x, y)].symbol(), "›");
+                    assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::REVERSED));
+                }
+                assert_eq!(buf[(list.x - 1, y)].symbol(), " ");
+            },
+        );
+    }
+}
+
+#[test]
 fn task_metadata_narrow_100_columns() {
     assert_task_metadata(100, true, true);
 }
 
 #[test]
 fn task_metadata_wide_150_columns() {
-    assert_task_metadata(150, false, false);
+    assert_task_metadata(150, true, false);
 }
 
 #[test]
@@ -3597,12 +3628,12 @@ fn task_metadata_wide_200_columns() {
 #[test]
 fn task_metadata_drops_rightmost_columns_at_title_limit() {
     for (width, title_width, show_status, show_updated) in [
-        (34, 30, false, false),
-        (36, 32, false, false),
-        (37, 20, true, false),
-        (47, 30, true, false),
-        (48, 20, true, true),
-        (49, 21, true, true),
+        (32, 30, false, false),
+        (34, 32, false, false),
+        (35, 20, true, false),
+        (45, 30, true, false),
+        (46, 20, true, true),
+        (47, 21, true, true),
     ] {
         let (mut view, now) = column_padding_fixture();
         view.rows[0].title = "T".repeat(80);
@@ -3625,7 +3656,7 @@ fn task_metadata_drops_rightmost_columns_at_title_limit() {
             "updated at {width}: {text}"
         );
         assert_eq!(
-            buf[(area.x + 4 + title_width - 1, y)].symbol(),
+            buf[(area.x + 2 + title_width - 1, y)].symbol(),
             "…",
             "title at {width}: {text}"
         );
@@ -3680,11 +3711,15 @@ fn list_row_highlights_include_column_padding() {
                 (layout.list, viewport.marker.expect("selected row").1)
             };
             let marker_x = content.x;
-            assert_eq!(buf[(marker_x, y)].symbol(), "›", "{kind} at {width}");
+            if kind == "picker" {
+                assert_eq!(buf[(marker_x, y)].symbol(), "›");
+            } else {
+                assert!(!(content.x..content.right()).any(|x| buf[(x, y)].symbol() == "›"));
+            }
             if kind == "task" {
-                assert_eq!(buf[(marker_x + 2, y)].symbol(), "●");
+                assert_eq!(buf[(marker_x, y)].symbol(), "●");
                 assert_eq!(
-                    buf[(marker_x + 4, y)].symbol(),
+                    buf[(marker_x + 2, y)].symbol(),
                     &view.rows[0].display_title()[..1]
                 );
             }
@@ -5814,7 +5849,7 @@ mod subagent_rows {
         let rendered = screen(&view, 120, 30);
         let parent = rendered
             .lines()
-            .position(|l| l.contains("› ○ Parent task"))
+            .position(|l| l.contains("○ Parent task"))
             .unwrap();
         let lines: Vec<_> = rendered.lines().collect();
         assert!(lines[parent + 2].contains("└ ● Check files"), "{rendered}");
@@ -6149,10 +6184,10 @@ mod subagent_rows {
             let mut buf = Buffer::empty(area);
             view.render_center_rows(area, &mut buf, "2026-10-13T12:00:00Z".parse().unwrap());
             let row = (0..area.height)
-                .find(|&y| buf[(2, y)].symbol() == "└" && buf[(4, y)].symbol() == "●")
+                .find(|&y| buf[(0, y)].symbol() == "└" && buf[(2, y)].symbol() == "●")
                 .unwrap();
-            assert_eq!(buf[(4, row)].symbol(), "●");
-            assert_eq!(buf[(6, row)].symbol(), "界");
+            assert_eq!(buf[(2, row)].symbol(), "●");
+            assert_eq!(buf[(4, row)].symbol(), "界");
             if width >= 57 {
                 let text: String = (0..width).map(|x| buf[(x, row)].symbol()).collect();
                 assert!(text.contains("Working"), "{text}");

@@ -42,9 +42,9 @@ fn task_cursor_preserves_cell_colors_in_both_themes_and_color_modes() {
                                 .contains("Accent")
                         })
                         .unwrap();
-                    assert_eq!(plain[(area.x + 2, y)].fg, Color::Green);
+                    assert_eq!(plain[(area.x, y)].fg, Color::Green);
                     assert_eq!(
-                        plain[(area.x + 4, y)].fg,
+                        plain[(area.x + 2, y)].fg,
                         if use_colors {
                             view.title_color(&session_key("cursor"))
                         } else {
