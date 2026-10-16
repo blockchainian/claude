@@ -495,12 +495,22 @@ impl View {
                     "Effort: {}",
                     draft.setup.effort.as_deref().unwrap_or("Default")
                 ),
-                format!("Branch: {}", draft.setup.branch),
+                format!(
+                    "Branch: {}",
+                    if draft.setup.branch.is_empty() {
+                        "—"
+                    } else {
+                        &draft.setup.branch
+                    }
+                ),
             ];
             for (index, text) in lines.into_iter().enumerate() {
                 line(text, row(area, index as u16, 1), buf);
             }
             for (index, field) in [(2, Field::Model), (3, Field::Effort), (4, Field::Branch)] {
+                if field == Field::Branch && draft.setup.branch.is_empty() {
+                    continue;
+                }
                 let rect = row(area, index, 1);
                 if !rect.is_empty() {
                     self.viewport.borrow_mut().field_targets.push((rect, field));

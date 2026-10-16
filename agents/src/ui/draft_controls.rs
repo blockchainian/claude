@@ -29,7 +29,7 @@ impl View {
                 return;
             }
             if field == Field::Branch {
-                if draft.setup.branch != draft.setup.trunk {
+                if draft.setup.branch.is_empty() || draft.setup.branch != draft.setup.trunk {
                     return;
                 }
                 self.branch_editor = Some(BranchEditor {
@@ -201,6 +201,31 @@ mod tests {
             trunk: "main".into(),
         });
         view
+    }
+    #[test]
+    fn plain_directory_draft_has_no_branch_control() {
+        let mut view = draft_view();
+        view.drafts[0].setup.branch.clear();
+        view.drafts[0].setup.trunk.clear();
+        view.open_field(Field::Branch);
+        assert!(view.branch_editor.is_none());
+        let area = Rect::new(0, 0, 120, 24);
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer);
+        let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Branch: —"));
+        assert!(
+            view.viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .all(|(_, field)| *field != Field::Branch)
+        );
+        view.open_field(Field::Model);
+        assert!(view.picker.is_some());
+        view.picker = None;
+        view.open_field(Field::Effort);
+        assert!(view.picker.is_some());
     }
     #[test]
     fn ctrl_c_closes_draft_controls_without_changing_fields() {

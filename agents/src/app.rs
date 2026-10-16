@@ -624,14 +624,19 @@ impl App {
                 .task_defaults()
                 .ok_or_else(|| io::Error::other("No provider supports new tasks"))?;
             let defaults = defaults?;
-            let repository = crate::tasks::repository(&cwd)?;
+            let cwd = std::fs::canonicalize(cwd)?;
+            let repository = crate::tasks::repository_if_present(&cwd)?;
+            let (cwd, branch, trunk) = match repository {
+                Some(repository) => (repository.directory, repository.branch, repository.trunk),
+                None => (cwd, String::new(), String::new()),
+            };
             Ok(crate::ui::DraftSetup {
                 provider,
-                cwd: repository.directory,
+                cwd,
                 model: defaults.model,
                 effort: defaults.effort,
-                branch: repository.branch,
-                trunk: repository.trunk,
+                branch,
+                trunk,
             })
         })();
         match result {
@@ -1001,3 +1006,38 @@ fn cell_aspect() -> Option<f64> {
 #[cfg(test)]
 #[path = "app_input_tests.rs"]
 mod input_tests;
+
+#[cfg(test)]
+mod draft_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn plain_directory_draft_keeps_cwd_and_accepts_prompt() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            Hub::new(vec![Box::new(
+                crate::providers::claude::ClaudeProvider::new(directory.path().to_owned()),
+            )]),
+            directory.path().to_owned(),
+        );
+        app.new_draft(directory.path().to_owned());
+        let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        app.view.render(area, &mut buffer);
+        let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("New task"), "{text}");
+        app.view.handle_paste("plain-directory prompt");
+        let action = app
+            .view
+            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let Some(Action::CreateTask { request, .. }) = action else {
+            panic!("draft did not submit: {action:?}");
+        };
+        assert_eq!(
+            request.cwd,
+            std::fs::canonicalize(directory.path()).unwrap()
+        );
+        assert_eq!(request.prompt, "plain-directory prompt");
+    }
+}

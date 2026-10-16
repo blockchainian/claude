@@ -8,6 +8,7 @@ pub(crate) struct DraftSetup {
     pub cwd: PathBuf,
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// Empty when the draft directory is outside a Git working tree.
     pub branch: String,
     pub trunk: String,
 }
