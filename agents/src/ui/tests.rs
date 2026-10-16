@@ -6197,7 +6197,7 @@ fn task_log_click_opens_a_whole_row_that_has_calls() {
 }
 
 #[test]
-fn merged_tool_title_rules_start_at_the_arrow_column_and_copy_only_titles() {
+fn merged_tool_title_rules_copy_only_titles_and_arrows_start_at_content_column() {
     for (width, title) in [
         (100, "Bash"),
         (99, "看探针结果"),
@@ -6254,10 +6254,11 @@ fn merged_tool_title_rules_start_at_the_arrow_column_and_copy_only_titles() {
                     .contains(ratatui::style::Modifier::DIM)
             );
             let arrow = (body.y..body.bottom())
-                .find(|y| buf[(body.x + 2, *y)].symbol() == "↓")
-                .expect("arrow at the title column");
+                .find(|y| buf[(body.x, *y)].symbol() == "↓")
+                .expect("arrow at the first content column");
+            assert!((body.x + 1..body.right()).all(|x| buf[(x, arrow)].symbol() == " "));
             assert!(
-                buf[(body.x + 2, arrow)]
+                buf[(body.x, arrow)]
                     .modifier
                     .contains(ratatui::style::Modifier::BOLD)
             );
@@ -6945,7 +6946,7 @@ fn open_tool_layout_titles_and_rules() {
     view.render_at(buf.area, &mut buf, now);
     let (x, y) = rendered_cell(&open, "↓");
     let area = view.viewport.borrow().log_text.area;
-    assert_eq!(x, area.x + 2);
+    assert_eq!(x, area.x);
     assert_eq!(buf[(x, y)].fg, Color::Reset);
     assert!(
         buf[(x, y)]

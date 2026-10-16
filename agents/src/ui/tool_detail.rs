@@ -19,7 +19,7 @@ enum Body {
     TitleRule,
     /// A section label, in the given style.
     Label(Style),
-    /// An input/output arrow at the title column.
+    /// An input/output arrow at the first content column.
     Arrow,
     /// The dim note that a call has no output yet.
     Running,
@@ -150,8 +150,8 @@ impl Part {
             ),
             Body::Arrow => {
                 let mut row = " ".repeat(width);
-                if width > 2 {
-                    row.replace_range(2..3, "↓");
+                if width > 0 {
+                    row.replace_range(0..1, "↓");
                 }
                 vec![Line::styled(row, super::style::log_jump_style())]
             }
@@ -624,7 +624,7 @@ mod tests {
             [
                 &format!("─ Bash {}", "─".repeat(73)),
                 "cargo test",
-                &format!("  ↓{}", " ".repeat(77)),
+                &format!("↓{}", " ".repeat(79)),
                 "running 3 tests",
                 "...",
                 "",
@@ -673,7 +673,7 @@ mod tests {
                     parts[1].lines(width, Style::default())[0]
                         .to_string()
                         .find('↓'),
-                    Some(2)
+                    Some(0)
                 );
                 for span in &lines[0].spans[1..lines[0].spans.len() - 2] {
                     assert_eq!(span.style, Style::new().not_dim());
@@ -723,7 +723,7 @@ mod tests {
                 for width in 0..=40 {
                     let lines = part.lines(width, Style::default().dim());
                     assert_eq!(lines[0].width(), width);
-                    assert_eq!(lines[0].to_string().find('↓'), (width > 2).then_some(2));
+                    assert_eq!(lines[0].to_string().find('↓'), (width > 0).then_some(0));
                     assert_eq!(lines[0].style, super::super::style::log_jump_style());
                     assert!(part.maps(&lines)[0].is_empty());
                 }
@@ -755,7 +755,7 @@ mod tests {
                 "+中文字符",
                 "串很长",
                 "-short",
-                "  ↓      ",
+                "↓        ",
                 "let value",
                 " = \"abcde",
                 "fghij\";",
