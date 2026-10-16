@@ -1,10 +1,10 @@
-Prompt
-Background task
-
 Background
 ─ Run checks                          0s
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ─ Waiting for output                  0s
+
+Prompt
+Background task
 
 Last message
 Checking the project

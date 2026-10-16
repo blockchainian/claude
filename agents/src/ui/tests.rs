@@ -2814,7 +2814,7 @@ fn details_background_boxes_tail_and_clip_output() {
         },
     ];
     let rendered = queued_details(row.clone(), 22);
-    assert!(rendered.find("Background\n").unwrap() < rendered.find("Last message").unwrap());
+    assert!(rendered.find("Background\n").unwrap() < rendered.find("Prompt\n").unwrap());
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_background.txt")
@@ -2826,7 +2826,7 @@ fn details_background_boxes_tail_and_clip_output() {
     );
     let clipped = queued_details(row, 15);
     assert!(
-        clipped.starts_with("Prompt\nBackground task\n\nBackground\n…\n"),
+        clipped.starts_with("Background\n…\n\nPrompt\nBackground task\n"),
         "{clipped}"
     );
     assert!(clipped.contains("Last message"));

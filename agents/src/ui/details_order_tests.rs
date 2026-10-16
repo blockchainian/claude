@@ -38,9 +38,9 @@ fn details_section_order_preserves_clicks_and_copies() {
             "Last message"
         };
         let sections = [
+            "Background",
             "Prompt",
             "Queued prompt",
-            "Background",
             label,
             "Project",
             "Model",

@@ -1,11 +1,11 @@
  Agent command center  Group: Project  g
   Active 3   Ready 2   Working 1   Needs you 0   Inactive 0                                             tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- /tmp/project  2 of 3                                       │ Prompt
- › ○ Parent task                     Ready           2m ago │ Parent task
+ /tmp/project  2 of 3                                       │ Background
+ › ○ Parent task                     Ready           2m ago │ ─ Check files ──────────────────────────────────────────╴
    └ ○ Review results                Ready              now │
-                                                            │ Background
-                                                            │ ─ Check files ──────────────────────────────────────────╴
+                                                            │ Prompt
+                                                            │ Parent task
                                                             │
                                                             │ Project
                                                             │ /tmp/project
