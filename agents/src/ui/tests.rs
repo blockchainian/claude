@@ -5350,6 +5350,44 @@ fn task_log_open_tool_snapshot() {
 }
 
 #[test]
+fn task_log_open_tool_highlighting_refreshes_when_theme_changes() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let events =
+        crate::providers::claude::log::tail(&root.join("claude-tool-calls.jsonl"), 100).unwrap();
+    let event = events
+        .into_iter()
+        .find(|event| event.calls.iter().any(|call| call.name == "Bash"))
+        .unwrap();
+    let (mut view, now) = log_fixture();
+    view.set_log_open(Some(event));
+    let render = || {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
+        view.render_at(buf.area, &mut buf, now);
+        let area = view.viewport.borrow().log_text.area;
+        let mut cells = Vec::new();
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                cells.push((buf[(x, y)].symbol().to_owned(), buf[(x, y)].fg));
+            }
+        }
+        cells
+    };
+    super::highlight::use_theme(false, None).unwrap();
+    let dark = render();
+    super::highlight::use_theme(true, None).unwrap();
+    let light = render();
+    super::highlight::use_theme(false, None).unwrap();
+    let dark_again = render();
+    assert_eq!(
+        dark.iter().map(|cell| &cell.0).collect::<Vec<_>>(),
+        light.iter().map(|cell| &cell.0).collect::<Vec<_>>()
+    );
+    assert!(dark.iter().zip(&light).any(|(a, b)| a.1 != b.1));
+    assert_eq!(dark, dark_again);
+}
+
+#[test]
 fn task_log_open_tool_layout_is_cached_until_it_closes_or_the_width_changes() {
     let (mut view, now) = open_tool_fixture();
     assert!(view.viewport.borrow().log_open_layout.is_none());

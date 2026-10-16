@@ -18,7 +18,15 @@ const MAX_LINE_BYTES: usize = 4 * 1024;
 
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 /// The theme for the current terminal background; `None` until a background is applied.
-static THEME: Mutex<Option<Theme>> = Mutex::new(None);
+static THEME: Mutex<HighlightTheme> = Mutex::new(HighlightTheme {
+    theme: None,
+    generation: 0,
+});
+
+struct HighlightTheme {
+    theme: Option<Theme>,
+    generation: u64,
+}
 
 fn syntax_set() -> &'static SyntaxSet {
     SYNTAX_SET.get_or_init(two_face::syntax::extra_newlines)
@@ -37,8 +45,15 @@ fn bundled_theme(light_background: bool) -> Theme {
 /// background; returns the reason when the file cannot be used, keeping the bundled theme.
 pub fn use_theme(light_background: bool, path: Option<&Path>) -> Result<(), String> {
     let (theme, result) = theme_for(light_background, path);
-    *locked_theme() = Some(theme);
+    let mut current = locked_theme();
+    current.theme = Some(theme);
+    current.generation += 1;
     result
+}
+
+/// Identifies the highlight theme used by cached styled lines.
+pub(super) fn theme_generation() -> u64 {
+    locked_theme().generation
 }
 
 fn theme_for(light_background: bool, path: Option<&Path>) -> (Theme, Result<(), String>) {
@@ -52,7 +67,7 @@ fn theme_for(light_background: bool, path: Option<&Path>) -> (Theme, Result<(), 
     }
 }
 
-fn locked_theme() -> MutexGuard<'static, Option<Theme>> {
+fn locked_theme() -> MutexGuard<'static, HighlightTheme> {
     THEME
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -61,7 +76,7 @@ fn locked_theme() -> MutexGuard<'static, Option<Theme>> {
 /// Runs `f` with the current theme, the dark bundled theme before any background is applied.
 fn with_theme<T>(f: impl FnOnce(&Theme) -> T) -> T {
     let mut theme = locked_theme();
-    f(theme.get_or_insert_with(|| bundled_theme(false)))
+    f(theme.theme.get_or_insert_with(|| bundled_theme(false)))
 }
 
 /// The bundled JSON grammar scopes object keys as quoted strings inside mapping keys.

@@ -141,7 +141,13 @@ impl View {
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
         let mut layout = match viewport.log_open_layout.take() {
-            Some(layout) if layout.width == area.width && layout.height == height => layout,
+            Some(layout)
+                if layout.width == area.width
+                    && layout.height == height
+                    && layout.theme_generation == super::highlight::theme_generation() =>
+            {
+                layout
+            }
             _ => {
                 let mut layout = open_layout(event, area.width, cwd);
                 if layout.lines.len() > height && area.width > 1 {
@@ -466,11 +472,11 @@ fn render_event(
 /// The screen cells of one drawn line, each with the source bytes it shows.
 type Cells = Vec<(std::ops::Range<u16>, std::ops::Range<usize>)>;
 
-/// The open log event laid out at one panel width, reused every frame until the event or
-/// the width changes.
+/// The open log event laid out for one panel size and highlight theme.
 pub(super) struct OpenLayout {
     width: u16,
     height: usize,
+    theme_generation: u64,
     lines: Vec<Line<'static>>,
     /// Each line's text part and the cells mapping it back to that part's bytes.
     rows: Vec<(usize, Cells)>,
@@ -480,6 +486,7 @@ pub(super) struct OpenLayout {
 }
 
 fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
+    let theme_generation = super::highlight::theme_generation();
     let body_style = super::style::log_styles(&event.kind).1;
     let parts: Vec<_> = open_parts(event)
         .into_iter()
@@ -508,6 +515,7 @@ fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
     let mut layout = OpenLayout {
         width,
         height: 0,
+        theme_generation,
         lines: Vec::new(),
         rows: Vec::new(),
         sources: Vec::new(),

@@ -511,6 +511,7 @@ mod tests {
 
     #[test]
     fn fields_keys_match_json_key_foregrounds() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         let mut parts = Vec::new();
         push_section(
             &mut parts,
