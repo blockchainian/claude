@@ -225,7 +225,12 @@ pub struct View {
         SessionKey,
         std::collections::BTreeMap<i64, crate::usage::Bin>,
     )>,
+    /// How many times taller than wide one terminal cell looks.
+    cell_aspect: f64,
 }
+
+/// Cell height over width assumed when the terminal reports no pixels.
+const DEFAULT_CELL_ASPECT: f64 = 2.0;
 
 impl Default for View {
     fn default() -> Self {
@@ -309,7 +314,14 @@ impl View {
             task_panels: HashMap::new(),
             left_log_newest: None,
             usage: None,
+            cell_aspect: DEFAULT_CELL_ASPECT,
         }
+    }
+
+    /// Takes the terminal's cell height over width, or a common one when the terminal reports
+    /// no pixels.
+    pub(crate) fn set_cell_aspect(&mut self, aspect: Option<f64>) {
+        self.cell_aspect = aspect.unwrap_or(DEFAULT_CELL_ASPECT);
     }
 
     pub fn set_capabilities(&mut self, capabilities: HashMap<ProviderId, Capabilities>) {

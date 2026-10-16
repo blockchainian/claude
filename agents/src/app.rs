@@ -207,6 +207,7 @@ impl App {
                 self.refresh();
                 schedule.refreshed(Instant::now());
             }
+            self.view.set_cell_aspect(cell_aspect());
             terminal.draw(|frame| {
                 let area = frame.area();
                 self.refresh_log(self.view.log_event_count(area));
@@ -709,3 +710,14 @@ fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 #[cfg(test)]
 #[path = "providers/claude/app_tests.rs"]
 mod tests;
+
+/// How many times taller than wide one terminal cell is, when the terminal reports its pixels.
+fn cell_aspect() -> Option<f64> {
+    let size = crossterm::terminal::window_size().ok()?;
+    if size.width == 0 || size.height == 0 || size.columns == 0 || size.rows == 0 {
+        return None;
+    }
+    let cell_height = f64::from(size.height) / f64::from(size.rows);
+    let cell_width = f64::from(size.width) / f64::from(size.columns);
+    Some(cell_height / cell_width)
+}

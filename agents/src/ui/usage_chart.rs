@@ -1,5 +1,6 @@
 //! The selected task's token usage, drawn in braille behind the task list: each dot column is one
 //! bin, rising from the list's bottom as high as the bin's tokens, and the list's rows cover it.
+//! A list that looks tall gives the chart only the bottom part of its height.
 
 use super::View;
 use crate::providers::SessionKey;
@@ -15,6 +16,12 @@ const CELL_DOTS: u16 = 4;
 
 /// The percentile of bin totals that fills the chart.
 const TOP_PERCENTILE: usize = 95;
+
+/// Height over width, as the list looks, past which the chart takes only part of the list.
+const TALL_LIST: f64 = 1.618;
+
+/// The share of a tall list's height the chart fills.
+const TALL_LIST_CHART: f64 = 0.382;
 
 /// Bins one cell holds, one per dot column.
 const CELL_BINS: i64 = 2;
@@ -53,7 +60,7 @@ impl View {
             bin_of(now)
         });
         let max = chart_top(bins.values().map(total).collect());
-        let height = area.height * CELL_DOTS;
+        let height = chart_rows(area, self.cell_aspect) * CELL_DOTS;
         let dots = |bin: i64| {
             bins.get(&bin)
                 .map_or(0, |usage| dot_height(total(usage), max, height))
@@ -110,6 +117,16 @@ fn cell_right(bin: i64) -> i64 {
     bin - bin.rem_euclid(CELL_BINS) + CELL_BINS - 1
 }
 
+/// Rows the chart fills in `area`, whose cells are `cell_aspect` times taller than wide.
+fn chart_rows(area: Rect, cell_aspect: f64) -> u16 {
+    let tall = f64::from(area.height) * cell_aspect > f64::from(area.width) * TALL_LIST;
+    if tall {
+        (f64::from(area.height) * TALL_LIST_CHART).round() as u16
+    } else {
+        area.height
+    }
+}
+
 /// The tokens that fill the chart: the 95th percentile of the bins' totals, so a few outsized bins
 /// fill it and cut off rather than flatten the rest.
 fn chart_top(mut totals: Vec<u64>) -> u64 {
@@ -149,6 +166,14 @@ mod tests {
         assert_eq!(chart_top(totals), 95);
         assert_eq!(chart_top(vec![7]), 7);
         assert_eq!(chart_top(Vec::new()), 0);
+    }
+
+    #[test]
+    fn a_list_that_looks_tall_gives_the_chart_its_bottom_share() {
+        // 70 by 59 cells of 7 by 21 pixels look 2.5 times taller than wide.
+        assert_eq!(chart_rows(Rect::new(0, 0, 70, 59), 3.0), 23);
+        // The same cells in a 160-column window look wider than tall.
+        assert_eq!(chart_rows(Rect::new(0, 0, 94, 30), 3.0), 30);
     }
 
     #[test]
