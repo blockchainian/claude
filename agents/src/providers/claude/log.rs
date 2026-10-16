@@ -447,7 +447,12 @@ impl Log {
                         self.entries.last_mut().unwrap().event.sender = sender;
                     } else if !text.trim_start().starts_with('<') {
                         let images = self.images.take(&record, &text);
-                        self.push(Kind::User, text, at);
+                        let kind = if record["isCompactSummary"] == true {
+                            Kind::Compaction
+                        } else {
+                            Kind::User
+                        };
+                        self.push(kind, text, at);
                         self.entries.last_mut().unwrap().event.images = images;
                     }
                 }

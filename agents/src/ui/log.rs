@@ -118,8 +118,8 @@ impl View {
         self.viewport.borrow_mut().log_links.extend(list_links);
     }
 
-    /// Draws the button that jumps back to the newest row on the rule, its arrow above the
-    /// rows' bodies, while an older event is selected.
+    /// Draws the button that jumps back to the newest row centered on the rule while an older
+    /// event is selected.
     pub(super) fn render_log_jump(&self, area: Rect, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
         if self.following_log() {
@@ -130,8 +130,9 @@ impl View {
             0 => " ↑ Latest ".to_owned(),
             unseen => format!(" ↑ {unseen} New "),
         };
-        let x = area.x;
-        let jump = Rect::new(x, area.y, label.width() as u16, 1).intersection(area);
+        let width = label.width() as u16;
+        let x = area.x + area.width.saturating_sub(width) / 2;
+        let jump = Rect::new(x, area.y, width, 1).intersection(area);
         Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
         viewport.log_jump = jump;
     }
@@ -770,6 +771,7 @@ pub(super) fn copied_label(event: &Event) -> String {
 pub(super) fn kind_label(kind: &Kind) -> &'static str {
     match kind {
         Kind::User => "User",
+        Kind::Compaction => "Compaction",
         Kind::Assistant => "Assistant",
         Kind::Agent => "Agent",
         Kind::Session => "Session",
@@ -782,7 +784,10 @@ pub(super) fn kind_label(kind: &Kind) -> &'static str {
 
 /// Whether an event's body is prose the log renders as Markdown.
 fn is_prose(kind: &Kind) -> bool {
-    matches!(kind, Kind::User | Kind::Assistant | Kind::Agent)
+    matches!(
+        kind,
+        Kind::User | Kind::Compaction | Kind::Assistant | Kind::Agent
+    )
 }
 
 pub(super) fn body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> Line<'static> {

@@ -391,7 +391,11 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     let body = rendered_cell(&after, "run a background job");
     assert_eq!(body, rendered_cell(&before, "run a background job"));
     let jump = rendered_cell(&after, "↑ 1 New");
-    assert_eq!((jump.0, jump.1), (body.0 + 1, rect.bottom()));
+    let label = " ↑ 1 New ".width() as u16;
+    assert_eq!(
+        (jump.0, jump.1),
+        (rect.x + (rect.width - label) / 2 + 1, rect.bottom())
+    );
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
     assert_eq!(buf[jump].fg, Color::Reset);
@@ -3228,6 +3232,27 @@ fn details_markdown_snapshot() {
     assert_eq!(buffer[(0, 5)].fg, Color::Cyan);
 }
 
+#[test]
+fn compaction_summary_renders_compaction_tag_and_keeps_visible_body() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/claude-compaction.jsonl");
+    let events = crate::providers::claude::log::tail(&path, 10).unwrap();
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(super::log::kind_label(&event.kind), "Compaction");
+    assert_eq!(super::log::copied_label(event), "Copied compaction message");
+    let (mut view, now) = log_fixture();
+    view.log = events.clone();
+    view.select_log_event(Some(event.clone()));
+    let rendered = log_screen(&view, 120, 60, now);
+    assert!(rendered.contains("Compaction"), "{rendered}");
+    assert!(
+        rendered.matches("This session is being continued").count() >= 2,
+        "summary must remain visible in both list and detail: {rendered}"
+    );
+    assert!(!rendered.contains("User"), "{rendered}");
+}
+
 fn log_fixture() -> (View, chrono::DateTime<Utc>) {
     use crate::log::{Event, Kind};
     use chrono::TimeZone;
@@ -3882,7 +3907,7 @@ fn task_log_time_column_and_ellipses_align_in_both_layouts() {
         view.scroll_content_row(true, true, top);
         view.render_at(area, &mut buffer, now);
         let jump = view.viewport.borrow().log_jump;
-        assert_eq!(jump.x, log.x);
+        assert_eq!(jump.x, log.x + (log.width - jump.width) / 2);
     }
 }
 

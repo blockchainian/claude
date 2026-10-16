@@ -309,6 +309,40 @@ fn terminal_layout_tracks_width() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_compaction_summary_keeps_row_and_labels_detail() {
+    use std::io::Write;
+
+    let (_directory, tmux, transcript) = start_probe("compaction");
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(transcript)
+        .unwrap()
+        .write_all(include_bytes!("fixtures/claude-compaction.jsonl"))
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(1));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let rows: Vec<_> = capture.lines().collect();
+    let rule = rows
+        .iter()
+        .rposition(|line| line.matches('─').count() > 100)
+        .expect("log detail rule");
+    let list = rows[3..rule].join("\n");
+    let detail = rows[rule + 1..rows.len() - 1].join("\n");
+    assert!(
+        list.contains("This session is being continued"),
+        "{capture}"
+    );
+    assert!(detail.contains("Compaction"), "{capture}");
+    assert!(
+        detail.contains("This session is being continued"),
+        "{capture}"
+    );
+    assert!(!detail.contains("User"), "{capture}");
+    println!("{{\"compaction_list\":\"pass\",\"compaction_detail\":\"pass\"}}");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_log_selection_tracks_wheel_click_and_tail() {
     use std::io::Write;
 

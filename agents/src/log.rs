@@ -61,6 +61,7 @@ pub(crate) fn participant_text(name: Option<&str>, body: &str) -> String {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     User,
+    Compaction,
     Assistant,
     Agent,
     Session,
