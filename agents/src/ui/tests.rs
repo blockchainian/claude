@@ -3821,6 +3821,53 @@ fn task_log_last_message_uses_relative_time_and_missing_transcript_hides_panel()
 }
 
 #[test]
+fn non_current_log_time_matches_unselected_task_and_details_times() {
+    let (mut view, now) = log_fixture();
+    view.log.truncate(5);
+    let mut other = view.rows[0].clone();
+    other.id = session_key("other");
+    other.title = "Other task".into();
+    other.updated_at = now - Duration::minutes(1);
+    let current = view.rows[0].clone();
+    view.set_sessions(vec![current, other], false);
+
+    let area = Rect::new(0, 0, 100, 25);
+    let mut tasks = Buffer::empty(area);
+    view.render_center_rows(area, &mut tasks, now);
+    let task_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| tasks[(x, y)].symbol())
+                .collect::<String>()
+                .contains("Other task")
+        })
+        .expect("unselected task row");
+    let task_time = &tasks[(99, task_y)];
+    assert_ne!(task_time.symbol(), " ");
+    assert!(task_time.modifier.contains(ratatui::style::Modifier::DIM));
+
+    let mut log = Buffer::empty(area);
+    view.render_at(area, &mut log, now);
+    assert_ne!(log[(98, 19)].symbol(), " ");
+    assert_eq!(log[(98, 19)].style(), task_time.style());
+
+    view.rows[view.selected].last_message = Some("Reply".into());
+    view.rows[view.selected].last_message_at = Some(now - Duration::minutes(1));
+    let mut details = Buffer::empty(area);
+    view.render_details(area, &mut details, now);
+    let details_y = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| details[(x, y)].symbol())
+                .collect::<String>()
+                .contains("Last message")
+        })
+        .expect("last message header");
+    assert_ne!(details[(99, details_y)].symbol(), " ");
+    assert_eq!(details[(99, details_y)].style(), task_time.style());
+}
+
+#[test]
 fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     use crate::log::Kind;
     use ratatui::style::Modifier;
@@ -3849,7 +3896,7 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
     }
     for y in 16..20 {
         assert_eq!(buf[(98, y)].fg, Color::Reset, "time row {y}");
-        assert!(buf[(98, y)].modifier.is_empty(), "time row {y}");
+        assert_eq!(buf[(98, y)].modifier, Modifier::DIM, "time row {y}");
     }
     for (kind, colour) in [
         (Kind::User, Color::Reset),
@@ -3872,9 +3919,9 @@ fn task_log_uses_cctail_colours_and_highlights_latest_time() {
         view.render_at(area, &mut buf, now);
         let time = &buf[(98, 19)];
         let time_style = super::style::log_time_style(&kind, false);
-        assert_eq!(time_style, Style::default());
+        assert_eq!(time_style, super::style::time_style());
         assert_eq!(time.fg, Color::Reset);
-        assert!(time.modifier.is_empty());
+        assert_eq!(time.modifier, Modifier::DIM);
         view.log.last_mut().unwrap().kind = kind;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
@@ -3902,11 +3949,7 @@ fn task_log_preserves_time_when_truncated() {
     view.render_at(area, &mut buf, now);
     assert_eq!(buf[(88, 16)].symbol(), "…");
     assert_eq!(buf[(98, 16)].fg, Color::Reset);
-    assert!(
-        !buf[(98, 16)]
-            .modifier
-            .intersects(Modifier::DIM | Modifier::BOLD)
-    );
+    assert_eq!(buf[(98, 16)].modifier, Modifier::DIM);
     for kind in [
         Kind::User,
         Kind::Assistant,
