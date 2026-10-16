@@ -244,7 +244,7 @@ impl View {
         }
         if viewport.log.contains(position)
             && self.log_list_visible()
-            && let Some(row) = (position.y - viewport.log.y).checked_sub(super::log::LOG_TOP)
+            && let Some(row) = (position.y - viewport.log.y).checked_sub(self.log_rows_top())
             && let Some(&(index, cut)) = viewport.log_rows.get(usize::from(row))
             && let Some(event) = self.log.get(index)
         {
@@ -461,7 +461,7 @@ impl View {
                 .contains(position)
                 .then(|| {
                     usize::from(mouse.row - viewport.log.y)
-                        .checked_sub(usize::from(super::log::LOG_TOP))
+                        .checked_sub(usize::from(self.log_rows_top()))
                 })
                 .flatten()
                 .and_then(|row| viewport.log_rows.get(row).copied());

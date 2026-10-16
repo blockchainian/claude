@@ -3496,16 +3496,16 @@ fn task_log_shows_only_newest_seven_events_and_hides_without_selection() {
 #[test]
 fn center_layout_golden_rects_follow_each_area() {
     let (view, _) = log_fixture();
-    for (width, height, top, log_height, list_width, details_width) in [
-        (80, 24, 13, 10, 37, 36),
-        (120, 40, 25, 14, 70, 43),
-        (200, 60, 37, 22, 77, 47),
-        (80, 24, 13, 10, 37, 36),
+    for (width, height, top, log_height, list_width, details_width, body_height) in [
+        (80, 24, 13, 10, 37, 36, 9),
+        (120, 40, 25, 14, 70, 43, 21),
+        (200, 60, 37, 22, 77, 47, 32),
+        (80, 24, 13, 10, 37, 36, 9),
     ] {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
         assert_eq!(layout.header, Rect::new(5, 7, width, 3));
-        assert_eq!(layout.list, Rect::new(7, 10, list_width, top - 4));
+        assert_eq!(layout.list, Rect::new(7, 10, list_width, body_height));
         let bottom = if width >= super::render::WIDE_LAYOUT_COLUMNS {
             assert_eq!(layout.log.y, layout.list.y);
             assert_eq!(layout.log.width, width / 3);
@@ -3519,10 +3519,10 @@ fn center_layout_golden_rects_follow_each_area() {
             assert_eq!(layout.details, Rect::default());
             assert_eq!(layout.gap, Rect::default());
         } else {
-            assert_eq!(layout.gap, Rect::new(7 + list_width, 10, 3, top - 4));
+            assert_eq!(layout.gap, Rect::new(7 + list_width, 10, 3, body_height));
             assert_eq!(
                 layout.details,
-                Rect::new(10 + list_width, 10, details_width, top - 4)
+                Rect::new(10 + list_width, 10, details_width, body_height)
             );
         }
     }

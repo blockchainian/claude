@@ -98,13 +98,16 @@ impl View {
             log.y.saturating_sub(area.y + prompt_height),
             prompt_height,
         );
-        let body = row(
+        let mut body = row(
             area,
             header_height,
             prompt.y.saturating_sub(header.bottom()),
         )
         .inner(Margin::new(2, 0));
         let wide = area.width >= WIDE_LAYOUT_COLUMNS;
+        if wide && !log.is_empty() {
+            body.height = body.height.saturating_sub(1);
+        }
         let (body, log_list) = if wide && !log.is_empty() {
             let log_width = area.width / 3;
             (
@@ -161,12 +164,13 @@ impl View {
         }
     }
     pub(crate) fn log_event_count(&self, area: Rect) -> usize {
-        usize::from(
-            self.center_layout(area)
-                .log
-                .height
-                .saturating_sub(super::log::LOG_TOP + 1),
-        )
+        usize::from(self.center_layout(area).log.height.saturating_sub(
+            if area.width >= WIDE_LAYOUT_COLUMNS {
+                1
+            } else {
+                super::log::LOG_TOP + 1
+            },
+        ))
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
@@ -349,12 +353,22 @@ impl View {
             Clear.render(bottom, buf);
             line(notice.clone().dim(), bottom, buf);
         }
-        // The details title sits on the task log's top rule, or on a rule of its own
-        // when the log is hidden.
+        // The three wide columns share the rule immediately above the prompt.
+        // Narrow details use the log rule, or their own rule when the log is hidden.
+        let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
+        if !layout.log_detail.is_empty() {
+            line(
+                "─".repeat(usize::from(inset(middle).width)).dim(),
+                inset(middle),
+                buf,
+            );
+        }
         let mut details = layout.details;
         let details_rule = if details.is_empty() {
             None
-        } else if layout.log.is_empty() || !layout.log_detail.is_empty() {
+        } else if !layout.log_detail.is_empty() {
+            Some(Rect::new(details.x, middle.y, details.width, 1))
+        } else if layout.log.is_empty() {
             details.height = details.height.saturating_sub(1);
             Some(row(layout.details, details.height, 1))
         } else {
@@ -372,9 +386,13 @@ impl View {
         if !layout.log_detail.is_empty() {
             self.render_log_detail(inset(layout.log_detail), buf, now);
         }
-        if !layout.log.is_empty() && layout.log_detail.is_empty() {
-            let rule = Rect::new(layout.list.x, layout.log.y, layout.list.width, 1)
-                .intersection(inset(layout.log));
+        if !layout.log.is_empty() {
+            let rule = if layout.log_detail.is_empty() {
+                Rect::new(layout.list.x, layout.log.y, layout.list.width, 1)
+                    .intersection(inset(layout.log))
+            } else {
+                Rect::new(layout.list.x, middle.y, layout.list.width, 1)
+            };
             self.render_activity_strip(rule, buf, now);
         }
         if let Some(rule) = details_rule {

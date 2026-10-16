@@ -67,7 +67,7 @@ fn terminal_layout_tracks_width() {
     // Let provider discovery finish, then select the real archived transcript.
     std::thread::sleep(Duration::from_secs(2));
     tmux.run(&["send-keys", "-t", "probe", "Tab", "Tab", "Tab", "Tab"]);
-    for width in [200, 149, 200] {
+    for width in [200, 149, 150, 200] {
         tmux.run(&[
             "resize-window",
             "-t",
@@ -85,6 +85,10 @@ fn terminal_layout_tracks_width() {
             capture.contains("4165651d") || capture.contains("Stop hook"),
             "fixture not selected: {capture}"
         );
+        assert!(
+            lines[2].trim().chars().all(|c| c == '─'),
+            "top rule is not clean: {capture}"
+        );
         let top = lines[3];
         assert_eq!(
             top.matches('│').count(),
@@ -98,6 +102,19 @@ fn terminal_layout_tracks_width() {
         if width >= 150 {
             assert_eq!(separators[1], width as usize - width as usize / 3 - 4);
             assert!(lines[30].contains('›'), "prompt missing: {capture}");
+            let middle: Vec<_> = lines[29].chars().collect();
+            let details: String = middle[separators[0] + 2..separators[1] - 1]
+                .iter()
+                .collect();
+            assert!(
+                details.contains("Inactive ·"),
+                "status missing from middle rule: {capture}"
+            );
+            for line in &lines[3..29] {
+                let log = line.split('│').next_back().unwrap();
+                assert!(!log.contains("────"), "extra log rule: {capture}");
+                assert!(!line.contains("Inactive ·"), "extra status row: {capture}");
+            }
             assert!(lines[31].trim().chars().all(|c| c == '─'));
             assert!(
                 lines[35..48]
@@ -106,7 +123,7 @@ fn terminal_layout_tracks_width() {
                 "detail does not span the terminal: {capture}"
             );
             assert!(
-                lines[6..29].iter().any(|line| {
+                lines[3..29].iter().any(|line| {
                     line.split('│').next_back().is_some_and(|log| {
                         log.contains("Tool") || log.contains("User") || log.contains("Assistant")
                     })

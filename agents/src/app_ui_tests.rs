@@ -459,3 +459,110 @@ fn new_key_without_selection_prepares_the_startup_repository() {
         "startup repository was not prepared:\n{rendered}"
     );
 }
+
+// Read a real prompt through the provider; move its timestamp into the visible
+// timeline so activity does not depend on when this test is run.
+fn border_fixture() -> (tempfile::TempDir, App) {
+    let (directory, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let mut prompt: serde_json::Value = serde_json::from_str(
+        include_str!("../tests/fixtures/transcript.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    prompt["timestamp"] = (chrono::Utc::now() - chrono::Duration::seconds(120))
+        .to_rfc3339()
+        .into();
+    let mut transcript = String::new();
+    for index in 0..40 {
+        let mut record = prompt.clone();
+        record["uuid"] = format!("border-prompt-{index}").into();
+        transcript.push_str(&format!("{record}\n"));
+    }
+    std::fs::write(path, transcript).unwrap();
+    app.refresh();
+    app.sessions[0].status = crate::model::SessionStatus::Working;
+    app.sessions[0].started_at = Some(
+        chrono::DateTime::parse_from_rfc3339(prompt["timestamp"].as_str().unwrap())
+            .unwrap()
+            .to_utc(),
+    );
+    app.view.set_sessions(app.sessions.clone(), false);
+    key(&mut app, KeyCode::Home);
+    (directory, app)
+}
+
+fn segment(buffer: &ratatui::buffer::Buffer, x: std::ops::Range<u16>, y: u16) -> String {
+    x.map(|x| buffer[(x, y)].symbol()).collect()
+}
+
+#[test]
+fn wide_border_labels_stay_in_their_columns() {
+    let (_directory, mut app) = border_fixture();
+    for width in [150, 200] {
+        let buffer = draw(&mut app, width);
+        let rendered = lines(&buffer);
+        let separators: Vec<_> = (0..width)
+            .filter(|&x| buffer[(x, 3)].symbol() == "│")
+            .collect();
+        assert_eq!(separators.len(), 2);
+        let prompt = position(&buffer, "›").1;
+        let middle = prompt - 1;
+        let tasks = 2..separators[0] - 1;
+        let details = separators[0] + 2..separators[1] - 1;
+        let log = separators[1] + 2..width - 2;
+        assert!(
+            segment(&buffer, tasks.clone(), middle)
+                .chars()
+                .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c)),
+            "activity missing on middle border:\n{}",
+            rendered.join("\n")
+        );
+        assert!(segment(&buffer, details.clone(), middle).contains("Working ·"));
+        assert!(segment(&buffer, details.clone(), middle).contains(" · 2m"));
+        assert!(segment(&buffer, 2..width - 2, 2).chars().all(|c| c == '─'));
+        for y in 3..middle {
+            for range in [details.clone(), log.clone()] {
+                let text = segment(&buffer, range, y);
+                assert!(
+                    !text.contains("Working ·") && !text.contains("────"),
+                    "extra label/rule row at {y}: {text}"
+                );
+            }
+        }
+        // Scroll the real event list through App, so its existing jump control
+        // must move to the same border without adding a row inside the list.
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: log.start,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        }));
+        let buffer = draw(&mut app, width);
+        assert!(segment(&buffer, log.clone(), middle).contains("↑ Latest"));
+        for y in 3..middle {
+            assert!(!segment(&buffer, log.clone(), y).contains("↑ Latest"));
+        }
+        let (x, y) = position(&buffer, "↑ Latest");
+        click(&mut app, x, y);
+        assert!(
+            !lines(&draw(&mut app, width))
+                .join("\n")
+                .contains("↑ Latest")
+        );
+    }
+}
+
+#[test]
+fn narrow_render_survives_wide_resize_unchanged() {
+    let (_directory, mut app) = fixture();
+    select_archive(&mut app);
+    for width in [80, 120, 149] {
+        let before = draw(&mut app, width);
+        draw(&mut app, 200);
+        let after = draw(&mut app, width);
+        assert_eq!(before, after);
+    }
+}

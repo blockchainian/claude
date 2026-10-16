@@ -16,6 +16,14 @@ pub(super) fn search_input_rect(area: Rect) -> Rect {
 }
 
 impl View {
+    pub(super) fn log_rows_top(&self) -> u16 {
+        if self.viewport.borrow().log_detail.is_empty() {
+            LOG_TOP
+        } else {
+            0
+        }
+    }
+
     pub(super) fn render_log(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
         self.viewport.borrow_mut().log_text = text_selection::TextRegion::default();
         if !self.selecting_list(text_selection::Panel::LogList) {
@@ -33,7 +41,11 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
-        super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
+        let wide = !self.viewport.borrow().log_detail.is_empty();
+        let top = self.log_rows_top();
+        if !wide {
+            super::render::line("─".repeat(usize::from(area.width)).dim(), area, buf);
+        }
         if self.log_session.as_ref() != Some(&session.id) {
             return;
         }
@@ -56,10 +68,15 @@ impl View {
             }
         }
         let scroll = self.log_scroll();
-        self.render_log_jump(area, scroll, buf);
+        let rule = if wide {
+            Rect::new(area.x, area.bottom(), area.width, 1)
+        } else {
+            area
+        };
+        self.render_log_jump(rule, scroll, buf);
         let matching: Vec<_> = self.shown_log_events().collect();
         let end = matching.len().saturating_sub(scroll);
-        let start = end.saturating_sub(usize::from(area.height.saturating_sub(LOG_TOP + 1)));
+        let start = end.saturating_sub(usize::from(area.height.saturating_sub(top + 1)));
         let mut rows = Vec::new();
         let mut drawn_links = Vec::new();
         for (index, &(log_index, event)) in matching[start..end].iter().rev().enumerate() {
@@ -69,7 +86,7 @@ impl View {
                 event,
                 &time,
                 last,
-                super::render::row(area, index as u16 + LOG_TOP, 1),
+                super::render::row(area, index as u16 + top, 1),
                 buf,
                 Some(&self.log_search),
                 &session.cwd,
@@ -77,7 +94,7 @@ impl View {
             rows.push((log_index, cut));
             drawn_links.extend(links);
         }
-        let text_area = super::render::row(area, LOG_TOP, rows.len() as u16);
+        let text_area = super::render::row(area, top, rows.len() as u16);
         {
             let mut viewport = self.viewport.borrow_mut();
             viewport.log_rows = rows;
