@@ -492,6 +492,19 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
         for part in &mut parts[input_start..] {
             part.group = Some(input_start);
         }
+        if let Some(code) = call.exit_code {
+            parts.push(Part::new("", Body::Arrow));
+            let status_start = parts.len();
+            push_section(
+                &mut parts,
+                &Section::Fields(vec![("exit code".into(), code.to_string())]),
+                label_style,
+                false,
+            );
+            for part in &mut parts[status_start..] {
+                part.group = Some(status_start);
+            }
+        }
         match &call.output {
             Some(output) => {
                 parts.push(Part::new("", Body::Arrow));
@@ -764,6 +777,7 @@ mod tests {
             name: "Bash".into(),
             input: vec![],
             output: None,
+            exit_code: None,
             is_error: false,
         }]));
         let part = parts.last().unwrap();
@@ -1211,6 +1225,7 @@ mod tests {
                     label: "stdout".into(),
                     text: "running 3 tests\n...".into(),
                 }]),
+                exit_code: None,
                 is_error: false,
             },
             ToolCall {
@@ -1222,6 +1237,7 @@ mod tests {
                     text: "agents/src/log.rs:1-40".into(),
                 }],
                 output: None,
+                exit_code: None,
                 is_error: false,
             },
         ]));
@@ -1273,6 +1289,7 @@ mod tests {
                     name: "Read".into(),
                     input: vec![],
                     output: Some(vec![]),
+                    exit_code: None,
                     is_error: false,
                 };
                 2
@@ -1333,6 +1350,7 @@ mod tests {
                     name: "Bash".into(),
                     input: vec![],
                     output: Some(vec![]),
+                    exit_code: None,
                     is_error: false,
                 };
                 count
@@ -1373,6 +1391,7 @@ mod tests {
                 lang: "rs".into(),
                 text: "let value = \"abcdefghij\";".into(),
             }]),
+            exit_code: None,
             is_error: false,
         }]));
         assert_eq!(
@@ -1404,6 +1423,7 @@ mod tests {
                 label: "stderr".into(),
                 text: "\tboom".into(),
             }]),
+            exit_code: None,
             is_error: true,
         }]));
         let lines = parts[1].lines(80, Style::default(), chrono::DateTime::UNIX_EPOCH);

@@ -173,6 +173,7 @@ impl View {
                     label: String::new(),
                     text: body,
                 }]),
+                exit_code: None,
                 is_error: false,
             }],
         }));

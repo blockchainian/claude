@@ -895,3 +895,6 @@ fn terminal_details_section_positions() {
         println!("{{\"details_sections\":\"pass\",\"width\":{width}}}");
     }
 }
+
+#[path = "support/terminal_codex_exit.rs"]
+mod terminal_codex_exit;

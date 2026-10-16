@@ -395,6 +395,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         name: name.to_owned(),
         input: sections,
         output,
+        exit_code: None,
         is_error: result.is_some_and(|result| result.error),
     }
 }
@@ -591,6 +592,7 @@ impl Log {
                 name: "task-notification".to_owned(),
                 input: Vec::new(),
                 output: Some(vec![Section::Fields(fields)]),
+                exit_code: None,
                 is_error: false,
             });
         }

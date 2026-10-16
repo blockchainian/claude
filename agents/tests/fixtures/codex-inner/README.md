@@ -16,3 +16,5 @@ Extracted from real local Codex rollouts. Source paths below are relative to the
 
 - `file-change-without-start.jsonl`: `2026/06/12/rollout-2026-06-12T22-31-00-019ebf76-46e6-7da2-acdd-4676737d367e.jsonl`, lines 150–152. Patch path scrubbed; timing fields retained, including the absent start.
 - `image-generation.jsonl`: `2026/07/21/rollout-2026-07-21T19-13-52-019f8461-d57c-7870-920d-fcac3f017a77.jsonl`, line 162. Image result omitted, prompt scrubbed, optional saved path omitted.
+
+- `../codex-command-failed.jsonl`: command completion from the same source as `command.jsonl`, line 14. Command, output, path and identifiers anonymized; non-zero exit and timing retained.

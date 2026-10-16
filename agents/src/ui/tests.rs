@@ -4266,7 +4266,7 @@ fn codex_inner_task_log_snapshot() {
     view.rematch_log();
     assert_eq!(view.matching_log_count(), 1);
     assert!(view.log_matches(4));
-    view.log_search.query.set_text("type (exit 1)");
+    view.log_search.query.set_text("type → 1");
     view.rematch_log();
     assert_eq!(view.matching_log_count(), 1);
     assert!(view.log_matches(0));
@@ -6731,6 +6731,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
                 label: "stdout".into(),
                 text: "running 3 tests\n...".into(),
             }]),
+            exit_code: None,
             is_error: false,
         },
         ToolCall {
@@ -6742,6 +6743,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
                 text: "agents/src/log.rs:1-40".into(),
             }],
             output: None,
+            exit_code: None,
             is_error: false,
         },
     ]
@@ -8700,3 +8702,6 @@ fn task_notification_detail_keeps_summary_only_in_header() {
         }));
     }
 }
+
+#[path = "codex_exit_tests.rs"]
+mod codex_exit_tests;

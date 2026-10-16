@@ -411,6 +411,7 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         name: payload["name"].as_str().unwrap_or("").to_owned(),
         input,
         output: output.map(|text| vec![text_section("output", text)]),
+        exit_code: None,
         is_error: false,
     }
 }
@@ -423,17 +424,11 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
     let item_type = item["type"].as_str().unwrap();
     let (name, input, output) = match item_type {
         "CommandExecution" => {
-            let mut input = vec![Section::Code {
+            let input = vec![Section::Code {
                 label: "command".to_owned(),
                 lang: "bash".to_owned(),
                 text: command.unwrap(),
             }];
-            if let Some(code) = item["exit_code"].as_i64().filter(|code| *code != 0) {
-                input.push(Section::Fields(vec![(
-                    "exit code".to_owned(),
-                    code.to_string(),
-                )]));
-            }
             (
                 "exec_command".to_owned(),
                 input,
@@ -520,6 +515,9 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
         name,
         input,
         output,
+        exit_code: item["exit_code"]
+            .as_i64()
+            .filter(|code| item_type == "CommandExecution" && *code != 0),
         is_error: item["status"] == "failed" || item["result"]["isError"] == true,
     }
 }
@@ -585,7 +583,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
             if let Some(code) = optional::<i32>(item, "exit_code")?
                 && code != 0
             {
-                body.push_str(&format!(" (exit {code})"));
+                body.push_str(&format!(" → {code}"));
             }
             body
         }
@@ -1164,10 +1162,8 @@ mod tests {
             .clone();
         command["payload"]["item"]["exit_code"] = 2.into();
         let event = completed_tool(&command).unwrap().unwrap();
-        assert_eq!(
-            event.calls[0].input[1],
-            Section::Fields(vec![("exit code".to_owned(), "2".to_owned())])
-        );
+        assert_eq!(event.calls[0].input.len(), 1);
+        assert_eq!(event.calls[0].exit_code, Some(2));
     }
 
     #[test]

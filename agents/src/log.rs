@@ -115,6 +115,8 @@ pub struct ToolCall {
     /// The provider's tool name, such as "Bash", "exec_command" or "apply_patch".
     pub name: String,
     pub input: Vec<Section>,
+    /// A completed command's non-zero exit status.
+    pub exit_code: Option<i64>,
     /// `None` while the call is running.
     pub output: Option<Vec<Section>>,
     pub is_error: bool,

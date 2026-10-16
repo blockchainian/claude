@@ -5,7 +5,7 @@
  ● Task log example         Working     │ Task log example                       │ web.search site:pond.dflow.net "dev-quote-api.dflow.net"                  1s
                                         │                                        │ claude.ask_claude                                                        28s
                                         │                                        │ apply_patch ~/Documents/case-studies/khaby-lame/drafts/06.md            17ms
-                                        │                                        │ type (exit 1)
+                                        │                                        │ type → 1
                                         │                Project                 │
                                         │ /tmp/project                           │
                                         │                                        │
