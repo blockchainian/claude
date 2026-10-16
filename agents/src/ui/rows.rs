@@ -277,7 +277,11 @@ impl View {
             if !updated.is_empty() {
                 let age = format_relative_time(reference, Some(task.updated_at));
                 Line::from(age)
-                    .style(if selected { style } else { style.dim() })
+                    .style(if selected {
+                        style
+                    } else {
+                        super::style::time_style()
+                    })
                     .right_aligned()
                     .render(updated, buf);
             }

@@ -725,7 +725,7 @@ impl View {
             items.extend([
                 left_right(
                     "Latest activity".dim().into(),
-                    Span::styled(format_relative_time(now, Some(activity.at)), style::time_style()).into(),
+                    format_relative_time(now, Some(activity.at)).dim().into(),
                     width,
                 )
                 .0
@@ -744,7 +744,7 @@ impl View {
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
             let mut header = Line::default();
             if let Some(at) = session.last_message_at {
-                header = Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
+                header = format_relative_time(now, Some(at)).dim().into();
             }
             separate_section(&mut items);
             items.push(
