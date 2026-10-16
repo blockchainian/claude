@@ -1,11 +1,11 @@
  Agent command center  Group: Project  g
   Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                                                                                     tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-     Tasks                              Status         Updated │ Prompt                                 │ Tool      view_image /t…/affiliates-page-17…       0s
- /tmp/project  1                                               │ Task log example                       │ Tool      web.search site:pond.dflow.net "d…       1s
- › ● Task log example                   Working            now │                                        │ Tool      claude.ask_claude                       28s
-                                                               │ Project                                │ Tool      apply_patch ~/D…/c…/k…/d…/06.md          0s
-                                                               │ /tmp/project                           │ Tool      type (exit 1)                            0s
+     Tasks                              Status         Updated │ Prompt                                 │ view_image /t…/affiliates-page-1791341607.p…       0s
+ /tmp/project  1                                               │ Task log example                       │ web.search site:pond.dflow.net "dev-quote-a…       1s
+ › ● Task log example                   Working            now │                                        │ claude.ask_claude                                 28s
+                                                               │ Project                                │ apply_patch ~/D…/c…/khaby-lame/drafts/06.md        0s
+                                                               │ /tmp/project                           │ type (exit 1)                                      0s
                                                                │                                        │
                                                                │ Model: Unknown                         │
                                                                │                                        │

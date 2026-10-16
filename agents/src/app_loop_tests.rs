@@ -45,7 +45,7 @@ fn idle_loop_opens_a_single_click_after_the_saved_deadline() {
     let (row, line) = before
         .iter()
         .enumerate()
-        .find(|(_, line)| line.contains("Tool") && line.contains("持"))
+        .find(|(_, line)| line.contains("持"))
         .unwrap_or_else(|| panic!("real tool event missing:\n{}", before.join("\n")));
     let column = line.chars().position(|c| c == '持').unwrap() as u16;
     for kind in [

@@ -54,6 +54,29 @@ fn position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
     panic!("missing {text:?}:\n{}", lines(buffer).join("\n"));
 }
 
+fn log_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
+    let separators: Vec<_> = (0..buffer.area.width)
+        .filter(|&x| buffer[(x, 3)].symbol() == "│")
+        .collect();
+    let (_, prompt) = position(buffer, "›");
+    let (left, rows) = if separators.len() == 2 {
+        (separators[1] + 2, 3..prompt - 1)
+    } else {
+        (1, prompt + 2..buffer.area.height - 1)
+    };
+    for y in rows.rev() {
+        for x in left..buffer.area.width - 1 {
+            let suffix: String = (x..buffer.area.width - 1)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            if suffix.starts_with(text) {
+                return (x, y);
+            }
+        }
+    }
+    panic!("missing log body {text:?}:\n{}", lines(buffer).join("\n"));
+}
+
 fn click(app: &mut App, x: u16, y: u16) {
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
@@ -85,7 +108,7 @@ fn selected_real_transcript_draws_log_and_prompt_at_narrow_and_wide_sizes() {
         );
         let rendered = lines(&buffer).join("\n");
         assert!(rendered.contains("Stop hook error"), "{rendered}");
-        assert!(rendered.contains("Assistant"), "{rendered}");
+        assert!(rendered.contains("codex-manager"), "{rendered}");
         let (x, y) = position(&buffer, "›");
         click(&mut app, x, y);
         assert!(!app.handle_event(Event::Paste("ui-route-proof".into())));
@@ -287,18 +310,7 @@ fn wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         lines(&buffer).join("\n")
     );
     // Click the actual User event in the right-hand event list, not the preview.
-    let (x, y) = lines(&buffer)
-        .iter()
-        .enumerate()
-        .find_map(|(y, line)| {
-            line.find("User").filter(|_| y < 20).map(|_| {
-                let x = (110..buffer.area.width)
-                    .find(|&x| buffer[(x, y as u16)].symbol() == "U")
-                    .unwrap();
-                (x, y as u16)
-            })
-        })
-        .expect("real user event row");
+    let (x, y) = log_position(&buffer, "⏺");
     click(&mut app, x, y);
     wait_for_click(&mut app);
     let buffer = draw(&mut app, 180);
@@ -323,18 +335,7 @@ fn wide_preview_follows_real_appends_and_clicked_event_stays_open() {
         lines(&buffer).join("\n")
     );
     // Another list row replaces the pinned event through the same click deadline.
-    let (x, y) = lines(&buffer)
-        .iter()
-        .enumerate()
-        .find_map(|(y, line)| {
-            if y >= 20 || !line.contains("Assistant") {
-                return None;
-            }
-            (110..buffer.area.width)
-                .find(|&x| buffer[(x, y as u16)].symbol() == "A")
-                .map(|x| (x, y as u16))
-        })
-        .expect("real assistant event row");
+    let (x, y) = log_position(&buffer, "对");
     click(&mut app, x, y);
     wait_for_click(&mut app);
     let buffer = draw(&mut app, 180);
@@ -355,13 +356,7 @@ fn wide_log_double_click_focuses_prompt_and_keeps_preview_following() {
     app.refresh();
     select_archive(&mut app);
     let buffer = draw(&mut app, 180);
-    let y = lines(&buffer)
-        .iter()
-        .position(|line| line.contains("User") && line.contains('│'))
-        .unwrap() as u16;
-    let x = (110..buffer.area.width)
-        .find(|&x| buffer[(x, y)].symbol() == "U")
-        .unwrap();
+    let (x, y) = log_position(&buffer, "⏺");
     click(&mut app, x, y);
     click(&mut app, x, y);
     app.handle_event(Event::Paste("double-click-prompt-proof".into()));
@@ -400,13 +395,7 @@ fn wide_list_and_detail_search_route_paste_without_changing_preview() {
     );
     key(&mut app, KeyCode::Esc);
     let buffer = draw(&mut app, 180);
-    let y = lines(&buffer)
-        .iter()
-        .position(|line| line.contains("User") && line.contains('│'))
-        .unwrap() as u16;
-    let x = (110..buffer.area.width)
-        .find(|&x| buffer[(x, y)].symbol() == "U")
-        .unwrap();
+    let (x, y) = log_position(&buffer, "⏺");
     click(&mut app, x, y);
     wait_for_click(&mut app);
     app.handle_event(Event::Key(KeyEvent::new(
@@ -606,7 +595,7 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
         draw(&mut app, width);
         app.view.set_log(events.clone());
         let buffer = draw(&mut app, width);
-        let (x, top) = position(&buffer, "Tool      long");
+        let (x, top) = log_position(&buffer, "long body");
         let right = width - 1;
         assert_eq!(
             x,
@@ -624,7 +613,7 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
             assert_eq!(clock, format!("{time:>8}"));
             assert_eq!(buffer[(right - 9, y)].symbol(), " ");
             assert_eq!(buffer[(right - 10, y)].symbol(), "…");
-            assert_eq!(buffer[(x, y)].symbol(), "T");
+            assert_eq!(buffer[(x, y)].symbol(), "l");
         }
     }
 }
@@ -643,7 +632,7 @@ fn app_log_padding_and_clicks_follow_real_transcript_rows() {
                 .filter(|&x| buffer[(x, 3)].symbol() == "│")
                 .collect();
             let left = if width == 200 { separators[1] + 2 } else { 1 };
-            let (x, y) = position(&buffer, "User      ");
+            let (x, y) = log_position(&buffer, "⏺ Ran 4 stop hooks");
             assert_eq!(x, left);
             assert_eq!(
                 (left..width).rfind(|&x| buffer[(x, y)].symbol() != " "),

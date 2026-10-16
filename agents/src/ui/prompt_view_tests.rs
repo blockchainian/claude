@@ -76,7 +76,7 @@ fn whole_log_row_double_click_focuses_input_without_opening_detail() {
             .position(|(index, cut)| !cut && !log::shows_calls(&view.log[*index]))
             .unwrap();
         (
-            viewport.log.x + 21,
+            viewport.log.x + 11,
             viewport.log.y + log::LOG_TOP + row as u16,
         )
     };

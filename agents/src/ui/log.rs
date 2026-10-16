@@ -6,7 +6,6 @@ use chrono::{DateTime, Local, Utc};
 
 const CLOCK_FORMAT: &str = "%H:%M:%S";
 const CLOCK_WIDTH: usize = 8;
-const KIND_WIDTH: usize = 9;
 
 /// Rows above the first event: the top rule.
 pub(super) const LOG_TOP: u16 = 1;
@@ -143,7 +142,7 @@ impl View {
             0 => " ↑ Latest ".to_owned(),
             unseen => format!(" ↑ {unseen} New "),
         };
-        let x = area.x + KIND_WIDTH as u16;
+        let x = area.x;
         let jump = Rect::new(x, area.y, label.width() as u16, 1).intersection(area);
         Line::from(Span::styled(label, super::style::log_jump_style())).render(jump, buf);
         viewport.log_jump = jump;
@@ -506,7 +505,6 @@ fn render_event(
         return (false, Vec::new());
     }
     let (content_area, time_area) = log_row_areas(area);
-    let (label_style, _) = super::style::log_styles(&event.kind);
     let time_style = super::style::log_time_style(&event.kind, last);
     Line::from(Span::styled(time.to_owned(), time_style))
         .right_aligned()
@@ -516,15 +514,11 @@ fn render_event(
         return (true, Vec::new());
     }
     let content_x = content_area.x;
-    let label = format!("{:<KIND_WIDTH$} ", kind_label(&event.kind));
-    let label_width = label.width().min(content_width);
-    Line::from(Span::styled(label, label_style))
-        .render(Rect::new(content_x, area.y, label_width as u16, 1), buf);
-    let body_width = content_width.saturating_sub(label_width);
+    let body_width = content_width;
     let fitted = fitted_body_line(event, body_width, cwd);
     let mut body = fitted.line;
     let cut = fitted.shortened || body.width() > body_width;
-    let body_x = content_x + label_width as u16;
+    let body_x = content_x;
     let links = {
         let links = if is_prose(&event.kind) {
             super::links::text_links(&fitted.source, cwd, &event.images)
@@ -846,7 +840,7 @@ mod log_markdown {
     use ratatui::style::Modifier;
 
     fn body_buffer(kind: Kind, body: &str, width: u16) -> Buffer {
-        let area = Rect::new(0, 0, width + 19, 1);
+        let area = Rect::new(0, 0, width + 9, 1);
         let mut buffer = Buffer::empty(area);
         let event = Event {
             sender: None,
@@ -873,7 +867,7 @@ mod log_markdown {
     }
 
     fn body_text(buffer: &Buffer) -> String {
-        buffer.content[10..buffer.content.len() - 9]
+        buffer.content[..buffer.content.len() - 9]
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>()
@@ -984,12 +978,12 @@ mod log_markdown {
                 80,
             );
             assert_eq!(body_text(&buffer), "plain code bold link");
-            assert_eq!(buffer[(10, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert_eq!(buffer[(16, 0)].fg, crate::theme::inline_code_color());
-            assert_eq!(buffer[(21, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(buffer[(21, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buffer[(26, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(!buffer[(26, 0)].modifier.contains(Modifier::UNDERLINED));
+            assert_eq!(buffer[(0, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert_eq!(buffer[(6, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(buffer[(11, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(buffer[(11, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(16, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(16, 0)].modifier.contains(Modifier::UNDERLINED));
         }
     }
 
@@ -997,9 +991,9 @@ mod log_markdown {
     fn prose_blocks_keep_their_own_styles_on_one_row() {
         let buffer = body_buffer(Kind::User, "# Title\n\nplain  text\n- item", 80);
         assert_eq!(body_text(&buffer), "Title plain text • item");
-        assert!(buffer[(10, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buffer[(16, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buffer[(16, 0)].modifier.contains(Modifier::BOLD));
+        assert!(buffer[(0, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(6, 0)].modifier.contains(Modifier::UNDERLINED));
+        assert!(!buffer[(6, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -1015,8 +1009,8 @@ mod log_markdown {
             let base = super::super::style::log_styles(&kind).1;
             let buffer = body_buffer(kind, "  `code`\n **bold** [link](url)  ", 80);
             assert_eq!(body_text(&buffer), "`code` **bold** [link](url)");
-            assert_eq!(buffer[(10, 0)].fg, base.fg.unwrap_or(Color::Reset));
-            assert!(!buffer[(10, 0)].modifier.contains(Modifier::BOLD));
+            assert_eq!(buffer[(0, 0)].fg, base.fg.unwrap_or(Color::Reset));
+            assert!(!buffer[(0, 0)].modifier.contains(Modifier::BOLD));
         }
     }
 
@@ -1086,7 +1080,7 @@ mod log_markdown {
         for kind in [Kind::User, Kind::Assistant, Kind::Agent] {
             let buffer = body_buffer(kind, "ok `abcdefghijklmnop`", 10);
             assert_eq!(body_text(&buffer), "ok abcdef…");
-            for x in 13..20 {
+            for x in 3..10 {
                 assert_eq!(buffer[(x, 0)].fg, crate::theme::inline_code_color());
             }
         }

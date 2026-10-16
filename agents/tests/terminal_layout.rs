@@ -107,10 +107,7 @@ fn terminal_layout_tracks_width() {
             assert_eq!(separators[1], width as usize - width as usize / 3 - 3);
             for line in &lines[3..29] {
                 let log = line.split('│').next_back().unwrap();
-                if ["Tool", "User", "Assistant"]
-                    .iter()
-                    .any(|label| log.trim_start().starts_with(label))
-                {
+                if !log.trim().is_empty() {
                     assert_eq!(log.len() - log.trim_start().len(), 1, "log left: {line}");
                     assert_eq!(
                         line.trim_end().width(),
@@ -142,17 +139,15 @@ fn terminal_layout_tracks_width() {
             );
             assert!(
                 lines[3..29].iter().any(|line| {
-                    line.split('│').next_back().is_some_and(|log| {
-                        log.contains("Tool") || log.contains("User") || log.contains("Assistant")
-                    })
+                    line.split('│')
+                        .next_back()
+                        .is_some_and(|log| log.contains("Stop hook"))
                 }),
                 "event list missing from top row: {capture}"
             );
         } else {
             assert!(
-                lines[33..48].iter().any(|line| line.contains("Tool")
-                    || line.contains("User")
-                    || line.contains("Assistant")),
+                lines[32..48].iter().any(|line| line.contains("Stop hook")),
                 "event list missing below prompt: {capture}"
             );
         }
