@@ -396,3 +396,10 @@ fn live_effort_picker_remains_available_when_transcript_omits_effort() {
         })
     );
 }
+
+#[test]
+fn new_draft_without_selection_uses_startup_directory() {
+    let mut view = View::default();
+    let cwd = std::env::current_dir().unwrap();
+    assert_eq!(key(&mut view, KeyCode::Char('n')), Some(Action::NewDraft { cwd }));
+}

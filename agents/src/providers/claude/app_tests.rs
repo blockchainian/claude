@@ -925,7 +925,6 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
     ]);
     let claude = app.sessions[0].clone();
     for rows in [vec![claude], vec![thread], vec![]] {
-        let has_project = !rows.is_empty();
         app.view = crate::ui::View::default();
         app.view.set_capabilities(app.hub.capabilities());
         app.view.set_input_choices(app.hub.input_choices());
@@ -954,6 +953,6 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert_eq!(rendered.contains("New task"), has_project, "{rendered}");
+        assert!(rendered.contains("New task"), "{rendered}");
     }
 }

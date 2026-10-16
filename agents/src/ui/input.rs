@@ -966,8 +966,9 @@ impl View {
                             .heading
                             .clone()
                         })
-                    });
-                return cwd.map(|cwd| Action::NewDraft { cwd });
+                    })
+                    .unwrap_or_else(|| self.startup_cwd.clone());
+                return Some(Action::NewDraft { cwd });
             }
             KeyCode::Char('w') => return Some(Action::Unsupported("New worktree")),
             KeyCode::Char('r') => {

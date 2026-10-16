@@ -189,6 +189,7 @@ impl ConfirmDialog {
 }
 
 pub struct View {
+    startup_cwd: PathBuf,
     drafts: Vec<drafts::Draft>,
     selected_draft: Option<crate::model::DraftId>,
     next_draft: crate::model::DraftId,
@@ -308,6 +309,7 @@ impl View {
 
     pub fn new(grouping: Grouping, use_colors: bool) -> Self {
         Self {
+            startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
             log: Vec::new(),
             log_session: None,
             log_open: None,
