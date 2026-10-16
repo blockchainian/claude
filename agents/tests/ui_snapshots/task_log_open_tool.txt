@@ -1,34 +1,34 @@
  Agent command center  Group: Project  g
   Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                         tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────
- /tmp/project  1                                             │ Prompt
- › ● Task log example                 Working            now │ Task log example
-                                                             │
-                                                             │ Project
-                                                             │ /tmp/project
-                                                             │
-                                                             │ Model                        Unknown
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
+ /tmp/project  1                                  │ Prompt
+ › ● Task log example                             │ Task log example
+                                                  │
+                                                  │ Project
+                                                  │ /tmp/project
+                                                  │
+                                                  │ Model                                   Unknown
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
  Task log example · Running in a terminal; open it to type
- ────────────────────────────────────────────────────────────────── Working · Task log example ────
+ ──────────────────────────────────────────────────────────── Working · Task log example ──────────
  run tests                                                                                      35s
 
  ─ Bash ───────────────────────────────────────────────────────────────────────────────────────────

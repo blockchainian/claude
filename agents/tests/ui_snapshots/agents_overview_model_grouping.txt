@@ -1,24 +1,24 @@
  Agent command center  Group: Model  g
   Active 4   Ready 4   Working 0   Needs you 0   Inactive 0                         tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────
- Unknown  1                                                  │ Prompt
- › ○ Legacy task                      Ready           1s ago │ Legacy task
-                                                             │
- model-a  2                                                  │ Project
-   ○ Recent task                      Ready           2s ago │ /tmp/project
-   ○ Older task                       Ready           4s ago │
-                                                             │ Model                        Unknown
- model-b  1                                                  │
-   ○ Other model                      Ready           3s ago │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │
-                                                             │ ─────── Ready · Legacy task ────────
+ Unknown  1                                       │ Prompt
+ › ○ Legacy task                                  │ Legacy task
+                                                  │
+ model-a  2                                       │ Project
+   ○ Recent task                                  │ /tmp/project
+   ○ Older task                                   │
+                                                  │ Model                                   Unknown
+ model-b  1                                       │
+   ○ Other model                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │
+                                                  │ ───────────── Ready · Legacy task ─────────────
  Legacy task ›
  ? help  esc back  ↑/↓ move  enter open  n new

@@ -162,7 +162,7 @@ fn full_dashboard_highlights_dragged_fenced_prompt() {
     };
     let initial = render(&view);
     let start = position(&initial, "Stop hook error: codex-manager: 2");
-    let end = position(&initial, "thread(s) need attention");
+    let end = position(&initial, "thread(s)");
     view.handle_mouse(mouse(
         MouseEventKind::Down(MouseButton::Left),
         start.0,
@@ -389,7 +389,7 @@ fn copied_text(action: Option<Action>) -> String {
 #[test]
 fn task_list_drag_copies_rendered_indicator_ellipsis_and_time() {
     let mut view = list_fixture(3);
-    let area = Rect::new(0, 0, 160, 30);
+    let area = Rect::new(0, 0, 240, 30);
     let initial = dashboard(&view, area);
     let list = view.viewport.borrow().list_rows;
     let start = position_in(&initial, "00 对，", list);

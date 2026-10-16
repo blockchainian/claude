@@ -73,7 +73,7 @@ fn setup(activity: bool) -> (tempfile::TempDir, App) {
 fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
     for activity in [false, true] {
         let (_directory, mut app) = setup(activity);
-        for width in [120, 149, 150, 200] {
+        for width in [120, 149, 150, 200, 240] {
             let mut terminal = Terminal::new(TestBackend::new(width, 60)).unwrap();
             app.draw(&mut terminal).unwrap();
             let buffer = terminal.backend().buffer();
@@ -82,7 +82,7 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                 .filter(|&x| cell_text(buffer, x, 3) == "│")
                 .collect();
             assert_eq!(left, separators[0] + 2);
-            if width != 150 {
+            if separators[0] - 2 >= 56 {
                 let updated_end = (1..separators[0])
                     .rfind(|&x| cell_text(buffer, x, 4) != " ")
                     .unwrap()

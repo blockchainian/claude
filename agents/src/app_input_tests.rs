@@ -408,7 +408,8 @@ fn registry_background_marker_needs_and_delete_warning_reach_the_screen() {
     let rendered = screen(&mut app);
     assert!(
         rendered.contains("Worktrees and")
-            && rendered.contains("branches created by agents remain."),
+            && rendered.contains("branches created by")
+            && rendered.contains("agents remain."),
         "{rendered}"
     );
     app.handle_event(Event::Paste("blocked-paste-proof".into()));

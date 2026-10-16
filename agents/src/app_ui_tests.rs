@@ -602,7 +602,7 @@ fn log_rows_keep_fixed_content_and_right_aligned_times() {
             if width < 150 {
                 1
             } else {
-                width - width / 3 - 1
+                2 * ((width - 8) / 4) + 7
             }
         );
         for (offset, time) in ["2s", "9m 50s", "10:06:26"].into_iter().enumerate() {

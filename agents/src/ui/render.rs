@@ -136,7 +136,8 @@ impl View {
             body.height = body.height.saturating_sub(1);
         }
         let (body, log_list) = if wide && !log.is_empty() {
-            let log_width = area.width / 3;
+            let column_width = (body.width - 6) / 4;
+            let log_width = body.width - 6 - 2 * column_width;
             (
                 Rect {
                     width: body.width - log_width - 3,
@@ -152,12 +153,9 @@ impl View {
                 width: body.width - 3,
                 ..body
             };
-            let ratio = if area.width >= 90 { 618 } else { 500 };
-            let [list, mut details] = Layout::horizontal([
-                Constraint::Ratio(ratio, 1000),
-                Constraint::Ratio(1000 - ratio, 1000),
-            ])
-            .areas(content);
+            let [list, mut details] =
+                Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+                    .areas(content);
             let gap = Rect::new(list.right(), body.y, 3, body.height);
             details.x += gap.width;
             [list, gap, details]
@@ -725,7 +723,11 @@ impl View {
             items.extend([
                 left_right(
                     "Latest activity".dim().into(),
-                    format_relative_time(now, Some(activity.at)).dim().into(),
+                    Span::styled(
+                        format_relative_time(now, Some(activity.at)),
+                        style::time_style(),
+                    )
+                    .into(),
                     width,
                 )
                 .0
@@ -744,7 +746,8 @@ impl View {
         if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
             let mut header = Line::default();
             if let Some(at) = session.last_message_at {
-                header = format_relative_time(now, Some(at)).dim().into();
+                header =
+                    Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
             items.push(

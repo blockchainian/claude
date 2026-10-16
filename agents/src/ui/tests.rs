@@ -2037,7 +2037,13 @@ fn archive_dialog_shows_codex_copy_and_two_accepts_at_once() {
     assert_eq!(key(&mut view, KeyCode::Char('a')), None);
     let rendered = screen(&view, 120, 24);
     assert!(rendered.contains("Archive “Current task”?"));
-    assert!(rendered.contains("then archives them. Their history can be restored from the"));
+    let dialog = rendered
+        .lines()
+        .filter_map(|line| line.split('│').nth(1))
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(dialog.contains("then archives them. Their history can be restored from the"));
     assert!(rendered.contains("2. Archive task and child agents"));
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     key(&mut view, KeyCode::Char('a'));
@@ -2641,7 +2647,7 @@ mod details_header {
         let rendered = queued_details(row, 15);
         let title = header.strip_prefix("Working · ").expect("visible status");
         assert!(title.ends_with('…'), "{title}");
-        assert_eq!(header, "Working · A very long session title …");
+        assert_eq!(header, "Working · A very long session title that exceeds…");
         assert_eq!(
             rendered,
             include_str!("../../tests/ui_snapshots/details_header_truncated.txt")
@@ -3410,7 +3416,7 @@ fn dashboard_screen_padding_is_one_cell() {
 
 #[test]
 fn dashboard_column_padding_matches_separators_in_buffer() {
-    for width in [100, 149, 150, 200] {
+    for width in [100, 149, 150, 200, 240] {
         let (view, now) = column_padding_fixture();
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
@@ -3426,7 +3432,11 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         let left = separators[0];
         let right = separators.get(1).copied().unwrap_or(width);
         let updated = text(4, 0, left);
-        assert_eq!(updated.trim_end().chars().count() as u16, left - 1);
+        if view.center_layout(area).list.width >= 56 {
+            assert_eq!(updated.trim_end().chars().count() as u16, left - 1);
+        } else {
+            assert!(!updated.contains("ago"));
+        }
         for label in ["Background", "Last message", "Prompt", "Project"] {
             let y = (3..35)
                 .find(|&y| text(y, left + 1, right).contains(label))
@@ -3534,7 +3544,7 @@ fn dashboard_log_search_uses_the_row_padding() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let left = if width >= 150 {
-            width - width / 3 - 1
+            2 * ((width - 8) / 4) + 7
         } else {
             1
         };
@@ -4032,12 +4042,58 @@ fn task_log_shows_only_newest_nine_events_and_hides_without_selection() {
 }
 
 #[test]
+fn center_layout_narrow_buffer_ranges_at_120_columns() {
+    let (view, now) = log_fixture();
+    let area = Rect::new(0, 0, 120, 60);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    let layout = view.center_layout(area);
+    assert_eq!(
+        [layout.list, layout.details, layout.log].map(|rect| rect.x..rect.right()),
+        [1..59, 62..119, 0..120],
+    );
+    for y in layout.list.y..layout.list.bottom() {
+        let separators: Vec<_> = (0..120).filter(|&x| buf[(x, y)].symbol() == "│").collect();
+        assert_eq!(separators, [60]);
+    }
+    assert!(layout.log.y >= layout.list.bottom());
+}
+
+#[test]
+fn center_layout_wide_buffer_ranges_at_200_columns() {
+    assert_wide_buffer_ranges(200, [1..49, 52..100, 103..199]);
+}
+
+#[test]
+fn center_layout_wide_buffer_ranges_at_151_columns() {
+    assert_wide_buffer_ranges(151, [1..36, 39..74, 77..150]);
+}
+
+fn assert_wide_buffer_ranges(width: u16, expected: [std::ops::Range<u16>; 3]) {
+    let (view, now) = log_fixture();
+    let area = Rect::new(0, 0, width, 60);
+    let mut buf = Buffer::empty(area);
+    view.render_at(area, &mut buf, now);
+    let layout = view.center_layout(area);
+    assert_eq!(
+        [layout.list, layout.details, layout.log].map(|rect| rect.x..rect.right()),
+        expected,
+    );
+    for y in layout.list.y..layout.list.bottom() {
+        let separators: Vec<_> = (0..width)
+            .filter(|&x| buf[(x, y)].symbol() == "│")
+            .collect();
+        assert_eq!(separators, [expected[0].end + 1, expected[1].end + 1]);
+    }
+}
+
+#[test]
 fn center_layout_golden_rects_follow_each_area() {
     let (view, _) = log_fixture();
     for (width, height, top, log_height, list_width, details_width, body_height) in [
         (80, 24, 13, 10, 38, 37, 9),
-        (120, 40, 25, 14, 71, 44, 21),
-        (200, 60, 37, 22, 78, 48, 32),
+        (120, 40, 25, 14, 58, 57, 21),
+        (200, 60, 37, 22, 48, 48, 32),
         (80, 24, 13, 10, 38, 37, 9),
     ] {
         let area = Rect::new(5, 7, width, height);
@@ -4046,7 +4102,7 @@ fn center_layout_golden_rects_follow_each_area() {
         assert_eq!(layout.list, Rect::new(6, 10, list_width, body_height));
         let bottom = if width >= super::render::WIDE_LAYOUT_COLUMNS {
             assert_eq!(layout.log.y, layout.list.y);
-            assert_eq!(layout.log.width, width / 3);
+            assert_eq!(layout.log.width, width - 8 - 2 * list_width);
             layout.log_detail
         } else {
             layout.log
