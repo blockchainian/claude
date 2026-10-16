@@ -622,7 +622,7 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: background, prompt, latest activity, last message,
+        // Sections top to bottom: background, prompt, latest activity, latest message,
         // needs attention, project, branch, model. The title
         // sits on the rule below the panel.
         let content_top = area.y;
@@ -777,7 +777,7 @@ impl View {
             }
             separate_section(&mut items);
             items.push(
-                left_right("Last message".dim().into(), header, width)
+                left_right("Latest message".dim().into(), header, width)
                     .0
                     .into(),
             );
@@ -795,8 +795,8 @@ impl View {
                     .map(Item::from),
             );
             bodies.push(start..items.len());
-            keys.push(body_key("Last message", message));
-            copies.push(Some((message.as_str(), "Copied last message")));
+            keys.push(body_key("Latest message", message));
+            copies.push(Some((message.as_str(), "Copied latest message")));
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
@@ -1513,7 +1513,7 @@ mod wrapped_path_tests {
                 .count(),
             2
         );
-        assert!(rows.iter().any(|row| row.contains("Last message")));
+        assert!(rows.iter().any(|row| row.contains("Latest message")));
         assert!(!rows.iter().any(|row| row.contains("/private/")));
     }
 

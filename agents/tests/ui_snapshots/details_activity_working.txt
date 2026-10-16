@@ -4,7 +4,7 @@ Activity task
 Latest activity                   7s ago
 Run checks
 
-Last message                      1h ago
+Latest message                    1h ago
 Checking the project
 
 Project

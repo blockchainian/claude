@@ -35,7 +35,7 @@ fn details_section_order_preserves_clicks_and_copies() {
         let label = if activity {
             "Latest activity"
         } else {
-            "Last message"
+            "Latest message"
         };
         let sections = [
             "Background",
@@ -65,7 +65,7 @@ fn details_section_order_preserves_clicks_and_copies() {
                 if activity {
                     "Copied latest activity"
                 } else {
-                    "Copied last message"
+                    "Copied latest message"
                 },
             ),
         ] {

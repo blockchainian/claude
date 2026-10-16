@@ -2,7 +2,7 @@ Prompt
 Use cargo and tests
 • queued prompt
 
-Last message
+Latest message
 Result
 
 Built agents.
