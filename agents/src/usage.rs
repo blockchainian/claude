@@ -1,8 +1,8 @@
 //! Token usage of one transcript over time, summed into fixed bins for the usage chart.
 //!
-//! Input counts every prompt token the model had to read fresh (cache reads excluded) and lands
-//! when its request started; output, thinking and reasoning included, is spread evenly over the
-//! request's duration.
+//! Input counts what a request's prompt gained since the last request, the user's messages and
+//! tool results, whatever the cache held; it lands when its request started. Output, thinking
+//! and reasoning included, is spread evenly over the request's duration.
 
 use crate::providers::ProviderId;
 use chrono::{DateTime, Utc};
@@ -38,9 +38,11 @@ pub struct Series {
     read: u64,
     /// When the next request started: the latest input record, else the end of the last request.
     request_start: Option<DateTime<Utc>>,
-    /// The Claude message counted last and the input and output already added for it; its
-    /// content blocks arrive as separate records repeating the usage.
-    message: Option<(String, u64, u64)>,
+    /// The prompt tokens and output of the request counted last.
+    last_request: Option<(u64, u64)>,
+    /// The Claude message counted last; its content blocks arrive as separate records repeating
+    /// the usage.
+    message: Option<String>,
 }
 
 impl Series {
@@ -101,20 +103,19 @@ impl Series {
                 else {
                     return;
                 };
-                let input = usage.input_tokens + usage.cache_creation_input_tokens;
+                let prompt = usage.input_tokens
+                    + usage.cache_creation_input_tokens
+                    + usage.cache_read_input_tokens;
                 let output = usage.output_tokens;
-                match &mut self.message {
-                    Some((counted, counted_input, counted_output)) if *counted == id => {
-                        let extra_input = input.saturating_sub(*counted_input);
-                        let extra_output = output.saturating_sub(*counted_output);
-                        *counted_input = (*counted_input).max(input);
+                match &mut self.last_request {
+                    Some((_, counted_output)) if self.message.as_ref() == Some(&id) => {
+                        let extra = output.saturating_sub(*counted_output);
                         *counted_output = (*counted_output).max(output);
-                        self.add(at, extra_input, 0);
-                        self.add(at, 0, extra_output);
+                        self.add(at, 0, extra);
                     }
                     _ => {
-                        self.request(at, input, output);
-                        self.message = Some((id, input, output));
+                        self.request(at, prompt, output);
+                        self.message = Some(id);
                     }
                 }
                 self.request_start = Some(at);
@@ -146,19 +147,23 @@ impl Series {
                 let Some(usage) = payload.usage else {
                     return;
                 };
-                self.request(
-                    at,
-                    usage.input_tokens.saturating_sub(usage.cached_input_tokens),
-                    usage.output_tokens,
-                );
+                self.request(at, usage.input_tokens, usage.output_tokens);
                 self.request_start = Some(at);
             }
             _ => {}
         }
     }
 
-    /// Counts a request that ended at `end`: its input at its start, its output spread up to `end`.
-    fn request(&mut self, end: DateTime<Utc>, input: u64, output: u64) {
+    /// Counts a request with `prompt` tokens that ended at `end`: its input at its start, its
+    /// output spread up to `end`. Its input is what the prompt gained over the last request's
+    /// prompt and output; a compacted prompt shrinks and gains nothing.
+    fn request(&mut self, end: DateTime<Utc>, prompt: u64, output: u64) {
+        let input = self
+            .last_request
+            .map_or(prompt, |(last_prompt, last_output)| {
+                prompt.saturating_sub(last_prompt + last_output)
+            });
+        self.last_request = Some((prompt, output));
         let start = self
             .request_start
             .filter(|start| *start < end)
@@ -224,6 +229,8 @@ struct ClaudeUsage {
     #[serde(default)]
     cache_creation_input_tokens: u64,
     #[serde(default)]
+    cache_read_input_tokens: u64,
+    #[serde(default)]
     output_tokens: u64,
 }
 
@@ -245,10 +252,9 @@ struct CodexPayload {
 
 #[derive(Deserialize)]
 struct CodexUsage {
+    /// Every prompt token, cached ones included.
     #[serde(default)]
     input_tokens: u64,
-    #[serde(default)]
-    cached_input_tokens: u64,
     #[serde(default)]
     output_tokens: u64,
 }
@@ -285,11 +291,12 @@ mod tests {
             &[CLAUDE_TOOL_RESULT, CLAUDE_THINKING, CLAUDE_TOOL_USE],
         );
         let start = bin_of(at("2026-10-14T10:25:28.100Z"));
-        assert_eq!(series.bins[&start].input, 36338);
+        // The first request takes in its whole prompt.
+        assert_eq!(series.bins[&start].input, 2 + 36336 + 14755);
         let output: u64 = series.bins.values().map(|bin| bin.output).sum();
         assert_eq!(output, 260);
         let input: u64 = series.bins.values().map(|bin| bin.input).sum();
-        assert_eq!(input, 36338);
+        assert_eq!(input, 2 + 36336 + 14755);
         // 28.1s to 37.8s spans the 25s, 30s and 35s bins.
         assert_eq!(series.bins.len(), 3);
     }
@@ -314,13 +321,13 @@ mod tests {
     const CODEX_TOKEN_COUNT: &str = r#"{"timestamp":"2026-09-20T16:33:00.206Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":208055,"cached_input_tokens":153344,"cache_write_input_tokens":0,"output_tokens":522,"reasoning_output_tokens":195,"total_tokens":208577},"last_token_usage":{"input_tokens":74313,"cached_input_tokens":73856,"cache_write_input_tokens":0,"output_tokens":925,"reasoning_output_tokens":624,"total_tokens":75238},"model_context_window":258400}}}"#;
 
     #[test]
-    fn codex_counts_usage_records_without_cached_input() {
+    fn codex_counts_usage_records_with_the_whole_first_prompt() {
         let (_file, series) = series(
             ProviderId::Codex,
             &[CODEX_TOOL_OUTPUT, CODEX_USAGE, CODEX_TOKEN_COUNT],
         );
         let start = bin_of(at("2026-09-20T16:32:54.622Z"));
-        assert_eq!(series.bins[&start].input, 74313 - 73856);
+        assert_eq!(series.bins[&start].input, 74313);
         let output: u64 = series.bins.values().map(|bin| bin.output).sum();
         assert_eq!(output, 925);
         // 54.6s to 57.8s spans the 50s and 55s bins, split by time.
@@ -335,6 +342,43 @@ mod tests {
         std::fs::write(file.path(), format!("{CODEX_USAGE}\n")).unwrap();
         series.update(file.path(), ProviderId::Codex).unwrap();
         let input: u64 = series.bins.values().map(|bin| bin.input).sum();
-        assert_eq!(input, 74313 - 73856);
+        assert_eq!(input, 74313);
+    }
+
+    #[test]
+    fn later_requests_take_in_what_the_prompt_gained_whatever_the_cache_held() {
+        let next = |prompt: u64, at: &str| {
+            CODEX_USAGE
+                .replace("2026-09-20T16:32:57.845Z", at)
+                .replacen(
+                    "\"input_tokens\":74313",
+                    &format!("\"input_tokens\":{prompt}"),
+                    1,
+                )
+                // A cache miss rewrites the whole prompt; it is no new input.
+                .replacen(
+                    "\"cached_input_tokens\":73856",
+                    "\"cached_input_tokens\":0",
+                    1,
+                )
+        };
+        let sent = |at: &str| CODEX_TOOL_OUTPUT.replace("2026-09-20T16:32:54.622Z", at);
+        let records = [
+            CODEX_USAGE.to_owned(),
+            sent("2026-09-20T16:40:00.000Z"),
+            next(80_000, "2026-09-20T16:40:03.000Z"),
+            sent("2026-09-20T16:50:00.000Z"),
+            next(20_000, "2026-09-20T16:50:03.000Z"),
+        ];
+        let records: Vec<&str> = records.iter().map(String::as_str).collect();
+        let (_file, series) = series(ProviderId::Codex, &records);
+        let input = |time: &str| {
+            series
+                .bins
+                .get(&bin_of(at(time)))
+                .map_or(0, |bin| bin.input)
+        };
+        assert_eq!(input("2026-09-20T16:40:00.000Z"), 80_000 - 74313 - 925);
+        assert_eq!(input("2026-09-20T16:50:00.000Z"), 0);
     }
 }
