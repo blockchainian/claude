@@ -706,7 +706,7 @@ impl View {
                     Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
-            items.push(left_right("Latest update".dim().into(), header, width).0.into());
+            items.push(left_right("Update".dim().into(), header, width).0.into());
             let start = items.len();
             let body_style = style::log_styles(&crate::log::Kind::Assistant).1;
             items.extend(
@@ -721,8 +721,8 @@ impl View {
                     .map(Item::from),
             );
             bodies.push(start..items.len());
-            keys.push(body_key("Latest update", message));
-            copies.push(Some((message.as_str(), "Copied latest update")));
+            keys.push(body_key("Update", message));
+            copies.push(Some((message.as_str(), "Copied update")));
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
@@ -1506,7 +1506,7 @@ mod wrapped_path_tests {
                 .count(),
             2
         );
-        assert!(rows.iter().any(|row| row.contains("Latest update")));
+        assert!(rows.iter().any(|row| row.contains("Update")));
         assert!(!rows.iter().any(|row| row.contains("/private/")));
     }
 

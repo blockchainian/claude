@@ -36,7 +36,7 @@ fn details_section_order_preserves_clicks_and_copies() {
         if activity {
             sections.push("Latest activity");
         }
-        sections.extend(["Latest update", "Prompt", "Queued prompt", "Project", "Model"]);
+        sections.extend(["Update", "Prompt", "Queued prompt", "Project", "Model"]);
         let positions: Vec<_> = sections
             .iter()
             .map(|text| rendered.find(text).unwrap())
@@ -50,7 +50,7 @@ fn details_section_order_preserves_clicks_and_copies() {
             (x + area.x, y + area.y)
         };
         let mut copies = vec![
-            ("Moved reply", "Copied latest update"),
+            ("Moved reply", "Copied update"),
             ("Moved prompt", "Copied prompt"),
         ];
         if activity {

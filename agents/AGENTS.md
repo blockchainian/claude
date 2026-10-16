@@ -19,6 +19,11 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - src/ui/ -- rendering, prompt input, drafts and the task log panel
 - tests/ -- real payload fixtures and rendered UI snapshots
 
+## Details panel
+
+- The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.
+- The activity section is `Latest activity`.
+
 ## Log panels
 
 - The log list selects one event, newest first; the detail shows that event.

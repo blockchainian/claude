@@ -102,7 +102,7 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                     if activity {
                         "Latest activity"
                     } else {
-                        "Latest update"
+                        "Update"
                     },
                     None,
                     if activity { "1m ago" } else { "2m ago" },
