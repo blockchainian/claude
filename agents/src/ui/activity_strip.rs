@@ -1,5 +1,5 @@
 //! Whether any task worked, dotted on the task log's top rule below the task list: each dot column
-//! of the shared timeline is one bin, dotted in the task log's assistant color when a task worked
+//! of the shared timeline is one bin, dotted in Markdown's inline code color when a task worked
 //! in it.
 
 use super::View;
@@ -12,11 +12,6 @@ use std::collections::BTreeSet;
 /// The braille bits of a cell's left and right dot columns: one dot each, the second from the top,
 /// nearest the rule's height.
 const DOT_BITS: [u8; 2] = [0x02, 0x10];
-
-/// The body style of the task log's assistant rows.
-fn assistant_style() -> ratatui::style::Style {
-    super::style::log_styles(&crate::log::Kind::Assistant).1
-}
 
 impl View {
     /// Takes the bins some task worked in.
@@ -42,7 +37,7 @@ impl View {
                 cell.reset();
                 cell.set_char(char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' '));
                 if self.use_colors {
-                    cell.set_style(assistant_style());
+                    cell.set_fg(crate::theme::inline_code_color());
                 }
             }
         }
