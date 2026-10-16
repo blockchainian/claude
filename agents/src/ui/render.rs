@@ -417,7 +417,6 @@ impl View {
         if !layout.log.is_empty() {
             self.render_log_jump(
                 Rect::new(layout.log.x, layout.log.bottom(), layout.log.width, 1),
-                self.log_scroll(),
                 buf,
             );
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
@@ -426,7 +425,7 @@ impl View {
         if let Some(rule) = details_rule {
             self.render_details_title(rule, buf, now);
         }
-        if self.log_open.is_some() && self.viewport.borrow().log_open_scroll > 0 {
+        if self.log_selected.is_some() && self.viewport.borrow().log_detail_scroll > 0 {
             let label = " ↑ Top ";
             let width = (label.width() as u16).min(layout.list.width);
             let panel = layout.log_detail;

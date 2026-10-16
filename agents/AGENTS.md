@@ -19,6 +19,15 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - src/ui/ -- rendering, prompt input, drafts and the task log panel
 - tests/ -- real payload fixtures and rendered UI snapshots
 
+## Log panels
+
+- The log list selects one event, newest first; the detail shows that event.
+- Selected rows use the task cursor style across the column, including both padding cells.
+- A list wheel step selects one adjacent event and keeps it visible; clicking a row selects it immediately. The detail wheel scrolls only its content.
+- Selecting the newest event follows arriving events. Older selections stay on their event and show the border's Latest/New jump; clicking it selects newest and follows again.
+- Switching tasks resets the log selection to newest and resumes following.
+- Double click, text selection and list/detail search remain independent of following.
+
 ## Development
 
 - A rendering change updates the snapshots it moves in `tests/ui_snapshots/`.

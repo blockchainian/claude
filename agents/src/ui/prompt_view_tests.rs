@@ -53,14 +53,14 @@ fn focused_input_pastes_and_consumes_task_shortcuts() {
 #[test]
 fn right_click_leaves_input_before_closing_log_detail() {
     let (mut view, now) = log_fixture();
-    view.set_log_open(Some(view.log[0].clone()));
-    let expected = view.log_open.clone();
+    view.select_log_event(Some(view.log[0].clone()));
+    let expected = view.log_selected.clone();
     log_screen(&view, 120, 40, now);
     view.input_box.focused = true;
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 0, 0));
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 0, 0));
     assert!(!view.input_box.focused);
-    assert_eq!(view.log_open, expected);
+    assert_eq!(view.log_selected, expected);
 }
 
 #[test]
@@ -90,11 +90,11 @@ fn whole_log_row_double_click_focuses_input_and_keeps_the_detail() {
             view.flush_pending_click(Instant::now() + view.double_click_interval),
             None
         );
-        assert_eq!(view.log_open.as_ref(), Some(&expected));
+        assert_eq!(view.log_selected.as_ref(), Some(&expected));
         assert_eq!(click_mouse(&mut view, click), None);
         assert_eq!(click_mouse(&mut view, click), None);
         assert!(view.input_box.focused);
-        assert_eq!(view.log_open.as_ref(), Some(&expected));
+        assert_eq!(view.log_selected.as_ref(), Some(&expected));
         log_screen(&view, width, 60, now);
         let viewport = view.viewport.borrow();
         assert!(!viewport.log_rows.is_empty());

@@ -187,6 +187,7 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
     let mut older = view.log[0].clone();
     older.body = "Older event".into();
     view.log.insert(0, older);
+    view.set_log(view.log.clone());
     let before = log_list_screen(&view, 100, 32, now);
     let rect = view.center_layout(Rect::new(0, 0, 100, 32)).log;
     assert!(
@@ -195,7 +196,13 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
             .any(|line| line.contains("run tests") && line.ends_with("35s")),
         "{before}"
     );
-    view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
+    for _ in 0..view.log.len() {
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y));
+        if view.log_scroll() > 0 {
+            break;
+        }
+    }
+    assert_eq!(view.log_scroll(), 1);
     let after = log_list_screen(&view, 100, 32, now);
     assert!(after.contains("Older event"), "{after}");
     assert!(!after.contains("run tests"));
@@ -220,7 +227,8 @@ fn mouse_log_wheel_shifts_rendered_rows_and_hides_live_time() {
             .lines()
             .any(|line| line.contains("Tool") && line.ends_with("35s"))
     );
-    view.scroll_content_row(false, true, rect.y + super::log::LOG_TOP);
+    view.select_log_event(None);
+    view.viewport.borrow_mut().log_scroll = 0;
     assert!(
         log_screen(&view, 100, 32, now)
             .lines()
@@ -240,10 +248,14 @@ fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
         .map(|index| {
             let mut event = event.clone();
             event.body = format!("Event {index:02}");
+            event.started_at -= Duration::seconds(11 - index);
+            event.ended_at = Some(event.started_at);
+            event.previous_end = Some(event.started_at - Duration::seconds(12));
             event
         })
         .collect();
     view.log.last_mut().unwrap().previous_end = None;
+    view.set_log(view.log.clone());
     let before = log_list_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
     assert!(
@@ -259,7 +271,13 @@ fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
         "{before}"
     );
     let (before_x, before_y) = rendered_cell(&before, "Event 10");
-    view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
+    for _ in 0..view.log.len() {
+        view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y));
+        if view.log_scroll() > 0 {
+            break;
+        }
+    }
+    assert_eq!(view.log_scroll(), 1);
     let after = log_list_screen(&view, 100, 25, now);
     assert!(!after.contains("Event 11"), "{after}");
     let (after_x, after_y) = rendered_cell(&after, "Event 10");
@@ -268,7 +286,7 @@ fn mouse_log_wheel_keeps_body_column_when_clock_leaves_window() {
 }
 
 #[test]
-fn mouse_log_wheel_scrolls_three_rows_per_report() {
+fn mouse_log_wheel_selects_one_event_per_report() {
     let (view, now) = log_fixture();
     log_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
@@ -278,13 +296,15 @@ fn mouse_log_wheel_scrolls_three_rows_per_report() {
         rect.x + 2,
         rect.y + super::log::LOG_TOP,
     ));
-    assert_eq!(view.log_scroll(), 3);
+    assert_eq!(view.log_selected.as_ref(), view.log.get(view.log.len() - 2));
+    assert_eq!(view.log_scroll(), 0);
     view.handle_mouse(mouse(
         MouseEventKind::ScrollUp,
         rect.x + 2,
         rect.y + super::log::LOG_TOP,
     ));
     assert_eq!(view.log_scroll(), 0);
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
 
 #[test]
@@ -362,7 +382,7 @@ fn new_log_events_keep_rows_still_off_the_newest_row() {
     let (mut view, now) = log_fixture();
     log_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
-    view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y));
     let before = log_list_screen(&view, 100, 25, now);
     assert!(before.contains("↑ Latest"), "{before}");
     view.set_log(log_with_newer_event(&view, now));
@@ -404,31 +424,29 @@ fn show_task_log(view: &mut View, index: usize, events: Vec<crate::log::Event>) 
 }
 
 #[test]
-fn log_list_returns_with_its_task_and_counts_events_from_away() {
+fn switching_tasks_resets_log_to_newest_and_clears_unseen() {
     let (mut view, now, log, other) = two_task_log_fixture();
     log_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
-    view.scroll_content_row(true, true, rect.y + super::log::LOG_TOP);
-    let scroll = view.log_scroll();
-    assert!(scroll > 0);
-    let before = log_screen(&view, 100, 25, now);
+    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x + 2, rect.y));
+    assert_eq!(view.log_selected.as_ref(), view.log.get(view.log.len() - 2));
     let newer = log_with_newer_event(&view, now);
     show_task_log(&mut view, other, Vec::new());
     assert_eq!(view.log_scroll(), 0);
+    assert!(view.log_selected.is_none());
     show_task_log(&mut view, log, newer);
-    assert_eq!(view.log_scroll(), scroll + 1);
+    assert_eq!(view.log_scroll(), 0);
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
     let after = log_screen(&view, 100, 25, now);
-    assert_eq!(
-        rendered_cell(&after, "run a background job"),
-        rendered_cell(&before, "run a background job")
-    );
-    assert!(after.contains("↑ 1 New"), "{after}");
+    assert!(after.contains("brand new event"), "{after}");
+    assert!(!after.contains("↑ 1 New"), "{after}");
+    assert!(!after.contains("↑ Latest"), "{after}");
 }
 
 #[test]
-fn open_log_event_and_search_return_with_their_task() {
+fn task_search_returns_but_selected_detail_resets_to_newest() {
     let (mut view, now, log, other) = two_task_log_fixture();
-    view.log[1].body = (1..=40)
+    view.log[2].body = (1..=40)
         .map(|i| format!("Reply line {i}"))
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -437,21 +455,18 @@ fn open_log_event_and_search_return_with_their_task() {
     for letter in "tool".chars() {
         key(&mut view, KeyCode::Char(letter));
     }
-    view.set_log_open(Some(events[1].clone()));
-    view.viewport.borrow_mut().log_open_scroll = 5;
-    let before = log_screen(&view, 100, 25, now);
+    view.select_log_event(Some(events[2].clone()));
+    view.viewport.borrow_mut().log_detail_scroll = 5;
+    log_screen(&view, 100, 25, now);
     show_task_log(&mut view, other, Vec::new());
     assert!(!view.log_search.active());
-    assert!(view.log_open.is_none());
-    let opened = events[1].body.clone();
+    assert!(view.log_selected.is_none());
     show_task_log(&mut view, log, events);
     assert_eq!(view.log_search.query.text(), "tool");
-    assert_eq!(
-        view.log_open.as_ref().map(|event| &event.body),
-        Some(&opened)
-    );
-    assert_eq!(view.viewport.borrow().log_open_scroll, 5);
-    assert_eq!(log_screen(&view, 100, 25, now), before);
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
+    assert_eq!(view.log_scroll(), 0);
+    assert!(log_screen(&view, 100, 25, now).contains("run tests"));
 }
 
 #[test]
@@ -478,12 +493,13 @@ fn jump_button_returns_to_the_newest_log_row() {
 }
 
 #[test]
-fn mouse_log_scroll_tracks_selected_session_identity() {
-    let mut view = overflowing_details();
-    details_panel(&view);
+fn mouse_log_selection_tracks_selected_session_identity() {
+    let (mut view, now) = log_fixture();
+    log_screen(&view, 100, 25, now);
     let rect = view.viewport.borrow().log;
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-    assert_eq!(view.log_scroll(), 3);
+    let selected = view.log_selected.clone();
+    assert_eq!(selected.as_ref(), view.log.get(view.log.len() - 2));
     let id = view.selected_id().unwrap().to_owned();
     let mut rows = view.rows.clone();
     rows.push(session(
@@ -494,19 +510,16 @@ fn mouse_log_scroll_tracks_selected_session_identity() {
     ));
     view.set_sessions(rows.clone(), false);
     assert_eq!(view.selected_id(), Some(&id));
-    assert_eq!(view.log_scroll(), 3);
+    assert_eq!(view.log_selected, selected);
     rows.retain(|row| row.id != id);
     for row in &mut rows {
         row.transcript = Some(row.cwd.join("session.jsonl"));
     }
     view.set_sessions(rows, false);
     assert_eq!(view.log_scroll(), 0);
-    details_panel(&view);
-    let rect = view.viewport.borrow().log;
-    view.handle_mouse(mouse(MouseEventKind::ScrollDown, rect.x, rect.y));
-    assert_eq!(view.log_scroll(), 3);
-    key(&mut view, KeyCode::Down);
-    assert_eq!(view.log_scroll(), 0);
+    assert!(view.log_selected.is_none());
+    view.set_log(view.log.clone());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
 
 #[test]
@@ -617,10 +630,7 @@ fn details_body_changed_while_away_opens_folded() {
     }
     let scrolled = details_reveal(&view);
     let prompt = 1;
-    assert!(
-        scrolled[prompt] > 0 && scrolled[0] > 0,
-        "{scrolled:?}"
-    );
+    assert!(scrolled[prompt] > 0 && scrolled[0] > 0, "{scrolled:?}");
     let index = view.selected;
     key(&mut view, KeyCode::Down);
     details_panel(&view);
@@ -1559,7 +1569,14 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
     assert!(rendered.contains("Active 0"));
     assert!(rendered.contains("Inactive 12"));
     assert_eq!(
-        rendered.lines().nth(3).unwrap().split('│').next().unwrap().trim(),
+        rendered
+            .lines()
+            .nth(3)
+            .unwrap()
+            .split('│')
+            .next()
+            .unwrap()
+            .trim(),
         "/"
     );
     let expected = include_str!("../../tests/ui_snapshots/agents_overview_recent_sessions.txt");
@@ -3335,6 +3352,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
             Some(event.started_at)
         };
     }
+    view.set_log(view.log.clone());
     (view, now)
 }
 
@@ -3380,7 +3398,7 @@ fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
     let (mut view, now) = log_fixture();
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
-    view.log = crate::providers::claude::log::tail_session(&path, 200, true).unwrap();
+    view.set_log(crate::providers::claude::log::tail_session(&path, 200, true).unwrap());
     let row = &mut view.rows[0];
     row.last_message = Some("A message that wraps across the details column. ".repeat(4));
     row.last_message_at = Some(now - Duration::minutes(2));
@@ -3629,10 +3647,7 @@ fn dashboard_log_bodies_start_at_the_left_padding() {
                 );
                 assert_eq!(
                     cell.fg,
-                    super::style::log_styles(&event.kind)
-                        .1
-                        .fg
-                        .unwrap_or(Color::Reset)
+                    super::style::selection_style().fg.unwrap_or(Color::Reset)
                 );
             }
             if width >= 150 && event.kind == crate::log::Kind::Assistant {
@@ -3700,7 +3715,7 @@ fn dashboard_log_list_fills_rows_next_to_rules() {
 fn dashboard_log_detail_starts_directly_below_rule() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = column_padding_fixture();
-        view.set_log_open(Some(view.log.last().unwrap().clone()));
+        view.select_log_event(Some(view.log.last().unwrap().clone()));
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
@@ -3854,7 +3869,7 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
                 mouse(MouseEventKind::Down(MouseButton::Left), x, y),
             );
             view.flush_pending_click(Instant::now() + view.double_click_interval);
-            assert_eq!(view.log_open, Some(selected), "edge click at {width}");
+            assert_eq!(view.log_selected, Some(selected), "edge click at {width}");
             if wide {
                 let detail = view.viewport.borrow().log_text.area;
                 assert_eq!(detail.x, 1);
@@ -3984,6 +3999,7 @@ fn task_log_denied_snapshot() {
         );
         view.log.push(event);
     }
+    view.set_log(view.log.clone());
     assert_eq!(
         log_screen(&view, 100, 25, now),
         include_str!("../../tests/ui_snapshots/task_log_denied.txt")
@@ -4028,6 +4044,7 @@ fn codex_inner_task_log_snapshot() {
         event.previous_end = view.log.last().map(|previous| previous.ended_at.unwrap());
         view.log.push(event);
     }
+    view.set_log(view.log.clone());
     assert_eq!(
         log_screen(&view, 160, 25, now),
         include_str!("../../tests/ui_snapshots/codex_inner_log.txt")
@@ -4056,6 +4073,7 @@ fn task_log_tall_running_snapshot() {
 fn task_log_tall_finished_snapshot() {
     let (mut view, now) = log_fixture();
     view.log.last_mut().unwrap().ended_at = Some(now - Duration::seconds(5));
+    view.set_log(view.log.clone());
     assert_eq!(
         log_screen(&view, 100, 25, now),
         include_str!("../../tests/ui_snapshots/task_log_finished.txt")
@@ -4461,11 +4479,7 @@ fn assert_equal_content_buffer(width: u16, height: u16, input: &str) {
     let expected = if wide {
         (available.div_ceil(2), available.div_ceil(2), available / 2)
     } else {
-        (
-            available.div_ceil(3),
-            (available + 1) / 3,
-            available / 3,
-        )
+        (available.div_ceil(3), (available + 1) / 3, available / 3)
     };
     println!(
         "{width}x{height}, input {} rows: top {top}, log {}, detail {detail}",
@@ -4749,7 +4763,10 @@ mod details_budget {
         assert!(rest[22] == format!("Model{}Unknown", " ".repeat(108)));
         assert!(rest[23].is_empty());
         let prompt = rest.iter().position(|line| line == "Prompt").unwrap();
-        let needs = rest.iter().position(|line| line == "Needs attention").unwrap();
+        let needs = rest
+            .iter()
+            .position(|line| line == "Needs attention")
+            .unwrap();
         assert!(
             rest[prompt + 1..needs]
                 .iter()
@@ -4863,9 +4880,7 @@ mod details_curtain {
             panel(&view);
         }
         let opened = panel(&view);
-        let prompt = (0..24)
-            .find(|&y| text(&opened, y) == "Prompt")
-            .unwrap();
+        let prompt = (0..24).find(|&y| text(&opened, y) == "Prompt").unwrap();
         assert!((1..prompt).all(|y| !text(&opened, y).ends_with('…')));
         assert_eq!(text(&opened, prompt - 2), "Reply row 7");
         view.scroll_content_row(true, false, pointer);
@@ -5148,7 +5163,7 @@ mod log_search {
         assert!(!text(&buf).contains("t........"));
         for x in 6..13 {
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(buf[(x, 0)].fg, super::style::selection_style().fg.unwrap());
         }
         key(&mut view, KeyCode::Enter);
         let buf = panel(&view, now);
@@ -5217,11 +5232,11 @@ mod log_search {
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain café link"));
         for x in 6..10 {
-            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(buf[(x, 0)].fg, super::style::selection_style().fg.unwrap());
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
         }
         assert!(!buf[(11, 0)].modifier.contains(Modifier::UNDERLINED));
-        assert!(!buf[(11, 0)].modifier.contains(Modifier::BOLD));
+        assert!(buf[(11, 0)].modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -5236,7 +5251,7 @@ mod log_search {
             rect.x,
             rect.y + super::log::LOG_TOP,
         ));
-        assert_eq!(view.log_scroll(), 3);
+        assert_eq!(view.log_selected.as_ref(), view.log.get(5));
         let mut second = view.rows[0].clone();
         second.id = session_key("second");
         view.set_sessions(vec![view.rows[0].clone(), second], false);
@@ -6309,10 +6324,11 @@ fn task_log_click_keeps_list_and_right_click_restores_preview() {
             log.y + 1,
         ),
     );
-    assert!(view.log_open.is_none());
-    assert_eq!(log_screen(&view, 100, 45, now), list);
+    assert_eq!(view.log_selected.as_ref(), view.log.get(6));
+    let selected = log_screen(&view, 100, 45, now);
+    assert!(selected.contains("A second paragraph"));
     click_log_text(&mut view, &list, "A long response", MouseButton::Right);
-    assert_eq!(log_screen(&view, 100, 45, now), list);
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
     click_log_text(&mut view, &list, "A long response", MouseButton::Left);
     let open = log_screen(&view, 100, 45, now);
     assert_eq!(
@@ -6327,7 +6343,10 @@ fn task_log_click_keeps_list_and_right_click_restores_preview() {
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
-    assert_eq!(view.log_redraw_in(now), None);
+    assert_eq!(
+        view.log_redraw_in(now),
+        Some(std::time::Duration::from_secs(1))
+    );
     click_log_text(&mut view, &open, "A second paragraph", MouseButton::Left);
     assert_eq!(log_screen(&view, 100, 45, now), open);
     click_log_text(&mut view, &open, "A second paragraph", MouseButton::Right);
@@ -6371,7 +6390,7 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
 fn open_tool_fixture() -> (View, chrono::DateTime<Utc>) {
     let (mut view, now) = log_fixture();
     view.log[7].calls = tool_calls();
-    view.set_log_open(Some(view.log[7].clone()));
+    view.select_log_event(Some(view.log[7].clone()));
     (view, now)
 }
 
@@ -6381,7 +6400,7 @@ fn task_log_click_opens_a_whole_row_that_has_calls() {
     view.log[7].calls = tool_calls();
     let list = log_screen(&view, 100, 25, now);
     click_log_text(&mut view, &list, "run tests", MouseButton::Left);
-    assert_eq!(view.log_open, Some(view.log[7].clone()));
+    assert_eq!(view.log_selected, Some(view.log[7].clone()));
     assert!(log_screen(&view, 100, 25, now).contains("cargo test"));
 }
 
@@ -6395,7 +6414,7 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_start_at_content_column()
         let (mut view, now) = open_tool_fixture();
         let mut event = view.log[7].clone();
         event.calls[0].title = title.into();
-        view.set_log_open(Some(event));
+        view.select_log_event(Some(event));
         let mut buf = Buffer::empty(Rect::new(0, 0, width, 48));
         view.render_at(buf.area, &mut buf, now);
         for title in [title, "Read"] {
@@ -6468,7 +6487,7 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_start_at_content_column()
 }
 
 #[test]
-fn task_log_open_tool_snapshot() {
+fn task_log_selected_tool_snapshot() {
     let (view, now) = open_tool_fixture();
     let open = log_screen(&view, 100, 48, now);
     assert_eq!(
@@ -6491,7 +6510,7 @@ fn task_log_open_tool_snapshot() {
 }
 
 #[test]
-fn task_log_open_tool_highlighting_refreshes_when_theme_changes() {
+fn task_log_selected_tool_highlighting_refreshes_when_theme_changes() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let events =
@@ -6501,7 +6520,7 @@ fn task_log_open_tool_highlighting_refreshes_when_theme_changes() {
         .find(|event| event.calls.iter().any(|call| call.name == "Bash"))
         .unwrap();
     let (mut view, now) = log_fixture();
-    view.set_log_open(Some(event));
+    view.select_log_event(Some(event));
     let render = || {
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 48));
         view.render_at(buf.area, &mut buf, now);
@@ -6529,21 +6548,22 @@ fn task_log_open_tool_highlighting_refreshes_when_theme_changes() {
 }
 
 #[test]
-fn task_log_open_tool_layout_is_cached_until_it_closes_or_the_width_changes() {
+fn task_log_selected_tool_layout_is_cached_until_selection_or_width_changes() {
     let (mut view, now) = open_tool_fixture();
-    assert!(view.viewport.borrow().log_open_layout.is_none());
+    assert!(view.viewport.borrow().log_detail_layout.is_none());
     let open = log_screen(&view, 100, 25, now);
-    assert!(view.viewport.borrow().log_open_layout.is_some());
+    assert!(view.viewport.borrow().log_detail_layout.is_some());
     assert_eq!(log_screen(&view, 100, 25, now), open);
     let narrow = log_screen(&view, 60, 25, now);
     assert_ne!(narrow, open);
     assert!(narrow.contains("running 3 tests"));
-    view.set_log_open(None);
-    assert!(view.viewport.borrow().log_open_layout.is_none());
+    view.select_log_event(Some(view.log[6].clone()));
+    assert!(view.viewport.borrow().log_detail_layout.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.get(6));
 }
 
 #[test]
-fn task_log_open_tool_gains_its_output_when_the_log_refreshes() {
+fn task_log_selected_tool_gains_its_output_when_the_log_refreshes() {
     let (mut view, now) = open_tool_fixture();
     let open = log_screen(&view, 100, 48, now);
     let mut events = view.log.clone();
@@ -6552,17 +6572,17 @@ fn task_log_open_tool_gains_its_output_when_the_log_refreshes() {
         text: "use chrono::{DateTime, Utc};".into(),
     }]);
     view.set_log(events.clone());
-    assert_eq!(view.log_open, Some(events[7].clone()));
+    assert_eq!(view.log_selected, Some(events[7].clone()));
     let refreshed = log_screen(&view, 100, 48, now);
     assert_ne!(refreshed, open);
     assert!(refreshed.contains("use chrono::{DateTime, Utc};"));
     assert!(!refreshed.contains("running…"));
     view.set_log(view.log[..7].to_vec());
-    assert_eq!(view.log_open, Some(events[7].clone()));
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
 
 #[test]
-fn task_log_open_tool_copies_a_dragged_section() {
+fn task_log_selected_tool_copies_a_dragged_section() {
     let (mut view, now) = open_tool_fixture();
     let open = log_screen(&view, 100, 25, now);
     let (x1, y1) = rendered_cell(&open, "cargo test");
@@ -6584,7 +6604,7 @@ fn task_log_open_tool_copies_a_dragged_section() {
 }
 
 #[test]
-fn task_log_open_event_header_keeps_kind_left_and_time_right() {
+fn task_log_selected_event_header_keeps_kind_left_and_time_right() {
     for body in ["A long response", "The newest reply"] {
         let (mut view, now) = log_fixture();
         // The newest row reads its time as "30s ago".
@@ -6612,6 +6632,7 @@ fn task_log_click_opens_row_with_shortened_path() {
         .paths
         .push(event.body.len() + 1..event.body.len() + 1 + path.len());
     event.body = format!("{} {path}", event.body);
+    view.set_log(view.log.clone());
     let list = log_list_screen(&view, 100, 25, now);
     assert!(!list.contains(path), "{list}");
     click_log_text(&mut view, &list, "run tests", MouseButton::Left);
@@ -6644,7 +6665,7 @@ fn missing_rooted_paths_stay_shortened_without_links_on_log_and_details() {
             assert!(list.contains(filename), "{list}");
             assert!(view.viewport.borrow().log_links.is_empty());
             assert_eq!(click_text(&mut view, &list, filename), None);
-            view.set_log_open(Some(view.log[7].clone()));
+            view.select_log_event(Some(view.log[7].clone()));
             log_screen(&view, 100, 25, now);
             assert!(view.viewport.borrow().log_links.is_empty());
         }
@@ -6694,7 +6715,7 @@ fn task_log_click_on_a_shortened_tool_path_opens_the_full_path() {
         click_text(&mut view, &list, "report.md"),
         Some(Action::OpenPath(path.into()))
     );
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.get(7));
     let (x, y) = rendered_cell(&list, "report.md");
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
@@ -6710,7 +6731,7 @@ fn task_log_click_on_a_shortened_tool_path_opens_the_full_path() {
             .contains(ratatui::style::Modifier::UNDERLINED)
     );
     assert_eq!(click_text(&mut view, &list, "run tests"), None);
-    assert!(view.log_open.is_some());
+    assert!(view.log_selected.is_some());
 }
 
 #[test]
@@ -6926,11 +6947,11 @@ fn project_group_header_opens_its_directory() {
 }
 
 #[test]
-fn task_log_open_event_closes_when_selection_changes() {
+fn task_log_selected_event_closes_when_selection_changes() {
     let (mut view, now) = log_fixture();
     let list = log_screen(&view, 100, 25, now);
     click_log_text(&mut view, &list, "A long response", MouseButton::Left);
-    assert!(view.log_open.is_some());
+    assert!(view.log_selected.is_some());
     let mut other = session("other", "Other task", SessionStatus::Working, 1);
     other.transcript = Some("/tmp/other.jsonl".into());
     let mut rows = view.rows.clone();
@@ -6942,7 +6963,7 @@ fn task_log_open_event_closes_when_selection_changes() {
             .position(|row| row.id.id == "other")
             .unwrap(),
     );
-    assert!(view.log_open.is_none());
+    assert!(view.log_selected.is_none());
 }
 
 fn double_click_text(view: &mut View, screen: &str, text: &str) -> Option<Action> {
@@ -7096,7 +7117,7 @@ fn review_running_call_refreshes_to_error_or_denied() {
         events[7].kind = kind.clone();
         events[7].calls[1].output = Some(vec![]);
         view.set_log(events);
-        assert_eq!(view.log_open.as_ref().unwrap().kind, kind);
+        assert_eq!(view.log_selected.as_ref().unwrap().kind, kind);
     }
 }
 
@@ -7118,7 +7139,7 @@ fn open_tool_layout_titles_and_rules() {
     let (mut view, now) = open_tool_fixture();
     view.log[7].calls.truncate(1);
     view.log[7].calls[0].title = "Run tests".into();
-    view.set_log_open(Some(view.log[7].clone()));
+    view.select_log_event(Some(view.log[7].clone()));
     let open = log_screen(&view, 100, 48, now);
     assert!(
         open.lines()
@@ -7163,7 +7184,7 @@ fn open_json_body_is_pretty_for_every_kind() {
         event.kind = kind;
         event.body = "{\"answer\":[1,2]}".into();
         event.calls.clear();
-        view.set_log_open(Some(event));
+        view.select_log_event(Some(event));
         let open = log_screen(&view, 100, 48, now);
         assert!(open.contains("\"answer\": ["), "{open}");
         assert!(open.lines().any(|line| line.trim() == "1,"));
@@ -7185,7 +7206,7 @@ fn open_view_top_button_and_scrollbar() {
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
-    view.set_log_open(Some(event));
+    view.select_log_event(Some(event));
     let top = log_screen(&view, 100, 25, now);
     assert!(!top.contains(" ↑ Top "));
     let area = view.viewport.borrow().log_text.area;
@@ -7194,7 +7215,7 @@ fn open_view_top_button_and_scrollbar() {
     assert_eq!(buf[(area.right(), area.top())].symbol(), "│");
     assert_eq!(buf[(area.right(), area.top())].fg, Color::Reset);
     assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), " ");
-    view.viewport.borrow_mut().log_open_scroll = usize::MAX;
+    view.viewport.borrow_mut().log_detail_scroll = usize::MAX;
     let bottom = log_screen(&view, 100, 25, now);
     assert!(bottom.contains(" ↑ Top "), "{bottom}");
     let layout = view.center_layout(Rect::new(0, 0, 100, 25));
@@ -7204,8 +7225,8 @@ fn open_view_top_button_and_scrollbar() {
     view.render_at(buf.area, &mut buf, now);
     assert_eq!(buf[(area.right(), area.bottom() - 1)].symbol(), "│");
     click_text(&mut view, &bottom, " ↑ Top ");
-    assert_eq!(view.viewport.borrow().log_open_scroll, 0);
-    assert!(view.log_open.is_some());
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
+    assert!(view.log_selected.is_some());
     assert!(!log_screen(&view, 100, 25, now).contains(" ↑ Top "));
 }
 
@@ -7235,7 +7256,7 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         let mut event = event.clone();
         event.calls = vec![call.clone()];
         let (mut view, now) = log_fixture();
-        view.set_log_open(Some(event.clone()));
+        view.select_log_event(Some(event.clone()));
         let open = log_screen(&view, 120, 48, now);
         let header = open
             .lines()
@@ -7249,7 +7270,7 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         );
         for kind in [crate::log::Kind::Error, crate::log::Kind::Denied] {
             event.kind = kind;
-            view.set_log_open(Some(event.clone()));
+            view.select_log_event(Some(event.clone()));
             let open = log_screen(&view, 120, 48, now);
             assert!(
                 open.lines()
@@ -7288,7 +7309,7 @@ fn real_tabs_survive_copy_and_expanded_cell_selection() {
         text: source.into(),
     }];
     event.calls[0].output = None;
-    view.set_log_open(Some(event.clone()));
+    view.select_log_event(Some(event.clone()));
     let open = log_screen(&view, 100, 48, now);
     assert!(super::log::open_text(&event).contains(source));
     assert!(!open.lines().any(|line| line.trim() == "↓"));
@@ -7326,7 +7347,7 @@ fn narrow_scrolled_tool_label_drag_stays_inside_the_buffer() {
         label: "/workspace/very/long/path/to/source.rs".repeat(6),
         text: "+中文".into(),
     }];
-    view.set_log_open(Some(event));
+    view.select_log_event(Some(event));
     let open = log_screen(&view, 30, 25, now);
     let (x, y) = rendered_cell(&open, "/workspace");
     view.begin_text_selection(x, y);
@@ -7347,7 +7368,7 @@ fn open_tool_without_calls_keeps_its_row_title() {
     let (mut view, now) = log_fixture();
     let event = view.log[7].clone();
     assert!(event.calls.is_empty());
-    view.set_log_open(Some(event));
+    view.select_log_event(Some(event));
     let open = log_screen(&view, 100, 25, now);
     assert!(
         open.lines()
@@ -7377,7 +7398,7 @@ fn tool_outputs_and_markdown_use_shared_json_rendering() {
         let mut event = view.log[7].clone();
         event.calls.truncate(1);
         event.calls[0].output = Some(vec![output]);
-        view.set_log_open(Some(event.clone()));
+        view.select_log_event(Some(event.clone()));
         let open = log_screen(&view, 100, 48, now);
         if matches!(
             event.calls[0].output.as_ref().unwrap()[0],
@@ -7394,7 +7415,7 @@ fn tool_outputs_and_markdown_use_shared_json_rendering() {
     let mut event = view.log[7].clone();
     event.calls.truncate(1);
     event.calls[0].output = Some(vec![]);
-    view.set_log_open(Some(event));
+    view.select_log_event(Some(event));
     let open = log_screen(&view, 100, 48, now);
     assert!(open.contains("(no output)"));
     assert!(open.lines().any(|line| line.trim() == "↓"));
@@ -7421,7 +7442,7 @@ fn pretty_json_body_remaps_provider_path_ranges() {
     let start = event.body.find(path_text).unwrap();
     event.paths.clear();
     event.paths.push(start..start + path_text.len());
-    view.set_log_open(Some(event));
+    view.select_log_event(Some(event));
     log_screen(&view, 100, 48, now);
     assert!(
         view.viewport
@@ -7485,6 +7506,7 @@ fn commit_sha_links_open_vscode_from_log_and_details() {
     view.log[7].paths.clear();
     for kind in [crate::log::Kind::Assistant, crate::log::Kind::Tool] {
         view.log[7].kind = kind;
+        view.set_log(view.log.clone());
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         let rendered = loop {
             let rendered = log_screen(&view, 120, 40, now);
@@ -7514,15 +7536,15 @@ fn commit_sha_links_open_vscode_from_log_and_details() {
             click_text(&mut view, &rendered, sha),
             Some(Action::OpenPath(target.clone()))
         );
-        assert!(view.log_open.is_none());
+        assert_eq!(view.log_selected.as_ref(), view.log.get(7));
         assert_eq!(click_text(&mut view, &rendered, "deadbeef"), None);
-        assert!(view.log_open.is_some());
+        assert!(view.log_selected.is_some());
         let rendered = log_screen(&view, 120, 40, now);
         assert_eq!(
             click_text(&mut view, &rendered, sha),
             Some(Action::OpenPath(target.clone()))
         );
-        view.set_log_open(None);
+        view.select_log_event(None);
     }
     let rendered = screen(&view, 120, 40);
     assert_eq!(
@@ -7531,7 +7553,7 @@ fn commit_sha_links_open_vscode_from_log_and_details() {
     );
     // Open the layout before the full SHA has been checked; it must gain the link later.
     view.log[7].body = format!("commit {full}");
-    view.set_log_open(Some(view.log[7].clone()));
+    view.select_log_event(Some(view.log[7].clone()));
     let deadline = Instant::now() + std::time::Duration::from_secs(5);
     loop {
         let rendered = log_screen(&view, 120, 40, now);
@@ -7591,7 +7613,7 @@ fn mixed_open_outputs_render_and_copy_pretty_json_with_markdown() {
             event.kind = crate::log::Kind::Error;
             event.body = output.into();
         }
-        view.set_log_open(Some(event.clone()));
+        view.select_log_event(Some(event.clone()));
         let screen = log_screen(&view, 100, 64, now);
         assert!(screen.contains("Result"));
         assert!(screen.contains("\"answer\": ["));
@@ -7677,16 +7699,16 @@ fn open_top_button_uses_task_rect_for_every_kind_and_width() {
             event.kind = kind;
             event.body = (0..100).map(|n| format!("row {n}\n\n")).collect();
             event.calls.clear();
-            view.set_log_open(Some(event));
+            view.select_log_event(Some(event));
             log_screen(&view, width, 25, now);
-            view.viewport.borrow_mut().log_open_scroll = 1;
+            view.viewport.borrow_mut().log_detail_scroll = 1;
             let screen = log_screen(&view, width, 25, now);
             let layout = view.center_layout(Rect::new(0, 0, width, 25));
             let jump = view.viewport.borrow().log_detail_jump;
             assert_eq!(jump.x, layout.list.x + (layout.list.width - jump.width) / 2);
             assert_eq!(jump.y, layout.log_detail.y);
             click_text(&mut view, &screen, " ↑ Top ");
-            assert_eq!(view.viewport.borrow().log_open_scroll, 0);
+            assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
         }
     }
 }
@@ -7732,7 +7754,7 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
         let mut later = event.clone();
         later.started_at = now;
         view.log = vec![event.clone(), later];
-        view.set_log_open(Some(event));
+        view.select_log_event(Some(event));
         let rendered = log_screen(&view, 160, 25, now);
         assert!(
             rendered.lines().any(|line| line
@@ -7742,7 +7764,7 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
             "{rendered}"
         );
         assert!(
-            !super::log::open_text(view.log_open.as_ref().unwrap())
+            !super::log::open_text(view.log_selected.as_ref().unwrap())
                 .contains(&format!("({sender})"))
         );
     }
@@ -7769,7 +7791,7 @@ fn wrapped_messages_keep_list_text_and_open_paragraphs() {
     }
     for event in &events[6..] {
         view.log = vec![event.clone()];
-        view.set_log_open(Some(event.clone()));
+        view.select_log_event(Some(event.clone()));
         let area = Rect::new(0, 0, 2000, 25);
         let mut buffer = Buffer::empty(area);
         view.render_log_detail(area, &mut buffer, now);

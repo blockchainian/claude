@@ -102,7 +102,7 @@ fn task_log_cache_rereads_when_event_count_changes() {
     app.refresh_log(8);
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
+    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
     for (height, count) in [(24, 6), (40, 11), (60, 18), (19, 0), (24, 6)] {
         app.refresh_log(
             app.view
@@ -110,6 +110,74 @@ fn task_log_cache_rereads_when_event_count_changes() {
         );
         assert_eq!(app.view.log.len(), count);
     }
+}
+
+/// Gives each copy of the captured transcript its own event identities and visible marker.
+fn transcript_copies(payload: &str, copies: usize, first: usize) -> String {
+    let records: Vec<serde_json::Value> = payload
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let mut text = String::new();
+    for copy in first..first + copies {
+        for record in &records {
+            let mut record = record.clone();
+            if let Some(timestamp) = record.get("timestamp").and_then(|value| value.as_str()) {
+                let timestamp = chrono::DateTime::parse_from_rfc3339(timestamp).unwrap()
+                    + chrono::Duration::minutes(copy as i64);
+                record["timestamp"] = timestamp.to_rfc3339().into();
+            }
+            for field in ["uuid", "parentUuid", "leafUuid"] {
+                if let Some(id) = record.get(field).and_then(|value| value.as_str()) {
+                    let (prefix, suffix) = id.split_at(id.len() - 8);
+                    let suffix = u32::from_str_radix(suffix, 16).unwrap() ^ (copy as u32 + 1);
+                    record[field] = format!("{prefix}{suffix:08x}").into();
+                }
+            }
+            if let Some(content) = record.pointer_mut("/message/content") {
+                match content {
+                    serde_json::Value::String(body) => {
+                        *body = format!("Transcript copy {copy}\n\n{body}");
+                    }
+                    serde_json::Value::Array(blocks) => {
+                        let body = blocks
+                            .iter_mut()
+                            .find_map(|block| block.get_mut("text"))
+                            .expect("captured assistant has text");
+                        *body =
+                            format!("Transcript copy {copy}\n\n{}", body.as_str().unwrap()).into();
+                    }
+                    _ => panic!("unexpected captured message content"),
+                }
+            }
+            text.push_str(&serde_json::to_string(&record).unwrap());
+            text.push('\n');
+        }
+    }
+    text
+}
+
+fn log_detail(app: &App) -> String {
+    let area = ratatui::layout::Rect::new(0, 0, 120, 24);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    app.view.render(area, &mut buffer);
+    let rule = (0..area.height)
+        .rev()
+        .find(|&y| {
+            (0..area.width)
+                .filter(|&x| buffer[(x, y)].symbol() == "─")
+                .count()
+                > usize::from(area.width / 2)
+        })
+        .expect("log detail has a top rule");
+    (rule + 1..area.height - 1)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(super) fn scroll_log(app: &mut App, kind: crossterm::event::MouseEventKind) {
@@ -129,7 +197,7 @@ fn queued_wheel_events_apply_before_the_next_draw() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
+    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
     app.refresh_log(8);
     let area = ratatui::layout::Rect::new(0, 0, 120, 24);
     app.view
@@ -151,7 +219,10 @@ fn queued_wheel_events_apply_before_the_next_draw() {
             .unwrap()
     );
     assert!(app.receiver.try_recv().is_err());
-    assert_eq!(app.view.log_scroll(), 15);
+    assert_eq!(app.view.log_scroll(), 0);
+    let detail = log_detail(&app);
+    assert!(detail.contains("Transcript copy 17"), "{detail}");
+    assert!(detail.contains("User"), "{detail}");
 }
 
 #[test]
@@ -160,15 +231,23 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
+    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
     app.refresh_log(8);
-    scroll_log(&mut app, ScrollDown);
+    for _ in 0..6 {
+        scroll_log(&mut app, ScrollDown);
+    }
     app.refresh_log(8);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 11);
-    assert_eq!(app.view.log.len(), 11);
+    assert_eq!(app.view.log_scroll(), 1);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 9);
+    assert_eq!(app.view.log.len(), 9);
+    assert!(log_detail(&app).contains("Transcript copy 16"));
     let cached = app.view.log.clone();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-    std::fs::write(&path, payload.replace("Codex", "CODEX").repeat(20)).unwrap();
+    std::fs::write(
+        &path,
+        transcript_copies(&payload.replace("Codex", "CODEX"), 20, 0),
+    )
+    .unwrap();
     std::fs::File::options()
         .write(true)
         .open(&path)
@@ -177,11 +256,15 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
         .unwrap();
     app.refresh_log(8);
     assert_eq!(app.view.log, cached);
-    scroll_log(&mut app, ScrollUp);
+    for _ in 0..6 {
+        scroll_log(&mut app, ScrollUp);
+    }
     app.refresh_log(8);
+    assert_eq!(app.view.log_scroll(), 0);
     assert_eq!(app.log_stamp.as_ref().unwrap().count, 8);
     assert_eq!(app.view.log.len(), 8);
-    assert_ne!(app.view.log, cached[3..]);
+    assert_ne!(app.view.log, cached[1..]);
+    assert!(log_detail(&app).contains("Transcript copy 19"));
 }
 
 #[test]
@@ -190,20 +273,25 @@ fn task_log_growth_keeps_distance_from_end() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
+    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
     app.refresh_log(8);
     scroll_log(&mut app, ScrollDown);
     app.refresh_log(8);
     let before = app.view.log.clone();
     std::fs::write(
         &path,
-        payload.repeat(20) + &payload.replace("Codex", "CODEX"),
+        transcript_copies(&payload, 20, 0)
+            + &transcript_copies(&payload.replace("Codex", "CODEX"), 1, 20),
     )
     .unwrap();
     app.refresh_log(8);
-    assert_eq!(app.view.log_scroll(), 3);
-    assert_eq!(app.log_stamp.as_ref().unwrap().count, 11);
+    assert_eq!(app.view.log_scroll(), 2);
+    assert_eq!(app.log_stamp.as_ref().unwrap().count, 10);
     assert_ne!(app.view.log, before);
+    let detail = log_detail(&app);
+    assert!(detail.contains("Transcript copy 19"), "{detail}");
+    assert!(detail.contains("User"), "{detail}");
+    assert!(!detail.contains("Transcript copy 20"), "{detail}");
 }
 
 #[test]
@@ -212,7 +300,7 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, payload.repeat(20)).unwrap();
+    std::fs::write(&path, transcript_copies(&payload, 20, 0)).unwrap();
     app.refresh_log(1);
     app.view.handle_key(crossterm::event::KeyEvent::new(
         KeyCode::Char('r'),
@@ -228,10 +316,20 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
         scroll_log(&mut app, crossterm::event::MouseEventKind::ScrollDown);
     }
     app.refresh_log(1);
-    assert_eq!(app.view.log_scroll(), 19);
+    let visible = app
+        .view
+        .log_event_count(ratatui::layout::Rect::new(0, 0, 120, 24));
+    assert_eq!(app.view.log_scroll(), 20 - visible);
+    let detail = log_detail(&app);
+    assert!(detail.contains("Transcript copy 0"), "{detail}");
+    assert!(detail.contains("User"), "{detail}");
     let cached = app.view.log.clone();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-    std::fs::write(&path, payload.replace("Codex", "other").repeat(20)).unwrap();
+    std::fs::write(
+        &path,
+        transcript_copies(&payload.replace("Codex", "other"), 20, 0),
+    )
+    .unwrap();
     std::fs::File::options()
         .write(true)
         .open(&path)
@@ -249,7 +347,7 @@ fn task_log_search_loads_all_caches_matches_and_refreshes_growth() {
         .append(true)
         .open(&path)
         .unwrap();
-    writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T16:40:00Z", "content":"Codex timeout"})).unwrap();
+    writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T17:00:00Z", "content":"Codex timeout"})).unwrap();
     app.refresh_log(1);
     assert_eq!(app.view.matching_log_count(), 1);
     assert_eq!(app.view.log.last().unwrap().body, "Codex timeout");

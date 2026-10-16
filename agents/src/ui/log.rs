@@ -3,6 +3,7 @@ use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
 use crate::log::{Event, Kind};
 use chrono::{DateTime, Local, Utc};
+use ratatui::style::Modifier;
 
 const CLOCK_FORMAT: &str = "%H:%M:%S";
 const CLOCK_WIDTH: usize = 8;
@@ -46,8 +47,14 @@ impl View {
                     .render(input, buf);
             }
         }
+        self.reveal_log_selection();
         let scroll = self.log_scroll();
         let matching: Vec<_> = self.shown_log_events().collect();
+        let selected_index = matching
+            .iter()
+            .rev()
+            .find(|(_, event)| self.log_selected.as_ref() == Some(*event))
+            .map(|(index, _)| *index);
         let end = matching.len().saturating_sub(scroll);
         let start = end.saturating_sub(usize::from(
             area.height
@@ -67,6 +74,17 @@ impl View {
                 Some(&self.log_search),
                 &session.cwd,
             );
+            if selected_index == Some(log_index) {
+                super::render::fill_list_row(
+                    super::render::row(area, index as u16, 1),
+                    buf,
+                    Style {
+                        sub_modifier: Modifier::all()
+                            - super::style::selection_style().add_modifier,
+                        ..super::style::selection_style()
+                    },
+                );
+            }
             rows.push(log_index);
             drawn_links.extend(links);
         }
@@ -80,11 +98,7 @@ impl View {
     }
 
     pub(super) fn visible_log_event(&self) -> Option<&Event> {
-        self.log_open.as_ref().or_else(|| {
-            (!self.viewport.borrow().log_detail.is_empty())
-                .then(|| self.log.last())
-                .flatten()
-        })
+        self.log_selected.as_ref()
     }
 
     pub(super) fn render_log_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
@@ -100,15 +114,15 @@ impl View {
         };
         let time = event_time(event, session, self.is_newest_shown(event), now);
         let list_links = self.viewport.borrow().log_links.clone();
-        self.render_open_event(event, &time, area, buf, &session.cwd);
+        self.render_event_detail(event, &time, area, buf, &session.cwd);
         self.viewport.borrow_mut().log_links.extend(list_links);
     }
 
     /// Draws the button that jumps back to the newest row on the rule, its arrow above the
-    /// rows' bodies, while the log is scrolled off its newest row.
-    pub(super) fn render_log_jump(&self, area: Rect, scroll: usize, buf: &mut Buffer) {
+    /// rows' bodies, while an older event is selected.
+    pub(super) fn render_log_jump(&self, area: Rect, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
-        if scroll == 0 {
+        if self.following_log() {
             viewport.log_unseen = 0;
             return;
         }
@@ -123,7 +137,7 @@ impl View {
     }
 
     /// Draws one log event whole: its list row's time and kind, a blank row, then the full body.
-    fn render_open_event(
+    fn render_event_detail(
         &self,
         event: &Event,
         time: &str,
@@ -177,7 +191,7 @@ impl View {
         }
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
-        let mut layout = match viewport.log_open_layout.take() {
+        let mut layout = match viewport.log_detail_layout.take() {
             Some(layout)
                 if layout.width == area.width
                     && layout.height == height
@@ -186,9 +200,9 @@ impl View {
                 layout
             }
             _ => {
-                let mut layout = open_layout(event, area.width, cwd);
+                let mut layout = detail_layout(event, area.width, cwd);
                 if layout.lines.len() > height && area.width > 1 {
-                    layout = open_layout(event, area.width - 1, cwd);
+                    layout = detail_layout(event, area.width - 1, cwd);
                     layout.width = area.width;
                 }
                 layout.height = height;
@@ -202,15 +216,15 @@ impl View {
         for (source, links) in layout.sources.iter().zip(&mut layout.links) {
             super::links::add_commits(&source.text, cwd, links);
         }
-        viewport.log_open_max = layout.lines.len().saturating_sub(height);
-        viewport.log_open_scroll = viewport.log_open_scroll.min(viewport.log_open_max);
-        let scroll = viewport.log_open_scroll;
+        viewport.log_detail_max = layout.lines.len().saturating_sub(height);
+        viewport.log_detail_scroll = viewport.log_detail_scroll.min(viewport.log_detail_max);
+        let scroll = viewport.log_detail_scroll;
         if overflow && height > 0 {
             let thumb = (height * height)
                 .div_ceil(layout.lines.len())
                 .max(1)
                 .min(height);
-            let top = scroll * (height - thumb) / viewport.log_open_max.max(1);
+            let top = scroll * (height - thumb) / viewport.log_detail_max.max(1);
             for row in 0..height {
                 buf[(body_area.right(), body_area.y + row as u16)].set_symbol(
                     if (top..top + thumb).contains(&row) {
@@ -248,7 +262,7 @@ impl View {
         let mut visible = layout.lines
             [scroll.min(layout.lines.len())..(scroll + height).min(layout.lines.len())]
             .to_vec();
-        viewport.log_open_layout = Some(layout);
+        viewport.log_detail_layout = Some(layout);
         drop(viewport);
         for line in &mut visible {
             highlight_matches(line, &self.log_detail_search);
@@ -258,7 +272,7 @@ impl View {
     }
 
     pub(super) fn jump_detail_match(&mut self) {
-        let Some(event) = &self.log_open else {
+        let Some(event) = &self.log_selected else {
             return;
         };
         if self.log_detail_search.query.is_empty() {
@@ -270,70 +284,190 @@ impl View {
             .selected_row()
             .map(|session| session.cwd.as_path())
             .unwrap_or(Path::new("."));
-        let layout = open_layout(event, width, cwd);
+        let layout = detail_layout(event, width, cwd);
         let found = layout
             .lines
             .iter()
             .position(|line| !self.log_detail_search.indices(&line.to_string()).is_empty());
         drop(viewport);
         if let Some(line) = found {
-            self.viewport.borrow_mut().log_open_scroll = line;
+            self.viewport.borrow_mut().log_detail_scroll = line;
         }
     }
 
-    /// Opens `event` in the log panel, or closes the open event, dropping its cached layout.
-    pub(super) fn set_log_open(&mut self, event: Option<Event>) {
-        self.cancel_open_selection();
-        self.log_open = event;
-        self.log_detail_search.clear();
-        self.viewport.borrow_mut().log_open_layout = None;
+    /// Selects an event for both panels; `None` selects the newest shown event.
+    pub(super) fn select_log_event(&mut self, event: Option<Event>) {
+        self.log_detail_focused = event.is_some();
+        let event = event.or_else(|| self.shown_log_events().last().map(|(_, e)| e.clone()));
+        if self.log_selected != event {
+            self.cancel_detail_selection();
+            self.log_selected = event;
+            self.log_detail_search.clear();
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_detail_layout = None;
+            viewport.log_detail_scroll = 0;
+        }
+        if self.following_log() {
+            self.viewport.borrow_mut().log_unseen = 0;
+        }
     }
 
-    /// Replaces the task log. Off the newest row, or while a mouse button is held, the rows on
-    /// screen stay put and the newer events count toward the jump button.
-    pub(crate) fn set_log(&mut self, events: Vec<Event>) {
-        let newest = self.left_log_newest.take().or_else(|| {
+    fn following_log(&self) -> bool {
+        self.log_selected.as_ref().is_none_or(|selected| {
             self.shown_log_events()
                 .last()
-                .map(|(_, event)| event.started_at)
-        });
-        self.log = events;
-        if self.log_open.is_none() {
-            self.viewport.borrow_mut().log_open_layout = None;
-            self.viewport.borrow_mut().log_open_scroll = 0;
-        }
-        self.prepare_log_search();
-        if self.log_background_return.is_none()
-            && let Some(open) = &self.log_open
-            && let Some(current) = self.log.iter().find(|event| {
-                if shows_calls(open) {
-                    event
-                        .calls
-                        .iter()
-                        .any(|call| open.calls.iter().any(|old| old.id == call.id))
-                } else {
-                    event.started_at == open.started_at && event.kind == open.kind
-                }
-            })
-            && current != open
+                .is_some_and(|(_, newest)| same_event(selected, newest))
+        }) && self.log_background_return.is_none()
+    }
+
+    /// Keeps the cursor in view without moving a list being dragged for text selection.
+    fn reveal_log_selection(&self) {
+        if self.mouse_press.is_some()
+            || (self.selecting_list(text_selection::Panel::LogList)
+                && self.text_selection_dragging())
         {
-            let current = current.clone();
-            self.cancel_open_selection();
-            self.log_open = Some(current);
-            self.viewport.borrow_mut().log_open_layout = None;
+            return;
         }
-        let following = self.log_scroll() == 0 && self.mouse_press.is_none();
-        let Some(newest) = newest.filter(|_| !following) else {
+        let Some(selected) = &self.log_selected else {
             return;
         };
-        let added = self
+        let Some(offset) = self
             .shown_log_events()
-            .filter(|(_, event)| event.started_at > newest)
-            .count();
+            .collect::<Vec<_>>()
+            .iter()
+            .rev()
+            .position(|(_, event)| same_event(selected, event))
+        else {
+            return;
+        };
         let mut viewport = self.viewport.borrow_mut();
-        viewport.log_scroll += added;
-        viewport.log_unseen += added;
-        self.shift_list_selection(text_selection::Panel::LogList, added);
+        let height = usize::from(
+            viewport
+                .log
+                .height
+                .saturating_sub(u16::from(self.log_search.active())),
+        );
+        if height == 0 {
+            return;
+        }
+        if offset < viewport.log_scroll {
+            viewport.log_scroll = offset;
+        } else if offset >= viewport.log_scroll + height {
+            viewport.log_scroll = offset + 1 - height;
+        }
+    }
+
+    /// Moves one displayed event; App loads older rows when the cursor reaches the tail window.
+    pub(super) fn move_log_selection(&mut self, older: bool) {
+        self.pending_click = None;
+        self.log_background_return = None;
+        if !older && self.log_pending_older > 0 {
+            self.log_pending_older -= 1;
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_scroll = viewport.log_scroll.saturating_sub(1);
+            return;
+        }
+        let matching: Vec<_> = self.shown_log_events().collect();
+        let Some(index) = self.log_selected.as_ref().and_then(|selected| {
+            matching
+                .iter()
+                .position(|(_, event)| same_event(selected, event))
+        }) else {
+            self.show_newest_log();
+            return;
+        };
+        if older && index == 0 {
+            if self.log_search.active() {
+                return;
+            }
+            self.log_pending_older += 1;
+            self.viewport.borrow_mut().log_scroll += 1;
+            return;
+        }
+        let next = if older {
+            index - 1
+        } else {
+            (index + 1).min(matching.len() - 1)
+        };
+        let event = matching[next].1.clone();
+        self.log_pending_older = 0;
+        self.select_log_event(Some(event));
+        self.reveal_log_selection();
+    }
+
+    /// Replaces the loaded transcript, retaining the selected event unless following its tail.
+    pub(crate) fn set_log(&mut self, events: Vec<Event>) {
+        let following = self.following_log();
+        let newest = self
+            .shown_log_events()
+            .last()
+            .map(|(_, event)| event.clone());
+        self.log = events;
+        self.prepare_log_search();
+        let added = newest.as_ref().map_or(0, |newest| {
+            let matching: Vec<_> = self.shown_log_events().collect();
+            matching
+                .iter()
+                .rposition(|(_, event)| same_event(newest, event))
+                .map_or_else(
+                    || {
+                        matching
+                            .iter()
+                            .filter(|(_, event)| event.started_at > newest.started_at)
+                            .count()
+                    },
+                    |index| matching.len() - index - 1,
+                )
+        });
+        let selected = if self.log_background_return.is_some() {
+            self.log_selected.clone()
+        } else if following {
+            self.shown_log_events()
+                .last()
+                .map(|(_, event)| event.clone())
+        } else {
+            let current = self.log_selected.as_ref().and_then(|selected| {
+                self.shown_log_events()
+                    .find(|(_, event)| same_event(selected, event))
+                    .map(|(_, event)| event.clone())
+            });
+            match current {
+                Some(event) => Some(event),
+                // App extends the tail window after the new rows shift its offset.
+                None if added > 0 => self.log_selected.clone(),
+                None => self
+                    .shown_log_events()
+                    .last()
+                    .map(|(_, event)| event.clone()),
+            }
+        };
+        if self.log_selected != selected {
+            self.cancel_detail_selection();
+            self.log_selected = selected;
+            self.viewport.borrow_mut().log_detail_layout = None;
+            if following {
+                self.viewport.borrow_mut().log_detail_scroll = 0;
+            }
+        }
+        if !following || self.mouse_press.is_some() {
+            let mut viewport = self.viewport.borrow_mut();
+            viewport.log_scroll += added;
+            viewport.log_unseen += added;
+            drop(viewport);
+            self.shift_list_selection(text_selection::Panel::LogList, added);
+        }
+        let pending = std::mem::take(&mut self.log_pending_older);
+        if pending > 0 {
+            let matching: Vec<_> = self.shown_log_events().collect();
+            if let Some(index) = self.log_selected.as_ref().and_then(|selected| {
+                matching
+                    .iter()
+                    .position(|(_, event)| same_event(selected, event))
+            }) {
+                let event = matching[index.saturating_sub(pending)].1.clone();
+                self.select_log_event(Some(event));
+            }
+        }
     }
 
     /// How long until the top log row's time reads differently, or `None` if it never does.
@@ -342,12 +476,10 @@ impl View {
         if self.log_session.as_ref() != Some(&session.id) {
             return None;
         }
-        let event = match &self.log_open {
-            Some(event) if self.is_newest_shown(event) => event,
-            Some(_) => return None,
-            None if self.log_scroll() != 0 => return None,
-            None => self.shown_log_events().last()?.1,
-        };
+        let event = self.shown_log_events().last()?.1;
+        if self.log_scroll() != 0 && !self.following_log() {
+            return None;
+        }
         row_time_changes_in(&row_time(event, session, true), now)
     }
 
@@ -364,6 +496,17 @@ impl View {
             .iter()
             .enumerate()
             .filter(|(index, _)| self.log_matches(*index))
+    }
+}
+
+fn same_event(left: &Event, right: &Event) -> bool {
+    if shows_calls(left) {
+        right
+            .calls
+            .iter()
+            .any(|call| left.calls.iter().any(|selected| selected.id == call.id))
+    } else {
+        left.started_at == right.started_at && left.kind == right.kind
     }
 }
 
@@ -527,7 +670,7 @@ fn render_event(
 type Cells = Vec<(std::ops::Range<u16>, std::ops::Range<usize>)>;
 
 /// The open log event laid out for one panel size and highlight theme.
-pub(super) struct OpenLayout {
+pub(super) struct DetailLayout {
     width: u16,
     height: usize,
     theme_generation: u64,
@@ -539,7 +682,7 @@ pub(super) struct OpenLayout {
     links: Vec<Vec<super::links::Link>>,
 }
 
-fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
+fn detail_layout(event: &Event, width: u16, cwd: &std::path::Path) -> DetailLayout {
     let theme_generation = super::highlight::theme_generation();
     let body_style = super::style::log_styles(&event.kind).1;
     let parts: Vec<_> = open_parts(event)
@@ -566,7 +709,7 @@ fn open_layout(event: &Event, width: u16, cwd: &std::path::Path) -> OpenLayout {
             (part.source, lines, maps, links)
         })
         .collect();
-    let mut layout = OpenLayout {
+    let mut layout = DetailLayout {
         width,
         height: 0,
         theme_generation,

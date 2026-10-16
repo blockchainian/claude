@@ -175,7 +175,7 @@ impl View {
         }
     }
 
-    pub(super) fn cancel_open_selection(&self) {
+    pub(super) fn cancel_detail_selection(&self) {
         if self
             .text_selection
             .borrow()
@@ -224,9 +224,6 @@ impl View {
                 }
                 selection.panel
             };
-        if panel == Panel::LogList {
-            self.set_log_open(None);
-        }
         self.last_copy_click = None;
         if panel.is_list() {
             self.last_click = None;
@@ -290,13 +287,13 @@ impl View {
                 previous != viewport.log_scroll
             }
             Panel::Log => {
-                let previous = viewport.log_open_scroll;
-                viewport.log_open_scroll = if forward {
-                    previous.saturating_add(1).min(viewport.log_open_max)
+                let previous = viewport.log_detail_scroll;
+                viewport.log_detail_scroll = if forward {
+                    previous.saturating_add(1).min(viewport.log_detail_max)
                 } else {
                     previous.saturating_sub(1)
                 };
-                previous != viewport.log_open_scroll
+                previous != viewport.log_detail_scroll
             }
             Panel::Details => {
                 let state = &mut viewport.details_scroll;

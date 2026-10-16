@@ -83,6 +83,9 @@ fn details_section_order_preserves_clicks_and_copies() {
             ),
             None
         );
-        assert_eq!(view.log_open.as_ref().unwrap().body, "background output\n");
+        assert_eq!(
+            view.log_selected.as_ref().unwrap().body,
+            "background output\n"
+        );
     }
 }

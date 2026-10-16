@@ -15,6 +15,23 @@ impl Tmux {
         assert!(output.status.success(), "{output:?}");
         String::from_utf8(output.stdout).unwrap()
     }
+
+    fn mouse(&self, button: u16, column: usize, row: usize, click: bool) {
+        let press = format!("\x1b[<{button};{};{}M", column + 1, row + 1);
+        let release = if click {
+            format!("\x1b[<{button};{};{}m", column + 1, row + 1)
+        } else {
+            String::new()
+        };
+        self.run(&[
+            "send-keys",
+            "-t",
+            "probe",
+            "-l",
+            &format!("{press}{release}"),
+        ]);
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 impl Drop for Tmux {
@@ -25,26 +42,19 @@ impl Drop for Tmux {
     }
 }
 
-// Runs the executable's terminal loop, provider discovery and log loading, rather
-// than constructing a View. AGENTS_PROBE_BIN also checks the installed artifact.
-#[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_layout_tracks_width() {
+fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");
     let project = config.join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
-    std::fs::write(
-        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
-        include_str!("fixtures/transcript.jsonl"),
-    )
-    .unwrap();
+    let transcript = project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl");
+    std::fs::write(&transcript, include_str!("fixtures/transcript.jsonl")).unwrap();
     let codex = directory.path().join("codex");
     std::fs::create_dir(&codex).unwrap();
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux(format!("agents-layout-{}", std::process::id()));
+    let tmux = Tmux(format!("agents-{name}-{}", std::process::id()));
     tmux.run(&[
         "-f",
         "/dev/null",
@@ -67,6 +77,15 @@ fn terminal_layout_tracks_width() {
     // Let provider discovery finish, then select the real archived transcript.
     std::thread::sleep(Duration::from_secs(2));
     tmux.run(&["send-keys", "-t", "probe", "Tab", "Tab", "Tab", "Tab"]);
+    (directory, tmux, transcript)
+}
+
+// Runs the executable's terminal loop, provider discovery and log loading, rather
+// than constructing a View. AGENTS_PROBE_BIN also checks the installed artifact.
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_layout_tracks_width() {
+    let (_directory, tmux, _transcript) = start_probe("layout");
     for (width, height) in [
         (200, 50),
         (120, 60),
@@ -281,5 +300,95 @@ fn terminal_layout_tracks_width() {
             ]);
             std::thread::sleep(Duration::from_secs(1));
         }
+    }
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_log_selection_tracks_wheel_click_and_tail() {
+    use std::io::Write;
+
+    for width in [120, 180] {
+        let (_directory, tmux, transcript) = start_probe("log-selection");
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "45",
+        ]);
+        std::thread::sleep(Duration::from_millis(200));
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let rows: Vec<_> = capture.lines().collect();
+        let prompt = rows
+            .iter()
+            .rposition(|row| row.contains('›'))
+            .expect("prompt");
+        let (column, row) = if width >= 150 {
+            let separator = rows[3].rfind('│').expect("log column separator");
+            (rows[3][..separator].width() + 2, 3)
+        } else {
+            (1, prompt + 1)
+        };
+        let detail = |capture: &str| {
+            let rows: Vec<_> = capture.lines().collect();
+            let rule = rows
+                .iter()
+                .rposition(|line| line.matches('─').count() > width / 2)
+                .expect("log detail rule");
+            rows[rule + 1..rows.len() - 1].join("\n")
+        };
+        assert!(detail(&capture).contains("decision"), "{capture}");
+        tmux.mouse(65, column, row, false);
+        let older = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(detail(&older).contains("run_in_background"), "{older}");
+        assert!(older.contains("↑ Latest"), "{older}");
+        tmux.mouse(64, column, row, false);
+        let newest = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(detail(&newest).contains("decision"), "{newest}");
+        assert!(!newest.contains("↑ Latest"), "{newest}");
+        tmux.mouse(0, column, row + 1, true);
+        let selected = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(
+            detail(&selected).contains("run_in_background"),
+            "{selected}"
+        );
+        let mut arrival: serde_json::Value = serde_json::from_str(
+            include_str!("fixtures/transcript.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        arrival["uuid"] = "terminal-tail-arrival".into();
+        arrival["timestamp"] = "2026-10-06T16:41:00Z".into();
+        arrival["message"]["content"] = "terminal-tail-proof".into();
+        writeln!(
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&transcript)
+                .unwrap(),
+            "{arrival}"
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+        let grown = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(detail(&grown).contains("run_in_background"), "{grown}");
+        let (jump_row, jump_line) = grown
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains("↑ 1 New"))
+            .expect("new event jump");
+        let jump_column = jump_line[..jump_line.find("↑ 1 New").unwrap()].width();
+        tmux.mouse(0, jump_column, jump_row, true);
+        let following = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        assert!(
+            detail(&following).contains("terminal-tail-proof"),
+            "{following}"
+        );
+        assert!(!following.contains("↑ 1 New"), "{following}");
+        println!("{width} columns: wheel, click, pinned arrival and tail jump passed");
     }
 }

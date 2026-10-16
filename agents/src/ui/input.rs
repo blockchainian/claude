@@ -35,11 +35,7 @@ impl View {
         }
         let click = self.pending_click.take().expect("click is due");
         match click.target {
-            ClickTarget::Log { event } => {
-                self.set_log_open(Some(event));
-                self.viewport.borrow_mut().log_open_scroll = 0;
-                None
-            }
+            ClickTarget::Log { .. } => None,
             ClickTarget::Link(path) => Some(Action::OpenPath(path)),
             ClickTarget::Heading(path) => click.open_heading.then_some(Action::OpenPath(path)),
             ClickTarget::Field(_) => None,
@@ -104,11 +100,12 @@ impl View {
             return;
         }
         if let Some(previous) = self.log_background_return.take() {
-            self.set_log_open(previous.event);
+            self.select_log_event(previous.event);
+            self.log_detail_focused = previous.detail_focused;
             self.log_detail_search = previous.search;
-            self.viewport.borrow_mut().log_open_scroll = previous.scroll;
+            self.viewport.borrow_mut().log_detail_scroll = previous.scroll;
         } else {
-            self.set_log_open(None);
+            self.show_newest_log();
         }
     }
 
@@ -122,12 +119,13 @@ impl View {
         };
         if self.log_background_return.is_none() {
             self.log_background_return = Some(BackgroundReturn {
-                event: self.log_open.take(),
-                scroll: self.viewport.borrow().log_open_scroll,
+                event: self.log_selected.take(),
+                detail_focused: self.log_detail_focused,
+                scroll: self.viewport.borrow().log_detail_scroll,
                 search: std::mem::take(&mut self.log_detail_search),
             });
         }
-        self.set_log_open(Some(crate::log::Event {
+        self.select_log_event(Some(crate::log::Event {
             kind: crate::log::Kind::Tool,
             sender: None,
             body,
@@ -139,7 +137,7 @@ impl View {
             images: Vec::new(),
             calls: Vec::new(),
         }));
-        self.viewport.borrow_mut().log_open_scroll = 0;
+        self.viewport.borrow_mut().log_detail_scroll = 0;
     }
 
     fn set_filter(&mut self, idx: usize) {
@@ -357,10 +355,24 @@ impl View {
         if mouse.kind == MouseEventKind::Up(MouseButton::Left)
             && self.viewport.borrow().log_detail_jump.contains(position)
         {
-            self.viewport.borrow_mut().log_open_scroll = 0;
+            self.viewport.borrow_mut().log_detail_scroll = 0;
             return None;
         }
         if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+            let event = {
+                let viewport = self.viewport.borrow();
+                viewport
+                    .log
+                    .contains(position)
+                    .then(|| usize::from(mouse.row - viewport.log.y))
+                    .and_then(|row| viewport.log_rows.get(row))
+                    .and_then(|&index| self.log.get(index))
+                    .cloned()
+            };
+            if let Some(event) = event {
+                self.log_background_return = None;
+                self.select_log_event(Some(event));
+            }
             let background = {
                 let viewport = self.viewport.borrow();
                 viewport
@@ -444,7 +456,7 @@ impl View {
                 .contains(position)
                 .then(|| usize::from(mouse.row - viewport.log.y))
                 .and_then(|row| viewport.log_rows.get(row).copied());
-            // The open log event's body starts below the top rows, its header and a blank row.
+            // The selected event's body starts below the top rows, its header and a blank row.
             let copy_text = if viewport.details.contains(position) {
                 viewport
                     .details_copy
@@ -505,9 +517,8 @@ impl View {
                 } else if let Some(index) = log_row
                     && let Some(event) = self.log.get(index)
                 {
-                    if self.defer_click(ClickTarget::Log {
-                        event: event.clone(),
-                    }) {
+                    let event = event.clone();
+                    if self.defer_click(ClickTarget::Log { event }) {
                         self.focus_input();
                     }
                 } else if let Some((text, label)) = copy_text {
@@ -521,7 +532,7 @@ impl View {
                     self.last_copy_click = Some((text, now));
                 }
             }
-            MouseEventKind::Up(MouseButton::Right) => self.set_log_open(None),
+            MouseEventKind::Up(MouseButton::Right) => self.show_newest_log(),
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let forward = mouse.kind == MouseEventKind::ScrollDown;
                 if over_tabs {
@@ -533,6 +544,8 @@ impl View {
                     self.set_filter(idx);
                 } else if over_list {
                     self.move_selection(forward);
+                } else if over_log && self.viewport.borrow().log.contains(position) {
+                    self.move_log_selection(forward);
                 } else if over_log || over_details {
                     for _ in 0..WHEEL_ROWS {
                         self.scroll_content_row(forward, over_log, mouse.row);
@@ -565,10 +578,10 @@ impl View {
         drop(viewport);
         if over_log && over_log_detail {
             let mut viewport = self.viewport.borrow_mut();
-            viewport.log_open_scroll = if forward {
-                viewport.log_open_scroll.saturating_add(1)
+            viewport.log_detail_scroll = if forward {
+                viewport.log_detail_scroll.saturating_add(1)
             } else {
-                viewport.log_open_scroll.saturating_sub(1)
+                viewport.log_detail_scroll.saturating_sub(1)
             };
         } else if over_log {
             let mut viewport = self.viewport.borrow_mut();
@@ -873,7 +886,7 @@ impl View {
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && key.code == KeyCode::Char('r')
         {
-            if self.log_open.is_some() {
+            if self.log_detail_focused {
                 self.log_detail_search.editing = true;
                 self.jump_detail_match();
             } else {

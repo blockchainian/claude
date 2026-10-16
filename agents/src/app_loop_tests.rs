@@ -14,7 +14,7 @@ fn screen(terminal: &Terminal<TestBackend>) -> Vec<String> {
 }
 
 #[test]
-fn idle_loop_opens_a_single_click_after_the_saved_deadline() {
+fn idle_loop_finishes_click_without_delaying_log_selection() {
     let directory = tempfile::tempdir().unwrap();
     let project = directory.path().join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
@@ -48,6 +48,7 @@ fn idle_loop_opens_a_single_click_after_the_saved_deadline() {
         .find(|(_, line)| line.contains("持"))
         .unwrap_or_else(|| panic!("real tool event missing:\n{}", before.join("\n")));
     let column = line.chars().position(|c| c == '持').unwrap() as u16;
+    let started = Instant::now();
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
         MouseEventKind::Up(MouseButton::Left),
@@ -60,17 +61,16 @@ fn idle_loop_opens_a_single_click_after_the_saved_deadline() {
         })));
     }
     app.draw(&mut terminal).unwrap();
-    assert_eq!(
-        screen(&terminal),
-        before,
-        "single click must remain deferred"
-    );
+    assert_ne!(screen(&terminal), before, "row selection must be immediate");
+    let selected = screen(&terminal);
+    assert!(selected.join("\n").contains("pkill") || selected.join("\n").contains("run_boxes"));
     // No terminal or filesystem event is queued. The real receive timeout must wake
     // for the pending click, then dispatch it before the next frame.
-    let started = Instant::now();
     let mut schedule = RefreshSchedule::new(started, Duration::from_secs(5));
     let mut watcher = None;
-    while screen(&terminal) == before && started.elapsed() < Duration::from_secs(1) {
+    while app.view.pending_click_in(Instant::now()).is_some()
+        && started.elapsed() < Duration::from_secs(1)
+    {
         assert!(
             !app.wait_for_input(&mut watcher, &mut schedule, Instant::now())
                 .unwrap()
@@ -86,7 +86,11 @@ fn idle_loop_opens_a_single_click_after_the_saved_deadline() {
         "idle receive did not wake for the click"
     );
     let after = screen(&terminal).join("\n");
-    assert_ne!(screen(&terminal), before, "deferred detail never opened");
+    assert_eq!(
+        screen(&terminal),
+        selected,
+        "expired click must not replace the selected detail"
+    );
     assert!(
         after.contains("pkill") || after.contains("run_boxes"),
         "real tool body missing:\n{after}"

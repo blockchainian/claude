@@ -107,11 +107,11 @@ struct Viewport {
     log_detail_jump: Rect,
     /// Index into the task log of each drawn log row, top down.
     log_rows: Vec<usize>,
-    /// Lines of the open log event scrolled off the top.
-    log_open_scroll: usize,
-    log_open_max: usize,
-    /// The open log event's layout, built on the first frame after it opens or the width changes.
-    log_open_layout: Option<log::OpenLayout>,
+    /// Lines of the selected event scrolled off the top.
+    log_detail_scroll: usize,
+    log_detail_max: usize,
+    /// The selected event's layout, cached until its content or size changes.
+    log_detail_layout: Option<log::DetailLayout>,
     log_text: text_selection::TextRegion,
     details_text: text_selection::TextRegion,
     task_text: text_selection::TextRegion,
@@ -147,6 +147,7 @@ struct DetailsScroll {
 
 struct BackgroundReturn {
     event: Option<crate::log::Event>,
+    detail_focused: bool,
     scroll: usize,
     search: log_search::LogSearch,
 }
@@ -157,14 +158,6 @@ struct TaskPanels {
     input_box: prompt_box::PromptBox,
     details_scroll: DetailsScroll,
     log_search: log_search::LogSearch,
-    log_open: Option<crate::log::Event>,
-    log_background_return: Option<BackgroundReturn>,
-    log_detail_search: log_search::LogSearch,
-    log_scroll: usize,
-    log_unseen: usize,
-    log_open_scroll: usize,
-    /// When the newest log event shown started, if the task's log was loaded.
-    log_newest: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Copy)]
@@ -201,8 +194,11 @@ pub struct View {
     pub(crate) log: Vec<crate::log::Event>,
     pub(crate) log_session: Option<SessionKey>,
     pub(crate) log_search: log_search::LogSearch,
-    /// The log event shown whole in the log panel, opened by clicking its cut row.
-    log_open: Option<crate::log::Event>,
+    /// The selected event, shared by the list cursor and detail panel.
+    log_selected: Option<crate::log::Event>,
+    log_detail_focused: bool,
+    /// Older wheel steps waiting for App to extend the loaded transcript window.
+    log_pending_older: usize,
     log_background_return: Option<BackgroundReturn>,
     log_detail_search: log_search::LogSearch,
     input_box: prompt_box::PromptBox,
@@ -247,9 +243,6 @@ pub struct View {
     panels_task: Option<SessionKey>,
     /// The panels of each task the user left, by task.
     task_panels: HashMap<SessionKey, TaskPanels>,
-    /// The newest log event the shown task had when the user left it, standing in for the
-    /// loaded log's newest until that task's log loads.
-    left_log_newest: Option<DateTime<Utc>>,
     /// The usage bins of the task the app read last.
     usage: Option<(
         SessionKey,
@@ -314,7 +307,9 @@ impl View {
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
             log: Vec::new(),
             log_session: None,
-            log_open: None,
+            log_selected: None,
+            log_detail_focused: false,
+            log_pending_older: 0,
             log_background_return: None,
             log_detail_search: log_search::LogSearch::default(),
             log_search: log_search::LogSearch::default(),
@@ -356,7 +351,6 @@ impl View {
             title_slots: RefCell::new(HashMap::new()),
             panels_task: None,
             task_panels: HashMap::new(),
-            left_log_newest: None,
             usage: None,
             cell_aspect: DEFAULT_CELL_ASPECT,
             activity: std::collections::BTreeSet::new(),
@@ -709,12 +703,16 @@ impl View {
         viewport.log_scroll = viewport.log_scroll.min(max);
     }
 
-    /// Closes the open log event and scrolls the log back to its newest row.
+    /// Selects the newest shown event and resumes following the log.
     fn show_newest_log(&mut self) {
-        self.set_log_open(None);
+        self.select_log_event(None);
+        self.log_detail_search.clear();
         let mut viewport = self.viewport.borrow_mut();
         viewport.log_scroll = 0;
-        viewport.log_open_scroll = 0;
+        viewport.log_detail_scroll = 0;
+        viewport.log_unseen = 0;
+        self.log_pending_older = 0;
+        self.log_background_return = None;
     }
 
     fn set_selected(&mut self, selected: usize) {
@@ -731,26 +729,12 @@ impl View {
             return;
         }
         self.text_selection.borrow_mut().take();
-        let log_newest = if self.log_session == self.panels_task {
-            self.shown_log_events()
-                .last()
-                .map(|(_, event)| event.started_at)
-        } else {
-            self.left_log_newest
-        };
         let viewport = self.viewport.get_mut();
         self.input_box.focused = false;
         let left = TaskPanels {
             input_box: std::mem::take(&mut self.input_box),
             details_scroll: std::mem::take(&mut viewport.details_scroll),
             log_search: std::mem::take(&mut self.log_search),
-            log_open: self.log_open.take(),
-            log_background_return: self.log_background_return.take(),
-            log_detail_search: std::mem::take(&mut self.log_detail_search),
-            log_scroll: viewport.log_scroll,
-            log_unseen: viewport.log_unseen,
-            log_open_scroll: viewport.log_open_scroll,
-            log_newest,
         };
         if let Some(id) = self.panels_task.take() {
             self.task_panels.insert(id, left);
@@ -763,17 +747,18 @@ impl View {
             shown.details_scroll.left_keys = Some(std::mem::take(&mut shown.details_scroll.keys));
         }
         viewport.details_scroll = shown.details_scroll;
-        viewport.log_scroll = shown.log_scroll;
-        viewport.log_unseen = shown.log_unseen;
-        viewport.log_open_scroll = shown.log_open_scroll;
-        viewport.log_open_layout = None;
+        viewport.log_scroll = 0;
+        viewport.log_unseen = 0;
+        viewport.log_detail_scroll = 0;
+        viewport.log_detail_layout = None;
         self.input_box = shown.input_box;
         self.log_search = shown.log_search;
-        self.log_open = shown.log_open;
-        self.log_background_return = shown.log_background_return;
-        self.log_detail_search = shown.log_detail_search;
+        self.log_selected = None;
+        self.log_detail_focused = false;
+        self.log_pending_older = 0;
+        self.log_background_return = None;
+        self.log_detail_search.clear();
         self.pending_click = None;
-        self.left_log_newest = shown.log_newest.filter(|_| self.log_session != selected);
         self.panels_task = selected;
     }
 

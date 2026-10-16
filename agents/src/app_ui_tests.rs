@@ -106,6 +106,219 @@ fn click(app: &mut App, x: u16, y: u16) {
     }
 }
 
+fn wheel(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
+    assert!(!app.handle_event(Event::Mouse(MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })));
+}
+
+fn assert_log_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
+    let separators: Vec<_> = (0..buffer.area.width)
+        .filter(|&x| buffer[(x, 3)].symbol() == "│")
+        .collect();
+    let task_row = (3..position(buffer, "›").1)
+        .find(|&y| (0..separators[0].min(5)).any(|x| buffer[(x, y)].symbol() == "›"))
+        .expect("selected task cursor");
+    let cursor = buffer[(0, task_row)].style();
+    let start = if separators.len() == 2 {
+        separators[1] + 1
+    } else {
+        0
+    };
+    // Terminal diff output omits continuation cells covered by a wide grapheme.
+    let mut x = start;
+    while x < buffer.area.width {
+        assert_eq!(
+            buffer[(x, row)].style(),
+            cursor,
+            "cursor fill at ({x}, {row})"
+        );
+        x += unicode_width::UnicodeWidthStr::width(buffer[(x, row)].symbol()).max(1) as u16;
+    }
+    if separators.len() == 2 {
+        let separator = separators[1];
+        assert_eq!(buffer[(separator, row)].symbol(), "│");
+        assert_ne!(buffer[(separator, row)].bg, cursor.bg.unwrap());
+    }
+}
+
+#[test]
+fn log_selection_cursor_fills_padding_through_app() {
+    for width in [120, 180] {
+        let (_directory, mut app) = fixture();
+        select_archive(&mut app);
+        let buffer = draw(&mut app, width);
+        assert_log_cursor(&buffer, log_position(&buffer, "对").1);
+    }
+}
+
+#[test]
+fn log_selection_wheel_updates_detail_and_cursor_through_app() {
+    for (width, height) in [(120, 45), (180, 40)] {
+        let (_directory, mut app) = fixture();
+        select_archive(&mut app);
+        let buffer = draw_size(&mut app, width, height);
+        let (x, newest) = log_position(&buffer, "对");
+        wheel(&mut app, MouseEventKind::ScrollDown, x, newest);
+        let buffer = draw_size(&mut app, width, height);
+        assert!(detail(&buffer).contains("run_in_background"));
+        let (_, older) = log_position(&buffer, "⏺");
+        assert_log_cursor(&buffer, older);
+        assert!(lines(&buffer).join("\n").contains("↑ Latest"));
+        wheel(&mut app, MouseEventKind::ScrollUp, x, older);
+        let buffer = draw_size(&mut app, width, height);
+        assert!(detail(&buffer).contains("decision"));
+        assert!(!lines(&buffer).join("\n").contains("↑ Latest"));
+    }
+}
+
+#[test]
+fn log_selection_follows_appends_and_jump_resumes_tail_through_app() {
+    for (width, height) in [(120, 45), (180, 40)] {
+        let (_directory, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let payload = include_str!("../tests/fixtures/transcript.jsonl");
+        let first = payload.lines().next().unwrap();
+        std::fs::write(&path, format!("{first}\n")).unwrap();
+        app.refresh();
+        select_archive(&mut app);
+        draw_size(&mut app, width, height);
+        std::fs::write(&path, payload).unwrap();
+        app.refresh();
+        let buffer = draw_size(&mut app, width, height);
+        assert!(detail(&buffer).contains("decision"));
+        let (x, y) = log_position(&buffer, "⏺");
+        click(&mut app, x, y);
+        let buffer = draw_size(&mut app, width, height);
+        assert!(detail(&buffer).contains("run_in_background"));
+        assert_log_cursor(&buffer, log_position(&buffer, "⏺").1);
+        assert!(lines(&buffer).join("\n").contains("↑ Latest"));
+        let mut arrival: serde_json::Value = serde_json::from_str(first).unwrap();
+        arrival["timestamp"] = "2026-10-06T16:40:00Z".into();
+        arrival["uuid"] = "tail-arrival".into();
+        arrival["message"]["content"] = format!(
+            "tail-arrival-proof {}",
+            arrival["message"]["content"].as_str().unwrap()
+        )
+        .into();
+        std::fs::write(&path, format!("{payload}{arrival}\n")).unwrap();
+        app.refresh();
+        let buffer = draw_size(&mut app, width, height);
+        assert!(!detail(&buffer).contains("tail-arrival-proof"));
+        assert!(detail(&buffer).contains("run_in_background"));
+        assert_log_cursor(&buffer, log_position(&buffer, "⏺").1);
+        let (x, y) = position(&buffer, "↑ 1 New");
+        click(&mut app, x, y);
+        let buffer = draw_size(&mut app, width, height);
+        assert!(detail(&buffer).contains("tail-arrival-proof"));
+        assert_log_cursor(&buffer, log_position(&buffer, "tail-arrival-proof").1);
+        assert!(!lines(&buffer).join("\n").contains("↑ 1 New"));
+        let previous = arrival.to_string();
+        arrival["uuid"] = "tail-following".into();
+        arrival["timestamp"] = "2026-10-06T16:41:00Z".into();
+        arrival["message"]["content"] = "tail-following-proof".into();
+        std::fs::write(&path, format!("{payload}{previous}\n{arrival}\n")).unwrap();
+        app.refresh();
+        let buffer = draw_size(&mut app, width, height);
+        assert!(detail(&buffer).contains("tail-following-proof"));
+        assert_log_cursor(&buffer, log_position(&buffer, "tail-following-proof").1);
+    }
+}
+
+#[test]
+fn log_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
+    for width in [120, 180] {
+        let (_directory, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let mut record: serde_json::Value = serde_json::from_str(
+            include_str!("../tests/fixtures/transcript.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        let body = record["message"]["content"].as_str().unwrap().to_owned();
+        let start =
+            chrono::DateTime::parse_from_rfc3339(record["timestamp"].as_str().unwrap()).unwrap();
+        let mut payload = String::new();
+        for index in 0..40 {
+            record["uuid"] = format!("selection-{index}").into();
+            record["timestamp"] = (start + chrono::Duration::seconds(index))
+                .to_rfc3339()
+                .into();
+            record["message"]["content"] = format!("event-{index:02} {body}").into();
+            payload.push_str(&format!("{record}\n"));
+        }
+        std::fs::write(&path, &payload).unwrap();
+        app.refresh();
+        select_archive(&mut app);
+        let buffer = draw_size(&mut app, width, 30);
+        let (x, y) = log_position(&buffer, "event-39");
+        // A burst is dispatched before the next frame, just like the real App loop.
+        for _ in 0..12 {
+            wheel(&mut app, MouseEventKind::ScrollDown, x, y);
+        }
+        let buffer = draw_size(&mut app, width, 30);
+        assert!(detail(&buffer).contains("event-27"));
+        assert_log_cursor(&buffer, log_position(&buffer, "event-27").1);
+        record["uuid"] = "selection-40".into();
+        record["timestamp"] = (start + chrono::Duration::seconds(40)).to_rfc3339().into();
+        record["message"]["content"] = format!("event-40 {body}").into();
+        payload.push_str(&format!("{record}\n"));
+        std::fs::write(&path, &payload).unwrap();
+        app.refresh();
+        let buffer = draw_size(&mut app, width, 30);
+        assert!(detail(&buffer).contains("event-27"));
+        assert_log_cursor(&buffer, log_position(&buffer, "event-27").1);
+        assert!(lines(&buffer).join("\n").contains("↑ 1 New"));
+        for expected in (0..27).rev() {
+            wheel(&mut app, MouseEventKind::ScrollDown, x, y);
+            let buffer = draw_size(&mut app, width, 30);
+            let label = format!("event-{expected:02}");
+            assert!(detail(&buffer).contains(&label));
+            assert_log_cursor(&buffer, log_position(&buffer, &label).1);
+        }
+        wheel(&mut app, MouseEventKind::ScrollDown, x, y);
+        assert!(detail(&draw_size(&mut app, width, 30)).contains("event-00"));
+    }
+}
+
+#[test]
+fn log_selection_switching_tasks_resets_following_through_app() {
+    for width in [120, 180] {
+        let (_directory, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let other = "5165651d-b9e3-458d-8612-f8114e312363";
+        std::fs::write(
+            path.with_file_name(format!("{other}.jsonl")),
+            include_str!("../tests/fixtures/transcript.jsonl")
+                .replace("4165651d-b9e3-458d-8612-f8114e312363", other),
+        )
+        .unwrap();
+        app.refresh();
+        select_archive(&mut app);
+        let first = app.view.selected_id().cloned().unwrap();
+        let buffer = draw(&mut app, width);
+        let (x, y) = log_position(&buffer, "对");
+        wheel(&mut app, MouseEventKind::ScrollDown, x, y);
+        assert!(detail(&draw(&mut app, width)).contains("run_in_background"));
+        key(&mut app, KeyCode::Down);
+        let buffer = draw(&mut app, width);
+        assert_ne!(app.view.selected_id(), Some(&first));
+        assert!(detail(&buffer).contains("decision"));
+        assert_log_cursor(&buffer, log_position(&buffer, "对").1);
+        key(&mut app, KeyCode::Up);
+        let buffer = draw(&mut app, width);
+        assert_eq!(app.view.selected_id(), Some(&first));
+        assert!(detail(&buffer).contains("decision"));
+        assert_log_cursor(&buffer, log_position(&buffer, "对").1);
+        assert!(!lines(&buffer).join("\n").contains("↑ Latest"));
+    }
+}
+
 #[test]
 fn selected_real_transcript_draws_log_and_prompt_at_narrow_and_wide_sizes() {
     let (_directory, mut app) = fixture();
@@ -549,7 +762,10 @@ fn narrow_and_wide_log_panels_scroll_and_copy_independently() {
         click(&mut app, jump_x, jump_y);
         let latest = draw_size(&mut app, width, height);
         assert!(!lines(&latest).join("\n").contains("↑ Latest"));
-        assert_eq!(detail(&latest), before);
+        assert_eq!(
+            detail(&latest).lines().skip(1).collect::<Vec<_>>(),
+            before.lines().skip(1).collect::<Vec<_>>()
+        );
     }
 }
 
@@ -597,6 +813,11 @@ fn border_fixture() -> (tempfile::TempDir, App) {
     for index in 0..40 {
         let mut record = prompt.clone();
         record["uuid"] = format!("border-prompt-{index}").into();
+        record["timestamp"] =
+            (chrono::DateTime::parse_from_rfc3339(prompt["timestamp"].as_str().unwrap()).unwrap()
+                + chrono::Duration::milliseconds(index))
+            .to_rfc3339()
+            .into();
         transcript.push_str(&format!("{record}\n"));
     }
     std::fs::write(path, transcript).unwrap();
@@ -675,13 +896,23 @@ fn wide_border_labels_stay_in_their_columns() {
 
 #[test]
 fn narrow_render_survives_wide_resize_unchanged() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (_directory, mut app) = fixture();
     select_archive(&mut app);
     for width in [80, 120, 149] {
         let before = draw(&mut app, width);
         draw(&mut app, 200);
         let after = draw(&mut app, width);
-        assert_eq!(before, after);
+        let changed: Vec<_> = before
+            .content
+            .iter()
+            .zip(&after.content)
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(index, (a, b))| (index % width as usize, index / width as usize, a, b))
+            .take(12)
+            .collect();
+        assert!(changed.is_empty(), "resize changed cells: {changed:?}");
     }
 }
 

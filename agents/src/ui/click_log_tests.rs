@@ -42,10 +42,16 @@ fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
     assert_eq!(release_click(view, MouseButton::Left, x, y), None);
     assert_eq!(release_click(view, MouseButton::Left, x, y), None);
     assert!(
-        view.log_open.is_some(),
+        view.log_selected.is_some(),
         "Background double click must open its full log"
     );
-    assert!(view.log_open.as_ref().unwrap().body.contains("globalState"));
+    assert!(
+        view.log_selected
+            .as_ref()
+            .unwrap()
+            .body
+            .contains("globalState")
+    );
     assert_eq!(view.pending_click_in(Instant::now()), None);
 }
 
@@ -54,7 +60,7 @@ fn background_double_click_returns_to_previous_list() {
     let (mut view, now, _output) = with_background();
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
 
 #[test]
@@ -66,44 +72,48 @@ fn background_double_click_restores_previous_detail_and_scroll() {
         .max_by_key(|event| log::open_text(event).len())
         .unwrap()
         .clone();
-    view.set_log_open(Some(previous.clone()));
+    view.select_log_event(Some(previous.clone()));
     log_screen(&view, 160, 40, now);
-    view.viewport.borrow_mut().log_open_scroll = 2;
+    view.viewport.borrow_mut().log_detail_scroll = 2;
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert_eq!(view.log_open.as_ref(), Some(&previous));
-    assert_eq!(view.viewport.borrow().log_open_scroll, 2);
+    assert_eq!(view.log_selected.as_ref(), Some(&previous));
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 2);
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
 
 #[test]
-fn open_detail_keeps_its_event_across_refresh_and_log_scroll() {
+fn selected_detail_refreshes_and_log_wheel_changes_it() {
     let (mut view, now) = real_log_view();
     let previous = view.log.first().unwrap().clone();
-    view.set_log_open(Some(previous.clone()));
+    view.select_log_event(Some(previous.clone()));
     log_screen(&view, 100, 30, now);
     let mut refreshed = view.log.clone();
     refreshed.extend(view.log.clone());
     view.set_log(refreshed);
+    assert_eq!(view.log_selected.as_ref(), Some(&previous));
     let area = view.viewport.borrow().log;
-    view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x + 22, area.y + 3));
-    assert_eq!(view.log_open.as_ref(), Some(&previous));
+    view.handle_mouse(mouse(MouseEventKind::ScrollUp, area.x + 22, area.y + 3));
+    assert_eq!(view.log_selected.as_ref(), view.log.get(1));
     release_click(&mut view, MouseButton::Right, area.x + 22, area.y + 3);
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
 
 #[test]
 fn detail_ctrl_r_search_jumps_and_highlights_without_closing() {
     let (mut view, now, _output) = with_background();
     open_background(&mut view, now);
-    let expected = view.log_open.clone();
+    let expected = view.log_selected.clone();
     log_screen(&view, 100, 25, now);
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)),
         None
     );
-    assert_eq!(view.log_open, expected, "Ctrl+R must keep the open event");
+    assert_eq!(
+        view.log_selected, expected,
+        "Ctrl+R must keep the open event"
+    );
     for ch in "globalState".chars() {
         assert_eq!(key(&mut view, KeyCode::Char(ch)), None);
     }
@@ -115,7 +125,7 @@ fn detail_ctrl_r_search_jumps_and_highlights_without_closing() {
     let screen = log_screen(&view, 100, 25, now);
     let (x, y) = rendered_cell(&screen, "globalState");
     assert!(
-        view.viewport.borrow().log_open_scroll > 0,
+        view.viewport.borrow().log_detail_scroll > 0,
         "search must reveal the matching line"
     );
     let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 25));
@@ -126,31 +136,31 @@ fn detail_ctrl_r_search_jumps_and_highlights_without_closing() {
             .contains(ratatui::style::Modifier::BOLD),
         "matched text must be highlighted"
     );
-    assert_eq!(view.log_open, expected);
+    assert_eq!(view.log_selected, expected);
     key(&mut view, KeyCode::Enter);
     assert!(!view.log_detail_search.editing);
-    assert_eq!(view.log_open, expected);
+    assert_eq!(view.log_selected, expected);
 }
 
 #[test]
 fn right_click_cancels_innermost_modal_before_open_detail() {
     let (mut view, _now) = real_log_view();
     let event = view.log[0].clone();
-    view.set_log_open(Some(event.clone()));
+    view.select_log_event(Some(event.clone()));
     view.rename_target = view.selected_id().cloned();
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert!(view.rename_target.is_none());
-    assert_eq!(view.log_open.as_ref(), Some(&event));
+    assert_eq!(view.log_selected.as_ref(), Some(&event));
     view.help = true;
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert!(!view.help);
-    assert_eq!(view.log_open.as_ref(), Some(&event));
+    assert_eq!(view.log_selected.as_ref(), Some(&event));
     view.searching = true;
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert!(!view.searching);
-    assert_eq!(view.log_open.as_ref(), Some(&event));
+    assert_eq!(view.log_selected.as_ref(), Some(&event));
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
 
 #[test]
@@ -164,11 +174,11 @@ fn background_detail_survives_refresh_with_matching_tool_timestamp() {
         .started_at;
     view.rows[view.selected].background[0].started_at = tool_time;
     open_background(&mut view, now);
-    let expected = view.log_open.clone();
+    let expected = view.log_selected.clone();
     assert_eq!(expected.as_ref().unwrap().started_at, tool_time);
     view.set_log(view.log.clone());
     assert_eq!(
-        view.log_open, expected,
+        view.log_selected, expected,
         "transcript Tool events must not replace a Background detail sharing their timestamp"
     );
 }
@@ -177,12 +187,12 @@ fn background_detail_survives_refresh_with_matching_tool_timestamp() {
 fn background_return_restores_detail_search() {
     let (mut view, now, _output) = with_background();
     let previous = view.log[0].clone();
-    view.set_log_open(Some(previous.clone()));
+    view.select_log_event(Some(previous.clone()));
     let text = log::open_text(&previous);
     let query = text.split_whitespace().next().unwrap();
     view.log_detail_search.query.set_text(query);
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert_eq!(view.log_open.as_ref(), Some(&previous));
+    assert_eq!(view.log_selected.as_ref(), Some(&previous));
     assert_eq!(view.log_detail_search.query.text(), query);
 }

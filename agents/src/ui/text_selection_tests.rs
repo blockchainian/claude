@@ -238,7 +238,7 @@ fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
         .unwrap();
     let source = super::log::open_text(&event);
     view.log_session = Some(view.rows[0].id.clone());
-    view.log_open = Some(event);
+    view.log_selected = Some(event);
     let area = Rect::new(2, 1, 30, 10);
     view.viewport.borrow_mut().log_detail = area;
     let render = |view: &View| {
@@ -262,7 +262,7 @@ fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
         assert!(view.tick_text_selection());
         render(&view);
     }
-    assert_eq!(view.viewport.borrow().log_open_scroll, 10);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 10);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         area.x,
@@ -270,7 +270,7 @@ fn open_log_drag_scrolls_in_both_directions_and_clears_on_release() {
     ));
     assert!(view.tick_text_selection());
     render(&view);
-    assert_eq!(view.viewport.borrow().log_open_scroll, 9);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 9);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         area.right(),
@@ -449,7 +449,7 @@ fn path_log_fixture() -> View {
     event.paths = std::iter::once(0..source_path.len()).collect();
     view.rows[0].transcript = Some(path);
     view.log_session = Some(view.rows[0].id.clone());
-    view.log = vec![event];
+    view.set_log(vec![event]);
     view
 }
 
@@ -482,8 +482,8 @@ fn log_list_drag_copies_abbreviated_path_as_drawn() {
     );
     dashboard(&view, area);
     assert!(
-        view.log_open.is_none(),
-        "dragging list text does not open its event"
+        view.log_selected.as_ref() == view.log.last(),
+        "dragging list text preserves the selected event"
     );
     assert_eq!(
         copied_text(view.handle_mouse(mouse(
@@ -595,25 +595,32 @@ fn task_list_click_and_double_click_keep_actions_without_copying() {
 }
 
 #[test]
-fn log_list_click_opens_cut_row_and_stationary_double_click_copies_nothing() {
+fn log_list_click_selects_cut_row_and_stationary_double_click_copies_nothing() {
     let mut view = path_log_fixture();
+    let mut newest = view.log[0].clone();
+    newest.started_at += chrono::Duration::seconds(1);
+    newest.body = "Newest event".into();
+    newest.paths.clear();
+    let mut events = view.log.clone();
+    events.push(newest);
+    view.set_log(events);
     let area = Rect::new(0, 0, 100, 30);
     dashboard(&view, area);
     let log = view.viewport.borrow().log;
-    let at = (log.x, log.y);
+    let at = (log.x, log.y + 1);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
     );
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
     dashboard(&view, area);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), at.0, at.1))
             .is_none()
     );
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.first());
     view.flush_pending_click(Instant::now() + view.double_click_interval);
-    assert_eq!(view.log_open, Some(view.log[0].clone()));
+    assert_eq!(view.log_selected.as_ref(), view.log.first());
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1))
             .is_none()
@@ -626,12 +633,12 @@ fn log_list_click_opens_cut_row_and_stationary_double_click_copies_nothing() {
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), at.0, at.1))
             .is_none()
     );
-    assert!(view.log_open.is_some());
+    assert!(view.log_selected.is_some());
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), at.0, at.1))
             .is_none()
     );
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
 
 #[test]
@@ -824,9 +831,10 @@ fn dragging_across_other_task_rows_preserves_selected_task() {
 }
 
 #[test]
-fn dragging_across_cut_log_rows_never_opens_an_event() {
+fn dragging_across_cut_log_rows_preserves_selected_event() {
     let mut view = path_log_fixture();
     view.log.push(view.log[0].clone());
+    view.set_log(view.log.clone());
     let area = Rect::new(0, 0, 100, 30);
     let initial = dashboard(&view, area);
     let log = view.viewport.borrow().log;
@@ -836,14 +844,14 @@ fn dragging_across_cut_log_rows_never_opens_an_event() {
         .collect::<Vec<_>>()
         .join("\n");
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), log.x, y));
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
     dashboard(&view, area);
     view.handle_mouse(mouse(
         MouseEventKind::Drag(MouseButton::Left),
         log.right(),
         y + 1,
     ));
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
     dashboard(&view, area);
     assert_eq!(
         copied_text(view.handle_mouse(mouse(
@@ -853,7 +861,7 @@ fn dragging_across_cut_log_rows_never_opens_an_event() {
         ))),
         expected
     );
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
     assert_eq!(dashboard(&view, area), initial);
 }
 
@@ -906,30 +914,37 @@ fn second_task_press_drag_is_not_a_double_click() {
 #[test]
 fn right_drag_does_not_close_open_log() {
     let mut view = path_log_fixture();
-    view.log_open = Some(view.log[0].clone());
-    let event = view.log_open.clone();
+    view.log_selected = Some(view.log[0].clone());
+    let event = view.log_selected.clone();
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20));
-    assert_eq!(view.log_open, event);
+    assert_eq!(view.log_selected, event);
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Right), 3, 20));
     view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 3, 20));
-    assert_eq!(view.log_open, event);
+    assert_eq!(view.log_selected, event);
 }
 
 #[test]
-fn right_click_closes_log_only_on_release() {
+fn right_click_selects_newest_only_on_release() {
     let mut view = path_log_fixture();
-    view.log_open = Some(view.log[0].clone());
-    let event = view.log_open.clone();
+    let mut newest = view.log[0].clone();
+    newest.started_at += chrono::Duration::seconds(1);
+    newest.body = "Newest event".into();
+    newest.paths.clear();
+    let mut events = view.log.clone();
+    events.push(newest);
+    view.set_log(events);
+    view.select_log_event(Some(view.log[0].clone()));
+    let event = view.log_selected.clone();
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 2, 20))
             .is_none()
     );
-    assert_eq!(view.log_open, event);
+    assert_eq!(view.log_selected, event);
     assert!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 2, 20))
             .is_none()
     );
-    assert!(view.log_open.is_none());
+    assert_eq!(view.log_selected.as_ref(), view.log.last());
 }
 
 #[test]
