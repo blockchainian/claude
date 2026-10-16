@@ -621,9 +621,9 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: background, needs attention, the newer of latest
-        // activity and last message, prompt, project, branch, model. The title sits
-        // on the rule below the panel.
+        // Sections top to bottom: prompt, background, the newer of latest activity
+        // and last message, needs attention, project, branch, model. The title
+        // sits on the rule below the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
         let mut bodies = Vec::new();
@@ -636,6 +636,72 @@ impl View {
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
         let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
+
+        let prompt_header = if let Some(start) = session.prompt_at {
+            let end = if session.status == SessionStatus::Working {
+                now
+            } else {
+                session.last_record_at.unwrap_or(start)
+            };
+            let messages = session.turn_messages;
+            let label = if messages == 1 { "message" } else { "messages" };
+            left_right(
+                "Prompt".dim().into(),
+                Line::from(vec![
+                    format!("{messages} {label}").dim(),
+                    " · ".dim(),
+                    format_duration((end - start).num_seconds().max(0)).dim(),
+                ]),
+                width,
+            )
+            .0
+        } else {
+            left_right("Prompt".dim().into(), Line::default(), width).0
+        };
+        separate_section(&mut items);
+        items.push(prompt_header.into());
+        let prompt_text = match session.prompt.trim() {
+            "" => "No prompt available.",
+            prompt => prompt,
+        };
+        let prompt_start = items.len();
+        let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
+        items.extend(prompt_body.into_iter().map(Item::from));
+        bodies.push(prompt_start..items.len());
+        keys.push(body_key("Prompt", &session.prompt));
+        copies.push(
+            Some((session.prompt.as_str(), "Copied prompt"))
+                .filter(|(prompt, _)| !prompt.trim().is_empty()),
+        );
+        body_links.push(super::links::text_links(
+            &session.prompt,
+            &session.cwd,
+            &session.prompt_images,
+        ));
+        item_links.resize(items.len(), Vec::new());
+        for queued in &session.queued {
+            let first = wrap_details(queued, &session.cwd, width, true)
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            let visible = if first.width() > width {
+                width - 1
+            } else {
+                width
+            } as u16;
+            let mut cells =
+                super::text_selection_layout::map_lines(queued, std::slice::from_ref(&first), true)
+                    .pop()
+                    .unwrap_or_default();
+            cells.retain(|(columns, _)| columns.end <= visible);
+            item_links.push(super::links::row_links(
+                &cells,
+                &super::links::text_links(queued, &session.cwd, &[]),
+            ));
+            items.push(truncate_line_with_ellipsis_if_overflow(first, width).into());
+        }
+
+        item_links.resize(items.len(), Vec::new());
 
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
@@ -666,45 +732,6 @@ impl View {
             background = start..items.len();
         }
 
-        let needs = session
-            .background_job
-            .as_ref()
-            .and_then(|job| job.needs.as_deref());
-        if session.status == SessionStatus::NeedsInput || needs.is_some() {
-            separate_section(&mut items);
-            let start = items.len();
-            items.extend([Span::styled("Needs attention", style::attention_title_style()).into()]);
-            if let Some(needs) = needs {
-                items.extend(
-                    textwrap::wrap(needs, width.max(1))
-                        .into_iter()
-                        .map(|text| Line::from(text.into_owned()).into()),
-                );
-            } else if session.pending_questions.is_empty() {
-                items.extend([
-                    "Open task to review.".dim().into(),
-                    "Waiting for your response.".into(),
-                ]);
-            } else {
-                items.extend(session.pending_questions.iter().map(|question| {
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(Span::styled(
-                            question.clone(),
-                            style::log_styles(&crate::log::Kind::Assistant).1,
-                        )),
-                        width,
-                    )
-                    .into()
-                }));
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key(
-                "Needs attention",
-                &(needs, &session.pending_questions),
-            ));
-            copies.push(None);
-            body_links.push(Vec::new());
-        }
         item_links.resize(items.len(), Vec::new());
 
         // Latest activity and Last message share one slot and follow the
@@ -774,70 +801,45 @@ impl View {
             body_links.push(super::links::text_links(message, &session.cwd, &[]));
         }
 
-        let prompt_header = if let Some(start) = session.prompt_at {
-            let end = if session.status == SessionStatus::Working {
-                now
+        let needs = session
+            .background_job
+            .as_ref()
+            .and_then(|job| job.needs.as_deref());
+        if session.status == SessionStatus::NeedsInput || needs.is_some() {
+            separate_section(&mut items);
+            let start = items.len();
+            items.extend([Span::styled("Needs attention", style::attention_title_style()).into()]);
+            if let Some(needs) = needs {
+                items.extend(
+                    textwrap::wrap(needs, width.max(1))
+                        .into_iter()
+                        .map(|text| Line::from(text.into_owned()).into()),
+                );
+            } else if session.pending_questions.is_empty() {
+                items.extend([
+                    "Open task to review.".dim().into(),
+                    "Waiting for your response.".into(),
+                ]);
             } else {
-                session.last_record_at.unwrap_or(start)
-            };
-            let messages = session.turn_messages;
-            let label = if messages == 1 { "message" } else { "messages" };
-            left_right(
-                "Prompt".dim().into(),
-                Line::from(vec![
-                    format!("{messages} {label}").dim(),
-                    " · ".dim(),
-                    format_duration((end - start).num_seconds().max(0)).dim(),
-                ]),
-                width,
-            )
-            .0
-        } else {
-            left_right("Prompt".dim().into(), Line::default(), width).0
-        };
-        separate_section(&mut items);
-        items.push(prompt_header.into());
-        let prompt_text = match session.prompt.trim() {
-            "" => "No prompt available.",
-            prompt => prompt,
-        };
-        let prompt_start = items.len();
-        let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
-        items.extend(prompt_body.into_iter().map(Item::from));
-        bodies.push(prompt_start..items.len());
-        keys.push(body_key("Prompt", &session.prompt));
-        copies.push(
-            Some((session.prompt.as_str(), "Copied prompt"))
-                .filter(|(prompt, _)| !prompt.trim().is_empty()),
-        );
-        body_links.push(super::links::text_links(
-            &session.prompt,
-            &session.cwd,
-            &session.prompt_images,
-        ));
-        item_links.resize(items.len(), Vec::new());
-        for queued in &session.queued {
-            let first = wrap_details(queued, &session.cwd, width, true)
-                .into_iter()
-                .next()
-                .unwrap_or_default();
-            let visible = if first.width() > width {
-                width - 1
-            } else {
-                width
-            } as u16;
-            let mut cells =
-                super::text_selection_layout::map_lines(queued, std::slice::from_ref(&first), true)
-                    .pop()
-                    .unwrap_or_default();
-            cells.retain(|(columns, _)| columns.end <= visible);
-            item_links.push(super::links::row_links(
-                &cells,
-                &super::links::text_links(queued, &session.cwd, &[]),
+                items.extend(session.pending_questions.iter().map(|question| {
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(Span::styled(
+                            question.clone(),
+                            style::log_styles(&crate::log::Kind::Assistant).1,
+                        )),
+                        width,
+                    )
+                    .into()
+                }));
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key(
+                "Needs attention",
+                &(needs, &session.pending_questions),
             ));
-            items.push(truncate_line_with_ellipsis_if_overflow(first, width).into());
+            copies.push(None);
+            body_links.push(Vec::new());
         }
-
         item_links.resize(items.len(), Vec::new());
 
         let project_label = Line::from("Project".dim());

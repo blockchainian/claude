@@ -1,8 +1,8 @@
-Latest activity                   7s ago
-Run checks
-
 Prompt              42 messages · 1h 10m
 Activity task
+
+Latest activity                   7s ago
+Run checks
 
 Project
 /tmp/project

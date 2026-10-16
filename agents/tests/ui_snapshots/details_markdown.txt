@@ -1,13 +1,13 @@
+Prompt
+Use cargo and tests
+• queued prompt
+
 Last message
 Result
 
 Built agents.
 
 cargo test
-
-Prompt
-Use cargo and tests
-• queued prompt
 
 Project
 /tmp/project

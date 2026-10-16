@@ -1,3 +1,6 @@
+Prompt
+Background task
+
 Background
 ─ Run checks                          0s
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -5,9 +8,6 @@ Background
 
 Last message
 Checking the project
-
-Prompt
-Background task
 
 Project
 /tmp/project
