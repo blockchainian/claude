@@ -146,8 +146,11 @@ fn result_text(value: &serde_json::Value) -> String {
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|block| block["type"] == "text")
-            .filter_map(|block| block["text"].as_str())
+            .filter_map(|block| match block["type"].as_str() {
+                Some("text") => block["text"].as_str(),
+                Some("tool_reference") => block["tool_name"].as_str(),
+                _ => None,
+            })
             .collect::<Vec<_>>()
             .join("\n")
     })
@@ -948,6 +951,34 @@ pub(crate) mod tests {
             }
         }
         assert!(calls.iter().any(|call| call.is_error));
+    }
+
+    #[test]
+    fn tool_reference_results_keep_tool_names_on_separate_lines() {
+        let records: Vec<Value> = include_str!("../../../tests/fixtures/claude-tool-search.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let name = "mcp__plugin_codex_codex-manager__send";
+        let reference = records[1]["message"]["content"][0]["content"][0].clone();
+        for (content, expected) in [
+            (json!([reference]), name.to_owned()),
+            (json!([reference, reference]), format!("{name}\n{name}")),
+            (
+                json!([{"type":"text","text":"before"}, reference, {"type":"text","text":"after"}]),
+                format!("before\n{name}\nafter"),
+            ),
+        ] {
+            let mut records = records.clone();
+            records[1]["message"]["content"][0]["content"] = content;
+            let events = events_from(records);
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].calls.len(), 1);
+            assert_eq!(
+                events[0].calls[0].output,
+                Some(vec![text_section("output", &expected)])
+            );
+        }
     }
 
     #[test]
