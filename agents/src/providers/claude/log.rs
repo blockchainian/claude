@@ -578,20 +578,24 @@ impl Log {
                 .find(|line| !line.is_empty())
                 .unwrap_or("")
         });
-        let fields: Vec<_> = ["task-id", "status", "output-file"]
-            .into_iter()
-            .filter_map(|key| field(key).map(|value| (key.to_owned(), value.to_owned())))
-            .collect();
+        // The output file's content, or its path once the file is gone.
+        let output = field("output-file").map(|path| match std::fs::read_to_string(path) {
+            Ok(text) => Section::Text {
+                label: String::new(),
+                text,
+            },
+            Err(_) => Section::Fields(vec![("output-file".to_owned(), path.to_owned())]),
+        });
         self.push(Kind::Tool, summary.to_owned(), at);
         let event = &mut self.entries.last_mut().unwrap().event;
         event.source = source.map(str::to_owned);
-        if !fields.is_empty() {
+        if field("task-id").is_some() || output.is_some() {
             event.calls.push(ToolCall {
                 id: field("task-id").unwrap_or("").to_owned(),
                 title: summary.to_owned(),
                 name: "task-notification".to_owned(),
                 input: Vec::new(),
-                output: Some(vec![Section::Fields(fields)]),
+                output: Some(output.into_iter().collect()),
                 exit_code: None,
                 is_error: false,
             });

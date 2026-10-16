@@ -180,6 +180,17 @@ impl View {
         Line::from(Span::styled(time.to_owned(), time_style))
             .right_aligned()
             .render(time_area, buf);
+        // A task notification shows its task id opposite the time.
+        if let [call] = &event.calls[..]
+            && call.name == "task-notification"
+        {
+            let id_area = Rect::new(header_row.x, header_row.y, margin, 1);
+            truncate_line_with_ellipsis_if_overflow(
+                Line::from(Span::styled(call.id.clone(), time_style)),
+                id_area.width.into(),
+            )
+            .render(id_area, buf);
+        }
         let mut body_area =
             super::render::row(area, LOG_TOP + 2, area.height.saturating_sub(LOG_TOP + 2));
         if self.log_detail_search.active() {
@@ -598,7 +609,9 @@ fn format_row_time(time: &RowTime, now: DateTime<Utc>) -> String {
     match *time {
         RowTime::Clock(at) => at.with_timezone(&Local).format(CLOCK_FORMAT).to_string(),
         RowTime::Settled(duration) => format_log_duration(duration),
-        RowTime::Running(start) if now - start < chrono::Duration::microseconds(500) => "0ms".into(),
+        RowTime::Running(start) if now - start < chrono::Duration::microseconds(500) => {
+            "0ms".into()
+        }
         RowTime::Running(start) => format_log_duration(now - start),
         RowTime::Ago(at) => format_relative_time(now, Some(at)),
     }
@@ -815,7 +828,10 @@ fn detail_layout(
 pub(super) fn shows_calls(event: &Event) -> bool {
     !event.calls.is_empty()
         && (matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied)
-            || event.calls.iter().any(|call| call.name == "AskUserQuestion"))
+            || event
+                .calls
+                .iter()
+                .any(|call| call.name == "AskUserQuestion"))
 }
 
 /// The full text an open log event shows below its header.
@@ -1024,44 +1040,43 @@ fn highlight_matches(line: &mut Line<'static>, search: &super::log_search::LogSe
 }
 
 #[cfg(test)]
-mod log_markdown {
+pub(super) mod log_markdown {
     use super::*;
     use ratatui::style::Modifier;
 
     #[test]
-    fn task_notifications_show_fields_and_link_without_repeating_summary() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/claude-task-notifications.jsonl");
-        let events = crate::providers::claude::log::tail(&path, 10).unwrap();
+    fn task_notifications_show_output_content_without_repeating_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = notification_events(dir.path(), Some("all 3 tests passed"));
         assert_eq!(events.len(), 2);
         for event in events {
             let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
             assert_eq!(event.kind, Kind::Tool);
             assert_eq!(event.body, summary);
             assert_eq!(event.calls[0].title, summary);
+            assert_eq!(event.calls[0].id, "b9wi31ww0");
             let body = open_text(&event);
-            assert!(body.contains("task-id: b9wi31ww0"), "{body}");
-            assert!(body.contains("status: completed"), "{body}");
-            assert!(
-                body.contains("output-file: /tmp/agents-notification/tasks/b9wi31ww0.output"),
-                "{body}"
-            );
+            assert!(body.contains("all 3 tests passed"), "{body}");
+            assert!(!body.contains("task-id"), "{body}");
+            assert!(!body.contains("status"), "{body}");
+            assert!(!body.contains("output-file"), "{body}");
             assert!(!body.contains(summary), "{body}");
             assert!(!body.contains("tool-use-id"), "{body}");
-            let dir = tempfile::tempdir().unwrap();
-            let output = dir.path().join("b9wi31ww0.output");
+        }
+    }
+
+    #[test]
+    fn task_notifications_keep_a_linked_path_once_the_output_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("b9wi31ww0.output");
+        for event in notification_events(dir.path(), None) {
+            let body = open_text(&event);
+            assert!(
+                body.contains(&format!("output-file: {}", output.display())),
+                "{body}"
+            );
             std::fs::write(&output, "done").unwrap();
-            let mut linked = event.clone();
-            if let Some(crate::log::Section::Fields(fields)) =
-                linked.calls[0].output.as_mut().unwrap().first_mut()
-            {
-                fields
-                    .iter_mut()
-                    .find(|(key, _)| key == "output-file")
-                    .unwrap()
-                    .1 = output.display().to_string();
-            }
-            let layout = detail_layout(&linked, 120, dir.path(), DateTime::UNIX_EPOCH);
+            let layout = detail_layout(&event, 120, dir.path(), DateTime::UNIX_EPOCH);
             assert!(
                 layout
                     .links
@@ -1069,7 +1084,31 @@ mod log_markdown {
                     .flatten()
                     .any(|link| link.target == output)
             );
+            std::fs::remove_file(&output).unwrap();
         }
+    }
+
+    /// The notification fixture's events, with its output file inside `dir` holding `output`.
+    pub(in crate::ui) fn notification_events(
+        dir: &std::path::Path,
+        output: Option<&str>,
+    ) -> Vec<Event> {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-task-notifications.jsonl");
+        let file = dir.join("b9wi31ww0.output");
+        if let Some(output) = output {
+            std::fs::write(&file, output).unwrap();
+        }
+        let transcript = dir.join("transcript.jsonl");
+        std::fs::write(
+            &transcript,
+            std::fs::read_to_string(fixture).unwrap().replace(
+                "/tmp/agents-notification/tasks/b9wi31ww0.output",
+                &file.display().to_string(),
+            ),
+        )
+        .unwrap();
+        crate::providers::claude::log::tail(&transcript, 10).unwrap()
     }
 
     #[test]

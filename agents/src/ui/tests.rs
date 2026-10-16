@@ -2272,7 +2272,11 @@ fn details_branch_uses_header_style_and_links_keep_their_styles() {
         })
         .expect("Project header");
     for x in 12..36 {
-        assert!(buf[(x, project_y + 1)].modifier.contains(ratatui::style::Modifier::DIM));
+        assert!(
+            buf[(x, project_y + 1)]
+                .modifier
+                .contains(ratatui::style::Modifier::DIM)
+        );
         assert_eq!(buf[(x, project_y + 1)].symbol(), " ");
     }
     for x in 36..40 {
@@ -3173,8 +3177,14 @@ fn details_sections_run_activity_background_update_tasks_prompt() {
         status: crate::model::TaskStatus::InProgress,
     }];
     let rendered = queued_details(row, 40);
-    let positions = ["Latest activity", "Background\n", "Update", "Tasks", "Prompt\n"]
-        .map(|label| rendered.find(label).expect(label));
+    let positions = [
+        "Latest activity",
+        "Background\n",
+        "Update",
+        "Tasks",
+        "Prompt\n",
+    ]
+    .map(|label| rendered.find(label).expect(label));
     assert!(positions.is_sorted(), "{rendered}");
 }
 
@@ -3357,7 +3367,7 @@ fn background_box_dims_border_but_not_title_or_output() {
         .find(|x| title_buf[(*x, 0)].symbol() == "R")
         .unwrap();
     assert_eq!(title_buf[(0, 0)], buf[(0, top)]);
-    assert_eq!(title_buf[(title_x, 0)], buf[(2, top)]);
+    assert!(title_buf[(title_x, 0)].modifier.contains(Modifier::DIM));
     assert_eq!(buf[(2, top + 1)].symbol(), "t");
     assert!(!buf[(2, top + 1)].modifier.contains(Modifier::DIM));
 }
@@ -3626,18 +3636,32 @@ fn task_rows_start_at_left_padding_without_marker_and_click_correctly() {
                 view.render(area, &mut buf);
                 let list = view.center_layout(area).list;
                 let second = view.selectable_indices()[1];
-                let title = view.rows[second].display_title().chars().take(12).collect::<String>();
+                let title = view.rows[second]
+                    .display_title()
+                    .chars()
+                    .take(12)
+                    .collect::<String>();
                 let rendered = screen(&view, width, 40);
                 let (_, y) = rendered_cell(&rendered, &title);
-                click_mouse(&mut view, mouse(MouseEventKind::Down(MouseButton::Left), list.x, y));
+                click_mouse(
+                    &mut view,
+                    mouse(MouseEventKind::Down(MouseButton::Left), list.x, y),
+                );
                 assert_eq!(view.selected, second);
                 view.render(area, &mut buf);
                 assert_eq!(view.marker_pos(), Some((list.x, y)));
-                assert_eq!(buf[(list.x, y)].symbol(), View::status(&view.rows[second]).1.content);
+                assert_eq!(
+                    buf[(list.x, y)].symbol(),
+                    View::status(&view.rows[second]).1.content
+                );
                 assert_eq!(buf[(list.x + 2, y)].symbol(), &title[..1]);
                 for x in list.x..list.right() {
                     assert_ne!(buf[(x, y)].symbol(), "›");
-                    assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::REVERSED));
+                    assert!(
+                        buf[(x, y)]
+                            .modifier
+                            .contains(ratatui::style::Modifier::REVERSED)
+                    );
                 }
                 assert_eq!(buf[(list.x - 1, y)].symbol(), " ");
             },
@@ -6864,7 +6888,7 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
                     .contains(ratatui::style::Modifier::DIM)
             );
             assert!(
-                !buf[(body.x + start, row.y)]
+                buf[(body.x + start, row.y)]
                     .modifier
                     .contains(ratatui::style::Modifier::DIM)
             );
@@ -8700,10 +8724,10 @@ fn details_click_selects_source(index: usize, label: &'static str) {
 }
 
 #[test]
-fn task_notification_detail_keeps_summary_only_in_header() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/claude-task-notifications.jsonl");
-    let events = crate::providers::claude::log::tail(&path, 10).unwrap();
+fn task_notification_detail_shows_task_id_and_output_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let events =
+        super::log::log_markdown::notification_events(dir.path(), Some("all 3 tests passed"));
     let (mut view, now) = log_fixture();
     for event in events {
         let summary = event.body.clone();
@@ -8728,25 +8752,29 @@ fn task_notification_detail_keeps_summary_only_in_header() {
             .collect();
         assert_eq!(
             lines.iter().filter(|line| line.contains(&summary)).count(),
-            1, "{lines:#?}"
+            1,
+            "{lines:#?}"
         );
         let header = lines
             .iter()
             .position(|line| line.contains(&summary))
             .unwrap();
+        assert!(lines[header].starts_with("b9wi31ww0"), "{lines:#?}");
+        let rest = &lines[header + 1..];
+        let arrow = rest.iter().position(|line| line.trim() == "↓").unwrap();
         assert!(
-            lines[header + 1..]
+            rest[arrow + 1..]
                 .iter()
-                .any(|line| line.contains("task-id: b9wi31ww0"))
+                .any(|line| line.trim() == "all 3 tests passed")
         );
         assert!(
-            lines[header + 1..]
-                .iter()
-                .any(|line| line.contains("status: completed"))
+            !rest.iter().any(|line| line.contains("status")),
+            "{lines:#?}"
         );
-        assert!(lines[header + 1..].iter().any(|line| {
-            line.contains("output-file: /tmp/agents-notification/tasks/b9wi31ww0.output")
-        }));
+        assert!(
+            !rest.iter().any(|line| line.contains("output-file")),
+            "{lines:#?}"
+        );
     }
 }
 

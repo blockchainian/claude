@@ -899,7 +899,10 @@ mod tests {
             let _budget = ScanBudget;
             let parts = Part::text_parts(source.clone(), false);
             let scanned = 2 * source.len() - JSON_SCAN_BUDGET.get().unwrap();
-            assert!(scanned >= source.len(), "the whole candidate must be scanned");
+            assert!(
+                scanned >= source.len(),
+                "the whole candidate must be scanned"
+            );
             assert_eq!(parts.len(), 1);
             assert_eq!(parts[0].source, source);
         }
@@ -1351,7 +1354,7 @@ mod tests {
                     Some(0)
                 );
                 for span in &lines[0].spans[1..lines[0].spans.len() - 2] {
-                    assert_eq!(span.style, Style::new().not_dim());
+                    assert_eq!(span.style, Style::new().dim());
                 }
                 assert_eq!(lines[0].spans[0].style, Style::new().dim());
                 assert_eq!(lines[0].spans.last().unwrap().style, Style::new().dim());

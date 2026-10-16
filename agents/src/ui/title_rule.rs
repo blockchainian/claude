@@ -25,9 +25,12 @@ pub(super) fn title_rule(title: &str, width: usize, elapsed: Option<&str>) -> Li
     Line::from(spans)
 }
 
-/// A title rule with the title centered between equal dim rules.
+/// A dim title rule with the title centered between equal rules, like the details titles.
 pub(super) fn centered_title_rule(title: &str, width: usize) -> Line<'static> {
     let mut line = title_rule(title, width, None);
+    for span in &mut line.spans {
+        span.style = Style::new().dim();
+    }
     if line.spans.len() < 4 {
         return line;
     }
