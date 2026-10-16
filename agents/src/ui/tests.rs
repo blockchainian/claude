@@ -968,6 +968,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         name: None,
         title: title.into(),
         prompt: title.into(),
+        detail_sources: Default::default(),
         prompt_images: Vec::new(),
         queued: Vec::new(),
         prompt_at: None,
@@ -3294,6 +3295,7 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Assistant, "A long response whose whitespace collapses and whose body must be truncated before the right aligned timestamp", 40, None),
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
+        source: None,
         sender: None,
         kind, body: body.into(), paths: Vec::new(), started_at: now - Duration::seconds(age),
         ended_at: end.map(|age| now - Duration::seconds(age)),
@@ -4442,6 +4444,7 @@ fn task_log_right_aligns_mixed_width_times_and_aligns_labels() {
 fn task_log_shows_only_visible_events_and_hides_without_selection() {
     let (mut view, now) = log_fixture();
     let first = crate::log::Event {
+        source: None,
         sender: None,
         kind: crate::log::Kind::User,
         body: "Discarded event".into(),
@@ -6845,7 +6848,7 @@ fn details_prompt_links_its_shortened_path_and_image_placeholder() {
     );
     assert_eq!(click_text(&mut view, &rendered, "Look at"), None);
     assert_eq!(
-        click_text(&mut view, &rendered, "Look at"),
+        double_click_text(&mut view, &rendered, "Look at"),
         Some(Action::Copy {
             text: view.rows[view.selected].prompt.clone(),
             label: "Copied prompt".into()
@@ -8051,3 +8054,91 @@ mod details_group_tests;
 
 #[path = "details_order_tests.rs"]
 mod details_order;
+
+#[test]
+fn details_activity_single_click_selects_source_and_double_click_copies() {
+    details_click_selects_source(7, "Copied latest activity");
+}
+
+#[test]
+fn details_update_single_click_selects_source_and_double_click_copies() {
+    details_click_selects_source(6, "Copied update");
+}
+
+#[test]
+fn details_prompt_single_click_selects_source_and_double_click_copies() {
+    details_click_selects_source(0, "Copied prompt");
+}
+
+fn details_click_selects_source(index: usize, label: &'static str) {
+    let (mut view, now) = log_fixture();
+    for (index, event) in view.log.iter_mut().enumerate() {
+        event.source = Some(format!("fixture:{index}"));
+    }
+    let activity = view.log[7].clone();
+    let update = view.log[6].clone();
+    let prompt = view.log[0].clone();
+    let row = &mut view.rows[view.selected];
+    row.activity = Some(crate::model::Activity {
+        kind: activity.kind.clone(),
+        label: activity.body.clone(),
+        at: activity.started_at,
+    });
+    row.last_message = Some(update.body.clone());
+    row.last_message_at = Some(update.started_at);
+    row.prompt = prompt.body.clone();
+    row.prompt_at = Some(prompt.started_at);
+    row.detail_sources = [
+        activity.source.clone(),
+        update.source.clone(),
+        prompt.source.clone(),
+    ];
+    let expected = view.log[index].clone();
+    view.select_log_event(Some(view.log[1].clone()));
+    let rendered = log_screen(&view, 160, 45, now);
+    let rows = view.viewport.borrow().details_copy.clone();
+    let y = rows
+        .iter()
+        .find(|(_, _, value)| *value == label)
+        .unwrap()
+        .0
+        .start;
+    let x = view.viewport.borrow().details.x;
+    let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
+    assert_eq!(click_mouse(&mut view, click), None);
+    assert_eq!(
+        view.flush_pending_click(Instant::now() + view.double_click_interval),
+        None
+    );
+    assert_eq!(
+        view.log_selected.as_ref(),
+        Some(&expected),
+        "{label}\n{rendered}"
+    );
+    log_screen(&view, 160, 45, now);
+    assert!(view.viewport.borrow().log_rows.contains(&index));
+    assert_eq!(view.log_selected.as_ref() == view.log.last(), index == 7);
+    let previous = view.log[1].clone();
+    view.select_log_event(Some(previous.clone()));
+    assert_eq!(click_mouse(&mut view, click), None);
+    assert_eq!(
+        click_mouse(&mut view, click),
+        Some(Action::Copy {
+            text: expected.body.clone(),
+            label: label.into(),
+        })
+    );
+    assert_eq!(
+        view.flush_pending_click(Instant::now() + view.double_click_interval),
+        None
+    );
+    assert_eq!(view.log_selected.as_ref(), Some(&previous));
+    view.set_log(Vec::new());
+    log_screen(&view, 160, 45, now);
+    assert_eq!(click_mouse(&mut view, click), None);
+    assert_eq!(
+        view.flush_pending_click(Instant::now() + view.double_click_interval),
+        None
+    );
+    assert!(view.log_selected.is_none());
+}

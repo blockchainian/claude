@@ -1499,6 +1499,7 @@ mod wrapped_path_tests {
             name: None,
             title: "Path probe".into(),
             prompt: MESSAGE.into(),
+            detail_sources: Default::default(),
             prompt_images: Vec::new(),
             queued: Vec::new(),
             prompt_at: None,

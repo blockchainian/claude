@@ -879,6 +879,7 @@ fn session(
         name: None,
         title,
         prompt: summary.prompt,
+        detail_sources: summary.detail_sources,
         prompt_images: summary.prompt_images,
         queued: summary.queued,
         prompt_at: summary.prompt_at,

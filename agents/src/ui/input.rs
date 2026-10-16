@@ -5,7 +5,15 @@ const WHEEL_ROWS: usize = 3;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
-    Log { event: crate::log::Event },
+    Log {
+        event: crate::log::Event,
+    },
+    Details {
+        session: SessionKey,
+        source: Option<String>,
+        text: String,
+        label: &'static str,
+    },
     Background(crate::model::BackgroundTask),
     Link(PathBuf),
     Heading(PathBuf),
@@ -36,6 +44,26 @@ impl View {
         let click = self.pending_click.take().expect("click is due");
         match click.target {
             ClickTarget::Log { .. } => None,
+            ClickTarget::Details {
+                session, source, ..
+            } => {
+                if self.selected_id() == Some(&session)
+                    && let Some(source) = source
+                    && let Some(event) = self
+                        .log
+                        .iter()
+                        .rev()
+                        .find(|event| {
+                            event.source.as_ref() == Some(&source)
+                                || event.calls.iter().any(|call| call.id == source)
+                        })
+                        .cloned()
+                {
+                    self.log_background_return = None;
+                    self.select_log_event(Some(event));
+                }
+                None
+            }
             ClickTarget::Link(path) => Some(Action::OpenPath(path)),
             ClickTarget::Heading(path) => click.open_heading.then_some(Action::OpenPath(path)),
             ClickTarget::Field(_) => None,
@@ -127,6 +155,7 @@ impl View {
         }
         self.select_log_event(Some(crate::log::Event {
             kind: crate::log::Kind::Tool,
+            source: None,
             sender: None,
             body,
             paths: Vec::new(),
@@ -221,6 +250,26 @@ impl View {
         }
         if let Some(path) = self.link_at(position) {
             return Some(ClickTarget::Link(path));
+        }
+        if viewport.details.contains(position)
+            && let Some((_, text, label)) = viewport
+                .details_copy
+                .iter()
+                .find(|(rows, _, _)| rows.contains(&position.y))
+            && let Some(session) = self.selected_row()
+        {
+            let index = match *label {
+                "Copied latest activity" => 0,
+                "Copied update" => 1,
+                "Copied prompt" => 2,
+                _ => return None,
+            };
+            return Some(ClickTarget::Details {
+                session: session.id.clone(),
+                source: session.detail_sources[index].clone(),
+                text: text.clone(),
+                label,
+            });
         }
         if viewport.log.contains(position)
             && let Some(&index) = viewport
@@ -520,6 +569,19 @@ impl View {
                     let event = event.clone();
                     if self.defer_click(ClickTarget::Log { event }) {
                         self.focus_input();
+                    }
+                } else if let Some(target @ ClickTarget::Details { .. }) =
+                    self.click_target_at(position)
+                {
+                    let ClickTarget::Details { text, label, .. } = &target else {
+                        unreachable!()
+                    };
+                    let action = Action::Copy {
+                        text: text.clone(),
+                        label: (*label).into(),
+                    };
+                    if self.defer_click(target) {
+                        return Some(action);
                     }
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();

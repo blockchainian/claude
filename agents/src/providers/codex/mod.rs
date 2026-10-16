@@ -169,7 +169,8 @@ impl CodexProvider {
             };
             if let Some(summary) = summary {
                 if let Some(path) = session.transcript.as_deref() {
-                    session.prompt_images = rollout::first_prompt_images(path, &session.prompt)?;
+                    (session.prompt_images, session.detail_sources[2]) =
+                        rollout::first_prompt(path, &session.prompt)?;
                 }
                 apply_rollout(session, summary);
             } else {
@@ -196,6 +197,7 @@ impl CodexProvider {
 }
 
 fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
+    session.detail_sources[..2].clone_from_slice(&summary.detail_sources[..2]);
     session.last_message = summary.last_message;
     session.last_message_at = summary.last_message_at;
     session.last_record_at = summary.updated_at;
@@ -269,6 +271,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         },
         title,
         prompt: prompt.chars().take(512).collect(),
+        detail_sources: Default::default(),
         prompt_images: Vec::new(),
         queued: vec![],
         prompt_at: None,

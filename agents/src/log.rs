@@ -73,6 +73,8 @@ pub enum Kind {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
+    /// Identity of the transcript record that produced this event.
+    pub source: Option<String>,
     pub kind: Kind,
     pub sender: Option<String>,
     pub body: String,

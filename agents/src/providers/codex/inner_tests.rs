@@ -596,15 +596,17 @@ fn first_prompt_images_stop_at_the_first_completed_user_boundary() {
         ],
     );
     assert!(
-        super::rollout::first_prompt_images(&path, later_text)
+        super::rollout::first_prompt(&path, later_text)
             .unwrap()
+            .0
             .is_empty()
     );
     // The wrapper path is usable even before the following event is appended.
     write_image_records(&path, &later[..1]);
     assert_eq!(
-        super::rollout::first_prompt_images(&path, later_text)
+        super::rollout::first_prompt(&path, later_text)
             .unwrap()
+            .0
             .len(),
         1
     );
@@ -614,8 +616,9 @@ fn first_prompt_images_stop_at_the_first_completed_user_boundary() {
     write_image_records(&path, &[plain, later[0].clone(), later[1].clone()]);
     let first_text = first[0]["payload"]["content"][3]["text"].as_str().unwrap();
     assert!(
-        super::rollout::first_prompt_images(&path, first_text)
+        super::rollout::first_prompt(&path, first_text)
             .unwrap()
+            .0
             .is_empty()
     );
 }

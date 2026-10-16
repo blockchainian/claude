@@ -384,6 +384,7 @@ mod tests {
 
     fn event(calls: Vec<ToolCall>) -> Event {
         Event {
+            source: None,
             sender: None,
             kind: Kind::Tool,
             body: String::new(),

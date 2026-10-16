@@ -11,6 +11,7 @@ const CHUNK: u64 = 64 * 1024;
 
 #[derive(Default)]
 pub(super) struct Summary {
+    pub detail_sources: [Option<String>; 3],
     pub last_message: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub activity: Option<Activity>,
@@ -20,7 +21,7 @@ pub(super) struct Summary {
 }
 
 /// Walk complete JSON records newest first, retaining records spanning chunks.
-fn walk(path: &Path, mut visit: impl FnMut(Value) -> io::Result<bool>) -> io::Result<()> {
+fn walk(path: &Path, mut visit: impl FnMut(Value, u64) -> io::Result<bool>) -> io::Result<()> {
     let mut file = File::open(path)?;
     let mut position = file.metadata()?.len();
     let mut remainder = Vec::new();
@@ -39,9 +40,12 @@ fn walk(path: &Path, mut visit: impl FnMut(Value) -> io::Result<bool>) -> io::Re
             remainder = bytes;
             continue;
         };
+        let mut end = bytes.len();
         for line in bytes[first..].split(|b| *b == b'\n').rev() {
-            if let Ok(record) = serde_json::from_slice(line)
-                && !visit(record)?
+            let start = end - line.len();
+            end = start.saturating_sub(1);
+            if let Ok(record) = serde_json::from_slice::<Value>(line)
+                && !visit(record, position + start as u64)?
             {
                 return Ok(());
             }
@@ -49,6 +53,27 @@ fn walk(path: &Path, mut visit: impl FnMut(Value) -> io::Result<bool>) -> io::Re
         remainder = bytes[..first].to_vec();
     }
     Ok(())
+}
+
+fn source(record: &Value, offset: u64) -> String {
+    let payload = &record["payload"];
+    payload["item"]["id"]
+        .as_str()
+        .or_else(|| payload["id"].as_str())
+        .or_else(|| payload["call_id"].as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("offset:{offset}"))
+}
+
+fn assistant_source(record: &Value, offset: u64) -> Option<String> {
+    let payload = &record["payload"];
+    ((record["type"] == "response_item"
+        && payload["type"] == "message"
+        && payload["role"] == "assistant")
+        || (record["type"] == "event_msg"
+            && payload["type"] == "item_completed"
+            && payload["item"]["type"] == "AgentMessage"))
+        .then(|| source(record, offset))
 }
 
 fn timestamp(record: &Value) -> Option<DateTime<Utc>> {
@@ -648,6 +673,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         None => ended_at,
     };
     Ok(Some(Event {
+        source: None,
         sender: None,
         kind: Kind::Tool,
         body,
@@ -663,14 +689,21 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
 
 /// Read only through the SQLite prompt and its following completed item.
 /// Prompt text itself comes from SQLite; rollout records supply attachments.
-pub(super) fn first_prompt_images(path: &Path, first_user_message: &str) -> io::Result<Vec<Image>> {
-    let mut lines = io::BufReader::new(File::open(path)?).lines();
+pub(super) fn first_prompt(
+    path: &Path,
+    first_user_message: &str,
+) -> io::Result<(Vec<Image>, Option<String>)> {
+    let mut lines = io::BufReader::new(File::open(path)?).split(b'\n');
+    let mut offset = 0u64;
     for line in lines.by_ref() {
-        let Ok(record) = serde_json::from_str::<Value>(&line?) else {
+        let line = line?;
+        let start = offset;
+        offset += line.len() as u64 + 1;
+        let Ok(record) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
         if completed_user(&record) {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), None));
         }
         let payload = &record["payload"];
         if record["type"] != "response_item"
@@ -690,24 +723,28 @@ pub(super) fn first_prompt_images(path: &Path, first_user_message: &str) -> io::
             continue;
         }
         if prompt.attachments.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Some(source(&record, start))));
         }
         let completed = lines
             .next()
             .transpose()?
-            .and_then(|line| serde_json::from_str::<Value>(&line).ok())
+            .and_then(|line| serde_json::from_slice::<Value>(&line).ok())
             .filter(completed_user);
-        return Ok(prompt_images(&prompt, payload, completed.as_ref()));
+        return Ok((
+            prompt_images(&prompt, payload, completed.as_ref()),
+            Some(source(&record, start)),
+        ));
     }
-    Ok(Vec::new())
+    Ok((Vec::new(), None))
 }
 
 pub(super) fn summary(path: &Path) -> io::Result<Summary> {
     let mut summary = Summary::default();
     let mut boundary = false;
+    let mut message_source_closed = false;
     let mut outputs = HashSet::new();
     let mut pending = Vec::new();
-    walk(path, |record| {
+    walk(path, |record, offset| {
         let Some(at) = timestamp(&record) else {
             return Ok(true);
         };
@@ -736,25 +773,38 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
                 _ => {}
             }
         }
+        if record["type"] == "event_msg" && payload["type"] == "task_started" {
+            message_source_closed = true;
+        }
         if !boundary && record["type"] == "event_msg" {
             match payload["type"].as_str() {
                 Some("task_complete" | "turn_aborted") => {
                     summary.turn_ended = true;
                     boundary = true;
                 }
-                Some("task_started") => boundary = true,
+                Some("task_started") => {
+                    boundary = true;
+                }
                 _ => {}
             }
         }
+        let message = assistant_text(&record)?;
         if summary.last_message.is_none()
-            && let Some(text) = assistant_text(&record)?
+            && let Some(text) = message.as_ref()
         {
-            summary.last_message = Some(printable(&text));
+            summary.detail_sources[1] = assistant_source(&record, offset);
+            summary.last_message = Some(printable(text));
             summary.last_message_at = Some(at);
+        }
+        // Completion notifications repeat the reply but have no log row. Keep
+        // the identity of the latest message record in that turn instead.
+        if summary.detail_sources[1].is_none() && !message_source_closed && message.is_some() {
+            summary.detail_sources[1] = assistant_source(&record, offset);
         }
         if summary.activity.is_none()
             && let Some(event) = completed_tool(&record)?
         {
+            summary.detail_sources[0] = Some(source(&record, offset));
             summary.activity = Some(Activity {
                 kind: event.kind,
                 label: event.body,
@@ -773,10 +823,14 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
                 _ => None,
             };
             if let Some((kind, label)) = activity {
+                summary.detail_sources[0] = Some(source(&record, offset));
                 summary.activity = Some(Activity { kind, label, at });
             }
         }
-        Ok(!(boundary && summary.last_message.is_some() && summary.activity.is_some()))
+        Ok(!(boundary
+            && summary.last_message.is_some()
+            && summary.activity.is_some()
+            && (summary.detail_sources[1].is_some() || message_source_closed)))
     })?;
     summary.pending_questions = pending.into_iter().rev().flatten().collect();
     Ok(summary)
@@ -790,7 +844,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
     let mut results = HashMap::new();
     let mut seen = HashSet::new();
     let mut completed_prompt = None;
-    walk(path, |record| {
+    walk(path, |record, offset| {
         let Some(at) = timestamp(&record) else {
             return Ok(true);
         };
@@ -801,7 +855,8 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
         let payload = &record["payload"];
         let mut images = Vec::new();
         let mut calls = Vec::new();
-        if let Some(event) = completed_tool(&record)? {
+        if let Some(mut event) = completed_tool(&record)? {
+            event.source = Some(source(&record, offset));
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
             }
@@ -894,6 +949,7 @@ pub(super) fn tail(path: &Path, count: usize) -> io::Result<Vec<Event>> {
             _ => return Ok(true),
         };
         entries.push(Event {
+            source: Some(source(&record, offset)),
             sender: None,
             kind,
             body,
@@ -929,6 +985,37 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn detail_sources_identify_real_rollout_events() {
+        let path = fixture();
+        let details = summary(&path).unwrap();
+        let (_, prompt) = first_prompt(&path, "Check the dashboard.").unwrap();
+        let events = tail(&path, usize::MAX).unwrap();
+        for (source, kind) in [
+            (details.detail_sources[1].as_ref(), Kind::Assistant),
+            (prompt.as_ref(), Kind::User),
+        ] {
+            let source = source.unwrap_or_else(|| panic!("fixture source {kind:?}"));
+            let event = events
+                .iter()
+                .find(|event| event.source.as_ref() == Some(source))
+                .unwrap();
+            assert_eq!(event.kind, kind);
+        }
+        let tool_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-inner/command.jsonl");
+        let tool_summary = summary(&tool_path).unwrap();
+        let tool_events = tail(&tool_path, usize::MAX).unwrap();
+        let source = tool_summary.detail_sources[0].as_ref().unwrap();
+        assert!(
+            tool_events
+                .iter()
+                .any(|event| event.source.as_ref() == Some(source))
+        );
+        let short = tail(&path, 1).unwrap();
+        assert!(!short.iter().any(|event| event.source == prompt));
     }
 
     #[test]

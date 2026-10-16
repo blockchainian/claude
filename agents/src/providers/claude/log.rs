@@ -447,6 +447,8 @@ impl Log {
                 {
                     if let Some((kind, sender, body)) = wrapped_message(&text) {
                         self.push(kind, body, at);
+                        self.entries.last_mut().unwrap().event.source =
+                            record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.sender = sender;
                     } else if !text.trim_start().starts_with('<') {
                         let images = self.images.take(&record, &text);
@@ -456,6 +458,8 @@ impl Log {
                             Kind::User
                         };
                         self.push(kind, text, at);
+                        self.entries.last_mut().unwrap().event.source =
+                            record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.images = images;
                     }
                 }
@@ -473,11 +477,14 @@ impl Log {
             }
             Some("assistant") => {
                 if let Some(blocks) = content.as_array() {
-                    for block in blocks.iter().rev() {
+                    for (index, block) in blocks.iter().enumerate().rev() {
                         match block["type"].as_str() {
                             Some("text") => {
                                 if let Some(text) = block["text"].as_str() {
                                     self.push(Kind::Assistant, text.to_owned(), at);
+                                    self.entries.last_mut().unwrap().event.source = record["uuid"]
+                                        .as_str()
+                                        .map(|uuid| format!("{uuid}:text:{index}"));
                                 }
                             }
                             Some("tool_use") => self.tool(block, at),
@@ -514,6 +521,8 @@ impl Log {
                         .map(|(_, sender, body)| (sender, body))
                         .unwrap_or_else(|| (None, body.to_owned()));
                     self.push(kind, body, at);
+                    self.entries.last_mut().unwrap().event.source =
+                        record["uuid"].as_str().map(str::to_owned);
                     self.entries.last_mut().unwrap().event.sender = sender;
                 }
             }
@@ -526,6 +535,7 @@ impl Log {
         let ended_at = matches!(kind, Kind::Tool).then_some(started_at);
         self.entries.push(Entry {
             event: Event {
+                source: None,
                 sender: None,
                 kind,
                 body,
@@ -577,6 +587,7 @@ impl Log {
         } else {
             Entry {
                 event: Event {
+                    source: None,
                     sender: None,
                     kind,
                     body: String::new(),
@@ -1558,6 +1569,29 @@ pub(crate) mod tests {
             assert_eq!(tail(file.path(), 1).unwrap()[0].previous_end, Some(at(5)));
         }
     }
+    #[test]
+    fn detail_sources_identify_real_transcript_events() {
+        let file = fixture();
+        let summary =
+            super::super::transcript::read(file.path(), file.as_file().metadata().unwrap().len())
+                .unwrap();
+        let events = tail(file.path(), usize::MAX).unwrap();
+        for (index, kind) in [(1, Kind::Assistant), (2, Kind::User)] {
+            let source = summary.detail_sources[index].as_ref().unwrap();
+            assert!(
+                events
+                    .iter()
+                    .any(|event| event.source.as_ref() == Some(source) && event.kind == kind)
+            );
+        }
+        let source = summary.detail_sources[0].as_ref().unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.calls.iter().any(|call| &call.id == source))
+        );
+    }
+
     fn fixture() -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         // Reuse the real prompt and assistant response before the tool records.

@@ -472,3 +472,49 @@ fn terminal_log_selection_tracks_wheel_click_and_tail() {
         println!("{width} columns: wheel, click, pinned arrival and tail jump passed");
     }
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_update_click_selects_source_row() {
+    let (_directory, tmux, _transcript) = start_probe("details-source");
+    std::thread::sleep(Duration::from_secs(1));
+    // Select the older user row before clicking the Update body.
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let lines: Vec<_> = capture.lines().collect();
+    let (update_y, update_x) = lines
+        .iter()
+        .enumerate()
+        .find_map(|(y, line)| line.find("Update").map(|byte| (y, line[..byte].width())))
+        .expect("Update section");
+    let (user_y, user_x) = lines
+        .iter()
+        .enumerate()
+        .find_map(|(y, line)| {
+            line.rfind("Stop hook").and_then(|byte| {
+                let x = line[..byte].width();
+                (x > update_x + 45 && y < 20).then_some((y, x))
+            })
+        })
+        .expect("user log row");
+    tmux.mouse(0, user_x, user_y, true);
+    let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    assert!(
+        before.lines().skip(22).any(|line| line.contains("User")),
+        "{before}"
+    );
+    tmux.mouse(0, update_x, update_y + 1, true);
+    std::thread::sleep(Duration::from_secs(1));
+    let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    assert!(
+        after
+            .lines()
+            .skip(22)
+            .any(|line| line.contains("Assistant")),
+        "{after}"
+    );
+    assert!(
+        after.lines().skip(22).any(|line| line.contains("Stop")),
+        "{after}"
+    );
+    println!("Update click selected the real transcript's assistant row in tmux.");
+}

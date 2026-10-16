@@ -11,6 +11,7 @@ const CHUNK: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Summary {
+    pub detail_sources: [Option<String>; 3],
     pub started_at: Option<DateTime<Utc>>,
     pub subagent_records: Vec<Value>,
     pub cwd: Option<PathBuf>,
@@ -145,6 +146,15 @@ fn text(value: &Value, field: &str) -> Option<String> {
         .as_str()
         .map(printable)
         .filter(|text| !text.trim().is_empty())
+}
+
+pub(super) fn message_source(record: &Value) -> Option<String> {
+    let uuid = record["uuid"].as_str()?;
+    let index = record["message"]["content"]
+        .as_array()?
+        .iter()
+        .rposition(|block| block["type"] == "text" && block["text"].is_string())?;
+    Some(format!("{uuid}:text:{index}"))
 }
 
 pub(super) fn content_text(record: &Value, last: bool) -> Option<String> {
@@ -508,6 +518,7 @@ fn read_messages(
             && !prompt.trim().is_empty()
             && !prompt.trim_start().starts_with('<')
         {
+            summary.detail_sources[2] = record["uuid"].as_str().map(str::to_owned);
             summary.prompt = printable(&prompt);
             summary.prompt_images = images.take(&record, &summary.prompt);
             summary.prompt_at = at;
@@ -531,6 +542,7 @@ fn read_messages(
                 .filter(|block| block["type"] == "tool_use")
                 .find_map(|block| {
                     super::log::tool_activity(block).map(|label| {
+                        summary.detail_sources[0] = block["id"].as_str().map(str::to_owned);
                         (
                             crate::log::tool_kind(block["name"].as_str().unwrap()),
                             label,
@@ -548,6 +560,7 @@ fn read_messages(
             && record["type"] == "assistant"
             && let Some(message) = content_text(&record, true)
         {
+            summary.detail_sources[1] = message_source(&record);
             summary.last_message = Some(printable(&message));
             summary.last_message_at = at;
         }

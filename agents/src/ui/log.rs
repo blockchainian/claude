@@ -514,6 +514,8 @@ fn same_event(left: &Event, right: &Event) -> bool {
             .calls
             .iter()
             .any(|call| left.calls.iter().any(|selected| selected.id == call.id))
+    } else if let (Some(left), Some(right)) = (&left.source, &right.source) {
+        left == right
     } else {
         left.started_at == right.started_at && left.kind == right.kind
     }
@@ -1004,6 +1006,7 @@ mod log_markdown {
         let area = Rect::new(0, 0, width + 10, 1);
         let mut buffer = Buffer::empty(area);
         let event = Event {
+            source: None,
             sender: None,
             kind,
             body: body.into(),
@@ -1255,6 +1258,7 @@ mod log_markdown {
         let body = format!("改了 src/ui/log.rs 和 {}，已发送", report.display());
         for kind in [Kind::User, Kind::Tool] {
             let event = Event {
+                source: None,
                 sender: None,
                 kind: kind.clone(),
                 body: body.clone(),
