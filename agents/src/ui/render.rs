@@ -910,43 +910,43 @@ impl View {
         item_links.resize(items.len(), Vec::new());
 
         let project_item = items.len();
-        let mut suffix = Line::default();
-        if let Some(branch) = &session.git_branch {
-            suffix.spans.extend([
-                " · ".dim(),
-                Span::styled(branch.clone(), style::time_style()),
-            ]);
-        }
-        let pr_offset = session.pr.as_ref().map(|pr| {
-            suffix.spans.push(" · ".dim());
-            let offset = suffix.width();
-            suffix.spans.push(Span::styled(
-                format!("#{}", pr.number),
-                self.title_style(&session.id),
-            ));
-            offset
-        });
-        let cwd = super::line_truncation::abbreviate_path(
-            &session.cwd.to_string_lossy(),
-            width.saturating_sub(suffix.width()),
+        let right = session
+            .pr
+            .as_ref()
+            .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id)))
+            .or_else(|| {
+                session
+                    .git_branch
+                    .as_ref()
+                    .map(|branch| Span::styled(branch.clone(), style::time_style()))
+            })
+            .filter(|value| width >= value.width() + 2);
+        let path_space = width.saturating_sub(right.as_ref().map_or(0, |value| value.width() + 1));
+        let cwd =
+            super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), path_space);
+        let mut project = truncate_line_with_ellipsis_if_overflow(
+            Line::from(Span::styled(cwd, style::time_style())),
+            path_space,
         );
-        let path_width = cwd.width();
-        let mut project = Line::from(Span::styled(cwd, style::time_style()));
-        project.spans.extend(suffix.spans);
-        let visible = width.saturating_sub(usize::from(project.width() > width));
-        let project = truncate_line_with_ellipsis_if_overflow(project, width);
-        let link = session.pr.as_ref().zip(pr_offset).and_then(|(pr, offset)| {
-            let start = path_width + offset;
-            let length = format!("#{}", pr.number)
-                .len()
-                .min(visible.saturating_sub(start));
-            (length > 0).then(|| {
+        for span in &mut project.spans {
+            span.style = style::time_style();
+        }
+        let path_width = project.width();
+        let mut link = None;
+        if let Some(right) = right {
+            let start = width - right.width();
+            project.spans.push(" ".repeat(start - path_width).dim());
+            if let Some(pr) = &session.pr {
                 let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
                     .unwrap_or_else(|| pr.url.clone());
-                (start as u16, length as u16, url)
-            })
-        });
-        let mut project_links = vec![(0..path_width.min(visible) as u16, session.cwd.clone())];
+                link = Some((start as u16, right.width() as u16, url));
+            }
+            project.spans.push(right);
+        }
+        let mut project_links = Vec::new();
+        if path_width > 0 {
+            project_links.push((0..path_width as u16, session.cwd.clone()));
+        }
         project_links.extend(
             link.iter()
                 .map(|(x, width, url)| (*x..x + width, PathBuf::from(url))),

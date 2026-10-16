@@ -11,6 +11,9 @@ fn session_key(id: &str) -> SessionKey {
     }
 }
 
+#[path = "details_project_tests.rs"]
+mod details_project;
+
 #[path = "details_footer_tests.rs"]
 mod details_footer;
 
@@ -2270,19 +2273,11 @@ fn details_branch_uses_header_style_and_links_keep_their_styles() {
                 == "Project"
         })
         .expect("Project header");
-    for (offset, symbol) in "main".chars().enumerate() {
-        let cell = &buf[(15 + offset as u16, project_y + 1)];
-        assert_eq!(cell.symbol(), symbol.to_string());
-        assert_eq!(cell.style(), buf[(16, project_y)].style());
+    for x in 12..36 {
+        assert!(buf[(x, project_y + 1)].modifier.contains(ratatui::style::Modifier::DIM));
+        assert_eq!(buf[(x, project_y + 1)].symbol(), " ");
     }
-    for x in 19..22 {
-        assert!(
-            buf[(x, project_y + 1)]
-                .modifier
-                .contains(ratatui::style::Modifier::DIM)
-        );
-    }
-    for x in 22..26 {
+    for x in 36..40 {
         assert_eq!(buf[(x, project_y + 1)].fg, color);
     }
     let path_y = project_y + 1;
@@ -2419,7 +2414,7 @@ fn details_branch_pull_request_snapshot() {
 
     row.git_branch = None;
     view.set_sessions(vec![row.clone()], false);
-    assert!(render(&view).contains("/tmp/project · #833"));
+    assert!(render(&view).contains(&format!("{:<36}#833", "/tmp/project")));
     row.pr = None;
     view.set_sessions(vec![row], false);
     assert!(render(&view).contains("                Project\n/tmp/project\n"));
@@ -7431,7 +7426,7 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
             .into()
         ))
     );
-    assert_eq!(click_text(&mut view, &rendered, "main"), None);
+    assert!(!rendered.contains("main"));
     // The directory link starts at the panel edge below the Project label.
     let (rect, _) = view
         .viewport

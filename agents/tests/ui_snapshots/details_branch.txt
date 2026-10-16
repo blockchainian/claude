@@ -13,7 +13,7 @@ PR task
 
 
                 Project
-/tmp/project · main
+/tmp/project                        main
 
 Unknown
 

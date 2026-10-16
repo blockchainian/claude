@@ -13,7 +13,7 @@ PR task
 
 
                 Project
-/tmp/project · main · #833
+/tmp/project                        #833
 
 Unknown
 

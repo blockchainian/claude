@@ -114,7 +114,7 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
             }
             assert_eq!(
                 row_text(buffer, project_y + 1, left, right).trim_end(),
-                "/tmp/project · main · #13"
+                format!("{:<width$}#13", "/tmp/project", width = usize::from(right - left - 3))
             );
             assert!(
                 buffer[(left + 13, project_y + 1)]
@@ -124,7 +124,7 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
 
             let (_, background_y) = position(buffer, "Check files");
             assert_eq!(row_text(buffer, background_y, right - 5, right), "1h 0m");
-            for x in left + 22..left + 25 {
+            for x in right - 3..right {
                 assert_eq!(click_link(&mut app, MouseEvent {
                     kind: MouseEventKind::Down(MouseButton::Left), column: x, row: project_y + 1, modifiers: KeyModifiers::NONE,
                 }), Some(Action::OpenPath("vscode://blockchainian.git/view-pr?repo=%2Ftmp%2Fproject&url=https%3A%2F%2Fgithub.com%2Fblockchainian%2Fclaude%2Fpull%2F13".into())));
@@ -159,7 +159,8 @@ fn app_details_narrow_groups_preserve_labels_and_do_not_leave_pr_hitboxes() {
         let end = (left..width)
             .find(|&x| cell_text(buffer, x, y) == "│")
             .unwrap_or(width);
-        assert!(row_text(buffer, y + 1, left, end).contains('…'));
+        assert!(row_text(buffer, y + 1, left, end).contains("#13"));
+        assert!(!row_text(buffer, y + 1, left, end).contains("分支"));
         for x in left..end {
             assert_eq!(
                 click_link(

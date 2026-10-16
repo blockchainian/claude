@@ -381,8 +381,8 @@ fn terminal_layout_tracks_width() {
         );
         let model = lines
             .iter()
-            .find(|line| line.contains("Model"))
-            .expect("Model header");
+            .find(|line| line.contains("claude-opus-5-5"))
+            .expect("model row");
         assert!(
             model.contains("claude-opus-5-5") && model.contains("medium"),
             "model group missing: {capture}"
@@ -892,70 +892,94 @@ fn terminal_running_tool_animates_without_input() {
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_details_section_positions() {
-    let (_directory, tmux, _transcript) = start_probe("details-sections");
-    for width in [112, 200] {
-        tmux.run(&[
-            "resize-window",
-            "-t",
-            "probe",
-            "-x",
-            &width.to_string(),
-            "-y",
-            "50",
-        ]);
-        std::thread::sleep(Duration::from_millis(500));
-        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-        println!("{width} columns:\n{capture}");
-        let lines: Vec<_> = capture.lines().collect();
-        let separators: Vec<_> = lines[3]
-            .match_indices('│')
-            .map(|(byte, _)| lines[3][..byte].width())
-            .collect();
-        let left = separators[0] + 2;
-        let right = if width >= 150 {
-            separators[1] - 1
+    let (_directory, tmux, transcript) = start_probe("details-sections");
+    let original = format!(
+        "{}\n{}",
+        std::fs::read_to_string(&transcript).unwrap(),
+        include_str!("fixtures/claude-todos.jsonl")
+    );
+    for has_pr in [false, true, false] {
+        let content = if has_pr {
+            format!("{original}\n{}", include_str!("fixtures/pr-link.jsonl"))
         } else {
-            width as usize - 1
+            original.clone()
         };
-        let panel_width = right - left;
-        let mut parser = vt100::Parser::new(50, width, 0);
-        parser.process(
-            capture
-                .trim_end_matches('\n')
-                .replace('\n', "\r\n")
-                .as_bytes(),
-        );
-        let panel: Vec<String> = (3..25)
-            .map(|y| {
-                (left..right)
-                    .map(|x| parser.screen().cell(y, x as u16).unwrap().contents())
-                    .collect()
-            })
-            .collect();
-        for label in ["Update", "Prompt", "Project"] {
-            let row = panel.iter().find(|row| row.contains(label)).unwrap();
-            let byte = row.find(label).unwrap();
-            assert_eq!(
-                row[..byte].width(),
-                (panel_width - label.len()) / 2,
-                "{row}"
+        std::fs::write(&transcript, content).unwrap();
+        tmux.wait_for(|capture| capture.contains("#763") == has_pr && capture.contains("Task 1"));
+        for width in [112, 200] {
+            tmux.run(&[
+                "resize-window",
+                "-t",
+                "probe",
+                "-x",
+                &width.to_string(),
+                "-y",
+                "70",
+            ]);
+            std::thread::sleep(Duration::from_millis(500));
+            let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            println!("{width} columns, PR {has_pr}:\n{capture}");
+            let lines: Vec<_> = capture.lines().collect();
+            let separators: Vec<_> = lines[3]
+                .match_indices('│')
+                .map(|(byte, _)| lines[3][..byte].width())
+                .collect();
+            let left = separators[0] + 2;
+            let right = if width >= 150 {
+                separators[1] - 1
+            } else {
+                width as usize - 1
+            };
+            let panel_width = right - left;
+            let bottom = 3 + lines[3..]
+                .iter()
+                .take_while(|line| line.matches('│').count() == separators.len())
+                .count();
+            let parser = captured_screen(&capture, width, 70);
+            let panel: Vec<String> = (3..bottom)
+                .map(|y| {
+                    (left..right)
+                        .map(|x| parser.screen().cell(y as u16, x as u16).unwrap().contents())
+                        .collect()
+                })
+                .collect();
+            let positions = ["Update", "Tasks", "Prompt", "Project"]
+                .map(|label| panel.iter().position(|row| row.contains(label)).unwrap());
+            assert!(positions.is_sorted(), "{panel:?}");
+            for label in ["Update", "Tasks", "Prompt", "Project"] {
+                let row = panel.iter().find(|row| row.contains(label)).unwrap();
+                let byte = row.find(label).unwrap();
+                assert_eq!(
+                    row[..byte].width(),
+                    (panel_width - label.len()) / 2,
+                    "{row}"
+                );
+                assert!(!row.contains("messages"));
+            }
+            let project = panel
+                .iter()
+                .position(|row| row.trim() == "Project")
+                .unwrap();
+            let project_row = &panel[project + 1];
+            assert!(!project_row.starts_with(' '), "{project_row}");
+            let metadata = if has_pr { "#763" } else { "main" };
+            assert!(project_row.ends_with(metadata), "{project_row}");
+            let directory = &project_row[..project_row.len() - metadata.len()];
+            assert!(directory.ends_with(' '), "{project_row}");
+            assert!(directory.trim_end().ends_with("/claude"), "{project_row}");
+            assert!(!project_row.contains('·'), "{project_row}");
+            if has_pr {
+                assert!(!project_row.contains("main"), "{project_row}");
+            }
+            let model = panel.last().unwrap();
+            assert!(model.starts_with("claude-opus-5-5"), "{model}");
+            assert!(model.ends_with("medium"), "{model}");
+            assert!(!model.contains("Model"));
+            assert!(!model.contains('·'));
+            println!(
+                "{{\"details_sections\":\"pass\",\"project_justified\":\"pass\",\"model_justified\":\"pass\",\"model_last_row\":\"pass\",\"width\":{width},\"pr\":{has_pr}}}"
             );
-            assert!(!row.contains("messages"));
         }
-        let project = panel
-            .iter()
-            .position(|row| row.trim() == "Project")
-            .unwrap();
-        assert!(panel[project + 1].trim_end().ends_with(" · main"));
-        let model = panel.iter().find(|row| row.starts_with("Model")).unwrap();
-        let name = "claude-opus-5-5";
-        assert_eq!(
-            model[..model.find(name).unwrap()].width(),
-            (panel_width - name.len()) / 2
-        );
-        assert!(model.ends_with("medium"));
-        assert!(!model.contains('·'));
-        println!("{{\"details_sections\":\"pass\",\"width\":{width}}}");
     }
 }
 

@@ -72,15 +72,20 @@ fn section_labels_stay_centered_before_right_values() {
 }
 
 #[test]
-fn project_line_combines_parts_and_keeps_visible_links() {
+fn project_line_justifies_directory_and_keeps_visible_links() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     for (branch, pr, width, expected) in [
-        (Some("main"), true, 60, "/tmp/project · main · #13"),
-        (None, true, 60, "/tmp/project · #13"),
-        (Some("main"), false, 60, "/tmp/project · main"),
-        (None, false, 60, "/tmp/project"),
-        (Some("main"), true, 24, "/t…/project · main · #13"),
-        (Some("main"), true, 22, "/t…/proj… · main · #13"),
+        (Some("main"), true, 60, format!("{:<57}#13", "/tmp/project")),
+        (None, true, 60, format!("{:<57}#13", "/tmp/project")),
+        (
+            Some("main"),
+            false,
+            60,
+            format!("{:<56}main", "/tmp/project"),
+        ),
+        (None, false, 60, "/tmp/project".to_owned()),
+        (Some("main"), true, 24, format!("{:<21}#13", "/tmp/project")),
+        (Some("main"), true, 22, format!("{:<19}#13", "/tmp/project")),
     ] {
         let mut row = session("project", "Project task", SessionStatus::Ready, 0);
         row.git_branch = branch.map(str::to_owned);
@@ -120,15 +125,6 @@ fn project_line_combines_parts_and_keeps_visible_links() {
                     .starts_with("vscode://blockchainian.git/view-pr?")
             );
             assert_eq!(buf[(rect.x, y)].fg, style::thread_color(0));
-        }
-        for (x, c) in expected.chars().enumerate() {
-            if c == '·' {
-                assert!(
-                    buf[(area.x + x as u16, y)]
-                        .modifier
-                        .contains(ratatui::style::Modifier::DIM)
-                );
-            }
         }
     }
 }
