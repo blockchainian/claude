@@ -100,9 +100,20 @@ def dim(theme, low, high):
         style["foreground"] = "#" + "".join("%02x" % round(max(0.0, min(1.0, gamma(max(0.0, c)))) * 255) for c in rgb) + color[7:]
 
 
+# Type definitions take the function definition style, as Nvim's LSP declarations do.
+TYPE_DEFINITIONS = [f"entity.name.{kind}" for kind in ("struct", "enum", "union", "trait", "type", "class", "interface")]
+
+
 def match_nvim(theme, appearance):
     """Appends one rule per measured scope; `source` raises them above GitHub's own rules."""
-    for scope, styles in json.loads((HERE / "nvim.json").read_text()).items():
+    measured = json.loads((HERE / "nvim.json").read_text())
+    definition = measured["entity.name.function"]
+    for scope in TYPE_DEFINITIONS:
+        measured.setdefault(scope, definition)
+    for scope, styles in measured.items():
+        innermost = scope.split()[-1]
+        if any(innermost == name or innermost.startswith(name + ".") for name in TYPE_DEFINITIONS):
+            styles = definition
         index, font_style = styles[appearance]
         theme["settings"].append(
             {"name": f"Nvim {scope}", "scope": f"source {scope}, text {scope}", "settings": {"foreground": palette(index), "fontStyle": font_style}}

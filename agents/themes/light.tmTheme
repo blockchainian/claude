@@ -1052,9 +1052,9 @@
 			<key>settings</key>
 			<dict>
 				<key>fontStyle</key>
-				<string>italic</string>
+				<string>bold italic</string>
 				<key>foreground</key>
-				<string>#1e000000</string>
+				<string>#12000000</string>
 			</dict>
 		</dict>
 		<dict>
@@ -1065,9 +1065,9 @@
 			<key>settings</key>
 			<dict>
 				<key>fontStyle</key>
-				<string>italic</string>
+				<string>bold italic</string>
 				<key>foreground</key>
-				<string>#1e000000</string>
+				<string>#12000000</string>
 			</dict>
 		</dict>
 		<dict>
@@ -1195,9 +1195,9 @@
 			<key>settings</key>
 			<dict>
 				<key>fontStyle</key>
-				<string>italic</string>
+				<string>bold italic</string>
 				<key>foreground</key>
-				<string>#1e000000</string>
+				<string>#12000000</string>
 			</dict>
 		</dict>
 		<dict>
@@ -1208,9 +1208,9 @@
 			<key>settings</key>
 			<dict>
 				<key>fontStyle</key>
-				<string>italic</string>
+				<string>bold italic</string>
 				<key>foreground</key>
-				<string>#1e000000</string>
+				<string>#12000000</string>
 			</dict>
 		</dict>
 		<dict>
@@ -3470,9 +3470,9 @@
 			<key>settings</key>
 			<dict>
 				<key>fontStyle</key>
-				<string>italic</string>
+				<string>bold italic</string>
 				<key>foreground</key>
-				<string>#1e000000</string>
+				<string>#12000000</string>
 			</dict>
 		</dict>
 		<dict>
@@ -7084,9 +7084,9 @@
 			<key>settings</key>
 			<dict>
 				<key>fontStyle</key>
-				<string>italic</string>
+				<string>bold italic</string>
 				<key>foreground</key>
-				<string>#1e000000</string>
+				<string>#12000000</string>
 			</dict>
 		</dict>
 		<dict>
@@ -10155,6 +10155,71 @@
 				<string></string>
 				<key>foreground</key>
 				<string>#1e000000</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>name</key>
+			<string>Nvim entity.name.union</string>
+			<key>scope</key>
+			<string>source entity.name.union, text entity.name.union</string>
+			<key>settings</key>
+			<dict>
+				<key>fontStyle</key>
+				<string>bold italic</string>
+				<key>foreground</key>
+				<string>#12000000</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>name</key>
+			<string>Nvim entity.name.trait</string>
+			<key>scope</key>
+			<string>source entity.name.trait, text entity.name.trait</string>
+			<key>settings</key>
+			<dict>
+				<key>fontStyle</key>
+				<string>bold italic</string>
+				<key>foreground</key>
+				<string>#12000000</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>name</key>
+			<string>Nvim entity.name.type</string>
+			<key>scope</key>
+			<string>source entity.name.type, text entity.name.type</string>
+			<key>settings</key>
+			<dict>
+				<key>fontStyle</key>
+				<string>bold italic</string>
+				<key>foreground</key>
+				<string>#12000000</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>name</key>
+			<string>Nvim entity.name.class</string>
+			<key>scope</key>
+			<string>source entity.name.class, text entity.name.class</string>
+			<key>settings</key>
+			<dict>
+				<key>fontStyle</key>
+				<string>bold italic</string>
+				<key>foreground</key>
+				<string>#12000000</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>name</key>
+			<string>Nvim entity.name.interface</string>
+			<key>scope</key>
+			<string>source entity.name.interface, text entity.name.interface</string>
+			<key>settings</key>
+			<dict>
+				<key>fontStyle</key>
+				<string>bold italic</string>
+				<key>foreground</key>
+				<string>#12000000</string>
 			</dict>
 		</dict>
 	</array>
