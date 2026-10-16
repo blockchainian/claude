@@ -2272,7 +2272,7 @@ fn details_branch_pull_request_snapshot() {
 }
 
 #[test]
-fn details_activity_follows_the_clock() {
+fn details_activity_and_message_are_independent() {
     let now = Utc::now();
     let mut row = session("activity", "Activity task", SessionStatus::Working, 7);
     row.prompt_at = Some(now - Duration::seconds(4200));
@@ -2306,20 +2306,21 @@ fn details_activity_follows_the_clock() {
             .to_owned()
     };
     let rendered = render(&view);
+    assert!(rendered.contains("Latest activity                   7s ago"));
+    assert!(rendered.contains("Last message                      1h ago"));
+    assert!(rendered.find("Run checks").unwrap() < rendered.find("Last message").unwrap());
+    assert!(rendered.contains("Checking the project"));
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/details_activity_working.txt")
     );
-    assert!(rendered.contains("Latest activity                   7s ago"));
-    assert!(!rendered.contains("Last message"));
     row.activity.as_mut().unwrap().label =
         "Run checks on every changed surface in the project".into();
     view.set_sessions(vec![row.clone()], false);
     let clipped = render(&view);
     assert!(clipped.contains("Run checks on every changed surface in…"));
     assert!(!clipped.contains("surface in the project"));
-    // The slot follows the clock, not the session status: a newer tool call
-    // still shows once the session is idle, and a newer reply replaces it.
+    // Both sections remain visible regardless of status or timestamp order.
     row.activity.as_mut().unwrap().label = "Run checks".into();
     row.status = SessionStatus::Ready;
     view.set_sessions(vec![row.clone()], false);
@@ -2332,11 +2333,70 @@ fn details_activity_follows_the_clock() {
     row.last_message_at = Some(now - Duration::seconds(3));
     view.set_sessions(vec![row.clone()], false);
     let replied = render(&view);
-    assert!(!replied.contains("Latest activity"));
+    assert!(replied.contains("Latest activity                   7s ago"));
+    assert!(replied.contains("Last message                      3s ago"));
     assert_eq!(
         replied,
         include_str!("../../tests/ui_snapshots/details_activity_replied.txt")
     );
+}
+
+#[test]
+fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
+    let now = Utc::now();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("reports")).unwrap();
+    for name in ["reports/activity.md", "reports/reply.md"] {
+        std::fs::write(dir.path().join(name), "report").unwrap();
+    }
+    let mut row = session("activity", "Activity task", SessionStatus::Ready, 0);
+    row.cwd = dir.path().into();
+    let activity = "Check reports/activity.md";
+    let message = "Reply reports/reply.md";
+    row.activity = Some(crate::model::Activity {
+        kind: crate::log::Kind::Tool,
+        label: activity.into(),
+        at: now,
+    });
+    row.last_message = Some(message.into());
+    row.last_message_at = Some(now);
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    let rendered = log_screen(&view, 120, 40, now);
+    for (body, label, path) in [
+        (activity, "Copied latest activity", "reports/activity.md"),
+        (message, "Copied last message", "reports/reply.md"),
+    ] {
+        view.last_copy_click = None;
+        assert_eq!(
+            double_click_text(&mut view, &rendered, body.split_once(' ').unwrap().0),
+            Some(Action::Copy {
+                text: body.into(),
+                label: label.into()
+            })
+        );
+        assert_eq!(
+            click_text(&mut view, &rendered, path),
+            Some(Action::OpenPath(dir.path().join(path)))
+        );
+    }
+    view.rows[view.selected].prompt = "Prompt row\n".repeat(20);
+    view.rows[view.selected].last_message = Some("Reply row\n".repeat(20));
+    for height in [16, 8] {
+        let area = Rect::new(0, 0, 40, height);
+        let mut buf = Buffer::empty(area);
+        view.render_details(area, &mut buf, now);
+        let viewport = view.viewport.borrow();
+        if height == 16 {
+            assert_eq!(viewport.details_scroll.fallback_max, None);
+            assert_eq!(viewport.details_copy.len(), 3);
+            assert_eq!(viewport.details_scroll.hidden[1], 0);
+            assert!(viewport.details_scroll.hidden[0] > 0);
+            assert!(viewport.details_scroll.hidden[2] > 0);
+        } else {
+            assert!(viewport.details_scroll.fallback_max.unwrap() > 0);
+        }
+    }
 }
 
 #[test]
@@ -2394,7 +2454,12 @@ fn details_message_uses_model_color_under_markdown() {
     view.render_details(area, &mut buf, now);
     let header = "Last message                                          2m ago";
     let y = (0..area.height)
-        .find(|y| buf[(0, *y)].symbol() == "L")
+        .find(|y| {
+            header
+                .chars()
+                .enumerate()
+                .all(|(x, ch)| buf[(x as u16, *y)].symbol() == ch.to_string())
+        })
         .expect("message header");
     for (offset, character) in header.chars().enumerate() {
         let cell = &buf[(offset as u16, y)];

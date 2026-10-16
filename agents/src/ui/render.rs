@@ -622,8 +622,8 @@ impl View {
         };
         self.viewport.borrow_mut().details = area;
         let width = usize::from(area.width.max(1));
-        // Sections top to bottom: background, prompt, the newer of latest activity
-        // and last message, needs attention, project, branch, model. The title
+        // Sections top to bottom: background, prompt, latest activity, last message,
+        // needs attention, project, branch, model. The title
         // sits on the rule below the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
@@ -735,9 +735,7 @@ impl View {
 
         item_links.resize(items.len(), Vec::new());
 
-        // Latest activity and Last message share one slot and follow the
-        // clock: whichever of the latest tool call and the last reply is newer.
-        let activity = session.latest_activity();
+        let activity = session.activity.as_ref();
         if let Some(activity) = activity {
             let wrapped = wrap_details(&activity.label, &session.cwd, width, false);
             let mut label = wrapped
@@ -771,7 +769,7 @@ impl View {
             copies.push(Some((activity.label.as_str(), "Copied latest activity")));
             body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }
-        if let Some(message) = session.last_message.as_ref().filter(|_| activity.is_none()) {
+        if let Some(message) = session.last_message.as_ref() {
             let mut header = Line::default();
             if let Some(at) = session.last_message_at {
                 header =
