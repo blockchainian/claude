@@ -73,7 +73,10 @@ fn details_groups_are_right_aligned() {
                 );
             }
             if parts[0] == "Project" {
-                assert_eq!(buf[(area.x + middle as u16, y)].fg, Color::Reset);
+                assert_eq!(
+                    buf[(area.x + middle as u16, y)].style(),
+                    buf[(area.x, y)].style()
+                );
                 assert_eq!(
                     click_mouse(
                         &mut view,

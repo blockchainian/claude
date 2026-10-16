@@ -2146,7 +2146,7 @@ fn task_titles_take_the_next_accent_when_first_shown_and_keep_it() {
 }
 
 #[test]
-fn details_branch_uses_default_foreground_and_pull_request_keeps_title_color() {
+fn details_branch_uses_header_style_and_links_keep_their_styles() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
     row.git_branch = Some("main".into());
@@ -2172,7 +2172,7 @@ fn details_branch_uses_default_foreground_and_pull_request_keeps_title_color() {
     for (offset, symbol) in "main".chars().enumerate() {
         let cell = &buf[(29 + offset as u16, project_y)];
         assert_eq!(cell.symbol(), symbol.to_string());
-        assert_eq!(cell.fg, ratatui::style::Color::Reset);
+        assert_eq!(cell.style(), buf[(0, project_y)].style());
     }
     for x in 33..36 {
         assert!(buf[(x, project_y)].modifier.contains(ratatui::style::Modifier::DIM));
@@ -2189,18 +2189,18 @@ fn details_branch_uses_default_foreground_and_pull_request_keeps_title_color() {
     for (x, symbol) in path.chars().enumerate() {
         let cell = &buf[(x as u16, path_y)];
         assert_eq!(cell.symbol(), symbol.to_string());
-        assert_eq!(cell.fg, ratatui::style::Color::Reset);
+        assert_eq!(cell.style(), ratatui::buffer::Cell::default().style());
     }
     view.underline_links(&mut buf);
     for (x, symbol) in path.chars().enumerate() {
         let cell = &buf[(x as u16, path_y)];
         assert_eq!(cell.symbol(), format!("\x1b[4:4m{symbol}\x1b[24m"));
-        assert_eq!(cell.fg, ratatui::style::Color::Reset);
+        assert_eq!(cell.style(), ratatui::buffer::Cell::default().style());
     }
 }
 
 #[test]
-fn details_model_and_effort_use_default_foreground() {
+fn details_model_and_effort_use_header_style() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     for use_colors in [true, false] {
         let mut row = session("model", "Model task", SessionStatus::Inactive, 120);
@@ -2226,14 +2226,9 @@ fn details_model_and_effort_use_default_foreground() {
         for (offset, symbol) in group.chars().enumerate() {
             let cell = &buf[(start + offset as u16, y)];
             assert_eq!(cell.symbol(), symbol.to_string());
-            let expected = if (15..18).contains(&offset) {
-                Style::default().dim()
-            } else {
-                Style::default()
-            };
             assert_eq!(
                 cell.style(),
-                ratatui::buffer::Cell::default().style().patch(expected),
+                buf[(0, y)].style(),
                 "cell {offset}, colors={use_colors}"
             );
         }
