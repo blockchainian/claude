@@ -408,3 +408,90 @@ fn adoption_skips_unregistered_sessions_and_refreshes_registered_jobs_with_a_rea
     assert_eq!(rows[1].background.len(), 1);
     assert_eq!(rows[1].background[0].output, output);
 }
+
+#[test]
+fn background_await_start_times_survive_cached_and_chunked_refreshes() {
+    use std::io::Write;
+    let records = include_str!("../../../tests/fixtures/background/two-awaits.jsonl");
+    let dir = tempfile::tempdir().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let mut tasks = Tasks::new(root.join("outputs"));
+    let path = root.join("session.jsonl");
+    fs::write(&path, records).unwrap();
+    let mut sessions = [super::super::session(
+        "session".into(),
+        transcript::Summary::default(),
+        Some(path.clone()),
+        Utc::now(),
+    )];
+    sessions[0].status = crate::model::SessionStatus::Working;
+    let directory = tasks.directory(&sessions[0]);
+    fs::create_dir_all(&directory).unwrap();
+    struct Children(Vec<std::process::Child>);
+    impl Drop for Children {
+        fn drop(&mut self) {
+            for child in &mut self.0 {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+    let mut children = Children(Vec::new());
+    let mut expected = Vec::new();
+    let parsed: Vec<serde_json::Value> = records
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for pair in parsed.chunks_exact(2) {
+        let id = pair[1]["toolUseResult"]["backgroundTaskId"]
+            .as_str()
+            .unwrap();
+        let output = directory.join(format!("{id}.output"));
+        children.0.push(
+            Command::new("sleep")
+                .arg("60")
+                .stdout(File::create(&output).unwrap())
+                .spawn()
+                .unwrap(),
+        );
+        expected.push(BackgroundTask {
+            description: pair[0]["message"]["content"][0]["input"]["description"]
+                .as_str()
+                .unwrap()
+                .into(),
+            output,
+            started_at: DateTime::parse_from_rfc3339(pair[0]["timestamp"].as_str().unwrap())
+                .unwrap()
+                .with_timezone(&Utc),
+        });
+    }
+    for refresh in 0..8 {
+        if refresh == 2 {
+            writeln!(
+                fs::OpenOptions::new().append(true).open(&path).unwrap(),
+                "{}",
+                include_str!("../../../tests/fixtures/background/quiet-turn.jsonl")
+            )
+            .unwrap();
+        }
+        if refresh == 4 {
+            writeln!(
+                fs::OpenOptions::new().append(true).open(&path).unwrap(),
+                "{}",
+                " ".repeat(150_000)
+            )
+            .unwrap();
+            // A cold scan now walks chunks; the original reader keeps its descriptions.
+            let mut cold = Tasks::new(root.join("outputs"));
+            cold.refresh(&root, &mut sessions, &Processes).unwrap();
+            assert_eq!(sessions[0].background, expected);
+        }
+        let summary = transcript::read(&path, fs::metadata(&path).unwrap().len()).unwrap();
+        tasks.observe("session", &summary);
+        tasks.refresh(&root, &mut sessions, &Processes).unwrap();
+        assert_eq!(
+            sessions[0].background, expected,
+            "provider refresh {refresh}"
+        );
+    }
+}

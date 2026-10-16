@@ -566,11 +566,17 @@ impl View {
         })
     }
     fn subagents_for<'a>(&'a self, session: &'a Session) -> impl Iterator<Item = &'a Session> {
-        self.rows.iter().filter(move |child| {
-            session.parent.is_none()
-                && child.parent.as_ref() == Some(&session.id)
-                && child.status == SessionStatus::Working
-        })
+        let mut children: Vec<_> = self
+            .rows
+            .iter()
+            .filter(|child| {
+                session.parent.is_none()
+                    && child.parent.as_ref() == Some(&session.id)
+                    && child.status == SessionStatus::Working
+            })
+            .collect();
+        children.sort_by_key(|child| (child.started_at, &child.id));
+        children.into_iter()
     }
 
     pub fn selected_id(&self) -> Option<&SessionKey> {
@@ -869,3 +875,6 @@ fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Durat
     }
     left
 }
+
+#[cfg(test)]
+mod background_order_tests;
