@@ -1,7 +1,6 @@
 Background
 ─ Check files · 1m 5s ─────────────────╴
   Read files
-
 ─ Run checks · 10s ────────────────────╴
 
 Prompt

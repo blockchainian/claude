@@ -3610,9 +3610,9 @@ mod details_budget {
         assert!(rows.iter().any(|line| line == "Queued work"));
         assert!(
             rows.iter()
-                .any(|line| line.starts_with("─") && line.contains("Check 2"))
+                .any(|line| line.starts_with("─") && line.contains("Check 4"))
         );
-        assert!(!rows.iter().any(|line| line.contains("Check 3")));
+        assert!(!rows.iter().any(|line| line.contains("Check 5")));
         assert_eq!(rows.iter().filter(|line| *line == "…").count(), 1);
         assert!(rows.iter().any(|line| line == "Prompt text…"));
         assert!(rows[22].starts_with("Model:"));
@@ -6898,6 +6898,3 @@ fn background_delete_confirmation_explains_agents_worktree_retention() {
         "{shown}"
     );
 }
-
-#[path = "background_spacing_tests.rs"]
-mod background_spacing_tests;

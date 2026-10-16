@@ -561,13 +561,6 @@ impl View {
             items.extend(subagents.into_iter().map(Item::Subagent));
             // Tasks showing output come first; each group keeps its order.
             items[start..].sort_by_key(|item| item.height() == 1);
-            let entries = items.drain(start..).collect::<Vec<_>>();
-            for (index, entry) in entries.into_iter().enumerate() {
-                if index > 0 {
-                    items.push(Line::default().into());
-                }
-                items.push(entry);
-            }
             background = start..items.len();
         }
 

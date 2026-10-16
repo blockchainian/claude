@@ -1,7 +1,6 @@
 Background
 ─ Run checks · 0s ─────────────────────╴
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
 ─ Waiting for output · 0s ─────────────╴
 
 Last message
