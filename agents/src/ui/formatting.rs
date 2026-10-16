@@ -82,7 +82,12 @@ pub(super) fn format_duration(seconds: i64) -> String {
 pub(super) fn format_log_duration(duration: chrono::Duration) -> String {
     let duration = duration.max(chrono::Duration::zero());
     if duration < chrono::Duration::seconds(1) {
-        format!("{}ms", (duration.subsec_nanos() + 500_000) / 1_000_000)
+        let milliseconds = (duration.subsec_nanos() + 500_000) / 1_000_000;
+        if milliseconds == 0 {
+            String::new()
+        } else {
+            format!("{milliseconds}ms")
+        }
     } else {
         format_duration(duration.num_seconds())
     }
@@ -130,9 +135,9 @@ mod tests {
     #[test]
     fn log_durations_round_subseconds_to_whole_milliseconds() {
         for (nanos, expected) in [
-            (-1, "0ms"),
-            (0, "0ms"),
-            (499_999, "0ms"),
+            (-1, ""),
+            (0, ""),
+            (499_999, ""),
             (500_000, "1ms"),
             (339_499_999, "339ms"),
             (339_500_000, "340ms"),

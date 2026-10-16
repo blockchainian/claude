@@ -1,11 +1,11 @@
  Agent command center  Group: Project  g
   Active 1   Ready 0   Working 1   Needs you 0   Inactive 0                                                                                     tab/⇧tab filter
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- /tmp/project                           │ Prompt                                 │ view_image /tmp/affiliates-page-1791341607.png                           0ms
+ /tmp/project                           │ Prompt                                 │ view_image /tmp/affiliates-page-1791341607.png
  › ● Task log example       Working     │ Task log example                       │ web.search site:pond.dflow.net "dev-quote-api.dflow.net"                  1s
                                         │                                        │ claude.ask_claude                                                        28s
                                         │ Project                                │ apply_patch ~/Documents/case-studies/khaby-lame/drafts/06.md            17ms
-                                        │ /tmp/project                           │ type (exit 1)                                                            0ms
+                                        │ /tmp/project                           │ type (exit 1)
                                         │                                        │
                                         │ Model                          Unknown │
                                         │                                        │
@@ -13,7 +13,7 @@
  ────────────────────────────────────────────── Task log example · Working ────────────────────────────────────────────────────────────────────────────────────
  Task log example ›
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ImageView                                                                                                                                                  0ms
+ ImageView
 
  id: exec-c4bea048-8537-4b20-9429-9fc6872f9a04
  path: file:///tmp/affiliates-page-1791341607.png

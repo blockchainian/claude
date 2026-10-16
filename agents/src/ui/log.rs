@@ -566,6 +566,7 @@ fn format_row_time(time: &RowTime, now: DateTime<Utc>) -> String {
     match *time {
         RowTime::Clock(at) => at.with_timezone(&Local).format(CLOCK_FORMAT).to_string(),
         RowTime::Settled(duration) => format_log_duration(duration),
+        RowTime::Running(start) if now - start < chrono::Duration::microseconds(500) => "0ms".into(),
         RowTime::Running(start) => format_log_duration(now - start),
         RowTime::Ago(at) => format_relative_time(now, Some(at)),
     }
@@ -945,6 +946,18 @@ fn highlight_matches(line: &mut Line<'static>, search: &super::log_search::LogSe
 mod log_markdown {
     use super::*;
     use ratatui::style::Modifier;
+
+    #[test]
+    fn running_times_keep_zero_milliseconds() {
+        let now = Utc::now();
+        for nanos in [-1, 0, 499_999, 500_000] {
+            let start = now - chrono::Duration::nanoseconds(nanos);
+            assert_eq!(
+                format_row_time(&RowTime::Running(start), now),
+                if nanos < 500_000 { "0ms" } else { "1ms" }
+            );
+        }
+    }
 
     fn body_buffer(kind: Kind, body: &str, width: u16) -> Buffer {
         let area = Rect::new(0, 0, width + 10, 1);

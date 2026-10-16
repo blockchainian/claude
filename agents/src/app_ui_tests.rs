@@ -146,6 +146,34 @@ fn assert_log_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
 }
 
 #[test]
+fn settled_zero_duration_leaves_the_time_column_empty_through_app() {
+    for width in [100, 149, 150, 200] {
+        let (_directory, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        // Real transcript payloads with scrubbed text and equal adjacent timestamps.
+        std::fs::write(
+            path,
+            include_bytes!("../tests/fixtures/claude-equal-timestamps.jsonl"),
+        )
+        .unwrap();
+        app.refresh();
+        select_archive(&mut app);
+        let buffer = draw(&mut app, width);
+        let (x, y) = log_position(&buffer, "Equal timestamp reply");
+        let right = width - 1;
+        assert_eq!(segment(&buffer, right - 8..right, y), "        ");
+        assert_eq!(segment(&buffer, right - 10..right - 8, y), "  ");
+        assert_eq!(buffer[(right - 11, y)].symbol(), "…");
+        let (prompt_x, prompt_y) = log_position(&buffer, "Equal timestamp prompt");
+        assert_eq!(x, prompt_x);
+        assert_eq!(buffer[(right - 11, prompt_y)].symbol(), "…");
+        assert!(segment(&buffer, right - 8..right, prompt_y).contains(':'));
+        let (_, latest_y) = log_position(&buffer, "Following message");
+        assert!(!segment(&buffer, right - 8..right, latest_y).trim().is_empty());
+    }
+}
+
+#[test]
 fn log_selection_cursor_fills_padding_through_app() {
     for width in [120, 180] {
         let (_directory, mut app) = fixture();

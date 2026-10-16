@@ -3852,9 +3852,10 @@ fn dashboard_log_padding_and_edge_clicks_use_rendered_rows() {
             let log: String = (left..width).map(|x| buf[(x, y)].symbol()).collect();
             assert_eq!(
                 log.trim_end().chars().count() as u16 + left,
-                width - 1,
-                "log time right at {width}: {row}"
+                width - 11,
+                "log body right at {width}: {row}"
             );
+            assert!((width - 11..width - 1).all(|x| buf[(x, y)].symbol() == " "));
             assert_ne!(buf[(left, y)].symbol(), " ", "log left at {width}");
             if wide {
                 assert_eq!(buf[(left - 1, y)].symbol(), " ");
