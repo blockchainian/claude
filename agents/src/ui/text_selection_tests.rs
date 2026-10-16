@@ -33,6 +33,7 @@ fn fixture() -> View {
         prompt_at: None,
         turn_messages: 0,
         last_record_at: None,
+        model_label: None,
         model: None,
         effort: None,
         git_branch: None,

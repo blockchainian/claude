@@ -1,102 +1,80 @@
 use super::*;
-use unicode_width::UnicodeWidthStr;
+
+fn visible(cell: &ratatui::buffer::Cell) -> &str {
+    cell.symbol()
+        .rsplit("\x1b\\")
+        .find(|part| !part.is_empty() && !part.starts_with("\x1b]8"))
+        .unwrap_or("")
+        .split("\x1b]8")
+        .next()
+        .unwrap()
+}
 
 #[test]
-fn project_justifies_directory_and_one_right_value_with_visible_links() {
-    for (pr, branch, right) in [
-        (true, Some("main"), Some("#833")),
-        (false, Some("main"), Some("main")),
-        (false, None, None),
-    ] {
-        for width in [1, 5, 6, 8, 13, 20, 40] {
+fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
+    for pr in [false, true] {
+        for width in [80, 149, 150, 220] {
             let mut view = fixture();
             let selected = &mut view.rows[view.selected];
-            selected.prompt = "Short prompt".into();
-            selected.last_message = None;
-            selected.activity = None;
-            selected.git_branch = branch.map(str::to_owned);
+            selected.git_branch = Some("hidden-branch".into());
             selected.pr = pr.then(|| crate::model::PullRequest {
                 number: 833,
                 url: "https://example.com/pull/833".into(),
             });
             let id = selected.id.clone();
-            let area = Rect::new(7, 4, width, 100);
-            let y = area.bottom() - 3;
-            let mut buf = Buffer::empty(Rect::new(0, 0, area.right(), area.bottom()));
-            view.render_details(area, &mut buf, Utc::now());
-            let text = (area.x..area.right())
-                .map(|x| {
-                    let symbol = buf[(x, y)].symbol();
-                    symbol
-                        .rsplit("\x1b\\")
-                        .find(|part| !part.is_empty() && !part.starts_with("\x1b]8"))
-                        .unwrap_or("")
-                        .split("\x1b]8")
-                        .next()
-                        .unwrap()
-                })
-                .collect::<String>();
-            let right = right.filter(|right| usize::from(width) >= right.width() + 2);
+            let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
+            view.render(buf.area, &mut buf);
+            let details = view.viewport.borrow().details;
             let links = view.viewport.borrow().details_links.clone();
-            let path = links
+            let (folder, _) = links
                 .iter()
                 .find(|(_, target)| target == std::path::Path::new("/tmp/project"))
-                .unwrap()
-                .0;
-            assert_eq!(path.x, area.x);
-            assert_eq!(path.y, y);
-            assert!(path.width > 0);
-            if width == 40 {
-                assert!(text.starts_with("/tmp/project"), "{text}");
-            } else if width == 13 && right.is_some() {
-                assert!(text.starts_with("/t…/"), "{text}");
-            }
-            if let Some(right) = right {
-                assert!(text.ends_with(right), "{width}: {text}");
-                let start = area.right() - right.width() as u16;
-                assert!(path.right() < start);
-                let expected_style = if pr {
-                    view.title_style(&id)
-                } else {
-                    style::time_style()
-                };
-                let mut reference = ratatui::buffer::Cell::default();
-                reference.set_style(expected_style);
-                assert_eq!(buf[(start, y)].style(), reference.style());
-            } else {
-                assert_eq!(links.len(), 1);
-            }
-            assert!(!text.contains('·'));
-            if pr && right.is_some() {
-                assert!(!text.contains("main"));
-            }
-            let path_text = (path.x..path.right())
-                .map(|x| buf[(x, y)].symbol())
+                .unwrap();
+            let row = (details.x..details.right())
+                .map(|x| visible(&buf[(x, folder.y)]))
                 .collect::<String>();
-            if width < 12 {
-                assert!(path_text.ends_with('…'), "{path_text}");
-            }
-            for x in area.x..area.right() {
-                let target = links.iter().find(|(rect, _)| rect.contains((x, y).into()));
-                let expected = if path.contains((x, y).into()) {
-                    Some(PathBuf::from("/tmp/project"))
-                } else if pr && right.is_some() && x >= area.right() - 4 {
-                    Some(PathBuf::from("https://example.com/pull/833"))
-                } else {
-                    None
-                };
+            assert!(row.contains("Ready"), "{width}: {row}");
+            assert!(!row.contains("hidden-branch"));
+            assert_eq!(folder.x, details.x + 2);
+            assert_eq!(
+                (folder.x..folder.right())
+                    .map(|x| visible(&buf[(x, folder.y)]))
+                    .collect::<String>(),
+                "project"
+            );
+            let mut reference = ratatui::buffer::Cell::default();
+            reference.set_style(style::time_style());
+            assert_eq!(buf[(folder.x, folder.y)].style(), reference.style());
+            assert_eq!(links.len(), if pr { 2 } else { 1 });
+            if pr {
+                let (rect, _) = &links[1];
+                assert_eq!(rect.y, folder.y);
+                assert_eq!(rect.right(), details.right() - 2);
                 assert_eq!(
-                    target.map(|(_, target)| target.clone()),
-                    expected,
-                    "{width}: x={x}: {text}"
+                    (rect.x..rect.right())
+                        .map(|x| visible(&buf[(x, rect.y)]))
+                        .collect::<String>(),
+                    "#833"
                 );
-                if let Some(target) = expected {
+                assert!(
+                    buf[(rect.x, rect.y)]
+                        .symbol()
+                        .contains("\x1b]8;;https://example.com/pull/833")
+                );
+                reference = ratatui::buffer::Cell::default();
+                reference.set_style(view.title_style(&id));
+                assert_eq!(buf[(rect.x, rect.y)].style(), reference.style());
+            } else {
+                assert!(!row.contains('#'));
+            }
+            for (rect, target) in links {
+                for x in rect.x..rect.right() {
                     assert_eq!(
                         click_mouse(
                             &mut view,
-                            mouse(MouseEventKind::Down(MouseButton::Left), x, y)
+                            mouse(MouseEventKind::Down(MouseButton::Left), x, rect.y)
                         ),
-                        Some(Action::OpenPath(target))
+                        Some(Action::OpenPath(target.clone()))
                     );
                 }
             }

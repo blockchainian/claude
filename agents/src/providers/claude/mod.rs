@@ -402,10 +402,7 @@ impl ClaudeProvider {
         }
         self.summaries.retain(|path, _| paths.contains(path));
         sessions.extend(children);
-        Snapshot {
-            sessions,
-            has_more,
-        }
+        Snapshot { sessions, has_more }
     }
 
     fn list_transcripts(&mut self) {
@@ -880,6 +877,10 @@ fn session(
         prompt_at: summary.prompt_at,
         turn_messages: summary.turn_messages,
         last_record_at: summary.timestamp,
+        model_label: summary
+            .model_identity
+            .filter(|(id, _)| summary.model.as_ref() == Some(id))
+            .map(|(_, name)| name),
         model: summary.model,
         effort: summary.effort,
         git_branch: summary.git_branch,
@@ -902,6 +903,34 @@ fn session(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn model_label_reads_the_transcript_name_of_the_session_model() {
+        let fixture = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-model-identity.jsonl"),
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        for (transcript, label) in [
+            (fixture.clone(), "Opus 5.5"),
+            (
+                fixture.replacen(
+                    "\"modelId\":\"claude-opus-5-5\"",
+                    "\"modelId\":\"claude-fable-5-1\"",
+                    1,
+                ),
+                "claude-opus-5-5",
+            ),
+        ] {
+            let path = dir.path().join("model-identity.jsonl");
+            std::fs::write(&path, transcript).unwrap();
+            let len = std::fs::metadata(&path).unwrap().len();
+            let summary = transcript::read(&path, len).unwrap();
+            let session = session("model-identity".into(), summary, Some(path), Utc::now());
+            assert_eq!(session.model_label(), label);
+        }
+    }
+
     use super::*;
     use std::io::Write;
     use std::time::Duration;

@@ -120,7 +120,11 @@ fn assert_log_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
         .filter(|&x| buffer[(x, 3)].symbol() == "│")
         .collect();
     let task_row = (3..position(buffer, "›").1)
-        .find(|&y| buffer[(0, y)].modifier.contains(ratatui::style::Modifier::BOLD))
+        .find(|&y| {
+            buffer[(0, y)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        })
         .expect("selected task cursor");
     let cursor = buffer[(0, task_row)].style();
     let start = if separators.len() == 2 {
@@ -889,8 +893,14 @@ fn wide_border_labels_stay_in_their_columns() {
         );
         let bottom = segment(&buffer, details.clone(), middle);
         let start = (details.len() - " Working ".len()) / 2;
-        assert_eq!(bottom.find(" Working "), Some(start * "─".len()));
-        assert!(bottom.chars().take(start).all(|c| c == '─'));
+        assert_eq!(
+            segment(
+                &buffer,
+                details.start + start as u16..details.start + start as u16 + 9,
+                middle
+            ),
+            " Working "
+        );
         assert!(!bottom.contains("2m 0s"));
         assert!(segment(&buffer, details.clone(), 2).ends_with(" 2m 0s"));
         let title_prefix: String = app.sessions[0].display_title().chars().take(8).collect();

@@ -8,14 +8,3 @@ cargo test
                  Prompt
 Use cargo and tests
 • queued prompt
-
-
-
-
-
-
-
-                Project
-/tmp/project
-
-Unknown

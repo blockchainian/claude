@@ -7,10 +7,10 @@
  │ task and its child agents, then        │ │
  │ permanently deletes their history.     │ │
  │ This cannot be undone.                 │ │
- │                                        │ │                  Project
- │ › 1. Cancel                            │ │ /tmp/project
+ │                                        │ │
+ │ › 1. Cancel                            │ │
  │   2. Permanently delete task and child │ │
- └────────────────────────────────────────┘ │ Unknown
-                                            │ ─────────────── Inactive ────────────────
+ └────────────────────────────────────────┘ │
+                                            │ ─ project ───── Inactive ────────────────
  Unloaded task ›
  ↑/↓ move  enter select  esc back

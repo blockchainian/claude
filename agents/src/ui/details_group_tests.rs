@@ -48,7 +48,6 @@ fn section_labels_stay_centered_before_right_values() {
             ("Update", "7s ago"),
             ("Prompt", "1m 4s"),
             ("Needs attention", ""),
-            ("Project", ""),
         ] {
             let y = (area.y..area.bottom())
                 .find(|&y| text(&buf, area, y).contains(label))
@@ -72,59 +71,40 @@ fn section_labels_stay_centered_before_right_values() {
 }
 
 #[test]
-fn project_line_justifies_directory_and_keeps_visible_links() {
-    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-    for (branch, pr, width, expected) in [
-        (Some("main"), true, 60, format!("{:<57}#13", "/tmp/project")),
-        (None, true, 60, format!("{:<57}#13", "/tmp/project")),
-        (
-            Some("main"),
-            false,
-            60,
-            format!("{:<56}main", "/tmp/project"),
+fn status_rule_keeps_github_pr_hyperlink_and_visible_click_target() {
+    let mut row = session("project", "A task", SessionStatus::Ready, 0);
+    row.git_branch = Some("hidden-branch".into());
+    row.pr = Some(crate::model::PullRequest {
+        number: 13,
+        url: "https://github.com/blockchainian/claude/pull/13".into(),
+    });
+    let mut view = test_view(Grouping::Project, true);
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 160, 50);
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf);
+    let links = view.viewport.borrow().details_links.clone();
+    let (rect, target) = links
+        .iter()
+        .find(|(_, target)| {
+            target
+                .to_str()
+                .unwrap()
+                .starts_with("vscode://blockchainian.git/view-pr?")
+        })
+        .unwrap();
+    assert_eq!(text(&buf, *rect, rect.y), "#13");
+    assert!(
+        buf[(rect.x, rect.y)]
+            .symbol()
+            .contains("\x1b]8;;vscode://blockchainian.git/view-pr?")
+    );
+    assert_eq!(buf[(rect.x, rect.y)].fg, style::thread_color(0));
+    assert_eq!(
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
         ),
-        (None, false, 60, "/tmp/project".to_owned()),
-        (Some("main"), true, 24, format!("{:<21}#13", "/tmp/project")),
-        (Some("main"), true, 22, format!("{:<19}#13", "/tmp/project")),
-    ] {
-        let mut row = session("project", "Project task", SessionStatus::Ready, 0);
-        row.git_branch = branch.map(str::to_owned);
-        row.pr = pr.then(|| crate::model::PullRequest {
-            number: 13,
-            url: "https://github.com/blockchainian/claude/pull/13".into(),
-        });
-        let mut view = test_view(Grouping::Project, true);
-        view.set_sessions(vec![row], false);
-        let area = Rect::new(5, 3, width, 30);
-        let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, Utc::now());
-        let y = area.bottom() - 3;
-        assert_eq!(text(&buf, area, y).trim_end(), expected);
-        assert_eq!(text(&buf, area, y - 1).trim(), "Project");
-        let links = view.viewport.borrow().details_links.clone();
-        for (rect, target) in links {
-            assert_eq!(rect.y, y);
-            assert_eq!(
-                click_mouse(
-                    &mut view,
-                    mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
-                ),
-                Some(Action::OpenPath(target))
-            );
-        }
-        let viewport = view.viewport.borrow();
-        assert_eq!(viewport.details_links.len(), if pr { 2 } else { 1 });
-        assert_eq!(viewport.details_links[0].1, PathBuf::from("/tmp/project"));
-        if pr {
-            let (rect, target) = &viewport.details_links[1];
-            assert_eq!(text(&buf, *rect, y), "#13");
-            assert!(
-                target
-                    .to_str()
-                    .unwrap()
-                    .starts_with("vscode://blockchainian.git/view-pr?")
-            );
-            assert_eq!(buf[(rect.x, y)].fg, style::thread_color(0));
-        }
-    }
+        Some(Action::OpenPath(target.clone()))
+    );
 }

@@ -100,6 +100,8 @@ pub struct Session {
     pub turn_messages: usize,
     pub last_record_at: Option<DateTime<Utc>>,
     pub model: Option<String>,
+    /// The model's human-readable name, such as "Opus 5.5", when the transcript names it.
+    pub model_label: Option<String>,
     pub effort: Option<String>,
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
@@ -175,6 +177,13 @@ impl Session {
             .filter(|model| !model.is_empty())
             .unwrap_or("Unknown")
     }
+
+    /// The model's human-readable name when known, else its id.
+    pub fn model_label(&self) -> &str {
+        self.model_label
+            .as_deref()
+            .unwrap_or_else(|| self.model_name())
+    }
 }
 
 pub type DraftId = u64;
@@ -220,11 +229,17 @@ pub enum Action {
     /// `h`: hide the session until the next launch.
     Hide(SessionKey),
     /// `p`: pin or unpin the session.
-    TogglePin { id: SessionKey, pinned: bool },
+    TogglePin {
+        id: SessionKey,
+        pinned: bool,
+    },
     /// `g`: the grouping changed; persist it.
     PersistGrouping(Grouping),
     /// `r`: set the session display name.
-    Rename { id: SessionKey, name: String },
+    Rename {
+        id: SessionKey,
+        name: String,
+    },
     /// Backspace, then confirmation: permanently delete the session transcript.
     Delete(SessionKey),
     /// `a`, then confirmation: archive the session and its child agents.
@@ -241,7 +256,10 @@ pub enum Action {
     Quit,
     /// Double click on an open log event or a details body: copy its text to the
     /// clipboard and confirm with `label`.
-    Copy { text: String, label: String },
+    Copy {
+        text: String,
+        label: String,
+    },
     /// Click on a drawn path, image placeholder or pull request link: open the
     /// file, directory or URL with macOS `open`.
     OpenPath(PathBuf),

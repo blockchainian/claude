@@ -5,20 +5,3 @@
 
                  Prompt
 Parent
-
-
-
-
-
-
-
-
-
-
-
-
-
-                Project
-/tmp/project
-
-Unknown

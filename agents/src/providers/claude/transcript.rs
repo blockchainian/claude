@@ -35,6 +35,8 @@ pub(super) struct Summary {
     pub completed_background: HashSet<String>,
     pub background_ids: HashSet<String>,
     pub model: Option<String>,
+    /// The newest model identity the transcript names: its id and human-readable name.
+    pub model_identity: Option<(String, String)>,
     pub effort: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
 }
@@ -207,6 +209,11 @@ impl Summary {
                 }
             }
             Some("assistant") => self.record_assistant_metadata(record),
+            Some("attachment") => {
+                if let Some(identity) = model_identity(record) {
+                    self.model_identity = Some(identity);
+                }
+            }
             _ => {}
         }
     }
@@ -234,6 +241,16 @@ pub(super) fn printable(text: &str) -> String {
     text.chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
         .collect()
+}
+
+/// The model id and human-readable name of a model attachment, such as "Opus 5.5".
+fn model_identity(record: &Value) -> Option<(String, String)> {
+    let attachment = &record["attachment"];
+    if attachment["type"] != "model" {
+        return None;
+    }
+    let identity = &attachment["identity"];
+    Some((text(identity, "modelId")?, text(identity, "marketingName")?))
 }
 
 fn assistant_model(record: &Value) -> Option<String> {
@@ -539,6 +556,7 @@ fn read_messages(
     let mut quiet_point = false;
     let mut questions_found = false;
     let mut model_found = false;
+    let mut identity_found = false;
     let mut effort_found = false;
     let mut tool_results = HashSet::new();
     let mut images = super::images::Companions::default();
@@ -552,6 +570,10 @@ fn read_messages(
                 summary.effort = Some(effort);
                 effort_found = true;
             }
+        }
+        if !identity_found && let Some(identity) = model_identity(&record) {
+            summary.model_identity = Some(identity);
+            identity_found = true;
         }
         images.record(&record);
         if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {

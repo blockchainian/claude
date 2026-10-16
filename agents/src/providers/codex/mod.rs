@@ -191,10 +191,7 @@ impl CodexProvider {
                 session.status = SessionStatus::NeedsInput;
             }
         }
-        Ok(Snapshot {
-            sessions,
-            has_more,
-        })
+        Ok(Snapshot { sessions, has_more })
     }
 }
 
@@ -280,6 +277,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
         prompt_at: None,
         turn_messages: 0,
         last_record_at: None,
+        model_label: None,
         model: column(row, "model")?,
         effort: column(row, "reasoning_effort")?,
         git_branch: column(row, "git_branch")?,

@@ -15,10 +15,10 @@
                                                   │
                                                   │
                                                   │
-                                                  │                     Project
-                                                  │ /tmp/project
                                                   │
-                                                  │ Unknown
-                                                  │ ──────────────────── Ready ────────────────────
+                                                  │
+                                                  │
+                                                  │
+                                                  │ ─ project ────────── Ready ────────────────────
  Legacy task ›
  ? help  esc back  ↑/↓ move  enter open  n new

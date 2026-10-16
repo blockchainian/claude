@@ -6,19 +6,3 @@ Checking the project
 
                  Prompt           1h 10m
 Activity task
-
-
-
-
-
-
-
-
-
-
-
-
-                Project
-/tmp/project
-
-Unknown

@@ -4,9 +4,9 @@
     /tmp/project    │      Prompt
  ○ Unloaded task    │ Unloaded task
                     │
-                    │      Project
-                    │ /tmp/project
-                    │ …
+                    │
+                    │
+                    │
                     │ ─── Inactive ────
  Unloaded tas ›
  ? help  esc back  ↑/↓ move  enter ope…

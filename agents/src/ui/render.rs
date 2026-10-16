@@ -412,7 +412,9 @@ impl View {
                 line("─".repeat(usize::from(border.width)).dim(), border, buf);
                 border.y
             };
-            self.render_log_jump(Rect::new(layout.log.x, jump_y, layout.log.width, 1), buf);
+            let log_rule = Rect::new(layout.log.x, jump_y, layout.log.width, 1);
+            self.render_log_model(log_rule, buf);
+            self.render_log_jump(log_rule, buf);
             let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
             self.render_activity_strip(rule, buf, now);
         }
@@ -577,6 +579,71 @@ impl View {
         );
         Clear.render(status_area, buf);
         line(status, status_area, buf);
+        // The project folder's name and its pull request flank the status.
+        let folder = session
+            .cwd
+            .file_name()
+            .map_or_else(|| session.cwd.display().to_string(), |name| {
+                name.to_string_lossy().into_owned()
+            });
+        let pr = session
+            .pr
+            .as_ref()
+            .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id)));
+        let (folder_area, pr_area) = render_rule_ends(
+            rule,
+            status_width,
+            Some(Span::styled(folder, style::time_style())),
+            pr,
+            buf,
+        );
+        let mut viewport = self.viewport.borrow_mut();
+        if let Some(area) = folder_area {
+            viewport.details_links.push((area, session.cwd.clone()));
+        }
+        if let (Some(area), Some(pr)) = (pr_area, &session.pr) {
+            let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
+                .unwrap_or_else(|| pr.url.clone());
+            super::hyperlink::hyperlink(buf, area, &url);
+            viewport.details_links.push((area, PathBuf::from(url)));
+        }
+    }
+
+    /// Writes the selected session's model on the left of the log's border and its effort on
+    /// the right; both open their pickers when clicked.
+    fn render_log_model(&self, rule: Rect, buf: &mut Buffer) {
+        let Some(session) = self.selected_row() else {
+            return;
+        };
+        let effort = match session.effort.as_deref() {
+            Some(effort) => Some(effort),
+            None if session.is_live_background()
+                && session.input_disabled_reason().is_none()
+                && self
+                    .input_choices
+                    .get(&session.id.provider)
+                    .is_some_and(|choices| !choices.efforts.is_empty()) =>
+            {
+                Some("Unknown")
+            }
+            None => None,
+        };
+        let (model_area, effort_area) = render_rule_ends(
+            rule,
+            0,
+            Some(Span::styled(
+                session.model_label().to_owned(),
+                style::time_style(),
+            )),
+            effort.map(|effort| Span::styled(effort.to_owned(), style::time_style())),
+            buf,
+        );
+        let mut viewport = self.viewport.borrow_mut();
+        for (area, field) in [(model_area, Field::Model), (effort_area, Field::Effort)] {
+            if let Some(area) = area {
+                viewport.field_targets.push((area, field));
+            }
+        }
     }
     pub(super) fn render_details(
         &self,
@@ -762,7 +829,11 @@ impl View {
         let tasks_text = tasks
             .iter()
             .map(|(task, status)| {
-                format!("{} {}", Self::status_indicator(*status).content, task.subject)
+                format!(
+                    "{} {}",
+                    Self::status_indicator(*status).content,
+                    task.subject
+                )
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -909,115 +980,6 @@ impl View {
         }
         item_links.resize(items.len(), Vec::new());
 
-        let project_item = items.len();
-        let right = session
-            .pr
-            .as_ref()
-            .map(|pr| Span::styled(format!("#{}", pr.number), self.title_style(&session.id)))
-            .or_else(|| {
-                session
-                    .git_branch
-                    .as_ref()
-                    .map(|branch| Span::styled(branch.clone(), style::time_style()))
-            })
-            .filter(|value| width >= value.width() + 2);
-        let path_space = width.saturating_sub(right.as_ref().map_or(0, |value| value.width() + 1));
-        let cwd =
-            super::line_truncation::abbreviate_path(&session.cwd.to_string_lossy(), path_space);
-        let mut project = truncate_line_with_ellipsis_if_overflow(
-            Line::from(Span::styled(cwd, style::time_style())),
-            path_space,
-        );
-        for span in &mut project.spans {
-            span.style = style::time_style();
-        }
-        let path_width = project.width();
-        let mut link = None;
-        if let Some(right) = right {
-            let start = width - right.width();
-            project.spans.push(" ".repeat(start - path_width).dim());
-            if let Some(pr) = &session.pr {
-                let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
-                    .unwrap_or_else(|| pr.url.clone());
-                link = Some((start as u16, right.width() as u16, url));
-            }
-            project.spans.push(right);
-        }
-        let mut project_links = Vec::new();
-        if path_width > 0 {
-            project_links.push((0..path_width as u16, session.cwd.clone()));
-        }
-        project_links.extend(
-            link.iter()
-                .map(|(x, width, url)| (*x..x + width, PathBuf::from(url))),
-        );
-        item_links.extend([Vec::new(), Vec::new(), project_links]);
-        items.extend([
-            Line::default().into(),
-            centered_header("Project".dim().into(), Line::default(), width).into(),
-            Item::Link {
-                line: project,
-                link,
-            },
-        ]);
-
-        let effort = match session.effort.as_deref() {
-            Some(effort) => Some(effort),
-            None if session.is_live_background()
-                && session.input_disabled_reason().is_none()
-                && self
-                    .input_choices
-                    .get(&session.id.provider)
-                    .is_some_and(|choices| !choices.efforts.is_empty()) =>
-            {
-                Some("Unknown")
-            }
-            None => None,
-        };
-        let effort = effort.filter(|value| width >= value.width() + 2);
-        let name_space = width.saturating_sub(effort.map_or(0, |value| value.width() + 1));
-        let mut model = truncate_line_with_ellipsis_if_overflow(
-            Line::from(Span::styled(
-                session.model_name().to_owned(),
-                style::time_style(),
-            )),
-            name_space,
-        );
-        for span in &mut model.spans {
-            span.style = style::time_style();
-        }
-        let name_width = model.width();
-        let mut model_fields = Vec::new();
-        if name_width > 0 {
-            model_fields.push((0, name_width, Field::Model));
-        }
-        if let Some(effort) = effort {
-            let start = width - effort.width();
-            model.spans.push(" ".repeat(start - model.width()).dim());
-            model
-                .spans
-                .push(Span::styled(effort.to_owned(), style::time_style()));
-            model_fields.push((start, effort.width(), Field::Effort));
-        }
-
-        let mut model_item = items.len() + 1;
-        // The model sits on the panel's last row, right above the bottom rule.
-        items.extend([Line::default().into(), model.into()]);
-        item_links.resize(items.len(), Vec::new());
-
-        let total = items.iter().map(Item::height).sum::<usize>();
-        if total < usize::from(area.height) {
-            // Move the unused rows above Project. All body ranges stay above
-            // the gap; links and Model move with their items.
-            let gap = usize::from(area.height) - total;
-            items.splice(
-                project_item..project_item,
-                (0..gap).map(|_| Line::default().into()),
-            );
-            item_links.splice(project_item..project_item, (0..gap).map(|_| Vec::new()));
-            model_item += gap;
-        }
-
         let mut text_rows = vec![None; items.len()];
         let mut sources = Vec::new();
         for (id, (body, copy)) in bodies.iter().zip(&copies).enumerate() {
@@ -1123,7 +1085,6 @@ impl View {
                         start..start + budget.bodies[i].0 + state.reveal[i]
                     })
                     .collect();
-                model_item = keep[..model_item].iter().filter(|keep| **keep).count();
                 let mut index = 0;
                 items.retain(|_| {
                     let retain = keep[index];
@@ -1174,17 +1135,9 @@ impl View {
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
-        for (item_index, ((item, mapped), links)) in
-            items.into_iter().zip(text_rows).zip(item_links).enumerate()
-        {
+        for ((item, mapped), links) in items.into_iter().zip(text_rows).zip(item_links) {
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
-                if item_index == model_item {
-                    for &(start, width, field) in &model_fields {
-                        let rect = Rect::new(area.x + start as u16, y, width as u16, 1);
-                        self.viewport.borrow_mut().field_targets.push((rect, field));
-                    }
-                }
                 if let Some(mut mapped) = mapped {
                     mapped.y = y;
                     self.viewport.borrow_mut().details_text.rows.push(mapped);
@@ -1200,16 +1153,6 @@ impl View {
             let item_area = row(content_area, offset as u16, height as u16);
             match item {
                 Item::Text(text) => line(text, item_area, &mut content),
-                Item::Link { line: text, link } => {
-                    line(text, item_area, &mut content);
-                    if let Some((x, width, url)) = link {
-                        super::hyperlink::hyperlink(
-                            &mut content,
-                            Rect::new(item_area.x + x, item_area.y, width, 1),
-                            &url,
-                        );
-                    }
-                }
                 Item::Background { task, output } => {
                     let start = offset.max(scroll);
                     let end = (offset + height).min(scroll + available);
@@ -1395,14 +1338,45 @@ fn left_right(label: Line<'static>, group: Line<'static>, width: usize) -> (Line
     (Line::from(spans), start)
 }
 
+/// Draws `left` after the rule's first cell and `right` before its last, each between spaces,
+/// keeping clear the `center` columns in the rule's middle. Returns where each text landed.
+fn render_rule_ends(
+    rule: Rect,
+    center: u16,
+    left: Option<Span<'static>>,
+    right: Option<Span<'static>>,
+    buf: &mut Buffer,
+) -> (Option<Rect>, Option<Rect>) {
+    // Each side keeps a rule cell at the edge, a space on both sides of its text and a rule
+    // cell before the center.
+    let side = usize::from(rule.width.saturating_sub(center) / 2).saturating_sub(4);
+    let mut place = |text: Option<Span<'static>>, from_left: bool| {
+        let style = text.as_ref()?.style;
+        let text = truncate_line_with_ellipsis_if_overflow(Line::from(text?), side);
+        let width = text.width() as u16;
+        if width == 0 {
+            return None;
+        }
+        let x = if from_left {
+            rule.x + 2
+        } else {
+            rule.right() - 2 - width
+        };
+        let area = Rect::new(x, rule.y, width, 1);
+        Clear.render(Rect::new(x - 1, rule.y, width + 2, 1), buf);
+        let mut text = text;
+        for span in &mut text.spans {
+            span.style = style;
+        }
+        text.render(area, buf);
+        Some(area)
+    };
+    (place(left, true), place(right, false))
+}
+
 /// One row-aligned piece of the details panel.
 enum Item<'a> {
     Text(Line<'static>),
-    Link {
-        line: Line<'static>,
-        /// Column offset, width and target of the pull request link.
-        link: Option<(u16, u16, String)>,
-    },
     Subagent(&'a Session),
     Background {
         task: &'a crate::model::BackgroundTask,
@@ -1413,7 +1387,7 @@ enum Item<'a> {
 impl Item<'_> {
     fn height(&self) -> usize {
         match self {
-            Self::Text(_) | Self::Link { .. } => 1,
+            Self::Text(_) => 1,
             Self::Background { output, .. } => box_height(output.len()),
             Self::Subagent(child) => box_height(usize::from(!subagent_line(child).0.is_empty())),
         }
@@ -1584,6 +1558,7 @@ mod wrapped_path_tests {
             prompt_at: None,
             turn_messages: 0,
             last_record_at: None,
+            model_label: None,
             model: None,
             effort: None,
             git_branch: None,

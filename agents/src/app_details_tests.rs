@@ -70,14 +70,14 @@ fn setup(activity: bool) -> (tempfile::TempDir, App) {
 }
 
 #[test]
-fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
+fn app_details_groups_and_project_links_follow_panel_rules() {
     for activity in [false, true] {
         let (_directory, mut app) = setup(activity);
         for width in [120, 149, 150, 200, 240] {
             let mut terminal = Terminal::new(TestBackend::new(width, 60)).unwrap();
             app.draw(&mut terminal).unwrap();
             let buffer = terminal.backend().buffer();
-            let (_, project_y) = position(buffer, "Project");
+            let status_y = position(buffer, "›").1 - 1;
             let separators: Vec<_> = (0..width)
                 .filter(|&x| cell_text(buffer, x, 3) == "│")
                 .collect();
@@ -104,7 +104,6 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                     if activity { "1m ago" } else { "2m ago" },
                 ),
                 ("Prompt", "1m 5s"),
-                ("Project", ""),
             ] {
                 let (x, y) = position(buffer, label);
                 assert_eq!(x, left + (right - left - label.len() as u16) / 2);
@@ -112,21 +111,34 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                 assert!(actual.ends_with(value), "{width}: {actual:?}");
                 assert!(!actual.contains("messages"));
             }
+            let folder_x = left + 2;
+            let pr_x = right - 5;
             assert_eq!(
-                row_text(buffer, project_y + 1, left, right).trim_end(),
-                format!("{:<width$}#13", "/tmp/project", width = usize::from(right - left - 3))
+                row_text(buffer, status_y, folder_x, folder_x + 7),
+                "project"
             );
+            assert_eq!(row_text(buffer, status_y, pr_x, pr_x + 3), "#13");
             assert!(
-                buffer[(left + 13, project_y + 1)]
+                buffer[(folder_x, status_y)]
                     .modifier
                     .contains(Modifier::DIM)
             );
+            assert!(buffer[(pr_x, status_y)].symbol().contains("\x1b]8;;"));
+            let rendered = (3..status_y)
+                .map(|y| row_text(buffer, y, left, right))
+                .collect::<Vec<_>>();
+            assert!(
+                rendered
+                    .iter()
+                    .all(|row| !row.contains("Project") && !row.contains("Model"))
+            );
+            assert!(rendered.iter().all(|row| !row.contains("/tmp/project")));
 
             let (_, background_y) = position(buffer, "Check files");
             assert_eq!(row_text(buffer, background_y, right - 5, right), "1h 0m");
-            for x in right - 3..right {
+            for x in pr_x..pr_x + 3 {
                 assert_eq!(click_link(&mut app, MouseEvent {
-                    kind: MouseEventKind::Down(MouseButton::Left), column: x, row: project_y + 1, modifiers: KeyModifiers::NONE,
+                    kind: MouseEventKind::Down(MouseButton::Left), column: x, row: status_y, modifiers: KeyModifiers::NONE,
                 }), Some(Action::OpenPath("vscode://blockchainian.git/view-pr?repo=%2Ftmp%2Fproject&url=https%3A%2F%2Fgithub.com%2Fblockchainian%2Fclaude%2Fpull%2F13".into())));
             }
             assert_eq!(
@@ -134,34 +146,41 @@ fn app_details_groups_end_at_matching_panel_margins_and_pr_click_moves() {
                     &mut app,
                     MouseEvent {
                         kind: MouseEventKind::Down(MouseButton::Left),
-                        column: left + 3,
-                        row: project_y,
+                        column: folder_x,
+                        row: status_y,
                         modifiers: KeyModifiers::NONE,
                     }
                 ),
-                None
+                Some(Action::OpenPath("/tmp/project".into()))
             );
         }
     }
 }
 
 #[test]
-fn app_details_narrow_groups_preserve_labels_and_do_not_leave_pr_hitboxes() {
+fn app_details_without_pr_has_only_folder_link_and_no_branch() {
     let (_directory, mut app) = setup(false);
     app.sessions[0].git_branch = Some("分支".repeat(40));
+    app.sessions[0].pr = None;
     app.view.set_sessions(app.sessions.clone(), false);
-    for width in [60, 80, 90, 150] {
+    for width in [60, 80, 90, 149, 150] {
         let mut terminal = Terminal::new(TestBackend::new(width, 60)).unwrap();
         app.draw(&mut terminal).unwrap();
         let buffer = terminal.backend().buffer();
-        let (left, y) = position(buffer, "Project");
-        assert_eq!(row_text(buffer, y, left, left + 8), "Project ");
-        let end = (left..width)
-            .find(|&x| cell_text(buffer, x, y) == "│")
-            .unwrap_or(width);
-        assert!(row_text(buffer, y + 1, left, end).contains("#13"));
-        assert!(!row_text(buffer, y + 1, left, end).contains("分支"));
-        for x in left..end {
+        let y = position(buffer, "›").1 - 1;
+        let separators: Vec<_> = (0..width)
+            .filter(|&x| cell_text(buffer, x, 3) == "│")
+            .collect();
+        let left = separators[0] + 2;
+        let end = if width >= 150 {
+            separators[1] - 1
+        } else {
+            width - 1
+        };
+        let rule = row_text(buffer, y, left, end);
+        assert!(!rule.contains("#13"));
+        assert!(!rule.contains("分支"));
+        for x in end.saturating_sub(5)..end {
             assert_eq!(
                 click_link(
                     &mut app,

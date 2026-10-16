@@ -18,7 +18,6 @@ Waiting for your response.
 
 
 
-                Project
-/tmp/project
 
-Unknown
+
+

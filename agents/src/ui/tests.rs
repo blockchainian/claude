@@ -756,36 +756,57 @@ fn details_scroll_preserves_background_cells_and_hyperlinks() {
         url: "https://example.com/pull/833".into(),
     });
     let now = selected.updated_at;
-    let full_area = Rect::new(7, 4, 43, 60);
-    let mut full = Buffer::empty(full_area);
-    view.render_details(full_area, &mut full, now);
-    let top = (full_area.y..full_area.bottom())
-        .find(|y| full[(full_area.x, *y)].symbol() == "─")
+    let area = Rect::new(7, 4, 120, 40);
+    let mut before = Buffer::empty(area);
+    view.render_at(area, &mut before, now);
+    let viewport = view.viewport.borrow();
+    let body = viewport.details;
+    let output_y = (body.y..body.bottom())
+        .find(|&y| {
+            (body.x..body.right())
+                .map(|x| before[(x, y)].symbol())
+                .collect::<String>()
+                .contains("Background output")
+        })
         .unwrap();
-    let area = Rect::new(7, 4, 43, 10);
-    view.viewport.borrow_mut().details_scroll.offset = usize::from(top - full_area.y);
-    let mut clipped = Buffer::empty(area);
-    view.render_details(area, &mut clipped, now);
-    assert_eq!(view.viewport.borrow().details_scroll.content_top, area.y);
-    assert_eq!(clipped[(area.x + 2, area.y + 1)].symbol(), "B");
-    let scroll = view.viewport.borrow().details_scroll.offset as u16;
-    for y in area.y + 1..area.bottom() - 1 {
-        for x in area.x..area.right() {
-            assert_eq!(clipped[(x, y)], full[(x, y + scroll)]);
-        }
-    }
-    view.viewport.borrow_mut().details_scroll.offset = usize::MAX;
-    view.render_details(area, &mut clipped, now);
-    let link = clipped
-        .content
+    let (pr, _) = viewport
+        .details_links
         .iter()
-        .find(|cell| cell.symbol().contains("https://example.com/pull/833"))
-        .expect("visible pull request hyperlink");
-    assert!(full.content.contains(link));
+        .find(|(_, path)| path == &PathBuf::from("https://example.com/pull/833"))
+        .unwrap();
+    let pr = *pr;
+    assert!(
+        before[(pr.x, pr.y)]
+            .symbol()
+            .contains("https://example.com/pull/833")
+    );
     assert!(matches!(
-        link.diff_option,
+        before[(pr.x, pr.y)].diff_option,
         ratatui::buffer::CellDiffOption::ForcedWidth(_)
     ));
+    let prompt = viewport.details_scroll.bodies[0].start as u16 + body.y;
+    assert!(viewport.details_scroll.hidden[0] > 0);
+    drop(viewport);
+    view.scroll_content_row(true, false, prompt);
+    let mut after = Buffer::empty(area);
+    view.render_at(area, &mut after, now);
+    assert!(view.viewport.borrow().details_scroll.reveal[0] > 0);
+    let after_y = (body.y..body.bottom())
+        .find(|&y| {
+            (body.x..body.right())
+                .map(|x| after[(x, y)].symbol())
+                .collect::<String>()
+                .contains("Background output")
+        })
+        .unwrap();
+    for offset in 0..=1 {
+        for x in body.x..body.right() {
+            assert_eq!(after[(x, after_y - offset)], before[(x, output_y - offset)]);
+        }
+    }
+    for x in pr.x..pr.right() {
+        assert_eq!(after[(x, pr.y)], before[(x, pr.y)]);
+    }
 }
 
 #[test]
@@ -1059,6 +1080,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
         prompt_at: None,
         turn_messages: 0,
         last_record_at: None,
+        model_label: None,
         model: None,
         effort: None,
         git_branch: None,
@@ -1788,8 +1810,7 @@ fn details_include_attention_and_clip_messages() {
     let rendered = screen(&view, 160, 50);
     for label in [
         "claude-opus",
-        "Project",
-        "main",
+        "project",
         "Needs attention",
         "Open task to review.",
         "Waiting for your response.",
@@ -1802,30 +1823,24 @@ fn details_include_attention_and_clip_messages() {
             .lines()
             .position(|line| !line.contains("Group:") && line.contains(label))
     };
-    // The path appears in both the task list and the details.
-    let project = rendered.lines().position(|line| {
-        line.chars()
-            .skip(usize::from(view.viewport.borrow().details.x))
-            .collect::<String>()
-            .contains("/tmp/project")
-    });
     assert!(position("Update") < position("Prompt"));
     assert!(position("Prompt") < position("Needs attention"));
-    assert!(position("Needs attention") < position("Project"));
-    assert!(position("Project") < project);
-    assert!(project < position("claude-opus"));
+    let viewport = view.viewport.borrow();
+    let folder = viewport
+        .details_links
+        .iter()
+        .find(|(_, path)| path == &PathBuf::from("/tmp/project"))
+        .unwrap()
+        .0;
+    assert_eq!(folder.y, viewport.details.bottom());
     assert!(
-        rendered
-            .lines()
-            .any(|line| line.contains("claude-opus") && line.contains("high"))
+        viewport
+            .field_targets
+            .iter()
+            .any(|(_, field)| *field == Field::Model)
     );
+    assert!(!rendered.contains("main"));
     assert!(!rendered.contains("Reasoning"));
-    let area = Rect::new(0, 0, 38, 22);
-    let mut buf = Buffer::empty(area);
-    view.render_details(area, &mut buf, Utc::now());
-    assert_eq!(buf[(0, 21)].symbol(), "c");
-    assert_eq!(buf[(34, 21)].symbol(), "h");
-    assert_eq!(buf[(0, 20)].symbol(), " ");
 }
 
 #[test]
@@ -2247,154 +2262,174 @@ fn task_titles_take_the_next_accent_when_first_shown_and_keep_it() {
 }
 
 #[test]
-fn details_branch_uses_header_style_and_links_keep_their_styles() {
+fn details_folder_and_pr_use_rule_styles_and_keep_links() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
-    row.git_branch = Some("main".into());
+    row.git_branch = Some("hidden-branch".into());
     row.pr = Some(crate::model::PullRequest {
         number: 833,
         url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
     });
-    let color = style::thread_color(0);
     let mut view = test_view(Grouping::Project, true);
     view.status_filter = 1;
     view.set_sessions(vec![row], false);
-    let area = Rect::new(0, 0, 40, 18);
-    let mut buf = Buffer::empty(area);
-    view.render_details(area, &mut buf, Utc::now());
-    let project_y = (0..area.height)
-        .find(|y| {
-            (0..area.width)
-                .map(|x| buf[(x, *y)].symbol())
-                .collect::<String>()
-                .trim()
-                == "Project"
-        })
-        .expect("Project header");
-    for x in 12..36 {
+    for width in [120, 200] {
+        let area = Rect::new(0, 0, width, 40);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+        let viewport = view.viewport.borrow();
+        let links = viewport.details_links.clone();
+        let y = viewport.details.bottom();
+        drop(viewport);
+        let (folder, _) = links
+            .iter()
+            .find(|(_, path)| path == &PathBuf::from("/tmp/project"))
+            .unwrap();
+        let (pr, url) = links
+            .iter()
+            .find(|(_, path)| path != &PathBuf::from("/tmp/project"))
+            .unwrap();
+        assert_eq!(folder.y, y);
+        assert_eq!(pr.y, y);
+        assert!(folder.right() < pr.x);
+        for (offset, symbol) in "project".chars().enumerate() {
+            let cell = &buf[(folder.x + offset as u16, y)];
+            assert_eq!(cell.symbol(), symbol.to_string());
+            assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
+            assert!(!cell.modifier.contains(ratatui::style::Modifier::BOLD));
+        }
+        for x in pr.x..pr.right() {
+            let cell = &buf[(x, y)];
+            let mut reference = ratatui::buffer::Cell::default();
+            reference.set_style(view.title_style(&session_key("pr")));
+            assert_eq!(cell.style(), reference.style());
+            if x == pr.x {
+                assert!(cell.symbol().contains("\x1b]8;;"));
+                assert!(cell.symbol().contains(url.to_str().unwrap()));
+            }
+        }
+        view.underline_links(&mut buf);
+        assert!(buf[(folder.x, y)].symbol().contains("\x1b[4:4m"));
         assert!(
-            buf[(x, project_y + 1)]
+            buf[(folder.x, y)]
                 .modifier
                 .contains(ratatui::style::Modifier::DIM)
         );
-        assert_eq!(buf[(x, project_y + 1)].symbol(), " ");
-    }
-    for x in 36..40 {
-        assert_eq!(buf[(x, project_y + 1)].fg, color);
-    }
-    let path_y = project_y + 1;
-    let path = "/tmp/project";
-    assert!(view.viewport.borrow().details_links.contains(&(
-        Rect::new(0, path_y, path.len() as u16, 1),
-        PathBuf::from(path),
-    )));
-    for (x, symbol) in path.chars().enumerate() {
-        let cell = &buf[(x as u16, path_y)];
-        assert_eq!(cell.symbol(), symbol.to_string());
-        assert_eq!(cell.style(), buf[(16, project_y)].style());
-    }
-    view.underline_links(&mut buf);
-    for (x, symbol) in path.chars().enumerate() {
-        let cell = &buf[(x as u16, path_y)];
-        assert_eq!(cell.symbol(), format!("\x1b[4:4m{symbol}\x1b[24m"));
-        assert_eq!(cell.style(), buf[(16, project_y)].style());
+        assert_eq!(
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), folder.x, y)
+            ),
+            Some(Action::OpenPath("/tmp/project".into()))
+        );
+        assert_eq!(
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), pr.x, y)
+            ),
+            Some(Action::OpenPath(url.clone()))
+        );
     }
 }
 
 #[test]
-fn details_model_and_effort_use_header_style() {
+fn log_model_and_effort_use_dim_style_and_picker_targets() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     for use_colors in [true, false] {
-        let mut row = session("model", "Model task", SessionStatus::Inactive, 120);
-        row.model = Some("claude-opus-5-5".into());
-        row.effort = Some("medium".into());
-        let mut view = test_view(Grouping::Project, use_colors);
-        view.status_filter = 1;
-        view.set_sessions(vec![row], false);
-        let area = Rect::new(0, 0, 40, 18);
-        let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, Utc::now());
-        let y = (0..area.height)
-            .find(|y| {
-                (0..area.width)
-                    .map(|x| buf[(x, *y)].symbol())
-                    .collect::<String>()
-                    .contains("claude-opus-5-5")
-            })
-            .expect("Model header");
-        let group = format!("{:<34}medium", "claude-opus-5-5");
-        let start = 0;
-        let title_style = view.title_style(&session_key("model"));
-        for (offset, symbol) in group.chars().enumerate() {
-            let cell = &buf[(start + offset as u16, y)];
-            assert_eq!(cell.symbol(), symbol.to_string());
-            if symbol == ' ' {
-                continue;
-            }
-            assert_eq!(
-                cell.style(),
-                buf[(0, y)].style(),
-                "cell {offset}, colors={use_colors}"
-            );
-        }
-        if use_colors {
-            let text: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
-            let styles: String = (0..area.width)
-                .map(|x| {
-                    if buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM) {
-                        'd'
-                    } else if buf[(x, y)].fg == title_style.fg.unwrap() {
-                        't'
-                    } else {
-                        '.'
+        for width in [120, 200] {
+            for human_name in [None, Some("Opus 5.5")] {
+                let mut row = session("model", "Model task", SessionStatus::Inactive, 120);
+                row.model = Some("claude-opus-5-5".into());
+                row.model_label = human_name.map(str::to_owned);
+                row.effort = Some("medium".into());
+                row.transcript = Some("/tmp/model.jsonl".into());
+                let mut view = test_view(Grouping::Project, use_colors);
+                view.status_filter = 1;
+                view.set_sessions(vec![row], false);
+                let area = Rect::new(0, 0, width, 40);
+                let mut buf = Buffer::empty(area);
+                view.render(area, &mut buf);
+                let layout = view.center_layout(area);
+                let y = if width >= 150 {
+                    layout.log.bottom()
+                } else {
+                    layout.log.y - 1
+                };
+                let targets = view.viewport.borrow().field_targets.clone();
+                for (field, text) in [
+                    (Field::Model, human_name.unwrap_or("claude-opus-5-5")),
+                    (Field::Effort, "medium"),
+                ] {
+                    let rect = targets.iter().find(|(_, value)| *value == field).unwrap().0;
+                    assert_eq!(rect.y, y);
+                    assert_eq!(rect.width as usize, text.len());
+                    assert_eq!(
+                        rect.x,
+                        if field == Field::Model {
+                            layout.log.x + 2
+                        } else {
+                            layout.log.right() - 2 - rect.width
+                        }
+                    );
+                    for (offset, symbol) in text.chars().enumerate() {
+                        let cell = &buf[(rect.x + offset as u16, y)];
+                        assert_eq!(cell.symbol(), symbol.to_string());
+                        assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
+                        assert!(!cell.modifier.contains(ratatui::style::Modifier::BOLD));
                     }
-                })
-                .collect();
-            assert_eq!(
-                format!("{text}\n{styles}\n"),
-                include_str!("../../tests/ui_snapshots/details_model_style.txt")
-            );
+                }
+                if use_colors && width == 120 && human_name.is_none() {
+                    let text: String = (layout.log.x..layout.log.right())
+                        .map(|x| buf[(x, y)].symbol())
+                        .collect();
+                    let styles: String = (layout.log.x..layout.log.right())
+                        .map(|x| {
+                            if buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM) {
+                                'd'
+                            } else {
+                                '.'
+                            }
+                        })
+                        .collect();
+                    assert_eq!(
+                        format!("{text}\n{styles}\n"),
+                        include_str!("../../tests/ui_snapshots/details_model_style.txt")
+                    );
+                }
+            }
         }
     }
 }
 
 #[test]
-fn details_branch_pull_request_snapshot() {
+fn details_status_folder_and_optional_pr_snapshot() {
     let mut row = session("pr", "PR task", SessionStatus::Inactive, 120);
-    row.git_branch = Some("main".into());
+    row.git_branch = Some("hidden-branch".into());
     let mut view = test_view(Grouping::Project, false);
     view.status_filter = 1;
     view.set_sessions(vec![row.clone()], false);
-    let area = Rect::new(0, 0, 40, 18);
     let render = |view: &View| {
-        let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, Utc::now());
-        buf.content
-            .chunks(40)
-            .map(|row| {
-                row.iter()
-                    .map(|cell| {
-                        let symbol = cell.symbol();
-                        let symbol = symbol
-                            .rsplit("\x1b\\")
-                            .find(|part| !part.is_empty() && !part.starts_with("\x1b]8"))
-                            .unwrap_or("");
-                        symbol.split("\x1b]8").next().unwrap().to_owned()
-                    })
-                    .collect::<String>()
-                    .trim_end()
-                    .to_owned()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-            .trim_end_matches('\n')
-            .to_owned()
-            + "\n\n"
+        let mut buf = Buffer::empty(Rect::new(0, 0, 120, 30));
+        view.render(buf.area, &mut buf);
+        let viewport = view.viewport.borrow();
+        let y = viewport.details.bottom();
+        let layout = view.center_layout(buf.area);
+        let mut text = String::new();
+        for x in layout.details.x..layout.details.right() {
+            let symbol = buf[(x, y)].symbol();
+            let symbol = symbol
+                .rsplit("\x1b\\")
+                .find(|part| !part.is_empty() && !part.starts_with("\x1b]8"))
+                .unwrap_or("");
+            text.push_str(symbol.split("\x1b]8").next().unwrap());
+        }
+        text + "\n"
     };
     assert_eq!(
         render(&view),
         include_str!("../../tests/ui_snapshots/details_branch.txt")
     );
+    assert_eq!(view.viewport.borrow().details_links.len(), 1);
     row.pr = Some(crate::model::PullRequest {
         number: 833,
         url: "https://github.com/0xbabedead/chadwallet/pull/833".into(),
@@ -2404,22 +2439,21 @@ fn details_branch_pull_request_snapshot() {
         render(&view),
         include_str!("../../tests/ui_snapshots/details_branch_pr.txt")
     );
-    for width in [13, 15, 20, 21, 40] {
-        let area = Rect::new(5, 8, width, 18);
-        let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, Utc::now());
-        for (rect, _) in &view.viewport.borrow().details_links {
-            assert_eq!(rect.y, area.bottom() - 3);
-            assert!(rect.right() <= area.right());
+    for width in [80, 120, 160, 200] {
+        let mut buf = Buffer::empty(Rect::new(5, 8, width, 30));
+        view.render(buf.area, &mut buf);
+        let viewport = view.viewport.borrow();
+        for (rect, _) in &viewport.details_links {
+            assert_eq!(rect.y, viewport.details.bottom());
+            assert!(rect.right() <= buf.area.right());
         }
     }
-
-    row.git_branch = None;
-    view.set_sessions(vec![row.clone()], false);
-    assert!(render(&view).contains(&format!("{:<36}#833", "/tmp/project")));
     row.pr = None;
     view.set_sessions(vec![row], false);
-    assert!(render(&view).contains("                Project\n/tmp/project\n"));
+    let text = render(&view);
+    assert!(!text.contains("#833"));
+    assert!(!text.contains("hidden-branch"));
+    assert_eq!(view.viewport.borrow().details_links.len(), 1);
 }
 
 #[test]
@@ -2548,9 +2582,9 @@ fn details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
         Some(Action::OpenPath(dir.path().join("reports/queued.md")))
     );
     view.rows[view.selected].queued.clear();
-    view.rows[view.selected].prompt = "Prompt row\n".repeat(20);
-    view.rows[view.selected].last_message = Some("Reply row\n".repeat(20));
-    for height in [16, 8] {
+    view.rows[view.selected].prompt = "Prompt row  \n".repeat(20);
+    view.rows[view.selected].last_message = Some("Reply row  \n".repeat(20));
+    for height in [16, 4] {
         let area = Rect::new(0, 0, 40, height);
         let mut buf = Buffer::empty(area);
         view.render_details(area, &mut buf, now);
@@ -2801,7 +2835,7 @@ mod details_header {
                             1,
                         );
                         let header = label(&buf, rule);
-                        assert_eq!(label(&buf, bottom), "Working");
+                        assert!(label(&buf, bottom).ends_with("Working"));
                         assert!(header.contains("Fix login bug"));
                         assert!(bottom.y > layout.header.bottom());
                         if advance == 0 {
@@ -2957,13 +2991,14 @@ mod details_header {
                     .collect::<String>();
                 let status_start = (usize::from(top.width) - " Working ".len()) / 2;
                 assert_eq!(
-                    bottom_text,
-                    format!(
-                        "{} Working {}",
-                        "─".repeat(status_start),
-                        "─".repeat(usize::from(top.width) - status_start - " Working ".len())
-                    )
+                    bottom_text
+                        .chars()
+                        .skip(status_start)
+                        .take(" Working ".len())
+                        .collect::<String>(),
+                    " Working "
                 );
+                assert!(bottom_text.contains("project"));
                 for x in top.right() - 6..top.right() {
                     let cell = &buf[(x, top.y)];
                     assert!(cell.modifier.contains(Modifier::DIM));
@@ -3052,7 +3087,7 @@ mod details_header {
             layout.details.width,
             1,
         );
-        assert_eq!(label(&buf, bottom), "Working");
+        assert!(label(&buf, bottom).ends_with("Working"));
     }
 }
 
@@ -3076,7 +3111,7 @@ fn details_prompt_renders_all_wrapped_lines() {
     assert_eq!(lines[1], "a".repeat(40));
     assert_eq!(lines[2], "b".repeat(40));
     assert_eq!(lines[3], "c".repeat(40));
-    assert_eq!(lines[4], "");
+    assert_eq!(lines.len(), 4);
     assert!(!rendered.contains('…'));
 }
 
@@ -3102,23 +3137,16 @@ fn details_prompt_overflow_marks_panel_and_scrolls_to_all_lines() {
     };
     assert_eq!(line(&buf, 1), wrapped[0]);
     assert_eq!(line(&buf, 2), wrapped[1]);
-    assert_eq!(line(&buf, 5), "…");
-    for expected in &wrapped[4..] {
-        view.scroll_content_row(true, false, area.y);
+    assert!(line(&buf, 5).ends_with('…'));
+    let hidden = view.viewport.borrow().details_scroll.hidden[0];
+    assert!(hidden > 0);
+    for _ in 0..hidden {
+        view.scroll_content_row(true, false, area.y + 1);
         buf.reset();
         view.render_details(area, &mut buf, now);
-        assert_eq!(line(&buf, 4), *expected);
-        assert_eq!(line(&buf, 5), "…");
     }
-    let total = view.viewport.borrow().details_scroll.fallback_max.unwrap();
-    for _ in 0..total {
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x, area.y));
-    }
-    buf.reset();
-    view.render_details(area, &mut buf, now);
-    assert_eq!(line(&buf, 3), "/tmp/project");
-    assert_eq!(line(&buf, 5), "Unknown");
-    assert_eq!(line(&buf, 4), "");
+    assert_eq!(line(&buf, 5), wrapped.last().unwrap().as_str());
+    assert!(!buf.content.iter().any(|cell| cell.symbol() == "…"));
 }
 
 #[test]
@@ -3218,7 +3246,7 @@ fn details_background_boxes_tail_and_clip_output() {
         queued_details(row.clone(), 22),
         include_str!("../../tests/ui_snapshots/details_background_long_title.txt")
     );
-    let clipped = queued_details(row, 14);
+    let clipped = queued_details(row, 9);
     assert!(
         clipped
             .lines()
@@ -3229,8 +3257,8 @@ fn details_background_boxes_tail_and_clip_output() {
         "{clipped}"
     );
     assert!(clipped.contains("Update"));
-    assert!(clipped.contains("Project"));
-    assert!(clipped.ends_with("Unknown"));
+    assert!(!clipped.contains("Project"));
+    assert!(!clipped.contains("Unknown"));
     assert!(!clipped.contains("xxxxxxxx"));
 }
 
@@ -4015,7 +4043,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         } else {
             assert!(!updated.contains("ago"));
         }
-        for label in ["Background", "Update", "Prompt", "Project"] {
+        for label in ["Background", "Update", "Prompt"] {
             let y = (3..35)
                 .find(|&y| text(y, left + 1, right).contains(label))
                 .unwrap_or_else(|| panic!("missing {label} at width {width}"));
@@ -5000,427 +5028,30 @@ fn task_log_event_count_follows_height() {
     }
 }
 
-mod details_budget {
-    use super::*;
-    use crate::ui::render::allocate;
-
-    #[test]
-    fn everything_fits() {
-        assert_eq!(allocate(&[12, 6, 3], 25), vec![12, 6, 3]);
-    }
-
-    #[test]
-    fn shares_rows_in_display_order() {
-        assert_eq!(allocate(&[12, 6, 3], 8), vec![3, 3, 2]);
-        assert_eq!(allocate(&[1, 12, 3], 10), vec![1, 6, 3]);
-    }
-
-    #[test]
-    fn single_section_uses_budget() {
-        assert_eq!(allocate(&[12], 5), vec![5]);
-    }
-
-    #[test]
-    fn budget_below_floors() {
-        for budget in 0..3 {
-            let rows = allocate(&[12, 6, 3], budget);
-            assert!(rows.iter().all(|&rows| rows <= 1));
-            assert_eq!(rows.iter().sum::<usize>(), budget);
-        }
-        assert_eq!(allocate(&[0, 12, 0], 2), vec![0, 2, 0]);
-    }
-
-    #[test]
-    fn background_gets_space_before_bodies_and_cuts_whole_boxes() {
-        use std::io::Write;
-        let mut output = tempfile::NamedTempFile::new().unwrap();
-        writeln!(output, "Running checks").unwrap();
-        let mut row = session(
-            "background-budget",
-            "Background task",
-            SessionStatus::NeedsInput,
-            0,
-        );
-        row.prompt = "Prompt text\n\n".repeat(12);
-        row.queued = vec!["Queued work".into()];
-        for i in 0..8 {
-            row.background.push(crate::model::BackgroundTask {
-                description: format!("Check {i}"),
-                output: output.path().into(),
-                started_at: row.updated_at,
-            });
-        }
-        let mut view = test_view(Grouping::Project, true);
-        view.status_filter = 0;
-        view.set_sessions(vec![row], false);
-        let rows = panel(&view);
-        assert!(rows.iter().any(|line| line == "Queued work"));
-        assert!(
-            rows.iter()
-                .any(|line| line.starts_with("─") && line.contains("Check 4")),
-            "{rows:?}"
-        );
-        assert!(!rows.iter().any(|line| line.contains("Check 5")));
-        let prompt = rows
-            .iter()
-            .position(|line| line.trim() == "Prompt")
-            .unwrap();
-        assert_eq!(rows[..prompt].iter().filter(|line| *line == "…").count(), 1);
-        assert_eq!(
-            &rows[prompt + 1..prompt + 4],
-            ["Prompt text", "…", "Queued work"]
-        );
-        assert!(rows[22].is_empty());
-        assert!(rows[23].ends_with("Unknown"));
-    }
-
-    #[test]
-    fn tiny_panel_keeps_plain_bottom_cut() {
-        let mut row = session("tiny", "Tiny task", SessionStatus::NeedsInput, 0);
-        row.prompt = "First row\n\nSecond row\n\nThird row".into();
-        let mut view = test_view(Grouping::Project, true);
-        view.status_filter = 0;
-        view.set_sessions(vec![row], false);
-        let area = Rect::new(0, 0, 120, 6);
-        let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, Utc::now());
-        assert_eq!(buf[(0, 1)].symbol(), "F");
-        assert_eq!(buf[(0, 5)].symbol(), "…");
-    }
-
-    fn panel(view: &View) -> Vec<String> {
-        let area = Rect::new(0, 0, 120, 24);
-        let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, Utc::now());
-        buf.content
-            .chunks(120)
-            .map(|row| {
-                row.iter()
-                    .map(|cell| cell.symbol())
-                    .collect::<String>()
-                    .trim_end()
-                    .to_owned()
-            })
-            .collect()
-    }
-
-    #[test]
-    fn rest_budget_and_wheel_opens_prompt() {
-        let mut row = session("budget", "Budget task", SessionStatus::NeedsInput, 0);
-        row.prompt = (1..=12)
-            .map(|i| format!("Prompt row {i}"))
-            .collect::<Vec<_>>()
-            .join("  \n");
-        row.last_message = Some(
-            (1..=6)
-                .map(|i| format!("Reply row {i}"))
-                .collect::<Vec<_>>()
-                .join("  \n"),
-        );
-        assert_eq!(super::super::markdown::render(&row.prompt, 120).len(), 12);
-        assert_eq!(
-            super::super::markdown::render(row.last_message.as_ref().unwrap(), 120).len(),
-            6
-        );
-        let mut view = test_view(Grouping::Project, true);
-        view.status_filter = 0;
-        view.set_sessions(vec![row], false);
-        let rest = panel(&view);
-        for header in ["Prompt", "Update", "Needs attention"] {
-            assert!(
-                rest.iter().any(|line| line.trim() == header),
-                "{header}: {rest:?}"
-            );
-        }
-        assert!(rest[22].is_empty());
-        assert!(rest[23].ends_with("Unknown"));
-        let prompt = rest
-            .iter()
-            .position(|line| line.trim() == "Prompt")
-            .unwrap();
-        let needs = rest
-            .iter()
-            .position(|line| line.trim() == "Needs attention")
-            .unwrap();
-        assert!(
-            rest[prompt + 1..needs]
-                .iter()
-                .rev()
-                .find(|line| !line.is_empty())
-                .unwrap()
-                .ends_with('…')
-        );
-        view.scroll_content_row(true, false, (prompt + 1) as u16);
-        assert_eq!(
-            view.viewport
-                .borrow()
-                .details_scroll
-                .reveal
-                .iter()
-                .sum::<usize>(),
-            1
-        );
-        let scrolled = panel(&view);
-        assert_eq!(scrolled[0], rest[1]);
-        assert_eq!(scrolled[23], rest[23]);
-        assert_eq!(scrolled[prompt], "Prompt row 1");
-        view.scroll_content_row(false, false, prompt as u16);
-        assert_eq!(panel(&view), rest);
-    }
-}
-
-mod details_curtain {
-    use super::*;
-
-    fn fixture() -> View {
-        let mut row = session("curtain", "Curtain task", SessionStatus::NeedsInput, 0);
-        row.prompt = (1..=12)
-            .map(|i| format!("Prompt row {i}"))
-            .collect::<Vec<_>>()
-            .join("  \n");
-        row.last_message = Some(
-            (1..=7)
-                .map(|i| format!("Reply row {i}"))
-                .collect::<Vec<_>>()
-                .join("  \n"),
-        );
-        let mut view = test_view(Grouping::Project, true);
-        view.status_filter = 0;
-        view.set_sessions(vec![row], false);
-        view
-    }
-
-    fn panel(view: &View) -> Buffer {
-        let area = Rect::new(0, 0, 120, 24);
-        let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, view.rows[view.selected].updated_at);
-        buf
-    }
-
-    fn text(buf: &Buffer, y: u16) -> String {
-        (0..buf.area.width)
-            .map(|x| buf[(x, y)].symbol())
-            .collect::<String>()
-            .trim_end()
-            .to_owned()
-    }
-
-    #[test]
-    fn targets_cut_body_or_first_cut_below() {
-        use super::super::input::curtain_target;
-        let bodies = [2..6, 8..12, 14..17];
-        let reveal = [0, 0, 0];
-        let hidden = [4, 2, 0];
-        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 3, true), Some(0));
-        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 7, true), Some(1));
-        assert_eq!(
-            curtain_target(&bodies, &[4, 0, 0], &hidden, 3, true),
-            Some(1)
-        );
-        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 13, true), None);
-        assert_eq!(curtain_target(&[], &[], &[], 0, true), None);
-    }
-
-    #[test]
-    fn targets_opened_body_then_below_then_above() {
-        use super::super::input::curtain_target;
-        let bodies = [2..6, 8..12, 14..17];
-        let reveal = [1, 0, 2];
-        let hidden = [4, 2, 2];
-        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 3, false), Some(0));
-        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 9, false), Some(2));
-        assert_eq!(
-            curtain_target(&bodies, &reveal, &hidden, 18, false),
-            Some(2)
-        );
-        assert_eq!(
-            curtain_target(&bodies, &[1, 0, 0], &hidden, 9, false),
-            Some(0)
-        );
-        assert_eq!(curtain_target(&bodies, &[0, 0, 0], &hidden, 3, false), None);
-        assert_eq!(curtain_target(&bodies, &reveal, &hidden, 1, false), Some(0));
-    }
-
-    #[test]
-    fn fully_open_message_hands_off_to_prompt() {
-        let mut view = fixture();
-        let before = panel(&view);
-        let pointer = (0..24)
-            .find(|&y| text(&before, y).starts_with("Reply row 1"))
-            .unwrap();
-        let hidden = view.viewport.borrow().details_scroll.hidden[0];
-        assert!(hidden > 0);
-        for _ in 0..hidden {
-            view.scroll_content_row(true, false, pointer);
-            panel(&view);
-        }
-        let opened = panel(&view);
-        let prompt = (0..24)
-            .find(|&y| text(&opened, y).trim() == "Prompt")
-            .unwrap();
-        assert!((1..prompt).all(|y| !text(&opened, y).ends_with('…')));
-        assert_eq!(text(&opened, prompt - 2), "Reply row 7");
-        view.scroll_content_row(true, false, pointer);
-        let after = panel(&view);
-        assert_eq!(
-            view.viewport.borrow().details_scroll.reveal,
-            vec![hidden, 1, 0]
-        );
-        assert_eq!(text(&after, 23), text(&opened, 23));
-        let prompt_pointer = (0..24)
-            .find(|&y| text(&after, y).starts_with("Prompt row"))
-            .unwrap();
-        let prompt_hidden = view.viewport.borrow().details_scroll.hidden[1];
-        for _ in 1..prompt_hidden {
-            view.scroll_content_row(true, false, prompt_pointer);
-            panel(&view);
-        }
-        let fully_open = panel(&view);
-        assert!((1..24).any(|y| text(&fully_open, y) == "Prompt row 12"));
-        assert_eq!(
-            view.viewport.borrow().details_scroll.reveal,
-            vec![hidden, prompt_hidden, 0]
-        );
-        view.scroll_content_row(true, false, prompt_pointer);
-        assert_eq!(panel(&view), fully_open);
-    }
-
-    #[test]
-    fn queued_background_and_hyperlink_cells_stay_fixed() {
-        use std::io::Write;
-        let mut output = tempfile::NamedTempFile::new().unwrap();
-        writeln!(output, "Background output").unwrap();
-        let mut view = fixture();
-        let row = &mut view.rows[view.selected];
-        row.queued = vec!["Queued prompt".into()];
-        row.pr = Some(crate::model::PullRequest {
-            number: 833,
-            url: "https://example.com/pull/833".into(),
-        });
-        for i in 0..8 {
-            row.background.push(crate::model::BackgroundTask {
-                description: format!("Check {i}"),
-                output: output.path().into(),
-                started_at: row.updated_at,
-            });
-        }
-        let before = panel(&view);
-        let queued = (0..24)
-            .find(|&y| text(&before, y) == "Queued prompt")
-            .unwrap();
-        assert_eq!(view.viewport.borrow().details_scroll.fallback_max, None);
-        assert!(
-            before
-                .content
-                .iter()
-                .any(|cell| cell.symbol().contains("https://example.com/pull/833"))
-        );
-        let pointer = (0..24)
-            .find(|&y| text(&before, y).starts_with("Prompt row 1"))
-            .unwrap();
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, pointer));
-        let after = panel(&view);
-        for y in queued..24 {
-            for x in 0..120 {
-                assert_eq!(after[(x, y)], before[(x, y)], "static tail {x},{y}");
-            }
-        }
-        view.handle_mouse(mouse(MouseEventKind::ScrollUp, 0, pointer));
-        assert_eq!(panel(&view), before);
-    }
-
-    #[test]
-    fn content_updates_clamp_and_body_count_changes_reset() {
-        let mut view = fixture();
-        let before = panel(&view);
-        let pointer = (0..24)
-            .find(|&y| text(&before, y) == "Prompt row 3")
-            .unwrap();
-        for _ in 0..4 {
-            view.scroll_content_row(true, false, pointer);
-            panel(&view);
-        }
-        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 4, 0]);
-        view.rows[view.selected].prompt = (1..=8)
-            .map(|i| format!("Prompt row {i}"))
-            .collect::<Vec<_>>()
-            .join("  \n");
-        panel(&view);
-        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 2, 0]);
-        assert_eq!(view.viewport.borrow().details_scroll.hidden[1], 2);
-        view.rows[view.selected].last_message = None;
-        panel(&view);
-        assert_eq!(view.viewport.borrow().details_scroll.reveal, vec![0, 0]);
-    }
-
-    #[test]
-    fn opening_prompt_scrolls_body_and_pins_tail_and_closes_exactly() {
-        let mut view = fixture();
-        let before = panel(&view);
-        let pointer = (0..24)
-            .find(|&y| text(&before, y) == "Prompt row 3")
-            .unwrap();
-        let project = (0..24)
-            .find(|&y| text(&before, y).trim() == "Project")
-            .unwrap();
-        view.scroll_content_row(true, false, pointer);
-        let after = panel(&view);
-        for x in 0..120 {
-            for y in 0..pointer {
-                assert_eq!(after[(x, y)], before[(x, y + 1)], "shift {x},{y}");
-            }
-            for y in project..24 {
-                assert_eq!(after[(x, y)], before[(x, y)], "tail {x},{y}");
-            }
-        }
-        assert_eq!(text(&after, pointer), "Prompt row 4");
-        let cut_before = (pointer..project)
-            .map(|y| text(&before, y))
-            .find(|s| s.ends_with('…'))
-            .unwrap();
-        let cut_after = (pointer..project)
-            .map(|y| text(&after, y))
-            .find(|s| s.ends_with('…'))
-            .unwrap();
-        assert_ne!(cut_before, cut_after);
-        view.scroll_content_row(false, false, pointer);
-        assert_eq!(panel(&view), before);
-    }
-
-    #[test]
-    fn wheel_below_last_cut_does_nothing() {
-        let mut view = fixture();
-        let before = panel(&view);
-        let project = (0..24)
-            .find(|&y| text(&before, y).trim() == "Project")
-            .unwrap();
-        view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, project));
-        assert_eq!(panel(&view), before);
-    }
-}
+#[path = "details_scroll_tests.rs"]
+mod details_scroll;
 
 #[test]
-fn path_abbreviation_in_details_preserves_last_component() {
+fn details_status_uses_only_the_last_folder_component() {
     let mut task = session("path", "Path task", SessionStatus::Ready, 0);
     task.cwd = "/Users/visitor/Code/.worktrees/agents-panel".into();
     let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![task], false);
-    let area = Rect::new(0, 0, 26, 20);
-    let mut buf = Buffer::empty(area);
-    view.render_details(area, &mut buf, Utc::now());
-    let rows: Vec<String> = buf
-        .content
-        .chunks(26)
-        .map(|row| {
-            row.iter()
-                .map(|cell| cell.symbol())
-                .collect::<String>()
-                .trim_end()
-                .to_owned()
-        })
-        .collect();
-    let project = rows.iter().position(|row| row.trim() == "Project").unwrap();
-    assert_eq!(rows[project + 1], "/U…/v…/C…/.w…/agents-panel");
+    let rendered = screen(&view, 200, 30);
+    let viewport = view.viewport.borrow();
+    let (rect, path) = viewport
+        .details_links
+        .iter()
+        .find(|(_, path)| path.ends_with("agents-panel"))
+        .unwrap();
+    assert_eq!(rect.y, viewport.details.bottom());
+    assert_eq!(
+        path,
+        &PathBuf::from("/Users/visitor/Code/.worktrees/agents-panel")
+    );
+    let rule = rendered.lines().nth(rect.y as usize).unwrap();
+    assert!(rule.contains("agents-panel"));
+    assert!(!rule.contains("/Users/"));
 }
 
 #[test]
@@ -6277,6 +5908,7 @@ mod subagent_rows {
         key(&mut view, KeyCode::Down);
         key(&mut view, KeyCode::Down);
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
+        view.rows[view.selected].transcript = Some("/tmp/child.jsonl".into());
         let rendered = screen(&view, 120, 30);
         let layout = view.center_layout(Rect::new(0, 0, 120, 30));
         let header = rendered
@@ -7461,7 +7093,7 @@ fn details_project_lines_link_the_pull_request_and_the_directory() {
         ))
     );
     assert!(!rendered.contains("main"));
-    // The directory link starts at the panel edge below the Project label.
+    // The folder link stays on the status rule.
     let (rect, _) = view
         .viewport
         .borrow()

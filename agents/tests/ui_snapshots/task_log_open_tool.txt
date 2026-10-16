@@ -11,13 +11,13 @@
                                                   │
                                                   │
                                                   │
-                                                  │                     Project
-                                                  │ /tmp/project
                                                   │
-                                                  │ Unknown
- ────────────────────────────────────────────────────────────────────── Working ───────────────────
+                                                  │
+                                                  │
+                                                  │
+ ──────────────────────────────────────────────────── project ───────── Working ───────────────────
  Task log example · Running in a terminal; open it to type
- ──────────────────────────────────────────────────────────────────────────────────────────────────
+ ─ Unknown ────────────────────────────────────────────────────────────────────────────────────────
                                         run tests                                               35s
  A long response whose whitespace collapses and whose body must be truncated before the …  11:59:20
                                   run a background job *                                         5s

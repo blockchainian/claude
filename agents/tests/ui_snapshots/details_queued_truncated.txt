@@ -5,11 +5,3 @@ Current prompt Current prompt Current
 prompt Current prompt Current prompt
 Current prompt Current prompt
 Queued prompt that extends beyond the
-
-
-
-
-                Project
-/tmp/project
-
-Unknown

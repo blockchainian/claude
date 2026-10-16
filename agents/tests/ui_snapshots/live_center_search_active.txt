@@ -7,10 +7,10 @@
                                             │
                                             │
                                             │
-                                            │                  Project
-                                            │ /tmp/project
                                             │
-                                            │ Unknown
-                                            │ ───────────────── Ready ─────────────────
+                                            │
+                                            │
+                                            │
+                                            │ ─ project ─────── Ready ─────────────────
  Task to find ›
  esc back  enter open

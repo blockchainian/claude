@@ -42,7 +42,7 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
     assert!(find("Update") < find("Tasks"));
     assert!(find("Tasks") < find("Prompt"));
     assert!(find("Tasks") < find("Needs attention"));
-    assert!(find("Needs attention") < find("Project"));
+    assert!(!rows.iter().any(|row| row.trim() == "Project"));
     assert_eq!(rows[find("Tasks")].find("Tasks"), Some(17));
     assert!(rows[find("Tasks")].ends_with("2/4"));
     assert!(
@@ -64,7 +64,7 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
         assert_eq!(buf[(0, y as u16)].symbol(), dot.content);
         assert_eq!(buf[(0, y as u16)].fg, dot.style.fg.unwrap());
     }
-    assert_eq!(rows[36].trim(), "Project");
+    assert!(rows[36].trim().is_empty());
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn tasks_long_list_uses_details_scroll_and_keeps_footer() {
         .position(|row| row.contains("Task row 1"))
         .unwrap() as u16;
     assert!(before.iter().any(|row| row.trim_end().ends_with('…')));
-    assert!(before.iter().any(|row| row.trim() == "Project"));
+    assert!(!before.iter().any(|row| row.trim() == "Project"));
     view.scroll_content_row(true, false, y);
     let (_, after) = render(&view, 40, 24);
     assert_eq!(

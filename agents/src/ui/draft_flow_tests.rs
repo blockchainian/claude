@@ -317,7 +317,7 @@ fn rendered_draft_model_double_click_opens_and_applies_provider_choice() {
 }
 
 #[test]
-fn details_model_section_keeps_controls_on_the_header_row() {
+fn log_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts() {
     let (_directory, mut view) = fixture();
     view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
@@ -329,41 +329,54 @@ fn details_model_section_keeps_controls_on_the_header_row() {
         started_at: None,
     });
     view.rows[view.selected].effort = Some("high".into());
-    let model_name = view.rows[view.selected].model_name().to_owned();
-    let buffer = render(&view);
-    let targets = view.viewport.borrow().field_targets.clone();
-    let model = targets
-        .iter()
-        .find(|(_, field)| *field == Field::Model)
-        .unwrap()
-        .0;
-    let effort = targets
-        .iter()
-        .find(|(_, field)| *field == Field::Effort)
-        .unwrap()
-        .0;
-    let text = |x, y, width| {
-        (x..x + width)
-            .map(|x| buffer[(x, y)].symbol())
-            .collect::<String>()
-    };
-    let details = view.viewport.borrow().details;
-    assert_eq!(text(model.x, model.y, model.width), model_name);
-    assert_eq!(model.x, details.x);
-    assert_eq!(effort.y, model.y);
-    assert_eq!(effort.right(), details.right());
-    assert!(model.right() < effort.x);
-    assert!(
-        buffer[(effort.x, model.y)]
-            .modifier
-            .contains(ratatui::style::Modifier::DIM)
-    );
-    assert_eq!(text(effort.x, effort.y, effort.width), "high");
-    for (rect, field) in [(model, Field::Model), (effort, Field::Effort)] {
-        assert_eq!(click(&mut view, rect.x, rect.y), None);
-        assert_eq!(click(&mut view, rect.x, rect.y), None);
-        assert_eq!(view.picker.as_ref().unwrap().field, field);
-        key(&mut view, KeyCode::Esc);
+    view.rows[view.selected].model_label = Some("Opus 5.5".into());
+    let model_name = view.rows[view.selected].model_label().to_owned();
+    for width in [149, 150, 200] {
+        let area = Rect::new(0, 0, width, 60);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, Utc::now());
+        let targets = view.viewport.borrow().field_targets.clone();
+        let model = targets
+            .iter()
+            .find(|(_, field)| *field == Field::Model)
+            .unwrap()
+            .0;
+        let effort = targets
+            .iter()
+            .find(|(_, field)| *field == Field::Effort)
+            .unwrap()
+            .0;
+        let text = |x, y, width| {
+            (x..x + width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        };
+        let log = view.viewport.borrow().log;
+        assert_eq!(text(model.x, model.y, model.width), model_name);
+        assert_eq!(model.x, log.x + 2);
+        assert_eq!(
+            model.y,
+            if width >= 150 {
+                log.bottom()
+            } else {
+                log.y - 1
+            }
+        );
+        assert_eq!(effort.y, model.y);
+        assert_eq!(effort.right(), log.right() - 2);
+        assert!(model.right() < effort.x);
+        assert!(
+            buffer[(effort.x, model.y)]
+                .modifier
+                .contains(ratatui::style::Modifier::DIM)
+        );
+        assert_eq!(text(effort.x, effort.y, effort.width), "high");
+        for (rect, field) in [(model, Field::Model), (effort, Field::Effort)] {
+            assert_eq!(click(&mut view, rect.x, rect.y), None);
+            assert_eq!(click(&mut view, rect.x, rect.y), None);
+            assert_eq!(view.picker.as_ref().unwrap().field, field);
+            key(&mut view, KeyCode::Esc);
+        }
     }
 }
 
@@ -413,7 +426,7 @@ fn live_effort_picker_remains_available_when_transcript_omits_effort() {
 }
 
 #[test]
-fn details_model_targets_cover_only_visible_value_cells() {
+fn log_model_targets_cover_only_visible_border_value_cells() {
     let (_directory, mut view) = fixture();
     let row = &mut view.rows[view.selected];
     row.background_job = Some(crate::model::BackgroundJob {
@@ -436,30 +449,45 @@ fn details_model_targets_cover_only_visible_value_cells() {
                 .efforts
                 .clear();
         }
-        for width in 1..=40 {
-            let area = Rect::new(5, 3, width, 300);
-            let mut buffer = Buffer::empty(Rect::new(0, 0, 50, 310));
-            view.viewport.borrow_mut().field_targets.clear();
-            view.render_details(area, &mut buffer, Utc::now());
-            let show_effort = effort.is_some() && width >= 8;
-            let available = width.saturating_sub(if show_effort { 7 } else { 0 });
+        for width in [20, 40, 60, 80, 120, 149, 150, 200] {
+            let frame = Rect::new(0, 0, width, 60);
+            let mut buffer = Buffer::empty(frame);
+            view.render_at(frame, &mut buffer, Utc::now());
+            let area = view.viewport.borrow().log;
+            let rule = Rect::new(
+                area.x,
+                if width >= 150 {
+                    area.bottom()
+                } else {
+                    area.y - 1
+                },
+                area.width,
+                1,
+            );
+            let available = (area.width / 2).saturating_sub(4);
+            let show_effort = effort.is_some() && available > 0;
             let name_width = available.min("claude-opus-5-5".len() as u16);
-            let start = area.x;
-            let expected_name = if name_width < "claude-opus-5-5".len() as u16 {
+            let start = area.x + 2;
+            let expected_name = if name_width == 0 {
+                String::new()
+            } else if name_width < "claude-opus-5-5".len() as u16 {
                 format!("{}…", &"claude-opus-5-5"[..usize::from(name_width - 1)])
             } else {
                 "claude-opus-5-5".into()
             };
             let drawn = (start..start + name_width)
-                .map(|x| buffer[(x, area.bottom() - 1)].symbol())
+                .map(|x| buffer[(x, rule.y)].symbol())
                 .collect::<String>();
             assert_eq!(drawn, expected_name, "width={width}");
             let targets = view.viewport.borrow().field_targets.clone();
-            let y = area.bottom() - 1;
+            let y = rule.y;
+            let effort_width = available.min(6);
             for x in area.x..area.right() {
                 let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
                     Some(Field::Model)
-                } else if show_effort && x >= area.right() - 6 {
+                } else if show_effort
+                    && (area.right() - 2 - effort_width..area.right() - 2).contains(&x)
+                {
                     Some(Field::Effort)
                 } else {
                     None

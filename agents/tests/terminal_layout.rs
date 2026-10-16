@@ -220,7 +220,15 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         status,
         "{capture}"
     );
-    assert!(details.chars().take(start).all(|c| c == '─'), "{capture}");
+    assert!(details.starts_with("─ claude "), "{capture}");
+    assert!(
+        details
+            .chars()
+            .skip("─ claude ".chars().count())
+            .take(start - "─ claude ".chars().count())
+            .all(|c| c == '─'),
+        "{capture}"
+    );
     assert!(
         details.chars().skip(start + status.len()).all(|c| c == '─'),
         "{capture}"
@@ -945,10 +953,10 @@ fn terminal_details_section_positions() {
                         .collect()
                 })
                 .collect();
-            let positions = ["Update", "Tasks", "Prompt", "Project"]
+            let positions = ["Update", "Tasks", "Prompt"]
                 .map(|label| panel.iter().position(|row| row.contains(label)).unwrap());
             assert!(positions.is_sorted(), "{panel:?}");
-            for label in ["Update", "Tasks", "Prompt", "Project"] {
+            for label in ["Update", "Tasks", "Prompt"] {
                 let row = panel.iter().find(|row| row.contains(label)).unwrap();
                 let byte = row.find(label).unwrap();
                 assert_eq!(
@@ -958,28 +966,64 @@ fn terminal_details_section_positions() {
                 );
                 assert!(!row.contains("messages"));
             }
-            let project = panel
-                .iter()
-                .position(|row| row.trim() == "Project")
-                .unwrap();
-            let project_row = &panel[project + 1];
-            assert!(!project_row.starts_with(' '), "{project_row}");
-            let metadata = if has_pr { "#763" } else { "main" };
-            assert!(project_row.ends_with(metadata), "{project_row}");
-            let directory = &project_row[..project_row.len() - metadata.len()];
-            assert!(directory.ends_with(' '), "{project_row}");
-            assert!(directory.trim_end().ends_with("/claude"), "{project_row}");
-            assert!(!project_row.contains('·'), "{project_row}");
+            assert!(
+                panel
+                    .iter()
+                    .all(|row| row.trim() != "Project" && row.trim() != "Model")
+            );
+            assert!(
+                panel
+                    .iter()
+                    .all(|row| !row.contains("claude-opus-5-5") && !row.contains("medium"))
+            );
+            let status: String = (left..right)
+                .map(|x| {
+                    parser
+                        .screen()
+                        .cell(bottom as u16, x as u16)
+                        .unwrap()
+                        .contents()
+                })
+                .collect();
+            assert!(status.starts_with("─ claude "), "{status}");
+            assert!(status.contains(" Inactive "), "{status}");
+            assert!(!status.contains("main"), "{status}");
             if has_pr {
-                assert!(!project_row.contains("main"), "{project_row}");
+                assert!(status.ends_with(" #763 ─"), "{status}");
+            } else {
+                assert!(!status.contains('#'), "{status}");
+                assert!(status.ends_with("────"), "{status}");
             }
-            let model = panel.last().unwrap();
-            assert!(model.starts_with("claude-opus-5-5"), "{model}");
-            assert!(model.ends_with("medium"), "{model}");
+            let model_y = if width >= 150 { bottom } else { bottom + 2 };
+            let model_left = if width >= 150 { separators[1] + 2 } else { 1 };
+            let model_right = width as usize - 1;
+            let model: String = (model_left..model_right)
+                .map(|x| {
+                    parser
+                        .screen()
+                        .cell(model_y as u16, x as u16)
+                        .unwrap()
+                        .contents()
+                })
+                .collect();
+            assert!(model.starts_with("─ claude-opus-5-5 "), "{model}");
+            assert!(model.ends_with(" medium ─"), "{model}");
             assert!(!model.contains("Model"));
             assert!(!model.contains('·'));
+            let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+            let colored = captured_screen(&colored, width, 70);
+            for (start, length) in [
+                (model_left + 2, "claude-opus-5-5".len()),
+                (model_right - 2 - "medium".len(), "medium".len()),
+            ] {
+                for x in start..start + length {
+                    let cell = colored.screen().cell(model_y as u16, x as u16).unwrap();
+                    assert!(cell.dim(), "{capture}");
+                    assert!(!cell.bold(), "{capture}");
+                }
+            }
             println!(
-                "{{\"details_sections\":\"pass\",\"project_justified\":\"pass\",\"model_justified\":\"pass\",\"model_last_row\":\"pass\",\"width\":{width},\"pr\":{has_pr}}}"
+                "{{\"details_sections\":\"pass\",\"folder_on_status_rule\":\"pass\",\"model_on_log_rule\":\"pass\",\"metadata_dim\":\"pass\",\"width\":{width},\"pr\":{has_pr}}}"
             );
         }
     }

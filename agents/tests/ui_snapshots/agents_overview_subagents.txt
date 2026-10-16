@@ -21,10 +21,10 @@
                                                             │
                                                             │
                                                             │
-                                                            │                          Project
-                                                            │ /tmp/project
                                                             │
-                                                            │ parent-model
-                                                            │ ───────────────────────── Ready ─────────────────────────
+                                                            │
+                                                            │
+                                                            │
+                                                            │ ─ project ─────────────── Ready ─────────────────────────
  Parent task ›
  ? help  esc back  ↑/↓ move  enter open  n new

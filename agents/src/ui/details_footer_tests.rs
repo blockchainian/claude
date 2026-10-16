@@ -1,43 +1,39 @@
 use super::*;
 
 #[test]
-fn details_footer_pins_project_and_model_below_spare_rows() {
+fn details_body_leaves_spare_rows_without_project_or_model() {
     for width in [25, 60] {
         let mut view = fixture();
         let selected = &mut view.rows[view.selected];
         selected.prompt = "Short prompt".into();
         selected.last_message = None;
         selected.activity = None;
-        let area = Rect::new(7, 4, width, 30);
-        let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, Utc::now());
-        let text = |y| {
-            (area.x..area.right())
-                .map(|x| buf[(x, y)].symbol())
-                .collect::<String>()
-        };
-        assert!(text(area.bottom() - 1).starts_with("Unknown"));
-        assert!(text(area.bottom() - 2).trim().is_empty());
-        assert_eq!(text(area.bottom() - 3).trim(), "/tmp/project");
-        assert!(text(area.bottom() - 4).trim() == "Project");
-        for y in area.y + 2..area.bottom() - 4 {
-            assert!(text(y).trim().is_empty(), "unexpected row {y}: {}", text(y));
+        for height in [6, 7, 8, 30] {
+            let area = Rect::new(7, 4, width, height);
+            let mut buf = Buffer::empty(area);
+            view.render_details(area, &mut buf, Utc::now());
+            let text = |y| {
+                (area.x..area.right())
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            };
+            assert_eq!(text(area.y).trim(), "Prompt");
+            assert_eq!(text(area.y + 1).trim(), "Short prompt");
+            for y in area.y + 2..area.bottom() {
+                assert!(text(y).trim().is_empty(), "unexpected row {y}: {}", text(y));
+            }
+            let viewport = view.viewport.borrow();
+            assert_eq!(viewport.details_copy[0].0, area.y + 1..area.y + 2);
+            assert_eq!(viewport.details_text.rows[0].y, area.y + 1);
+            assert!(viewport.field_targets.is_empty());
+            assert!(viewport.details_links.is_empty());
+            assert_eq!(viewport.details_scroll.hidden, vec![0]);
         }
-        let viewport = view.viewport.borrow();
-        assert_eq!(viewport.details_copy[0].0, area.y + 1..area.y + 2);
-        assert_eq!(viewport.details_text.rows[0].y, area.y + 1);
-        assert!(
-            viewport
-                .field_targets
-                .iter()
-                .any(|(rect, field)| { *field == Field::Model && rect.y == area.bottom() - 1 })
-        );
-        assert_eq!(viewport.details_scroll.hidden, vec![0]);
     }
 }
 
 #[test]
-fn details_footer_shifted_links_keep_click_targets_in_both_layouts() {
+fn details_status_links_keep_underlines_and_click_targets_in_both_layouts() {
     for width in [80, 160] {
         let mut view = fixture();
         let selected = &mut view.rows[view.selected];
@@ -52,19 +48,18 @@ fn details_footer_shifted_links_keep_click_targets_in_both_layouts() {
         view.render(buf.area, &mut buf);
         view.underline_links(&mut buf);
         let area = view.viewport.borrow().details;
-        let project_y = area.bottom() - 4;
         let links = view.viewport.borrow().details_links.clone();
-        for (target, y) in [
-            (PathBuf::from("https://example.com/pull/833"), project_y + 1),
-            (PathBuf::from("/tmp/project"), project_y + 1),
+        for target in [
+            PathBuf::from("https://example.com/pull/833"),
+            PathBuf::from("/tmp/project"),
         ] {
             let rect = links.iter().find(|(_, path)| *path == target).unwrap().0;
-            assert_eq!(rect.y, y);
-            assert!(buf[(rect.x, y)].symbol().contains("\x1b[4:4m"));
+            assert_eq!(rect.y, area.bottom());
+            assert!(buf[(rect.x, rect.y)].symbol().contains("\x1b[4:4m"));
             assert_eq!(
                 click_mouse(
                     &mut view,
-                    mouse(MouseEventKind::Down(MouseButton::Left), rect.x, y)
+                    mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
                 ),
                 Some(Action::OpenPath(target))
             );
@@ -73,79 +68,55 @@ fn details_footer_shifted_links_keep_click_targets_in_both_layouts() {
 }
 
 #[test]
-fn details_footer_keeps_filled_and_overflowing_rows_unchanged() {
-    let mut view = fixture();
-    let selected = &mut view.rows[view.selected];
-    selected.prompt = "Short prompt".into();
-    selected.last_message = None;
-    selected.activity = None;
-    for (height, scroll, expected) in [
-        (
-            8,
-            0,
-            vec![
-                "Prompt",
-                "Short prompt",
-                "",
-                "",
-                "Project",
-                "/tmp/project",
-                "",
-                "Unknown",
-            ],
-        ),
-        (
-            7,
-            0,
-            vec![
-                "Prompt",
-                "Short prompt",
-                "",
-                "Project",
-                "/tmp/project",
-                "",
-                "Unknown",
-            ],
-        ),
-        (
-            6,
-            1,
-            vec![
-                "Short prompt",
-                "",
-                "Project",
-                "/tmp/project",
-                "",
-                "Unknown",
-            ],
-        ),
-    ] {
-        let area = Rect::new(7, 4, 40, height);
-        view.viewport.borrow_mut().details_scroll.offset = scroll;
-        let mut buf = Buffer::empty(area);
-        view.render_details(area, &mut buf, Utc::now());
-        for (y, expected) in (area.y..area.bottom()).zip(expected) {
-            let text = (area.x..area.right())
-                .map(|x| buf[(x, y)].symbol())
-                .collect::<String>();
-            if expected == "Unknown" {
-                assert!(text.starts_with(expected), "{text}");
+fn log_border_places_model_label_and_effort_targets_in_both_layouts() {
+    for width in [80, 149, 150, 220] {
+        for label in [None, Some("Opus 5.5")] {
+            let mut view = fixture();
+            let selected = &mut view.rows[view.selected];
+            selected.transcript = Some(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/claude-model-identity.jsonl"),
+            );
+            selected.model = Some("claude-opus-5-5".into());
+            selected.model_label = label.map(str::to_owned);
+            selected.effort = Some("high".into());
+            let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
+            let layout = view.center_layout(buf.area);
+            view.render(buf.area, &mut buf);
+            let viewport = view.viewport.borrow();
+            let model = viewport
+                .field_targets
+                .iter()
+                .find(|(_, field)| *field == Field::Model)
+                .unwrap()
+                .0;
+            let effort = viewport
+                .field_targets
+                .iter()
+                .find(|(_, field)| *field == Field::Effort)
+                .unwrap()
+                .0;
+            let y = if width >= 150 {
+                layout.log.bottom()
             } else {
-                assert_eq!(text.trim(), expected);
-            }
+                layout.log.y - 1
+            };
+            assert_eq!(model.y, y);
+            assert_eq!(effort.y, y);
+            assert_eq!(model.x, layout.log.x + 2);
+            assert_eq!(effort.right(), layout.log.right() - 2);
+            let text = |rect: Rect| {
+                (rect.x..rect.right())
+                    .map(|x| buf[(x, rect.y)].symbol())
+                    .collect::<String>()
+            };
+            assert_eq!(text(model), label.unwrap_or("claude-opus-5-5"));
+            assert_eq!(text(effort), "high");
+            let mut reference = ratatui::buffer::Cell::default();
+            reference.set_style(style::time_style());
+            assert_eq!(buf[(model.x, y)].style(), reference.style());
+            assert_eq!(buf[(effort.x, y)].style(), reference.style());
+            assert!(model.right() < effort.x);
         }
     }
-}
-
-#[test]
-fn hidden_model_row_has_no_field_targets() {
-    let mut view = fixture();
-    let selected = &mut view.rows[view.selected];
-    selected.prompt = "Short prompt".into();
-    selected.last_message = None;
-    selected.activity = None;
-    let area = Rect::new(7, 4, 40, 6);
-    let mut buf = Buffer::empty(area);
-    view.render_details(area, &mut buf, Utc::now());
-    assert!(view.viewport.borrow().field_targets.is_empty());
 }
