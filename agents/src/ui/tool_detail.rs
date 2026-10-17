@@ -35,8 +35,8 @@ pub(super) struct Part {
 }
 
 enum Body {
-    /// A merged call's title after a leading rule cell and space, with the call's duration.
-    TitleRule(Option<String>),
+    /// A merged call's title and duration, with the event header used to size its rule.
+    TitleRule(Option<String>, String),
     InputTitleRule(Option<String>),
     /// A section label, in the given style.
     Label(Style),
@@ -195,7 +195,7 @@ impl Part {
         if let Body::Shell(commands) = &self.body {
             return shell_maps(&self.source, commands, lines);
         }
-        if !matches!(self.body, Body::TitleRule(_) | Body::InputTitleRule(_)) {
+        if !matches!(self.body, Body::TitleRule(..) | Body::InputTitleRule(_)) {
             return super::text_selection_layout::map_lines(&self.source, lines, self.markdown());
         }
         lines
@@ -242,7 +242,10 @@ impl Part {
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let lines = match &self.body {
-            Body::TitleRule(time) | Body::InputTitleRule(time) => {
+            Body::TitleRule(time, header) => {
+                vec![call_title_rule(source, width, time.as_deref(), header)]
+            }
+            Body::InputTitleRule(time) => {
                 let mut line =
                     super::title_rule::centered_title_rule(source, width, time.as_deref());
                 if matches!(self.body, Body::InputTitleRule(_))
@@ -311,7 +314,7 @@ impl Part {
         };
         if matches!(
             self.body,
-            Body::TitleRule(_) | Body::InputTitleRule(_) | Body::Arrow
+            Body::TitleRule(..) | Body::InputTitleRule(_) | Body::Arrow
         ) {
             return lines;
         }
@@ -325,6 +328,38 @@ impl Part {
             })
             .collect()
     }
+}
+
+/// Center the call's rule on the event header, keeping its time at the panel edge.
+fn call_title_rule(title: &str, width: usize, time: Option<&str>, header: &str) -> Line<'static> {
+    let mut line = super::title_rule::centered_title_rule(title, width, time);
+    if line.spans.len() < 4 {
+        return line;
+    }
+    let last = line.spans.len() - 1;
+    let time = line.spans[last].content.trim_start_matches('─').to_owned();
+    let middle = line.width() - line.spans[0].width() - line.spans[last].width() + 1;
+    // The header reserves its clock column and gap symmetrically before truncating.
+    let header_width = width.saturating_sub(2 * (super::log::CLOCK_WIDTH + 2));
+    let title_width = super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+        Line::from(header.to_owned()),
+        header_width,
+    )
+    .width();
+    let rule_width = title_width
+        .max(middle + 2)
+        .min(width.saturating_sub(2 * time.width()));
+    let padding = (width - rule_width) / 2;
+    let left = (rule_width - middle) / 2;
+    let right = rule_width - middle - left;
+    line.spans[0].content = format!("{}{} ", " ".repeat(padding), "─".repeat(left)).into();
+    line.spans[last].content = format!(
+        "{}{}{time}",
+        "─".repeat(right),
+        " ".repeat(width - padding - rule_width - time.width()),
+    )
+    .into();
+    line
 }
 
 /// Use original source offsets for selection, including separators between selected rows.
@@ -596,7 +631,18 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
             let time = call.duration.map(super::formatting::format_log_duration);
             parts.push(match input_title(call) {
                 Some(title) => Part::new(title, Body::InputTitleRule(time)),
-                None => Part::new(call.title.clone(), Body::TitleRule(time)),
+                None => {
+                    let mut header = String::new();
+                    if let Some(sender) = &event.sender {
+                        header.push_str(&format!("({sender}) "));
+                    }
+                    if event.kind != Kind::Tool {
+                        header.push_str(super::log::kind_label(&event.kind));
+                        header.push(' ');
+                    }
+                    header.push_str(&event.body);
+                    Part::new(call.title.clone(), Body::TitleRule(time, header))
+                }
             });
         }
         if let Some(agent) = &call.agent {
@@ -921,6 +967,57 @@ mod tests {
             .flat_map(|part| part.lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH))
             .map(|line| line.to_string())
             .collect()
+    }
+
+    #[test]
+    fn merged_rule_matches_ascii_title_width() {
+        assert_merged_rule("Inspect the active worker", "Read", 80, 25);
+    }
+
+    #[test]
+    fn merged_rule_matches_cjk_title_display_width() {
+        let title = "codex-manager list，看贴图片线程为啥停";
+        assert_merged_rule(title, "codex-manager list", 100, title.width());
+        assert_merged_rule(&"界".repeat(20), "Read", 40, 19);
+    }
+
+    #[test]
+    fn merged_rule_fits_name_wider_than_title() {
+        assert_merged_rule("工具", "Read 界面", 80, "─ Read 界面 ─".width());
+    }
+
+    fn assert_merged_rule(title: &str, name: &str, width: usize, expected: usize) {
+        let call = ToolCall {
+            agent: None,
+            id: "rule-fixture".into(),
+            title: name.into(),
+            name: "Read".into(),
+            input: vec![],
+            output: Some(vec![]),
+            exit_code: None,
+            is_error: false,
+            duration: Some(chrono::Duration::seconds(12)),
+        };
+        let mut event = event(vec![call.clone(), call]);
+        event.body = title.into();
+        let part = parts(&event).remove(0);
+        let lines = part.lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH);
+        let text = lines[0].to_string();
+        let start = text.find('─').unwrap();
+        let end = text.rfind('─').unwrap() + '─'.len_utf8();
+        let rule = &text[start..end];
+        assert_eq!(rule.width(), expected, "{text}");
+        assert_eq!(text[..start].width(), (width - expected) / 2, "{text}");
+        assert_eq!(
+            rule[..rule.find(name).unwrap()].width(),
+            (expected - name.width()) / 2
+        );
+        assert!(text.ends_with(" 12s"), "{text}");
+        assert_eq!(lines[0].width(), width);
+        assert_eq!(
+            part.maps(&lines)[0][0].0.start as usize,
+            text[..text.find(name).unwrap()].width()
+        );
     }
 
     #[test]
@@ -1465,13 +1562,13 @@ mod tests {
         assert_eq!(
             texts(&parts, 80),
             [
-                &format!("{} Bash {}", "─".repeat(37), "─".repeat(37)),
+                &format!("{}─ Bash ─{}", " ".repeat(36), " ".repeat(36)),
                 "cargo test",
                 "↓",
                 "running 3 tests",
                 "...",
                 "",
-                &format!("{} Read {}", "─".repeat(37), "─".repeat(37)),
+                &format!("{}─ Read ─{}", " ".repeat(36), " ".repeat(36)),
                 "agents/src/log.rs:1-40",
                 "↓",
                 "•··",
@@ -1515,10 +1612,16 @@ mod tests {
                     continue;
                 }
                 let text = lines[0].to_string();
-                let title_row = text.trim_matches('─');
+                let title_row = text.trim().trim_matches('─');
                 assert!(title_row.starts_with(' ') && title_row.ends_with(' '));
                 let drawn = &title_row[1..title_row.len() - 1];
-                let left = text.chars().take_while(|ch| *ch == '─').count() + 1;
+                let left = text[..text.find('─').unwrap()].width()
+                    + text
+                        .trim_start()
+                        .chars()
+                        .take_while(|ch| *ch == '─')
+                        .count()
+                    + 1;
                 assert_eq!(left, (width - drawn.width() - 2) / 2 + 1);
                 assert_eq!(
                     parts[1].lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH)[0]
@@ -1569,7 +1672,7 @@ mod tests {
             assert_eq!(
                 parts
                     .iter()
-                    .filter(|part| matches!(part.body, Body::TitleRule(_)))
+                    .filter(|part| matches!(part.body, Body::TitleRule(..)))
                     .count(),
                 if count == 1 { 0 } else { 2 }
             );

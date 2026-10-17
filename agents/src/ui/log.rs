@@ -5,7 +5,7 @@ use crate::log::{Event, Kind};
 use chrono::{DateTime, Local, Utc};
 
 const CLOCK_FORMAT: &str = "%H:%M:%S";
-const CLOCK_WIDTH: usize = 8;
+pub(super) const CLOCK_WIDTH: usize = 8;
 
 /// Rows above the detail header: the top rule.
 pub(super) const LOG_TOP: u16 = 1;
