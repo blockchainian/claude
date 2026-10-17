@@ -505,7 +505,7 @@ impl View {
                 && let Some(selector) = self.selector.as_mut()
             {
                 if selector.editing() && Some(index) == selector.create_index() {
-                    self.mouse_focus = Panel::Prompt;
+                    self.mouse_focus = Panel::Details;
                     return None;
                 }
                 selector.selected = index;
@@ -914,6 +914,9 @@ impl View {
         if let Some(action) = self.question_key(key) {
             return action;
         }
+        if let Some(action) = self.selector_key(key) {
+            return action;
+        }
         if key.code == KeyCode::Char('/')
             && !key
                 .modifiers
@@ -928,9 +931,6 @@ impl View {
             && !self.log_detail_search.editing
         {
             return None;
-        }
-        if let Some(action) = self.selector_key(key) {
-            return action;
         }
         if self.input_box.focused
             && !self.searching

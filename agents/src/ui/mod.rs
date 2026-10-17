@@ -439,6 +439,18 @@ impl View {
         if self.confirm_dialog.is_some() || self.help {
             return;
         }
+        if let Some(Selector {
+            kind:
+                draft_controls::SelectorKind::Branch {
+                    editor: Some(editor),
+                    ..
+                },
+            ..
+        }) = &mut self.selector
+        {
+            editor.insert(text);
+            return;
+        }
         if self.selector.is_some() && !self.input_box.focused {
             return;
         }
@@ -468,9 +480,6 @@ impl View {
     }
 
     fn input_label(&self) -> String {
-        if self.selector.as_ref().is_some_and(Selector::editing) {
-            return draft_controls::NEW_BRANCH_LABEL.into();
-        }
         if let Some(draft) = self.selected_draft() {
             return if draft.name.is_some() {
                 "New prompt"

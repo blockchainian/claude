@@ -192,7 +192,7 @@ fn terminal_show_more_keeps_label_while_loading() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_branch_name_uses_prompt_and_restores_input() {
+fn terminal_branch_name_edits_in_details_and_preserves_input() {
     let repository = tempfile::tempdir().unwrap();
     for args in [
         vec!["init", "-b", "main"],
@@ -257,7 +257,16 @@ fn terminal_branch_name_uses_prompt_and_restores_input() {
         branch_line[..branch_line.find("main").unwrap()].width()
     );
     tmux.mouse(0, create_column, row, true);
-    tmux.wait_for(|capture| capture.contains("New branch ❯"));
+    let editing = tmux.capture_when(|capture| !capture.contains("Create new branch"));
+    let editor = editing.lines().nth(row).unwrap();
+    assert_eq!(
+        editor.find('❯').map(|offset| editor[..offset].width()),
+        Some(create_column - 1)
+    );
+    assert!(editing.contains("New task ❯ unfinished task"));
+    assert!(!editing.contains("New branch"));
+    let cursor = tmux.run(&["display-message", "-p", "-t", "probe", "#{cursor_y}"]);
+    assert_eq!(cursor.trim().parse::<usize>().unwrap(), row);
     tmux.run(&["send-keys", "-t", "probe", "-l", "feature/probe"]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     tmux.wait_for(|capture| {

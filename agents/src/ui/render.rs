@@ -226,6 +226,20 @@ impl View {
         let layout = self.center_layout(area);
         if !self.help
             && self.confirm_dialog.is_none()
+            && let Some(selector) = &self.selector
+            && let Some(editor) = selector.branch_editor()
+            && let Some((rect, _)) = self
+                .viewport
+                .borrow()
+                .picker_rows
+                .iter()
+                .find(|(_, index)| Some(*index) == selector.create_index())
+        {
+            let (_, cursor) = editor.window(usize::from(rect.width.saturating_sub(1)));
+            return Some((rect.x + 1 + cursor, rect.y));
+        }
+        if !self.help
+            && self.confirm_dialog.is_none()
             && let Some(question) = self.active_question()
         {
             return question.cursor(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)));

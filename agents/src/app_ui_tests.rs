@@ -519,12 +519,13 @@ fn rendered_new_branch_name_accepts_paste_and_escape_cancels_without_worktree() 
     app.handle_event(Event::Paste("feature/paste-route-proof".into()));
     let rendered = lines(&draw(&mut app, 180)).join("\n");
     assert!(
-        rendered.contains("New branch ❯ feature/paste-route-proof"),
+        rendered.contains("❯ feature/paste-route-proof"),
         "{rendered}"
     );
     key(&mut app, KeyCode::Esc);
     let rendered = lines(&draw(&mut app, 180)).join("\n");
-    assert!(!rendered.contains("╴main "), "{rendered}");
+    assert!(rendered.contains("╴main "), "{rendered}");
+    assert!(rendered.contains("New task ❯"), "{rendered}");
     assert!(!rendered.contains("New branch"), "{rendered}");
     assert!(!rendered.contains("paste-route-proof"), "{rendered}");
     let output = Command::new("git")

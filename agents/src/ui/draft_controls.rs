@@ -37,7 +37,7 @@ pub(super) enum SelectorKind {
     Branch {
         draft: DraftId,
         branches: Vec<String>,
-        saved_input: Option<Box<prompt_box::PromptBox>>,
+        editor: Option<line_edit::LineEdit>,
     },
     Model {
         target: ControlTarget,
@@ -50,7 +50,6 @@ pub(super) enum SelectorKind {
 }
 
 const CREATE_BRANCH: &str = "Create new branch";
-pub(super) const NEW_BRANCH_LABEL: &str = "New branch";
 
 impl Selector {
     pub(super) fn new(kind: SelectorKind, selected: usize) -> Self {
@@ -85,10 +84,17 @@ impl Selector {
         matches!(
             &self.kind,
             SelectorKind::Branch {
-                saved_input: Some(_),
+                editor: Some(_),
                 ..
             }
         )
+    }
+
+    pub(super) fn branch_editor(&self) -> Option<&line_edit::LineEdit> {
+        match &self.kind {
+            SelectorKind::Branch { editor, .. } => editor.as_ref(),
+            _ => None,
+        }
     }
 
     /// The choice that opens the new branch's name editor.
@@ -219,7 +225,7 @@ impl View {
                         SelectorKind::Branch {
                             draft: draft.id,
                             branches,
-                            saved_input: None,
+                            editor: None,
                         },
                         selected,
                     ));
@@ -298,17 +304,7 @@ impl View {
 
     /// Closes the selector; a draft's keys go back to its prompt.
     pub(super) fn close_selector(&mut self) {
-        if let Some(Selector {
-            kind:
-                SelectorKind::Branch {
-                    saved_input: Some(input),
-                    ..
-                },
-            ..
-        }) = self.selector.take()
-        {
-            self.input_box = *input;
-        }
+        self.selector = None;
         if self.selected_draft.is_some() {
             self.mouse_focus = Panel::Prompt;
             self.input_box.focused = true;
@@ -358,15 +354,10 @@ impl View {
                 BrowseEntry::Repository(_) => {}
             },
             SelectorKind::Branch {
-                branches,
-                saved_input,
-                ..
+                branches, editor, ..
             } if index == branches.len() => {
-                if saved_input.is_none() {
-                    *saved_input = Some(Box::new(std::mem::take(&mut self.input_box)));
-                }
-                self.mouse_focus = Panel::Prompt;
-                self.input_box.focused = true;
+                editor.get_or_insert_with(line_edit::LineEdit::default);
+                self.focus_selector();
             }
             _ => {}
         }
@@ -426,13 +417,13 @@ impl View {
         }
     }
 
-    /// Handles branch naming in the prompt, or navigation in the details selector.
+    /// Handles branch naming and navigation in the details selector.
     pub(super) fn selector_key(&mut self, key: KeyEvent) -> Option<Option<Action>> {
         let selector = self.selector.as_mut()?;
         if selector.editing() {
             match key.code {
                 KeyCode::Enter if key.modifiers.is_empty() => {
-                    let name = self.input_box.editor.text().trim().to_owned();
+                    let name = selector.branch_editor()?.text().trim().to_owned();
                     if !name.is_empty() {
                         let draft = selector.draft()?;
                         self.close_selector();
@@ -441,9 +432,15 @@ impl View {
                         }
                     }
                 }
-                KeyCode::Esc => self.discard_selected_draft(),
+                KeyCode::Esc => self.close_selector(),
                 _ => {
-                    self.input_box.editor.handle(key);
+                    if let SelectorKind::Branch {
+                        editor: Some(editor),
+                        ..
+                    } = &mut selector.kind
+                    {
+                        editor.handle(key);
+                    }
                 }
             }
             return Some(None);
@@ -482,6 +479,24 @@ impl View {
             area,
             buf,
         );
+        if let Some(editor) = selector.branch_editor()
+            && let Some((rect, _)) = rows
+                .iter()
+                .find(|(_, index)| Some(*index) == selector.create_index())
+        {
+            let (text, _) = editor.window(usize::from(rect.width.saturating_sub(1)));
+            Clear.render(*rect, buf);
+            render::line(
+                Line::from(format!("❯ {text}")),
+                Rect::new(
+                    rect.x.saturating_sub(1),
+                    rect.y,
+                    rect.width.saturating_add(1),
+                    1,
+                ),
+                buf,
+            );
+        }
         self.viewport.borrow_mut().picker_rows = rows;
     }
 }
@@ -660,20 +675,21 @@ mod tests {
         assert!(!view.selector.as_ref().unwrap().editing());
         view.flush_pending_click(Instant::now() + Duration::from_secs(1));
         assert!(view.selector.as_ref().unwrap().editing());
-        assert!(view.input_box.focused);
-        assert_eq!(view.input_label(), "New branch");
-        assert!(view.input_box.editor.is_empty());
+        assert!(!view.input_box.focused);
+        assert_eq!(view.input_label(), "New task");
+        assert_eq!(view.input_box.editor.text(), "unfinished task");
         for code in [KeyCode::Char('j'), KeyCode::Char('k')] {
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
         }
-        view.handle_paste("/你好");
+        view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        view.handle_paste("你好");
         screen(&view, area);
-        let prompt = view.center_layout(area).prompt;
-        assert_eq!(view.cursor_pos(area).unwrap().1, prompt.y);
+        assert_eq!(view.cursor_pos(area).unwrap().1, create.y);
         let rendered = screen(&view, area);
-        assert!(rendered.contains("New branch ❯ jk/"), "{rendered}");
-        assert_eq!(view.input_box.editor.text(), "jk/你好");
-        assert!(rendered.contains("Create new branch"));
+        assert!(rendered.contains("❯ jk/你 好"), "{rendered}");
+        assert!(!rendered.contains("New branch"));
+        assert_eq!(view.input_box.editor.text(), "unfinished task");
+        assert!(!rendered.contains("Create new branch"));
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(view.selector.is_none());
         assert!(view.input_box.focused);
@@ -694,7 +710,7 @@ mod tests {
     }
 
     #[test]
-    fn branch_input_enter_restores_prompt_and_escape_discards_draft() {
+    fn branch_input_enter_and_escape_preserve_draft_and_prompt() {
         for named in [false, true] {
             let directory = tempfile::tempdir().unwrap();
             let mut view = draft_view(directory.path(), directory.path());
@@ -711,16 +727,16 @@ mod tests {
                 SelectorKind::Branch {
                     draft,
                     branches: vec!["main".into()],
-                    saved_input: None,
+                    editor: None,
                 },
                 1,
             ));
             view.focus_selector();
             view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            assert!(view.input_box.focused);
-            assert_eq!(view.input_label(), NEW_BRANCH_LABEL);
+            assert!(!view.input_box.focused);
+            assert_eq!(view.input_label(), label);
             view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            assert_eq!(view.input_label(), NEW_BRANCH_LABEL);
+            assert_eq!(view.input_label(), label);
             view.handle_paste("feature/input");
             view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
             assert_eq!(view.input_label(), label);
@@ -731,14 +747,16 @@ mod tests {
                 SelectorKind::Branch {
                     draft,
                     branches: vec!["main".into()],
-                    saved_input: None,
+                    editor: None,
                 },
                 1,
             ));
             view.focus_selector();
             view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
             view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-            assert!(view.drafts.is_empty());
+            assert_eq!(view.drafts.len(), 1);
+            assert_eq!(view.input_box.editor.text(), "saved input");
+            assert!(view.input_box.focused);
             assert!(view.selector.is_none());
         }
     }
