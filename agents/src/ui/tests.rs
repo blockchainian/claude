@@ -7659,7 +7659,9 @@ fn notice_sits_at_task_list_bottom_left_for_one_second() {
         .last()
         .unwrap()
         .to_owned();
-    view.set_notice(Some("Resume is not supported".into()));
+    // Keep logical time behind wall time so mixing the clocks fails deterministically.
+    let start = Instant::now() - std::time::Duration::from_secs(2);
+    view.set_notice_at(Some("Resume is not supported".into()), start);
     let rendered = log_screen(&view, 100, 25, now);
     let lines = rendered.lines().collect::<Vec<_>>();
     let notice_row = lines[usize::from(list.bottom() - 1)];
@@ -7674,12 +7676,16 @@ fn notice_sits_at_task_list_bottom_left_for_one_second() {
         "{rendered}"
     );
     assert_eq!(*lines.last().unwrap(), hints);
-    assert!(
-        view.expire_messages(Instant::now())
-            .is_some_and(|left| left <= std::time::Duration::from_secs(1))
+    assert_eq!(
+        view.expire_messages(start),
+        Some(std::time::Duration::from_secs(1))
     );
     assert_eq!(
-        view.expire_messages(Instant::now() + std::time::Duration::from_secs(1)),
+        view.expire_messages(start + std::time::Duration::from_millis(400)),
+        Some(std::time::Duration::from_millis(600))
+    );
+    assert_eq!(
+        view.expire_messages(start + std::time::Duration::from_secs(1)),
         None
     );
     assert!(!log_screen(&view, 100, 25, now).contains("Resume is not supported"));

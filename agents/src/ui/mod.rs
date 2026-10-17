@@ -634,7 +634,11 @@ impl View {
     }
     /// Shows `notice` at the task list's bottom-left for `MESSAGE_LIFETIME`.
     pub fn set_notice(&mut self, notice: Option<String>) {
-        self.notice = notice.map(|text| (text, Instant::now() + MESSAGE_LIFETIME));
+        self.set_notice_at(notice, Instant::now());
+    }
+
+    fn set_notice_at(&mut self, notice: Option<String>, now: Instant) {
+        self.notice = notice.map(|text| (text, now + MESSAGE_LIFETIME));
     }
 
     /// Shows `label` at the footer's right end until `MESSAGE_LIFETIME` after `now`.
