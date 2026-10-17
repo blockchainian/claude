@@ -6,6 +6,8 @@ pub(super) mod rollout;
 #[cfg(test)]
 mod send_tests;
 #[cfg(test)]
+mod subagents_tests;
+#[cfg(test)]
 mod tests;
 
 use super::{Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot};
@@ -344,15 +346,24 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
     }
     let id: String = row.get("id")?;
     let prompt = column::<String>(row, "first_user_message")?.unwrap_or_default();
-    let title = column::<String>(row, "title")?
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| prompt.clone());
+    let agent_path = subagent
+        .and_then(|value| value.get("thread_spawn"))
+        .and_then(|spawn| spawn.get("agent_path"))
+        .and_then(|path| path.as_str());
+    let title = if let Some(path) = agent_path {
+        path.rsplit('/').next().unwrap_or_default().to_owned()
+    } else {
+        column::<String>(row, "title")?
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| prompt.clone())
+    };
     let updated_at = time(row, "updated_at")?.unwrap_or(DateTime::UNIX_EPOCH);
     Ok(Some(Session {
         parent: parents.get(&id).cloned().map(key),
         id: key(id),
         cwd: PathBuf::from(column::<String>(row, "cwd")?.unwrap_or_default()),
         name: match column::<String>(row, "history_mode")?.as_deref() {
+            _ if agent_path.is_some() => None,
             Some("paginated") => column::<String>(row, "name")?
                 .map(|name| name.trim().to_owned())
                 .filter(|name| !name.is_empty()),
@@ -362,7 +373,11 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
             }
         },
         title,
-        prompt: prompt.chars().take(512).collect(),
+        prompt: if agent_path.is_some() {
+            String::new()
+        } else {
+            prompt.chars().take(512).collect()
+        },
         detail_sources: Default::default(),
         prompt_images: Vec::new(),
         queued: vec![],
@@ -575,7 +590,9 @@ impl Provider for CodexProvider {
         if !session.can_resume()
             || matches!(
                 input,
-                SessionInput::SetModel(_) | SessionInput::SetEffort(_) | SessionInput::Answer { .. }
+                SessionInput::SetModel(_)
+                    | SessionInput::SetEffort(_)
+                    | SessionInput::Answer { .. }
             )
         {
             return None;
@@ -597,9 +614,9 @@ impl Provider for CodexProvider {
                         None => Ok(()),
                     }
                 }
-                SessionInput::SetModel(_) | SessionInput::SetEffort(_) | SessionInput::Answer { .. } => {
-                    Err(io::ErrorKind::Unsupported.into())
-                }
+                SessionInput::SetModel(_)
+                | SessionInput::SetEffort(_)
+                | SessionInput::Answer { .. } => Err(io::ErrorKind::Unsupported.into()),
             }
         }))
     }

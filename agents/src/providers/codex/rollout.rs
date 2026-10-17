@@ -91,6 +91,7 @@ impl Tasks {
         use std::os::unix::fs::MetadataExt;
         let mut file = File::open(path)?;
         let metadata = file.metadata()?;
+        let history = history_start(&mut file)?;
         let identity = (metadata.dev(), metadata.ino());
         if self.identity != Some(identity) || metadata.len() < self.offset {
             self.offset = 0;
@@ -105,6 +106,9 @@ impl Tasks {
             let Ok(record) = serde_json::from_slice::<Value>(line) else {
                 return;
             };
+            if inherited(&record, history) {
+                return;
+            }
             let payload = &record["payload"];
             if record["type"] != "response_item"
                 || payload["type"] != "function_call"
@@ -152,9 +156,42 @@ fn plan_tasks(payload: &Value) -> io::Result<Vec<SessionTask>> {
         .collect()
 }
 
+/// Read the subagent boundary from the first session metadata record.
+fn history_start(file: &mut File) -> io::Result<Option<u64>> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut line = Vec::new();
+    io::BufReader::new(file).read_until(b'\n', &mut line)?;
+    let Ok(record) = serde_json::from_slice::<Value>(&line) else {
+        return Ok(None);
+    };
+    if record["type"] != "session_meta" {
+        return Ok(None);
+    }
+    record["payload"]
+        .get("subagent_history_start_ordinal")
+        .map(|value| {
+            value.as_u64().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid Codex subagent history boundary",
+                )
+            })
+        })
+        .transpose()
+}
+
+fn inherited(record: &Value, start: Option<u64>) -> bool {
+    start.is_some_and(|start| {
+        record["ordinal"]
+            .as_u64()
+            .is_some_and(|ordinal| ordinal < start)
+    })
+}
+
 /// Walk complete JSON records newest first, retaining records spanning chunks.
 fn walk(path: &Path, mut visit: impl FnMut(Value, u64) -> io::Result<bool>) -> io::Result<()> {
     let mut file = File::open(path)?;
+    let history = history_start(&mut file)?;
     let mut position = file.metadata()?.len();
     let mut remainder = Vec::new();
     while position > 0 {
@@ -177,7 +214,7 @@ fn walk(path: &Path, mut visit: impl FnMut(Value, u64) -> io::Result<bool>) -> i
             let start = end - line.len();
             end = start.saturating_sub(1);
             if let Ok(record) = serde_json::from_slice::<Value>(line)
-                && !visit(record, position + start as u64)?
+                && (inherited(&record, history) || !visit(record, position + start as u64)?)
             {
                 return Ok(());
             }
@@ -877,7 +914,12 @@ pub(super) fn first_prompt(
         let Ok(record) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
-        if completed_user(&record) {
+        if (record["type"] == "session_meta"
+            && record["payload"]
+                .get("subagent_history_start_ordinal")
+                .is_some())
+            || completed_user(&record)
+        {
             return Ok((Vec::new(), None));
         }
         let payload = &record["payload"];
@@ -1013,6 +1055,7 @@ pub(super) fn summary(path: &Path) -> io::Result<Summary> {
 pub(crate) struct Reader {
     path: PathBuf,
     identity: Option<(u64, u64)>,
+    history_start: Option<u64>,
     observed_len: u64,
     modified: Option<std::time::SystemTime>,
     oldest: u64,
@@ -1032,6 +1075,7 @@ impl Reader {
         Self {
             path,
             identity: None,
+            history_start: None,
             observed_len: 0,
             modified: None,
             oldest: 0,
@@ -1077,9 +1121,11 @@ impl Reader {
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)?;
         if let Ok(record) = serde_json::from_slice::<Value>(&bytes) {
-            self.pending_offset = Some(self.read);
-            self.pending_bytes = bytes.clone();
-            self.records.push((self.read, record));
+            if !inherited(&record, self.history_start) {
+                self.pending_offset = Some(self.read);
+                self.pending_bytes = bytes.clone();
+                self.records.push((self.read, record));
+            }
             Ok(bytes.len() as u64)
         } else {
             Ok(0)
@@ -1105,6 +1151,7 @@ impl Reader {
         let mut replaced = 0;
         if reset {
             self.identity = Some(identity);
+            self.history_start = history_start(&mut file)?;
             self.read = crate::jsonl::complete_end(&mut file)?;
             self.oldest = self.read;
             self.records.clear();
@@ -1142,6 +1189,7 @@ impl Reader {
             })?;
             parsed_bytes += end - self.read - reused;
             self.read = end;
+            incoming.retain(|(_, record)| !inherited(record, self.history_start));
             let mut affected = pending.unwrap_or(end);
             for (offset, record) in &incoming {
                 affected = affected.min(self.dependency(record, *offset));
@@ -1181,6 +1229,10 @@ impl Reader {
                 oldest = offset;
                 parsed_bytes += line.len() as u64 + 1;
                 if let Ok(record) = serde_json::from_slice::<Value>(line) {
+                    if inherited(&record, self.history_start) {
+                        oldest = 0;
+                        return false;
+                    }
                     older.push((offset, record));
                 }
                 offset > target
@@ -1326,6 +1378,28 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
                     body,
                     ended.map(|(at, _, _)| at),
                 )
+            }
+            (Some("response_item"), Some("agent_message")) => {
+                let header = content_text(&payload["content"]).ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Missing Codex agent message header",
+                    )
+                })?;
+                let field = |prefix: &str| {
+                    header
+                        .lines()
+                        .find_map(|line| line.strip_prefix(prefix))
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "Invalid Codex agent message header",
+                            )
+                        })
+                };
+                let body = format!("{} from {}", field("Message Type: ")?, field("Sender: ")?);
+                (Kind::Assistant, body, None)
             }
             (Some("response_item"), Some("message")) => {
                 let kind = match payload["role"].as_str() {

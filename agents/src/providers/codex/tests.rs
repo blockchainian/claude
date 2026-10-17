@@ -299,14 +299,11 @@ fn capabilities_gate_codex_actions_in_the_view() {
     );
     let mut parent = session.clone();
     parent.id = key("parent".into());
-    parent.status = SessionStatus::Inactive;
+    parent.status = SessionStatus::Working;
     session.parent = Some(parent.id.clone());
     view.set_sessions(vec![parent, session.clone()], false);
     assert_eq!(view.selected_id(), Some(&session.id));
-    for (code, name) in [
-        (KeyCode::Enter, "Resume"),
-        (KeyCode::Char('o'), "Terminal"),
-    ] {
+    for (code, name) in [(KeyCode::Enter, "Resume"), (KeyCode::Char('o'), "Terminal")] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             Some(Action::Unsupported(name))
@@ -331,7 +328,11 @@ fn delete_rejects_children_and_requires_the_daemon() {
     let mut session = provider.snapshot(1).unwrap().sessions.remove(0);
     session.parent = Some(key("parent".into()));
     assert_eq!(
-        provider.delete(&session).and_then(|delete| delete()).unwrap_err().kind(),
+        provider
+            .delete(&session)
+            .and_then(|delete| delete())
+            .unwrap_err()
+            .kind(),
         io::ErrorKind::Unsupported
     );
     session.parent = None;
@@ -341,7 +342,11 @@ fn delete_rejects_children_and_requires_the_daemon() {
         started_at: None,
     });
     assert_eq!(
-        provider.delete(&session).and_then(|delete| delete()).unwrap_err().to_string(),
+        provider
+            .delete(&session)
+            .and_then(|delete| delete())
+            .unwrap_err()
+            .to_string(),
         "Codex's app-server daemon isn't running"
     );
 }
@@ -618,8 +623,11 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     let mut view = View::new(Grouping::Project, false);
     view.set_capabilities(hub.capabilities());
     view.set_sessions(snapshot.sessions, snapshot.has_more);
-    // Active shows the inactive parent as context above its waiting child.
-    // The Active tab includes the waiting child.
+    // Descendants follow their inactive root into the Inactive tab.
+    assert_eq!(view.selected_id(), None);
+    view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    view.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+    view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     assert_eq!(view.selected_id(), Some(&key("thread-12".into())));
     let mut buffer = Buffer::empty(Rect::new(0, 0, 160, 40));
     view.render(buffer.area, &mut buffer);
@@ -634,7 +642,7 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
         .unwrap_or_else(|| panic!("parent={parent_title:?}\n{}", lines.join("\n")));
     let x = 6;
     assert!(
-        buffer[(x as u16, parent_row as u16)]
+        !buffer[(x as u16, parent_row as u16)]
             .modifier
             .contains(Modifier::DIM)
     );
@@ -642,7 +650,10 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     for (code, expected) in [
         (KeyCode::Enter, Action::Open(key("thread-12".into()))),
         (KeyCode::Right, Action::Open(key("thread-12".into()))),
-        (KeyCode::Char('o'), Action::OpenTerminal(key("thread-12".into()))),
+        (
+            KeyCode::Char('o'),
+            Action::OpenTerminal(key("thread-12".into())),
+        ),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
@@ -692,7 +703,6 @@ fn manager_children_use_shared_hub_filtering_and_resumable_rows() {
     );
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     // Pending and inactive children never populate the parent's Background section.
-    view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     while view.selected_id() != Some(&parent_key) {
         let previous = view.selected_id().cloned();
         view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
@@ -750,11 +760,12 @@ fn spawn_children_cannot_resume_in_the_view() {
         .find(|session| session.id.id == "thread-13")
         .unwrap()
         .clone();
-    let parent = sessions
+    let mut parent = sessions
         .iter()
         .find(|session| session.id.id == "thread-12")
         .unwrap()
         .clone();
+    parent.status = SessionStatus::Working;
     child.status = SessionStatus::Ready;
     let id = child.id.clone();
     let mut view = View::new(Grouping::Project, false);
@@ -764,10 +775,7 @@ fn spawn_children_cannot_resume_in_the_view() {
     )]));
     view.set_sessions(vec![parent, child], false);
     assert_eq!(view.selected_id(), Some(&id));
-    for (code, name) in [
-        (KeyCode::Enter, "Resume"),
-        (KeyCode::Char('o'), "Terminal"),
-    ] {
+    for (code, name) in [(KeyCode::Enter, "Resume"), (KeyCode::Char('o'), "Terminal")] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
             Some(Action::Unsupported(name))
@@ -916,7 +924,11 @@ fn manager_thread_operations_use_the_provider_paths() {
         started_at: None,
     });
     assert_eq!(
-        provider.delete(&session).and_then(|delete| delete()).unwrap_err().to_string(),
+        provider
+            .delete(&session)
+            .and_then(|delete| delete())
+            .unwrap_err()
+            .to_string(),
         "Codex's app-server daemon isn't running"
     );
 }

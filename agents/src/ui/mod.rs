@@ -8,9 +8,9 @@ mod drafts;
 use draft_controls::{Field, Selector};
 mod formatting;
 pub(crate) use drafts::DraftSetup;
+mod centering;
 #[cfg(test)]
 mod chronological_log_tests;
-mod centering;
 mod content;
 mod detail_model;
 mod highlight;
@@ -34,12 +34,12 @@ mod selection_tabs;
 mod shell_commands;
 mod shortcut_help;
 mod style;
+mod terminal_panel;
 mod text_selection;
 mod text_selection_layout;
 mod timeline;
 mod title_row;
 mod title_rule;
-mod terminal_panel;
 mod tool_detail;
 mod usage_chart;
 pub(crate) mod vscode;
@@ -685,13 +685,21 @@ impl View {
         let mut children: Vec<_> = self
             .rows
             .iter()
-            .filter(|child| {
-                session.parent.is_none()
-                    && child.parent.as_ref() == Some(&session.id)
-                    && child.status == SessionStatus::Working
+            .enumerate()
+            .filter(|(_, child)| child.status == SessionStatus::Working)
+            .filter(|(index, _)| {
+                self.ancestors(*index)
+                    .any(|ancestor| self.rows[ancestor].id == session.id)
             })
+            .map(|(_, child)| child)
             .collect();
-        children.sort_by_key(|child| (child.started_at, &child.id));
+        children.sort_by_key(|child| {
+            (
+                child.parent.as_ref() != Some(&session.id),
+                child.started_at,
+                &child.id,
+            )
+        });
         children.into_iter()
     }
 
@@ -706,23 +714,24 @@ impl View {
             .get(self.selected)
             .filter(|_| self.visible_indices().contains(&self.selected))
     }
+    fn ancestors(&self, index: usize) -> impl Iterator<Item = usize> + '_ {
+        let mut remaining = self.rows.len();
+        std::iter::successors(Some(index), move |&index| {
+            remaining = remaining.checked_sub(1)?;
+            let parent = self.rows[index].parent.as_ref()?;
+            self.rows.iter().position(|session| &session.id == parent)
+        })
+        .skip(1)
+    }
     fn group_index(&self, index: usize) -> Option<usize> {
-        match self.rows[index].parent.as_ref() {
-            None => Some(index),
-            Some(parent) => self
-                .rows
-                .iter()
-                .position(|s| s.parent.is_none() && &s.id == parent),
-        }
+        let root = self.ancestors(index).last().unwrap_or(index);
+        self.rows[root].parent.is_none().then_some(root)
     }
     fn is_pinned(&self, index: usize) -> bool {
         self.group_index(index)
             .is_some_and(|parent| self.pinned.contains(&self.rows[parent].id))
     }
     fn same_group(&self, grouping: Grouping, left: usize, right: usize) -> bool {
-        if grouping == Grouping::Status && self.rows[left].status != self.rows[right].status {
-            return false;
-        }
         let (Some(left), Some(right)) = (self.group_index(left), self.group_index(right)) else {
             return false;
         };
@@ -733,7 +742,7 @@ impl View {
             Grouping::Project => {
                 self.project_groups[left].key() == self.project_groups[right].key()
             }
-            Grouping::Status => true,
+            Grouping::Status => self.rows[left].status == self.rows[right].status,
             Grouping::Model => self.rows[left].model_name() == self.rows[right].model_name(),
         }
     }
@@ -752,12 +761,10 @@ impl View {
     }
     fn visible_indices(&self) -> Vec<usize> {
         let filter = TASK_FILTERS[self.status_filter].1;
-        let matches = |s: &Session| self.matches_search(s);
         let mut children = std::collections::HashMap::<&SessionKey, Vec<usize>>::new();
         for (index, session) in self.rows.iter().enumerate() {
             if let Some(parent) = session.parent.as_ref()
                 && !self.hidden.contains(&session.id)
-                && filter.contains(&session.status)
             {
                 children.entry(parent).or_default().push(index);
             }
@@ -769,44 +776,42 @@ impl View {
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, s)| {
-                s.parent.is_none()
-                    && !self.hidden.contains(&s.id)
-                    && ((filter.contains(&s.status) && matches(s))
-                        || children.get(&s.id).is_some_and(|indices| {
-                            indices
-                                .iter()
-                                .any(|&i| matches(s) || matches(&self.rows[i]))
-                        }))
+            .filter(|(_, session)| {
+                session.parent.is_none()
+                    && !self.hidden.contains(&session.id)
+                    && filter.contains(&session.status)
+                    && self.matches_search(session)
             })
-            .map(|(i, _)| i)
-            .partition(|i| self.is_pinned(*i));
-        pinned.sort_by_key(|i| self.pinned.iter().position(|id| *id == self.rows[*i].id));
+            .map(|(index, _)| index)
+            .partition(|index| self.is_pinned(*index));
+        pinned.sort_by_key(|index| {
+            self.pinned
+                .iter()
+                .position(|id| *id == self.rows[*index].id)
+        });
         match self.grouping {
-            Grouping::Project => visible
-                .sort_by_key(|i| (self.project_groups[*i].key(), session_order(&self.rows[*i]))),
-            Grouping::Status => {}
-            Grouping::Model => {
-                visible.sort_by_key(|i| (self.rows[*i].model_name(), session_order(&self.rows[*i])))
-            }
+            Grouping::Project => visible.sort_by_key(|index| {
+                (
+                    self.project_groups[*index].key(),
+                    session_order(&self.rows[*index]),
+                )
+            }),
+            Grouping::Status => visible.sort_by_key(|index| self.rows[*index].status),
+            Grouping::Model => visible.sort_by_key(|index| {
+                (
+                    self.rows[*index].model_name(),
+                    session_order(&self.rows[*index]),
+                )
+            }),
         }
         pinned.extend(visible);
         let mut rows = Vec::new();
-        for parent in pinned {
-            if filter.contains(&self.rows[parent].status) {
-                rows.push(parent);
+        let mut pending: Vec<_> = pinned.into_iter().rev().collect();
+        while let Some(index) = pending.pop() {
+            rows.push(index);
+            if let Some(siblings) = children.get(&self.rows[index].id) {
+                pending.extend(siblings.iter().rev().copied());
             }
-            if let Some(siblings) = children.get(&self.rows[parent].id) {
-                rows.extend(
-                    siblings
-                        .iter()
-                        .copied()
-                        .filter(|&i| matches(&self.rows[parent]) || matches(&self.rows[i])),
-                );
-            }
-        }
-        if self.grouping == Grouping::Status {
-            rows.sort_by_key(|&index| (!self.is_pinned(index), self.rows[index].status));
         }
         rows
     }
@@ -922,7 +927,10 @@ impl View {
 
     /// Makes the selected task the selection of every tab that lists it.
     fn remember_selection(&mut self) {
-        let Some((id, status)) = self.selected_row().map(|s| (s.id.clone(), s.status)) else {
+        let Some((id, status)) = self.selected_row().and_then(|session| {
+            self.group_index(self.selected)
+                .map(|root| (session.id.clone(), self.rows[root].status))
+        }) else {
             return;
         };
         for (tab, (_, statuses)) in TASK_FILTERS.iter().enumerate() {

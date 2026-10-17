@@ -335,7 +335,7 @@ impl View {
                         !self.hidden.contains(&s.id)
                             && self.group_index(*index).is_some_and(|parent| {
                                 !self.hidden.contains(&self.rows[parent].id)
-                                    && group.contains(&s.status)
+                                    && group.contains(&self.rows[parent].status)
                             })
                     })
                     .count();
@@ -821,32 +821,39 @@ impl View {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
-            centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
-        } else {
-            centered_header("Prompt".dim().into(), Line::default(), width)
-        };
-        separate_section(&mut items);
-        items.push(prompt_header.into());
-        let prompt_text = match session.prompt.trim() {
-            "" => "No prompt available.",
-            prompt => prompt,
-        };
-        let prompt_start = items.len();
-        let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
-        items.extend(prompt_body.into_iter().map(Item::from));
-        bodies.push(prompt_start..items.len());
-        keys.push(body_key("Prompt", &session.prompt));
-        copies.push(
-            Some((session.prompt.as_str(), "Copied prompt"))
-                .filter(|(prompt, _)| !prompt.trim().is_empty()),
-        );
-        body_links.push(super::links::text_links(
-            &session.prompt,
-            &session.cwd,
-            &session.prompt_images,
-        ));
-        item_links.resize(items.len(), Vec::new());
+        if !session.prompt.trim().is_empty()
+            || session
+                .parent
+                .as_ref()
+                .is_none_or(|parent| parent.provider != ProviderId::Codex)
+        {
+            let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
+                centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
+            } else {
+                centered_header("Prompt".dim().into(), Line::default(), width)
+            };
+            separate_section(&mut items);
+            items.push(prompt_header.into());
+            let prompt_text = match session.prompt.trim() {
+                "" => "No prompt available.",
+                prompt => prompt,
+            };
+            let prompt_start = items.len();
+            let prompt_body = wrap_details(prompt_text, &session.cwd, width, true);
+            items.extend(prompt_body.into_iter().map(Item::from));
+            bodies.push(prompt_start..items.len());
+            keys.push(body_key("Prompt", &session.prompt));
+            copies.push(
+                Some((session.prompt.as_str(), "Copied prompt"))
+                    .filter(|(prompt, _)| !prompt.trim().is_empty()),
+            );
+            body_links.push(super::links::text_links(
+                &session.prompt,
+                &session.cwd,
+                &session.prompt_images,
+            ));
+            item_links.resize(items.len(), Vec::new());
+        }
         for queued in &session.queued {
             let first = wrap_details(queued, &session.cwd, width, true)
                 .into_iter()

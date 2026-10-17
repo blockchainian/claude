@@ -12,7 +12,7 @@ fn columns(area: Rect, indent: u16) -> (Rect, Rect, Rect) {
     const UPDATED_WIDTH: u16 = 9;
     const GAP: u16 = 2;
 
-    let gutter = area.width.min(2 + indent);
+    let gutter = area.width.min(indent.saturating_add(2));
     let available = area.width - gutter;
     let status_metadata = GAP + STATUS_WIDTH;
     let all_metadata = status_metadata + GAP + UPDATED_WIDTH;
@@ -53,7 +53,10 @@ impl View {
                 Grouping::Project => self.project_groups[self.group_index(index).unwrap()]
                     .directory()
                     .map_or_else(|| "No directory".to_owned(), format_directory_display),
-                Grouping::Status => self.rows[index].status.label().to_owned(),
+                Grouping::Status => self.rows[self.group_index(index).unwrap()]
+                    .status
+                    .label()
+                    .to_owned(),
                 Grouping::Model => self.rows[self.group_index(index).unwrap()]
                     .model_name()
                     .to_owned(),
@@ -188,11 +191,20 @@ impl View {
             if selected {
                 state.marker = Some((rect.x, rect.y));
             }
-            let indent = if task.parent.is_some() { 3 } else { 0 };
+            let depth = self.ancestors(index).count();
+            let indent = u16::try_from(depth).unwrap_or(u16::MAX).saturating_mul(3);
             if indent > 0 {
-                let has_next_sibling = entries.get(start + offset + 1).is_some_and(|entry| {
-                    matches!(entry, CenterRow::Task(next) if self.rows[*next].parent == task.parent)
-                });
+                let has_next_sibling = entries
+                    .iter()
+                    .skip(start + offset + 1)
+                    .find_map(|entry| {
+                        let CenterRow::Task(next) = entry else {
+                            return None;
+                        };
+                        (self.ancestors(*next).count() <= depth)
+                            .then_some(self.rows[*next].parent == task.parent)
+                    })
+                    .unwrap_or(false);
                 line(
                     Line::from(if has_next_sibling {
                         "├─ "
@@ -200,7 +212,12 @@ impl View {
                         "└─ "
                     })
                     .style(style),
-                    Rect::new(rect.x, rect.y, rect.width.min(indent), 1),
+                    Rect::new(
+                        rect.x + rect.width.min(indent.saturating_sub(3)),
+                        rect.y,
+                        rect.width.saturating_sub(indent.saturating_sub(3)).min(3),
+                        1,
+                    ),
                     buf,
                 );
             }
