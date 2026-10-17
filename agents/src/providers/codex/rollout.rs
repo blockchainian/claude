@@ -620,6 +620,11 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                     } else {
                         vec![text_section("result", &result.to_string())]
                     }
+                })
+                .or_else(|| {
+                    item["error"]["message"]
+                        .as_str()
+                        .map(|text| vec![result_section(text)])
                 });
             (
                 format!(
@@ -627,7 +632,11 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                     item["server"].as_str().unwrap(),
                     item["tool"].as_str().unwrap()
                 ),
-                argument_fields(&item["arguments"]),
+                match &item["arguments"] {
+                    Value::Null => Vec::new(),
+                    arguments @ Value::Object(_) => argument_fields(arguments),
+                    arguments => vec![text_section("input", &arguments.to_string())],
+                },
                 output,
             )
         }
@@ -1783,6 +1792,67 @@ mod tests {
         let event = completed_tool(&command).unwrap().unwrap();
         assert_eq!(event.calls[0].input.len(), 1);
         assert_eq!(event.calls[0].exit_code, Some(2));
+    }
+
+    // Real timeout and rejection completions, with identifiers and project names scrubbed.
+    // Sources (relative to Codex sessions/):
+    // 2026/06/11/rollout-2026-06-11T19-39-04-019eb9b2-8282-7b02-827f-034576f5de4d.jsonl.zst:158
+    // 2026/07/22/rollout-2026-07-22T09-19-33-019f8768-1762-79b3-b3ee-1db3f099c4f0.jsonl.zst:34
+    fn mcp_error_records() -> Vec<Value> {
+        include_str!("../../../tests/fixtures/codex-mcp-errors.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn mcp_completed_errors_keep_reason_and_failed_state() {
+        for mut record in mcp_error_records() {
+            let message = record["payload"]["item"]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            for null_result in [false, true] {
+                if null_result {
+                    record["payload"]["item"]["result"] = Value::Null;
+                }
+                let event = completed_tool(&record).unwrap().unwrap();
+                assert!(event.calls[0].is_error);
+                assert_eq!(event.calls[0].output, Some(vec![result_section(&message)]));
+            }
+            record["payload"]["item"]["result"] = serde_json::json!({
+                "content": [{"type": "text", "text": "result retained"}], "isError": true
+            });
+            let event = completed_tool(&record).unwrap().unwrap();
+            assert_eq!(
+                event.calls[0].output,
+                Some(vec![result_section("result retained")])
+            );
+            assert!(event.calls[0].is_error);
+        }
+    }
+
+    #[test]
+    fn mcp_completed_non_object_arguments_keep_json() {
+        let mut record = mcp_error_records().remove(0);
+        // No non-object arguments found in the source days' real MCP completions.
+        // Vary only the arguments on a captured completion to cover JSON shapes.
+        for arguments in [
+            serde_json::json!(["text", {"key": 1}, null]),
+            serde_json::json!("text"),
+            serde_json::json!(42),
+            serde_json::json!(true),
+            Value::Null,
+        ] {
+            record["payload"]["item"]["arguments"] = arguments.clone();
+            let event = completed_tool(&record).unwrap().unwrap();
+            let expected = if arguments.is_null() {
+                Vec::new()
+            } else {
+                vec![text_section("input", &arguments.to_string())]
+            };
+            assert_eq!(event.calls[0].input, expected, "{arguments}");
+        }
     }
 
     #[test]
