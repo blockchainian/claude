@@ -207,7 +207,8 @@ fn ask_live_other_focus_after_restart() {
         answers: BTreeMap::from([(
             "Cold Other?".into(),
             crate::ask::QuestionAnswer {
-                answers: vec!["user_note: hey".into()],
+                answers: Vec::new(),
+                other: Some("hey".into()),
             },
         )]),
     };

@@ -179,14 +179,31 @@ pub(in crate::providers::claude) fn pending(
 fn question_value(question: &Question) -> Value {
     json!({"question":question.text,"header":question.header,"options":question.options.iter().map(|o| json!({"label":o.label,"description":o.description,"preview":o.preview})).collect::<Vec<_>>()})
 }
-fn raw_answers(ask: &Ask, answer: &Answer) -> io::Result<BTreeMap<String, String>> {
+/// The terminal flow keeps free text after the selected option labels.
+fn terminal_answers(answer: &Answer) -> BTreeMap<String, Vec<String>> {
+    answer
+        .answers
+        .iter()
+        .map(|(id, answer)| {
+            let mut values = answer.answers.clone();
+            if let Some(other) = &answer.other {
+                values.push(format!("user_note: {other}"));
+            }
+            (id.clone(), values)
+        })
+        .collect()
+}
+fn raw_answers(
+    ask: &Ask,
+    answer: &BTreeMap<String, Vec<String>>,
+) -> io::Result<BTreeMap<String, String>> {
     let AskKind::Questions { questions, .. } = &ask.kind;
-    if questions.len() != answer.answers.len() {
+    if questions.len() != answer.len() {
         return Err(mismatch());
     }
     let mut result = BTreeMap::new();
     for q in questions {
-        let values = &answer.answers.get(&q.id).ok_or_else(mismatch)?.answers;
+        let values = answer.get(&q.id).ok_or_else(mismatch)?;
         if values.is_empty() || (!q.multi && values.len() != 1) {
             return Err(mismatch());
         }
@@ -302,7 +319,7 @@ enum Phase {
 #[derive(Clone)]
 struct AnswerFlow<'a> {
     ask: &'a Ask,
-    answer: &'a Answer,
+    answer: BTreeMap<String, Vec<String>>,
     expected: BTreeMap<String, String>,
     page: usize,
     choice: usize,
@@ -311,11 +328,13 @@ struct AnswerFlow<'a> {
     phase: Phase,
 }
 impl<'a> AnswerFlow<'a> {
-    fn new(ask: &'a Ask, answer: &'a Answer) -> io::Result<Self> {
+    fn new(ask: &'a Ask, answer: &Answer) -> io::Result<Self> {
+        let answer = terminal_answers(answer);
+        let expected = raw_answers(ask, &answer)?;
         Ok(Self {
             ask,
             answer,
-            expected: raw_answers(ask, answer)?,
+            expected,
             page: 0,
             choice: 0,
             selected: Vec::new(),
@@ -359,7 +378,7 @@ impl<'a> AnswerFlow<'a> {
         if parse_page(screen, &question_value(q))? != *q || checked(screen) != self.selected {
             return Err(mismatch());
         }
-        let choices = &self.answer.answers[&q.id].answers;
+        let choices = &self.answer[&q.id];
         if self.phase == Phase::OtherSubmitRow {
             if !body(screen)?.lines().any(|line| {
                 line.trim()
@@ -484,10 +503,10 @@ impl Terminal {
         answer: &Answer,
         transcript: &Path,
     ) -> io::Result<()> {
-        let expected = raw_answers(ask, answer)?;
+        let mut flow = AnswerFlow::new(ask, answer)?;
+        let expected = flow.expected.clone();
         let mut confirmation = File::open(transcript)?;
         let mut offset = crate::jsonl::complete_end(&mut confirmation)?;
-        let mut flow = AnswerFlow::new(ask, answer)?;
         #[cfg(test)]
         let mut capture_index = 0;
         while flow.phase != Phase::Done {
@@ -624,7 +643,8 @@ mod tests {
             answers: BTreeMap::from([(
                 "Cold Other?".into(),
                 crate::ask::QuestionAnswer {
-                    answers: vec!["user_note: hey".into()],
+                    answers: Vec::new(),
+                    other: Some("hey".into()),
                 },
             )]),
         };
@@ -645,7 +665,8 @@ mod tests {
             answers: BTreeMap::from([(
                 "Probe single choice?".into(),
                 crate::ask::QuestionAnswer {
-                    answers: vec!["user_note: 嗨".into()],
+                    answers: Vec::new(),
+                    other: Some("嗨".into()),
                 },
             )]),
         };
@@ -756,7 +777,8 @@ mod tests {
             answers: BTreeMap::from([(
                 "Transport multi Other?".into(),
                 crate::ask::QuestionAnswer {
-                    answers: vec!["Red".into(), "user_note: custom multi note".into()],
+                    answers: vec!["Red".into()],
+                    other: Some("custom multi note".into()),
                 },
             )]),
         };
@@ -846,7 +868,15 @@ mod tests {
                         (
                             q.id.clone(),
                             crate::ask::QuestionAnswer {
-                                answers: answers.into_iter().map(str::to_owned).collect(),
+                                answers: answers
+                                    .iter()
+                                    .filter(|value| !value.starts_with("user_note: "))
+                                    .map(|value| (*value).to_owned())
+                                    .collect(),
+                                other: answers
+                                    .iter()
+                                    .find_map(|value| value.strip_prefix("user_note: "))
+                                    .map(str::to_owned),
                             },
                         )
                     })
@@ -871,7 +901,10 @@ mod tests {
                 flow = next;
             }
             assert_eq!(flow.phase, Phase::Done, "{header}");
-            assert_eq!(raw_answers(&ask, &answer).unwrap(), result);
+            assert_eq!(
+                raw_answers(&ask, &terminal_answers(&answer)).unwrap(),
+                result
+            );
             assert!(verify_result(capture, &ask, &result).unwrap());
         }
     }

@@ -114,15 +114,13 @@ impl QuestionView {
             .iter()
             .zip(&self.pages)
             .map(|(question, page)| {
-                let mut answers: Vec<String> = page
+                let answers: Vec<String> = page
                     .selected
                     .iter()
                     .map(|&index| question.options[index].label.clone())
                     .collect();
-                if !page.other.is_empty() {
-                    answers.push(format!("user_note: {}", page.other.text()));
-                }
-                (question.id.clone(), QuestionAnswer { answers })
+                let other = (!page.other.is_empty()).then(|| page.other.text().to_owned());
+                (question.id.clone(), QuestionAnswer { answers, other })
             })
             .collect();
         Some(Outcome::Submit(Answer { answers }))
@@ -477,9 +475,10 @@ mod tests {
         press(&mut view, KeyCode::Up);
         view.paste("custom probe note");
         let answer = submitted(press(&mut view, KeyCode::Enter));
+        assert!(answer.answers["Probe single choice?"].answers.is_empty());
         assert_eq!(
-            answer.answers["Probe single choice?"].answers,
-            ["user_note: custom probe note"]
+            answer.answers["Probe single choice?"].other.as_deref(),
+            Some("custom probe note")
         );
         let mut view = QuestionView::new(fixture("Single"));
         press(&mut view, KeyCode::Down);
@@ -529,8 +528,8 @@ mod tests {
         press(&mut view, KeyCode::Backspace);
         let answer = submitted(press(&mut view, KeyCode::Enter));
         assert_eq!(
-            answer.answers["Probe custom text?"].answers,
-            ["user_note: custom probe note"]
+            answer.answers["Probe custom text?"].other.as_deref(),
+            Some("custom probe note")
         );
         assert!(matches!(
             press(&mut view, KeyCode::Esc),
@@ -565,8 +564,8 @@ mod tests {
         press(&mut view, KeyCode::Char('2'));
         let answer = submitted(press(&mut view, KeyCode::Enter));
         assert_eq!(
-            answer.answers["Probe custom text?"].answers,
-            ["user_note: 2"]
+            answer.answers["Probe custom text?"].other.as_deref(),
+            Some("2")
         );
         let mut view = QuestionView::new(fixture("Multi"));
         press(&mut view, KeyCode::Char(' '));
