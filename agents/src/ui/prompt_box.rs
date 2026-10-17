@@ -6,7 +6,6 @@ pub(super) enum SendState {
     #[default]
     Ready,
     Sending,
-    Sent,
     Failed(String),
 }
 
@@ -37,7 +36,6 @@ impl PromptBox {
         let status = match &self.state {
             SendState::Ready => String::new(),
             SendState::Sending => " · sending".into(),
-            SendState::Sent => " · sent".into(),
             SendState::Failed(reason) => {
                 format!(" · failed: {}", reason.lines().next().unwrap_or(""))
             }
@@ -308,7 +306,6 @@ mod tests {
         for (state, expected) in [
             (SendState::Ready, "Task"),
             (SendState::Sending, "sending"),
-            (SendState::Sent, "sent"),
             (SendState::Failed("denied".into()), "denied"),
         ] {
             editor.state = state;

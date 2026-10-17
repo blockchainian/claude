@@ -107,8 +107,15 @@ fn whole_log_row_double_click_focuses_input_and_keeps_the_detail() {
 }
 
 #[test]
-fn completed_input_updates_its_task_while_another_task_is_selected() {
+fn successful_input_keeps_prompt_while_another_task_is_selected() {
+    let prompt = |view: &View| {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buffer = Buffer::empty(area);
+        view.input_box.render(area, &mut buffer, "Task", None);
+        buffer
+    };
     let mut view = fixture();
+    let before = prompt(&view);
     let first = view.selected;
     let first_id = view.selected_id().unwrap().clone();
     let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
@@ -129,8 +136,9 @@ fn completed_input_updates_its_task_while_another_task_is_selected() {
     assert_eq!(view.input_box.editor.text(), "another task");
     assert_eq!(view.input_box.state, prompt_box::SendState::Ready);
     view.select(first);
-    assert_eq!(view.input_box.state, prompt_box::SendState::Sent);
     assert!(view.input_box.editor.is_empty());
+    assert_eq!(prompt(&view), before);
+    assert_eq!(view.input_box.state, prompt_box::SendState::Ready);
 }
 
 #[test]

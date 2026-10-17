@@ -88,8 +88,8 @@ pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
         assert!(!screen.contains("Failed to stop"), "{screen}");
     } else {
         assert!(
-            screen.contains(" · sent"),
-            "completed provider send must appear in the selected task: {screen}"
+            !screen.contains(" · sent"),
+            "completed provider send must keep the regular prompt: {screen}"
         );
     }
 }

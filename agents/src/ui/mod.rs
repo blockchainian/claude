@@ -483,7 +483,7 @@ impl View {
                 {
                     target.editor.clear();
                 }
-                prompt_box::SendState::Sent
+                prompt_box::SendState::Ready
             }
             Err(error) => prompt_box::SendState::Failed(error.to_string()),
         };
