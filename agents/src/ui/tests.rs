@@ -6878,7 +6878,7 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
 
 #[test]
 fn shell_commands_share_center_and_copy_original_without_connector_hits() {
-    let command = "cat /workspace/a && printf longer; echo done && pwd\n";
+    let command = "cat /workspace/a && printf longer && echo done; pwd\n";
     let (mut view, now) = open_tool_fixture();
     let mut event = view.log[7].clone();
     event.calls.truncate(1);
@@ -6911,11 +6911,11 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
         let offset = super::centering::centered_x(
             viewport.log_detail,
             region.area,
-            "cat /workspace/a".width() as u16,
+            ("cat /workspace/a".width() + 2) as u16,
         ) - region.area.x;
         assert!(
             rows.iter()
-                .all(|row| row.cells.first().unwrap().0.start == offset)
+                .all(|row| row.cells.first().unwrap().0.start == offset + 2)
         );
         let fields = region
             .sources
@@ -6928,21 +6928,33 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
             .find(|row| row.segment == fields.id)
             .unwrap();
         assert_eq!(fields_row.cells.first().unwrap().0.start, offset);
-        // Brackets follow the group's left edge, outside every command's cell map.
-        let gutter = region.area.x + offset - 1;
-        for (row, glyph) in rows.iter().zip(["┌", "└", "┌", "└"]) {
-            assert_eq!(buf[(gutter, row.y)].symbol(), glyph);
+        // Shell display prefixes occupy the group origin without selectable bytes.
+        let prefix_x = region.area.x + offset;
+        for (row, glyph) in rows.iter().zip(["┌", "│", "└", " "]) {
+            assert_eq!(buf[(prefix_x, row.y)].symbol(), glyph);
+            assert_eq!(buf[(prefix_x + 1, row.y)].symbol(), " ");
             // Muted like the time labels: the default foreground dimmed, not the tool accent.
-            assert_eq!(buf[(gutter, row.y)].fg, ratatui::style::Color::Reset);
+            assert_eq!(buf[(prefix_x, row.y)].fg, ratatui::style::Color::Reset);
             assert!(
-                buf[(gutter, row.y)]
+                buf[(prefix_x, row.y)]
                     .modifier
                     .contains(ratatui::style::Modifier::DIM)
             );
         }
-        assert!(!viewport.log_links.iter().any(|link| link.0.x <= gutter));
+        assert!(
+            !viewport
+                .log_links
+                .iter()
+                .any(|link| link.0.x <= prefix_x + 1)
+        );
         (region.area, rows)
     };
+    for row in &rows {
+        for prefix_cell in 1..=2 {
+            view.begin_text_selection(body.x + row.cells[0].0.start - prefix_cell, row.y);
+            assert!(view.text_selection.borrow().is_none());
+        }
+    }
     let first = &rows[0];
     let last = rows.last().unwrap();
     let x1 = body.x + first.cells[0].0.start;

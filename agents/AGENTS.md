@@ -42,6 +42,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - Switching tasks resets the log selection to newest and resumes following.
 - Double click, text selection and list/detail search remain independent of following.
 - Log detail times share the list’s time-column geometry at the panel’s right edge. Title rows place details on the left, the title on the panel midline and the time in its column; titles move left to clear the time column and truncate only when wider than the available space. Body groups stay left of the time column and use the same panel-midline placement: prose wraps at the reading width, while preformatted lines use the full available width and truncate with an ellipsis. List rows also center on the panel midline, moving left to clear the time column.
+- Shell blocks containing `&&` chains draw a two-cell display prefix on every line: `┌ `, `│ ` and `└ ` inside chains, two spaces outside. Blocks without chains have no prefix. Prefixes count toward group width and truncation, but have no selectable or copied bytes.
 
 ## Development
 

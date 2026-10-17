@@ -309,7 +309,6 @@ impl View {
         let mut visible = layout.lines
             [scroll.min(layout.lines.len())..(scroll + height).min(layout.lines.len())]
             .to_vec();
-        let gutters = layout.gutters.clone();
         let times = layout.times.clone();
         viewport.log_detail_layout = Some(layout);
         drop(viewport);
@@ -326,18 +325,6 @@ impl View {
                     1,
                 );
                 Line::from(time).right_aligned().render(time_area, buf);
-            }
-        }
-        // Each command gutter stays one cell left of its group's shared origin.
-        for &(row, x, glyph) in &gutters {
-            if let Some(y) = row
-                .checked_sub(scroll)
-                .filter(|&row| row < height)
-                .map(|row| body_area.y + row as u16)
-            {
-                if x >= buf.area.x && x < buf.area.right() {
-                    buf[(x, y)].set_symbol(glyph).set_style(Style::new().dim());
-                }
             }
         }
         self.highlight_text_selection(text_selection::Panel::Log, buf);
@@ -863,8 +850,6 @@ pub(super) struct DetailLayout {
     sources: Vec<text_selection::Source>,
     /// The links in each text part.
     links: Vec<Vec<super::links::Link>>,
-    /// Each decorated line's row, gutter column and glyph, one cell left of its group.
-    gutters: Vec<(usize, u16, &'static str)>,
     /// Section title times, drawn separately in the time column.
     times: Vec<(usize, Span<'static>)>,
 }
@@ -970,7 +955,6 @@ fn detail_parts_layout(
         rows: Vec::new(),
         sources: Vec::new(),
         links: Vec::new(),
-        gutters: Vec::new(),
         times: Vec::new(),
     };
     for (section_index, section) in sections.into_iter().enumerate() {
@@ -1031,7 +1015,6 @@ fn detail_parts_layout(
             for (part, lines) in rendered {
                 let id = layout.sources.len();
                 let mut maps = part.maps(&lines);
-                let gutter = part.gutter();
                 let first = layout.lines.len();
                 if part.running() && width > 0 {
                     layout.running.push(first);
@@ -1068,11 +1051,6 @@ fn detail_parts_layout(
                 layout
                     .rows
                     .extend(maps.into_iter().map(|cells| (id, cells)));
-                layout
-                    .gutters
-                    .extend(gutter.into_iter().enumerate().filter_map(|(row, glyph)| {
-                        Some((first + row, group_x.checked_sub(1)?, glyph?))
-                    }));
                 layout.sources.push(text_selection::Source {
                     id,
                     text: part.source.into(),
@@ -2101,31 +2079,75 @@ mod panel_detail_tests {
     }
 
     #[test]
-    fn shell_gutters_stay_one_cell_left_of_their_group() {
-        let dir = tempfile::tempdir().unwrap();
-        let event = fixture_events(include_str!(
+    fn shell_prefixes_count_toward_group_width_and_ellipsis_maps_hidden_command_bytes() {
+        let mut event = fixture_events(include_str!(
             "../../tests/fixtures/claude-inline-script.jsonl"
         ))
         .into_iter()
         .find(|event| event.calls.iter().any(|call| call.name == "Bash"))
         .unwrap();
+        let source = "echo 123456789012345678901234567890 && pwd; whoami";
+        event.calls.truncate(1);
+        event.calls[0].input = vec![crate::log::Section::Code {
+            label: "command".into(),
+            lang: "bash".into(),
+            text: source.into(),
+        }];
         for width in [200, 35] {
+            let columns = columns(width);
             let layout = detail_parts_layout(
                 &event,
-                columns(width),
-                dir.path(),
+                columns,
+                Path::new("/"),
                 DateTime::UNIX_EPOCH,
                 super::super::tool_detail::detail(&event, String::new(), Style::new().dim())
                     .sections,
                 None,
             );
-            assert!(!layout.gutters.is_empty());
-            for &(row, x, _) in &layout.gutters {
-                let (_, cells) = &layout.rows[row];
-                assert_eq!(
-                    x + 1,
-                    layout.columns.text.x + cells.first().unwrap().0.start
+            let id = layout
+                .sources
+                .iter()
+                .find(|part| part.text.as_ref() == source)
+                .unwrap()
+                .id;
+            let rows: Vec<_> = layout
+                .rows
+                .iter()
+                .enumerate()
+                .filter(|(_, (part, _))| *part == id)
+                .collect();
+            assert_eq!(rows.len(), 3);
+            let group_width = ("echo 123456789012345678901234567890".len() + 2)
+                .min(usize::from(columns.text.width));
+            let padding = super::super::centering::centered_x(
+                columns.panel,
+                columns.text,
+                group_width as u16,
+            ) - columns.text.x;
+            for ((row, (_, cells)), (prefix, command)) in rows.iter().zip([
+                ("┌ ", "echo 123456789012345678901234567890"),
+                ("└ ", "pwd"),
+                ("  ", "whoami"),
+            ]) {
+                let line = &layout.lines[*row];
+                assert!(
+                    line.to_string()
+                        .starts_with(&format!("{}{prefix}", " ".repeat(usize::from(padding))))
                 );
+                assert_eq!(cells.first().unwrap().0.start, padding + 2);
+                assert!(line.width() <= usize::from(columns.text.width));
+                assert_eq!(
+                    cells
+                        .iter()
+                        .map(|(_, bytes)| &source[bytes.clone()])
+                        .collect::<String>(),
+                    command
+                );
+            }
+            let first_line = &layout.lines[rows[0].0];
+            assert_eq!(first_line.to_string().ends_with('…'), width == 35);
+            if width == 35 {
+                assert_eq!(rows[0].1.1.last().unwrap().0.end, columns.text.width);
             }
         }
     }

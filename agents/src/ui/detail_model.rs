@@ -19,13 +19,6 @@ pub(super) struct DetailColumns {
     pub reading_width: u16,
 }
 
-impl DetailColumns {
-    /// The column left of the text area, where shell command brackets are drawn.
-    pub fn gutter_x(&self) -> u16 {
-        self.text.x.saturating_sub(1)
-    }
-}
-
 /// Columns for a detail `panel` whose log list occupies `list`.
 pub(super) fn detail_columns(panel: Rect, list: Rect) -> DetailColumns {
     let (text, time) = super::log::log_row_areas(panel);
