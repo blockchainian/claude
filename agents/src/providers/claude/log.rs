@@ -622,10 +622,13 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         // The diff's label shows the path.
         "Edit" => Vec::new(),
         "WebFetch" => vec![fields(input, &["url", "prompt"])],
-        "Agent" | "Task" => vec![Section::Markdown {
-            label: "prompt".to_owned(),
-            text: input["prompt"].as_str().unwrap_or("").to_owned(),
-        }],
+        "Agent" | "Task" => vec![
+            Section::Markdown {
+                label: "prompt".to_owned(),
+                text: input["prompt"].as_str().unwrap_or("").to_owned(),
+            },
+            fields(input, &["name"]),
+        ],
         "SendMessage" => vec![Section::Markdown {
             label: "message".to_owned(),
             text: input["message"].as_str().unwrap_or("").to_owned(),
@@ -753,6 +756,7 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             _ => fallback(),
         }
     });
+    crate::log::include_description(&mut sections, input);
     ToolCall {
         agent: None,
         id: String::new(),
@@ -1757,7 +1761,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn tool_inputs_do_not_repeat_titles_or_metadata() {
+    fn tool_inputs_retain_descriptions_for_detail_headers() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude-tool-calls.jsonl");
         let events = super::tail(&path, 100).unwrap();
@@ -1767,7 +1771,10 @@ pub(crate) mod tests {
                 .flat_map(|event| &event.calls)
                 .find(|call| call.name == name)
                 .unwrap();
-            assert_eq!(call.input.len(), 1, "{name}");
+
+            assert!(
+                matches!(call.input.last(), Some(Section::Fields(fields)) if fields[0].0 == "description")
+            );
         }
     }
 

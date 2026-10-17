@@ -445,7 +445,7 @@ fn text_section(label: &str, text: &str) -> Section {
 }
 
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
-    let input = if payload["type"] == "custom_tool_call" {
+    let mut input = if payload["type"] == "custom_tool_call" {
         vec![text_section(
             "input",
             payload["input"].as_str().unwrap_or(""),
@@ -483,6 +483,9 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
             _ => vec![text_section("input", raw)],
         }
     };
+    if let Some(arguments) = tool_arguments(payload) {
+        crate::log::include_description(&mut input, &arguments);
+    }
     ToolCall {
         agent: None,
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
@@ -505,7 +508,7 @@ fn result_section(text: &str) -> Section {
 
 fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
     let item_type = item["type"].as_str().unwrap();
-    let (name, input, output) = match item_type {
+    let (name, mut input, output) = match item_type {
         "CommandExecution" => {
             let input = vec![Section::Code {
                 label: "command".to_owned(),
@@ -583,6 +586,7 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
             None,
         ),
     };
+    crate::log::include_description(&mut input, &item["arguments"]);
     let title = if name == "exec_command" {
         if let Some(Section::Code { text, .. }) = input.first() {
             crate::log::tool_title(&name, &serde_json::json!({ "command": text }))

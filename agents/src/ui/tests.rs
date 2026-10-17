@@ -6750,7 +6750,13 @@ fn merged_tool_title_rules_copy_only_titles_and_arrows_center_on_panel() {
             let row = &rows[0];
             let start = row.cells.first().unwrap().0.start;
             let end = row.cells.last().unwrap().0.end;
-            assert_eq!(start, 2);
+            let cap = view
+                .center_layout(buf.area)
+                .log
+                .width
+                .saturating_sub(10)
+                .min(body.width);
+            assert!(start.abs_diff((cap - (end - start)) / 2) <= 1);
             if start > 1 {
                 assert_eq!(buf[(body.x + start - 2, row.y)].symbol(), "─");
             }
@@ -7075,12 +7081,24 @@ fn task_log_selected_event_header_centers_kind_and_keeps_time_right() {
         let list = log_screen(&view, 100, 25, now);
         let row = list.lines().find(|line| line.contains(body)).unwrap();
         let time = row.chars().skip(91).take(8).collect::<String>();
-        let header = format!("{:<91}{time}", " Assistant");
+        let time = time.trim();
         click_log_text(&mut view, &list, body, MouseButton::Left);
         let open = log_screen(&view, 100, 25, now);
-        assert!(
-            open.lines().any(|line| line == header),
-            "{header:?}\n{open}"
+        let detail = view.viewport.borrow().log_detail;
+        let cap = view
+            .center_layout(Rect::new(0, 0, 100, 25))
+            .log
+            .width
+            .saturating_sub(10)
+            .min(detail.width);
+        let header = open.lines().nth(usize::from(detail.y + 1)).unwrap();
+        assert_eq!(
+            header.find("Assistant"),
+            Some(usize::from(detail.x) + (usize::from(cap) - "Assistant".len()) / 2)
+        );
+        assert_eq!(
+            header.find(time),
+            Some(usize::from(detail.x + cap) - time.len())
         );
     }
 }
@@ -7848,11 +7866,18 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
             .find(|line| line.replace(' ', "").contains(&title.replace(' ', "")))
             .unwrap_or_else(|| panic!("{name}: {open}"));
         assert!(!header.contains(" Tool "), "{header}");
-        assert!(
-            header
-                .replace(' ', "")
-                .starts_with(&call.title.replace(' ', ""))
-        );
+        if super::tool_detail::input_label(call).is_some() {
+            assert!(
+                header.contains(&crate::log::display_tool_name(&call.name)),
+                "{header}"
+            );
+        } else {
+            assert!(
+                header
+                    .replace(' ', "")
+                    .starts_with(&call.title.replace(' ', ""))
+            );
+        }
         for kind in [crate::log::Kind::Error, crate::log::Kind::Denied] {
             event.kind = kind;
             view.select_fixture_event(Some(event.clone()));
@@ -7862,7 +7887,11 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
                     .any(|line| line.replace(' ', "").contains(&format!(
                         "{}{}",
                         super::log::kind_label(&event.kind),
-                        call.title.replace(' ', "")
+                        if super::tool_detail::input_label(call).is_some() {
+                            crate::log::display_tool_name(&call.name).replace(' ', "")
+                        } else {
+                            call.title.replace(' ', "")
+                        }
                     )))
             );
         }
@@ -8766,20 +8795,21 @@ fn task_notification_detail_shows_task_id_and_output_content() {
                 text
             })
             .collect();
-        assert_eq!(
-            lines.iter().filter(|line| line.contains(&summary)).count(),
-            1,
-            "{lines:#?}"
-        );
         let header = lines
             .iter()
-            .position(|line| line.contains(&summary))
+            .position(|line| line.contains("Task b9"))
             .unwrap();
-        assert!(lines[header].starts_with("Task b9wi31ww0"), "{lines:#?}");
-        let time_style = buffer[(159, header as u16)].style();
-        for column in 0.."Task b9wi31ww0".len() {
-            assert_eq!(buffer[(column as u16, header as u16)].style(), time_style);
-        }
+        assert!(
+            !lines[header + 1..]
+                .iter()
+                .any(|line| line.contains(&summary))
+        );
+        let label_x = lines[header].find("Task b9").unwrap() as u16;
+        let time_x = lines[header].trim_end().width() as u16 - 1;
+        assert_eq!(
+            buffer[(label_x, header as u16)].style(),
+            buffer[(time_x, header as u16)].style()
+        );
         assert_eq!(
             lines
                 .iter()
@@ -9198,11 +9228,13 @@ fn claude_agent_display_from_real_records() {
         view.select_fixture_event(Some(event.clone()));
         let screen = log_screen(&view, 200, 45, now);
         let rows: Vec<_> = screen.lines().collect();
-        let header = rows
-            .iter()
-            .position(|r| r.trim_start().starts_with(metadata))
-            .unwrap_or_else(|| panic!("{screen}"));
+        let detail = view.viewport.borrow().log_detail;
+        let header = usize::from(detail.y + 1);
         assert!(rows[header].contains("Agent"), "{screen}");
+        assert!(
+            rows[header + 2..].iter().any(|row| row.trim() == metadata),
+            "{screen}"
+        );
         for kind in [
             crate::log::Kind::Tool,
             crate::log::Kind::Error,
@@ -9226,11 +9258,11 @@ fn claude_agent_display_from_real_records() {
                 buffer[(right, header as u16)].style()
             );
         }
-
+        let description = super::tool_detail::input_label(&event.calls[0]).unwrap();
         assert!(
-            rows[header + 2..]
+            !rows[header + 2..]
                 .iter()
-                .any(|r| r.replace(' ', "") == label.replace(' ', "")),
+                .any(|row| row.replace(' ', "") == description.replace(' ', "")),
             "{screen}"
         );
     }

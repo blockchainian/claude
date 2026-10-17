@@ -236,7 +236,11 @@ impl View {
                 header.push(" ".into());
             }
             let title = if event.calls.len() == 1 {
-                event.calls[0].title.clone()
+                if super::tool_detail::input_label(&event.calls[0]).is_some() {
+                    crate::log::display_tool_name(&event.calls[0].name)
+                } else {
+                    event.calls[0].title.clone()
+                }
             } else {
                 event.body.clone()
             };
@@ -253,55 +257,28 @@ impl View {
                 .map(|header| Span::styled(header.clone(), time_style)),
             _ => None,
         };
+        let description = match event.calls.as_slice() {
+            [call] => super::tool_detail::input_label(call),
+            _ => None,
+        };
         let header_row = super::render::row(area, LOG_TOP, 1);
-        let (content_area, time_area) = log_row_areas(header_row);
-        let label_width = header_label
-            .as_ref()
-            .map_or(0, |id| id.width().min(usize::from(header_row.width)) as u16);
-        let margin = (header_row.width - content_area.width).max(label_width);
-        let title_width = content_width.min(if wide {
-            header_row.width.saturating_sub(2 * margin)
-        } else {
-            content_area
-                .width
-                .saturating_sub(label_width + u16::from(header_label.is_some()) * 2)
+        let bar = detail_block(header_row, content_width, wide);
+        let left = description.unwrap_or_else(|| {
+            header_label.map_or_else(String::new, |label| label.content.into_owned())
         });
-        let header_area = Rect::new(
-            header_row.x
-                + if wide {
-                    (header_row.width - title_width) / 2
-                } else {
-                    0
-                },
-            header_row.y,
-            title_width,
-            1,
+        let mut title = super::tool_detail::input_title_bar(
+            &left,
+            Line::from(header),
+            usize::from(bar.width),
+            time,
         );
-        if !header_area.is_empty() {
-            let title = truncate_line_with_ellipsis_if_overflow(
-                Line::from(header),
-                header_area.width.into(),
-            );
-            if wide { title.centered() } else { title }.render(header_area, buf);
+        if let Some(label) = title.spans.first_mut() {
+            label.style = time_style;
         }
-        Line::from(Span::styled(time.to_owned(), time_style))
-            .right_aligned()
-            .render(time_area, buf);
-        // Metadata stays clear of the title and time.
-        if let Some(header_label) = header_label {
-            let id_area = Rect::new(
-                if wide {
-                    header_row.x
-                } else {
-                    time_area.x.saturating_sub(label_width + 2)
-                },
-                header_row.y,
-                if wide { margin } else { label_width },
-                1,
-            );
-            truncate_line_with_ellipsis_if_overflow(Line::from(header_label), id_area.width.into())
-                .render(id_area, buf);
+        if let Some(time) = title.spans.last_mut() {
+            time.style = time_style;
         }
+        title.render(bar, buf);
         let mut body_area =
             super::render::row(area, LOG_TOP + 2, area.height.saturating_sub(LOG_TOP + 2));
         if self.log_detail_search.active() {
@@ -963,6 +940,17 @@ fn detail_layout(
     )
 }
 
+/// Detail content differs between modes only in its horizontal placement.
+fn detail_block(area: Rect, width: u16, wide: bool) -> Rect {
+    let width = width.min(area.width);
+    Rect::new(
+        area.x + if wide { (area.width - width) / 2 } else { 0 },
+        area.y,
+        width,
+        area.height,
+    )
+}
+
 fn detail_parts_layout(
     event: &Event,
     width: u16,
@@ -977,11 +965,7 @@ fn detail_parts_layout(
     let rendered: Vec<_> = parts
         .into_iter()
         .map(|part| {
-            let body_width = part
-                .wrap_width(usize::from(content_width), wide)
-                .unwrap_or(usize::from(content_width));
-            let mut lines = part.lines(body_width, body_style, now);
-            part.align_title(&mut lines, wide);
+            let lines = part.lines(usize::from(content_width), body_style, now);
             (part, lines)
         })
         .collect();
@@ -1001,11 +985,8 @@ fn detail_parts_layout(
                 || lines.iter().map(Line::width).max().unwrap_or(0),
                 |group| group_widths[group],
             );
-            let padding = if wide {
-                usize::from(width).saturating_sub(block_width) / 2
-            } else {
-                0
-            };
+            let padding =
+                usize::from(detail_block(Rect::new(0, 0, width, 1), block_width as u16, wide).x);
             if padding > 0 {
                 // Every row keeps its position within the section, including its source cell map.
                 for (line, cells) in lines.iter_mut().zip(&mut maps) {

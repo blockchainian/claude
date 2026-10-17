@@ -688,7 +688,7 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
     assert!(left.abs_diff((164 - "codex-manager detach".len()) / 2) <= 1);
     let input = rows
         .iter()
-        .find(|row| row.contains("thread 01a1489e"))
+        .find(|row| row.contains("threadId: 01a1489e"))
         .expect("thread input remains visible");
     assert!(input.len() - input.trim_start().len() > 20);
     let snapshot = rows

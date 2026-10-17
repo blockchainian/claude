@@ -61,7 +61,7 @@ fn prose_body_kinds_use_the_log_column_width() {
 }
 
 #[test]
-fn generic_input_fields_keep_summaries_and_prose_without_changing_outputs() {
+fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
     let parsed = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
     let event = parsed
         .iter()
@@ -93,7 +93,7 @@ fn generic_input_fields_keep_summaries_and_prose_without_changing_outputs() {
             .any(|p| p.source.starts_with("name: ") || p.source.contains("\nname: "))
     );
     assert_eq!(
-        super::super::tool_detail::input_summary(&event.calls[0]).as_deref(),
+        super::super::tool_detail::input_label(&event.calls[0]).as_deref(),
         Some(name.as_str())
     );
     assert!(parts.iter().any(|p| p.source.starts_with("cwd: ")));
@@ -116,13 +116,13 @@ fn generic_input_fields_keep_summaries_and_prose_without_changing_outputs() {
     ])];
     event.calls[0].name = "mcp__plugin_codex_codex-manager__send".into();
     assert_eq!(
-        super::super::tool_detail::input_summary(&event.calls[0]).as_deref(),
-        Some("thread abc-123")
+        super::super::tool_detail::input_label(&event.calls[0]).as_deref(),
+        None
     );
     let drawn = layout(&event, 200);
     assert_reading_column(&drawn, 0, true);
     assert!(
-        !drawn
+        drawn
             .sources
             .iter()
             .any(|s| s.text.starts_with("threadId:"))
@@ -206,15 +206,13 @@ fn generic_roles_depend_on_field_names_and_only_on_inputs() {
         ])];
         event.calls[0].output = Some(event.calls[0].input.clone());
         assert_eq!(
-            super::super::tool_detail::input_summary(&event.calls[0]).as_deref(),
-            Some("Readable task · session abc")
+            super::super::tool_detail::input_label(&event.calls[0]).as_deref(),
+            None
         );
         let drawn = layout(&event, 200);
-        assert_eq!(
-            drawn.sources[0].text.as_ref(),
-            "Readable task · session abc"
-        );
-        assert_eq!(drawn.sources[1].text.as_ref(), "cwd: /workspace");
+        assert!(drawn.sources[0].text.contains("title: Readable task"));
+        assert!(drawn.sources[0].text.contains("sessionId: abc"));
+        assert!(drawn.sources[0].text.contains("cwd: /workspace"));
         assert_reading_column(&drawn, 0, true);
         assert_reading_column(&drawn, 1, true);
         assert!(
@@ -237,10 +235,14 @@ fn generic_roles_depend_on_field_names_and_only_on_inputs() {
     for value in ["a\nb".to_owned(), "x".repeat(81)] {
         event.calls[0].input = vec![Section::Fields(vec![("name".into(), value.clone())])];
         assert_eq!(
-            super::super::tool_detail::input_summary(&event.calls[0]),
-            None
+            super::super::tool_detail::input_label(&event.calls[0]),
+            Some(value.clone())
         );
-        assert_eq!(open_parts(&event)[0].source, format!("name: {value}"));
+        assert!(
+            !open_parts(&event)
+                .iter()
+                .any(|part| part.source == format!("name: {value}"))
+        );
     }
 }
 
@@ -275,8 +277,13 @@ fn command_and_all_output_body_formats_keep_their_width() {
         Section::Fields(vec![("prompt".into(), text.clone())]),
     ]);
     for part in open_parts(&event) {
-        assert_eq!(part.wrap_width(200, true), Some(200));
-        assert_eq!(part.wrap_width(120, false), Some(120));
+        for width in [200, 120] {
+            assert!(
+                part.lines(width, Style::default(), DateTime::UNIX_EPOCH)
+                    .iter()
+                    .all(|line| line.width() <= width)
+            );
+        }
     }
 }
 
@@ -293,16 +300,22 @@ fn queued_fragments_keep_json_formatting_and_markdown_detection() {
         expected.iter().map(|p| &p.source).collect::<Vec<_>>()
     );
     for part in actual {
-        assert_eq!(part.wrap_width(200, true), Some(200));
+        assert!(
+            part.lines(200, Style::default(), DateTime::UNIX_EPOCH)
+                .iter()
+                .all(|line| line.width() <= 200)
+        );
     }
 }
 
 #[test]
-fn merged_calls_keep_tool_titles_and_centered_input_summaries() {
-    let mut event = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
-        .into_iter()
-        .find(|e| e.calls.iter().any(|c| c.name.ends_with("__start")))
-        .unwrap();
+fn merged_calls_keep_descriptions_in_title_bars() {
+    let mut event = events(include_str!(
+        "../../tests/fixtures/claude-manager-start.jsonl"
+    ))
+    .into_iter()
+    .find(|e| e.calls.iter().any(|c| c.name.ends_with("__start")))
+    .unwrap();
     let call = event
         .calls
         .iter()
@@ -312,9 +325,12 @@ fn merged_calls_keep_tool_titles_and_centered_input_summaries() {
     event.calls = vec![call.clone(), call];
     let parts = open_parts(&event);
     assert_eq!(parts[0].source, event.calls[0].title);
-    assert_eq!(
-        parts[1].source,
-        super::super::tool_detail::input_summary(&event.calls[0]).unwrap()
+    let description = super::super::tool_detail::input_label(&event.calls[0]).unwrap();
+    assert!(!parts.iter().any(|part| part.source == description));
+    assert!(
+        parts[0].lines(120, Style::default(), DateTime::UNIX_EPOCH)[0]
+            .to_string()
+            .starts_with(&description)
     );
     for width in [120, 200] {
         assert_centered_blocks(&event, width);
@@ -494,4 +510,32 @@ fn centered_detail_blocks_snapshot() {
         std::fs::write(&path, &snapshot).unwrap();
     }
     assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}
+
+#[test]
+fn description_takes_priority_over_name_in_real_agent_inputs() {
+    let parsed = events(include_str!(
+        "../../tests/fixtures/claude-agent-display.jsonl"
+    ));
+    let event = parsed
+        .iter()
+        .find(|event| {
+            event
+                .calls
+                .iter()
+                .any(|call| call.id == "toolu_015h3Ngbytx63sMddkJwjDX7")
+        })
+        .unwrap();
+    let call = &event.calls[0];
+    assert_eq!(
+        super::super::tool_detail::input_label(call).as_deref(),
+        Some("实测 attach 发提示词")
+    );
+    let body = open_parts(event);
+    assert!(body.iter().any(|part| part.source == "name: attach-probe"));
+    assert!(
+        !body
+            .iter()
+            .any(|part| part.source == "实测 attach 发提示词")
+    );
 }

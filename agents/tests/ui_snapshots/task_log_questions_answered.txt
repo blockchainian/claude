@@ -1,5 +1,5 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Assistant AskUserQuestion · 子 命 令  · cd                                                                                                  now
+                                            Assistant AskUserQuestion · 子 命 令  · cd                                          now
 
 • 怎 么 判 断 命 令 后 面 那 个 词 是 子 命 令 ？ 比 如  `rg -n 'background' src` 里 的  background 是 搜 索 词 、 `cat README.md` 的 是 文 件 ， 光 看 形 状 分 不
 出 来 。

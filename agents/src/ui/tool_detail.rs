@@ -36,7 +36,7 @@ pub(super) struct Part {
 
 enum Body {
     /// A merged call's title and duration, with the event header used to size its rule.
-    TitleRule(Option<String>, String),
+    TitleRule(Option<String>, String, Option<String>),
     /// A section label, in the given style.
     Label(Style),
     /// An input/output arrow without selectable source bytes.
@@ -162,26 +162,6 @@ impl Part {
         self
     }
 
-    /// Every body uses the log list's message-column width supplied by the layout.
-    pub fn wrap_width(&self, width: usize, _wide: bool) -> Option<usize> {
-        Some(width)
-    }
-
-    /// Narrow merged calls start at the same left edge as their input and output.
-    pub fn align_title(&self, lines: &mut [Line<'_>], wide: bool) {
-        if wide || !matches!(self.body, Body::TitleRule(..)) {
-            return;
-        }
-        for line in lines {
-            if line.spans.len() >= 4 && line.spans[0].width() >= 2 {
-                let shift = line.spans[0].width() - 2;
-                line.spans[0].content = "─ ".into();
-                let last = line.spans.last_mut().expect("title rule suffix exists");
-                last.content = format!("{}{}", "─".repeat(shift), last.content).into();
-            }
-        }
-    }
-
     /// Whether the selection maps the drawn lines back to the source as Markdown.
     pub fn markdown(&self) -> bool {
         matches!(self.body, Body::Markdown | Body::Prose(true))
@@ -246,8 +226,17 @@ impl Part {
         let source = drawn.as_str();
         let options = super::line_truncation::prose_wrap_options(width);
         let lines = match &self.body {
-            Body::TitleRule(time, header) => {
-                vec![call_title_rule(source, width, time.as_deref(), header)]
+            Body::TitleRule(time, header, summary) => {
+                vec![if let Some(summary) = summary {
+                    input_title_bar(
+                        summary,
+                        Line::from(source.to_owned()),
+                        width,
+                        time.as_deref().unwrap_or(""),
+                    )
+                } else {
+                    call_title_rule(source, width, time.as_deref(), header)
+                }]
             }
             Body::Label(style) => split_wide(
                 vec![Line::from(Span::styled(source.to_owned(), *style))],
@@ -315,6 +304,40 @@ impl Part {
             })
             .collect()
     }
+}
+
+/// Keep the tool centered and the time intact; metadata uses the remaining left slot.
+pub(super) fn input_title_bar(
+    description: &str,
+    title: Line<'static>,
+    width: usize,
+    time: &str,
+) -> Line<'static> {
+    let time = super::line_truncation::truncate_line_to_width(Line::from(time.to_owned()), width);
+    let reserve = if time.width() == 0 {
+        0
+    } else {
+        time.width() + 1
+    };
+    let title = super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+        title,
+        width.saturating_sub(2 * reserve),
+    );
+    let left = ((width - title.width()) / 2).min(width - time.width());
+    let label = super::line_truncation::truncate_line_with_ellipsis_if_overflow(
+        Line::from(description.replace(['\n', '\r', '\t'], " ")),
+        left.saturating_sub(1),
+    );
+    let mut spans = vec![Span::styled(
+        format!("{}{}", label, " ".repeat(left - label.width())),
+        Style::new().dim(),
+    )];
+    spans.extend(title.spans);
+    spans.push(Span::raw(" ".repeat(
+        width - left - spans.iter().skip(1).map(Span::width).sum::<usize>() - time.width(),
+    )));
+    spans.push(Span::styled(time.to_string(), Style::new().dim()));
+    Line::from(spans)
 }
 
 /// Center the call's rule on the event header, keeping its time at the panel edge.
@@ -625,17 +648,39 @@ pub(super) fn parts(event: &Event) -> Vec<Part> {
                 header.push(' ');
             }
             header.push_str(&event.body);
-            parts.push(Part::new(call.title.clone(), Body::TitleRule(time, header)));
+            parts.push(Part::new(
+                if input_label(call).is_some() {
+                    crate::log::display_tool_name(&call.name)
+                } else {
+                    call.title.clone()
+                },
+                Body::TitleRule(time, header, input_label(call)),
+            ));
         }
         if let Some(agent) = &call.agent {
-            parts.push(Part::text(agent.label.clone(), false));
+            if input_label(call).is_some() {
+                if let Some(header) = &agent.header {
+                    parts.push(Part::text(header.clone(), false));
+                }
+            } else {
+                parts.push(Part::text(agent.label.clone(), false));
+            }
         }
         let input_start = parts.len();
-        if let Some(summary) = input_summary(call) {
-            parts.push(Part::prose(summary, false));
-        }
+        let label_key = input_label_field(call).map(|(key, _)| key);
         for section in &call.input {
-            push_section(&mut parts, section, label_style, false);
+            if let Section::Fields(fields) = section {
+                let body = Section::Fields(
+                    fields
+                        .iter()
+                        .filter(|(key, _)| Some(key.as_str()) != label_key)
+                        .cloned()
+                        .collect(),
+                );
+                push_section(&mut parts, &body, label_style, false);
+            } else {
+                push_section(&mut parts, section, label_style, false);
+            }
         }
         for part in &mut parts[input_start..] {
             part.group = Some(input_start);
@@ -683,34 +728,25 @@ fn free_text(key: &str) -> bool {
     matches!(key, "prompt" | "message" | "question")
 }
 
-fn header_field(key: &str, value: &str) -> Option<String> {
-    if value.trim().is_empty() || value.contains(['\n', '\r']) {
-        return None;
-    }
-    if matches!(key, "name" | "title") && value.width() <= 80 {
-        return Some(value.to_owned());
-    }
-    key.strip_suffix("Id")
-        .filter(|stem| !stem.is_empty())
-        .map(|stem| format!("{stem} {value}"))
+fn input_label_field(call: &crate::log::ToolCall) -> Option<(&str, &str)> {
+    ["description", "name"].into_iter().find_map(|label_key| {
+        call.input
+            .iter()
+            .filter_map(|section| match section {
+                Section::Fields(fields) => Some(fields),
+                _ => None,
+            })
+            .flatten()
+            .find_map(|(key, value)| {
+                (key == label_key && !value.trim().is_empty())
+                    .then_some((key.as_str(), value.as_str()))
+            })
+    })
 }
 
-/// Input metadata forms a body summary; the tool title stays independent.
-pub(super) fn input_summary(call: &crate::log::ToolCall) -> Option<String> {
-    let labels: Vec<_> = call
-        .input
-        .iter()
-        .filter_map(|section| {
-            if let Section::Fields(fields) = section {
-                Some(fields)
-            } else {
-                None
-            }
-        })
-        .flatten()
-        .filter_map(|(key, value)| header_field(key, value))
-        .collect();
-    (!labels.is_empty()).then(|| labels.join(" · "))
+/// Prefer the input description, then its name, for the left title slot.
+pub(super) fn input_label(call: &crate::log::ToolCall) -> Option<String> {
+    input_label_field(call).map(|(_, value)| value.to_owned())
 }
 
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
@@ -738,7 +774,7 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             if !text_output {
                 let ordinary: Vec<_> = fields
                     .iter()
-                    .filter(|(key, value)| !free_text(key) && header_field(key, value).is_none())
+                    .filter(|(key, _)| !free_text(key))
                     .cloned()
                     .collect();
                 if !ordinary.is_empty() {

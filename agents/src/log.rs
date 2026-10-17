@@ -76,6 +76,15 @@ pub(crate) fn tool_title(name: &str, input: &Value) -> String {
     }
 }
 
+/// Retain the input description alongside specialized input sections.
+pub(crate) fn include_description(sections: &mut Vec<Section>, input: &Value) {
+    if let Some(description) = input["description"].as_str()
+        && !sections.iter().any(|section| matches!(section, Section::Fields(fields) if fields.iter().any(|(key, _)| key == "description")))
+    {
+        sections.push(Section::Fields(vec![("description".into(), description.into())]));
+    }
+}
+
 pub(crate) fn question_texts(input: &Value) -> Vec<String> {
     input["questions"]
         .as_array()
