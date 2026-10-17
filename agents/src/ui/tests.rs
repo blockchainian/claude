@@ -6872,6 +6872,8 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
         let gutter = region.area.x - 1;
         for (row, glyph) in rows.iter().zip(["┌", "└", "┌", "└"]) {
             assert_eq!(buf[(gutter, row.y)].symbol(), glyph);
+            // Muted like the time labels: the default foreground dimmed, not the tool accent.
+            assert_eq!(buf[(gutter, row.y)].fg, ratatui::style::Color::Reset);
             assert!(
                 buf[(gutter, row.y)]
                     .modifier
