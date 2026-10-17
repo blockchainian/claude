@@ -853,13 +853,13 @@ pub(crate) mod tests {
                         .all(|call| call.name == "mcp__plugin_codex_codex-manager__start")
             })
             .unwrap();
-        assert!(event.body.contains("codex-manager · start"));
+        assert!(event.body.contains("codex-manager start"));
         assert!(!event.body.contains("mcp__"));
         assert!(
             event
                 .calls
                 .iter()
-                .all(|call| call.title == "codex-manager · start")
+                .all(|call| call.title == "codex-manager start")
         );
         let record: serde_json::Value =
             include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
@@ -869,18 +869,18 @@ pub(crate) mod tests {
                 .unwrap();
         assert_eq!(
             super::tool_activity(&record["message"]["content"][0]).unwrap(),
-            "codex-manager · start"
+            "codex-manager start"
         );
         let input = &record["message"]["content"][0]["input"];
         let prompt = input["prompt"].as_str().unwrap();
         assert!(
             event
                 .body
-                .contains(&format!("codex-manager · start · {prompt}"))
+                .contains(&format!("codex-manager start · {prompt}"))
         );
         assert_eq!(
             super::tool_label("mcp__plugin_codex_codex-manager__start", ""),
-            "codex-manager · start"
+            "codex-manager start"
         );
         assert_eq!(
             super::tool_label("mcp__tool", prompt),
@@ -888,7 +888,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             super::tool_label("mcp__plugin_codex_codex-manager__send", prompt),
-            format!("codex-manager · send · {prompt}")
+            format!("codex-manager send · {prompt}")
         );
         let url = include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
             .lines()
@@ -900,7 +900,7 @@ pub(crate) mod tests {
             .to_owned();
         assert_eq!(
             super::tool_label("mcp__claude-in-chrome__navigate", &url),
-            format!("claude-in-chrome · navigate · {url}")
+            format!("claude-in-chrome navigate · {url}")
         );
     }
 
@@ -2115,7 +2115,7 @@ pub(crate) mod tests {
         }
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].body, "codex-manager · detach，TaskStop");
+        assert_eq!(events[0].body, "codex-manager detach，TaskStop");
     }
 
     #[test]
