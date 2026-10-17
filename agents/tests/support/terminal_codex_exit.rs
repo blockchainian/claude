@@ -44,10 +44,18 @@ fn terminal_codex_exit_sections() {
         &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
         binary.to_str().unwrap(),
     ]);
-    std::thread::sleep(Duration::from_secs(2));
+    tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .next()
+            .is_some_and(|tabs| tabs.contains("Inactive 1"))
+    });
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
-    std::thread::sleep(Duration::from_secs(1));
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let capture = tmux.capture_when(|capture| {
+        capture.contains("false → 1")
+            && capture.contains("exit code: 1")
+            && capture.contains("[scrubbed]")
+    });
     let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
     assert!(capture.contains("false → 1"), "{capture}");
