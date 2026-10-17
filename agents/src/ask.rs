@@ -23,7 +23,7 @@ pub enum AskKind {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Question {
-    /// The provider's opaque answer key.
+    /// Provider answer key; Claude uses the verbatim question text.
     pub id: String,
     pub header: String,
     pub text: String,
@@ -40,7 +40,7 @@ pub struct QuestionOption {
     pub preview: Option<String>,
 }
 
-/// Collected answers keyed by each question's provider answer key.
+/// Codex response shape, keyed by each question's provider answer key.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Answer {
     pub answers: BTreeMap<String, QuestionAnswer>,
@@ -48,8 +48,6 @@ pub struct Answer {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct QuestionAnswer {
-    /// Selected option labels, in selection order.
+    /// Selected labels and optional free text encoded as `user_note: <text>`.
     pub answers: Vec<String>,
-    /// Free text entered alongside or instead of selected options.
-    pub other: Option<String>,
 }

@@ -151,11 +151,7 @@ pub(crate) fn create(app: &mut App, request: crate::tasks::NewTask) -> String {
     job
 }
 
-pub(crate) fn answer_questions(
-    app: &mut App,
-    session: Session,
-    values: Vec<crate::ask::QuestionAnswer>,
-) {
+pub(crate) fn answer_questions(app: &mut App, session: Session, values: Vec<Vec<String>>) {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let ask = session
         .ask
@@ -179,28 +175,29 @@ pub(crate) fn answer_questions(
         "question view absent: {screen}"
     );
     for (question, answers) in questions.iter().zip(values) {
-        for answer in answers.answers {
-            let n = question
-                .options
-                .iter()
-                .position(|o| o.label == answer)
-                .unwrap()
-                + 1;
-            app.handle_event(Event::Key(KeyEvent::new(
-                KeyCode::Char(char::from_digit(n as u32, 10).unwrap()),
-                KeyModifiers::NONE,
-            )));
-        }
-        if let Some(note) = answers.other {
-            app.handle_event(Event::Key(KeyEvent::new(
-                KeyCode::Char(char::from_digit(question.options.len() as u32 + 1, 10).unwrap()),
-                KeyModifiers::NONE,
-            )));
-            app.handle_event(Event::Paste(note));
-            app.handle_event(Event::Key(KeyEvent::new(
-                KeyCode::Enter,
-                KeyModifiers::NONE,
-            )));
+        for answer in answers {
+            if let Some(note) = answer.strip_prefix("user_note: ") {
+                app.handle_event(Event::Key(KeyEvent::new(
+                    KeyCode::Char(char::from_digit(question.options.len() as u32 + 1, 10).unwrap()),
+                    KeyModifiers::NONE,
+                )));
+                app.handle_event(Event::Paste(note.to_owned()));
+                app.handle_event(Event::Key(KeyEvent::new(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                )));
+            } else {
+                let n = question
+                    .options
+                    .iter()
+                    .position(|o| o.label == answer)
+                    .unwrap()
+                    + 1;
+                app.handle_event(Event::Key(KeyEvent::new(
+                    KeyCode::Char(char::from_digit(n as u32, 10).unwrap()),
+                    KeyModifiers::NONE,
+                )));
+            }
         }
         if question.multi {
             app.handle_event(Event::Key(KeyEvent::new(
