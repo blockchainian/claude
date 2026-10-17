@@ -940,6 +940,21 @@ impl View {
                 self.discard_selected_draft();
                 return None;
             }
+            // A new task's first Enter names it; the name stays out of the prompt history.
+            if key.code == KeyCode::Enter
+                && key.modifiers.is_empty()
+                && let Some(id) = self.selected_draft
+                && self.selected_draft().is_some_and(|draft| draft.name.is_none())
+            {
+                let name = self.input_box.editor.text().trim().to_owned();
+                if !name.is_empty() {
+                    self.input_box.editor.clear();
+                    if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
+                        draft.name = Some(name);
+                    }
+                }
+                return None;
+            }
             self.input_box.history = self.prompt_history.clone();
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
@@ -965,6 +980,7 @@ impl View {
                             branch: draft.branch_choice.clone(),
                             request: crate::tasks::NewTask {
                                 cwd: draft.setup.cwd.clone(),
+                                name: draft.name.clone(),
                                 model: draft.setup.model.clone(),
                                 effort: draft.setup.effort.clone(),
                                 prompt: text,
@@ -1300,7 +1316,7 @@ impl View {
                     {
                         Action::OpenTerminal(id)
                     } else {
-                        Action::Unsupported("Open terminal")
+                        Action::Unsupported("Terminal")
                     },
                 );
             }

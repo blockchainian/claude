@@ -57,7 +57,7 @@ impl App {
             self.hub
                 .provider(session.id.provider)
                 .launch(&Action::Resume(session.id.clone()), Some(session))
-                .ok_or("Open terminal is not supported")
+                .ok_or("Terminal is not supported")
         };
         match session.id.provider {
             // The app-server owns Codex turns, so closing the client leaves them running.
@@ -71,7 +71,7 @@ impl App {
             ProviderId::Claude => {
                 // A session with no live process wakes as a background job under the same
                 // id, whose job id is the session id's first eight characters.
-                let job = session.id.id.get(..8).ok_or("Open terminal is not supported")?;
+                let job = session.id.id.get(..8).ok_or("Terminal is not supported")?;
                 let mut command = Command::new("sh");
                 command
                     .args([

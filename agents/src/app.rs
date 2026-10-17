@@ -965,7 +965,7 @@ impl App {
                 return self.handle_action(Some(Action::Unsupported("Resume")));
             }
             if matches!(action, Action::OpenTerminal(_)) {
-                return self.handle_action(Some(Action::Unsupported("Open terminal")));
+                return self.handle_action(Some(Action::Unsupported("Terminal")));
             }
             return false;
         }

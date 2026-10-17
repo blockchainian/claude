@@ -305,7 +305,7 @@ fn capabilities_gate_codex_actions_in_the_view() {
     assert_eq!(view.selected_id(), Some(&session.id));
     for (code, name) in [
         (KeyCode::Enter, "Resume"),
-        (KeyCode::Char('o'), "Open terminal"),
+        (KeyCode::Char('o'), "Terminal"),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),
@@ -766,7 +766,7 @@ fn spawn_children_cannot_resume_in_the_view() {
     assert_eq!(view.selected_id(), Some(&id));
     for (code, name) in [
         (KeyCode::Enter, "Resume"),
-        (KeyCode::Char('o'), "Open terminal"),
+        (KeyCode::Char('o'), "Terminal"),
     ] {
         assert_eq!(
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE)),

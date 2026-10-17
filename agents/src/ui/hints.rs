@@ -75,7 +75,7 @@ impl View {
                 &[
                     ("n", "New"),
                     ("w", "New worktree"),
-                    ("o", "Open terminal"),
+                    ("o", "Terminal"),
                     ("f", "Fork"),
                     ("r", "Rename"),
                     ("x", "Stop"),

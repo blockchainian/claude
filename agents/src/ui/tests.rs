@@ -6349,7 +6349,7 @@ mod subagent_actions {
         for (code, name) in [
             (KeyCode::Enter, "Resume"),
             (KeyCode::Right, "Resume"),
-            (KeyCode::Char('o'), "Open terminal"),
+            (KeyCode::Char('o'), "Terminal"),
         ] {
             let mut view = fixture();
             assert_eq!(key(&mut view, code), Some(Action::Unsupported(name)));
@@ -6419,7 +6419,7 @@ fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
     for (code, name) in [
         (KeyCode::Enter, "Resume"),
         (KeyCode::Right, "Resume"),
-        (KeyCode::Char('o'), "Open terminal"),
+        (KeyCode::Char('o'), "Terminal"),
         (KeyCode::Char('f'), "Fork"),
         (KeyCode::Char('r'), "Rename"),
         (KeyCode::Backspace, "Delete"),
@@ -6464,7 +6464,7 @@ fn missing_provider_capabilities_do_not_allow_actions() {
     view.set_capabilities(HashMap::new());
     assert_eq!(
         key(&mut view, KeyCode::Char('o')),
-        Some(Action::Unsupported("Open terminal"))
+        Some(Action::Unsupported("Terminal"))
     );
 }
 
