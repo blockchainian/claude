@@ -21,6 +21,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
+    time::SystemTime,
 };
 
 const PAGE_SIZE: usize = 10;
@@ -29,6 +30,7 @@ pub struct CodexProvider {
     home: PathBuf,
     manager_home: PathBuf,
     tasks: Mutex<HashMap<PathBuf, rollout::Tasks>>,
+    models: Mutex<ModelCatalog>,
 }
 
 impl CodexProvider {
@@ -37,6 +39,7 @@ impl CodexProvider {
             manager_home,
             home,
             tasks: Mutex::new(HashMap::new()),
+            models: Mutex::new(ModelCatalog::default()),
         }
     }
 
@@ -97,9 +100,19 @@ impl CodexProvider {
                 Ok(session)
             })
             .map_err(io::Error::other)?;
+        let mut models = self
+            .models
+            .lock()
+            .map_err(|_| io::Error::other("Codex model cache lock poisoned"))?;
+        models.refresh(&self.home.join("models_cache.json"))?;
         let mut sessions = Vec::new();
         for row in rows {
             if let Some(mut session) = row.map_err(io::Error::other)? {
+                session.model_label = session
+                    .model
+                    .as_ref()
+                    .and_then(|slug| models.labels.get(slug))
+                    .cloned();
                 if let Some(pid) = live.get(&session.id.id) {
                     session.process = Some(Process {
                         pid: *pid,
@@ -119,6 +132,7 @@ impl CodexProvider {
                 sessions.push(session);
             }
         }
+        drop(models);
         sessions.sort_by(|a, b| {
             b.updated_at
                 .cmp(&a.updated_at)
@@ -191,6 +205,46 @@ impl CodexProvider {
             }
         }
         Ok(Snapshot { sessions, has_more })
+    }
+}
+
+#[derive(Default)]
+struct ModelCatalog {
+    modified: Option<SystemTime>,
+    labels: HashMap<String, String>,
+}
+
+impl ModelCatalog {
+    fn refresh(&mut self, path: &Path) -> io::Result<()> {
+        let modified = match std::fs::metadata(path) {
+            Ok(metadata) => metadata.modified()?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                self.modified = None;
+                self.labels.clear();
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        if self.modified == Some(modified) {
+            return Ok(());
+        }
+        #[derive(serde::Deserialize)]
+        struct Catalog {
+            models: Vec<Model>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Model {
+            slug: String,
+            display_name: String,
+        }
+        let catalog: Catalog = serde_json::from_reader(io::BufReader::new(File::open(path)?))?;
+        self.labels = catalog
+            .models
+            .into_iter()
+            .map(|model| (model.slug, model.display_name))
+            .collect();
+        self.modified = Some(modified);
+        Ok(())
     }
 }
 
