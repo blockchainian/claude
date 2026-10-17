@@ -1146,12 +1146,16 @@ mod tests {
     fn shell_wrapping_and_fields_keep_source_maps() {
         for command in [
             "echo 中文 && printf done; pwd",
+            "python3 -c \"\nimport json;d=json.load(open('/tmp/x.json'))\nfor t in d['threads']:\n  if t['id'].startswith('01a147c6'): print(t)\n\"",
+            "cd /some/dir && python3 - <<'EOF'\nimport json\nrows=[json.loads(l) for l in open('a.jsonl')]\nEOF",
+            "node -e 'const x = \"中文\"; console.log(x)' && echo done",
             "echo 'a && b; c' && next",
             "echo $(a && b) || next && last",
             "cat <<'EOF'\na && b; c\nEOF\necho done && next",
             "  a && b  ",
         ] {
             let part = command_part(command);
+            assert_eq!(part.source, command);
             for width in [3, 12, 80] {
                 let lines = part.lines(width, Style::default(), chrono::DateTime::UNIX_EPOCH);
                 let maps = part.maps(&lines);

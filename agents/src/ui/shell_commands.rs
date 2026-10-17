@@ -132,23 +132,9 @@ pub(super) fn split(source: &str) -> Option<Vec<Command>> {
                 if !heredocs.is_empty() {
                     index += 1;
                     for (delimiter, tabs) in heredocs.drain(..) {
-                        loop {
-                            let relative_end = source[index..].find('\n');
-                            let line_end = relative_end.map_or(bytes.len(), |n| index + n);
-                            let line = &source[index..line_end];
-                            let line = if tabs {
-                                line.trim_start_matches('\t')
-                            } else {
-                                line
-                            };
-                            if line == delimiter {
-                                end = line_end;
-                                index = line_end;
-                                break;
-                            }
-                            relative_end?;
-                            index = line_end + 1;
-                        }
+                        let (_, marker_end) = heredoc_body(source, index, &delimiter, tabs)?;
+                        end = marker_end;
+                        index = marker_end;
                     }
                 }
                 let command = source[start..end].trim();
@@ -271,6 +257,129 @@ fn heredoc_delimiter(source: &str, mut index: usize) -> Option<(usize, String, b
         return None;
     }
     Some((index, String::from_utf8(delimiter).ok()?, tabs))
+}
+
+/// The body and delimiter's end use the same boundaries for layout and highlighting.
+fn heredoc_body(
+    source: &str,
+    start: usize,
+    delimiter: &str,
+    tabs: bool,
+) -> Option<(Range<usize>, usize)> {
+    let mut offset = start;
+    loop {
+        let newline = source[offset..].find('\n');
+        let end = newline.map_or(source.len(), |n| offset + n);
+        let marker = &source[offset..end];
+        let marker = if tabs {
+            marker.trim_start_matches('\t')
+        } else {
+            marker
+        };
+        if marker == delimiter {
+            return Some((start..offset, end));
+        }
+        newline?;
+        offset = end + 1;
+    }
+}
+
+/// An interpreter argument or stdin body, excluding the shell's quotes and delimiter.
+pub(super) struct Script<'a> {
+    pub interpreter: &'a str,
+    pub range: Range<usize>,
+}
+
+/// Recognizes simple interpreter invocations without changing any source bytes.
+/// Compounds that `split` cannot safely group keep their shell highlighting.
+pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
+    let Some(commands) = split(source) else {
+        return Vec::new();
+    };
+    let mut scripts = Vec::new();
+    for command in commands {
+        let mut index = command.range.start;
+        let Some(interpreter) = argument(source, &mut index) else {
+            continue;
+        };
+        let interpreter = &source[interpreter];
+        while index < command.range.end {
+            while matches!(source.as_bytes().get(index), Some(b' ' | b'\t')) {
+                index += 1;
+            }
+            if source[index..].starts_with("<<") {
+                if source[index..].starts_with("<<<") {
+                    break;
+                }
+                let Some((end, delimiter, tabs)) = heredoc_delimiter(source, index + 2) else {
+                    break;
+                };
+                if let Some(newline) = source[end..].find('\n') {
+                    let start = end + newline + 1;
+                    if let Some((range, _)) = heredoc_body(source, start, &delimiter, tabs) {
+                        scripts.push(Script { interpreter, range });
+                    }
+                }
+                break;
+            }
+            let Some(option) = argument(source, &mut index) else {
+                break;
+            };
+            let option = &source[option];
+            if matches!(option, "-c" | "-e" | "--eval") {
+                if let Some(range) = argument(source, &mut index) {
+                    scripts.push(Script { interpreter, range });
+                }
+                break;
+            }
+            if !option.starts_with('-') || option == "--" {
+                break;
+            }
+        }
+    }
+    scripts
+}
+
+/// A literal shell word's content range; surrounding quotes stay shell syntax.
+/// Concatenated words and unquoted expansions require evaluation and are left as shell.
+fn argument(source: &str, index: &mut usize) -> Option<Range<usize>> {
+    let bytes = source.as_bytes();
+    while matches!(bytes.get(*index), Some(b' ' | b'\t')) {
+        *index += 1;
+    }
+    let &first = bytes.get(*index)?;
+    if is_word_boundary(first) || first == b'#' {
+        return None;
+    }
+    let quote = matches!(first, b'\'' | b'"').then_some(first);
+    *index += usize::from(quote.is_some());
+    let start = *index;
+    while let Some(&byte) = bytes.get(*index) {
+        if Some(byte) == quote || (quote.is_none() && is_word_boundary(byte)) {
+            break;
+        }
+        if byte == b'\\' && quote != Some(b'\'') {
+            *index += 1;
+            bytes.get(*index)?;
+        } else if quote.is_none() && matches!(byte, b'\'' | b'"' | b'$' | b'`') {
+            return None;
+        }
+        *index += 1;
+    }
+    let end = *index;
+    if quote.is_some() {
+        if bytes.get(*index).copied() != quote {
+            return None;
+        }
+        *index += 1;
+        if bytes
+            .get(*index)
+            .is_some_and(|byte| !is_word_boundary(*byte))
+        {
+            return None;
+        }
+    }
+    Some(start..end)
 }
 
 #[cfg(test)]

@@ -207,7 +207,63 @@ fn exceeds_limits(text: &str) -> bool {
 /// `text` as one line per source line, highlighted as `lang` when the language is known
 /// and the text is within the size limits, plain otherwise.
 pub(super) fn code_lines(text: &str, lang: &str) -> Vec<Line<'static>> {
-    highlighted(text, lang).unwrap_or_else(|| plain_lines(text))
+    let Some(mut lines) = highlighted(text, lang) else {
+        return plain_lines(text);
+    };
+    if find_syntax(lang).map(|syntax| syntax.scope)
+        == find_syntax("bash").map(|syntax| syntax.scope)
+    {
+        for script in super::shell_commands::scripts(text) {
+            let shebang = format!("#!/usr/bin/env {}", script.interpreter);
+            if let Some(syntax) = syntax_set().find_syntax_by_first_line(&shebang)
+                && let Some(embedded) = highlighted(&text[script.range.clone()], &syntax.name)
+            {
+                overlay(&mut lines, text, script.range, embedded);
+            }
+        }
+    }
+    lines
+}
+
+/// Replaces styles only inside a script range; the shell parser still sees the entire command.
+fn overlay(
+    lines: &mut [Line<'static>],
+    text: &str,
+    range: std::ops::Range<usize>,
+    embedded: Vec<Line<'static>>,
+) {
+    let first_row = text[..range.start]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count();
+    let first_column = range.start - text[..range.start].rfind('\n').map_or(0, |n| n + 1);
+    for (row, script) in embedded.into_iter().enumerate() {
+        let column = if row == 0 { first_column } else { 0 };
+        let length: usize = script.spans.iter().map(|span| span.content.len()).sum();
+        let line = &mut lines[first_row + row];
+        let mut spans = Vec::new();
+        let mut suffix = Vec::new();
+        let mut offset = 0;
+        for span in &line.spans {
+            let end = offset + span.content.len();
+            if offset < column {
+                spans.push(Span::styled(
+                    span.content[..(column - offset).min(span.content.len())].to_owned(),
+                    span.style,
+                ));
+            }
+            if end > column + length {
+                suffix.push(Span::styled(
+                    span.content[(column + length).saturating_sub(offset)..].to_owned(),
+                    span.style,
+                ));
+            }
+            offset = end;
+        }
+        spans.extend(script.spans);
+        spans.extend(suffix);
+        line.spans = spans;
+    }
 }
 
 fn highlighted(text: &str, lang: &str) -> Option<Vec<Line<'static>>> {
@@ -379,6 +435,133 @@ mod tests {
         assert!(lines[0].spans.len() > 1);
         assert!(lines[0].spans.iter().all(|span| span.style.fg.is_some()));
         assert_eq!(text(&code_lines("echo hi", "bash")), ["echo hi"]);
+    }
+
+    fn byte_styles(lines: &[Line<'_>]) -> Vec<Vec<Style>> {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .flat_map(|span| std::iter::repeat_n(span.style, span.content.len()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn assert_script_styles(source: &str, script: &str, lang: &str) {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let lines = code_lines(source, "bash");
+        assert_eq!(text(&lines), source.lines().collect::<Vec<_>>());
+        let actual = byte_styles(&lines);
+        let shell = byte_styles(&highlighted(source, "bash").unwrap());
+        let embedded = byte_styles(&highlighted(script, lang).unwrap());
+        let start = source.find(script).unwrap();
+        let end = start + script.len();
+        let mut offset = 0;
+        let mut embedded_offset = 0;
+        let embedded: Vec<_> = embedded.into_iter().flatten().collect();
+        for (row, line) in source.split_inclusive('\n').enumerate() {
+            for column in 0..line.trim_end_matches(['\r', '\n']).len() {
+                let expected = if (start..end).contains(&(offset + column)) {
+                    let style = embedded[embedded_offset];
+                    embedded_offset += 1;
+                    style
+                } else {
+                    shell[row][column]
+                };
+                assert_eq!(
+                    actual[row][column], expected,
+                    "{source}: row {row}, byte {column}"
+                );
+            }
+            offset += line.len();
+        }
+    }
+
+    #[test]
+    fn shell_script_python_argument() {
+        let (source, script, lang) = (
+            "python3 -c \"\nimport json;d=json.load(open('/tmp/x.json'))\nfor t in d['threads']:\n  if t['id'].startswith('01a147c6'): print(t)\n\"",
+            "\nimport json;d=json.load(open('/tmp/x.json'))\nfor t in d['threads']:\n  if t['id'].startswith('01a147c6'): print(t)\n",
+            "python",
+        );
+        assert_script_styles(source, script, lang);
+    }
+
+    #[test]
+    fn shell_script_python_heredoc() {
+        let (source, script, lang) = (
+            "cd /some/dir && python3 - <<'EOF'\nimport json\nrows=[json.loads(l) for l in open('a.jsonl')]\nEOF",
+            "import json\nrows=[json.loads(l) for l in open('a.jsonl')]\n",
+            "python",
+        );
+        assert_script_styles(source, script, lang);
+    }
+
+    #[test]
+    fn shell_script_node_argument() {
+        let (source, script, lang) = (
+            "node -e 'const x = 42; console.log(x)' && echo done",
+            "const x = 42; console.log(x)",
+            "js",
+        );
+        assert_script_styles(source, script, lang);
+    }
+
+    #[test]
+    fn shell_script_node_heredoc() {
+        let (source, script, lang) = (
+            "node <<EOF\nconst x = 42; console.log(x)\nEOF\necho done",
+            "const x = 42; console.log(x)\n",
+            "js",
+        );
+        assert_script_styles(source, script, lang);
+    }
+
+    #[test]
+    fn shell_scripts_follow_bundled_shebang_syntaxes() {
+        for (source, script, lang) in [
+            (
+                "python -c 'import json; print(42)'",
+                "import json; print(42)",
+                "python",
+            ),
+            ("/usr/bin/python3 -c 'print(42)'", "print(42)", "python"),
+            ("ruby -e 'puts 42'", "puts 42", "ruby"),
+            (
+                "python3 <<-EOF\n\timport json\n\tprint(42)\n\tEOF",
+                "\timport json\n\tprint(42)\n",
+                "python",
+            ),
+            (
+                "python3 -c 'print(\"中文\")' && echo done",
+                "print(\"中文\")",
+                "python",
+            ),
+        ] {
+            assert_script_styles(source, script, lang);
+        }
+    }
+
+    #[test]
+    fn shell_scripts_leave_non_interpreter_arguments_alone() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        for source in [
+            "echo python3 -c 'import json'",
+            "python3 script.py -c 'import json'",
+            "python3 script.py <<EOF\nimport json\nEOF",
+            "cat <<EOF\nimport json\nEOF",
+            "echo \"python3 -c 'import json'\"",
+            "python3 -c 'import json'\"suffix\"",
+            "python3 -c \"unterminated",
+        ] {
+            assert_eq!(
+                code_lines(source, "bash"),
+                highlighted(source, "bash").unwrap(),
+                "{source}"
+            );
+        }
     }
 
     #[test]

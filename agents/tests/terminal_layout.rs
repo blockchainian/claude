@@ -9,6 +9,9 @@ mod terminal_questions;
 #[path = "support/terminal_headings.rs"]
 mod terminal_headings;
 
+#[path = "support/terminal_scripts.rs"]
+mod terminal_scripts;
+
 struct Tmux(String);
 
 impl Tmux {
