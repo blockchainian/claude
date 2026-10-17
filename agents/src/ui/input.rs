@@ -890,6 +890,7 @@ impl View {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
+        let key = line_edit::normalize_key(key);
         if key.kind == KeyEventKind::Release {
             return None;
         }
@@ -901,6 +902,7 @@ impl View {
                 self.mouse_focus,
                 Panel::TaskList | Panel::LogList | Panel::LogDetail
             )
+            && !self.input_box.searching_history()
             && !self.searching
             && !self.log_search.editing
             && !self.log_detail_search.editing
@@ -918,8 +920,9 @@ impl View {
             && !self.searching
             && !self.log_search.editing
             && !self.log_detail_search.editing
-            && !open_search
+            && (!open_search || self.input_box.searching_history())
         {
+            self.input_box.history = self.prompt_history.clone();
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
                 Some(prompt_box::PromptAction::Submit(text)) => {

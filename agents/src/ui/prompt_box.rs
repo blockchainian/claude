@@ -1,6 +1,9 @@
 use super::line_edit::LineEdit;
 use super::*;
 
+#[path = "composer_history.rs"]
+mod composer_history;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) enum SendState {
     #[default]
@@ -20,6 +23,10 @@ pub(super) struct PromptBox {
     pub(super) editor: LineEdit,
     pub(super) focused: bool,
     pub(super) state: SendState,
+    pub(super) history: composer_history::History,
+    recall: composer_history::Recall,
+    search: Option<composer_history::Search>,
+    text_width: std::cell::Cell<usize>,
 }
 
 struct PromptLayout {
@@ -45,39 +52,37 @@ impl PromptBox {
             }
             clipped
         };
+        let search_label = self
+            .search
+            .as_ref()
+            .map(|search| format!("History: {}", search.query.text()));
+        let label = search_label.as_deref().unwrap_or(label);
         let prefix_budget = usize::from(width.saturating_sub((width / 3).max(1)));
-        let label_budget = usize::from(width / 3).min(prefix_budget.saturating_sub(3));
+        let label_budget = if self.search.is_some() {
+            prefix_budget.saturating_sub(3)
+        } else {
+            usize::from(width / 3).min(prefix_budget.saturating_sub(3))
+        };
         let label = clip(label.lines().next().unwrap_or(""), label_budget);
         let heading = format!("{label} {PROMPT_MARKER} ");
         let prefix = clip(&heading, prefix_budget);
         let inset = prefix.width() as u16;
         let available = usize::from(width.saturating_sub(inset).max(1));
-        let mut lines = vec![String::new()];
-        let mut column = 0;
+        self.text_width.set(available);
+        let positions = self.editor.visual_positions(available);
+        let row_count = positions.last().expect("end caret").2 + 1;
+        let mut lines = vec![String::new(); row_count];
         let mut caret = (0, 0);
-        for (index, grapheme) in self.editor.text().grapheme_indices(true) {
-            let columns = grapheme.width();
-            if column > 0 && column + columns.max(1) > available {
-                lines.push(String::new());
-                column = 0;
-            }
+        for &(index, column, row) in &positions {
             if index == self.editor.cursor() {
-                caret = (column as u16, lines.len() - 1);
+                caret = (column as u16, row);
             }
-            if grapheme == "\n" || grapheme == "\r\n" {
-                lines.push(String::new());
-                column = 0;
-            } else {
-                lines.last_mut().expect("one prompt row").push_str(grapheme);
-                column += columns.min(available);
+            if let Some(grapheme) = self.editor.text()[index..].graphemes(true).next()
+                && grapheme != "\n"
+                && grapheme != "\r\n"
+            {
+                lines[row].push_str(grapheme);
             }
-        }
-        if self.editor.cursor() == self.editor.text().len() {
-            if column >= available {
-                lines.push(String::new());
-                column = 0;
-            }
-            caret = (column as u16, lines.len() - 1);
         }
         PromptLayout {
             prefix,
@@ -147,15 +152,40 @@ impl PromptBox {
         ))
     }
 
+    pub(super) fn searching_history(&self) -> bool {
+        self.search.is_some()
+    }
+
     pub(super) fn paste(&mut self, text: &str) {
-        if self.focused {
+        if self.focused && self.search.is_some() {
+            self.search_paste(text);
+        } else if self.focused {
             self.editor
                 .insert(text.replace("\r\n", "\n").replace('\r', "\n"));
         }
     }
 
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> Option<PromptAction> {
+        let key = super::line_edit::normalize_key(key);
         if !self.focused || key.kind == KeyEventKind::Release {
+            return None;
+        }
+        if self.history_key(key) {
+            return None;
+        }
+        let vertical = match (key.code, key.modifiers) {
+            (KeyCode::Up, KeyModifiers::NONE) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                Some(false)
+            }
+            (KeyCode::Down, KeyModifiers::NONE) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                Some(true)
+            }
+            _ => None,
+        };
+        if let Some(down) = vertical {
+            if !self.editor.move_vertical(self.text_width.get(), down) {
+                self.recall_history(down);
+            }
             return None;
         }
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -174,6 +204,7 @@ impl PromptBox {
             self.editor.insert('\n');
         } else if key.code == KeyCode::Enter {
             if !self.editor.is_empty() && self.state != SendState::Sending {
+                self.record_submission();
                 self.state = SendState::Sending;
                 return Some(PromptAction::Submit(self.editor.text().to_owned()));
             }
@@ -401,3 +432,7 @@ mod tests {
         assert_eq!(editor.editor.text(), REAL_TEXT);
     }
 }
+
+#[cfg(test)]
+#[path = "composer_keys_tests.rs"]
+mod composer_keys_tests;

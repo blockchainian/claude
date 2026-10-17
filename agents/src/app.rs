@@ -1092,20 +1092,29 @@ impl crossterm::Command for MouseReports {
     }
 }
 
+#[path = "app_keyboard.rs"]
+mod keyboard;
+
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
     crossterm::execute!(
         stdout,
         terminal::EnterAlternateScreen,
-        crossterm::event::EnableBracketedPaste
+        crossterm::event::EnableBracketedPaste,
+        crossterm::event::PushKeyboardEnhancementFlags(
+            crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        )
     )?;
+    keyboard::enable_tmux_keys(&mut stdout)?;
     Terminal::new(CrosstermBackend::new(stdout))
 }
 
 fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
     let reports = crossterm::execute!(
         terminal.backend_mut(),
+        crossterm::event::PopKeyboardEnhancementFlags,
+        keyboard::ModifyOtherKeys(false),
         crossterm::event::DisableThemeChangeReports,
         crossterm::event::DisableBracketedPaste,
         MouseReports::Disable
