@@ -28,7 +28,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 ## Details panel
 
 - The assistant reply section is `Update`; double-click its body to copy it with the `Copied update` toast.
-- The activity section is `Latest activity`.
+- The activity section is `Last activity`.
 
 ## Log panels
 

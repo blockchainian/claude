@@ -43,7 +43,7 @@ fn section_labels_stay_centered_before_right_values() {
         let mut buf = Buffer::empty(area);
         view.render_details(area, &mut buf, now);
         for (label, value) in [
-            ("Latest activity", "7s ago"),
+            ("Last activity", "7s ago"),
             ("Background", ""),
             ("Update", "7s ago"),
             ("Prompt", "1m 4s"),

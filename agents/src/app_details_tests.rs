@@ -97,7 +97,7 @@ fn app_details_groups_and_project_links_follow_panel_rules() {
             for (label, value) in [
                 (
                     if activity {
-                        "Latest activity"
+                        "Last activity"
                     } else {
                         "Update"
                     },

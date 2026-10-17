@@ -2522,7 +2522,7 @@ fn details_activity_and_message_are_independent() {
             .to_owned()
     };
     let rendered = render(&view);
-    assert!(rendered.contains("            Latest activity       7s ago"));
+    assert!(rendered.contains("             Last activity        7s ago"));
     assert!(rendered.contains("                 Update           1h ago"));
     assert!(rendered.find("Run checks").unwrap() < rendered.find("Update").unwrap());
     assert!(rendered.contains("Checking the project"));
@@ -2540,7 +2540,7 @@ fn details_activity_and_message_are_independent() {
     row.activity.as_mut().unwrap().label = "Run checks".into();
     row.status = SessionStatus::Ready;
     view.set_sessions(vec![row.clone()], false);
-    assert!(render(&view).contains("            Latest activity       7s ago"));
+    assert!(render(&view).contains("             Last activity        7s ago"));
     assert_eq!(
         render(&view),
         include_str!("../../tests/ui_snapshots/details_activity_ready.txt")
@@ -2549,7 +2549,7 @@ fn details_activity_and_message_are_independent() {
     row.last_message_at = Some(now - Duration::seconds(3));
     view.set_sessions(vec![row.clone()], false);
     let replied = render(&view);
-    assert!(replied.contains("            Latest activity       7s ago"));
+    assert!(replied.contains("             Last activity        7s ago"));
     assert!(replied.contains("                 Update           3s ago"));
     assert_eq!(
         replied,
@@ -2649,7 +2649,7 @@ fn details_activity_uses_tool_color() {
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
     view.render_details(area, &mut buf, now);
-    let header = "                      Latest activity                 2m ago";
+    let header = "                       Last activity                  2m ago";
     let y = (0..area.height)
         .find(|y| {
             header
@@ -3244,7 +3244,7 @@ fn details_sections_run_tasks_background_activity_update_prompt() {
     let positions = [
         "Tasks",
         "Background\n",
-        "Latest activity",
+        "Last activity",
         "Update",
         "Prompt\n",
     ]

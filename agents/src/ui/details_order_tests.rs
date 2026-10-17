@@ -39,7 +39,7 @@ fn details_section_order_preserves_clicks_and_copies() {
             .join("\n");
         let mut sections = vec!["Tasks", "Background"];
         if activity {
-            sections.push("Latest activity");
+            sections.push("Last activity");
         }
         sections.extend(["Update", "Prompt", "Queued prompt", "Needs attention"]);
         assert!(!rendered.contains("Project"));

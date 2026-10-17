@@ -860,7 +860,7 @@ impl View {
             let start = items.len() + 1;
             items.extend([
                 centered_header(
-                    "Latest activity".dim().into(),
+                    "Last activity".dim().into(),
                     Span::styled(
                         format_relative_time(now, Some(activity.at)),
                         style::time_style(),
@@ -876,7 +876,7 @@ impl View {
                 .into(),
             ]);
             bodies.push(start..items.len());
-            keys.push(body_key("Latest activity", &activity.label));
+            keys.push(body_key("Last activity", &activity.label));
             copies.push(Some((activity.label.as_str(), "Copied latest activity")));
             body_links.push(super::links::text_links(&activity.label, &session.cwd, &[]));
         }

@@ -216,6 +216,68 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_last_activity_heading_stays_centered() {
+    let (_directory, tmux, transcript) = start_probe("activity-heading");
+    // Append a recorded tool call so the provider supplies a real activity section.
+    let call = include_str!("fixtures/claude-tool-calls.jsonl")
+        .lines()
+        .next()
+        .unwrap();
+    let original = std::fs::read_to_string(&transcript).unwrap();
+    std::fs::write(&transcript, format!("{original}\n{call}\n")).unwrap();
+    tmux.wait_for(|capture| capture.contains("Last activity"));
+    for width in [120, 200] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "70",
+        ]);
+        tmux.wait_for(|capture| {
+            capture.lines().count() == 70
+                && capture
+                    .lines()
+                    .nth(1)
+                    .is_some_and(|line| line.width() == width)
+                && capture.contains("Last activity")
+        });
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let lines: Vec<_> = capture.lines().collect();
+        let separators: Vec<_> = lines[2]
+            .match_indices('│')
+            .map(|(byte, _)| lines[2][..byte].width())
+            .collect();
+        let left = separators[0] + 2;
+        let right = if width >= 150 {
+            separators[1] - 1
+        } else {
+            width - 1
+        };
+        let heading = lines
+            .iter()
+            .find(|line| line.contains("Last activity"))
+            .unwrap();
+        let column = heading[..heading.find("Last activity").unwrap()].width();
+        assert_eq!(
+            column,
+            left + (right - left - "Last activity".len()) / 2,
+            "{capture}"
+        );
+        assert!(!capture.contains("Latest activity"), "{capture}");
+        let path = std::env::temp_dir().join(format!("agents-activity-heading-{width}.txt"));
+        std::fs::write(&path, &capture).unwrap();
+        println!(
+            "{{\"activity_heading\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
+            path.display()
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_inline_code_follows_neovim_accent() {
     let (_directory, tmux, _transcript) = start_probe("text-accent");
     for (mode, notification, index) in [
@@ -623,7 +685,7 @@ fn terminal_layout_tracks_width() {
             "stale update header: {capture}"
         );
         assert!(
-            !capture.contains("Latest activity"),
+            !capture.contains("Last activity"),
             "stale activity header: {capture}"
         );
         assert!(
