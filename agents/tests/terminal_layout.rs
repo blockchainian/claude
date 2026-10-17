@@ -37,11 +37,15 @@ impl Tmux {
     }
 
     fn wait_for(&self, ready: impl Fn(&str) -> bool) {
+        self.capture_when(ready);
+    }
+
+    fn capture_when(&self, ready: impl Fn(&str) -> bool) -> String {
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
             let capture = self.run(&["capture-pane", "-t", "probe", "-p"]);
             if ready(&capture) {
-                return;
+                return capture;
             }
             assert!(
                 std::time::Instant::now() < deadline,
@@ -103,6 +107,7 @@ fn start_probe_with_transcript(
     std::fs::create_dir_all(&project).unwrap();
     let transcript = project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl");
     std::fs::write(&transcript, contents).unwrap();
+    std::fs::create_dir(directory.path().join("clipboard")).unwrap();
     let codex = directory.path().join("codex");
     std::fs::create_dir(&codex).unwrap();
     let binary =
@@ -128,6 +133,11 @@ fn start_probe_with_transcript(
         &format!("CLAUDE_CODE_TMPDIR={}", directory.path().display()),
         "-e",
         &format!("CODEX_HOME={}", codex.display()),
+        "-e",
+        &format!(
+            "AGENTS_CLIPBOARD_DIR={}",
+            directory.path().join("clipboard").display()
+        ),
         "-e",
         &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
         binary.to_str().unwrap(),
@@ -1692,22 +1702,38 @@ fn terminal_log_border_double_clicks() {
     println!("{{\"log_border_double_clicks\":\"pass\",\"width\":200,\"height\":45}}");
 }
 
-#[test]
-#[ignore = "requires tmux and macOS clipboard; run with --ignored --nocapture"]
-fn terminal_detail_right_click_and_double_click_copy() {
-    let (_directory, tmux, _transcript) = start_probe("raw-copy");
-    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "45"]);
-    tmux.wait_for(|capture| capture.lines().count() == 45 && capture.contains("对，必须"));
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-    let (column, row) = capture
-        .lines()
+// The last full-width rule is the detail header; summaries above it can repeat
+// the same text as the copy target.
+fn detail_body_position(capture: &str, needle: &str) -> Option<(usize, usize)> {
+    let rows: Vec<_> = capture.lines().collect();
+    let rule = rows
+        .iter()
+        .rposition(|line| line.matches('─').count() > 100)?;
+    rows.iter()
         .enumerate()
+        .skip(rule + 1)
         .find_map(|(row, line)| {
-            let byte = line.rfind("对，必须")?;
-            let column = line[..byte].width();
-            (row > 25).then_some((column, row))
+            let byte = line.rfind(needle)?;
+            Some((line[..byte].width(), row))
         })
-        .expect("assistant body in log detail");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_detail_right_click_and_double_click_copy() {
+    let (directory, tmux, _transcript) = start_probe("raw-copy");
+    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "45"]);
+    // A resize can expose the upper Update before the detail body is drawn.
+    // Wait for the resized footer and the actual target, then use that same frame.
+    let capture = tmux.capture_when(|capture| {
+        capture.lines().count() == 45
+            && capture
+                .lines()
+                .last()
+                .is_some_and(|line| line.contains("? help"))
+            && detail_body_position(capture, "对，必须").is_some()
+    });
+    let (column, row) = detail_body_position(&capture, "对，必须").unwrap();
     // The helper waits 200 ms, so also wait past the configured double-click window.
     tmux.mouse(0, column, row, true);
     std::thread::sleep(Duration::from_millis(350));
@@ -1717,17 +1743,9 @@ fn terminal_detail_right_click_and_double_click_copy() {
         "left click changed mode: {after_left}"
     );
     tmux.mouse(2, column, row, true);
-    tmux.wait_for(|capture| capture.contains("\"apiBlockIndex\""));
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-    let (column, row) = capture
-        .lines()
-        .enumerate()
-        .find_map(|(row, line)| {
-            let byte = line.rfind('{')?;
-            let column = line[..byte].width();
-            (row > 25).then_some((column, row))
-        })
-        .expect("raw JSON in log detail");
+    let capture =
+        tmux.capture_when(|capture| detail_body_position(capture, "\"apiBlockIndex\"").is_some());
+    let (column, row) = detail_body_position(&capture, "{").unwrap();
     let sequence = format!(
         "\x1b[<0;{};{}M\x1b[<0;{};{}m",
         column + 1,
@@ -1738,8 +1756,7 @@ fn terminal_detail_right_click_and_double_click_copy() {
     .repeat(2);
     tmux.run(&["send-keys", "-t", "probe", "-l", &sequence]);
     tmux.wait_for(|capture| capture.contains("Copied transcript"));
-    let copied = Command::new("pbpaste").output().unwrap();
-    assert!(copied.status.success());
+    let copied = std::fs::read_to_string(directory.path().join("clipboard/text")).unwrap();
     let expected: serde_json::Value = serde_json::from_str(
         include_str!("fixtures/transcript.jsonl")
             .lines()
@@ -1747,21 +1764,13 @@ fn terminal_detail_right_click_and_double_click_copy() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(
-        String::from_utf8(copied.stdout).unwrap(),
-        serde_json::to_string_pretty(&expected).unwrap()
-    );
+    assert_eq!(copied, serde_json::to_string_pretty(&expected).unwrap());
     tmux.mouse(2, column, row, true);
-    tmux.wait_for(|capture| !capture.contains("\"apiBlockIndex\""));
-    let parsed = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-    let (column, row) = parsed
-        .lines()
-        .enumerate()
-        .find_map(|(row, line)| {
-            let byte = line.rfind("对，必须")?;
-            (row > 25).then_some((line[..byte].width(), row))
-        })
-        .expect("parsed body after right-click round trip");
+    let parsed = tmux.capture_when(|capture| {
+        !capture.contains("\"apiBlockIndex\"")
+            && detail_body_position(capture, "对，必须").is_some()
+    });
+    let (column, row) = detail_body_position(&parsed, "对，必须").unwrap();
     let sequence = format!(
         "\x1b[<0;{};{}M\x1b[<0;{};{}m",
         column + 1,
@@ -1773,7 +1782,7 @@ fn terminal_detail_right_click_and_double_click_copy() {
     tmux.run(&["send-keys", "-t", "probe", "-l", &sequence]);
     tmux.wait_for(|capture| capture.contains("Copied assistant message"));
     println!(
-        "{{\"raw_transcript_copy\":\"pass\",\"note\":\"Copied transcript\",\"width\":200,\"height\":45,\"pbpaste\":\"pretty JSON matches\"}}"
+        "{{\"raw_transcript_copy\":\"pass\",\"note\":\"Copied transcript\",\"width\":200,\"height\":45,\"clipboard\":\"pretty JSON matches\"}}"
     );
 }
 
@@ -1870,7 +1879,7 @@ fn terminal_session_search_overlays_chart_bottom() {
 }
 
 #[test]
-#[ignore = "requires tmux and macOS clipboard; run with --ignored --nocapture"]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_detail_reading_column_preserves_original_copy() {
     use std::io::Write;
 
@@ -1949,7 +1958,7 @@ fn terminal_detail_reading_column_preserves_original_copy() {
             false,
         ),
     ] {
-        let (_directory, tmux, transcript) = start_probe(&format!("reading-{kind}"));
+        let (directory, tmux, transcript) = start_probe(&format!("reading-{kind}"));
         if !records.is_empty() {
             std::fs::OpenOptions::new()
                 .append(true)
@@ -2076,10 +2085,16 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 tmux.mouse(32, left + "对，必须".width(), row, false);
                 let release = format!("\x1b[<0;{};{}m", left + "对，必须".width() + 1, row + 1);
                 tmux.run(&["send-keys", "-t", "probe", "-l", &release]);
-                tmux.wait_for(|capture| capture.contains("Copied"));
-                let selected = Command::new("pbpaste").output().unwrap();
-                assert!(selected.status.success());
-                assert_eq!(String::from_utf8(selected.stdout).unwrap(), "对，必须");
+                // A previous copy can leave the same toast visible. Wait for this
+                // gesture's clipboard value before reading it.
+                tmux.wait_for(|capture| {
+                    capture.contains("Copied")
+                        && std::fs::read_to_string(directory.path().join("clipboard/text"))
+                            .is_ok_and(|text| text == "对，必须")
+                });
+                let selected =
+                    std::fs::read_to_string(directory.path().join("clipboard/text")).unwrap();
+                assert_eq!(selected, "对，必须");
                 std::thread::sleep(Duration::from_millis(350));
                 // Visual wrapping must not change the Markdown or source paragraphs copied.
                 let click = format!(
@@ -2091,9 +2106,6 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                 )
                 .repeat(2);
                 tmux.run(&["send-keys", "-t", "probe", "-l", &click]);
-                tmux.wait_for(|capture| capture.contains("Copied assistant message"));
-                let copied = Command::new("pbpaste").output().unwrap();
-                assert!(copied.status.success());
                 let source: serde_json::Value = serde_json::from_str(
                     include_str!("fixtures/transcript.jsonl")
                         .lines()
@@ -2101,10 +2113,15 @@ fn terminal_detail_reading_column_preserves_original_copy() {
                         .unwrap(),
                 )
                 .unwrap();
-                assert_eq!(
-                    String::from_utf8(copied.stdout).unwrap(),
-                    source["message"]["content"][0]["text"].as_str().unwrap()
-                );
+                let expected = source["message"]["content"][0]["text"].as_str().unwrap();
+                tmux.wait_for(|capture| {
+                    capture.contains("Copied assistant message")
+                        && std::fs::read_to_string(directory.path().join("clipboard/text"))
+                            .is_ok_and(|text| text == expected)
+                });
+                let copied =
+                    std::fs::read_to_string(directory.path().join("clipboard/text")).unwrap();
+                assert_eq!(copied, expected);
             }
             println!(
                 "{{\"reading_column\":\"pass\",\"kind\":\"{kind}\",\"width\":{width},\"capture\":\"{}\"}}",

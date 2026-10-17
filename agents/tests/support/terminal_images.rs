@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux and a desktop clipboard; run with --ignored --nocapture"]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_image_path_and_clipboard_are_atomic() {
     use base64::Engine;
     let (directory, tmux, _transcript) = start_probe("input-images");
@@ -22,38 +22,11 @@ fn terminal_image_path_and_clipboard_are_atomic() {
     tmux.wait_for(|capture| capture.contains("[Image #1]"));
     tmux.run(&["send-keys", "-t", "probe", "BSpace"]);
     tmux.wait_for(|capture| !capture.contains("[Image #1]"));
-    let mut clipboard = arboard::Clipboard::new().unwrap();
-    let saved_text = clipboard.get_text().ok();
-    let saved_image = clipboard.get_image().ok();
-    let saved_files = clipboard
-        .get()
-        .file_list()
-        .ok()
-        .filter(|files| !files.is_empty());
-    let rgba = image::load_from_memory(&bytes).unwrap().into_rgba8();
-    clipboard
-        .set_image(arboard::ImageData {
-            width: rgba.width() as usize,
-            height: rgba.height() as usize,
-            bytes: std::borrow::Cow::Owned(rgba.into_raw()),
-        })
-        .unwrap();
-    let result = std::panic::catch_unwind(|| {
-        tmux.run(&["send-keys", "-t", "probe", "C-v"]);
-        tmux.wait_for(|capture| capture.contains("[Image #1]"));
-        tmux.run(&["send-keys", "-t", "probe", "Left"]);
-        tmux.run(&["send-keys", "-t", "probe", "Delete"]);
-        tmux.wait_for(|capture| !capture.contains("[Image #1]"));
-    });
-    if let Some(files) = saved_files {
-        clipboard.set().file_list(&files).unwrap();
-    } else if let Some(image) = saved_image {
-        clipboard.set_image(image).unwrap();
-    } else if let Some(text) = saved_text {
-        clipboard.set_text(text).unwrap();
-    } else {
-        clipboard.clear().unwrap();
-    }
-    result.unwrap();
+    std::fs::write(directory.path().join("clipboard/image.png"), &bytes).unwrap();
+    tmux.run(&["send-keys", "-t", "probe", "C-v"]);
+    tmux.wait_for(|capture| capture.contains("[Image #1]"));
+    tmux.run(&["send-keys", "-t", "probe", "Left"]);
+    tmux.run(&["send-keys", "-t", "probe", "Delete"]);
+    tmux.wait_for(|capture| !capture.contains("[Image #1]"));
     println!("{{\"image_path\":\"pass\",\"clipboard\":\"pass\",\"atomic_delete\":\"pass\"}}");
 }
