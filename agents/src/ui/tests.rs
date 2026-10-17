@@ -3532,6 +3532,7 @@ fn background_box_dims_title_rule_but_not_output() {
     let (tool_view, _) = open_tool_fixture();
     let mut event = tool_view.log[7].clone();
     event.calls[0].title = "Run checks".into();
+    event.calls[0].detail_title = "Run checks".into();
     let detail = super::tool_detail::detail(&event, String::new(), Style::new().dim());
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
     let columns = super::detail_model::detail_columns(title_buf.area, title_buf.area);
@@ -3687,6 +3688,8 @@ fn log_fixture() -> (View, chrono::DateTime<Utc>) {
         (Kind::Tool, "run tests", 30, None),
     ].into_iter().map(|(kind, body, age, end)| Event {
         source: None,
+        completed_time: false,
+        background: false,
         source_records: Vec::new(),
         sender: None,
         kind, body: body.into(), paths: Vec::new(), started_at: now - Duration::seconds(age),
@@ -4959,6 +4962,8 @@ fn task_log_shows_only_visible_events_and_hides_without_selection() {
     let (mut view, now) = log_fixture();
     let first = crate::log::Event {
         source: None,
+        completed_time: false,
+        background: false,
         source_records: Vec::new(),
         sender: None,
         kind: crate::log::Kind::User,
@@ -6721,13 +6726,14 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
     use crate::log::{Section, ToolCall};
     vec![
         ToolCall {
-            subagent_type: None,
+            detail_left: "Bash".into(),
+            detail_title: "Bash".into(),
+            show_details: false,
             id: "Bash-fixture".into(),
             title: "Bash".into(),
             name: "Bash".into(),
-            input: vec![Section::Code {
-                label: "command".into(),
-                lang: "bash".into(),
+            input: vec![Section::Shell {
+                prefix: 0,
                 text: "cargo test".into(),
             }],
             output: Some(vec![Section::Text {
@@ -6739,7 +6745,9 @@ fn tool_calls() -> Vec<crate::log::ToolCall> {
             duration: Some(chrono::Duration::seconds(12)),
         },
         ToolCall {
-            subagent_type: None,
+            detail_left: "Read".into(),
+            detail_title: "Read".into(),
+            show_details: false,
             id: "Read-fixture".into(),
             title: "Read".into(),
             name: "Read".into(),
@@ -6783,6 +6791,7 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
         let (mut view, now) = open_tool_fixture();
         let mut event = view.log[7].clone();
         event.calls[0].title = title.into();
+        event.calls[0].detail_title = title.into();
         view.select_fixture_event(Some(event));
         let mut buf = Buffer::empty(Rect::new(0, 0, width, 48));
         view.render_at(buf.area, &mut buf, now);
@@ -6874,9 +6883,8 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
     let mut event = view.log[7].clone();
     event.calls.truncate(1);
     event.calls[0].input = vec![
-        crate::log::Section::Code {
-            label: "command".into(),
-            lang: "bash".into(),
+        crate::log::Section::Shell {
+            prefix: 0,
             text: command.into(),
         },
         crate::log::Section::Fields(vec![("timeout".into(), "1000".into())]),
@@ -7820,6 +7828,7 @@ fn open_tool_layout_titles_and_arrows() {
     let (mut view, now) = open_tool_fixture();
     view.log[7].calls.truncate(1);
     view.log[7].calls[0].title = "Run tests".into();
+    view.log[7].calls[0].detail_title = "Run tests".into();
     view.select_fixture_event(Some(view.log[7].clone()));
     let open = log_screen(&view, 100, 48, now);
     assert!(
@@ -7936,11 +7945,8 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         let call = event.calls.iter().find(|call| call.name == name).unwrap();
         let mut event = event.clone();
         event.calls = vec![call.clone()];
-        let title = super::tool_detail::input_label(call).unwrap_or_else(|| call.title.clone());
-        let left = call
-            .subagent_type
-            .clone()
-            .unwrap_or_else(|| crate::log::display_tool_name(&call.name));
+        let title = call.detail_title.clone();
+        let left = call.detail_left.clone();
         for kind in [
             crate::log::Kind::Tool,
             crate::log::Kind::Error,
@@ -9255,7 +9261,7 @@ fn claude_agent_display_from_real_records() {
         let detail = view.viewport.borrow().log_detail;
         let header = usize::from(detail.y + 1);
         assert!(rows[header].contains(metadata), "{screen}");
-        let description = super::tool_detail::input_label(&event.calls[0]).unwrap();
+        let description = event.calls[0].detail_title.clone();
         assert!(
             rows[header]
                 .replace(' ', "")
@@ -9289,7 +9295,7 @@ fn claude_agent_display_from_real_records() {
                 buffer[(right, header as u16)].style()
             );
         }
-        let description = super::tool_detail::input_label(&event.calls[0]).unwrap();
+        let description = event.calls[0].detail_title.clone();
         assert!(
             !rows[header + 1..]
                 .iter()

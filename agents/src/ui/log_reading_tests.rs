@@ -83,17 +83,6 @@ fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
         .unwrap();
     let mut event = event.clone();
     event.calls = vec![call.clone()];
-    let name = call
-        .input
-        .iter()
-        .find_map(|s| match s {
-            crate::log::Section::Fields(fields) => fields
-                .iter()
-                .find(|(k, _)| k == "name")
-                .map(|(_, v)| v.clone()),
-            _ => None,
-        })
-        .unwrap();
     let parts = body_parts(&event);
     assert!(
         !parts
@@ -101,10 +90,7 @@ fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
             .take_while(|p| !p.source.is_empty())
             .any(|p| p.source.starts_with("name: ") || p.source.contains("\nname: "))
     );
-    assert_eq!(
-        super::super::tool_detail::input_label(&event.calls[0]).as_deref(),
-        Some(name.as_str())
-    );
+    assert_eq!(event.calls[0].detail_title, "tool-calls");
     assert!(parts.iter().any(|p| p.source.starts_with("cwd: ")));
     assert!(!parts.iter().any(|p| p.source.starts_with("prompt: ")));
     for width in [200, 120] {
@@ -116,18 +102,14 @@ fn generic_input_fields_move_name_to_header_and_keep_ids_in_body() {
             assert_reading_column(&drawn, segment);
         }
     }
-    event.calls[0].input = vec![crate::log::Section::Fields(vec![
-        ("threadId".into(), "abc-123".into()),
-        (
-            "prompt".into(),
-            "Continue reading this message. ".repeat(20),
-        ),
-    ])];
-    event.calls[0].name = "mcp__plugin_codex_codex-manager__send".into();
-    assert_eq!(
-        super::super::tool_detail::input_label(&event.calls[0]).as_deref(),
-        None
-    );
+    event.calls[0].input = vec![
+        crate::log::Section::Fields(vec![("threadId".into(), "abc-123".into())]),
+        crate::log::Section::Prose {
+            text: "Continue reading this message. ".repeat(20),
+            markdown: true,
+        },
+    ];
+    event.calls[0].detail_title = "Send".into();
     let drawn = layout(&event, 200);
     assert_reading_column(&drawn, 1);
     assert!(
@@ -158,9 +140,7 @@ fn question_agent_inputs_limit_prose_and_preserve_tool_output() {
                     .input
                     .iter()
                     .find_map(|s| match s {
-                        crate::log::Section::Text { text, label } if label == "questions" => {
-                            Some(text.as_str())
-                        }
+                        crate::log::Section::Prose { text, .. } => Some(text.as_str()),
                         crate::log::Section::Markdown { text, .. } => Some(text.as_str()),
                         _ => None,
                     })
@@ -209,34 +189,33 @@ fn question_agent_inputs_limit_prose_and_preserve_tool_output() {
 }
 
 #[test]
-fn generic_roles_depend_on_field_names_and_only_on_inputs() {
+fn generic_roles_are_explicit_and_field_names_are_literal() {
     use crate::log::Section;
     let mut event = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"))
         .into_iter()
-        .find(|e| e.calls.iter().any(|c| c.name.ends_with("__start")))
+        .find(|e| !e.calls.is_empty())
         .unwrap();
     event.calls.truncate(1);
-    for key in ["prompt", "message", "question"] {
-        event.calls[0].name = "any_provider.any_tool".into();
-        event.calls[0].input = vec![Section::Fields(vec![
-            ("title".into(), "Readable task".into()),
-            ("sessionId".into(), "abc".into()),
-            ("cwd".into(), "/workspace".into()),
-            (
-                key.into(),
-                "Some words to read without a field prefix. ".repeat(12),
-            ),
-        ])];
-        event.calls[0].output = Some(event.calls[0].input.clone());
-        assert_eq!(
-            super::super::tool_detail::input_label(&event.calls[0]).as_deref(),
-            None
-        );
+    for key in [
+        "prompt",
+        "message",
+        "question",
+        "command",
+        "name",
+        "description",
+    ] {
+        let fields = Section::Fields(vec![(key.into(), "Some words to read. ".repeat(12))]);
+        event.calls[0].input = vec![
+            fields.clone(),
+            Section::Prose {
+                text: "Explicit prose. ".repeat(12),
+                markdown: true,
+            },
+        ];
+        event.calls[0].output = Some(vec![fields]);
         let drawn = layout(&event, 200);
-        assert!(drawn.sources[1].text.contains("title: Readable task"));
-        assert!(drawn.sources[1].text.contains("sessionId: abc"));
-        assert!(drawn.sources[1].text.contains("cwd: /workspace"));
-        assert_reading_column(&drawn, 1);
+        assert!(drawn.sources[1].text.starts_with(&format!("{key}: ")));
+        assert!(drawn.sources[2].text.starts_with("Explicit prose."));
         assert_reading_column(&drawn, 2);
         assert!(
             drawn
@@ -244,27 +223,7 @@ fn generic_roles_depend_on_field_names_and_only_on_inputs() {
                 .last()
                 .unwrap()
                 .text
-                .contains(&format!("{key}: Some words"))
-        );
-        assert!(
-            drawn
-                .sources
-                .last()
-                .unwrap()
-                .text
-                .contains("sessionId: abc")
-        );
-    }
-    for value in ["a\nb".to_owned(), "x".repeat(81)] {
-        event.calls[0].input = vec![Section::Fields(vec![("name".into(), value.clone())])];
-        assert_eq!(
-            super::super::tool_detail::input_label(&event.calls[0]),
-            Some(value.clone())
-        );
-        assert!(
-            !body_parts(&event)
-                .iter()
-                .any(|part| part.source == format!("name: {value}"))
+                .starts_with(&format!("{key}: "))
         );
     }
 }
@@ -278,9 +237,8 @@ fn command_and_all_output_body_formats_keep_their_width() {
         .unwrap();
     event.calls.truncate(1);
     let text = "long command or output stays at the panel width ".repeat(10);
-    event.calls[0].input = vec![Section::Code {
-        label: "command".into(),
-        lang: "bash".into(),
+    event.calls[0].input = vec![Section::Shell {
+        prefix: 0,
         text: format!("echo {text}\necho second"),
     }];
     event.calls[0].output = Some(vec![
@@ -349,15 +307,9 @@ fn merged_calls_keep_descriptions_in_title_bars() {
     event.calls = vec![call.clone(), call];
     let detail = super::super::tool_detail::detail(&event, String::new(), Style::new().dim());
     let title = &detail.sections[0].title;
-    assert_eq!(
-        title.source(),
-        super::super::tool_detail::input_label(&event.calls[0]).unwrap()
-    );
-    let description = super::super::tool_detail::input_label(&event.calls[0]).unwrap();
-    assert_eq!(
-        title.left,
-        Some(crate::log::display_tool_name(&event.calls[0].name))
-    );
+    assert_eq!(title.source(), event.calls[0].detail_title.clone());
+    let description = event.calls[0].detail_title.clone();
+    assert_eq!(title.left, Some(event.calls[0].detail_left.clone()));
     assert!(
         !body_parts(&event)
             .iter()
@@ -567,7 +519,7 @@ fn description_takes_priority_over_name_in_real_agent_inputs() {
         .unwrap();
     let call = &event.calls[0];
     assert_eq!(
-        super::super::tool_detail::input_label(call).as_deref(),
+        Some(call.detail_title.as_str()),
         Some("实测 attach 发提示词")
     );
     let body = body_parts(event);

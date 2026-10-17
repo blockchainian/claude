@@ -260,7 +260,11 @@ fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
     }
     session.status = status(session.process.is_some(), summary.turn_ended);
     session.tasks = summary.tasks;
-    session.pending_questions = summary.pending_questions;
+    session.pending_questions = summary
+        .pending_questions
+        .into_iter()
+        .map(|question| question.text)
+        .collect();
     if session.process.is_some() && !session.pending_questions.is_empty() {
         session.status = SessionStatus::NeedsInput;
     }

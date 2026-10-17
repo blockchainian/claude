@@ -85,6 +85,7 @@ fn codex_exit_detail_snapshot() {
     event.started_at = now;
     event.ended_at = Some(now);
     event.previous_end = None;
+    event.duration = None;
     view.set_log(vec![event]);
     let rendered = log_screen(&view, 100, 40, now);
     assert_eq!(

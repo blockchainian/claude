@@ -23,11 +23,31 @@ fn default_detail(input: &serde_json::Value) -> Option<(&str, &str)> {
         .find_map(|key| input_text(input, key).map(|text| (key, text)))
 }
 
+pub(super) fn tool_kind(name: &str) -> Kind {
+    match name.rsplit('.').next() {
+        Some("AskUserQuestion" | "request_user_input") => Kind::Assistant,
+        _ => Kind::Tool,
+    }
+}
+
+fn base_tool_title(name: &str, input: &serde_json::Value) -> String {
+    use crate::providers::tool::Title;
+    let kind = match name.rsplit('.').next().unwrap_or(name) {
+        "AskUserQuestion" => Title::Questions,
+        "Agent" | "Task" | "spawn_agent" => Title::Agent,
+        "Skill" => Title::Skill,
+        "SendMessage" | "send_message" | "followup_task" => Title::Recipient,
+        "Bash" | "exec" | "exec_command" | "shell" => Title::Shell,
+        _ => Title::Tool,
+    };
+    crate::providers::tool::title(name, input, kind)
+}
+
 fn tool_title(name: &str, input: &serde_json::Value) -> String {
     if name == "Agent" {
         return name.to_owned();
     }
-    let title = crate::log::tool_title(name, input);
+    let title = base_tool_title(name, input);
     if name == "Skill"
         && let Some(args) = input["args"].as_str().filter(|args| !args.is_empty())
     {
@@ -39,7 +59,7 @@ fn tool_title(name: &str, input: &serde_json::Value) -> String {
 
 fn tool_detail(name: &str, input: &serde_json::Value) -> String {
     match name {
-        "AskUserQuestion" => crate::log::question_texts(input).join(" · "),
+        "AskUserQuestion" => crate::providers::tool::question_texts(input).join(" · "),
         "Bash" => input_text(input, "description")
             .map(str::to_owned)
             .unwrap_or_else(|| {
@@ -83,11 +103,11 @@ fn tool_detail(name: &str, input: &serde_json::Value) -> String {
 fn tool_label(name: &str, detail: &str) -> String {
     let name = if name == "SendMessage" { "To" } else { name };
     if detail.is_empty() {
-        crate::log::display_tool_name(name)
+        crate::providers::tool::display_tool_name(name)
     } else if matches!(name, "Bash" | "AskUserQuestion" | "Agent") {
         detail.to_owned()
     } else {
-        let label = crate::log::display_tool_name(name);
+        let label = crate::providers::tool::display_tool_name(name);
         if label == name {
             format!("{label} {detail}")
         } else {
@@ -109,10 +129,10 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     {
         Some(tool_label(name, &tool_detail(name, input)))
     } else {
-        Some(
-            input_text(input, "description")
-                .map_or_else(|| crate::log::display_tool_name(name), str::to_owned),
-        )
+        Some(input_text(input, "description").map_or_else(
+            || crate::providers::tool::display_tool_name(name),
+            str::to_owned,
+        ))
     }
 }
 
@@ -756,9 +776,11 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
             _ => fallback(),
         }
     });
-    crate::log::include_description(&mut sections, input);
-    ToolCall {
-        subagent_type: None,
+    crate::providers::tool::include_description(&mut sections, input);
+    let mut call = ToolCall {
+        detail_left: crate::providers::tool::display_tool_name(name),
+        detail_title: String::new(),
+        show_details: name == "AskUserQuestion",
         id: String::new(),
         title: tool_title(name, input),
         name: name.to_owned(),
@@ -767,7 +789,9 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         exit_code: None,
         is_error: result.is_some_and(|result| result.error),
         duration: None,
-    }
+    };
+    crate::providers::tool::annotate(&mut call);
+    call
 }
 
 impl Log {
@@ -1007,7 +1031,9 @@ impl Log {
         event.source = source.map(str::to_owned);
         if field("task-id").is_some() || output.is_some() {
             event.calls.push(ToolCall {
-                subagent_type: None,
+                detail_left: format!("Task {}", field("task-id").unwrap_or("")),
+                detail_title: summary.to_owned(),
+                show_details: false,
                 id: field("task-id").unwrap_or("").to_owned(),
                 title: summary.to_owned(),
                 name: "task-notification".to_owned(),
@@ -1026,6 +1052,8 @@ impl Log {
         self.entries.push(Entry {
             offset: self.offset,
             event: Event {
+                completed_time: false,
+                background: body.ends_with(" *"),
                 source: None,
                 source_records: self.source_records(),
                 sender: None,
@@ -1061,7 +1089,7 @@ impl Log {
             .filter(|_| result.is_none_or(|result| result.denial.is_none()))
             .map(|(_, path)| path);
         let detail = tool_detail(name, input);
-        let display_name = crate::log::display_tool_name(name);
+        let display_name = crate::providers::tool::display_tool_name(name);
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
             if display_name == name {
                 format!("{display_name}: {reason}")
@@ -1075,7 +1103,7 @@ impl Log {
         } else {
             tool_label(name, &detail)
         };
-        let kind = crate::log::tool_kind(name);
+        let kind = tool_kind(name);
         if self.batch.is_some_and(|index| {
             (self.entries[index].event.kind == Kind::Assistant) != (kind == Kind::Assistant)
         }) {
@@ -1087,6 +1115,8 @@ impl Log {
             Entry {
                 offset: self.offset,
                 event: Event {
+                    completed_time: false,
+                    background: false,
                     source: None,
                     source_records: self.source_records(),
                     sender: None,
@@ -1157,14 +1187,17 @@ impl Log {
         let mut detail = tool_call(name, input, result);
         detail.id = block["id"].as_str().unwrap_or("").to_owned();
         detail.duration = result.map(|result| result.at - at);
-        if name == "Agent" {
-            detail.subagent_type = input_text(input, "subagent_type").map(str::to_owned);
+        if name == "Agent"
+            && let Some(kind) = input_text(input, "subagent_type")
+        {
+            detail.detail_left = kind.to_owned();
         }
         entry.event.calls.insert(0, detail);
         entry.background |= input["run_in_background"] == true;
         if entry.background {
             entry.event.body.push_str(" *");
         }
+        entry.event.background = entry.event.body.ends_with(" *");
         entry.event.started_at = at;
         if let Some(result) = result {
             if result.denial.is_some() {
@@ -1633,7 +1666,7 @@ pub(crate) mod tests {
         let types: Vec<_> = events
             .iter()
             .flat_map(|event| &event.calls)
-            .map(|call| call.subagent_type.as_deref())
+            .map(|call| Some(call.detail_left.as_str()))
             .collect();
         assert_eq!(
             types,
@@ -1706,9 +1739,9 @@ pub(crate) mod tests {
                 .find(|call| call.name == name)
                 .unwrap();
 
-            assert!(
-                matches!(call.input.last(), Some(Section::Fields(fields)) if fields[0].0 == "description")
-            );
+            assert!(!call.detail_title.is_empty());
+            assert!(!call.input.iter().any(|section| matches!(section,
+                Section::Fields(fields) if fields.iter().any(|(key, _)| key == "description"))));
         }
     }
 
@@ -1803,18 +1836,14 @@ pub(crate) mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
-        let parallel_inputs: Vec<_> = records[16..18]
-            .iter()
-            .map(|record| all_fields(&record["message"]["content"][0]["input"]))
-            .collect();
         let events = events_from(records.clone());
         let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
         assert!(calls.len() >= 10);
         let bash = calls.iter().find(|call| call.name == "Bash").unwrap();
-        assert!(matches!(&bash.input[0], Section::Code { lang, .. } if lang == "bash"));
+        assert!(matches!(&bash.input[0], Section::Shell { prefix: 0, .. }));
         let output = bash.output.as_ref().unwrap();
         assert!(matches!(&output[0], Section::Text { label, .. } if label == "stdout"));
-        assert!(matches!(&output[1], Section::Text { label, .. } if label == "stderr"));
+        assert!(matches!(&output[1], Section::Label(label) if label == "stderr"));
         let read = calls.iter().find(|call| call.name == "Read").unwrap();
         assert!(
             matches!(&read.output.as_ref().unwrap()[0], Section::Code { lang, text, .. }
@@ -1899,14 +1928,20 @@ pub(crate) mod tests {
                 "mcp__plugin_codex_codex-manager__start"
             ]
         );
-        assert_eq!(
-            parallel
-                .calls
-                .iter()
-                .map(|call| call.input[0].clone())
-                .collect::<Vec<_>>(),
-            parallel_inputs
-        );
+        for (call, record) in parallel.calls.iter().zip(&records[16..18]) {
+            let input = &record["message"]["content"][0]["input"];
+            assert_eq!(call.detail_title, input["name"].as_str().unwrap());
+            assert_eq!(
+                call.input,
+                vec![
+                    Section::Fields(vec![("cwd".into(), input["cwd"].as_str().unwrap().into())]),
+                    Section::Prose {
+                        text: input["prompt"].as_str().unwrap().into(),
+                        markdown: true
+                    },
+                ]
+            );
+        }
         assert!(parallel.calls[1].output.is_none());
         for (name, input_index, output_index) in
             [("Write", 6, 7), ("WebFetch", 8, 9), ("Agent", 10, 11)]
@@ -2040,11 +2075,10 @@ pub(crate) mod tests {
         let events = events_from(vec![record]);
         assert_eq!(
             events[0].calls[0].input[0],
-            code_section(
-                "command",
-                "bash",
-                bash["input"]["command"].as_str().unwrap()
-            )
+            Section::Shell {
+                prefix: 0,
+                text: bash["input"]["command"].as_str().unwrap().to_owned()
+            }
         );
         assert_eq!(
             all_fields(&json!({"flag":true,"nested":{"n":1}})),

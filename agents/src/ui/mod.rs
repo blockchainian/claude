@@ -183,7 +183,7 @@ enum Removal {
     Delete,
 }
 
-/// Codex's confirmation before archiving or deleting a task.
+/// Confirmation before archiving or deleting a task.
 struct ConfirmDialog {
     removal: Removal,
     id: SessionKey,

@@ -164,6 +164,8 @@ impl View {
         self.log_background_event = Some(crate::log::Event {
             kind: crate::log::Kind::Tool,
             source: None,
+            completed_time: false,
+            background: false,
             source_records: Vec::new(),
             sender: None,
             body: task.description.clone(),
@@ -174,7 +176,9 @@ impl View {
             previous_end: None,
             images: Vec::new(),
             calls: vec![crate::log::ToolCall {
-                subagent_type: None,
+                detail_left: "background".into(),
+                detail_title: task.description.clone(),
+                show_details: false,
                 id: String::new(),
                 title: task.description,
                 name: "background".into(),

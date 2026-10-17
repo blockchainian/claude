@@ -663,7 +663,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
             RowTime::Clock(event.started_at)
         };
     }
-    if session.id.provider == crate::providers::ProviderId::Codex
+    if event.completed_time
         && event.kind == Kind::Tool
         && let Some(end) = event.ended_at
     {
@@ -675,7 +675,7 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
     let Some(previous) = event.previous_end else {
         return RowTime::Clock(event.started_at);
     };
-    let background = event.body.ends_with(" *");
+    let background = event.background;
     let end = match event.ended_at {
         Some(end) => end,
         None if !last || background => event.started_at,
@@ -1065,10 +1065,7 @@ fn detail_parts_layout(
 pub(super) fn shows_calls(event: &Event) -> bool {
     !event.calls.is_empty()
         && (matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied)
-            || event
-                .calls
-                .iter()
-                .any(|call| call.name == "AskUserQuestion"))
+            || event.calls.iter().any(|call| call.show_details))
 }
 
 /// The copied event text, including the titles separating merged tool calls.
@@ -1398,6 +1395,8 @@ pub(super) mod log_markdown {
     fn tool_without_calls_has_no_body_below_its_title() {
         let event = &Event {
             source: None,
+            completed_time: false,
+            background: false,
             source_records: Vec::new(),
             sender: None,
             kind: Kind::Tool,
@@ -1446,6 +1445,8 @@ pub(super) mod log_markdown {
         let mut buffer = Buffer::empty(area);
         let event = Event {
             source: None,
+            completed_time: false,
+            background: false,
             source_records: Vec::new(),
             sender: None,
             kind,
@@ -1745,6 +1746,8 @@ pub(super) mod log_markdown {
         for kind in [Kind::User, Kind::Tool] {
             let event = Event {
                 source: None,
+                completed_time: false,
+                background: false,
                 source_records: Vec::new(),
                 sender: None,
                 kind: kind.clone(),
@@ -2203,9 +2206,8 @@ mod panel_detail_tests {
         .unwrap();
         let source = "echo 123456789012345678901234567890 && pwd; whoami";
         event.calls.truncate(1);
-        event.calls[0].input = vec![crate::log::Section::Code {
-            label: "command".into(),
-            lang: "bash".into(),
+        event.calls[0].input = vec![crate::log::Section::Shell {
+            prefix: 0,
             text: source.into(),
         }];
         for width in [200, 35] {
