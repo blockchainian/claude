@@ -11,12 +11,19 @@ impl TitleRow {
     pub fn line(&self, width: usize) -> (Line<'static>, Vec<CellMap>) {
         let source = self.source();
         if self.rule {
-            let line = super::title_rule::centered_title_rule(&source, width, None);
+            let mut line = super::title_rule::centered_title_rule(&source, width, None);
             let maps = if line.spans.len() < 4 {
                 Vec::new()
             } else {
                 let padding = line.spans[0].width();
                 let title = Line::from(line.spans[1..line.spans.len() - 2].to_vec());
+                if self.left.is_some() {
+                    let label = self.left_label(padding.saturating_sub(1));
+                    line.spans[0] = Span::styled(
+                        format!("{label}{}", " ".repeat(padding - label.width())),
+                        self.meta_style,
+                    );
+                }
                 title_maps(&source, title, padding)
             };
             return (line, maps);
@@ -26,15 +33,7 @@ impl TitleRow {
         let title_width = title.width();
         let padding = (width - title_width) / 2;
         let maps = title_maps(&source, title.clone(), padding);
-        let label = truncate_line_with_ellipsis_if_overflow(
-            Line::from(
-                self.left
-                    .as_deref()
-                    .unwrap_or("")
-                    .replace(['\n', '\r', '\t'], " "),
-            ),
-            padding.saturating_sub(1),
-        );
+        let label = self.left_label(padding.saturating_sub(1));
         let mut spans = vec![Span::styled(
             format!("{label}{}", " ".repeat(padding - label.width())),
             self.meta_style,
@@ -50,6 +49,18 @@ impl TitleRow {
     /// The title's copy source, excluding metadata and generated padding or rules.
     pub fn source(&self) -> String {
         self.title.to_string()
+    }
+
+    fn left_label(&self, width: usize) -> Line<'static> {
+        truncate_line_with_ellipsis_if_overflow(
+            Line::from(
+                self.left
+                    .as_deref()
+                    .unwrap_or("")
+                    .replace(['\n', '\r', '\t'], " "),
+            ),
+            width,
+        )
     }
 }
 
@@ -75,7 +86,7 @@ fn title_maps(source: &str, mut title: Line<'static>, padding: usize) -> Vec<Cel
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::style::{Color, Style, Stylize};
+    use ratatui::style::{Color, Style};
 
     fn row(title: &str, rule: bool) -> TitleRow {
         TitleRow {
@@ -129,6 +140,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn rule_keeps_left_metadata_outside_the_centered_title() {
+        let mut row = row("Read", true);
+        row.left = Some("Task b9wi31ww0".into());
+        let (line, maps) = row.line(60);
+        assert!(line.to_string().starts_with("Task b9wi31ww0"));
+        assert_eq!(maps.first().unwrap().0.start, 28);
+        assert_eq!(maps.last().unwrap().0.end, 32);
+        assert_eq!(line.width(), 60);
+        assert!(!line.to_string().contains("12s"));
     }
 
     #[test]
