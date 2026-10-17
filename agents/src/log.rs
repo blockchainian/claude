@@ -1,6 +1,28 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
+pub(crate) fn display_tool_name(name: &str) -> String {
+    let Some((server, tool)) = name
+        .strip_prefix("mcp__")
+        .and_then(|rest| rest.split_once("__"))
+    else {
+        return name.to_owned();
+    };
+    let server = if let Some(rest) = server.strip_prefix("plugin_") {
+        match rest.split_once('_') {
+            Some((plugin, server)) if !plugin.is_empty() => server,
+            _ => return name.to_owned(),
+        }
+    } else {
+        server
+    };
+    if server.is_empty() || tool.is_empty() || tool.contains("__") {
+        name.to_owned()
+    } else {
+        format!("{server} {tool}")
+    }
+}
+
 pub(crate) fn tool_kind(name: &str) -> Kind {
     match name.rsplit('.').next() {
         Some("AskUserQuestion" | "request_user_input") => Kind::Assistant,
@@ -39,7 +61,7 @@ pub(crate) fn tool_title(name: &str, input: &Value) -> String {
             .or_else(|| text("target"))
             .map(|recipient| format!("To {recipient}"))
             .unwrap_or_else(|| name.to_owned()),
-        _ if name.starts_with("mcp__") => name.to_owned(),
+        _ if name.starts_with("mcp__") => display_tool_name(name),
         _ if text("description").is_some() => text("description").unwrap().to_owned(),
         "Bash" | "exec" | "exec_command" | "shell" => {
             let command = text("command").or_else(|| text("cmd")).unwrap_or("");
@@ -149,4 +171,34 @@ pub enum Section {
 pub struct Image {
     pub label: String,
     pub path: std::path::PathBuf,
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mcp_titles_show_server_and_tool() {
+        for (name, expected) in [
+            (
+                "mcp__plugin_codex_codex-manager__send",
+                "codex-manager send",
+            ),
+            (
+                "mcp__plugin_codex_codex-manager__start",
+                "codex-manager start",
+            ),
+            (
+                "mcp__claude-in-chrome__navigate",
+                "claude-in-chrome navigate",
+            ),
+            ("mcp__context7__query-docs", "context7 query-docs"),
+            ("mcp__tool", "mcp__tool"),
+            ("mcp____send", "mcp____send"),
+            ("mcp__server__", "mcp__server__"),
+            ("mcp__plugin_codex__send", "mcp__plugin_codex__send"),
+            ("mcp__plugin__server__send", "mcp__plugin__server__send"),
+            ("mcp__plugin_codex___send", "mcp__plugin_codex___send"),
+        ] {
+            assert_eq!(super::tool_title(name, &serde_json::json!({})), expected);
+        }
+    }
 }

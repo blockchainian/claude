@@ -123,6 +123,45 @@ fn start_probe(name: &str) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_mcp_display_names() {
+    use std::io::Write;
+
+    let (_directory, tmux, transcript) = start_probe("mcp-names");
+    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "45"]);
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(transcript)
+        .unwrap();
+    // Keep the two parallel calls and their recorded result from the real transcript.
+    for line in include_str!("fixtures/claude-tool-calls.jsonl")
+        .lines()
+        .skip(16)
+        .take(3)
+    {
+        writeln!(file, "{line}").unwrap();
+    }
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    tmux.wait_for(|capture| capture.contains("codex-manager start"));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let path = std::env::temp_dir().join("agents-mcp-names-200x45.txt");
+    std::fs::write(&path, &capture).unwrap();
+    assert_eq!(capture.lines().count(), 45);
+    assert!(
+        !capture.contains("mcp__plugin_codex_codex-manager__start"),
+        "{capture}"
+    );
+    assert!(
+        capture.matches("codex-manager start").count() >= 3,
+        "{capture}"
+    );
+    println!(
+        "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
+        path.display()
+    );
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_dashboard_tabs_and_grouping_hint() {
     let (_directory, tmux, _transcript) = start_probe("header-footer");
     for width in [200, 120] {

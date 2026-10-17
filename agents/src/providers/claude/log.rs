@@ -60,11 +60,11 @@ fn tool_detail(name: &str, input: &serde_json::Value) -> String {
 fn tool_label(name: &str, detail: &str) -> String {
     let name = if name == "SendMessage" { "To" } else { name };
     if detail.is_empty() {
-        name.to_owned()
+        crate::log::display_tool_name(name)
     } else if matches!(name, "Bash" | "AskUserQuestion") {
         detail.to_owned()
     } else {
-        format!("{name} {detail}")
+        format!("{} {detail}", crate::log::display_tool_name(name))
     }
 }
 
@@ -81,7 +81,10 @@ pub(super) fn tool_activity(block: &serde_json::Value) -> Option<String> {
     {
         Some(tool_label(name, &tool_detail(name, input)))
     } else {
-        Some(input_text(input, "description").unwrap_or(name).to_owned())
+        Some(
+            input_text(input, "description")
+                .map_or_else(|| crate::log::display_tool_name(name), str::to_owned),
+        )
     }
 }
 
@@ -643,12 +646,13 @@ impl Log {
             .filter(|_| result.is_none_or(|result| result.denial.is_none()))
             .map(|(_, path)| path);
         let detail = tool_detail(name, input);
+        let display_name = crate::log::display_tool_name(name);
         let call = if let Some(reason) = result.and_then(|result| result.denial.as_deref()) {
-            format!("{name}: {reason}")
+            format!("{display_name}: {reason}")
         } else if name == "AskUserQuestion" {
             crate::log::tool_title(name, input)
         } else if let Some(path) = path {
-            format!("{name} {path}")
+            format!("{display_name} {path}")
         } else {
             tool_label(name, &detail)
         };
@@ -686,9 +690,9 @@ impl Log {
             .strip_suffix(" *")
             .filter(|_| entry.background)
             .unwrap_or(&entry.event.body);
-        let path = path.map(|_| name.len() + 1..call.len());
+        let path = path.map(|_| display_name.len() + 1..call.len());
         // A path call followed by a path call of the same tool shares its verb: "Edit a b".
-        let verb = format!("{name} ");
+        let verb = format!("{display_name} ");
         let shared = path.is_some()
             && body.starts_with(&verb)
             && entry.event.paths.first().map(|range| range.start) == Some(verb.len());
@@ -816,6 +820,44 @@ fn user_text(text: &str) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn real_mcp_calls_share_display_names_and_keep_raw_names() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-tool-calls.jsonl");
+        let events = super::tail(&path, 100).unwrap();
+        let event = events
+            .iter()
+            .find(|event| {
+                event.calls.len() == 2
+                    && event
+                        .calls
+                        .iter()
+                        .all(|call| call.name == "mcp__plugin_codex_codex-manager__start")
+            })
+            .unwrap();
+        assert!(event.body.contains("codex-manager start"));
+        assert!(!event.body.contains("mcp__"));
+        assert!(
+            event
+                .calls
+                .iter()
+                .all(|call| call.title == "codex-manager start")
+        );
+        let record: serde_json::Value =
+            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .find(|record| {
+                    record["message"]["content"][0]["name"]
+                        == "mcp__plugin_codex_codex-manager__start"
+                })
+                .unwrap();
+        assert_eq!(
+            super::tool_activity(&record["message"]["content"][0]).unwrap(),
+            "codex-manager start"
+        );
+    }
+
     #[test]
     fn real_call_titles_and_ids_match_inputs() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2027,10 +2069,7 @@ pub(crate) mod tests {
         }
         let events = tail(file.path(), 1).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(
-            events[0].body,
-            "mcp__plugin_codex_codex-manager__detach，TaskStop"
-        );
+        assert_eq!(events[0].body, "codex-manager detach，TaskStop");
     }
 
     #[test]
