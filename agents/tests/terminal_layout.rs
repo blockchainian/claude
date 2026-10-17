@@ -224,7 +224,7 @@ fn terminal_branch_name_uses_prompt_and_restores_input() {
         branch_line[..branch_line.find("main").unwrap()].width()
     );
     tmux.mouse(0, create_column, row, true);
-    tmux.wait_for(|capture| capture.contains("New branch name ❯"));
+    tmux.wait_for(|capture| capture.contains("New branch ❯"));
     tmux.run(&["send-keys", "-t", "probe", "-l", "feature/probe"]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
     tmux.wait_for(|capture| {

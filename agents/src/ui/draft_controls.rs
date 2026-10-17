@@ -50,7 +50,7 @@ pub(super) enum SelectorKind {
 }
 
 const CREATE_BRANCH: &str = "Create new branch";
-pub(super) const NEW_BRANCH_LABEL: &str = "New branch name";
+pub(super) const NEW_BRANCH_LABEL: &str = "New branch";
 
 impl Selector {
     pub(super) fn new(kind: SelectorKind, selected: usize) -> Self {
@@ -661,7 +661,7 @@ mod tests {
         view.flush_pending_click(Instant::now() + Duration::from_secs(1));
         assert!(view.selector.as_ref().unwrap().editing());
         assert!(view.input_box.focused);
-        assert_eq!(view.input_label(), "New branch name");
+        assert_eq!(view.input_label(), "New branch");
         assert!(view.input_box.editor.is_empty());
         for code in [KeyCode::Char('j'), KeyCode::Char('k')] {
             view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
@@ -671,7 +671,7 @@ mod tests {
         let prompt = view.center_layout(area).prompt;
         assert_eq!(view.cursor_pos(area).unwrap().1, prompt.y);
         let rendered = screen(&view, area);
-        assert!(rendered.contains("New branch name ❯ jk/"), "{rendered}");
+        assert!(rendered.contains("New branch ❯ jk/"), "{rendered}");
         assert_eq!(view.input_box.editor.text(), "jk/你好");
         assert!(rendered.contains("Create new branch"));
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
