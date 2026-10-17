@@ -1043,10 +1043,7 @@ fn open_parts(event: &Event) -> Vec<super::tool_detail::Part> {
     } else if is_prose(&event.kind) {
         vec![super::tool_detail::Part::prose(event.body.clone(), true)]
     } else if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
-        vec![super::tool_detail::Part::prose(
-            event.body.clone(),
-            super::markdown::has_markers(&event.body),
-        )]
+        super::tool_detail::Part::prose_parts(event.body.clone(), false)
     } else {
         super::tool_detail::Part::text_parts(event.body.clone(), false)
     }

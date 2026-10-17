@@ -142,12 +142,24 @@ impl Part {
     }
 
     pub fn prose(source: String, markdown: bool) -> Self {
-        let mut part = Self::text(source, markdown);
-        part.body = match part.body {
+        Self::text(source, markdown).into_prose()
+    }
+
+    pub fn prose_parts(source: String, markdown: bool) -> Vec<Self> {
+        Self::text_parts(source, markdown)
+            .into_iter()
+            .map(Self::into_prose)
+            .collect()
+    }
+
+    fn into_prose(mut self) -> Self {
+        self.body = match self.body {
             Body::Json(value) => Body::ProseJson(value),
-            _ => Body::Prose(markdown),
+            Body::Markdown => Body::Prose(true),
+            Body::Text => Body::Prose(false),
+            _ => unreachable!("only text fragments become prose"),
         };
-        part
+        self
     }
 
     /// Body semantics determine the reading column, independently of the caller.

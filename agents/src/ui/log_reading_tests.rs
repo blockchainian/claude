@@ -296,3 +296,20 @@ fn command_and_all_output_body_formats_keep_their_width() {
         assert_eq!(part.column(120, false), None);
     }
 }
+
+#[test]
+fn queued_fragments_keep_json_formatting_and_markdown_detection() {
+    let mut event = events(include_str!("../../tests/fixtures/transcript.jsonl")).remove(0);
+    event.calls.clear();
+    event.kind = Kind::QueuedUser;
+    event.body = "Read **this** before {\"answer\":[1,2]} and continue".into();
+    let expected = super::super::tool_detail::Part::text_parts(event.body.clone(), false);
+    let actual = open_parts(&event);
+    assert_eq!(
+        actual.iter().map(|p| &p.source).collect::<Vec<_>>(),
+        expected.iter().map(|p| &p.source).collect::<Vec<_>>()
+    );
+    for part in actual {
+        assert_eq!(part.column(200, true), Some((100, 50)));
+    }
+}
