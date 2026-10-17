@@ -510,6 +510,13 @@ impl View {
                 }
                 selector.selected = index;
                 self.input_box.focused = false;
+                if matches!(
+                    selector.kind,
+                    draft_controls::SelectorKind::Repository { .. }
+                ) {
+                    self.pending_click = None;
+                    return self.apply_choice(index);
+                }
                 if self.defer_click(ClickTarget::Choice(index)) {
                     return self.apply_choice(index);
                 }

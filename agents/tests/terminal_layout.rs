@@ -24,6 +24,9 @@ mod terminal_prompt_mouse;
 #[path = "support/terminal_images.rs"]
 mod terminal_images;
 
+#[path = "support/terminal_drafts.rs"]
+mod terminal_drafts;
+
 struct Tmux(String);
 
 impl Tmux {

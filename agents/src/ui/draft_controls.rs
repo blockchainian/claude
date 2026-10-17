@@ -20,7 +20,8 @@ pub(super) enum ControlTarget {
 }
 
 /// The list the details panel shows to choose a new task's repository or branch, or a task's
-/// model or effort: a click selects, a double click or Enter applies, a right click or Esc cancels.
+/// model or effort. Repository clicks apply immediately; other lists apply on double click
+/// or Enter. A right click or Esc cancels.
 pub(super) struct Selector {
     pub kind: SelectorKind,
     pub selected: usize,

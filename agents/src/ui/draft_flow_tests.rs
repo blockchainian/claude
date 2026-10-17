@@ -452,7 +452,7 @@ fn chosen_branch_rides_with_the_first_prompt() {
 }
 
 #[test]
-fn details_browser_opens_folders_on_click_and_applies_a_repository_on_double_click() {
+fn details_browser_opens_folders_and_applies_repositories_without_a_click_delay() {
     let (directory, mut view) = fixture();
     let parent = std::fs::canonicalize(directory.path())
         .unwrap()
@@ -462,6 +462,9 @@ fn details_browser_opens_folders_on_click_and_applies_a_repository_on_double_cli
         std::fs::create_dir_all(&repository).unwrap();
         git(&repository, &["init", "-b", branch]);
     }
+    let nested = parent.join("z/nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    git(&nested, &["init", "-b", "main"]);
     view.startup_cwd = parent.join("a");
     let id = view.add_draft(setup(&parent.join("a")));
     assert!(view.input_box.focused);
@@ -485,10 +488,17 @@ fn details_browser_opens_folders_on_click_and_applies_a_repository_on_double_cli
     let (x, y) = row_with(&mut view, "..");
     assert_eq!(click(&mut view, x, y), None);
     assert!(!view.input_box.focused);
-    view.flush_pending_click(std::time::Instant::now() + std::time::Duration::from_secs(1));
-    let (x, y) = row_with(&mut view, "b");
+    assert!(view.pending_click_in(Instant::now()).is_none());
+    let (x, y) = row_with(&mut view, "z");
     assert_eq!(click(&mut view, x, y), None);
+    assert!(view.pending_click_in(Instant::now()).is_none());
+    row_with(&mut view, "nested");
+    let (x, y) = row_with(&mut view, "..");
+    assert_eq!(click(&mut view, x, y), None);
+    assert!(view.pending_click_in(Instant::now()).is_none());
+    let (x, y) = row_with(&mut view, "b");
     let action = click(&mut view, x, y);
+    assert!(view.pending_click_in(Instant::now()).is_none());
     let Some(Action::ChangeDraftDirectory { draft_id, cwd }) = action else {
         panic!("{action:?}");
     };
