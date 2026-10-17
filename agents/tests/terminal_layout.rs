@@ -243,11 +243,11 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         .iter()
         .take_while(|line| line.matches('│').count() == separators.len())
         .count();
-    let details_start = separators[0] + 2;
+    let details_start = separators[0];
     let details_end = if width >= 150 {
-        separators[1] - 1
+        separators[1] + 1
     } else {
-        width as usize - 1
+        width as usize
     };
     let middle: Vec<_> = lines[top_end].chars().collect();
     let details: String = middle[details_start..details_end].iter().collect();
@@ -262,17 +262,26 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
         status,
         "{capture}"
     );
-    assert!(details.starts_with("─ claude "), "{capture}");
+    assert!(details.starts_with('┴'), "{capture}");
     assert!(
-        details
-            .chars()
-            .skip("─ claude ".chars().count())
-            .take(start - "─ claude ".chars().count())
-            .all(|c| c == '─'),
+        details.ends_with(if width >= 150 {
+            " claude ┴"
+        } else {
+            " claude ─"
+        }),
         "{capture}"
     );
     assert!(
-        details.chars().skip(start + status.len()).all(|c| c == '─'),
+        details.chars().skip(1).take(start - 1).all(|c| c == '─'),
+        "{capture}"
+    );
+    let folder_start = details.chars().count() - " claude ─".chars().count();
+    assert!(
+        details
+            .chars()
+            .skip(start + status.len())
+            .take(folder_start - start - status.len())
+            .all(|c| c == '─'),
         "{capture}"
     );
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
@@ -288,19 +297,29 @@ fn assert_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
     let top: String = (details_start..details_end)
         .map(|x| parser.screen().cell(1, x as u16).unwrap().contents())
         .collect();
-    let elapsed = top.rsplit('─').next().unwrap();
-    assert!(elapsed.starts_with(' '), "{capture}");
+    let elapsed = top
+        .rsplit('─')
+        .map(|part| part.trim_matches('┬'))
+        .find(|part| !part.trim_matches([' ', '┬']).is_empty())
+        .unwrap();
+    assert!(
+        elapsed.starts_with(' ') && elapsed.ends_with(' '),
+        "{capture}"
+    );
     assert!(!elapsed.trim().is_empty(), "{capture}");
-    let elapsed_start = details_end - elapsed.width();
-    for x in elapsed_start + 1..details_end - 1 {
+    let elapsed_start = details_end - 1 - elapsed.width();
+    for x in elapsed_start + 1..details_end - 2 {
         let cell = parser.screen().cell(1, x as u16).unwrap();
         assert!(cell.dim(), "{colored}");
         assert!(!cell.bold(), "{colored}");
     }
-    let title = top.trim_end_matches(elapsed).trim_matches('─');
+    let title = top
+        .split('─')
+        .find(|part| !part.trim_matches([' ', '┬']).is_empty())
+        .unwrap();
     assert!(title.starts_with(' ') && title.ends_with(' '), "{capture}");
     let start = (details_end - details_start - title.width()) / 2;
-    assert_eq!(top.find(title), Some(start * "─".len()), "{capture}");
+    assert_eq!(top[..top.find(title).unwrap()].width(), start, "{capture}");
     for x in details_start + start + 1..details_start + start + title.width() - 1 {
         let cell = parser.screen().cell(1, x as u16).unwrap();
         if !cell.contents().is_empty() {
@@ -732,7 +751,7 @@ fn terminal_update_click_selects_source_row() {
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_task_notification_shows_summary_and_fields() {
+fn terminal_task_notification_shows_summary_id_and_missing_output_path() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("task-notification");
     let record = include_str!("fixtures/claude-task-notifications.jsonl")
@@ -758,15 +777,15 @@ fn terminal_task_notification_shows_summary_and_fields() {
         .expect("log detail rule");
     let detail = rows[rule + 1..rows.len() - 1].join("\n");
     assert_eq!(detail.matches(summary).count(), 1, "{capture}");
-    for field in [
-        "task-id: b9wi31ww0",
-        "status: completed",
-        "output-file: /tmp/agents-notification/tasks/b9wi31ww0.output",
-    ] {
-        assert!(detail.contains(field), "{capture}");
-    }
+    assert!(rows[rule + 1].starts_with(" b9wi31ww0 "), "{capture}");
+    assert!(
+        detail.contains("output-file: /tmp/agents-notification/tasks/b9wi31ww0.output"),
+        "{capture}"
+    );
+    assert!(!detail.contains("task-id:"), "{capture}");
+    assert!(!detail.contains("status: completed"), "{capture}");
     assert!(!detail.contains("tool-use-id"), "{capture}");
-    println!("{{\"task_notification\":\"pass\",\"summary_once\":true,\"fields\":true}}");
+    println!("{{\"task_notification\":\"pass\",\"summary_once\":true,\"output_path\":true}}");
 }
 
 #[test]
@@ -976,13 +995,14 @@ fn terminal_details_section_positions() {
                 .match_indices('│')
                 .map(|(byte, _)| lines[2][..byte].width())
                 .collect();
-            let left = separators[0] + 2;
+            let left = separators[0];
             let right = if width >= 150 {
-                separators[1] - 1
+                separators[1] + 1
             } else {
-                width as usize - 1
+                width as usize
             };
-            let panel_width = right - left;
+            let panel_right = right - if width >= 150 { 2 } else { 1 };
+            let panel_width = panel_right - left - 2;
             let bottom = 2 + lines[2..]
                 .iter()
                 .take_while(|line| line.matches('│').count() == separators.len())
@@ -990,7 +1010,7 @@ fn terminal_details_section_positions() {
             let parser = captured_screen(&capture, width, 70);
             let panel: Vec<String> = (2..bottom)
                 .map(|y| {
-                    (left..right)
+                    (left + 2..panel_right)
                         .map(|x| parser.screen().cell(y as u16, x as u16).unwrap().contents())
                         .collect()
                 })
@@ -1027,18 +1047,25 @@ fn terminal_details_section_positions() {
                         .contents()
                 })
                 .collect();
-            assert!(status.starts_with("─ claude "), "{status}");
+            assert!(
+                status.ends_with(if width >= 150 {
+                    " claude ┴"
+                } else {
+                    " claude ─"
+                }),
+                "{status}"
+            );
             assert!(status.contains(" Inactive "), "{status}");
             assert!(!status.contains("main"), "{status}");
             if has_pr {
-                assert!(status.ends_with(" #763 ─"), "{status}");
+                assert!(status.starts_with("┴ #763 ─"), "{status}");
             } else {
                 assert!(!status.contains('#'), "{status}");
-                assert!(status.ends_with("────"), "{status}");
+                assert!(status.starts_with("┴────"), "{status}");
             }
             let model_y = if width >= 150 { bottom } else { bottom + 2 };
-            let model_left = if width >= 150 { separators[1] + 2 } else { 1 };
-            let model_right = width as usize - 1;
+            let model_left = if width >= 150 { separators[1] } else { 0 };
+            let model_right = width as usize;
             let model: String = (model_left..model_right)
                 .map(|x| {
                     parser
@@ -1048,7 +1075,14 @@ fn terminal_details_section_positions() {
                         .contents()
                 })
                 .collect();
-            assert!(model.starts_with("─ claude-opus-5-5 "), "{model}");
+            assert!(
+                model.starts_with(if width >= 150 {
+                    "┴ claude-opus-5-5 "
+                } else {
+                    "─ claude-opus-5-5 "
+                }),
+                "{model}"
+            );
             assert!(model.ends_with(" medium ─"), "{model}");
             assert!(!model.contains("Model"));
             assert!(!model.contains('·'));
