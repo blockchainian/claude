@@ -1192,3 +1192,59 @@ fn terminal_log_border_double_clicks() {
     assert!(latest.contains("对，必须"));
     println!("{{\"log_border_double_clicks\":\"pass\",\"width\":200,\"height\":45}}");
 }
+
+#[test]
+#[ignore = "requires tmux and macOS clipboard; run with --ignored --nocapture"]
+fn terminal_raw_transcript_copy_note() {
+    let (_directory, tmux, _transcript) = start_probe("raw-copy");
+    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "45"]);
+    tmux.wait_for(|capture| capture.lines().count() == 45 && capture.contains("对，必须"));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let (column, row) = capture
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            let byte = line.rfind("对，必须")?;
+            let column = line[..byte].width();
+            (row > 25).then_some((column, row))
+        })
+        .expect("assistant body in log detail");
+    tmux.mouse(0, column, row, true);
+    tmux.wait_for(|capture| capture.contains("\"apiBlockIndex\""));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let (column, row) = capture
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            let byte = line.rfind('{')?;
+            let column = line[..byte].width();
+            (row > 25).then_some((column, row))
+        })
+        .expect("raw JSON in log detail");
+    let sequence = format!(
+        "\x1b[<0;{};{}M\x1b[<0;{};{}m",
+        column + 1,
+        row + 1,
+        column + 1,
+        row + 1
+    )
+    .repeat(2);
+    tmux.run(&["send-keys", "-t", "probe", "-l", &sequence]);
+    tmux.wait_for(|capture| capture.contains("Copied transcript"));
+    let copied = Command::new("pbpaste").output().unwrap();
+    assert!(copied.status.success());
+    let expected: serde_json::Value = serde_json::from_str(
+        include_str!("fixtures/transcript.jsonl")
+            .lines()
+            .nth(1)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        String::from_utf8(copied.stdout).unwrap(),
+        serde_json::to_string_pretty(&expected).unwrap()
+    );
+    println!(
+        "{{\"raw_transcript_copy\":\"pass\",\"note\":\"Copied transcript\",\"width\":200,\"height\":45,\"pbpaste\":\"pretty JSON matches\"}}"
+    );
+}

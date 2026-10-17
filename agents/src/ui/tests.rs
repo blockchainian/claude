@@ -7304,6 +7304,45 @@ fn double_click_on_open_log_body_copies_the_whole_event() {
 }
 
 #[test]
+fn double_click_log_detail_copy_note_matches_transcript_mode() {
+    for raw in [false, true] {
+        let (mut view, now) = log_fixture();
+        view.log[6].body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph".into();
+        view.log[6].source_records = vec![crate::log::SourceRecord {
+            path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/transcript.jsonl"),
+            offset: 0,
+        }];
+        let list = log_screen(&view, 100, 25, now);
+        click_log_text(&mut view, &list, "A long response", MouseButton::Left);
+        view.log_detail_raw = raw;
+        let expected = if raw {
+            view.log[6].raw_text().unwrap()
+        } else {
+            view.log[6].body.clone()
+        };
+        let open = log_screen(&view, 100, 25, now);
+        assert_eq!(
+            double_click_text(
+                &mut view,
+                &open,
+                if raw { "{" } else { "A second paragraph" }
+            ),
+            Some(Action::Copy {
+                text: expected,
+                label: if raw {
+                    "Copied transcript"
+                } else {
+                    "Copied assistant message"
+                }
+                .into(),
+            }),
+            "raw={raw}",
+        );
+    }
+}
+
+#[test]
 fn double_click_on_details_prompt_or_last_message_copies_it() {
     let mut view = overflowing_details();
     let message = "First reply row\n\nSecond reply row";

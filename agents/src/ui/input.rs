@@ -35,6 +35,14 @@ pub(super) struct PendingClick {
 }
 
 impl View {
+    fn detail_copy_label(&self, event: &crate::log::Event) -> String {
+        if self.log_detail_raw {
+            "Copied transcript".into()
+        } else {
+            super::log::copied_label(event)
+        }
+    }
+
     pub(crate) fn pending_click_in(&self, now: Instant) -> Option<Duration> {
         self.pending_click
             .as_ref()
@@ -590,7 +598,7 @@ impl View {
                         {
                             return Some(Action::Copy {
                                 text: self.detail_text(event),
-                                label: super::log::copied_label(event),
+                                label: self.detail_copy_label(event),
                             });
                         }
                     }
@@ -689,7 +697,7 @@ impl View {
                     {
                         return Some(Action::Copy {
                             text: self.detail_text(event),
-                            label: super::log::copied_label(event),
+                            label: self.detail_copy_label(event),
                         });
                     }
                 } else if let Some((text, label)) = copy_text {
