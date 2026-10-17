@@ -2292,10 +2292,31 @@ fn terminal_start_description_header() {
             })
             .expect("three-slot title bar");
         let bar = rows[header];
-        assert!(
-            bar.trim_end().width() <= usize::from(width) - 11,
-            "tool call without a result leaves the time column empty: {capture}"
+        let clock = |line: &str| -> String {
+            line.chars()
+                .scan(0, |column, ch| {
+                    let start = *column;
+                    *column += ch.to_string().width();
+                    Some((start, ch))
+                })
+                .filter(|(column, _)| {
+                    *column >= usize::from(width) - 9 && *column < usize::from(width) - 1
+                })
+                .map(|(_, ch)| ch)
+                .collect::<String>()
+                .trim()
+                .to_owned()
+        };
+        let list_row = rows[..header]
+            .iter()
+            .rfind(|line| line.contains("codex-manager start ·"))
+            .expect("selected tool list row");
+        assert_eq!(
+            clock(bar),
+            clock(list_row),
+            "event time stays at the panel edge: {capture}"
         );
+        assert!(bar.trim_end().width() < usize::from(width), "{capture}");
         assert_eq!(
             bar[..bar.find("codex-manager start").unwrap()].width(),
             1,
