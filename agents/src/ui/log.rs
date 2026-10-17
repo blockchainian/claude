@@ -576,7 +576,13 @@ impl View {
 }
 
 fn same_event(left: &Event, right: &Event) -> bool {
-    if shows_calls(left) {
+    // A task can emit several notifications with the same task ID.
+    if shows_calls(left)
+        && left
+            .calls
+            .iter()
+            .all(|call| call.name != "task-notification")
+    {
         right
             .calls
             .iter()

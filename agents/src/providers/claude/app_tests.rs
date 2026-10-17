@@ -271,6 +271,87 @@ fn task_log_scroll_reloads_requested_events_and_keeps_cache() {
 }
 
 #[test]
+fn task_log_wheel_reverses_across_reloaded_windows() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    for navigation in [None, Some(KeyCode::Up), Some(KeyCode::Char('k'))] {
+        let (_dir, mut app) = fixture();
+        let path = app.sessions[0].transcript.clone().unwrap();
+        let payload = std::fs::read_to_string(&path).unwrap();
+        let transcript = format!(
+            "{}{}{}",
+            transcript_copies(&payload, 20, 0),
+            include_str!("../../../tests/fixtures/claude-task-notifications.jsonl"),
+            transcript_copies(&payload, 20, 20)
+        );
+        std::fs::write(&path, transcript).unwrap();
+        let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+        let visible = app.view.log_event_count(area);
+        let wheel = |app: &mut App, kind| {
+            app.handle_event(Event::Mouse(MouseEvent {
+                kind,
+                column: 134,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            }));
+            app.refresh_log(visible);
+            app.view
+                .render(area, &mut ratatui::buffer::Buffer::empty(area));
+        };
+        app.refresh_log(visible);
+        app.view
+            .render(area, &mut ratatui::buffer::Buffer::empty(area));
+        for _ in 0..45 {
+            wheel(&mut app, MouseEventKind::ScrollDown);
+        }
+        if let Some(code) = navigation {
+            for kind in [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+            ] {
+                app.handle_event(Event::Mouse(MouseEvent {
+                    kind,
+                    column: 134,
+                    row: 21,
+                    modifiers: KeyModifiers::NONE,
+                }));
+            }
+            // Clicking the selected bottom row gives keyboard navigation to the log list.
+            for _ in 0..6 {
+                app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+                app.refresh_log(visible);
+                app.view
+                    .render(area, &mut ratatui::buffer::Buffer::empty(area));
+            }
+        } else {
+            for _ in 0..6 {
+                wheel(&mut app, MouseEventKind::ScrollUp);
+            }
+        }
+        let after = log_detail_at(&app, area);
+        assert!(
+            after.contains("Transcript copy 20"),
+            "newer navigation must leave both notifications: {after}"
+        );
+        for _ in 0..6 {
+            if let Some(code) = navigation {
+                let code = if code == KeyCode::Up {
+                    KeyCode::Down
+                } else {
+                    KeyCode::Char('j')
+                };
+                app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+                app.refresh_log(visible);
+                app.view
+                    .render(area, &mut ratatui::buffer::Buffer::empty(area));
+            } else {
+                wheel(&mut app, MouseEventKind::ScrollDown);
+            }
+        }
+        assert!(log_detail_at(&app, area).contains("Transcript copy 18"));
+    }
+}
+
+#[test]
 fn bottom_border_loads_first_event_of_whole_log() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let (_dir, mut app) = fixture();
