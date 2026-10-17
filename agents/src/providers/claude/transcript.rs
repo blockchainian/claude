@@ -373,10 +373,21 @@ fn prompt_text(record: &Value) -> Option<String> {
             })
         }
         "attachment" => {
-            let attachment = &record["attachment"];
-            (attachment["type"] == "queued_command" && attachment["commandMode"] == "prompt")
-                .then(|| attachment["prompt"].as_str().map(str::to_owned))
-                .flatten()
+            let prompt = super::images::queued_prompt(record)?;
+            prompt
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| {
+                    Some(
+                        prompt
+                            .as_array()?
+                            .iter()
+                            .filter(|block| block["type"] == "text")
+                            .filter_map(|block| block["text"].as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                })
                 .map(typed_text)
         }
         _ => None,
@@ -588,6 +599,7 @@ fn read_messages(
     let mut effort_found = false;
     let mut tool_results = HashSet::new();
     let mut images = super::images::Companions::default();
+    let mut image_error = None;
     walk_records(file, start, bytes, sidechains, |record| {
         if record["type"] == "assistant" {
             if !model_found && let Some(model) = assistant_model(&record) {
@@ -666,7 +678,13 @@ fn read_messages(
         {
             summary.detail_sources[2] = record["uuid"].as_str().map(str::to_owned);
             summary.prompt = printable(&prompt);
-            summary.prompt_images = images.take(&record, &summary.prompt);
+            match images.take(&record, &summary.prompt) {
+                Ok(images) => summary.prompt_images = images,
+                Err(error) => {
+                    image_error = Some(error);
+                    return false;
+                }
+            }
             summary.prompt_at = at;
             summary.turn_messages = turn_messages;
             prompt_found = true;
@@ -724,6 +742,9 @@ fn read_messages(
         }
         true
     })?;
+    if let Some(error) = image_error {
+        return Err(error);
+    }
     summary.completed_background = background.completed.clone();
     summary.queued = queued_prompts(operations);
     Ok(background)

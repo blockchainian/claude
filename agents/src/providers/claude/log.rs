@@ -142,6 +142,9 @@ pub fn tail_session(path: &Path, count: usize, sidechains: bool) -> io::Result<V
         log.offset = offset;
         log.record(record, count)
     })?;
+    if let Some(error) = log.error {
+        return Err(error);
+    }
     let mut events: Vec<_> = log.entries.into_iter().map(|entry| entry.event).collect();
     events.reverse();
     let mut previous_end = None;
@@ -204,7 +207,7 @@ impl Reader {
             .collect()
     }
 
-    fn replay(&mut self, start: u64) -> usize {
+    fn replay(&mut self, start: u64) -> io::Result<usize> {
         let retained = self.entries.partition_point(|entry| entry.offset < start);
         let replaced = self.entries.len() - retained;
         self.entries.truncate(retained);
@@ -221,6 +224,9 @@ impl Reader {
             log.offset = *offset;
             log.record(record.clone(), usize::MAX);
         }
+        if let Some(error) = log.error {
+            return Err(error);
+        }
         self.entries.extend(log.entries.into_iter().rev());
         let mut previous_end = None;
         for entry in &mut self.entries {
@@ -233,7 +239,7 @@ impl Reader {
                 _ => Some(event.started_at),
             };
         }
-        replaced
+        Ok(replaced)
     }
 
     fn affected_start(&self, appended: &[(u64, serde_json::Value)]) -> u64 {
@@ -241,7 +247,14 @@ impl Reader {
         let mut key = None;
         let mut requests = std::collections::HashMap::new();
         let mut prompts = std::collections::HashMap::new();
+        let mut queued = std::collections::HashMap::new();
         for (offset, record) in &self.records {
+            if record["type"] == "queue-operation"
+                && record["operation"] == "enqueue"
+                && let Some(text) = record["content"].as_str()
+            {
+                queued.entry(text).or_insert(*offset);
+            }
             if record["type"] == "assistant" {
                 let next = record["message"]["id"]
                     .as_str()
@@ -272,6 +285,24 @@ impl Reader {
         }
         let mut start = group.unwrap_or(self.read_offset);
         for (_, record) in appended {
+            if super::images::queued_prompt(record).is_some()
+                && let Some(id) = record["attachment"]["source_uuid"].as_str()
+                && let Some(text) =
+                    self.records
+                        .iter()
+                        .chain(appended.iter())
+                        .rev()
+                        .find_map(|(_, removal)| {
+                            (removal["type"] == "queue-operation"
+                                && removal["operation"] == "remove"
+                                && removal["commandUuid"] == id)
+                                .then(|| removal["content"].as_str())
+                                .flatten()
+                        })
+                && let Some(offset) = queued.get(text)
+            {
+                start = start.min(*offset);
+            }
             for block in record["message"]["content"]
                 .as_array()
                 .into_iter()
@@ -385,14 +416,14 @@ impl Reader {
                     self.records.pop();
                 }
                 self.records.extend(appended);
-                replaced = self.replay(affected);
+                replaced = self.replay(affected)?;
             }
         }
         let after_append = self.entries.len();
         let parsed_before_older = parsed_bytes;
         while self.oldest_offset > 0 && self.entries.len() < requested {
             parsed_bytes += self.older_page(&mut file)?;
-            self.replay(self.oldest_offset);
+            self.replay(self.oldest_offset)?;
         }
         if parsed_bytes > parsed_before_older {
             replaced = replaced.max(shown_before);
@@ -438,6 +469,7 @@ struct Log {
     offset: u64,
     companions: std::collections::HashMap<String, Vec<crate::log::SourceRecord>>,
     images: super::images::Companions,
+    error: Option<io::Error>,
     entries: Vec<Entry>,
     results: std::collections::HashMap<String, ResultAt>,
     assistant: Option<String>,
@@ -769,6 +801,16 @@ impl Log {
     }
 
     fn record(&mut self, record: serde_json::Value, count: usize) -> bool {
+        match self.record_result(record, count) {
+            Ok(keep_reading) => keep_reading,
+            Err(error) => {
+                self.error = Some(error);
+                false
+            }
+        }
+    }
+
+    fn record_result(&mut self, record: serde_json::Value, count: usize) -> io::Result<bool> {
         self.images.record(&record);
         if record["turnCompanion"] == true
             && let Some(id) = record["promptId"].as_str()
@@ -790,7 +832,7 @@ impl Log {
                 self.batch = None;
                 self.assistant = key;
                 if self.ready(count) {
-                    return false;
+                    return Ok(false);
                 }
             }
         }
@@ -799,7 +841,7 @@ impl Log {
             .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
             .map(|at| at.with_timezone(&Utc))
         else {
-            return !self.ready(count);
+            return Ok(!self.ready(count));
         };
         let content = &record["message"]["content"];
         match record["type"].as_str() {
@@ -863,7 +905,7 @@ impl Log {
                             record["uuid"].as_str().map(str::to_owned);
                         self.entries.last_mut().unwrap().event.sender = sender;
                     } else if !text.trim_start().starts_with('<') {
-                        let images = self.images.take(&record, &text);
+                        let images = self.images.take(&record, &text)?;
                         let kind = if record["isCompactSummary"] == true {
                             Kind::Compaction
                         } else {
@@ -919,7 +961,7 @@ impl Log {
             Some("queue-operation") if record["operation"] == "enqueue" => {
                 if let Some(text) = record["content"].as_str() {
                     if self.notification(text, at, record["uuid"].as_str()) {
-                        return !self.ready(count);
+                        return Ok(!self.ready(count));
                     }
                     let (kind, body) = if text.starts_with('<') {
                         (Kind::QueuedSystem, text)
@@ -929,7 +971,9 @@ impl Log {
                     let (sender, body) = wrapped_message(body)
                         .map(|(_, sender, body)| (sender, body))
                         .unwrap_or_else(|| (None, body.to_owned()));
+                    let images = self.images.take(&record, &body)?;
                     self.push(kind, body, at);
+                    self.entries.last_mut().unwrap().event.images = images;
                     self.entries.last_mut().unwrap().event.source =
                         record["uuid"].as_str().map(str::to_owned);
                     self.entries.last_mut().unwrap().event.sender = sender;
@@ -937,7 +981,7 @@ impl Log {
             }
             _ => {}
         }
-        !self.ready(count)
+        Ok(!self.ready(count))
     }
 
     fn notification(&mut self, text: &str, at: DateTime<Utc>, source: Option<&str>) -> bool {
@@ -1679,6 +1723,49 @@ pub(crate) mod tests {
                 .unwrap();
             assert_eq!(call.input.len(), 1, "{name}");
         }
+    }
+
+    #[test]
+    fn queued_prompt_images_follow_delivery_in_incremental_and_tail_reads() {
+        // Transcript e9f4ef31, record 4800; only the PNG and local cwd are reduced.
+        let delivery: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-queued-image.jsonl"
+        ))
+        .unwrap();
+        let text = delivery["attachment"]["prompt"][0]["text"]
+            .as_str()
+            .unwrap();
+        let enqueue = json!({
+            "type": "queue-operation", "operation": "enqueue", "content": text,
+            "timestamp": "2026-10-17T02:58:05.000Z"
+        });
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{enqueue}").unwrap();
+        let mut reader = Reader::new(file.path().to_owned(), false);
+        assert!(reader.refresh(20).unwrap().events[0].images.is_empty());
+        // Queue records identify absorbed commands on removal, not enqueue.
+        let remove = json!({
+            "type": "queue-operation", "operation": "remove", "content": text,
+            "commandUuid": delivery["attachment"]["source_uuid"],
+            "reason": "absorbed_mid_turn", "timestamp": delivery["timestamp"]
+        });
+        writeln!(file, "{remove}").unwrap();
+        reader.refresh(20).unwrap();
+        writeln!(file, "{delivery}").unwrap();
+        let events = reader.refresh(20).unwrap().events;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, Kind::QueuedUser);
+        assert_eq!(events[0].body, text);
+        assert_eq!(events[0].images.len(), 1);
+        assert_eq!(events[0].images[0].label, "[Image #1]");
+        let bytes = std::fs::read(&events[0].images[0].path).unwrap();
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_eq!(super::tail(file.path(), 20).unwrap(), events);
+        let summary =
+            super::super::transcript::read(file.path(), file.as_file().metadata().unwrap().len())
+                .unwrap();
+        assert_eq!(summary.prompt, text);
+        assert_eq!(summary.prompt_images, events[0].images);
     }
 
     #[test]
