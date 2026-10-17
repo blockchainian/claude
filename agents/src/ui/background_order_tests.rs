@@ -60,6 +60,17 @@ fn background_children_keep_start_order_through_provider_refreshes() {
     // Actual processes keep the writer descriptors and exclusive locks alive.
     let executable = root.join("codex-bg-test");
     fs::copy("/bin/sleep", &executable).unwrap();
+    // Relocated platform binaries need a local signature to run on macOS.
+    let signed = Command::new("codesign")
+        .args(["--force", "--sign", "-"])
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        signed.status.success(),
+        "cannot sign writer process: {}",
+        String::from_utf8_lossy(&signed.stderr)
+    );
     let mut writers = Writers(Vec::new());
     for (id, _, _) in &threads {
         let path = codex.join(format!("{id}.jsonl"));
