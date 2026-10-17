@@ -93,10 +93,7 @@ impl PendingAsks {
                     session.id.clone(),
                     block.clone(),
                 );
-                let since = fs::metadata(&path)
-                    .and_then(|m| m.modified())
-                    .map(DateTime::<Utc>::from)
-                    .unwrap_or(epoch);
+                let since = Utc::now();
                 let result = thread::Builder::new()
                     .name("agents-question-screen".into())
                     .spawn(move || {

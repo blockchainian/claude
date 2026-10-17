@@ -80,6 +80,14 @@ Crucial persistence observation: while Escape was visible and registry waiting, 
 - A second attach client works; both see and control shared focus.
 - A pending tool_use is not necessarily persisted while waiting; live transcript-only detection is incomplete on this run.
 
-Permission prompts and ExitPlanMode were not exercised: this phase restricted tools to AskUserQuestion. No answer transport or UI is implemented.
+Permission prompts and ExitPlanMode were not exercised: this phase restricted tools to AskUserQuestion.
 
 Cleanup: both probe jobs stopped with `claude stop` and removed with `claude rm`; isolated tmux servers terminated. No persistent Claude job remains.
+
+## Multi-select Other
+
+Claude Code 2.1.302, Haiku 5.5 low effort, isolated `/tmp` cwd, AskUserQuestion only and external MCP disabled. Disposable jobs `1f1391c0` and the later production-flow capture were stopped and removed. `multi-other/` contains verbatim attach screens plus the original AskUserQuestion/tool_result records; unrelated transcript metadata is omitted.
+
+Verified sequence: digit 1 checks Red; digit 4 checks Other without moving focus; Down three times focuses the inline Other editor; bracketed paste types `custom multi note`; Tab focuses the unnumbered Submit row; Enter advances to review; Enter on Submit answers returns `{"Transport multi Other?":"Red, custom multi note"}`. Each navigation is observed before the next key. In particular, Tab from the active Other editor does not directly open review.
+
+`production/` captures the actual production answer state machine immediately before every delivered input, for single, multi, two-question, Other and multi Other. The replay test runs that same state transition function over these recorded screens; it does not substitute a terminal implementation.

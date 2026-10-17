@@ -47,7 +47,7 @@ impl Probe {
     }
     fn new() -> io::Result<Self> {
         let config = PathBuf::from(std::env::var_os("HOME").ok_or_else(mismatch)?).join(".claude");
-        let cwd = tempfile::tempdir()?;
+        let cwd = tempfile::tempdir_in("/tmp")?;
         let trust_path = config.with_extension("json");
         let mut value: Value = serde_json::from_slice(&fs::read(&trust_path)?)?;
         let key = cwd.path().canonicalize()?.to_string_lossy().into_owned();
@@ -63,7 +63,10 @@ impl Probe {
         })
     }
     fn start(&mut self) -> io::Result<()> {
-        let prompt = "This is an isolated terminal answer transport probe. Use ONLY AskUserQuestion. Make exactly FOUR calls in order and wait for each answer before the next. Do not answer yourself. Use exact question/header text. Every question has options Red (description Red choice), Green (description Green choice), Blue (description Blue choice). Call 1: one question question='Transport single?' header='Single' multiSelect=false. Call 2: one question question='Transport multi?' header='Multi' multiSelect=true. Call 3: two questions in ONE call: question='Transport first?' header='First' multiSelect=false and question='Transport second?' header='Second' multiSelect=false. Call 4: one question question='Transport other?' header='Other' multiSelect=false. After all answers reply DONE and stop. This explicitly requests testing interactive question behavior.";
+        let prompt = "This is an isolated terminal answer transport probe. Use ONLY AskUserQuestion. Make exactly FIVE calls in order and wait for each answer before the next. Do not answer yourself. Use exact question/header text. Every question has options Red (description Red choice), Green (description Green choice), Blue (description Blue choice). Call 1: one question question='Transport single?' header='Single' multiSelect=false. Call 2: one question question='Transport multi?' header='Multi' multiSelect=true. Call 3: two questions in ONE call: question='Transport first?' header='First' multiSelect=false and question='Transport second?' header='Second' multiSelect=false. Call 4: one question question='Transport other?' header='Other' multiSelect=false. Call 5: one question question='Transport multi Other?' header='MultiOther' multiSelect=true. After all answers reply DONE and stop. This explicitly requests testing interactive question behavior.";
+        self.start_prompt(prompt)
+    }
+    fn start_prompt(&mut self, prompt: &str) -> io::Result<()> {
         let output = self.command(&[
             "--bg",
             "--model",
@@ -163,6 +166,10 @@ fn ask_live_single_multi_two_other() {
             "Transport other?",
             vec![vec!["user_note: custom transport note"]],
         ),
+        (
+            "Transport multi Other?",
+            vec![vec!["Red", "user_note: custom multi note"]],
+        ),
     ] {
         let state = probe.waiting(text).unwrap();
         let id = state["sessionId"].as_str().unwrap().to_owned();
@@ -214,7 +221,141 @@ fn ask_live_single_multi_two_other() {
                 .map(|values| values.into_iter().map(str::to_owned).collect())
                 .collect(),
         );
+        if let Some(directory) = std::env::var_os("AGENTS_ASK_CAPTURE") {
+            fs::write(
+                PathBuf::from(directory).join("transcript.jsonl"),
+                fs::read(&transcript).unwrap(),
+            )
+            .unwrap();
+        }
         eprintln!("verified live {text}");
     }
+    probe.cleanup().unwrap();
+}
+
+#[test]
+#[ignore = "probes billable disposable Claude multi Other key map and records actual screens"]
+fn ask_live_multi_other_keymap() {
+    let mut probe = Probe::new().unwrap();
+    probe.start_prompt("Use ONLY AskUserQuestion. This is an explicit interactive key-map probe. Ask exactly one multiSelect=true question with question 'Transport multi Other?' header 'MultiOther' and options Red (description Red choice), Green (description Green choice), Blue (description Blue choice). Wait for the answer, then reply DONE and stop.").unwrap();
+    let state = probe.waiting("Transport multi Other?").unwrap();
+    let id = state["sessionId"].as_str().unwrap();
+    let source = &state["block"]["questions"][0];
+    let mut value = source.clone();
+    value["header"] = json!("MultiOther");
+    let mut terminal = Terminal::spawn(probe.job.as_ref().unwrap(), probe.cwd.path()).unwrap();
+    terminal
+        .wait_allowing(
+            |screen| parse_page(screen, &value).is_ok(),
+            Some("Enter to select"),
+        )
+        .unwrap();
+    let directory = std::env::temp_dir().join("agents-ask-multi-other");
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("01-initial.screen.txt"), terminal.screen()).unwrap();
+    terminal.write(b"1").unwrap();
+    terminal
+        .wait_allowing(|screen| checked(screen) == vec![1], Some("Enter to select"))
+        .unwrap();
+    fs::write(
+        directory.join("01-red-selected.screen.txt"),
+        terminal.screen(),
+    )
+    .unwrap();
+    assert!(parse_page(&terminal.screen(), &value).is_ok());
+    terminal.write(b"4").unwrap();
+    terminal
+        .wait_allowing(
+            |screen| checked(screen) == vec![1, 4],
+            Some("Enter to select"),
+        )
+        .unwrap();
+    fs::write(
+        directory.join("02-digit-other.screen.txt"),
+        terminal.screen(),
+    )
+    .unwrap();
+    for n in 2..=4 {
+        assert!(parse_page(&terminal.screen(), &value).is_ok());
+        terminal.write(b"\x1b[B").unwrap();
+        terminal
+            .wait_allowing(
+                |screen| {
+                    body(screen).is_ok_and(|page| {
+                        page.lines()
+                            .any(|line| numbered(line).is_some_and(|(index, f, _)| index == n && f))
+                    })
+                },
+                Some("Enter to select"),
+            )
+            .unwrap();
+        fs::write(
+            directory.join(format!("03-focus-{n}.screen.txt")),
+            terminal.screen(),
+        )
+        .unwrap();
+    }
+    fs::write(
+        directory.join("03-other-focused.screen.txt"),
+        terminal.screen(),
+    )
+    .unwrap();
+    terminal.paste("custom multi note").unwrap();
+    terminal
+        .wait_allowing(
+            |screen| screen.contains("custom multi note"),
+            Some("Enter to select"),
+        )
+        .unwrap();
+    fs::write(directory.join("04-pasted.screen.txt"), terminal.screen()).unwrap();
+    assert!(parse_page(&terminal.screen(), &value).is_ok());
+    terminal.write(b"\t").unwrap();
+    terminal
+        .wait_allowing(
+            |screen| {
+                screen.lines().any(|line| {
+                    line.trim()
+                        .strip_prefix('❯')
+                        .is_some_and(|s| s.trim() == "Submit")
+                })
+            },
+            Some("Enter to select"),
+        )
+        .unwrap();
+    fs::write(
+        directory.join("05-submit-focused.screen.txt"),
+        terminal.screen(),
+    )
+    .unwrap();
+    assert!(parse_page(&terminal.screen(), &value).is_ok());
+    terminal.write(b"\r").unwrap();
+    terminal
+        .wait_allowing(
+            |screen| screen.contains("Review your answers"),
+            Some("Enter to select"),
+        )
+        .unwrap();
+    fs::write(directory.join("06-review.screen.txt"), terminal.screen()).unwrap();
+    eprintln!("multi Other review:\n{}", terminal.screen());
+    assert!(
+        terminal
+            .screen()
+            .lines()
+            .any(|line| line.trim() == "❯ 1. Submit answers")
+    );
+    terminal.write(b"\r").unwrap();
+    let path = probe.transcript(id).unwrap();
+    terminal
+        .wait_allowing(
+            |_| {
+                fs::read_to_string(&path)
+                    .is_ok_and(|text| text.contains("\\\"Transport multi Other?\\\"=\\\""))
+            },
+            None,
+        )
+        .unwrap();
+    fs::write(directory.join("transcript.jsonl"), fs::read(&path).unwrap()).unwrap();
+    eprintln!("multi Other artifacts {}", directory.display());
+    terminal.detach().unwrap();
     probe.cleanup().unwrap();
 }

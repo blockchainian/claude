@@ -247,10 +247,15 @@ fn verify_result(text: &str, ask: &Ask, expected: &BTreeMap<String, String>) -> 
                             .as_array()
                             .is_some_and(|qs| {
                                 qs.len() == questions.len()
-                                    && qs
-                                        .iter()
-                                        .zip(questions)
-                                        .all(|(v, q)| v["question"] == q.text)
+                                    && qs.iter().zip(questions).all(|(v, q)| {
+                                        v["question"] == q.text
+                                            && v["header"] == q.header
+                                            && v["multiSelect"].as_bool() == Some(q.multi)
+                                            && serde_json::from_value::<Vec<QuestionOption>>(
+                                                v["options"].clone(),
+                                            )
+                                            .is_ok_and(|options| options == q.options)
+                                    })
                             })))
         });
         if !matching {
@@ -276,6 +281,192 @@ fn verify_result(text: &str, ask: &Ask, expected: &BTreeMap<String, String>) -> 
     Ok(false)
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum Delivery {
+    Keys(Vec<u8>),
+    Paste(String),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Phase {
+    Select,
+    OtherFocus,
+    OtherPasted,
+    OtherSubmitRow,
+    Review,
+    Done,
+}
+#[derive(Clone)]
+struct AnswerFlow<'a> {
+    ask: &'a Ask,
+    answer: &'a Answer,
+    expected: BTreeMap<String, String>,
+    page: usize,
+    choice: usize,
+    selected: Vec<usize>,
+    focus: Option<usize>,
+    phase: Phase,
+}
+impl<'a> AnswerFlow<'a> {
+    fn new(ask: &'a Ask, answer: &'a Answer) -> io::Result<Self> {
+        Ok(Self {
+            ask,
+            answer,
+            expected: raw_answers(ask, answer)?,
+            page: 0,
+            choice: 0,
+            selected: Vec::new(),
+            focus: None,
+            phase: Phase::Select,
+        })
+    }
+    fn advance_page(&mut self) {
+        let AskKind::Questions { questions, .. } = &self.ask.kind;
+        let review = questions.len() > 1 || questions[self.page].multi;
+        self.page += 1;
+        self.choice = 0;
+        self.selected.clear();
+        self.focus = None;
+        self.phase = if self.page < questions.len() {
+            Phase::Select
+        } else if review {
+            Phase::Review
+        } else {
+            Phase::Done
+        };
+    }
+    fn next(&self, screen: &str) -> io::Result<(Self, Delivery)> {
+        let mut next = self.clone();
+        if self.phase == Phase::Review {
+            if !screen.contains("Review your answers")
+                || !screen
+                    .lines()
+                    .any(|line| line.trim() == "❯ 1. Submit answers")
+                || !self.expected.iter().all(|(q, a)| {
+                    normalized(screen).contains(&format!("● {} → {}", normalized(q), normalized(a)))
+                })
+            {
+                return Err(mismatch());
+            }
+            next.phase = Phase::Done;
+            return Ok((next, Delivery::Keys(vec![b'\r'])));
+        }
+        let AskKind::Questions { questions, .. } = &self.ask.kind;
+        let q = questions.get(self.page).ok_or_else(mismatch)?;
+        if parse_page(screen, &question_value(q))? != *q || checked(screen) != self.selected {
+            return Err(mismatch());
+        }
+        let choices = &self.answer.answers[&q.id].answers;
+        if self.phase == Phase::OtherSubmitRow {
+            if !body(screen)?.lines().any(|line| {
+                line.trim()
+                    .strip_prefix('❯')
+                    .is_some_and(|s| s.trim() == "Submit")
+            }) {
+                return Err(mismatch());
+            }
+            next.advance_page();
+            return Ok((next, Delivery::Keys(vec![b'\r'])));
+        }
+        let focus = body(screen)?
+            .lines()
+            .filter_map(numbered)
+            .find(|(_, f, _)| *f)
+            .map(|(n, _, _)| n)
+            .ok_or_else(mismatch)?;
+        if self.focus.is_some_and(|expected| focus != expected) {
+            return Err(mismatch());
+        }
+        if matches!(self.phase, Phase::OtherFocus | Phase::OtherPasted) {
+            let note = choices[self.choice]
+                .strip_prefix("user_note: ")
+                .ok_or_else(mismatch)?;
+            let other = q.options.len() + 1;
+            if focus != other {
+                if self.phase != Phase::OtherFocus || focus > other {
+                    return Err(mismatch());
+                }
+                next.focus = Some(focus + 1);
+                return Ok((next, Delivery::Keys(b"\x1b[B".to_vec())));
+            }
+            if self.phase == Phase::OtherFocus {
+                next.phase = Phase::OtherPasted;
+                return Ok((next, Delivery::Paste(note.to_owned())));
+            }
+            let page = body(screen)?;
+            let lines: Vec<_> = page.lines().collect();
+            let row = lines
+                .iter()
+                .position(|line| numbered(line).is_some_and(|(n, f, _)| n == other && f))
+                .ok_or_else(mismatch)?;
+            let first = numbered(lines[row])
+                .unwrap()
+                .2
+                .trim_start_matches("[✔] ")
+                .trim_start_matches("[ ] ");
+            let tail = lines
+                .iter()
+                .skip(row + 1)
+                .take_while(|line| !line.trim().starts_with('─') && line.trim() != "Submit")
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if normalized(&format!("{first} {tail}")) != normalized(note) {
+                return Err(mismatch());
+            }
+            if q.multi {
+                next.phase = Phase::OtherSubmitRow;
+                next.focus = None;
+            } else {
+                next.advance_page();
+            }
+            return Ok((
+                next,
+                Delivery::Keys(if q.multi { vec![b'\t'] } else { vec![b'\r'] }),
+            ));
+        }
+        if !focused_option(screen, q) {
+            return Err(mismatch());
+        }
+        if self.choice == choices.len() {
+            if !q.multi {
+                return Err(mismatch());
+            }
+            next.advance_page();
+            return Ok((next, Delivery::Keys(vec![b'\t'])));
+        }
+        let choice = &choices[self.choice];
+        let n = if choice.starts_with("user_note: ") {
+            if self.choice + 1 != choices.len() {
+                return Err(mismatch());
+            }
+            next.phase = Phase::OtherFocus;
+            next.focus = Some(if q.multi { focus } else { q.options.len() + 1 });
+            q.options.len() + 1
+        } else {
+            q.options
+                .iter()
+                .position(|o| &o.label == choice)
+                .ok_or_else(mismatch)?
+                + 1
+        };
+        if n > 9 {
+            return Err(mismatch());
+        }
+        if q.multi {
+            next.selected.push(n);
+            next.selected.sort_unstable();
+        }
+        if next.phase == Phase::Select {
+            if q.multi {
+                next.choice += 1;
+            } else {
+                next.advance_page();
+            }
+        }
+        Ok((next, Delivery::Keys(vec![b'0' + n as u8])))
+    }
+}
+
 impl Terminal {
     pub(super) fn answer_questions(
         &mut self,
@@ -284,132 +475,47 @@ impl Terminal {
         transcript: &Path,
     ) -> io::Result<()> {
         let expected = raw_answers(ask, answer)?;
-        let AskKind::Questions { questions, .. } = &ask.kind;
-        for (index, q) in questions.iter().enumerate() {
-            let value = question_value(q);
-            self.wait_allowing(
-                |screen| parse_page(screen, &value).is_ok(),
-                Some("Enter to select"),
-            )?;
-            let current = self.screen();
-            if !focused_option(&current, q) || !checked(&current).is_empty() {
-                return Err(mismatch());
-            }
-            let mut selected = Vec::new();
-            for choice in &answer.answers[&q.id].answers {
-                // Re-read the PTY immediately before each step to catch another client's changes.
-                self.read(Duration::from_millis(25))?;
-                let screen = self.screen();
-                if parse_page(&screen, &value)? != *q
-                    || !focused_option(&screen, q)
-                    || checked(&screen) != selected
-                {
-                    return Err(mismatch());
-                }
-                if let Some(note) = choice.strip_prefix("user_note: ") {
-                    if q.multi {
-                        return Err(io::Error::other(
-                            "Claude multi-select Other is not verified",
-                        ));
-                    }
-                    self.write((q.options.len() + 1).to_string().as_bytes())?;
-                    self.wait_allowing(
-                        |screen| {
-                            body(screen).is_ok_and(|page| {
-                                page.lines().any(|line| {
-                                    numbered(line)
-                                        .is_some_and(|(n, f, _)| f && n == q.options.len() + 1)
-                                })
-                            })
-                        },
-                        Some("Enter to select"),
-                    )?;
-                    self.read(Duration::from_millis(25))?;
-                    if parse_page(&self.screen(), &value)? != *q {
-                        return Err(mismatch());
-                    }
-                    self.paste(note)?;
-                    self.wait_allowing(
-                        |screen| {
-                            body(screen).is_ok_and(|page| {
-                                page.lines().any(|line| {
-                                    numbered(line).is_some_and(|(n, f, s)| {
-                                        f && n == q.options.len() + 1 && s == note
-                                    })
-                                })
-                            })
-                        },
-                        Some("Enter to select"),
-                    )?;
-                    self.read(Duration::from_millis(25))?;
-                    let screen = self.screen();
-                    if parse_page(&screen, &value)? != *q
-                        || !body(&screen)?.lines().any(|line| {
-                            numbered(line)
-                                .is_some_and(|(n, f, s)| f && n == q.options.len() + 1 && s == note)
-                        })
-                    {
-                        return Err(mismatch());
-                    }
-                    self.write(b"\r")?;
-                } else {
-                    let n = q
-                        .options
-                        .iter()
-                        .position(|o| o.label == *choice)
-                        .ok_or_else(mismatch)?
-                        + 1;
-                    if n > 9 {
-                        return Err(mismatch());
-                    }
-                    self.write(n.to_string().as_bytes())?;
-                    if q.multi {
-                        selected.push(n);
-                        selected.sort_unstable();
-                        self.wait_allowing(
-                            |screen| {
-                                parse_page(screen, &value).is_ok() && checked(screen) == selected
-                            },
-                            Some("Enter to select"),
-                        )?;
-                    }
-                }
-            }
-            if q.multi {
-                self.read(Duration::from_millis(25))?;
-                if parse_page(&self.screen(), &value)? != *q || checked(&self.screen()) != selected
-                {
-                    return Err(mismatch());
-                }
-                self.write(b"\t")?;
-            }
-            if index + 1 == questions.len() && (questions.len() > 1 || q.multi) {
-                self.wait_allowing(
-                    |screen| screen.contains("Review your answers"),
-                    Some("Enter to select"),
+        let mut confirmation = File::open(transcript)?;
+        let mut offset = crate::jsonl::complete_end(&mut confirmation)?;
+        let mut flow = AnswerFlow::new(ask, answer)?;
+        #[cfg(test)]
+        let mut capture_index = 0;
+        while flow.phase != Phase::Done {
+            self.wait_allowing(|screen| flow.next(screen).is_ok(), Some("Enter to select"))?;
+            self.read(Duration::from_millis(25))?;
+            let (next, delivery) = flow.next(&self.screen())?;
+            #[cfg(test)]
+            if let Some(directory) = std::env::var_os("AGENTS_ASK_CAPTURE") {
+                let directory = std::path::PathBuf::from(directory);
+                std::fs::create_dir_all(&directory)?;
+                let AskKind::Questions { questions, .. } = &ask.kind;
+                std::fs::write(
+                    directory.join(format!(
+                        "{}-{capture_index:02}.screen.txt",
+                        questions[0].header
+                    )),
+                    self.screen(),
                 )?;
-                self.read(Duration::from_millis(25))?;
-                let screen = self.screen();
-                if !screen
-                    .lines()
-                    .any(|line| line.trim() == "❯ 1. Submit answers")
-                    || !expected.iter().all(|(q, a)| {
-                        normalized(&screen).contains(&format!(
-                            "● {} → {}",
-                            normalized(q),
-                            normalized(a)
-                        ))
-                    })
-                {
-                    return Err(mismatch());
-                }
-                self.write(b"\r")?;
+                capture_index += 1;
             }
+            match delivery {
+                Delivery::Keys(keys) => self.write(&keys)?,
+                Delivery::Paste(text) => self.paste(&text)?,
+            }
+            flow = next;
         }
         let deadline = Instant::now() + READY_TIMEOUT;
         loop {
-            let text = std::fs::read_to_string(transcript)?;
-            if verify_result(&text, ask, &expected)? {
+            let mut result = Ok(false);
+            offset = crate::jsonl::read_lines(&mut confirmation, offset, |line| {
+                if !matches!(result, Ok(false)) {
+                    return;
+                }
+                result = std::str::from_utf8(line)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+                    .and_then(|line| verify_result(&format!("{line}\n"), ask, &expected));
+            })?;
+            if result? {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -440,8 +546,8 @@ mod tests {
             .find(|q| q["question"] == text)
             .unwrap()
     }
-    fn fixture_ask(text: &str) -> (Ask, BTreeMap<String, String>) {
-        let event: Value = CAPTURE
+    fn fixture_ask(capture: &str, text: &str) -> (Ask, BTreeMap<String, String>) {
+        let event: Value = capture
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
             .find(|event| {
@@ -489,7 +595,7 @@ mod tests {
             "Probe first page?",
             "Probe custom text?",
         ] {
-            let (ask, expected) = fixture_ask(text);
+            let (ask, expected) = fixture_ask(CAPTURE, text);
             assert!(verify_result(CAPTURE, &ask, &expected).unwrap(), "{text}");
             let mut wrong = expected.clone();
             wrong.insert(text.to_owned(), "different answer".into());
@@ -498,7 +604,7 @@ mod tests {
     }
     #[test]
     fn transcript_verification_waits_for_complete_jsonl_record() {
-        let (ask, expected) = fixture_ask("Probe single choice?");
+        let (ask, expected) = fixture_ask(CAPTURE, "Probe single choice?");
         assert!(!verify_result("{\"type\":", &ask, &expected).unwrap());
     }
     #[test]
@@ -526,6 +632,131 @@ mod tests {
             assert!(focused_option(screen, &q));
             assert_eq!(checked(screen), expected);
         }
+    }
+
+    #[test]
+    fn recorded_screens_replay_production_delivery_flow() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-attach/ask/production");
+        let capture =
+            include_str!("../../../tests/fixtures/claude-attach/ask/production/transcript.jsonl");
+        let keys = |values: &[&[u8]]| {
+            values
+                .iter()
+                .map(|value| Delivery::Keys(value.to_vec()))
+                .collect::<Vec<_>>()
+        };
+        for (header, text, values, expected) in [
+            (
+                "Single",
+                "Transport single?",
+                vec![vec!["Green"]],
+                keys(&[b"2"]),
+            ),
+            (
+                "Multi",
+                "Transport multi?",
+                vec![vec!["Blue", "Red"]],
+                keys(&[b"3", b"1", b"\t", b"\r"]),
+            ),
+            (
+                "First",
+                "Transport first?",
+                vec![vec!["Green"], vec!["Green"]],
+                keys(&[b"2", b"2", b"\r"]),
+            ),
+            (
+                "Other",
+                "Transport other?",
+                vec![vec!["user_note: custom transport note"]],
+                vec![
+                    Delivery::Keys(b"4".to_vec()),
+                    Delivery::Paste("custom transport note".into()),
+                    Delivery::Keys(b"\r".to_vec()),
+                ],
+            ),
+            (
+                "MultiOther",
+                "Transport multi Other?",
+                vec![vec!["Red", "user_note: custom multi note"]],
+                vec![
+                    Delivery::Keys(b"1".to_vec()),
+                    Delivery::Keys(b"4".to_vec()),
+                    Delivery::Keys(b"\x1b[B".to_vec()),
+                    Delivery::Keys(b"\x1b[B".to_vec()),
+                    Delivery::Keys(b"\x1b[B".to_vec()),
+                    Delivery::Paste("custom multi note".into()),
+                    Delivery::Keys(b"\t".to_vec()),
+                    Delivery::Keys(b"\r".to_vec()),
+                    Delivery::Keys(b"\r".to_vec()),
+                ],
+            ),
+        ] {
+            let (ask, result) = fixture_ask(capture, text);
+            let AskKind::Questions { questions, .. } = &ask.kind;
+            let answer = Answer {
+                answers: questions
+                    .iter()
+                    .zip(values)
+                    .map(|(q, answers)| {
+                        (
+                            q.id.clone(),
+                            crate::ask::QuestionAnswer {
+                                answers: answers.into_iter().map(str::to_owned).collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+            };
+            let mut flow = AnswerFlow::new(&ask, &answer).unwrap();
+            for (index, expected) in expected.into_iter().enumerate() {
+                let screen = std::fs::read_to_string(
+                    directory.join(format!("{header}-{index:02}.screen.txt")),
+                )
+                .unwrap();
+                let (next, delivery) = flow
+                    .next(&screen)
+                    .unwrap_or_else(|error| panic!("{header} step {index}: {error}"));
+                assert_eq!(delivery, expected, "{header} step {index}");
+                assert!(flow.next("different screen").is_err());
+                flow = next;
+            }
+            assert_eq!(flow.phase, Phase::Done, "{header}");
+            assert_eq!(raw_answers(&ask, &answer).unwrap(), result);
+            assert!(verify_result(capture, &ask, &result).unwrap());
+        }
+    }
+    #[test]
+    fn recorded_result_rejects_stale_epoch_and_changed_question_signature() {
+        let (mut ask, expected) = fixture_ask(CAPTURE, "Probe single choice?");
+        ask.id = "screen:recorded:1".into();
+        assert!(verify_result(CAPTURE, &ask, &expected).unwrap());
+        ask.since = "2026-10-18T00:00:00Z".parse().unwrap();
+        assert!(!verify_result(CAPTURE, &ask, &expected).unwrap());
+        ask.since = "2026-10-17T04:00:00Z".parse().unwrap();
+        let AskKind::Questions { questions, .. } = &mut ask.kind;
+        questions[0].header = "Different".into();
+        assert!(!verify_result(CAPTURE, &ask, &expected).unwrap());
+    }
+    #[test]
+    fn recorded_rejected_result_is_an_error() {
+        let event: Value = CAPTURE
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|v| {
+                v["message"]["content"].as_array().is_some_and(|items| {
+                    items
+                        .iter()
+                        .any(|item| item["type"] == "tool_result" && item["is_error"] == true)
+                })
+            })
+            .unwrap();
+        let (mut ask, expected) = fixture_ask(CAPTURE, "Probe single choice?");
+        ask.id = event["message"]["content"][0]["tool_use_id"]
+            .as_str()
+            .unwrap()
+            .into();
+        assert!(verify_result(CAPTURE, &ask, &expected).is_err());
     }
 
     #[test]
