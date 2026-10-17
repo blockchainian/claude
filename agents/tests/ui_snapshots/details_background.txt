@@ -3,7 +3,7 @@ Background task
 
                Background
 ────────────── Run checks ─────────── 0s
-  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ────────── Waiting for output ─────── 0s
 
                  Update

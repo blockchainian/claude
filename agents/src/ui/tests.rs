@@ -3549,8 +3549,8 @@ fn background_box_dims_title_rule_but_not_output() {
             .fg
             .unwrap()
     );
-    assert_eq!(buf[(2, top + 1)].symbol(), "t");
-    assert!(!buf[(2, top + 1)].modifier.contains(Modifier::DIM));
+    assert_eq!(buf[(0, top + 1)].symbol(), "t");
+    assert!(!buf[(0, top + 1)].modifier.contains(Modifier::DIM));
 }
 
 #[test]

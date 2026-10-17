@@ -1236,7 +1236,7 @@ impl View {
                     let body = (!text.is_empty()).then(|| {
                         truncate_line_with_ellipsis_if_overflow(
                             Line::from(Span::styled(text.to_owned(), style::log_styles(&kind).1)),
-                            usize::from(item_area.width.saturating_sub(2)),
+                            usize::from(item_area.width),
                         )
                     });
                     // A known turn uses the same clock as its Prompt. Without a
@@ -1550,12 +1550,6 @@ fn render_background_box(
         row(box_area, 0, 1),
         buf,
     );
-    // Keep output indented two cells under the rule.
-    let inner = Rect {
-        x: inner.x + 2,
-        width: inner.width.saturating_sub(2),
-        ..inner
-    };
     Paragraph::new(output).render(inner, buf);
 }
 
@@ -1723,7 +1717,7 @@ mod background_title_tests {
                     ),
                     "{title} {time:?}"
                 );
-                assert_eq!(buf[(2, 1)].symbol(), "o");
+                assert_eq!(buf[(0, 1)].symbol(), "o");
             }
         }
     }
