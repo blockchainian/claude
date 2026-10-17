@@ -473,7 +473,7 @@ impl View {
         }
         if let Some(draft) = self.selected_draft() {
             return if draft.name.is_some() {
-                "New task prompt"
+                "New prompt"
             } else {
                 "New task"
             }

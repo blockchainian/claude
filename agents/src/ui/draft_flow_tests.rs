@@ -529,7 +529,7 @@ fn new_task_takes_its_name_then_its_prompt() {
         Some("改 Claude Code 的颜色")
     );
     assert!(view.input_box.editor.is_empty());
-    assert_eq!(view.input_label(), "New task prompt");
+    assert_eq!(view.input_label(), "New prompt");
     let text = render(&view)
         .content
         .iter()
@@ -556,7 +556,7 @@ fn new_task_takes_its_name_then_its_prompt() {
         .collect::<String>();
     assert!(!screen.contains("Creating"), "{screen}");
     assert!(!screen.contains("waiting for session"), "{screen}");
-    assert!(screen.contains("New task prompt ❯"), "{screen}");
+    assert!(screen.contains("New prompt ❯"), "{screen}");
     view.input_box.history.borrow().iter().for_each(|entry| {
         assert_ne!(entry.text(), "改 Claude Code 的颜色");
     });

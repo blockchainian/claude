@@ -19,7 +19,7 @@ fn terminal_image_path_and_clipboard_are_atomic() {
     tmux.wait_for(|capture| capture.contains("New task ❯"));
     tmux.run(&["send-keys", "-t", "probe", "-l", "probe"]);
     tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-    tmux.wait_for(|capture| capture.contains("New task prompt ❯"));
+    tmux.wait_for(|capture| capture.contains("New prompt ❯"));
     let paste = format!("\x1b[200~'{}'\x1b[201~", source.display());
     tmux.run(&["send-keys", "-t", "probe", "-l", &paste]);
     tmux.wait_for(|capture| capture.contains("[Image #1]"));
