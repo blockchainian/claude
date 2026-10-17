@@ -66,12 +66,13 @@ fn detail_buffer(view: &View, width: u16, now: chrono::DateTime<Utc>) -> Buffer 
 }
 
 #[test]
-fn detail_centers_multiline_sections_and_arrow_in_content_column() {
+fn detail_centers_multiline_sections_and_arrow_on_panel_midline() {
     for width in [80, 81, 160] {
         let (view, now, input, output) = multiline_tool_view();
         let buf = detail_buffer(&view, width, now);
         let viewport = view.viewport.borrow();
         let region = &viewport.log_text;
+        let columns = super::super::detail_model::detail_columns(viewport.log_detail, viewport.log);
         for text in [&input, &output] {
             let source = region
                 .sources
@@ -84,7 +85,9 @@ fn detail_centers_multiline_sections_and_arrow_in_content_column() {
                 .filter(|row| row.segment == source.id)
                 .collect();
             let block_width = text.lines().map(UnicodeWidthStr::width).max().unwrap() as u16;
-            let offset = (region.area.width - block_width) / 2;
+            let offset =
+                super::super::centering::centered_x(columns.panel, columns.text, block_width)
+                    - columns.text.x;
             for (row, line) in rows.iter().zip(text.lines()) {
                 let drawn: String = (0..block_width)
                     .map(|x| buf[(region.area.x + offset + x, row.y)].symbol())
@@ -100,7 +103,7 @@ fn detail_centers_multiline_sections_and_arrow_in_content_column() {
         }
         assert_eq!(
             buf[(
-                region.area.x + (region.area.width - 1) / 2,
+                super::super::centering::centered_x(columns.panel, columns.text, 1),
                 region.area.y + 2
             )]
                 .symbol(),
@@ -130,12 +133,11 @@ fn detail_centers_all_output_fragments_with_one_offset() {
             .unwrap();
         let output_parts = &parts[output_start..];
         assert!(output_parts.len() >= 4);
-        let content_width = super::super::detail_model::detail_columns(
+        let columns = super::super::detail_model::detail_columns(
             Rect::new(2, 1, width, 40),
             view.center_layout(Rect::new(0, 0, width + 4, 42)).log,
-        )
-        .content
-        .width;
+        );
+        let content_width = columns.text.width;
         let widest = output_parts
             .iter()
             .flat_map(|part| {
@@ -148,7 +150,11 @@ fn detail_centers_all_output_fragments_with_one_offset() {
             .map(|line| line.width())
             .max()
             .unwrap() as u16;
-        let offset = (content_width - widest.min(content_width)) / 2;
+        let offset = super::super::centering::centered_x(
+            columns.panel,
+            columns.text,
+            widest.min(content_width),
+        ) - columns.text.x;
         view.select_fixture_event(Some(event));
         let buf = detail_buffer(&view, width, now);
         let viewport = view.viewport.borrow();
@@ -235,25 +241,25 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
                 .join("\n"),
             include_str!("../../tests/ui_snapshots/manager_await_json.txt").trim_end_matches('\n')
         );
-        let content_width = super::super::detail_model::detail_columns(
+        let columns = super::super::detail_model::detail_columns(
             Rect::new(2, 1, width, 40),
             view.center_layout(Rect::new(0, 0, width + 4, 42)).log,
-        )
-        .content
-        .width;
+        );
+        let content_width = columns.text.width;
         let lines = part.lines(
             content_width.into(),
             Style::default(),
             chrono::DateTime::UNIX_EPOCH,
         );
-        let offset = (content_width as usize
-            - lines
-                .iter()
-                .map(Line::width)
-                .max()
-                .unwrap()
-                .min(content_width as usize))
-            / 2;
+        let widest = lines
+            .iter()
+            .map(Line::width)
+            .max()
+            .unwrap()
+            .min(content_width as usize);
+        let offset =
+            super::super::centering::centered_x(columns.panel, columns.text, widest as u16)
+                - columns.text.x;
         let copy = super::super::log::open_text(&event);
         assert!(copy.ends_with(&part.source));
         view.select_fixture_event(Some(event));
@@ -613,12 +619,11 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
     view.select_fixture_event(Some(event));
     view.log_detail_raw = true;
     for width in [23, 80, 120] {
-        let content_width = super::super::detail_model::detail_columns(
+        let columns = super::super::detail_model::detail_columns(
             Rect::new(2, 1, width, 40),
             view.center_layout(Rect::new(0, 0, width + 4, 42)).log,
-        )
-        .content
-        .width;
+        );
+        let content_width = columns.text.width;
         let mut expected = super::highlight::code_lines(&source, "json");
         let plain = super::tool_detail::Part::raw_json(source.clone());
         assert_eq!(
@@ -626,7 +631,13 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
             plain.maps(&plain.lines(content_width as usize, body_style, now))
         );
         let widest = expected.iter().map(Line::width).max().unwrap();
-        let padding = (content_width as usize).saturating_sub(widest) / 2;
+        let padding = usize::from(
+            super::super::centering::centered_x(
+                columns.panel,
+                columns.text,
+                widest.min(content_width as usize) as u16,
+            ) - columns.text.x,
+        );
         for line in &mut expected {
             for span in &mut line.spans {
                 span.style = body_style.patch(span.style);
@@ -647,7 +658,7 @@ fn raw_detail_scrolling_preserves_eager_colors_and_source_maps() {
                 Rect::new(2, 1, width, 40),
                 view.center_layout(actual.area).log,
             );
-            let body = Rect::new(columns.content.x, 4, columns.content.width, 37);
+            let body = Rect::new(columns.text.x, 4, columns.text.width, 37);
             let mut reference = Buffer::empty(actual.area);
             Paragraph::new(
                 expected
@@ -699,8 +710,11 @@ fn manager_detach_detail_keeps_tool_title_and_centered_input() {
     );
     assert_eq!(
         left,
-        columns.content.x as usize
-            + (columns.content.width as usize - "codex-manager detach".len()) / 2
+        usize::from(super::super::centering::centered_x(
+            columns.panel,
+            columns.text,
+            "codex-manager detach".len() as u16,
+        ))
     );
     let input = rows
         .iter()

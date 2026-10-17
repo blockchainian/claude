@@ -22,7 +22,7 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
                 view.viewport.borrow().log_detail,
                 view.viewport.borrow().log
             )
-            .content
+            .text
             .x
         );
         let assert_maps = |view: &View, buf: &Buffer| {
@@ -96,14 +96,14 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
                 view.viewport.borrow().log_detail,
                 view.viewport.borrow().log
             )
-            .content
+            .text
             .x
         );
         assert_maps(&view, &buf);
     }
 }
 
-fn start_detail_header(width: u16) -> (String, String, usize, usize) {
+fn start_detail_header(width: u16) -> (String, String, super::super::detail_model::DetailColumns) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("transcript.jsonl");
     std::fs::write(
@@ -148,8 +148,6 @@ fn start_detail_header(width: u16) -> (String, String, usize, usize) {
         .join("\n");
     let detail = view.viewport.borrow().log_detail;
     let columns = super::super::detail_model::detail_columns(detail, view.center_layout(area).log);
-    let cap = columns.content.width;
-    let left = usize::from(columns.content.x);
     let header = rendered
         .lines()
         .nth(usize::from(detail.y + 1))
@@ -160,29 +158,34 @@ fn start_detail_header(width: u16) -> (String, String, usize, usize) {
         .skip(usize::from(detail.y + 3))
         .collect::<Vec<_>>()
         .join("\n");
-    (header, body, left, usize::from(cap))
+    (header, body, columns)
 }
 
 #[test]
-fn start_summary_occupies_left_header_slot_without_body_duplicate() {
+fn start_description_occupies_center_header_without_body_duplicate() {
     for width in [200, 120, 100] {
-        let (header, body, left, cap) = start_detail_header(width);
+        let (header, body, columns) = start_detail_header(width);
+        let title = "Claude 图片链接";
         assert_eq!(
-            header[..header.find("Claude 图片链接").expect("left summary")].width(),
-            left
+            header[..header.find(title).expect("center description")].width(),
+            usize::from(super::super::centering::centered_x(
+                columns.panel,
+                columns.text,
+                title.width() as u16,
+            ))
         );
         assert_eq!(
             header[..header.find("codex-manager start").unwrap()].width(),
-            left + (cap - "codex-manager start".width()) / 2
+            usize::from(columns.text.x)
         );
         assert_eq!(
             header[..header.find("41s").unwrap()].width(),
-            left + cap + 2 + 8 - 3
+            usize::from(columns.time.right()) - 3
         );
         assert!(!body.contains("Claude 图片链接"), "{body}");
         assert!(body.contains("cwd: /workspace/agents"));
     }
-    let (header, body, _, _) = start_detail_header(200);
+    let (header, body, _) = start_detail_header(200);
     let snapshot = format!(
         "{}\n{}\n",
         header.trim_end(),
@@ -201,18 +204,23 @@ fn start_summary_occupies_left_header_slot_without_body_duplicate() {
 }
 
 #[test]
-fn start_summary_truncates_before_center_title_and_time() {
-    let (header, body, left, cap) = start_detail_header(55);
+fn start_tool_metadata_truncates_before_center_description_and_time() {
+    let (header, body, columns) = start_detail_header(45);
     assert!(header.contains('…'), "{header}");
+    let title = "Claude 图片链接";
     assert_eq!(
-        header[..header.find("codex-manager start").unwrap()].width(),
-        left + (cap - "codex-manager start".width()) / 2
+        header[..header.find(title).unwrap()].width(),
+        usize::from(super::super::centering::centered_x(
+            columns.panel,
+            columns.text,
+            title.width() as u16,
+        ))
     );
     assert_eq!(
         header[..header.find("41s").unwrap()].width(),
-        left + cap + 2 + 8 - 3
+        usize::from(columns.time.right()) - 3
     );
-    assert!(!body.contains("Claude 图片链接"));
+    assert!(!body.contains(title));
 }
 
 #[test]
@@ -234,13 +242,13 @@ fn preformatted_detail_rows_stay_in_content_column() {
             viewport.log_detail,
             view.center_layout(area).log,
         );
-        let limit = columns.content.width;
-        let left = columns.content.x;
+        let limit = columns.text.width;
+        let left = columns.text.x;
         for row in &viewport.log_text.rows {
             for (cells, _) in &row.cells {
                 assert!(
                     row.x + cells.start >= left && row.x + cells.end <= left + limit,
-                    "detail must fit log-list message width {limit} at screen width {width}"
+                    "detail must fit the text column {limit} at screen width {width}"
                 );
             }
         }
@@ -250,7 +258,7 @@ fn preformatted_detail_rows_stay_in_content_column() {
             .iter()
             .find(|row| !row.cells.is_empty())
             .unwrap();
-        assert!(first.x + first.cells[0].0.start >= columns.content.x);
+        assert!(first.x + first.cells[0].0.start >= columns.text.x);
     }
 }
 
@@ -270,13 +278,15 @@ fn detail_without_description_centers_tool_in_both_modes() {
             detail,
             view.center_layout(Rect::new(0, 0, width, 50)).log,
         );
-        let cap = columns.content.width;
-        let left = columns.content.x;
         let header = screen.lines().nth(usize::from(detail.y + 1)).unwrap();
         let title = "codex-manager detach";
         assert_eq!(
             header[..header.find(title).unwrap()].width(),
-            usize::from(left) + (usize::from(cap) - title.width()) / 2
+            usize::from(super::super::centering::centered_x(
+                columns.panel,
+                columns.text,
+                title.width() as u16,
+            ))
         );
         assert!(
             screen
@@ -309,9 +319,7 @@ fn detail_event_and_tool_times_share_the_list_clock_column() {
         let (_, list_time) = super::super::log::log_row_areas(viewport.log);
         assert_eq!(columns.time.width, list_time.width);
         assert_eq!(columns.time.width, super::super::log::CLOCK_WIDTH as u16);
-        if width < super::super::render::WIDE_LAYOUT_COLUMNS {
-            assert_eq!(columns.time.right(), list_time.right());
-        }
+        assert_eq!(columns.time.right(), columns.panel.right());
         let clock = |y| {
             (columns.time.x..columns.time.right())
                 .map(|x| buf[(x, y)].symbol())
@@ -340,13 +348,7 @@ fn detail_event_and_tool_times_share_the_list_clock_column() {
             let duration = title.time.as_ref().unwrap();
             assert_eq!(clock(row.y).trim(), duration);
             assert_ne!(buf[(columns.time.right() - 1, row.y)].symbol(), " ");
-            assert!(
-                !title
-                    .line(columns.content.width.into())
-                    .0
-                    .to_string()
-                    .contains(duration)
-            );
+            assert!(!title.line(columns).0.to_string().contains(duration));
         }
     }
 }
@@ -385,7 +387,7 @@ fn clipped_command_and_output_keep_time_empty_and_double_click_copies_original()
             let viewport = view.viewport.borrow();
             let columns =
                 super::super::detail_model::detail_columns(viewport.log_detail, viewport.log);
-            assert!(command.width() > columns.content.width.into());
+            assert!(command.width() > columns.text.width.into());
             let rows: Vec<_> = viewport
                 .log_text
                 .rows
@@ -394,18 +396,18 @@ fn clipped_command_and_output_keep_time_empty_and_double_click_copies_original()
                 .collect();
             assert_eq!(rows.len(), 2);
             for row in &rows {
-                assert_eq!(buf[(columns.content.right() - 1, row.y)].symbol(), "…");
+                assert_eq!(buf[(columns.text.right() - 1, row.y)].symbol(), "…");
                 assert!(
-                    (columns.content.right()..columns.time.right())
+                    (columns.text.right()..columns.time.right())
                         .all(|x| buf[(x, row.y)].symbol() == " ")
                 );
                 let (cells, bytes) = row.cells.last().unwrap();
-                assert_eq!(cells.end, columns.content.width);
+                assert_eq!(cells.end, columns.text.width);
                 assert_eq!(bytes.end, command.len());
                 assert!(bytes.end - bytes.start > 1);
             }
             (
-                columns.content.right() - 1,
+                columns.text.right() - 1,
                 rows.iter().map(|row| row.y).collect::<Vec<_>>(),
             )
         };

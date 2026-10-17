@@ -174,11 +174,11 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
         let columns =
             super::super::detail_model::detail_columns(area, view.center_layout(area).log);
         for row in &region.rows {
-            assert_eq!(row.x, columns.content.x);
+            assert_eq!(row.x, columns.text.x);
             assert!(
                 row.cells
                     .iter()
-                    .all(|(cells, _)| cells.end <= columns.content.width)
+                    .all(|(cells, _)| cells.end <= columns.text.width)
             );
         }
         assert_eq!(region.sources[0].text.as_ref(), parts[0].source);
