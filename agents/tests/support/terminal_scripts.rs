@@ -18,7 +18,7 @@ fn terminal_bash_interpreter_script_colors() {
     // Exact Bash event from a Claude transcript; commands are displayed, never executed.
     write!(file, "{fixture}").unwrap();
     file.flush().unwrap();
-    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
     tmux.wait_for(|capture| capture.contains("python3") && capture.contains("enumerate(lines)"));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);

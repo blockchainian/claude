@@ -20,7 +20,7 @@ fn terminal_ask_questions_render_real_rejection_and_answer() {
         ),
     ] {
         std::fs::write(&transcript, fixture).unwrap();
-        tmux.run(&["send-keys", "-t", "probe", "Home"]);
+        tmux.run(&["send-keys", "-t", "probe", "End"]);
         std::thread::sleep(Duration::from_secs(2));
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         let path = std::env::temp_dir().join(format!("agents-ask-question-{name}.txt"));
