@@ -12,10 +12,6 @@ pub(super) enum ClickTarget {
     Log {
         index: usize,
     },
-    LogDetail {
-        session: SessionKey,
-        index: Option<usize>,
-    },
     Details {
         session: SessionKey,
         source: Option<String>,
@@ -60,18 +56,6 @@ impl View {
         let click = self.pending_click.take().expect("click is due");
         match click.target {
             ClickTarget::Log { .. } | ClickTarget::LogBorder { .. } => None,
-            ClickTarget::LogDetail { session, index } => {
-                if self.selected_id() == Some(&session) && self.log_selected == index {
-                    self.log_detail_raw = !self.log_detail_raw;
-                    self.cancel_detail_selection();
-                    let mut viewport = self.viewport.borrow_mut();
-                    let cached = viewport.log_detail_other_layout.take();
-                    viewport.log_detail_other_layout = viewport.log_detail_layout.take();
-                    viewport.log_detail_layout = cached;
-                    viewport.log_detail_scroll = 0;
-                }
-                None
-            }
             ClickTarget::Details {
                 session, source, ..
             } => {
@@ -353,15 +337,6 @@ impl View {
                 label,
             });
         }
-        if viewport.log_text.area.contains(position)
-            && self.visible_log_event().is_some()
-            && let Some(session) = self.selected_id()
-        {
-            return Some(ClickTarget::LogDetail {
-                session: session.clone(),
-                index: self.log_selected,
-            });
-        }
         if !viewport.log_jump.contains(position)
             && let Some(border) = viewport
                 .log_borders
@@ -394,8 +369,18 @@ impl View {
                 .take()
                 .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
             {
+                self.last_detail_click = None;
                 let position = (mouse.column, mouse.row).into();
-                if !self.viewport.borrow().log_detail.contains(position) {
+                if self.viewport.borrow().log_detail.contains(position) {
+                    self.log_detail_raw = !self.log_detail_raw;
+                    self.cancel_detail_selection();
+                    self.pending_click = None;
+                    let mut viewport = self.viewport.borrow_mut();
+                    let cached = viewport.log_detail_other_layout.take();
+                    viewport.log_detail_other_layout = viewport.log_detail_layout.take();
+                    viewport.log_detail_layout = cached;
+                    viewport.log_detail_scroll = 0;
+                } else {
                     self.right_click();
                 }
             }
@@ -428,6 +413,7 @@ impl View {
                         self.last_click = None;
                         self.pending_click = None;
                         self.last_copy_click = None;
+                        self.last_detail_click = None;
                     }
                 }
                 return None;
@@ -451,6 +437,11 @@ impl View {
             }
             _ => {}
         }
+        let detail_click = if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+            self.last_detail_click.take()
+        } else {
+            None
+        };
         let position = (mouse.column, mouse.row).into();
         if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
             if self.picker.is_some() {
@@ -689,17 +680,24 @@ impl View {
                     if self.defer_click(target) {
                         return Some(action);
                     }
-                } else if let Some(target @ ClickTarget::LogDetail { .. }) =
-                    self.click_target_at(position)
+                } else if self.viewport.borrow().log_text.area.contains(position)
+                    && let Some(session) = self.selected_id().cloned()
+                    && self.visible_log_event().is_some()
                 {
-                    if self.defer_click(target)
-                        && let Some(event) = self.visible_log_event()
-                    {
+                    let now = Instant::now();
+                    let double = detail_click.is_some_and(|(last, index, at)| {
+                        last == session
+                            && index == self.log_selected
+                            && now.duration_since(at) < self.double_click_interval
+                    });
+                    if double {
+                        let event = self.visible_log_event().expect("detail event is visible");
                         return Some(Action::Copy {
                             text: self.detail_text(event),
                             label: self.detail_copy_label(event),
                         });
                     }
+                    self.last_detail_click = Some((session, self.log_selected, now));
                 } else if let Some((text, label)) = copy_text {
                     let now = Instant::now();
                     let double = self.last_copy_click.take().is_some_and(|(last, at)| {

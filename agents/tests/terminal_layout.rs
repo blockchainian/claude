@@ -1195,7 +1195,7 @@ fn terminal_log_border_double_clicks() {
 
 #[test]
 #[ignore = "requires tmux and macOS clipboard; run with --ignored --nocapture"]
-fn terminal_raw_transcript_copy_note() {
+fn terminal_detail_right_click_and_double_click_copy() {
     let (_directory, tmux, _transcript) = start_probe("raw-copy");
     tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "45"]);
     tmux.wait_for(|capture| capture.lines().count() == 45 && capture.contains("对，必须"));
@@ -1209,7 +1209,15 @@ fn terminal_raw_transcript_copy_note() {
             (row > 25).then_some((column, row))
         })
         .expect("assistant body in log detail");
+    // The helper waits 200 ms, so also wait past the configured double-click window.
     tmux.mouse(0, column, row, true);
+    std::thread::sleep(Duration::from_millis(350));
+    let after_left = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    assert!(
+        !after_left.contains("\"apiBlockIndex\""),
+        "left click changed mode: {after_left}"
+    );
+    tmux.mouse(2, column, row, true);
     tmux.wait_for(|capture| capture.contains("\"apiBlockIndex\""));
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let (column, row) = capture
@@ -1244,6 +1252,27 @@ fn terminal_raw_transcript_copy_note() {
         String::from_utf8(copied.stdout).unwrap(),
         serde_json::to_string_pretty(&expected).unwrap()
     );
+    tmux.mouse(2, column, row, true);
+    tmux.wait_for(|capture| !capture.contains("\"apiBlockIndex\""));
+    let parsed = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let (column, row) = parsed
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            let byte = line.rfind("对，必须")?;
+            (row > 25).then_some((line[..byte].width(), row))
+        })
+        .expect("parsed body after right-click round trip");
+    let sequence = format!(
+        "\x1b[<0;{};{}M\x1b[<0;{};{}m",
+        column + 1,
+        row + 1,
+        column + 1,
+        row + 1
+    )
+    .repeat(2);
+    tmux.run(&["send-keys", "-t", "probe", "-l", &sequence]);
+    tmux.wait_for(|capture| capture.contains("Copied assistant message"));
     println!(
         "{{\"raw_transcript_copy\":\"pass\",\"note\":\"Copied transcript\",\"width\":200,\"height\":45,\"pbpaste\":\"pretty JSON matches\"}}"
     );

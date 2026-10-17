@@ -251,6 +251,7 @@ pub struct View {
     last_click: Option<(usize, Instant)>,
     double_click_interval: Duration,
     pending_click: Option<input::PendingClick>,
+    last_detail_click: Option<(SessionKey, Option<usize>, Instant)>,
     /// Button, origin and drag state of the held mouse press.
     mouse_press: Option<(MouseButton, u16, u16, bool)>,
     /// Text under the last left click on a copyable body, and when it happened.
@@ -378,6 +379,7 @@ impl View {
             last_click: None,
             double_click_interval: DOUBLE_CLICK_INTERVAL,
             pending_click: None,
+            last_detail_click: None,
             mouse_press: None,
             last_copy_click: None,
             copied: None,

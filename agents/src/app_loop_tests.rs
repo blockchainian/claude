@@ -107,7 +107,7 @@ fn idle_loop_finishes_click_without_delaying_log_selection() {
 }
 
 #[test]
-fn deferred_detail_toggle_returns_to_draw_without_another_input() {
+fn right_detail_toggle_draws_without_pending_input() {
     let directory = tempfile::tempdir().unwrap();
     let project = directory.path().join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
@@ -144,11 +144,10 @@ fn deferred_detail_toggle_returns_to_draw_without_another_input() {
         .find(|(_, line)| line.contains("cctail"))
         .unwrap_or_else(|| panic!("real tool result missing:\n{}", parsed.join("\n")));
     let column = line.find("cctail").unwrap() as u16;
-    let mut schedule = RefreshSchedule::new(Instant::now(), Duration::from_secs(5));
     for raw in [true, false] {
         for kind in [
-            MouseEventKind::Down(MouseButton::Left),
-            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::Up(MouseButton::Right),
         ] {
             assert!(!app.handle_event(Event::Mouse(MouseEvent {
                 kind,
@@ -157,13 +156,6 @@ fn deferred_detail_toggle_returns_to_draw_without_another_input() {
                 modifiers: KeyModifiers::NONE,
             })));
         }
-        assert!(app.view.pending_click_in(Instant::now()).is_some());
-        // Match event_loop: draw the deferred click, wait once, then draw again.
-        app.draw_at(&mut terminal, now).unwrap();
-        assert!(
-            !app.wait_for_input(&mut None, &mut schedule, Instant::now())
-                .unwrap()
-        );
         assert!(app.view.pending_click_in(Instant::now()).is_none());
         app.draw_at(&mut terminal, now).unwrap();
         if raw {

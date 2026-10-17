@@ -9,7 +9,7 @@ fn click(view: &mut View, button: MouseButton, x: u16, y: u16) -> Option<Action>
 }
 
 #[test]
-fn raw_detail_right_click_keeps_event_and_scroll() {
+fn raw_detail_right_click_keeps_event_and_resets_scroll() {
     let (mut view, now) = log_fixture();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
     view.set_log(crate::providers::claude::log::tail_session(&path, 200, true).unwrap());
@@ -23,7 +23,8 @@ fn raw_detail_right_click_keeps_event_and_scroll() {
         None
     );
     assert_eq!(view.log_selected, selected);
-    assert_eq!(view.viewport.borrow().log_detail_scroll, 1);
+    assert_eq!(view.viewport.borrow().log_detail_scroll, 0);
+    assert!(view.log_detail_raw);
 }
 
 fn source_view(provider: ProviderId) -> (View, chrono::DateTime<Utc>, String) {
@@ -70,17 +71,15 @@ fn flush(view: &mut View) -> Option<Action> {
 }
 
 #[test]
-fn raw_detail_single_click_toggles_after_double_click_deadline() {
+fn raw_detail_right_click_toggles_immediately() {
     for provider in [ProviderId::Claude, ProviderId::Codex] {
         let (mut view, now, expected) = source_view(provider);
         assert!(!view.log_detail_raw);
         log_screen(&view, 200, 45, now);
         let (x, y) = body_position(&view);
-        assert_eq!(click(&mut view, MouseButton::Left, x, y), None);
-        assert!(
-            !view.log_detail_raw,
-            "wait until a second click is excluded"
-        );
+        assert_eq!(click(&mut view, MouseButton::Right, x, y), None);
+        assert!(view.log_detail_raw);
+        assert_eq!(view.pending_click_in(Instant::now()), None);
         assert_eq!(flush(&mut view), None);
         assert!(view.log_detail_raw);
         let rendered = log_screen(&view, 200, 45, now);
@@ -102,7 +101,7 @@ fn raw_detail_single_click_toggles_after_double_click_deadline() {
             "raw selection must use pretty-printed source JSON"
         );
         let (x, y) = body_position(&view);
-        assert_eq!(click(&mut view, MouseButton::Left, x, y), None);
+        assert_eq!(click(&mut view, MouseButton::Right, x, y), None);
         assert_eq!(flush(&mut view), None);
         assert!(!view.log_detail_raw);
     }
@@ -238,16 +237,16 @@ fn raw_detail_layout_survives_mode_round_trip_without_reading_source_again() {
     }
     log_screen(&view, 200, 45, now);
     let (x, y) = body_position(&view);
-    click(&mut view, MouseButton::Left, x, y);
+    click(&mut view, MouseButton::Right, x, y);
     flush(&mut view);
     let raw = log_screen(&view, 200, 45, now);
     std::fs::remove_file(path).unwrap();
     let (x, y) = body_position(&view);
-    click(&mut view, MouseButton::Left, x, y);
+    click(&mut view, MouseButton::Right, x, y);
     flush(&mut view);
     log_screen(&view, 200, 45, now);
     let (x, y) = body_position(&view);
-    click(&mut view, MouseButton::Left, x, y);
+    click(&mut view, MouseButton::Right, x, y);
     flush(&mut view);
     assert_eq!(log_screen(&view, 200, 45, now), raw);
 }
@@ -257,7 +256,7 @@ fn raw_detail_cached_modes_follow_event_changes_and_resize() {
     let (mut view, now, _) = source_view(ProviderId::Claude);
     log_screen(&view, 200, 45, now);
     let (x, y) = body_position(&view);
-    click(&mut view, MouseButton::Left, x, y);
+    click(&mut view, MouseButton::Right, x, y);
     flush(&mut view);
     log_screen(&view, 200, 45, now);
     view.select_log_event(Some(1));
@@ -265,7 +264,7 @@ fn raw_detail_cached_modes_follow_event_changes_and_resize() {
         for raw in [true, false] {
             if view.log_detail_raw != raw {
                 let (x, y) = body_position(&view);
-                click(&mut view, MouseButton::Left, x, y);
+                click(&mut view, MouseButton::Right, x, y);
                 flush(&mut view);
             }
             let (mut expected, _, _) = source_view(ProviderId::Claude);

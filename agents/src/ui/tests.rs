@@ -6470,11 +6470,31 @@ fn task_log_click_keeps_list_and_detail_right_click_keeps_selection() {
         Some(std::time::Duration::from_secs(1))
     );
     click_log_text(&mut view, &open, "A second paragraph", MouseButton::Left);
+    assert!(!view.log_detail_raw);
+    click_log_text(&mut view, &open, "A second paragraph", MouseButton::Right);
     assert!(view.log_detail_raw);
     let raw = log_screen(&view, 100, 45, now);
-    click_log_text(&mut view, &open, "A second paragraph", MouseButton::Right);
+    let area = view.viewport.borrow().log_detail;
+    click_mouse(
+        &mut view,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            area.x + 1,
+            area.y + 3,
+        ),
+    );
     assert_eq!(log_screen(&view, 100, 45, now), raw);
-    click_log_text(&mut view, &open, "A second paragraph", MouseButton::Left);
+    let area = view.viewport.borrow().log_detail;
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Right),
+        area.x + 1,
+        area.y + 3,
+    ));
+    view.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Right),
+        area.x + 1,
+        area.y + 3,
+    ));
     assert!(!view.log_detail_raw);
     assert_eq!(log_screen(&view, 100, 45, now), open);
 }
@@ -7301,6 +7321,41 @@ fn double_click_on_open_log_body_copies_the_whole_event() {
         })
     );
     assert_eq!(double_click_text(&mut view, &open, "Assistant"), None);
+}
+
+#[test]
+fn log_detail_right_click_toggles_and_left_click_has_no_deadline() {
+    let (mut view, now) = log_fixture();
+    log_screen(&view, 100, 45, now);
+    let area = view.viewport.borrow().log_detail;
+    let (x, y) = (area.right() - 2, area.y + 4);
+    for raw in [false, true] {
+        view.log_detail_raw = raw;
+        log_screen(&view, 100, 45, now);
+        assert_eq!(
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), x, y)
+            ),
+            None
+        );
+        assert_eq!(view.pending_click_in(Instant::now()), None);
+        assert_eq!(
+            view.flush_pending_click(Instant::now() + view.double_click_interval),
+            None
+        );
+        assert_eq!(view.log_detail_raw, raw);
+        assert_eq!(
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), x, y)),
+            None
+        );
+        assert_eq!(
+            view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), x, y)),
+            None
+        );
+        assert_eq!(view.log_detail_raw, !raw);
+        assert_eq!(view.pending_click_in(Instant::now()), None);
+    }
 }
 
 #[test]
