@@ -74,38 +74,7 @@ fn render(view: &View) -> Buffer {
 }
 
 #[test]
-fn draft_shows_under_active_tab() {
-    let (directory, mut view) = fixture();
-    let id = view.add_draft(setup(directory.path()));
-    assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
-    let buffer = render(&view);
-    assert!(
-        buffer
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>()
-            .contains("New task")
-    );
-    let entries = view.center_rows(&view.selectable_indices(), Grouping::Project);
-    assert!(
-        entries
-            .iter()
-            .any(|entry| matches!(entry, navigation::CenterRow::Draft(draft) if *draft == id))
-    );
-    key(&mut view, KeyCode::Esc);
-    key(&mut view, KeyCode::Tab);
-    assert_eq!(TASK_FILTERS[view.status_filter].0, "Inactive");
-    let entries = view.center_rows(&view.selectable_indices(), Grouping::Project);
-    assert!(
-        !entries
-            .iter()
-            .any(|entry| matches!(entry, navigation::CenterRow::Draft(_)))
-    );
-}
-
-#[test]
-fn acknowledged_job_refresh_drops_only_its_draft_and_selects_real_session() {
+fn acknowledged_job_refresh_drops_its_draft_and_selects_real_session() {
     let (directory, mut view) = fixture();
     let mut arrived = view.rows[0].clone();
     arrived.background_job = Some(crate::model::BackgroundJob {
@@ -113,8 +82,9 @@ fn acknowledged_job_refresh_drops_only_its_draft_and_selects_real_session() {
         needs: None,
     });
     arrived.updated_at = Utc::now();
-    let other = view.add_draft(setup(directory.path()));
+    view.add_draft(setup(directory.path()));
     let selected = view.add_draft(setup(directory.path()));
+    assert_eq!(view.drafts.len(), 1);
     view.draft_created(selected, Ok("e772d00b".into()));
     let mut older = arrived.clone();
     older.id.id = "d6e5280c-6bcd-42c4-8bb9-6ff96d1b0744".into();
@@ -123,60 +93,7 @@ fn acknowledged_job_refresh_drops_only_its_draft_and_selects_real_session() {
     let expected = arrived.id.clone();
     view.set_sessions(vec![arrived, older], false);
     assert_eq!(view.selected_id(), Some(&expected));
-    assert_eq!(view.drafts.len(), 1);
-    assert_eq!(view.drafts[0].id, other);
-}
-
-#[test]
-fn linked_worktree_draft_stays_in_primary_project_group() {
-    let (directory, mut view) = fixture();
-    let repository = directory.path().join("repository");
-    std::fs::create_dir_all(repository.join("src")).unwrap();
-    git(&repository, &["init", "-b", "main"]);
-    std::fs::write(
-        repository.join("src/README.md"),
-        include_bytes!("../../tests/fixtures/claude-peer-message.txt"),
-    )
-    .unwrap();
-    git(&repository, &["add", "--", "src/README.md"]);
-    git(
-        &repository,
-        &[
-            "-c",
-            "user.name=UI probe",
-            "-c",
-            "user.email=probe@example.test",
-            "commit",
-            "-m",
-            "fixture",
-        ],
-    );
-    let linked = directory.path().join("linked");
-    git(
-        &repository,
-        &["worktree", "add", "-b", "feature", linked.to_str().unwrap()],
-    );
-    view.rows[0].cwd = repository.join("src");
-    view.set_sessions(view.rows.clone(), false);
-    let id = view.add_draft(setup(&repository.join("src")));
-    view.draft_worktree_complete(id, Ok((linked.join("src"), "feature".into())));
-    let entries = view.center_rows(&view.selectable_indices(), Grouping::Project);
-    assert_eq!(
-        entries
-            .iter()
-            .filter(|entry| matches!(entry, navigation::CenterRow::Group(_)))
-            .count(),
-        1
-    );
-    assert!(
-        !entries
-            .iter()
-            .any(|entry| matches!(entry, navigation::CenterRow::DraftGroup(_)))
-    );
-    assert_eq!(
-        view.selected_draft().unwrap().heading(),
-        std::fs::canonicalize(repository).unwrap().join("src")
-    );
+    assert!(view.drafts.is_empty());
 }
 
 #[test]
@@ -211,43 +128,19 @@ fn project_heading_defers_single_open_and_double_creates_in_actual_directory() {
 }
 
 #[test]
-fn draft_navigation_click_tab_and_pending_job_preserve_input_without_keys() {
+fn pending_job_draft_survives_escape_and_leaving_until_its_session_arrives() {
     let (directory, mut view) = fixture();
-    let session = view.rows[0].id.clone();
     let id = view.add_draft(setup(directory.path()));
-    let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
-    view.handle_paste(text);
-    key(&mut view, KeyCode::Esc);
-    render(&view);
-    key(&mut view, KeyCode::Home);
-    assert_eq!(view.selected_id(), Some(&session));
-    key(&mut view, KeyCode::End);
-    assert_eq!(view.selected_draft, Some(id));
-    key(&mut view, KeyCode::Home);
-    assert_eq!(view.selected_id(), Some(&session));
-    let buffer = render(&view);
-    let position = buffer
-        .content
-        .chunks(160)
-        .enumerate()
-        .find_map(|(y, row)| {
-            let text = row.iter().map(|cell| cell.symbol()).collect::<String>();
-            text.find("New task").map(|x| (x as u16, y as u16))
-        })
-        .unwrap();
-    click(&mut view, position.0, position.1);
-    assert_eq!(view.selected_draft, Some(id));
-    key(&mut view, KeyCode::Tab);
-    assert_eq!(view.selected_draft, None);
-    view.status_filter = 0;
-    view.select_draft(id);
-    assert_eq!(view.input_box.editor.text(), text);
+    view.handle_paste("typed prompt");
     view.draft_created(id, Ok("e772d00b".into()));
     assert!(view.input_disabled().is_some());
-    key(&mut view, KeyCode::Backspace);
+    key(&mut view, KeyCode::Esc);
+    assert_eq!(view.selected_draft, Some(id));
+    view.input_box.focused = false;
+    key(&mut view, KeyCode::Tab);
+    assert_eq!(view.selected_draft, None);
     assert_eq!(view.drafts.len(), 1);
 }
-
 #[test]
 fn prompt_model_label_does_not_become_a_metadata_picker_target() {
     let (_directory, mut view) = fixture();
@@ -551,24 +444,31 @@ fn draft_first_message_accepts_images_and_preserves_input_on_failure() {
 }
 
 #[test]
-fn escape_in_empty_draft_input_discards_draft_and_keeps_typed_one() {
+fn draft_is_not_a_list_row_and_escape_or_moving_away_discards_it() {
     let (directory, mut view) = fixture();
     let session = view.rows[0].id.clone();
     view.add_draft(setup(directory.path()));
-    assert!(view.input_box.focused);
+    view.handle_paste("typed prompt");
+    let buffer = render(&view);
+    let list = view.center_layout(buffer.area).list;
+    let list = (list.top()..list.bottom())
+        .map(|y| {
+            (list.left()..list.right())
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!list.contains("New task"), "{list}");
     key(&mut view, KeyCode::Esc);
     assert!(view.drafts.is_empty());
     assert_eq!(view.selected_draft, None);
     assert_eq!(view.selected_id(), Some(&session));
-    let rendered = render(&view)
-        .content
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>();
-    assert!(!rendered.contains("New task"), "{rendered}");
-    let id = view.add_draft(setup(directory.path()));
-    view.handle_paste("keep this prompt");
-    key(&mut view, KeyCode::Esc);
-    assert_eq!(view.drafts.len(), 1);
-    assert_eq!(view.selected_draft, Some(id));
+    view.add_draft(setup(directory.path()));
+    view.handle_paste("typed prompt");
+    view.input_box.focused = false;
+    key(&mut view, KeyCode::Down);
+    assert!(view.drafts.is_empty());
+    assert_eq!(view.selected_id(), Some(&session));
+    assert!(!view.input_box.editor.text().contains("typed prompt"));
 }

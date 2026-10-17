@@ -99,27 +99,25 @@ impl View {
             .and_then(|id| self.drafts.iter().find(|draft| draft.id == id))
     }
 
-    pub(super) fn save_draft_input(&mut self) {
-        if let Some(id) = self.selected_draft.take()
-            && let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id)
-        {
-            draft.input = std::mem::take(&mut self.input_box);
+    /// Leaves the selected draft: drops it unless its task is already being created, which keeps it
+    /// until the task's session arrives.
+    pub(super) fn leave_draft(&mut self) {
+        if let Some(id) = self.selected_draft.take() {
+            self.drafts
+                .retain(|draft| draft.id != id || draft.job.is_some());
+            self.input_box = prompt_box::PromptBox::default();
         }
     }
 
     /// Removes the selected draft unless its task is already being created.
     pub(super) fn discard_selected_draft(&mut self) {
-        let Some(id) = self.selected_draft else {
-            return;
-        };
         if self
             .selected_draft()
             .is_some_and(|draft| draft.working || draft.job.is_some())
         {
             return;
         }
-        self.save_draft_input();
-        self.drafts.retain(|draft| draft.id != id);
+        self.leave_draft();
         self.reconcile_selection();
         self.show_selected_panels();
     }
@@ -128,7 +126,7 @@ impl View {
         if self.selected_draft == Some(id) {
             return;
         }
-        self.save_draft_input();
+        self.leave_draft();
         self.selected_draft = Some(id);
         self.show_selected_panels();
         if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
@@ -180,7 +178,7 @@ mod tests {
         }
     }
     #[test]
-    fn drafts_keep_identity_selection_and_exact_input_across_refresh() {
+    fn draft_keeps_identity_selection_and_exact_input_across_refresh() {
         let directory = tempfile::tempdir().unwrap();
         let mut view = View::default();
         let first = view.add_draft(setup(directory.path()));
@@ -192,23 +190,25 @@ mod tests {
         assert_eq!(view.input_box.editor.text(), text);
         let second = view.add_draft(setup(directory.path()));
         assert_ne!(first, second);
-        view.select_draft(first);
-        assert_eq!(view.input_box.editor.text(), text);
+        assert_eq!(view.drafts.len(), 1);
+        assert!(view.input_box.editor.is_empty());
     }
     #[test]
-    fn worker_results_target_stable_draft_not_current_selection() {
+    fn worker_results_target_stable_draft_not_a_replaced_one() {
         let directory = tempfile::tempdir().unwrap();
         let mut view = View::default();
         let first = view.add_draft(setup(directory.path()));
         let second = view.add_draft(setup(directory.path()));
+        view.draft_worktree_complete(first, Ok((directory.path().join("stale"), "stale".into())));
         view.draft_worktree_complete(
-            first,
+            second,
             Ok((directory.path().join("worktree"), "feature".into())),
         );
         assert_eq!(view.selected_draft, Some(second));
+        assert_eq!(view.drafts.len(), 1);
         assert_eq!(view.drafts[0].setup.branch, "feature");
-        assert_eq!(view.drafts[1].setup.branch, "main");
-        view.draft_created(first, Ok("real-job-id".into()));
+        view.draft_created(first, Ok("stale-job-id".into()));
+        view.draft_created(second, Ok("real-job-id".into()));
         assert_eq!(view.drafts[0].job.as_deref(), Some("real-job-id"));
     }
 }

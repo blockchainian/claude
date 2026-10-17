@@ -848,7 +848,7 @@ impl View {
     }
 
     fn set_selected(&mut self, selected: usize) {
-        self.save_draft_input();
+        self.leave_draft();
         self.selected = selected;
         self.show_selected_panels();
     }

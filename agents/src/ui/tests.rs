@@ -3864,19 +3864,9 @@ fn task_metadata_drops_rightmost_columns_at_title_limit() {
 #[test]
 fn list_row_highlights_include_column_padding() {
     for width in [100, 149, 150, 200] {
-        for kind in ["task", "draft", "more", "picker"] {
+        for kind in ["task", "more", "picker"] {
             let (mut view, now) = column_padding_fixture();
             match kind {
-                "draft" => {
-                    view.add_draft(DraftSetup {
-                        provider: ProviderId::Claude,
-                        cwd: view.rows[0].cwd.clone(),
-                        model: None,
-                        effort: None,
-                        branch: "main".into(),
-                        trunk: "main".into(),
-                    });
-                }
                 "more" => {
                     view.status_filter = TASK_FILTERS
                         .iter()

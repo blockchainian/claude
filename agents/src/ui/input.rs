@@ -199,7 +199,7 @@ impl View {
         if self.selected_id() == self.chosen.as_ref() {
             self.remember_selection();
         }
-        self.save_draft_input();
+        self.leave_draft();
         self.status_filter = idx;
         self.viewport.borrow_mut().scroll = 0;
         let visible = self.visible_indices();
@@ -287,13 +287,6 @@ impl View {
                 self.group_heading(*index, rect.width),
                 self.project_groups[*index].heading.clone(),
             ),
-            super::navigation::CenterRow::DraftGroup(id) => {
-                let draft = self.drafts.iter().find(|draft| draft.id == *id)?;
-                (
-                    format!("{}", draft.heading().display()),
-                    draft.setup.cwd.clone(),
-                )
-            }
             _ => return None,
         };
         super::rows::heading_rect(&heading, rect)
@@ -688,10 +681,6 @@ impl View {
                 } else if let Some(entry) = entry {
                     let entries = self.center_rows(&self.selectable_indices(), self.grouping);
                     let task = match entries.get(entry) {
-                        Some(super::navigation::CenterRow::Draft(id)) => {
-                            self.select_draft(*id);
-                            return None;
-                        }
                         Some(super::navigation::CenterRow::Task(index)) => *index,
                         Some(super::navigation::CenterRow::ShowMore) => {
                             self.select(usize::MAX);
@@ -849,39 +838,6 @@ impl View {
     }
 
     pub(super) fn move_selection(&mut self, forward: bool) {
-        if self.status_filter == 0 && !self.drafts.is_empty() {
-            let targets: Vec<_> = self
-                .center_rows(&self.selectable_indices(), self.grouping)
-                .into_iter()
-                .filter_map(|row| match row {
-                    super::navigation::CenterRow::Task(index) => Some((Some(index), None)),
-                    super::navigation::CenterRow::Draft(id) => Some((None, Some(id))),
-                    super::navigation::CenterRow::ShowMore => Some((Some(usize::MAX), None)),
-                    _ => None,
-                })
-                .collect();
-            if targets.is_empty() {
-                return;
-            }
-            let current = targets
-                .iter()
-                .position(|(index, draft)| match draft {
-                    Some(id) => self.selected_draft == Some(*id),
-                    None => self.selected_draft.is_none() && *index == Some(self.selected),
-                })
-                .unwrap_or(0);
-            let next = if forward {
-                (current + 1) % targets.len()
-            } else {
-                (current + targets.len() - 1) % targets.len()
-            };
-            match targets[next] {
-                (Some(index), _) => self.select(index),
-                (_, Some(id)) => self.select_draft(id),
-                _ => unreachable!(),
-            };
-            return;
-        }
         let visible = self.selectable_indices();
         if visible.is_empty() {
             return;
@@ -966,10 +922,7 @@ impl View {
             && !self.log_search.editing
             && !self.log_detail_search.editing
         {
-            if key.code == KeyCode::Esc
-                && self.selected_draft.is_some()
-                && self.input_box.editor.is_empty()
-            {
+            if key.code == KeyCode::Esc && self.selected_draft.is_some() {
                 self.discard_selected_draft();
                 return None;
             }
@@ -1244,41 +1197,6 @@ impl View {
             KeyCode::Down => self.move_selection(true),
             KeyCode::PageUp => self.page_selection(false),
             KeyCode::PageDown => self.page_selection(true),
-            KeyCode::Home if self.status_filter == 0 && !self.drafts.is_empty() => {
-                let target = self
-                    .center_rows(&self.selectable_indices(), self.grouping)
-                    .into_iter()
-                    .find(|row| {
-                        matches!(
-                            row,
-                            super::navigation::CenterRow::Task(_)
-                                | super::navigation::CenterRow::Draft(_)
-                        )
-                    });
-                match target {
-                    Some(super::navigation::CenterRow::Task(index)) => self.select(index),
-                    Some(super::navigation::CenterRow::Draft(id)) => self.select_draft(id),
-                    _ => {}
-                }
-            }
-            KeyCode::End if self.status_filter == 0 && !self.drafts.is_empty() => {
-                let target = self
-                    .center_rows(&self.selectable_indices(), self.grouping)
-                    .into_iter()
-                    .rev()
-                    .find(|row| {
-                        matches!(
-                            row,
-                            super::navigation::CenterRow::Task(_)
-                                | super::navigation::CenterRow::Draft(_)
-                        )
-                    });
-                match target {
-                    Some(super::navigation::CenterRow::Task(index)) => self.select(index),
-                    Some(super::navigation::CenterRow::Draft(id)) => self.select_draft(id),
-                    _ => {}
-                }
-            }
             KeyCode::Home => {
                 let selected = self
                     .selectable_indices()

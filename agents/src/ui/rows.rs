@@ -99,7 +99,6 @@ impl View {
             .iter()
             .position(|row| match row {
                 CenterRow::Task(index) => self.selected_draft.is_none() && *index == self.selected,
-                CenterRow::Draft(id) => self.selected_draft == Some(*id),
                 CenterRow::ShowMore => self.selected == usize::MAX,
                 _ => false,
             })
@@ -130,40 +129,11 @@ impl View {
             ..viewport
         };
         for (offset, entry) in entries.iter().skip(start).take(height).enumerate() {
-            if let CenterRow::Draft(id) | CenterRow::DraftGroup(id) = entry {
-                let draft = self
-                    .drafts
-                    .iter()
-                    .find(|draft| draft.id == *id)
-                    .expect("visible draft");
-                let rect = row(viewport, offset as u16, 1);
-                if matches!(entry, CenterRow::DraftGroup(_)) {
-                    let heading = format!("{}", draft.heading().display());
-                    line(heading.clone().dim(), heading_rect(&heading, rect), buf);
-                } else {
-                    let selected = self.selected_draft == Some(*id);
-                    if selected {
-                        fill_list_row(rect, buf, cursor_style());
-                        state.marker = Some((rect.x, rect.y));
-                    }
-                    let text = "  New task";
-                    line(
-                        Line::from(text).style(if selected {
-                            cursor_style()
-                        } else {
-                            Style::default()
-                        }),
-                        rect,
-                        buf,
-                    );
-                }
-                continue;
-            }
             let index = match entry {
                 CenterRow::Group(index) | CenterRow::Task(index) | CenterRow::Parent(index) => {
                     *index
                 }
-                CenterRow::Gap | CenterRow::Draft(_) | CenterRow::DraftGroup(_) => continue,
+                CenterRow::Gap => continue,
                 CenterRow::ShowMore => {
                     let rect = row(viewport, offset as u16, /*height*/ 1);
                     let selected = self.selected == usize::MAX;
