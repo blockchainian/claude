@@ -847,8 +847,10 @@ impl Provider for ClaudeProvider {
         rename(path, &session.id.id, name)
     }
 
-    fn delete(&self, session: &Session) -> io::Result<()> {
-        delete_session(&self.config_dir, session)
+    fn delete(&self, session: &Session) -> io::Result<Job> {
+        let config_dir = self.config_dir.clone();
+        let session = session.clone();
+        Ok(Box::new(move || delete_session(&config_dir, &session)))
     }
     fn archive(&self, _: &Session) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
@@ -1259,7 +1261,7 @@ mod tests {
                 .launch(&Action::Resume(session.id.clone()), Some(&session))
                 .is_none()
         );
-        provider.delete(&session).unwrap();
+        provider.delete(&session).and_then(|delete| delete()).unwrap();
         assert!(!path.exists());
     }
 

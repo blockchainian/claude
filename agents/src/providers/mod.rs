@@ -120,7 +120,8 @@ pub trait Provider {
     /// Returns a resume, fork or new-session command when available.
     fn launch(&self, action: &Action, session: Option<&Session>) -> Option<Command>;
     fn rename(&self, session: &Session, name: &str) -> io::Result<()>;
-    fn delete(&self, session: &Session) -> io::Result<()>;
+    /// Returns the job that permanently deletes the session, to run off the UI thread.
+    fn delete(&self, session: &Session) -> io::Result<Job>;
     fn archive(&self, session: &Session) -> io::Result<()>;
 }
 

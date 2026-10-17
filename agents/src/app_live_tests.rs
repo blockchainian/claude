@@ -23,6 +23,21 @@ pub(crate) fn action(app: &mut App, action: Action) {
     assert!(!app.handle_action(Some(action)));
 }
 
+/// Deletes the session and waits for the worker to finish.
+pub(crate) fn delete(app: &mut App, id: SessionKey) {
+    action(app, Action::Delete(id.clone()));
+    let event = app
+        .receiver
+        .recv_timeout(Duration::from_secs(120))
+        .expect("provider delete deadline");
+    assert!(
+        matches!(&event, Input::Deleted { id: deleted, .. } if deleted == &id),
+        "expected real provider deletion"
+    );
+    let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+    app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+}
+
 pub(crate) fn send(app: &mut App, id: SessionKey, input: SessionInput) {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     for _ in 0..5 {

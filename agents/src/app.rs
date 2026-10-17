@@ -55,6 +55,10 @@ enum Input {
         input: SessionInput,
         result: io::Result<()>,
     },
+    Deleted {
+        id: SessionKey,
+        result: io::Result<()>,
+    },
 }
 
 struct InputReader {
@@ -434,6 +438,7 @@ impl App {
                         self.view.input_complete(&id, &input, result);
                     }
                 }
+                Input::Deleted { id, result } => self.deleted(&id, result),
             }
         }
         Ok(false)
@@ -885,6 +890,48 @@ impl App {
         }
     }
 
+    /// Deletes the session on a worker thread; the list shows it as deleting until then.
+    fn delete(&mut self, session: Session) {
+        let id = session.id.clone();
+        if !self.view.start_deleting(&id) {
+            return;
+        }
+        let job = match self.hub.provider(id.provider).delete(&session) {
+            Ok(job) => job,
+            Err(error) => return self.deleted(&id, Err(error)),
+        };
+        let sender = self.sender.clone();
+        let worker_id = id.clone();
+        if let Err(error) = thread::Builder::new()
+            .name("agents-delete".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                    .unwrap_or_else(|_| Err(io::Error::other("Delete job panicked")));
+                let _ = sender.send(Input::Deleted {
+                    id: worker_id,
+                    result,
+                });
+            })
+        {
+            self.deleted(&id, Err(error));
+        }
+    }
+
+    fn deleted(&mut self, id: &SessionKey, result: io::Result<()>) {
+        self.view.finish_deleting(id);
+        match result {
+            Ok(()) => {
+                self.view.hide(id);
+                self.refresh();
+            }
+            Err(error) => {
+                self.refresh();
+                self.view
+                    .set_notice(Some(format!("Failed to delete: {error}")));
+            }
+        }
+    }
+
     fn handle_action(&mut self, action: Option<Action>) -> bool {
         let Some(action) = action else {
             return false;
@@ -1016,17 +1063,7 @@ impl App {
                     if session.transcript.is_none() {
                         self.view.set_notice(Some("Nothing to delete".into()));
                     } else {
-                        match self.hub.provider(id.provider).delete(&session) {
-                            Ok(()) => {
-                                self.view.hide(&id);
-                                self.refresh();
-                            }
-                            Err(error) => {
-                                self.refresh();
-                                self.view
-                                    .set_notice(Some(format!("Failed to delete: {error}")));
-                            }
-                        }
+                        self.delete(session);
                     }
                 } else {
                     self.view.set_notice(Some("Nothing to delete".into()));

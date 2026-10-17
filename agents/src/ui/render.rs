@@ -635,7 +635,7 @@ impl View {
         let session = self.selected_row();
         let draft = self.selected_draft();
         let (status, cwd) = match (session, draft) {
-            (Some(session), _) => (Self::status(session).0, &session.cwd),
+            (Some(session), _) => (self.status_of(session).0, &session.cwd),
             (None, Some(draft)) => (
                 if draft.working || draft.job.is_some() {
                     "Creating"

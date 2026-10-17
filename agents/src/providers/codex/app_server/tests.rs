@@ -199,7 +199,7 @@ fn stop_and_archive_thread(manager: bool) {
             .any(|candidate| candidate.id == session.id)
     );
     assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
-    provider.delete(&session).unwrap();
+    provider.delete(&session).and_then(|delete| delete()).unwrap();
     cleanup.2 = false;
     assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
 }
@@ -253,7 +253,7 @@ fn delete_real_codex_sessions() {
             session.transcript = Some(PathBuf::from(path));
         }
         let deleted_rollout = session.transcript.clone().unwrap();
-        provider.delete(&session).unwrap();
+        provider.delete(&session).and_then(|delete| delete()).unwrap();
         cleanup.2 = false;
         assert!(!rollout.exists());
         assert!(!deleted_rollout.exists());
@@ -283,7 +283,7 @@ fn delete_real_codex_sessions() {
         .unwrap();
         assert_eq!(count, 0);
         assert_eq!(
-            provider.delete(&session).unwrap_err().to_string(),
+            provider.delete(&session).and_then(|delete| delete()).unwrap_err().to_string(),
             format!("no rollout found for thread id {id}")
         );
     }

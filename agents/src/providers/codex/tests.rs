@@ -328,7 +328,7 @@ fn delete_rejects_children_and_requires_the_daemon() {
     let mut session = provider.snapshot(1).unwrap().sessions.remove(0);
     session.parent = Some(key("parent".into()));
     assert_eq!(
-        provider.delete(&session).unwrap_err().kind(),
+        provider.delete(&session).and_then(|delete| delete()).unwrap_err().kind(),
         io::ErrorKind::Unsupported
     );
     session.parent = None;
@@ -338,7 +338,7 @@ fn delete_rejects_children_and_requires_the_daemon() {
         started_at: None,
     });
     assert_eq!(
-        provider.delete(&session).unwrap_err().to_string(),
+        provider.delete(&session).and_then(|delete| delete()).unwrap_err().to_string(),
         "Codex's app-server daemon isn't running"
     );
 }
@@ -910,7 +910,7 @@ fn manager_thread_operations_use_the_provider_paths() {
         started_at: None,
     });
     assert_eq!(
-        provider.delete(&session).unwrap_err().to_string(),
+        provider.delete(&session).and_then(|delete| delete()).unwrap_err().to_string(),
         "Codex's app-server daemon isn't running"
     );
 }

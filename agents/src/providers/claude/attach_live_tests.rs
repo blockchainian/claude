@@ -1,7 +1,6 @@
 //! Opt-in checks against an actual background Claude session.
 use super::{ClaudeProvider, attach};
 use crate::app::live_tests as dashboard;
-use crate::model::Action;
 use crate::providers::SessionInput;
 use serde_json::{Value, json};
 use std::{
@@ -349,7 +348,7 @@ fn real_attach_prompt_paste_busy_steer_interrupt_model() {
         );
         assert_eq!(live.registry(&job)?.unwrap()["sessionId"], id);
         eprintln!("same-session model change preserved global defaults");
-        dashboard::action(&mut app, Action::Delete(session.id.clone()));
+        dashboard::delete(&mut app, session.id.clone());
         dashboard::refresh(&mut app);
         assert!(
             !live.home.join("jobs").join(&job).exists(),

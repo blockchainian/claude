@@ -566,11 +566,15 @@ impl Provider for CodexProvider {
         let mut client = app_server::Client::connect(&self.home)?;
         app_server::thread::archive(&mut client, &session.id.id)
     }
-    fn delete(&self, session: &Session) -> io::Result<()> {
+    fn delete(&self, session: &Session) -> io::Result<Job> {
         if !session.can_resume() {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        let mut client = app_server::Client::connect(&self.home)?;
-        app_server::thread::delete(&mut client, &session.id.id)
+        let home = self.home.clone();
+        let id = session.id.id.clone();
+        Ok(Box::new(move || {
+            let mut client = app_server::Client::connect(&home)?;
+            app_server::thread::delete(&mut client, &id)
+        }))
     }
 }

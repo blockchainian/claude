@@ -246,6 +246,8 @@ pub struct View {
     use_colors: bool,
     pinned: Vec<SessionKey>,
     hidden: HashSet<SessionKey>,
+    /// Tasks whose deletion is still running.
+    deleting: HashSet<SessionKey>,
     status_filter: usize,
     /// The task each tab shows selected when it is entered, by tab index.
     tab_selections: Vec<Option<SessionKey>>,
@@ -380,6 +382,7 @@ impl View {
             use_colors,
             pinned: Vec::new(),
             hidden: HashSet::new(),
+            deleting: HashSet::new(),
             status_filter: 0,
             tab_selections: vec![None; TASK_FILTERS.len()],
             chosen: None,
@@ -615,6 +618,13 @@ impl View {
     pub fn set_pinned(&mut self, ids: &[SessionKey]) {
         self.pinned = ids.to_vec();
         self.reconcile_selection();
+    }
+    /// Marks the task as deleting; false when its deletion is already running.
+    pub fn start_deleting(&mut self, id: &SessionKey) -> bool {
+        self.deleting.insert(id.clone())
+    }
+    pub fn finish_deleting(&mut self, id: &SessionKey) {
+        self.deleting.remove(id);
     }
     pub fn hide(&mut self, id: &SessionKey) {
         let visible = self.selectable_indices();
@@ -968,6 +978,14 @@ impl View {
             Style::default().fg(self.title_color(id))
         } else {
             Style::default()
+        }
+    }
+    /// The status shown for the task, which reads Deleting while its deletion runs.
+    pub(crate) fn status_of(&self, session: &Session) -> (&'static str, Span<'static>) {
+        if self.deleting.contains(&session.id) {
+            ("Deleting", "○".dim())
+        } else {
+            Self::status(session)
         }
     }
     fn status(session: &Session) -> (&'static str, Span<'static>) {

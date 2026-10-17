@@ -181,7 +181,7 @@ impl View {
                 Style::default()
             };
             fill_list_row(rect, buf, style);
-            let (status, mut dot) = Self::status(task);
+            let (status, mut dot) = self.status_of(task);
             if header {
                 dot.style = style;
             }
