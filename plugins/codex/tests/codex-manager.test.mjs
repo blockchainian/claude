@@ -431,8 +431,8 @@ test("mcp initialize provides thread lifecycle instructions before tools are loa
     assert.match(result.instructions, /no activity for a minute.*stuck.*pointed hint.*never steer.*faked tests/);
     assert.match(result.instructions, /finished only.*turn completed.*not failed, interrupted.*waiting on an ask or approval.*checked and accepted.*no further message/);
     assert.match(result.instructions, /Detach it in that same turn/);
-    assert.match(result.instructions, /Before ending a multi-thread run, list.*detach every finished one/);
-    assert.match(result.instructions, /check list for waiting requests before you reply.*already answered/);
+    assert.match(result.instructions, /Before ending a multi-thread run, list with excludeDetached: true.*detach every finished one/);
+    assert.match(result.instructions, /check list with excludeDetached: true for waiting requests before you reply.*already answered/);
   } finally {
     await home.close();
   }
@@ -1200,6 +1200,42 @@ async function recordedListHome() {
   await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 1, threads }));
   return home;
 }
+
+test("list optionally excludes detached threads without changing stored history", { timeout: 10_000 }, async () => {
+  const home = await recordedListHome();
+  const stateFile = path.join(home.dir, "state.json");
+  const state = JSON.parse(await readFile(stateFile, "utf8"));
+  delete state.threads[0].detached;
+  state.threads[1].detached = false;
+  await writeFile(stateFile, JSON.stringify(state));
+  const before = await readFile(stateFile, "utf8");
+  const mcp = await mcpChild(home, { socketPath: path.join(home.home, "missing.sock") });
+  try {
+    const all = await mcp.call("list", {});
+    assert.equal(all.isError, false, all.text);
+    assert.deepEqual(all.json.threads.map(thread => thread.id), state.threads.map(thread => thread.id));
+    const filtered = await mcp.call("list", { excludeDetached: true });
+    assert.equal(filtered.isError, false, filtered.text);
+    assert.deepEqual(filtered.json, { ...all.json, threads: all.json.threads.slice(0, 2) });
+    const explicitAll = await mcp.call("list", { excludeDetached: false });
+    assert.deepEqual(explicitAll.json, all.json);
+    assert.equal(await readFile(stateFile, "utf8"), before);
+
+    state.threads.forEach(thread => { thread.detached = true; });
+    await writeFile(stateFile, JSON.stringify(state));
+    assert.deepEqual((await mcp.call("list", { excludeDetached: true })).json.threads, []);
+
+    const tools = await mcp.request("tools/list", {});
+    const schema = tools.result.tools.find(tool => tool.name === "list").inputSchema;
+    assert.equal(schema.properties.excludeDetached.type, "boolean");
+    assert.equal(schema.properties.excludeDetached.default, false);
+    assert.match(schema.properties.excludeDetached.description, /detached/);
+    assert.equal(schema.required?.includes("excludeDetached") ?? false, false);
+  } finally {
+    await mcp.close();
+    await home.close();
+  }
+});
 
 test("list refreshes registered names in one paged pass and persists only name changes", { timeout: 10_000 }, async () => {
   const home = await recordedListHome();
